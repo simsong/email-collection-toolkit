@@ -1,4 +1,4 @@
-.PHONY: benchmark-name-resolution check data-quality-audit data-quality-babyl-audit data-quality-summary extract-pdf-mail fixture-bagit fixture-e2e gui gui-smoke website-build-check website-check release-tag-check
+.PHONY: benchmark-name-resolution check data-quality-audit data-quality-babyl-audit data-quality-summary extract-pdf-mail fixture-bagit fixture-e2e gui gui-smoke name-matcher-observations website-build-check website-check release-tag-check
 .PHONY: install-linux install-mac install-test-browser install-tika ocr-analyze ocr-experiment ocr-inventory ocr-profile ocr-run pylint run search summary-smoke test test-bagit test-data-quality
 .PHONY: test-e2e test-encoding test-gui test-headers test-mailsearch test-native-gui test-pdf-mail test-plugins test-progress test-provenance test-tika test-website validation-aws-start validation-aws-start-all
 .PHONY: validation-fetch validation-list validation-prepare validation-run validation-run-all validation-sam-build validation-sam-deploy validation-sam-validate validation-test verify
@@ -39,6 +39,11 @@ data-quality-babyl-audit:
 
 benchmark-name-resolution:
 	uv run python scripts/benchmark_name_resolution.py
+
+name-matcher-observations:
+	@test -n "$(ARCHIVE)" || { echo 'usage: make name-matcher-observations ARCHIVE=/path/to/mailbag OUTPUT=.tmp/name-evidence.sqlite3'; exit 2; }
+	@test -n "$(OUTPUT)" || { echo 'usage: make name-matcher-observations ARCHIVE=/path/to/mailbag OUTPUT=.tmp/name-evidence.sqlite3'; exit 2; }
+	uv run python -m scripts.name_matcher.build_observations --archive "$(ARCHIVE)" --output "$(OUTPUT)" $(ARGS)
 
 data-quality-summary:
 	@test -d "$(AUDIT_OUTPUT)" || { echo "missing audit output directory: $(AUDIT_OUTPUT)"; exit 2; }
@@ -110,7 +115,7 @@ test-mailsearch:
 	uv run pytest -q tests/test_mailsearch.py
 
 test-name-resolution:
-	uv run pytest -q tests/test_name_resolution_benchmark.py
+	uv run pytest -q tests/test_name_resolution_benchmark.py tests/test_name_matcher_research.py
 
 test-gui:
 	uv run pytest -q tests/test_gui_service.py
