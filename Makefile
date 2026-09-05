@@ -1,6 +1,6 @@
-.PHONY: benchmark-name-resolution check data-quality-audit data-quality-babyl-audit data-quality-summary extract-pdf-mail fixture-bagit fixture-e2e gui gui-smoke website-build-check website-check release-tag-check
+.PHONY: benchmark-name-resolution check data-quality-audit data-quality-babyl-audit data-quality-summary distribution-check extract-pdf-mail fixture-bagit fixture-e2e gui gui-smoke website-build-check website-check release-tag-check
 .PHONY: install-linux install-mac install-test-browser install-tika ocr-analyze ocr-experiment ocr-inventory ocr-profile ocr-run pylint run search summary-smoke test test-bagit test-data-quality
-.PHONY: test-e2e test-encoding test-gui test-headers test-mailsearch test-native-gui test-pdf-mail test-plugins test-progress test-provenance test-tika test-website validation-aws-start validation-aws-start-all
+.PHONY: test-e2e test-encoding test-gui test-headers test-mailsearch test-native-gui test-pdf-mail test-plugins test-progress test-provenance test-scanner test-tika test-website validation-aws-start validation-aws-start-all
 .PHONY: validation-fetch validation-list validation-prepare validation-run validation-run-all validation-sam-build validation-sam-deploy validation-sam-validate validation-test verify
 
 
@@ -43,6 +43,9 @@ benchmark-name-resolution:
 data-quality-summary:
 	@test -d "$(AUDIT_OUTPUT)" || { echo "missing audit output directory: $(AUDIT_OUTPUT)"; exit 2; }
 	uv run python scripts/data_quality/summarize_evidence.py "$(AUDIT_OUTPUT)"
+
+distribution-check:
+	uv run python scripts/check_distribution.py
 
 fixture-bagit:
 	uv run python tests/generate_bagit_fixture.py tests/data/three-message-mailbag
@@ -123,6 +126,9 @@ test-headers:
 
 test-progress:
 	uv run pytest -q tests/test_progress.py tests/test_sources.py
+
+test-scanner:
+	uv run pytest -q tests/test_scanner.py
 
 test-tika:
 	uv run pytest -q tests/test_tika.py

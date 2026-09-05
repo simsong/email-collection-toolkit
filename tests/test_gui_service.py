@@ -583,11 +583,41 @@ def test_gui_concurrent_drag_exports_have_distinct_temporary_paths(tmp_path: Pat
     assert destination.read_bytes() == MULTIPART_MESSAGE
 
 
-def test_gui_flags_executable_attachment_types() -> None:
-    """Requirement: opening executable-looking attachments requires explicit confirmation."""
-    assert is_risky("installer.dmg", "application/octet-stream")
-    assert is_risky("script", "application/x-sh")
-    assert not is_risky("report.pdf", "application/pdf")
+@pytest.mark.parametrize(
+    ("filename", "content_type"),
+    [
+        ("installer.dmg", "application/octet-stream"),
+        ("archive.tar", "application/x-tar"),
+        ("archive.gz", "application/gzip"),
+        ("archive.7z", "application/x-7z-compressed"),
+        ("archive.rar", "application/vnd.rar"),
+        ("document.docm", "application/vnd.ms-word.document.macroenabled.12"),
+        ("results.csv", "text/csv"),
+        ("script", "application/x-sh"),
+        ("picture.png", "application/octet-stream"),
+        ("document.pdf.exe", "application/pdf"),
+    ],
+)
+def test_gui_requires_confirmation_for_active_unknown_or_mismatched_attachments(
+    filename: str, content_type: str
+) -> None:
+    """Requirement: only a matching inert MIME/suffix pair opens without confirmation."""
+    assert is_risky(filename, content_type)
+
+
+@pytest.mark.parametrize(
+    ("filename", "content_type"),
+    [
+        ("report.pdf", "application/pdf"),
+        ("picture.PNG", "image/png"),
+        ("notes.txt", "text/plain"),
+    ],
+)
+def test_gui_opens_only_known_inert_attachment_pairs_without_confirmation(
+    filename: str, content_type: str
+) -> None:
+    """Requirement: known inert content with a matching suffix remains convenient to open."""
+    assert not is_risky(filename, content_type)
 
 
 def find_tree_node(nodes: list[MailboxTreeNode], label: str) -> MailboxTreeNode:

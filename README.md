@@ -67,8 +67,10 @@ The [data-quality audit](doc/DATA_QUALITY_AUDIT.md) documents the read-only
 diagnostic scripts used to investigate implausible dates, missing senders, and
 previously unsupported Babyl sources. Its generated mail and metadata evidence
 is private and deliberately excluded from Git.
-The [current source-code audit](doc/source-code-audit.md) distinguishes completed
-tightening from the remaining architectural gaps.
+The [current repository audit](doc/developer/ANALYSIS.md) reviews source,
+documentation, tests, packaging, validation, and CI/CD. The earlier
+[2026-08-25 source-code audit](doc/source-code-audit.md) is a dated implementation
+snapshot.
 The [competitive analysis](doc/competitive_analysis.md) explains how this
 combination differs from preservation, migration, search, forensic, and
 commercial compliance products. [Project direction](doc/project_direction.md)

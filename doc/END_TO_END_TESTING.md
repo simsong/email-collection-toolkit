@@ -94,7 +94,8 @@ Playwright exercises the complete HTML interface:
 * the main ingest-status line and its window action; and
 * the separate ingest-history page, final statistics, and worker rows.
 
-The test retains a Playwright trace on failure.
+The test retains a Playwright trace on failure. Hosted Linux CI uploads the
+result directory for seven days when the test job fails.
 
 ### Native macOS smoke test
 

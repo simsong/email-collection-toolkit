@@ -336,7 +336,9 @@ see the source evidence and the resulting routing decision. The original header
 and canonical message remain unchanged.
 
 Attachments and their previews appear below the body. Opening an attachment is
-always explicit, with an additional warning for executable or container types.
+always explicit. PDF, common inert image types, and plain text bypass the
+additional warning only when their MIME type and filename suffix agree. Archives,
+executables, active documents, unknown types, and mismatches require confirmation.
 The bottom of the message view separately lists the canonical archive mailbox
 and every source volume and source or forensic path where the message was found.
 **Save Message…** exports an exact, SHA-256-verified `.eml` copy without changing

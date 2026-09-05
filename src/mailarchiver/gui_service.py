@@ -49,23 +49,16 @@ PROVIDER_LABELS = {
     "o365": "Microsoft 365",
 }
 BLOCKED_ELEMENTS = {"base", "button", "embed", "form", "frame", "frameset", "iframe", "input", "link", "meta", "object", "script"}
-RISKY_SUFFIXES = {
-    ".app",
-    ".applescript",
-    ".bat",
-    ".bin",
-    ".command",
-    ".dmg",
-    ".exe",
-    ".iso",
-    ".jar",
-    ".js",
-    ".pkg",
-    ".ps1",
-    ".scpt",
-    ".sh",
-    ".vbs",
-    ".zip",
+SAFE_OPEN_SUFFIXES = {
+    "application/pdf": {".pdf"},
+    "image/bmp": {".bmp"},
+    "image/gif": {".gif"},
+    "image/heic": {".heic"},
+    "image/jpeg": {".jpeg", ".jpg"},
+    "image/png": {".png"},
+    "image/tiff": {".tif", ".tiff"},
+    "image/webp": {".webp"},
+    "text/plain": {".log", ".md", ".txt"},
 }
 
 
@@ -573,13 +566,9 @@ def safe_filename(filename: str | None, part_id: int, content_type: str) -> str:
 
 
 def is_risky(filename: str, content_type: str) -> bool:
-    return Path(filename).suffix.casefold() in RISKY_SUFFIXES or content_type in {
-        "application/java-archive",
-        "application/vnd.apple.installer+xml",
-        "application/x-executable",
-        "application/x-mach-binary",
-        "application/x-sh",
-    }
+    """Require confirmation unless both MIME type and suffix identify inert content."""
+    suffix = Path(filename).suffix.casefold()
+    return suffix not in SAFE_OPEN_SUFFIXES.get(content_type.casefold(), set())
 
 
 def safe_html(value: str, message: Message, allow_remote: bool) -> tuple[str, bool]:

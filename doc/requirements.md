@@ -8,6 +8,10 @@ from it and may be recreated. It must support unified search across decades of
 mail, non-destructive redacted derivatives, and reproducible research reports
 from structured metadata.
 
+This document specifies the target system. Items explicitly marked **Planned**
+are requirements whose implementation is incomplete; `README.md` and
+`implementation.md` describe the current executable feature set.
+
 The system must harvest backup drives and active sources, including Outlook
 `.pst` and `.ost`, Eudora backups, Emacs RMAIL Babyl, working IMAP client-cache
 directories, MBOX, EML, Maildir, Apple Mail, Gmail exports, and live read-only
@@ -296,7 +300,10 @@ in an actual message body.
   refresh explicitly identifies that wait and shows its increasing startup
   elapsed time instead of a stale source-file status. A newly started daemon is
   ready only after the configured scanner health probe succeeds, not merely when
-  its socket appears.
+  its socket appears. Every scanner health-check subprocess has a five-second
+  caller-enforced deadline, and every message scan has a five-minute deadline.
+  A timeout is a scanner failure, never a clean or infected result, and plaintext
+  temporary message bytes are removed after every outcome.
 * Control-C is a graceful stop: close scanner and MBOX resources, commit
   completed messages and observations, publish a complete BagIt/Mailbag
   checkpoint, report interruption,
@@ -534,7 +541,9 @@ forms, plugins, file URLs, and remote resources are blocked by default; remote
 HTTP(S) images may load only after an explicit per-message action. Embedded
 CID images may render from the verified message. Attachments appear in a list,
 safe images and PDFs can be previewed inline, and opening any attachment is an
-explicit action with an additional warning for executable or container types.
+explicit action. Only a documented inert MIME type with a matching filename
+suffix bypasses the additional warning; executable, container, unknown, and
+MIME/suffix-mismatched attachments require confirmation.
 For a non-multipart message whose complete raw body, apart from surrounding
 ASCII whitespace, is enclosed by case-insensitive `<x-html>` and `</x-html>`
 tags, the GUI exposes the enclosed content as a preferred **HTML — legacy
@@ -600,6 +609,11 @@ It provides a clearly labeled index of digital-email-curation reports and
 related organizations; it does not imply that planned application features
 are implemented. The Pages build pins its Zola release and verifies the
 downloaded archive against a source-controlled SHA-256 digest before execution.
+Pull-request CI builds the complete Zola site, builds and installs both sdist and
+wheel in clean environments, verifies declared package resources, and safely
+invokes every console entry point. Linux test failures retain Playwright traces
+as short-lived artifacts. Publishing a GitHub release triggers a Pages rebuild
+so tag-derived release links do not wait for an unrelated website commit.
 
 ## Ingest sources
 
@@ -636,28 +650,28 @@ downloaded archive against a source-controlled SHA-256 digest before execution.
   `.mbox` package, with each `.mbox` suffix removed. Account and parent mailbox
   components remain in the path; internal UUID, `Data`, numeric bucket,
   `Messages`, and `.emlx` filename components do not.
-* Gmail ingest uses OAuth and the Gmail API for incremental acquisition of
-  raw messages and labels.  It supports a rolling `--days N` mode using
-  Gmail's `newer_than:Nd` query.  Google Takeout MBOX is supported as an offline,
+* **Planned:** Gmail ingest uses OAuth and the Gmail API for incremental
+  acquisition of raw messages and labels. It supports a rolling `--days N` mode
+  using Gmail's `newer_than:Nd` query. Google Takeout MBOX is supported as an offline,
   one-time baseline input; personal Takeout is not assumed to be
   programmatically triggerable.
-* IMAP ingest supports TLS and authenticated account configuration, records
-  account/folder/UID provenance, and retrieves RFC 5322 bytes without marking
-  messages read or modifying the remote mailbox.
-* Outlook `.pst` and `.ost` ingest does not require Outlook to modify or export
-  the source. The adapter records the parser/converter and version, enumerates
-  every encountered store item, preserves folder and item identifiers as
+* **Planned:** IMAP ingest supports TLS and authenticated account configuration,
+  records account/folder/UID provenance, and retrieves RFC 5322 bytes without
+  marking messages read or modifying the remote mailbox.
+* **Planned:** Outlook `.pst` and `.ost` ingest does not require Outlook to modify
+  or export the source. The adapter records the parser/converter and version,
+  enumerates every encountered store item, preserves folder and item identifiers as
   provenance, and reports corrupt, deleted, partial, or unsupported records
   rather than silently omitting them. The current backend decision, fixture
   matrix, and format limitations are maintained in
   [ON_DISK_MAIL_FORMATS.md](ON_DISK_MAIL_FORMATS.md).
-* Eudora ingest recognizes mailbox files together with their table-of-contents,
-  attachment, and embedded-content conventions. It records which companion
-  files were present and never treats an absent or stale index as proof that a
+* **Planned:** Eudora ingest recognizes mailbox files together with their
+  table-of-contents, attachment, and embedded-content conventions. It records
+  which companion files were present and never treats an absent or stale index as proof that a
   message or attachment does not exist.
-* Working IMAP client-cache ingest is an offline, read-only source distinct from
-  live IMAP. It recognizes supported cache/profile layouts, records account and
-  folder context when recoverable, and explicitly reports placeholders,
+* **Planned:** Working IMAP client-cache ingest is an offline, read-only source
+  distinct from live IMAP. It recognizes supported cache/profile layouts,
+  records account and folder context when recoverable, and explicitly reports placeholders,
   evicted bodies, partial downloads, and detached parts. It does not contact a
   server unless the user separately configures and authorizes live IMAP ingest.
 * Every source adapter emits original RFC 5322 bytes where the source contains
@@ -718,12 +732,13 @@ downloaded archive against a source-controlled SHA-256 digest before execution.
 
 ## Sorting, validation, and recovery
 
-* At the end of an ingest run, touched normal MBOX files are sorted by
-  resolved timestamp and then message SHA-256 for deterministic ties.
-* Sorting writes a same-directory temporary replacement and preserves the
-  prior file as a backup.
-* The replacement and backup are parsed end-to-end.  Their unordered sets of
-  `(Message-ID, SHA-256)` must match exactly before the backup is deleted.
+* **Planned sorting:** At the end of an ingest run, touched normal MBOX files are
+  sorted by resolved timestamp and then message SHA-256 for deterministic ties.
+* **Planned sorting:** Sorting writes a same-directory temporary replacement and
+  preserves the prior file as a backup.
+* **Planned sorting:** The replacement and backup are parsed end-to-end. Their
+  unordered sets of `(Message-ID, SHA-256)` must match exactly before the backup
+  is deleted.
 * The MBOX byte hash, integrity tags, Mailbag CSV, payload manifest, tag
   manifest, locations, and metadata database updates are published in the
   documented checkpoint order. Interrupted runs leave either the preceding
@@ -746,15 +761,18 @@ downloaded archive against a source-controlled SHA-256 digest before execution.
 * `refresh-index` rebuilds the disposable FTS database in a temporary file,
   verifies every normal MBOX message against the catalog and the total
   searchable-message count, and replaces the prior index only after those
-  checks succeed. `review` queries the
-  committed source-observation log by run, source, and disposition. Derived
-  catalog fields and canonical locations are created correctly during ingest.
+  checks succeed. `review` currently queries the committed source-observation
+  log with an optional run filter; source and disposition filters are planned.
+  Derived catalog fields and canonical locations are created correctly during
+  ingest.
 
 ## Scope boundaries
 
-The first release is a local command-line normalizer and verifier.  Its TOML
-configuration holds archive and scanner policy; `owner-names.txt` remains a
-separate, one-name-per-line reusable classification input.  A local
+The current first release is a local command-line normalizer and verifier. Its
+operator controls are CLI options and documented environment variables; strict
+packaged YAML holds application policy. A future operator TOML format may
+consolidate archive and scanner policy. `owner-names.txt` remains a separate,
+one-name-per-line reusable classification input. A local
 special-purpose search and message-viewing interface is a consumer of
 the two SQLite databases, not a reason to depend on Thunderbird or FoxTrot.
 No source mailbox is modified by this program.

@@ -49,7 +49,11 @@ def main() -> int:
     missing = [str(path) for path in required if not path.is_file()]
     if missing:
         raise SystemExit("missing website files: " + ", ".join(missing))
-    for path in (root / ".github/workflows/pages.yml", root / ".github/workflows/release.yml"):
+    for path in (
+        root / ".github/workflows/continuous-integration.yml",
+        root / ".github/workflows/pages.yml",
+        root / ".github/workflows/release.yml",
+    ):
         try:
             yaml.safe_load(path.read_text(encoding="utf-8"))
         except yaml.YAMLError as error:

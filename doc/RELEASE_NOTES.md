@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+* Bound ClamAV health probes to five seconds and message scans to five minutes.
+  A timed-out scan fails ingest and always removes its plaintext temporary file.
+  Replace the attachment-open denylist with matching inert MIME/suffix pairs so
+  unknown, mismatched, executable, container, and active-document types require
+  confirmation.
+* Build, install, and smoke both sdist and wheel in CI and before assembling a
+  draft release. Build the complete Zola site on pull requests, upload retained
+  Playwright traces after failures, and refresh Pages when a release is published.
+  Runtime GUI and validation data packaging remains deferred in the repository
+  audit.
+* Distinguish target requirements, planned features, current implementation, and
+  dated audit snapshots throughout the documentation.
 * Make graphical searches complete across the full archival time span instead
   of favoring the newest 10,000 catalog rows. Probe at most 2,001 matches,
   display all sets up to 2,000, and automatically load larger remainders with

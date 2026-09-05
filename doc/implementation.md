@@ -502,6 +502,10 @@ same HTML path, and derived again from verified raw bytes when selected; the
 canonical message is never rewritten. Individual image and PDF attachments
 are base64-transferred only on an explicit preview action; other attachment
 payloads are written to a private temporary directory before macOS opens them.
+Opening bypasses confirmation only when the normalized MIME type and filename
+suffix match the inert allowlist: PDF; BMP, GIF, HEIC, JPEG, PNG, TIFF, or WebP;
+or plain `.txt`, `.log`, or `.md`. Every unknown, mismatched, executable,
+container, active-document, or spreadsheet-consumable type requires confirmation.
 The viewer also reads the archive mailbox location and linked source
 observations from the catalog, then displays archive path, source-volume label,
 and source or forensic path at the bottom without treating an archive mailbox
@@ -854,7 +858,10 @@ on-access scanner, a login service, nor a scheduled scan is enabled.  Run
 `freshclam` only when an operator explicitly wants new signatures.
 `MAILARCHIVER_CLAMD`, `MAILARCHIVER_CLAMDSCAN`, `MAILARCHIVER_CLAMD_CONFIG`,
 and `MAILARCHIVER_CLAMD_SOCKET` override the macOS Homebrew defaults for a
-separately configured local environment such as CI.
+separately configured local environment such as CI. The Python caller bounds
+each health probe to five seconds and each message scan to five minutes. A scan
+timeout raises an ingest failure and the `finally` path removes the plaintext
+temporary message.
 
 Current MIME traversal uses the standard-library parser without explicit size,
 recursion, time, or decompression limits. Plain text and rendered HTML are
@@ -985,7 +992,12 @@ installed standard-library-only verifier under isolated Python.
 
 `make test` runs the ordinary test tree, while `make check` runs it followed by
 the separate end-to-end suite. The tracked source corpus has enough messages to
-exercise complete scoped searches and rich MIME behavior.
+exercise complete scoped searches and rich MIME behavior. `make
+distribution-check` builds sdist and wheel, verifies packaged runtime resources,
+installs each artifact in a clean environment, and invokes every console entry
+point without launching the native GUI or an external service. CI also runs the
+complete Zola build on pull requests and uploads retained Playwright traces after
+Linux test failures.
 `make test-e2e` drives
 the complete interface in headless Chromium while binding every bridge method
 to the real Python service and disposable test archive. It therefore works

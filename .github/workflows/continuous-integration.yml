@@ -71,6 +71,44 @@ jobs:
         run: make install-test-browser PLAYWRIGHT_INSTALL_ARGS="--with-deps chromium"
       - name: Pytest
         run: make check
+      - name: Upload Playwright failure traces
+        if: failure()
+        uses: actions/upload-artifact@v7.0.1
+        with:
+          name: playwright-traces-${{ github.run_id }}-${{ github.run_attempt }}
+          path: test-results
+          if-no-files-found: ignore
+          retention-days: 7
+
+  distribution-and-site:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7.0.1
+      - name: Set up Python
+        uses: actions/setup-python@v7.0.0
+        with:
+          python-version: "3.12"
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v10.0.1
+      - name: Install dependencies
+        run: uv sync --locked --all-groups
+      - name: Validate distributions
+        run: make distribution-check
+      - name: Install Zola
+        env:
+          ZOLA_VERSION: 0.23.4
+          ZOLA_SHA256: 54d1a347781b2f32330914fcc02def81c7e3ddb6111b36d1cc89c06557aed1de
+        run: |
+          curl --fail --location --output "$RUNNER_TEMP/zola.tar.gz" \
+            "https://github.com/getzola/zola/releases/download/v${ZOLA_VERSION}/zola-v${ZOLA_VERSION}-x86_64-unknown-linux-gnu.tar.gz"
+          printf '%s  %s\n' "$ZOLA_SHA256" "$RUNNER_TEMP/zola.tar.gz" | sha256sum --check -
+          mkdir "$RUNNER_TEMP/zola"
+          tar -xzf "$RUNNER_TEMP/zola.tar.gz" -C "$RUNNER_TEMP/zola"
+          echo "$RUNNER_TEMP/zola" >> "$GITHUB_PATH"
+      - name: Build website
+        run: make website-build-check
 
   pylint:
     runs-on: ubuntu-latest
