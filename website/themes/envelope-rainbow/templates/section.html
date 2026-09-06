@@ -1,0 +1,41 @@
+{% extends "base.html" %}
+{% block title %}{{ section.title }} · {{ config.title }}{% endblock title %}
+{% block content %}
+<main class="page section-page shell">
+  <p class="eyebrow">{{ section.extra.eyebrow | default(value="Mail Archiver") }}</p>
+  <h1>{{ section.title }}</h1>
+  {% if section.description %}<p class="lede">{{ section.description }}</p>{% endif %}
+
+  {% if section.extra.stages %}
+  <section class="curation-flow" aria-label="Email curation workflow">
+    {% for stage in section.extra.stages %}
+    <article>
+      <span>{{ stage.number }}</span>
+      <h2>{{ stage.title }}</h2>
+      <p>{{ stage.description }}</p>
+    </article>
+    {% endfor %}
+  </section>
+  {% endif %}
+
+  <div class="prose section-prose">{{ section.content | safe }}</div>
+
+  {% if section.pages %}
+  <section class="section-resources" aria-labelledby="section-resources-title">
+    <div class="section-heading">
+      <p class="eyebrow">Related pages</p>
+      <h2 id="section-resources-title">Documentation and external resources.</h2>
+    </div>
+    <div class="section-resource-grid">
+      {% for page in section.pages %}
+      <a class="resource-card" href="{{ page.permalink }}">
+        <span>↗</span>
+        <h3>{{ page.title }}</h3>
+        {% if page.description %}<p>{{ page.description }}</p>{% endif %}
+      </a>
+      {% endfor %}
+    </div>
+  </section>
+  {% endif %}
+</main>
+{% endblock content %}

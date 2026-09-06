@@ -15,6 +15,7 @@
     <header class="site-header shell">
       <a class="brand" href="{{ get_url(path='') }}"><img src="{{ get_url(path='icons/rainbow-post.svg') }}" alt=""><span>Mail Archiver</span></a>
       <nav aria-label="Primary navigation">
+        <a href="{{ get_url(path='use-cases/') }}">Use cases</a>
         <a href="{{ get_url(path='gmail-authorization/') }}">Gmail setup</a>
         <a href="{{ get_url(path='curation/') }}">Curation</a>
         <a href="{{ get_url(path='discussions/') }}">Discussions</a>
@@ -23,8 +24,8 @@
     </header>
     {% block content %}{% endblock content %}
     <footer class="site-footer shell">
-      <span>Mail Archiver · preservation-first email tools</span>
-      <span><a href="{{ config.extra.release_notes }}">Release notes</a> · <a href="{{ config.extra.releases }}">Releases</a></span>
+      <span>(C) 2026 Simson L. Garfinkel, authored with Codex.</span>
+      <span><a href="{{ get_url(path='privacy/') }}">Privacy</a> · <a href="{{ get_url(path='rights/') }}">Rights</a> · <a href="{{ config.extra.release_notes }}">Release notes</a> · <a href="{{ config.extra.releases }}">Releases</a></span>
     </footer>
   </body>
 </html>

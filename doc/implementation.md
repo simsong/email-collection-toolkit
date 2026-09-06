@@ -432,7 +432,22 @@ Python application and its About/Dock identity use a stable project asset. The
 `envelope-rainbow` theme. GitHub Pages builds it from `main`; the workflow
 SHA-256 verifies the pinned Zola archive before extraction, resolves the newest
 exact stable and beta tags into Zola data, then deploys a Pages artifact. The
-release workflow follows the repository's draft-release
+home-page template presents equal individual and archivist columns, while the
+`use-cases.md` content page supplies the detailed personal-archive and donor
+digital-estate narratives. It describes BagIt/Mailbag as an export and standard
+MBOX as the ePADD handoff, with planned direct-provider, first-class package
+import, and automated interoperability work labeled explicitly.
+The base template links every page to `privacy.md` and `rights.md`. The privacy
+page describes planned Gmail and Microsoft 365 OAuth data access, local
+storage, read-only use, revocation, and provider-policy commitments without
+presenting the reserved adapters as implemented. The rights page records the
+current GPL distribution, copyright, and possible non-GPL availability.
+The reusable `section.html` template renders section content and child-page
+cards through the site theme. The curation section adds a responsive five-part
+summary of local file discovery, read-only ingest, archive creation, search and
+reporting, export, and verification. Public copy describes implemented and
+planned functions in language intended for archivists.
+The release workflow follows the repository's draft-release
 pattern: it requires a version-matching signed annotated tag, builds a source
 distribution, writes `SHA256SUMS`, and creates a draft GitHub Release.
 
