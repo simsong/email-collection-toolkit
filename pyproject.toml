@@ -21,6 +21,7 @@ dependencies = [
 [project.scripts]
 mailarchiver = "mailarchiver.__main__:main"
 mailarchiver-auth = "mailarchiver.auth:main"
+mailarchiver-compare-apple-mail = "mailarchiver.apple_mail_compare:main"
 mailsearch = "mailarchiver.mailsearch:main"
 mailsearch-gui = "mailarchiver.gui_app:main"
 summarize = "mailarchiver.aisummarize:main"

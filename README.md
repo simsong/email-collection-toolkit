@@ -213,6 +213,12 @@ Google Takeout MBOX is the supported Gmail acquisition path today; see
 acquisition path; its Outlook export and future Graph design are documented in
 [doc/M365.md](doc/M365.md). Apple Mail cache limitations are documented in
 [doc/APPLE_MAIL_CACHE.md](doc/APPLE_MAIL_CACHE.md).
+Until provider adapters are implemented, complete Apple Mail `.emlx` records
+can serve as a best-effort local bridge for synchronized Gmail, Microsoft 365,
+and IMAP accounts. Rerunning ingest adds newly completed messages; byte-identical
+cross-source messages remain one canonical record with multiple observations.
+Use `make compare-apple-mail` to reconcile the default Apple Mail cache with
+`~/mail-archive` by raw and semantic message hashes without changing either.
 
 `uv run mailarchiver-auth ACCOUNT` is a developer preview for the planned live
 Gmail adapter. It detects Google Workspace and Microsoft 365 from public

@@ -6,8 +6,10 @@ Mail Archiver can import complete `.emlx` messages found below an Apple Mail
 store, but a live `~/Library/Mail` directory cannot be assumed to contain a
 complete copy of every server message or attachment. It is suitable as a
 best-effort offline source and may be the easiest route for mail already fully
-downloaded by Apple Mail. It is not, by itself, proof of a complete Gmail or
-Microsoft 365 acquisition.
+downloaded by Apple Mail. Until direct Gmail, Microsoft 365, and IMAP adapters
+exist, it can serve as a read-only bridge for any of those accounts after the
+account has been synchronized with Apple Mail. It is not, by itself, proof of
+a complete provider acquisition.
 
 For a deliberately complete export, Apple's supported **Mailbox > Export
 Mailbox** command produces MBOX packages. That is preferable to relying on
@@ -50,10 +52,10 @@ elsewhere. The local cache would therefore omit just over half of the observed
 Google-style records if Mail Archiver accepted only byte-complete input, as it
 must.
 
-No message header, body, subject, address, or attachment content was read. The
-audit read only path/type/size metadata, EMLX numeric first lines, aggregate
-SQLite counts in read-only/query-only mode, and process state. It did not copy,
-change, or ingest any source data.
+During that initial audit, no message header, body, subject, address, or
+attachment content was read. It read only path/type/size metadata, EMLX numeric
+first lines, aggregate SQLite counts in read-only/query-only mode, and process
+state. It did not copy, change, or ingest any source data.
 
 The practical conclusion is that this store is useful for best-effort recovery
 of 102,192 complete records, but direct whole-cache import cannot produce a
@@ -78,6 +80,64 @@ The local-source importer already:
 
 These rules prevent known partial messages from being silently treated as
 complete. They cannot prove that Apple Mail downloaded every server message.
+
+## Compare the cache with an existing archive
+
+The read-only comparison command answers three different questions:
+
+```console
+make compare-apple-mail
+```
+
+It defaults to `~/Library/Mail` and `~/mail-archive`. Pass alternate paths with
+`ARGS='--apple-mail /path/to/Mail --archive /path/to/archive'`. The command
+never writes either source. It builds a temporary SQLite index containing only
+relative cache paths and hashes, excludes `.partial.emlx`, and reports header
+names and aggregate counts without printing header values or message content.
+
+The comparison uses the archive's **h3 semantic-message v1 SHA-256**. This is
+not a header-only hash: it applies DKIM-relaxed normalization to a selected set
+of stable and delivery headers, combines them with the complete body under
+DKIM-simple-style canonicalization, and hashes the result. It ignores mutable
+or transport-specific fields such as `Status`, `X-Status`, `Received`, and
+`Return-Path`. See [INTEGRITY_CONTROLS.md](INTEGRITY_CONTROLS.md) for the exact
+ordered field list and byte algorithm.
+
+The September 6, 2026 comparison on this computer found:
+
+| Classification | Count |
+| --- | ---: |
+| Complete Apple Mail records compared | 102,192 |
+| Exact raw-byte matches | 12,426 |
+| h3 matches with different raw bytes | 20,046 |
+| Complete cache records with no archive h3 match | 69,720 |
+| Canonical archive messages represented by a cache h3 | 43,066 |
+| Canonical archive messages with no cache h3 | 1,157,725 |
+
+Of the 20,046 semantic-only pairs, 19,537 differed only in header formatting.
+The aggregate report found 508 occurrences each of Apple-only `Received`,
+`Return-Path`, and `X-Mailer`, and 508 occurrences of archive-only
+`X-Universally-Unique-Identifier`. One pair lacked `X-GM-THRID` and
+`X-Gmail-Labels` in Apple Mail. No selected header had a changed normalized
+value. Some h3 values identify more than one canonical archive record, so the
+tool reports ambiguous matches and chooses the candidate with the smallest
+header delta only for aggregate header analysis. The Envelope Index WAL
+changed during the scan, so these remain point-in-time results.
+
+## Rerunning ingest and duplicate identity
+
+Ingest is idempotent and is intended to be rerun as Apple Mail downloads more
+complete messages. An unchanged source is skipped; a changed source is scanned
+again, and a message with the same normalized `Message-ID` and raw RFC 5322
+SHA-256 is not stored twice. Thus a byte-identical message found in both a
+backup and the Apple Mail cache has one canonical copy with two retained source
+observations.
+
+The h3 comparison does **not** change that admission rule. If Apple Mail adds,
+removes, refolds, or otherwise rewrites headers, its raw SHA-256 differs and the
+current importer preserves the variant as a separate canonical record. The h3
+hash records the semantic relationship for reconciliation; it is deliberately
+not used to discard source variants.
 
 ## Required read-only preflight
 

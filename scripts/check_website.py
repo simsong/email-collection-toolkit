@@ -23,6 +23,9 @@ REQUIRED_TEXT = (
     "/discussions/55",
     "/discussions/56",
     "gmail-authorization/",
+    "advanced/",
+    "h3 semantic-message v1",
+    "Apple Mail as a temporary provider adapter",
     "your.name@gmail.com",
     "For Individuals",
     "For Archivists",
@@ -82,6 +85,7 @@ def main() -> int:
         root / "website/themes/envelope-rainbow/templates/page.html",
         root / "website/themes/envelope-rainbow/templates/section.html",
         root / "website/content/gmail-authorization.md",
+        root / "website/content/advanced.md",
         root / "website/content/oauth-client-registration.md",
         root / "website/static/icons/rainbow-post.svg", root / "gui/icons/rainbow-post.svg",
     ]

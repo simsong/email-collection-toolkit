@@ -218,6 +218,25 @@ therefore omits Apple's internal UUID, `Data`, bucket, `Messages`, and message
 filename components while retaining the account path. A `[Gmail].mbox` chain
 also stores a typed cache relationship to the Gmail source kind and retains
 the Apple account UUID as a non-authoritative account hint.
+This same EMLX path is the interim local-file bridge for Gmail, Microsoft 365,
+and ordinary IMAP accounts synchronized by Apple Mail; it makes no provider
+completeness claim. Reingest uses the ordinary source controls and message
+identity, so newly completed EMLX records can be added without duplicating an
+unchanged canonical message.
+
+`apple_mail_compare.py` performs read-only cache/archive reconciliation. It
+walks only complete nonsymlink `.emlx` files, extracts their declared RFC 5322
+payloads, and stores relative paths plus raw and semantic SHA-256 values in a
+temporary SQLite database. It attaches `archive.sqlite3` by a read-only URI and
+uses indexed `messages.sha256` and `observations.semantic_sha256` lookups to
+classify exact, semantic-only, cache-only, archive-only, and ambiguous matches.
+For semantic-only pairs it retrieves hash-verified canonical MBOX bytes and
+compares DKIM-relaxed header multisets. Its report contains only header names
+and aggregate counts, never values or content. It snapshots the active Apple
+Envelope Index WAL metadata before and after the scan to flag a live cache
+change. `make compare-apple-mail` supplies the standard paths and
+`make test-apple-mail-compare` exercises exact, semantic, formatting-only,
+header-added, cache-only, archive-only, and partial-record behavior.
 Emacs RMAIL files are detected by their case-insensitive `BABYL OPTIONS:`
 header because they commonly have no extension. The reader accepts LF and CRLF
 container line endings, streams records without modifying the source, combines
@@ -712,7 +731,9 @@ a checkpoint. The legacy file SHA/check/run columns remain a local display
 cache, not the authority for source decisions. Each observation directly stores raw (`h2`) and semantic
 (`h3`) SHA-256 values for fast forensic lookup. The deduplication lookup is indexed on `(message_id_normalized, sha256)`;
 `messages.sha256` has a separate index for the missing-Message-ID exception and
-FTS result lookup.  Do not make
+FTS result lookup. Thus repeated ingestion and byte-identical cross-source
+copies are idempotent, while Apple- or transport-rewritten records with only an
+`h3` match remain distinct canonical evidence. Do not make
 Message-ID unique.  `email_addresses.address`, `messages.sender_address_pk`,
 and `recipients.address_pk` are indexed. Recipient role preserves To, Cc, or
 Bcc; ordering within a header is not preserved. The catalog also indexes

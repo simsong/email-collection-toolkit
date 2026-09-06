@@ -180,7 +180,12 @@ in an actual message body.
 * Idempotence is at message level.  After a raw message hash and Message-ID
   have been obtained, a matching stored identity is skipped before ClamAV,
   text extraction, and MBOX writing.  A deliberate rescan/reindex mode is
-  separate from normal ingest.
+  separate from normal ingest. Repeated ingest may add newly available source
+  messages. A byte-identical message found in a backup, provider export, and
+  local cache has one canonical record with multiple observations. A record
+  that differs in raw RFC 5322 bytes is preserved even when its semantic `h3`
+  digest matches; semantic identity is reconciliation evidence, not an
+  admission-time discard rule.
 * Every source plug-in declares source integrity controls appropriate to its
   source. The framework executes those controls, displays their progress, and
   persists typed evidence and resume decisions. Cryptographic hashes,
@@ -769,7 +774,19 @@ one-time registration procedure and tell readers to use their own account.
   records are rejected, and a cache-completeness preflight must report partial
   records and attachment policy before a completeness claim. The observed
   machine-specific access boundary and preflight are maintained in
-  `doc/APPLE_MAIL_CACHE.md`.
+  `doc/APPLE_MAIL_CACHE.md`. Until direct Gmail, Microsoft 365, and IMAP
+  adapters are implemented, complete Apple Mail cache records are a supported
+  local-file bridge for accounts synchronized through those providers; the
+  bridge must not be represented as provider-complete acquisition.
+* The Apple Mail/archive comparator is strictly read-only. It indexes complete
+  `.emlx` records in a disposable database, opens the archive catalog
+  read-only, and classifies exact raw, semantic-only, cache-only, archive-only,
+  and ambiguous matches using semantic-message version 1 (`h3`). It compares
+  header names and DKIM-relaxed values only for semantic-only pairs, outputs no
+  header values or message content, reports excluded partial and unreadable
+  records, and warns when the active Envelope Index WAL changes during the
+  scan. It must never treat `h3` alone as authorization to merge or delete a
+  canonical source variant.
 * Every source adapter emits original RFC 5322 bytes where the source contains
   them. When a proprietary store requires reconstruction or conversion, the
   observation records that fact and the responsible tool/version; reconstructed

@@ -20,6 +20,12 @@ snapshot rather than an incremental service, and large exports may be divided
 into several ZIP files. Keep the ZIP files until the resulting archive passes
 verification.
 
+For best-effort updates between Takeout snapshots, an account already
+synchronized with Apple Mail can be ingested through its local cache. This can
+be rerun as more complete messages arrive, but it is not proof of server
+completeness. See [Advanced](../advanced/) for cache limits, exact
+deduplication, and semantic-message reconciliation.
+
 ## DEVELOPER
 
 The canonical [Gmail design and operations document](https://github.com/simsong/mail-archiver/blob/main/doc/GMAIL.md)

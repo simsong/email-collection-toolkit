@@ -41,6 +41,18 @@ imported. Reimporting overlapping MBOX content is safe because Mail Archiver
 records source observations and deduplicates only messages with the same
 normalized Message-ID and raw-message SHA-256.
 
+### Interim incremental recovery through Apple Mail
+
+Until a direct Gmail adapter exists, a user may synchronize Gmail with Apple
+Mail and ingest the complete `.emlx` records in `~/Library/Mail`. This can add
+messages downloaded since the last Takeout import. It is best-effort recovery:
+Apple Mail may retain `.partial.emlx` placeholders or omit detached attachment
+content, so the cache cannot prove completeness. Rerunning ingest is safe.
+Byte-identical copies in Takeout and the cache share one canonical record and
+retain both observations. If Apple Mail rewrites raw headers, the variant is
+preserved separately and can be reconciled with the `h3` semantic-message
+hash. See [APPLE_MAIL_CACHE.md](APPLE_MAIL_CACHE.md).
+
 Google Workspace administrators can restrict whether organizational users may
 export data. A generated Takeout archive expires after about seven days and is
 limited to five downloads; this has nothing to do with OAuth registration.
@@ -64,6 +76,10 @@ for compatibility, but it does not avoid Google OAuth.
 | Gmail API | None | Shared Desktop OAuth client with `gmail.readonly` | Future incremental collection |
 | Gmail IMAP | None | Shared OAuth client with `https://mail.google.com/` | Compatibility only |
 | IMAP app password | User creates a 16-digit password | Password-like credential | Limited fallback, not a distribution strategy |
+
+Apple Mail cache acquisition is an implemented local-file bridge, not a Gmail
+API or IMAP adapter. Its provider relationship is provenance; it neither
+contacts Google nor establishes that the local cache is complete.
 
 The Takeout importer must eventually accept all ZIP parts directly, reject
 archive traversal, links, special files, and decompression bombs, stream files
