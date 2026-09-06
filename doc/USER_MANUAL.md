@@ -44,58 +44,31 @@ Choose two locations:
 On macOS, reading Apple Mail or another protected location may require Full
 Disk Access for the terminal application.
 
-## Authorize a Gmail account
+## Import Gmail
 
-Authorization is available before live Gmail ingest. It prepares and retains
-read-only credentials but does not download or change any mail.
+Use Google Takeout for Gmail today. It creates MBOX files without granting Mail
+Archiver access to the account. Download every Takeout ZIP part, extract them
+beneath one directory, and ingest that directory as the local source. See
+[GMAIL.md](GMAIL.md) for the complete end-user procedure and the separate
+developer discussion of Gmail API, OAuth, IMAP, verification, and security
+assessment requirements.
 
-A release of Mail Archiver includes one Gmail Desktop client registered by the
-project maintainer. **You do not create a Google Cloud project, register Mail
-Archiver, or obtain a client ID.** Replace the example with your own address:
+Live Gmail authorization is a developer preview for an unimplemented future
+adapter. End users should not run `mailarchiver-auth` or create a Google Cloud
+project for ordinary Takeout ingestion.
 
-```console
-uv run mailarchiver-auth your.name@gmail.com
-```
+## Import Microsoft 365
 
-The command recognizes a Google Workspace address from its public mail records,
-so the same form works for a custom Google-hosted domain:
+Microsoft has no platform-neutral Takeout equivalent. Outlook can export PST
+on Windows or OLM from legacy Outlook for Mac, but Mail Archiver does not yet
+ingest those formats and its Microsoft authorization adapter is only a stub.
+There is currently no supported Microsoft 365 end-user workflow. See
+[M365.md](M365.md) for the end-user status and developer design.
 
-```console
-uv run mailarchiver-auth person@example.org
-```
-
-If automatic detection is inconclusive for an account known to use Gmail, use:
-
-```console
-uv run mailarchiver-auth --gmail person@example.org
-```
-
-The command opens Google in the system browser. Sign in with the same account
-you supplied on the command line and approve read-only Gmail access. Mail
-Archiver verifies the returned account and stores the refresh token in the
-operating-system credential store, not in the archive.
-
-The Google project and Desktop client are registered once and do not expire
-after seven days. If the project is in Google's **Testing** state, each listed
-test user's authorization expires after seven days and that user must authorize
-again. The maintainer does not recreate or re-register the program. An
-**In production** unverified project accepts Google accounts without adding
-each one to the test-user list, but displays Google's warning and is limited to
-100 new users until verification.
-
-If the command says the build has no distributed Gmail client, that is an
-incomplete development build, not a task for the end user. Report it to the
-person who built or distributed Mail Archiver.
-
-Use `--detect-only` to inspect provider detection without authorizing an
-account. `--client-secrets` and `--register-client` are maintainer and developer
-options. The illustrated [one-time client-registration guide](OAUTH_CLIENT_REGISTRATION.md)
-shows the screenshots captured while registering the project-wide client; end
-users do not perform those steps.
-
-Microsoft 365 domains are detected through their mail or Autodiscover records,
-but authorization is not implemented and reports
-`Microsoft Office not yet implemented.`
+Apple Mail can export selected mailboxes as MBOX, and Mail Archiver can read
+complete messages from an Apple Mail cache. A cache can be incomplete, however;
+see [APPLE_MAIL_CACHE.md](APPLE_MAIL_CACHE.md) before treating it as an
+acquisition source.
 
 ## Identify the archive owner
 

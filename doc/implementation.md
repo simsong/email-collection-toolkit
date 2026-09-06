@@ -965,13 +965,26 @@ user-only modes and its path is printed so the maintainer can package it as
 `src/mailarchiver/gmail_client.json`. `--client-secrets` instead installs an
 account-specific developer override.
 
-The user manual and Zola `gmail-authorization` page describe only end-user
-consent. The separate `OAUTH_CLIENT_REGISTRATION.md` and Zola
-`oauth-client-registration` maintainer pages contain the one-time numbered
-registration workflow. Nine 1800-pixel-wide screenshots live under
+`doc/GMAIL.md` is the canonical provider document: its END USER section makes
+Takeout MBOX the current path, while its DEVELOPER section records the API,
+OAuth, verification, security-assessment, and IMAP decisions. The user manual
+and Zola `gmail-authorization` page lead with Takeout rather than an
+unimplemented live adapter. The separate `OAUTH_CLIENT_REGISTRATION.md` and
+Zola `oauth-client-registration` maintainer pages retain the experimental
+one-time numbered registration workflow. Nine 1800-pixel-wide screenshots live
+under
 `website/static/images/gmail-authorization`; the Markdown guide references that
 single asset set rather than duplicating it. The website checker requires both
-pages, the navigation link, a generic example address, and all nine PNG assets.
+pages, the navigation link, a generic maintainer address, and all nine PNG
+assets.
+
+`doc/M365.md` likewise separates the unsupported end-user boundary from the
+developer design. It records Outlook PST and legacy-Mac OLM as the nearest
+offline export paths, Graph delegated `Mail.Read` as the preferred future live
+source, Entra public-client and publisher-verification constraints, and OAuth
+IMAP as a broader compatibility path rather than an authentication shortcut.
+`doc/APPLE_MAIL_CACHE.md` records the best-effort cache boundary and the
+read-only preflight required before completeness claims.
 
 Gmail, IMAP, O365, Microsoft Exchange, and NUL-delimited standard input have
 manifest-loaded reserved source plug-ins. They recognize only their explicit
@@ -992,8 +1005,9 @@ folders and UIDs, fetches RFC 5322 bytes without setting `\\Seen`, and stores
 UIDVALIDITY plus UID so server reset/reuse is detectable.
 
 The `--days N` option uses `newer_than:Nd` on `messages.list`; `--after`
-accepts an epoch for timezone-precise collection.  Google Takeout is an MBOX directory input.  The program does not automate
-personal Takeout creation or download.
+accepts an epoch for timezone-precise collection. Google Takeout is an MBOX
+directory input. The program does not automate personal Takeout creation or
+download and does not yet extract Takeout ZIP parts.
 
 ## Public corpus validation pipeline
 

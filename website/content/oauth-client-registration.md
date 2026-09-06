@@ -3,6 +3,9 @@ title = "Register the distributed Gmail client"
 description = "The one-time Google OAuth setup performed by a Mail Archiver release maintainer."
 +++
 
+This procedure supports the experimental future Gmail API adapter. Google
+Takeout is the supported end-user path today; see [Archive Gmail](../gmail-authorization/).
+
 > **Maintainers only. End users do not perform these steps.** A Mail Archiver
 > release carries one Desktop client registered by the project maintainer.
 

@@ -1,58 +1,32 @@
 +++
-title = "Authorize Gmail"
-description = "Connect your Gmail account without creating a Google Cloud project."
+title = "Archive Gmail"
+description = "Import a Gmail snapshot using Google Takeout and MBOX."
 +++
 
-Gmail ingest is not implemented yet. This page describes the authorization
-experience that a completed Mail Archiver release will provide.
+## END USER
 
-## What you do
+Use [Google Takeout](https://takeout.google.com/) today. This does not grant Mail
+Archiver access to Gmail and does not require an OAuth client.
 
-Replace the example with the Gmail or Google Workspace address you want to
-archive:
+1. Choose **Deselect all**, then select **Mail**.
+2. Retain all mail data for the strongest completeness evidence.
+3. Choose a one-time ZIP export and **Create export**.
+4. Download every part when Google emails you, then extract the files beneath
+   one directory.
+5. Import the extracted directory into Mail Archiver.
 
-```console
-uv run mailarchiver-auth your.name@gmail.com
-```
+Google exports message content, headers, attachments, and labels. Takeout is a
+snapshot rather than an incremental service, and large exports may be divided
+into several ZIP files. Keep the ZIP files until the resulting archive passes
+verification.
 
-Mail Archiver usually recognizes Google Workspace domains automatically. If it
-cannot identify yours, use:
+## DEVELOPER
 
-```console
-uv run mailarchiver-auth --gmail person@example.org
-```
-
-The command opens Google in your system browser. Sign in with the same account
-you entered on the command line and approve read-only Gmail access. That is the
-entire end-user setup: **you do not create a Google Cloud project, register Mail
-Archiver, or obtain a client ID.**
-
-Mail Archiver verifies the account Google returns and stores your refresh token
-in your operating-system credential store. It does not put the token in your
-archive. Authorization grants no permission to delete, label, move, or mark
-messages as read.
-
-## What “seven days” means
-
-The Mail Archiver project and Desktop client are registered once by the release
-maintainer. They do not expire after seven days and do not need to be recreated.
-
-If the shared Google project is in **Testing**, Google requires the maintainer to
-list each test account. Each test user's authorization expires after seven days,
-so that user must approve access again. The project and program registration
-remain unchanged.
-
-If the project is **In production**, users do not have to be added individually.
-An unverified personal-use app can serve fewer than 100 users, but Google shows
-an unverified-app warning and applies a lifetime cap of 100 new users. See
-[Google's Audience documentation](https://support.google.com/cloud/answer/15549945)
-and [personal-use exception](https://support.google.com/cloud/answer/13464323).
-
-## If Mail Archiver asks you to register an app
-
-It should not. A message saying that no distributed Gmail client is present
-means the package is an incomplete development build. Report it to whoever
-built or distributed that copy of Mail Archiver.
+The canonical [Gmail design and operations document](https://github.com/simsong/mail-archiver/blob/main/doc/GMAIL.md)
+covers Takeout ingestion, the future Gmail API adapter, shared Desktop OAuth
+clients, Testing versus production, personal-use exceptions, restricted-scope
+verification, annual assessments when server-side data handling makes one
+necessary, and why IMAP is not an authentication shortcut.
 
 The illustrated [one-time registration reference](../oauth-client-registration/)
-is for release maintainers, not Gmail users.
+remains available for maintainers experimenting with the future API adapter.

@@ -722,8 +722,12 @@ one-time registration procedure and tell readers to use their own account.
 * Gmail ingest uses OAuth and the Gmail API for incremental acquisition of
   raw messages and labels.  It supports a rolling `--days N` mode using
   Gmail's `newer_than:Nd` query.  Google Takeout MBOX is supported as an offline,
-  one-time baseline input; personal Takeout is not assumed to be
-  programmatically triggerable.
+  one-time baseline input and is the current end-user path; personal Takeout is
+  not assumed to be programmatically triggerable. Direct multi-part Takeout ZIP
+  ingestion remains future work, so current users extract every part and ingest
+  their common parent directory. `doc/GMAIL.md` separately identifies end-user
+  instructions and developer-only OAuth, verification, assessment, and IMAP
+  decisions.
 * IMAP ingest supports TLS and authenticated account configuration, records
   account/folder/UID provenance, and retrieves RFC 5322 bytes without marking
   messages read or modifying the remote mailbox.
@@ -734,6 +738,10 @@ one-time registration procedure and tell readers to use their own account.
   rather than silently omitting them. The current backend decision, fixture
   matrix, and format limitations are maintained in
   [ON_DISK_MAIL_FORMATS.md](ON_DISK_MAIL_FORMATS.md).
+  Microsoft 365 has no platform-neutral Takeout equivalent. Outlook PST export
+  on Windows and OLM export from legacy Outlook for Mac are recognized future
+  acquisition paths, but PST, OST, OLM, Graph, and Exchange Online IMAP are not
+  current end-user sources. `doc/M365.md` must keep that boundary explicit.
 * Eudora ingest recognizes mailbox files together with their table-of-contents,
   attachment, and embedded-content conventions. It records which companion
   files were present and never treats an absent or stale index as proof that a
@@ -743,6 +751,12 @@ one-time registration procedure and tell readers to use their own account.
   folder context when recoverable, and explicitly reports placeholders,
   evicted bodies, partial downloads, and detached parts. It does not contact a
   server unless the user separately configures and authorizes live IMAP ingest.
+  A live Apple Mail cache is best-effort evidence rather than proof of complete
+  provider acquisition. Complete `.emlx` records are accepted, known partial
+  records are rejected, and a cache-completeness preflight must report partial
+  records and attachment policy before a completeness claim. The observed
+  machine-specific access boundary and preflight are maintained in
+  `doc/APPLE_MAIL_CACHE.md`.
 * Every source adapter emits original RFC 5322 bytes where the source contains
   them. When a proprietary store requires reconstruction or conversion, the
   observation records that fact and the responsible tool/version; reconstructed

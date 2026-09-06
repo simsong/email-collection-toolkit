@@ -208,13 +208,16 @@ standard input are reserved stubs, not supported ingest modes yet. Repeatable
 code there executes, so only name directories you trust. See
 [doc/PLUGINS.md](doc/PLUGINS.md).
 
-`uv run mailarchiver-auth ACCOUNT` separately prepares read-only Gmail OAuth
-credentials for the planned Gmail adapter. It detects Google Workspace and
-Microsoft 365 from public provider records, supports `--gmail` when detection is
-inconclusive, and stores Gmail refresh tokens in the operating-system credential
-store. A completed release carries one project-wide Desktop client; Gmail users
-do not register an app or create a Cloud project. It does not ingest mail;
-Microsoft 365 authorization remains unavailable.
+Google Takeout MBOX is the supported Gmail acquisition path today; see
+[doc/GMAIL.md](doc/GMAIL.md). Microsoft 365 currently has no supported end-user
+acquisition path; its Outlook export and future Graph design are documented in
+[doc/M365.md](doc/M365.md). Apple Mail cache limitations are documented in
+[doc/APPLE_MAIL_CACHE.md](doc/APPLE_MAIL_CACHE.md).
+
+`uv run mailarchiver-auth ACCOUNT` is a developer preview for the planned live
+Gmail adapter. It detects Google Workspace and Microsoft 365 from public
+provider records, but it does not ingest mail and Microsoft 365 authorization
+remains unavailable.
 
 The archive directory is a native BagIt/Mailbag package containing:
 
