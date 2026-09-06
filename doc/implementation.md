@@ -939,12 +939,12 @@ themselves. `--gmail` bypasses DNS with recorded override evidence, while
 `--detect-only` makes no external changes beyond public DNS lookup. Microsoft
 365 detection currently stops with `Microsoft Office not yet implemented.`
 
-For Gmail, account-specific Desktop-client configuration lives under the user
-configuration directory, keyed by a truncated SHA-256 of the normalized
-account. Directories are mode `0700` and the client file is atomically installed
-at mode `0600` where meaningful. Pydantic rejects Web-client or malformed JSON
-as well as non-Google client IDs, OAuth endpoints, and redirects; a guided setup
-also rejects a download from a different project. Refresh tokens are serialized
+For Gmail, `existing_client_secrets` first accepts an account-specific developer
+override and otherwise reads the release-wide `gmail_client.json` beside the
+package module. `MAILARCHIVER_GMAIL_CLIENT_JSON` supplies a development or
+packaging override. Pydantic rejects Web-client or malformed JSON as well as
+non-Google client IDs, OAuth endpoints, and redirects. A release without either
+client fails without opening Cloud registration. Refresh tokens are serialized
 only into the platform keyring service `mailarchiver.gmail.oauth`; they are not
 written to an archive or fallback token file. An existing token is refreshed
 when possible. Otherwise `google-auth-oauthlib` opens an installed-app loopback
@@ -952,16 +952,26 @@ flow with PKCE, a five minute timeout, a login hint for the requested account,
 and only `gmail.readonly`. A typed `users.getProfile` response must match the
 requested address before the token is retained.
 
-The setup command generates an account-neutral personal project ID. With
-`gcloud`, it authenticates the named account, creates the project without
+The maintainer-only `--register-client` command generates an account-neutral
+project ID. With `gcloud`, it authenticates the named account and creates the project without
 activating that account or altering the default project, and enables
 `gmail.googleapis.com`; all mutations follow a terminal confirmation. The
 unsupported Google Auth Platform operations are explicit user handoffs to
 project-qualified Branding, Audience, Scope, and Client pages. The final
 Desktop-client download is discovered only in the standard Downloads directory
 after that handoff or is selected by path. There is no browser DOM automation
-or credential scraping. `--client-secrets` skips project setup and imports an
-existing Desktop-client download.
+or credential scraping. The validated download is atomically installed with
+user-only modes and its path is printed so the maintainer can package it as
+`src/mailarchiver/gmail_client.json`. `--client-secrets` instead installs an
+account-specific developer override.
+
+The user manual and Zola `gmail-authorization` page describe only end-user
+consent. The separate `OAUTH_CLIENT_REGISTRATION.md` and Zola
+`oauth-client-registration` maintainer pages contain the one-time numbered
+registration workflow. Nine 1800-pixel-wide screenshots live under
+`website/static/images/gmail-authorization`; the Markdown guide references that
+single asset set rather than duplicating it. The website checker requires both
+pages, the navigation link, a generic example address, and all nine PNG assets.
 
 Gmail, IMAP, O365, Microsoft Exchange, and NUL-delimited standard input have
 manifest-loaded reserved source plug-ins. They recognize only their explicit

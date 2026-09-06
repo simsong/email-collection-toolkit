@@ -19,6 +19,7 @@ from mailarchiver.auth import (
     classify_provider,
     console_steps,
     detect_provider,
+    existing_client_secrets,
     gcloud_plan,
     install_client_secrets,
     unavailable_provider_message,
@@ -108,6 +109,30 @@ def test_requested_cli_forms_have_one_account_positional() -> None:
     assert overridden.gmail is True
 
 
+def test_release_client_is_shared_without_per_user_registration(tmp_path: Path) -> None:
+    shared = tmp_path / "installed" / "gmail_client.json"
+    shared.parent.mkdir()
+    shared.write_text(client_document(), encoding="utf-8")
+
+    selected = existing_client_secrets(
+        MailboxAddress.parse("new.user@gmail.com"),
+        config_root=tmp_path / "user-config",
+        distributed_path=shared,
+    )
+
+    assert selected == shared
+
+
+def test_missing_release_client_does_not_start_registration(tmp_path: Path) -> None:
+    selected = existing_client_secrets(
+        MailboxAddress.parse("new.user@gmail.com"),
+        config_root=tmp_path / "user-config",
+        distributed_path=tmp_path / "missing.json",
+    )
+
+    assert selected is None
+
+
 def test_gcloud_plan_is_project_scoped_and_least_privilege() -> None:
     account = MailboxAddress.parse("simsong@gmail.com")
     plan = gcloud_plan(account, "mailarchiver-personal-1234abcd")
@@ -143,6 +168,8 @@ def test_console_plan_requests_only_gmail_readonly_and_desktop_client() -> None:
     )
 
     assert all("project=mailarchiver-personal-1234abcd" in step.url for step in steps)
+    assert "your own address" in steps[0].instruction
+    assert "seven days" in steps[1].instruction
     assert GMAIL_READONLY_SCOPE in steps[2].instruction
     assert "Desktop app" in steps[3].instruction
 

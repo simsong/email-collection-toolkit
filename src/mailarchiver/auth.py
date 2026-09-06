@@ -35,6 +35,8 @@ GMAIL_PROFILE_URL = "https://gmail.googleapis.com/gmail/v1/users/me/profile"
 GOOGLE_AUTH_URI = "https://accounts.google.com/o/oauth2/auth"
 GOOGLE_TOKEN_URI = "https://oauth2.googleapis.com/token"
 KEYRING_SERVICE = "mailarchiver.gmail.oauth"
+DISTRIBUTED_CLIENT_FILENAME = "gmail_client.json"
+DISTRIBUTED_CLIENT_ENV = "MAILARCHIVER_GMAIL_CLIENT_JSON"
 GOOGLE_MX_SUFFIXES = (".google.com", ".googlemail.com", ".l.google.com")
 MICROSOFT_MX_SUFFIXES = (".mail.protection.outlook.com",)
 MICROSOFT_AUTODISCOVER_SUFFIXES = (".outlook.com", ".office365.com")
@@ -276,6 +278,14 @@ def client_path(account: MailboxAddress, config_root: Path | None = None) -> Pat
     return account_directory(account, config_root) / "client.json"
 
 
+def distributed_client_path() -> Path:
+    """Return the release-provided public Desktop-client configuration path."""
+    override = os.environ.get(DISTRIBUTED_CLIENT_ENV)
+    return Path(override).expanduser() if override else Path(__file__).with_name(
+        DISTRIBUTED_CLIENT_FILENAME
+    )
+
+
 def parse_client_secrets(path: Path) -> ClientSecrets:
     try:
         return ClientSecrets.model_validate_json(path.read_bytes())
@@ -302,6 +312,23 @@ def install_client_secrets(
     os.chmod(temporary, stat.S_IRUSR | stat.S_IWUSR)
     temporary.replace(destination)
     return destination
+
+
+def existing_client_secrets(
+    account: MailboxAddress,
+    config_root: Path | None = None,
+    distributed_path: Path | None = None,
+) -> Path | None:
+    """Prefer an account override, then the client registered once for the release."""
+    account_path = client_path(account, config_root)
+    if account_path.is_file():
+        parse_client_secrets(account_path)
+        return account_path
+    shared_path = distributed_path or distributed_client_path()
+    if shared_path.is_file():
+        parse_client_secrets(shared_path)
+        return shared_path
+    return None
 
 
 def _open_console(url: str) -> None:
@@ -359,15 +386,17 @@ def console_steps(account: MailboxAddress, project_id: str) -> tuple[ConsoleStep
         ConsoleStep(
             url=f"https://console.cloud.google.com/auth/branding?project={project}",
             instruction=(
-                "Configure Google Auth with app name 'Mail Archiver personal', your support "
-                "email, and your developer email."
+                "Click Get started if necessary. Use app name 'Mail Archiver personal', "
+                "select your own address for support and contact email, choose External for "
+                "personal Gmail, accept Google's user-data policy, and create the configuration."
             ),
         ),
         ConsoleStep(
             url=f"https://console.cloud.google.com/auth/audience?project={project}",
             instruction=(
-                f"Choose External. Add {account.address} as a test user. For a durable "
-                "personal-use token, publish the app In production but leave it unverified."
+                f"Under Test users, add {account.address}. Leave the app in Testing for this "
+                "trial; Google expires Testing authorizations after seven days. Publishing "
+                "requires additional branding, policy, and possibly domain-verification work."
             ),
         ),
         ConsoleStep(
@@ -439,7 +468,7 @@ def _select_download(project_id: str, since: float) -> Path:
 
 
 def provision_google_client(account: MailboxAddress) -> Path:
-    """Create what supported APIs permit and guide the remaining Console steps."""
+    """Register the distributable client once; this is a maintainer operation."""
     if not sys.stdin.isatty():
         raise AuthorizerError("Google client setup requires an interactive terminal")
     gcloud = shutil.which("gcloud")
@@ -549,10 +578,16 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="treat the account as Gmail when automatic detection is inconclusive",
     )
-    parser.add_argument(
+    client_options = parser.add_mutually_exclusive_group()
+    client_options.add_argument(
         "--client-secrets",
         type=Path,
-        help="import an existing Google Desktop-client JSON instead of creating one",
+        help="developer override: import an existing Google Desktop-client JSON",
+    )
+    client_options.add_argument(
+        "--register-client",
+        action="store_true",
+        help="maintainer only: register the shared Desktop client used by a release",
     )
     parser.add_argument(
         "--detect-only",
@@ -582,13 +617,18 @@ def main(argv: list[str] | None = None) -> int:
                 f"could not determine the provider for {account.domain}; rerun with --gmail if it is Gmail"
             )
 
-        destination = client_path(account)
-        if arguments.client_secrets is not None:
-            destination = install_client_secrets(arguments.client_secrets, account)
-        elif not destination.is_file():
+        if arguments.register_client:
             destination = provision_google_client(account)
+            print(f"Maintainer client configuration saved at {destination}.")
+        elif arguments.client_secrets is not None:
+            destination = install_client_secrets(arguments.client_secrets, account)
         else:
-            parse_client_secrets(destination)
+            destination = existing_client_secrets(account)
+            if destination is None:
+                raise AuthorizerError(
+                    "this development build has no distributed Gmail client; the release "
+                    "maintainer must register it once with --register-client"
+                )
         profile = authorize_gmail(account, destination)
         print(f"Authorized read-only Gmail access for {profile.email_address}.")
         print("The refresh token is stored in the operating-system credential store.")

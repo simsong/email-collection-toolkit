@@ -212,7 +212,9 @@ code there executes, so only name directories you trust. See
 credentials for the planned Gmail adapter. It detects Google Workspace and
 Microsoft 365 from public provider records, supports `--gmail` when detection is
 inconclusive, and stores Gmail refresh tokens in the operating-system credential
-store. It does not ingest mail; Microsoft 365 authorization remains unavailable.
+store. A completed release carries one project-wide Desktop client; Gmail users
+do not register an app or create a Cloud project. It does not ingest mail;
+Microsoft 365 authorization remains unavailable.
 
 The archive directory is a native BagIt/Mailbag package containing:
 

@@ -47,42 +47,54 @@ Disk Access for the terminal application.
 ## Authorize a Gmail account
 
 Authorization is available before live Gmail ingest. It prepares and retains
-read-only credentials but does not download or change any mail. Run:
+read-only credentials but does not download or change any mail.
+
+A release of Mail Archiver includes one Gmail Desktop client registered by the
+project maintainer. **You do not create a Google Cloud project, register Mail
+Archiver, or obtain a client ID.** Replace the example with your own address:
 
 ```console
-uv run mailarchiver-auth simsong@gmail.com
+uv run mailarchiver-auth your.name@gmail.com
 ```
 
 The command recognizes a Google Workspace address from its public mail records,
 so the same form works for a custom Google-hosted domain:
 
 ```console
-uv run mailarchiver-auth simsong@basistech.com
+uv run mailarchiver-auth person@example.org
 ```
 
 If automatic detection is inconclusive for an account known to use Gmail, use:
 
 ```console
-uv run mailarchiver-auth --gmail simsong@basistech.com
+uv run mailarchiver-auth --gmail person@example.org
 ```
 
-The first run asks before creating a personal Google Cloud project. When the
-Google Cloud CLI is installed, the command creates the project and enables the
-Gmail API. It then opens Google's project-specific configuration pages. Complete
-the displayed Branding, External Audience, `gmail.readonly` scope, and Desktop
-client steps, download the JSON file, and return to the terminal. The command
-finds a matching new download or asks for its path, opens Google's authorization
-page, verifies that Google returned the command-line account, and stores the
-refresh token in the operating-system credential store. It does not store the
-token in the archive.
+The command opens Google in the system browser. Sign in with the same account
+you supplied on the command line and approve read-only Gmail access. Mail
+Archiver verifies the returned account and stores the refresh token in the
+operating-system credential store, not in the archive.
 
-Use `--client-secrets PATH` to import an existing Google Desktop-client JSON.
-Use `--detect-only` to inspect provider detection without creating a project or
-authorizing an account.
+The Google project and Desktop client are registered once and do not expire
+after seven days. If the project is in Google's **Testing** state, each listed
+test user's authorization expires after seven days and that user must authorize
+again. The maintainer does not recreate or re-register the program. An
+**In production** unverified project accepts Google accounts without adding
+each one to the test-user list, but displays Google's warning and is limited to
+100 new users until verification.
+
+If the command says the build has no distributed Gmail client, that is an
+incomplete development build, not a task for the end user. Report it to the
+person who built or distributed Mail Archiver.
+
+Use `--detect-only` to inspect provider detection without authorizing an
+account. `--client-secrets` and `--register-client` are maintainer and developer
+options. The illustrated [one-time client-registration guide](OAUTH_CLIENT_REGISTRATION.md)
+shows the screenshots captured while registering the project-wide client; end
+users do not perform those steps.
 
 Microsoft 365 domains are detected through their mail or Autodiscover records,
-but authorization is not implemented. For example,
-`uv run mailarchiver-auth sgarfinkel@fas.harvard.edu` currently reports
+but authorization is not implemented and reports
 `Microsoft Office not yet implemented.`
 
 ## Identify the archive owner

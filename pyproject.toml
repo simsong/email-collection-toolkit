@@ -39,6 +39,7 @@ where = ["src"]
 mailarchiver = [
     "*.yaml",
     "*.swift",
+    "gmail_client.json",
     "sql/*.sql",
     "plugins/sources/*/plugin.toml",
     "plugins/files/*/plugin.toml",

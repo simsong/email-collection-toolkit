@@ -657,20 +657,32 @@ application flow in the system browser, and verifies the returned Gmail profile
 against the command-line account before retaining the token. The refresh token
 is stored under that account in the operating-system credential store, never in
 the archive, client configuration, terminal output, logs, fixtures, or reports.
-The downloaded Google Desktop-client JSON is Pydantic-validated, checked
-against the project created by the setup run, and copied outside the archive
-with user-only directory and file modes where the platform supports them.
+A release provides one public Google Desktop-client configuration registered by
+the Mail Archiver maintainer. End users do not create Cloud projects, configure
+consent, obtain client IDs, or supply client files. A build without that
+configuration fails with a distributor-facing error; it must not route an end
+user into registration. Account-specific `--client-secrets` remains a developer
+override. The downloaded configuration is Pydantic-validated and restricted to
+Google client IDs, OAuth endpoints, and loopback redirects.
 
-When no saved Desktop client exists, the interactive setup uses an installed
-Google Cloud CLI to authenticate the named account, then creates one personal
-project and enables only the Gmail API after explicit confirmation. It does not
-change the CLI's active account or default project. Without that CLI, it opens
-project creation and Gmail API pages and asks for the resulting project ID.
-Because Google has no supported general API for External consent-screen and
+`--register-client` is the explicit one-time maintainer workflow. It uses an
+installed Google Cloud CLI to authenticate the named owner account, then creates
+one project and enables only the Gmail API after explicit confirmation. It does
+not change the CLI's active account or default project. Without that CLI, it
+opens project creation and Gmail API pages and asks for the resulting project
+ID. Because Google has no supported general API for External consent-screen and
 Desktop-client creation, setup opens project-scoped Branding, Audience, Data
-Access, and Client pages in order, waits for the operator at each boundary, and
-imports Google's downloaded JSON. It must not scrape a browser profile, capture
-a Google password, or automate the Google Cloud Console DOM.
+Access, and Client pages in order and imports Google's download. It must not
+scrape a browser profile, capture a Google password, or automate the Console
+DOM.
+
+The project and Desktop client registration persist. In Google's Testing state,
+listed test users reauthorize after seven days; the maintainer does not
+re-register the program. In production, users need not be individually listed.
+An unverified personal-use app warns users and is limited to 100 new users until
+verification. The end-user manual and website explain this distinction with
+generic account examples. Separate maintainer help pages contain the illustrated
+one-time registration procedure and tell readers to use their own account.
 
 ## Ingest sources
 

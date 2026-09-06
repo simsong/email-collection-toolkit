@@ -11,7 +11,15 @@ import yaml
 
 
 SIZES = (48, 64, 128, 192)
-REQUIRED_TEXT = ("doc/RELEASE_NOTES.md", "README.md", "/releases", "/discussions/55", "/discussions/56")
+GMAIL_AUTH_IMAGES = tuple(f"{number:02d}-{name}.png" for number, name in enumerate((
+    "get-started", "app-information", "external-audience", "contact-information",
+    "user-data-policy", "create-configuration", "configuration-created", "add-test-user",
+    "branding-requirements",
+), start=1))
+REQUIRED_TEXT = (
+    "doc/RELEASE_NOTES.md", "README.md", "/releases", "/discussions/55", "/discussions/56",
+    "gmail-authorization/", "your.name@gmail.com",
+)
 
 
 def png_size(path: Path) -> tuple[int, int]:
@@ -44,8 +52,12 @@ def main() -> int:
         root / "website/themes/envelope-rainbow/templates/base.html",
         root / "website/themes/envelope-rainbow/templates/index.html",
         root / "website/themes/envelope-rainbow/templates/page.html",
+        root / "website/content/gmail-authorization.md",
+        root / "website/content/oauth-client-registration.md",
         root / "website/static/icons/rainbow-post.svg", root / "gui/icons/rainbow-post.svg",
     ]
+    auth_image_directory = root / "website/static/images/gmail-authorization"
+    required.extend(auth_image_directory / name for name in GMAIL_AUTH_IMAGES)
     missing = [str(path) for path in required if not path.is_file()]
     if missing:
         raise SystemExit("missing website files: " + ", ".join(missing))
@@ -62,6 +74,9 @@ def main() -> int:
     for required_text in REQUIRED_TEXT:
         if required_text not in text:
             raise SystemExit(f"website is missing required link text: {required_text}")
+    for path in (root / "doc/USER_MANUAL.md", root / "website/content/gmail-authorization.md"):
+        if "simsong@gmail.com" in path.read_text(encoding="utf-8"):
+            raise SystemExit(f"end-user help contains the maintainer example address: {path}")
     app_svg = (root / "gui/icons/rainbow-post.svg").read_bytes()
     site_svg = (root / "website/static/icons/rainbow-post.svg").read_bytes()
     if app_svg != site_svg:
@@ -70,6 +85,11 @@ def main() -> int:
         for directory in (root / "gui/icons", root / "website/static/icons"):
             path = directory / f"rainbow-post-{size}.png"
             validate_png(path, size)
+    for name in GMAIL_AUTH_IMAGES:
+        path = auth_image_directory / name
+        width, height = png_size(path)
+        if width != 1800 or height < 1200:
+            raise SystemExit(f"unexpected Gmail authorization screenshot size: {path}")
     print("website assets and required links are valid")
     return 0
 
