@@ -208,6 +208,12 @@ standard input are reserved stubs, not supported ingest modes yet. Repeatable
 code there executes, so only name directories you trust. See
 [doc/PLUGINS.md](doc/PLUGINS.md).
 
+`uv run mailarchiver-auth ACCOUNT` separately prepares read-only Gmail OAuth
+credentials for the planned Gmail adapter. It detects Google Workspace and
+Microsoft 365 from public provider records, supports `--gmail` when detection is
+inconclusive, and stores Gmail refresh tokens in the operating-system credential
+store. It does not ingest mail; Microsoft 365 authorization remains unavailable.
+
 The archive directory is a native BagIt/Mailbag package containing:
 
 * canonical MBOX payloads under `data/mbox/`;

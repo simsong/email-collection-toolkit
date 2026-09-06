@@ -6,16 +6,21 @@ requires-python = ">=3.12"
 dependencies = [
     "beautifulsoup4>=4.15.0",
     "charset-normalizer>=3.4.0",
+    "dnspython>=2.8.0",
     "ftfy>=6.3.0",
+    "google-auth-oauthlib>=1.2.3",
+    "keyring>=25.6.0",
     "py7zr>=1.0.0",
     "pydantic>=2.13.4",
     "pywebview>=6.2",
     "pyyaml>=6.0.2",
+    "requests>=2.32.0",
     "tabulate>=0.9.0",
 ]
 
 [project.scripts]
 mailarchiver = "mailarchiver.__main__:main"
+mailarchiver-auth = "mailarchiver.auth:main"
 mailsearch = "mailarchiver.mailsearch:main"
 mailsearch-gui = "mailarchiver.gui_app:main"
 summarize = "mailarchiver.aisummarize:main"

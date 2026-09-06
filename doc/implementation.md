@@ -929,6 +929,40 @@ omitted from FTS entirely.
 
 ## Planned remote sources
 
+The implemented `mailarchiver-auth` console entry point is separate from the
+reserved remote-source adapters. It parses and normalizes one account using a
+strict Pydantic model, recognizes well-known consumer domains, and otherwise
+performs bounded DNS MX and `autodiscover.<domain>` CNAME queries. Only Google
+mail hosts and Microsoft `mail.protection.outlook.com` or Autodiscover targets
+are affirmative evidence; gateways such as Proofpoint remain inconclusive by
+themselves. `--gmail` bypasses DNS with recorded override evidence, while
+`--detect-only` makes no external changes beyond public DNS lookup. Microsoft
+365 detection currently stops with `Microsoft Office not yet implemented.`
+
+For Gmail, account-specific Desktop-client configuration lives under the user
+configuration directory, keyed by a truncated SHA-256 of the normalized
+account. Directories are mode `0700` and the client file is atomically installed
+at mode `0600` where meaningful. Pydantic rejects Web-client or malformed JSON
+as well as non-Google client IDs, OAuth endpoints, and redirects; a guided setup
+also rejects a download from a different project. Refresh tokens are serialized
+only into the platform keyring service `mailarchiver.gmail.oauth`; they are not
+written to an archive or fallback token file. An existing token is refreshed
+when possible. Otherwise `google-auth-oauthlib` opens an installed-app loopback
+flow with PKCE, a five minute timeout, a login hint for the requested account,
+and only `gmail.readonly`. A typed `users.getProfile` response must match the
+requested address before the token is retained.
+
+The setup command generates an account-neutral personal project ID. With
+`gcloud`, it authenticates the named account, creates the project without
+activating that account or altering the default project, and enables
+`gmail.googleapis.com`; all mutations follow a terminal confirmation. The
+unsupported Google Auth Platform operations are explicit user handoffs to
+project-qualified Branding, Audience, Scope, and Client pages. The final
+Desktop-client download is discovered only in the standard Downloads directory
+after that handoff or is selected by path. There is no browser DOM automation
+or credential scraping. `--client-secrets` skips project setup and imports an
+existing Desktop-client download.
+
 Gmail, IMAP, O365, Microsoft Exchange, and NUL-delimited standard input have
 manifest-loaded reserved source plug-ins. They recognize only their explicit
 source forms and raise a clear unavailable error. The generic provider pipeline

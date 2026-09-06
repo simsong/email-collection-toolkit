@@ -44,6 +44,47 @@ Choose two locations:
 On macOS, reading Apple Mail or another protected location may require Full
 Disk Access for the terminal application.
 
+## Authorize a Gmail account
+
+Authorization is available before live Gmail ingest. It prepares and retains
+read-only credentials but does not download or change any mail. Run:
+
+```console
+uv run mailarchiver-auth simsong@gmail.com
+```
+
+The command recognizes a Google Workspace address from its public mail records,
+so the same form works for a custom Google-hosted domain:
+
+```console
+uv run mailarchiver-auth simsong@basistech.com
+```
+
+If automatic detection is inconclusive for an account known to use Gmail, use:
+
+```console
+uv run mailarchiver-auth --gmail simsong@basistech.com
+```
+
+The first run asks before creating a personal Google Cloud project. When the
+Google Cloud CLI is installed, the command creates the project and enables the
+Gmail API. It then opens Google's project-specific configuration pages. Complete
+the displayed Branding, External Audience, `gmail.readonly` scope, and Desktop
+client steps, download the JSON file, and return to the terminal. The command
+finds a matching new download or asks for its path, opens Google's authorization
+page, verifies that Google returned the command-line account, and stores the
+refresh token in the operating-system credential store. It does not store the
+token in the archive.
+
+Use `--client-secrets PATH` to import an existing Google Desktop-client JSON.
+Use `--detect-only` to inspect provider detection without creating a project or
+authorizing an account.
+
+Microsoft 365 domains are detected through their mail or Autodiscover records,
+but authorization is not implemented. For example,
+`uv run mailarchiver-auth sgarfinkel@fas.harvard.edu` currently reports
+`Microsoft Office not yet implemented.`
+
 ## Identify the archive owner
 
 Mail Archiver separates sent and received messages. It needs a short text file

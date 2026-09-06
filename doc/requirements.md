@@ -640,6 +640,38 @@ related organizations; it does not imply that planned application features
 are implemented. The Pages build pins its Zola release and verifies the
 downloaded archive against a source-controlled SHA-256 digest before execution.
 
+## Remote account authorization
+
+`mailarchiver-auth ACCOUNT` authorizes a remote account independently of an
+archive or ingest run. It accepts exactly one mailbox address and detects
+consumer Gmail directly, Google Workspace from provider-specific MX records,
+and Microsoft 365 from provider-specific MX or Autodiscover records. Detection
+is bounded and explainable. An inconclusive result fails closed and identifies
+the `--gmail` override; it does not guess from generic gateways or unrelated
+domain-verification records. `--detect-only` reports the evidence without
+authorizing or changing external state. Microsoft 365 authorization is a
+recognized but unavailable stub.
+
+Gmail authorization requests only `gmail.readonly`, opens Google's installed
+application flow in the system browser, and verifies the returned Gmail profile
+against the command-line account before retaining the token. The refresh token
+is stored under that account in the operating-system credential store, never in
+the archive, client configuration, terminal output, logs, fixtures, or reports.
+The downloaded Google Desktop-client JSON is Pydantic-validated, checked
+against the project created by the setup run, and copied outside the archive
+with user-only directory and file modes where the platform supports them.
+
+When no saved Desktop client exists, the interactive setup uses an installed
+Google Cloud CLI to authenticate the named account, then creates one personal
+project and enables only the Gmail API after explicit confirmation. It does not
+change the CLI's active account or default project. Without that CLI, it opens
+project creation and Gmail API pages and asks for the resulting project ID.
+Because Google has no supported general API for External consent-screen and
+Desktop-client creation, setup opens project-scoped Branding, Audience, Data
+Access, and Client pages in order, waits for the operator at each boundary, and
+imports Google's downloaded JSON. It must not scrape a browser profile, capture
+a Google password, or automate the Google Cloud Console DOM.
+
 ## Ingest sources
 
 * Recursive local-directory ingest recognizes MBOX streams, Apple Mail MBOX
