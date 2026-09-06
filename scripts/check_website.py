@@ -11,7 +11,34 @@ import yaml
 
 
 SIZES = (48, 64, 128, 192)
-REQUIRED_TEXT = ("doc/RELEASE_NOTES.md", "README.md", "/releases", "/discussions/55", "/discussions/56")
+REQUIRED_TEXT = (
+    "doc/RELEASE_NOTES.md",
+    "README.md",
+    "/releases",
+    "/discussions/55",
+    "/discussions/56",
+    "For Individuals",
+    "For Archivists",
+    "BagIt 1.0",
+    "Mailbag 1.0",
+    "ePADD",
+    "Privacy policy",
+    "Copyright Simson Garfinkel",
+    "GNU General Public License",
+    "The non-GPL versions may be available",
+    "Identify email files",
+    "Search and report",
+    "Export and verify",
+    "(C) 2026 Simson L. Garfinkel, authored with Codex.",
+)
+
+FORBIDDEN_TEXT = (
+    "Digital email curation begins before the first message is copied",
+    "Current boundary",
+    "Built for personal memory and archival stewardship",
+    "Search the decades you already saved",
+    "Preserve the messages. Understand the collection",
+)
 
 
 def png_size(path: Path) -> tuple[int, int]:
@@ -40,10 +67,13 @@ def main() -> int:
     root = parser.parse_args().root
     required = [
         root / "website/config.toml", root / "website/content/_index.md",
+        root / "website/content/use-cases.md",
+        root / "website/content/privacy.md", root / "website/content/rights.md",
         root / "website/themes/envelope-rainbow/theme.toml",
         root / "website/themes/envelope-rainbow/templates/base.html",
         root / "website/themes/envelope-rainbow/templates/index.html",
         root / "website/themes/envelope-rainbow/templates/page.html",
+        root / "website/themes/envelope-rainbow/templates/section.html",
         root / "website/static/icons/rainbow-post.svg", root / "gui/icons/rainbow-post.svg",
     ]
     missing = [str(path) for path in required if not path.is_file()]
@@ -62,6 +92,9 @@ def main() -> int:
     for required_text in REQUIRED_TEXT:
         if required_text not in text:
             raise SystemExit(f"website is missing required link text: {required_text}")
+    for forbidden_text in FORBIDDEN_TEXT:
+        if forbidden_text in text:
+            raise SystemExit(f"website contains retired promotional text: {forbidden_text}")
     app_svg = (root / "gui/icons/rainbow-post.svg").read_bytes()
     site_svg = (root / "website/static/icons/rainbow-post.svg").read_bytes()
     if app_svg != site_svg:

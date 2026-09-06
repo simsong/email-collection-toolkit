@@ -635,10 +635,23 @@ The project also publishes a Zola-generated GitHub Pages site at
 `https://simsong.github.io/mail-archiver/`. The site links to the README,
 release notes, GitHub releases, the current stable `v1.2.3`-shaped tag and
 current beta `v1.2.3-beta1`-shaped tag when present, and project discussions.
-It provides a clearly labeled index of digital-email-curation reports and
-related organizations; it does not imply that planned application features
-are implemented. The Pages build pins its Zola release and verifies the
-downloaded archive against a source-controlled SHA-256 digest before execution.
+Its home page gives equal prominence to individuals consolidating personal
+exports and archivists curating donor collections. A separate use-cases page
+describes both workflows, including an institutional digital-estate scenario,
+BagIt/Mailbag export, MBOX handoff to ePADD, and explicit boundaries between
+implemented and planned sources. It also provides a clearly labeled index of
+digital-email-curation reports and related organizations; it does not imply
+that planned application features are implemented. Every site page links to a
+public privacy policy covering planned Gmail and Microsoft 365 OAuth access and
+to a rights page stating the software's current GPL distribution, copyright,
+and availability of non-GPL versions. The curation section renders a
+responsive summary of the program's local file discovery, read-only ingest,
+archive creation, search and reporting, export, and verification functions,
+followed by its reports and organizations. Public website copy uses language
+for archivists, avoids software-development jargon, and labels unavailable
+functions as planned work.
+The Pages build pins its Zola release and verifies the downloaded archive
+against a source-controlled SHA-256 digest before execution.
 
 ## Ingest sources
 
