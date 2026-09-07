@@ -496,13 +496,14 @@ operating-system open event create a window for the requested document; they
 must not silently retarget an existing search window.
 
 Startup opens explicit document paths first, otherwise the last valid archive,
-otherwise a new in-memory **Untitled** document. A missing or invalid last
-archive is removed from recent state and reported, never recreated. Untitled
-documents cannot write until the creation/import workflow chooses and creates
-a destination archive. After the native event loop starts, first-launch
-Untitled immediately offers the same destination dialog and then the Import
-source workflow; canceling either dialog safely leaves the appropriate blank
-document open.
+otherwise a macOS dialog offers **Open Existing**, **Create New**, and **Cancel**.
+A missing or invalid last archive is removed from recent state and reported,
+never recreated. Cancel dismisses the dialog without creating a search window;
+About and File New/Open remain available. New asks for a permanent destination
+before opening a search window, then offers Import. Accepting the default
+Untitled name must work. Native save results may be strings or path sequences;
+neither form may truncate the path. File New/Open/Close have Command-N/O/W
+shortcuts on macOS. Search windows have no Open Archive toolbar button.
 
 An About window always opens at application startup and remains present while
 the application has another window. It displays the installed version, current

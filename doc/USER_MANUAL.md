@@ -203,8 +203,8 @@ Start the graphical search interface with:
 make gui ARGS='--archive "/path/to/mail-archive"'
 ```
 
-If no archive was supplied, the application opens the last valid archive or an
-in-memory **Untitled** document. Use **File → Open…** or **Open Archive…** to
+If no archive was supplied, the application opens the last valid archive or
+offers **Open Existing**, **Create New**, and **Cancel**. Use **File → Open…** (Command-O) to
 open an existing archive in a new window. **File → New Search Window** opens
 another independently searchable window on the active archive. Recent archives
 are kept in **File → Open Recent**. A missing or invalid saved archive is
@@ -215,9 +215,10 @@ asks for the UTF-8 owner-names file, shows the destination and sources for final
 confirmation, and starts import using the separately installed ClamAV.
 For a saved document, the window title shows the archive path and total number
 of deduplicated, searchable messages.
-On first launch with no usable archive, the Untitled window immediately offers
-the New destination and then Import dialogs. Canceling leaves the blank window
-open and does not choose or mutate any other path.
+Cancel dismisses the startup dialog without opening a search window. About and
+File New/Open remain available. Create New asks for a destination before opening
+its search window and offering Import; accepting the default Untitled name works.
+Command-N creates an archive and Command-W closes an eligible search window.
 
 The About window remains available for the application run. It shows the
 installed version, free disk space, live Internet reachability, startup errors,

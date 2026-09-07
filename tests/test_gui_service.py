@@ -43,6 +43,8 @@ from mailarchiver.gui_app import (
     application_icon_path,
     application_menu,
     application_metadata,
+    archive_destination,
+    dialog_paths,
     external_link_destination,
 )
 from mailarchiver.mailsearch import RECENT_FTS_SCAN_LIMIT, _search_statement, parse_query
@@ -52,6 +54,26 @@ from mailarchiver.plugin_api import SourceContainerMetadata, SourceRelationship
 from mailarchiver.mbox import add_message
 from mailarchiver.search import index_message
 from mailarchiver.standalone_verify import semantic_bytes
+
+@pytest.mark.parametrize("as_sequence", [False, True])
+def test_native_save_default_archive_path(tmp_path: Path, as_sequence: bool) -> None:
+    """New must accept native SAVE strings and sequences without truncating paths."""
+    selected = str(tmp_path / "Untitled")
+    destination = archive_destination((selected,) if as_sequence else selected)
+    controller = ApplicationController(ApplicationPreferencesStore(tmp_path / "preferences.json"))
+    document = controller.create_document(destination)
+    assert document.path == tmp_path / "Untitled.mailarchive"
+    assert (document.path / "archive.sqlite3").is_file()
+    assert (document.path / "search.sqlite3").is_file()
+
+
+def test_native_dialog_paths_preserve_unicode_and_reject_root() -> None:
+    """Native paths remain intact; invalid root destinations fail before archive writes."""
+    selected = "/Users/example/資料/Untitled.mailarchive"
+    assert dialog_paths(selected) == (Path(selected),)
+    assert archive_destination([selected]) == Path(selected)
+    with pytest.raises(ValueError, match="filesystem root"):
+        archive_destination("/")
 
 
 SIMPLE_MESSAGE = (

@@ -19,8 +19,8 @@ make gui ARGS="--archive /path/to/archive"
 
 The archive must contain `archive.sqlite3`, `search.sqlite3`, and the canonical
 MBOX files referenced by the catalog. Without `--archive`, the app opens the
-last valid archive or an in-memory Untitled document. Use **File → Open…** or
-**Open Archive…** to open an archive in a new window, and **File → New Search
+last valid archive or offers Open Existing, Create New, and Cancel.
+Use **File → Open…** (Command-O) to open an archive in a new window, and **File → New Search
 Window** for another independently searchable view of the active archive.
 **File → New** selects a permanent destination before initialization, and
 **File → Import…** selects source files/directories and the owner-names file.

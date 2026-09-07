@@ -688,7 +688,7 @@ class GuiApi:
         )
         if not selected:
             return None
-        destination = Path(selected[0])
+        destination = dialog_paths(selected)[0]
         if destination.suffix.casefold() != ".eml":
             destination = destination.with_suffix(".eml")
         write_message(self._archive(), message_pk, destination)
@@ -708,7 +708,7 @@ class GuiApi:
         )
         if not selected:
             return None
-        destination = Path(selected[0])
+        destination = dialog_paths(selected)[0]
         write_attachment(self._archive(), message_pk, part_id, destination)
         return str(destination)
 
@@ -873,6 +873,7 @@ class PyWebViewApplication:
             menu=self.menu(),
         )
         self._about_window = window
+        window.events.shown += lambda *_args: self._refresh_menus()
 
         def closed(*_args: object) -> None:
             self._about_window = None
@@ -993,10 +994,8 @@ class PyWebViewApplication:
         )
         if not selected:
             return None
-        destination = Path(selected[0])
-        if destination.suffix.casefold() != ".mailarchive":
-            destination = destination.with_suffix(".mailarchive")
         try:
+            destination = archive_destination(selected)
             document = self.controller.create_document(destination)
         except (OSError, ValueError) as error:
             self.add_notice("error", f"Could not create archive: {error}")
@@ -1004,24 +1003,36 @@ class PyWebViewApplication:
         return self.create_search_window(self.controller.new_search_window(document))
 
     def prompt_for_startup_archive(self) -> None:
-        """Offer destination and import when startup had no usable saved archive."""
-        untitled = next(
-            (
-                api
-                for api in self._search_apis()
-                if api.document is not None and api.document.descriptor.untitled
-            ),
-            None,
-        )
-        if untitled is None or untitled.window is None:
+        """Offer Open, New, or Cancel without creating an unsaved search window."""
+        self._refresh_menus()
+        if sys.platform != "darwin":
             return
-        created = self._create_new_document(untitled.window)
-        if created is None:
-            return
-        untitled.window.destroy()
-        if created.search_window is not None:
-            self.controller.activate_window(created.search_window.window_id)
-        self._import_document(created)
+        from AppKit import NSAlert  # pylint: disable=import-outside-toplevel,no-name-in-module,import-error
+        from PyObjCTools import AppHelper  # pylint: disable=import-outside-toplevel,import-error
+
+        finished = Event()
+        choice = 1002
+
+        def ask() -> None:
+            nonlocal choice
+            try:
+                alert = NSAlert.alloc().init()
+                alert.setMessageText_("Open or create an archive")
+                alert.setInformativeText_("Open an existing archive or choose where to create a new one.")
+                for title in ("Open Existing…", "Create New…", "Cancel"):
+                    alert.addButtonWithTitle_(title)
+                choice = alert.runModal()
+            finally:
+                finished.set()
+
+        AppHelper.callAfter(ask)
+        finished.wait()
+        if choice == 1000:
+            self.open_archive_dialog()
+        elif choice == 1001:
+            created = self._create_new_document(self._about_window)
+            if created is not None:
+                self._import_document(created)
 
     def new_search_window(self) -> bool:
         api = self.active_api()
@@ -1064,8 +1075,8 @@ class PyWebViewApplication:
         )
         if not selected_owners:
             return False
-        roots = [Path(path) for path in selected_sources]
-        owner_names = Path(selected_owners[0])
+        roots = list(dialog_paths(selected_sources))
+        owner_names = dialog_paths(selected_owners)[0]
         summary = "\n".join(str(root) for root in roots)
         if not api.window.create_confirmation_dialog(
             "Import Mail",
@@ -1159,7 +1170,7 @@ class PyWebViewApplication:
         if not selected:
             return False
         try:
-            self.open_document(Path(selected[0]))
+            self.open_document(dialog_paths(selected)[0])
             return True
         except (OSError, ValueError) as error:
             self.add_notice("error", f"Could not open archive: {error}")
@@ -1362,6 +1373,8 @@ class PyWebViewApplication:
             return
 
         def refresh() -> None:
+            for native in BrowserView.instances.values():
+                native.menu = active.menu
             instance = BrowserView.instances.get(active.uid)
             if instance is None:
                 return
@@ -1369,6 +1382,12 @@ class PyWebViewApplication:
             BrowserView.app.setMainMenu_(menu)
             BrowserView.current_menu = active.menu
             file_item = menu.itemWithTitle_("File")
+            if file_item is not None:
+                for title, key in (("New", "n"), ("Open…", "o"), ("Close", "w")):
+                    item = file_item.submenu().itemWithTitle_(title)
+                    if item is not None:
+                        item.setKeyEquivalent_(key)
+                        item.setKeyEquivalentModifierMask_(1 << 20)
             close_item = file_item.submenu().itemWithTitle_("Close") if file_item else None
             if close_item is not None:
                 with self._lock:
@@ -1380,6 +1399,21 @@ class PyWebViewApplication:
                 close_item.setEnabled_(enabled)
 
         AppHelper.callAfter(refresh)
+
+
+def dialog_paths(selected: str | tuple[str, ...] | list[str]) -> tuple[Path, ...]:
+    """Normalize native SAVE strings and OPEN/FOLDER sequences without splitting strings."""
+    return tuple(Path(item) for item in ((selected,) if isinstance(selected, str) else selected))
+
+
+def archive_destination(selected: str | tuple[str, ...] | list[str]) -> Path:
+    """Validate a save choice before adding the archive extension."""
+    destination = dialog_paths(selected)[0]
+    if not destination.name:
+        raise ValueError("Choose an archive name, not a filesystem root")
+    if destination.suffix.casefold() != ".mailarchive":
+        destination = destination.with_name(destination.name + ".mailarchive")
+    return destination
 
 
 def _is_archive(path: Path) -> bool:
@@ -1522,7 +1556,10 @@ def main() -> int:
             application.add_notice("error", error)
         application.create_about_window()
         for session in startup.windows:
-            application.create_search_window(session)
+            if controller.document(session.document_id).descriptor.untitled:
+                controller.close_window(session.window_id)
+            else:
+                application.create_search_window(session)
     webview.settings["ALLOW_FILE_URLS"] = False
     webview.settings["OPEN_EXTERNAL_LINKS_IN_BROWSER"] = False
     if smoke:

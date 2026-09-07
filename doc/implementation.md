@@ -429,10 +429,14 @@ runs the service on a non-daemon worker thread, leaves readers usable, polls the
 existing typed status files in every attached search window and the persistent
 About window, and invalidates view caches after the run. Startup and import
 errors are retained as typed notices instead of being available only on stderr.
-When startup produced Untitled, a `webview.start` callback runs after native
-windows exist, asks for the permanent destination, replaces Untitled with the
-created document, and offers Import; cancellation never creates an implicit
-temporary archive.
+When startup produces a placeholder, the shell discards it without creating a
+native search window. A `webview.start` callback presents a three-button NSAlert
+on the Cocoa main thread: Open Existing, Create New, or Cancel. About anchors
+subsequent dialogs and retains File New/Open after cancellation. Native dialog
+paths normalize SAVE strings and OPEN/FOLDER sequences before indexing; New
+validates the destination inside its error handler. Cocoa File menu items carry
+explicit Command-N/O/W shortcuts. Archive opening uses the File menu rather than
+a toolbar button.
 
 `LoopbackAssetServer` owns GUI delivery. It binds `127.0.0.1:0`, issues a
 different one-use bootstrap ticket for every new window, sets a random

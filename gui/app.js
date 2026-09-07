@@ -96,7 +96,7 @@ async function initialize() {
     await runNativeSmoke();
     return;
   }
-  for (const id of ["choose-archive", "search-form", "search", "search-filters", "search-suggestions", "search-help-template", "archive-label", "result-status", "results-pane", "result-list",
+  for (const id of ["search-form", "search", "search-filters", "search-suggestions", "search-help-template", "archive-label", "result-status", "results-pane", "result-list",
     "result-help",
     "sort-by", "sort-direction", "search-attachments", "show-original-folders", "mailbox-browser", "mailbox-tree", "show-source-volumes", "filter-set", "manage-filter-sets",
     "save-filter-dialog", "save-filter-form", "filter-set-name", "cancel-save-filter", "manage-filter-dialog", "filter-set-list", "close-filter-manager",
@@ -106,10 +106,6 @@ async function initialize() {
   }
   initializeResultTable();
   renderSearchHelp();
-  elements["choose-archive"].addEventListener("click", async () => {
-    await chooseArchive();
-    elements["choose-archive"].dataset.completed = String(Number(elements["choose-archive"].dataset.completed || 0) + 1);
-  });
   elements["search-form"].addEventListener("submit", event => {
     event.preventDefault();
     if (state.suggestionIndex >= 0) acceptSuggestion(state.suggestionIndex);
