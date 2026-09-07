@@ -1,0 +1,192 @@
+{
+  "version": 1,
+  "files": [
+    {
+      "path": "credible_date_with_quoted_body.eml",
+      "sha256": "a9b3c1b3aef366ec245855227fb7eb87d71f5ceb695b4254f3bd34b59d701bec",
+      "observations": 1,
+      "excluded": 0,
+      "messages": [
+        {
+          "subject": "",
+          "sha256": "a9b3c1b3aef366ec245855227fb7eb87d71f5ceb695b4254f3bd34b59d701bec"
+        }
+      ]
+    },
+    {
+      "path": "email-korean-bad-encoding.eml",
+      "sha256": "aef5bfa35ebdff69492a3ec91d354c5dcaf094834970e7b8909f3315264693bf",
+      "observations": 5,
+      "excluded": 0,
+      "messages": [
+        {
+          "subject": "* Mortgage Approved !*",
+          "sha256": "50fd171da0fbc715768c431647849803b9bdfb13c214dd5c1db795dadd740fbc"
+        },
+        {
+          "subject": "Mortgage rates as low as 4.65%             29623",
+          "sha256": "ea05b54ef4150d6462b5ad053b4cc49a31911dcb6eea28e3163cbec1ae06224e"
+        },
+        {
+          "subject": "[ADV]  Looking for creative talented managers and executive producers !",
+          "sha256": "10788f9ba8c73e0e082ae3d7cc55a8444927b2497ba9b58c71ee64335d9210f1"
+        },
+        {
+          "subject": "[광고]지금 클릭하세요 대박신화가 이어집니다.",
+          "sha256": "7a783a007f96f6d6f50f0664bfe3595d09ae292630383c6563b26fe2171b0107"
+        },
+        {
+          "subject": "[광고]컴맹탈출!! 이젠 망설이지 마세요~",
+          "sha256": "57d69ed54de5f450b6cfc53f329e975c421649216f586bcb985c2fd63dbe2d2b"
+        }
+      ]
+    },
+    {
+      "path": "emlx_maildir/2024/001-collision.emlx",
+      "sha256": "be869cb7ac700bb5ec6b2d1ea1a697d1426010701871f1a74448b6632b40d89f",
+      "observations": 1,
+      "excluded": 0,
+      "messages": [
+        {
+          "subject": "second collision fixture",
+          "sha256": "109acb67795fc7e9c7fd4faaf668931d498776b6673023b946d90988f34ed520"
+        }
+      ]
+    },
+    {
+      "path": "emlx_maildir/2024/002-autosave.emlx",
+      "sha256": "00cc16ce515e0fa9ee1de3b0300f92b694118815c6afd9b7616d2df78419ae97",
+      "observations": 1,
+      "excluded": 1,
+      "messages": []
+    },
+    {
+      "path": "emlx_maildir/2024/infected/003-infected.emlx.template",
+      "sha256": "8dcc953857fcd62c2692883af4047ee7a646172edc6e6e27126d66e1def55383",
+      "observations": 0,
+      "excluded": 0,
+      "messages": []
+    },
+    {
+      "path": "quoted_date_message.eml",
+      "sha256": "b9e2e7fd08c2715a05be34c5dd020fdaf805afbc2e8782b3e1739e72f3bde6cd",
+      "observations": 1,
+      "excluded": 0,
+      "messages": [
+        {
+          "subject": "",
+          "sha256": "b9e2e7fd08c2715a05be34c5dd020fdaf805afbc2e8782b3e1739e72f3bde6cd"
+        }
+      ]
+    },
+    {
+      "path": "sipbadmin.mbox",
+      "sha256": "ba360efdfd070d4adc097a310ebe071c027d790abb756555f0c6f081a9fdfbff",
+      "observations": 4,
+      "excluded": 0,
+      "messages": [
+        {
+          "subject": "Current Status of my UROP",
+          "sha256": "f9b0c1cc4eefd491c382277375a581ebb162f7a8420bbad92c511ae55ba25896"
+        },
+        {
+          "subject": "Is 2:00 today ok?",
+          "sha256": "0cfdad3d682d5e531fa8fb2c7ca37d6590a09f3f0aabe013cf5a8cc6a256563f"
+        },
+        {
+          "subject": "Jupiter 7 Plus and phone calls to California",
+          "sha256": "76afadc48d702841e9be0f8b7b8a8d570f80d680461aa633edcc6bf5c891d6b0"
+        },
+        {
+          "subject": "Read/Write CDs as possible student storage for Athena?",
+          "sha256": "a1f6dc3b5d60fc56282123653de0e8ece833bf8c51906e8e55c29f2689cf70d3"
+        }
+      ]
+    },
+    {
+      "path": "sipbadmin.pdf",
+      "sha256": "724b9090dd531356c9a565b4579f148f454a0ece1b40075eeb5fcd065ef7e04a",
+      "observations": 0,
+      "excluded": 0,
+      "messages": []
+    },
+    {
+      "path": "three-message-mailbag/bag-info.txt",
+      "sha256": "4a3da1bcd30087ca004179079b91c65de45caf3419c6d64181d56322f19ddf75",
+      "observations": 0,
+      "excluded": 0,
+      "messages": []
+    },
+    {
+      "path": "three-message-mailbag/bagit.txt",
+      "sha256": "1712ecfb074bf29c4188ad3421032509159a09739fd604f8fe57038b4ddefcc9",
+      "observations": 0,
+      "excluded": 0,
+      "messages": []
+    },
+    {
+      "path": "three-message-mailbag/data/mbox/three-messages.mbox",
+      "sha256": "12f3f954508c1bf1a0e24b7de268d1e54fda354519956af22d86f2827b4ba85e",
+      "observations": 3,
+      "excluded": 0,
+      "messages": [
+        {
+          "subject": "Attachment fixture",
+          "sha256": "6b6402e0bb29b29f3cdb7e687c5f9d6387bf655c874d3e412819362e30a03344"
+        },
+        {
+          "subject": "First fixture message",
+          "sha256": "f47164843d728e984dec0a01ce98473ecc2b46d92e33637122638bf6426516e4"
+        },
+        {
+          "subject": "Mutable status fixture",
+          "sha256": "ade812c6b2a7ce258d27b8fc7f78f1166d1cc9bc630f0dd3d742b317d5d6906f"
+        }
+      ]
+    },
+    {
+      "path": "three-message-mailbag/integrity/three-messages.mbox.integrity",
+      "sha256": "8ed2314df94ff4fe46380b16f7fb3f0e431e8d2327cc9c69333cdbfeaa0fb8fb",
+      "observations": 0,
+      "excluded": 0,
+      "messages": []
+    },
+    {
+      "path": "three-message-mailbag/mailbag.csv",
+      "sha256": "210aa7887242226ff9cc6026bfca03176c2d3877fbdd7b04b2c832dcb4a1365f",
+      "observations": 0,
+      "excluded": 0,
+      "messages": []
+    },
+    {
+      "path": "three-message-mailbag/manifest-sha256.txt",
+      "sha256": "41d21f704b0ef3e749efc2e221c0e3f05ca9541f1e48b468289f05d6bf0b8132",
+      "observations": 0,
+      "excluded": 0,
+      "messages": []
+    },
+    {
+      "path": "three-message-mailbag/tagmanifest-sha256.txt",
+      "sha256": "298b257f446e65f2f843827791548e94a8cfea426f415ef5488f2e02cb68360b",
+      "observations": 0,
+      "excluded": 0,
+      "messages": []
+    },
+    {
+      "path": "three_messages.mbox",
+      "sha256": "4e0aafcf73fd55263656e7d2bdae26c619d74bd18047f100da61f0434954731d",
+      "observations": 3,
+      "excluded": 0,
+      "messages": [
+        {
+          "subject": "first collision fixture",
+          "sha256": "c1be80cd493b5ec99ef39971f0b3acb6fd8a373e4f32c264eb78d751f9fc333c"
+        },
+        {
+          "subject": "sent archive fixture",
+          "sha256": "832e056ee7a7a0ee2ffd3ffca325948c3a92b0d252655c20c06c9b59275c4e4b"
+        }
+      ]
+    }
+  ]
+}

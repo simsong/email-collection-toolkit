@@ -566,7 +566,7 @@ SHA-256 verifies the pinned Zola archive before extraction, resolves the newest
 exact stable and beta tags into Zola data, then deploys a Pages artifact. The
 home-page template presents equal individual and archivist columns, while the
 `use-cases.md` content page supplies the detailed personal-archive and donor
-digital-estate narratives. It describes BagIt/Mailbag as an export and standard
+digital-estate narratives. It describes BagIt/Mailbag as native archive storage and standard
 MBOX as the ePADD handoff, with planned direct-provider, first-class package
 import, and automated interoperability work labeled explicitly.
 The base template links every page to `privacy.md` and `rights.md`. The privacy
@@ -577,8 +577,13 @@ current GPL distribution, copyright, and possible non-GPL availability.
 The reusable `section.html` template renders section content and child-page
 cards through the site theme. The curation section adds a responsive five-part
 summary of local file discovery, read-only ingest, archive creation, search and
-reporting, export, and verification. Public copy describes implemented and
+reporting, verification, and sharing. Public copy describes implemented and
 planned functions in language intended for archivists.
+The primary navigation links to `about.md`, which describes Simson Garfinkel
+and links to his personal website, GitHub profile, and project repository.
+About links to `changelog.md`, a dated record of website changes distinct from
+application release notes. The 2026-09-07 entry records the storage-format
+wording correction and the new About/changelog pages.
 The release workflow follows the repository's draft-release
 pattern: it requires a version-matching signed annotated tag, builds a source
 distribution, writes `SHA256SUMS`, and creates a draft GitHub Release.
@@ -1049,12 +1054,27 @@ the policy (older files default to `unknown`), without changing the catalog
 schema or canonical bytes. Failed required scanning still stops import.
 The native source picker and Ingests page show a missing-configuration banner;
 the final native confirmation defaults to Cancel and gates the opt-out.
+Import confirmations use a 560-point-wide selectable AppKit accessory label,
+keeping archive/source/owner paths readable without changing default or Cancel
+actions. `make test-packaging` checks real alert layout and both button sets
+without showing a modal dialog.
 The download action opens only ClamAV's official page. About reports configuration
 presence separately from readiness, which remains an ingest preflight check.
 `make test-packaging` exercises missing-scanner failure, explicit opt-out,
 durable evidence, source immutability, and isolated headless diagnostics.
 
 ## macOS packaging
+
+`make ruff` runs `uv run --locked ruff check .`. It is a required prerequisite
+of `make check` and `make dmg`, and CI and source-release builds also run it.
+Ruff retains its default error rules (`E4`, `E7`, `E9`, `F`), including unused
+imports/variables and assigned lambdas; no per-file suppressions are
+introduced. Pylint remains a complementary check.
+
+`make syntax-check` uses standard-library `compileall` on `src`, `scripts`,
+`tests`, and `e2e_tests`. It is a prerequisite of `make check` and `make dmg`;
+the regression with a stray filename before the build script's opening
+docstring fails this check before packaging starts.
 
 `scripts/build_macos.py`, invoked by `make dmg`, uses project-local PyInstaller
 dependencies, creates the app icon from the existing PNG, collects runtime
@@ -1064,6 +1084,23 @@ and signs the resulting bundle ad-hoc unless a signing identity was supplied.
 and `--self-test-gui`. Frozen GUI resources use PyInstaller's bundle root;
 the verifier's actual `.py` source is explicitly bundled for archive installation.
 The Cocoa document delegate extends rather than replaces pywebview's quit guards.
+
+`scripts/dmg_layout.py` uses build-only `dmgbuild` to write the Finder `.DS_Store`
+and background into the image without changing global Finder preferences.
+AppKit draws a 2x-resolution TIFF at a logical 720-by-420-point size. The two
+scales are linked by the bitmap's logical size; no additional drawing transform
+is applied. `make test-packaging` renders the background and checks its logical
+and pixel dimensions, ink bounds, and presence of title, arrow, and instructions.
+The same pixel check runs before image creation and against the mounted image,
+catching the double-scaling regression that metadata-only checks missed. The
+real icons are 128 points, positioned app-left and Applications-right; the
+background contains the title, arrow, and install/eject instructions.
+Finder's outer window is 720 by 480 points, reserving 60 points for window
+chrome so the background footer is not cropped if Finder shows its status bar.
+The mounted build test decodes `.DS_Store` to verify layout metadata and
+requires exactly the app and Applications as visible root items.
+`make preview-dmg DMG=...` opens the mounted image in Finder for visual review
+and ejects it when Return is pressed. This preview does not install the app.
 
 `self_test.py` uses temporary source and archive fixtures plus isolated application
 preferences. It verifies ingest, original bytes, FTS search, fixity, idempotence,
@@ -1245,6 +1282,41 @@ schema, and policy versions so correspondent, thread, entity, attachment, and
 provenance reports can declare how they were produced.
 
 ## Validation and tests
+
+The Cocoa termination delegate confirms an active-import quit and returns
+`NSTerminateLater`, keeping the event loop alive while `IngestJob.stop` requests
+cooperative cancellation. The shared service checks this event during discovery,
+scanner startup, and worker status refresh; ordinary worker failures remain
+distinct from cancellation. It follows the existing interrupted-run checkpoint
+and lease-release path. A completion event allows Cocoa termination only after
+the GUI worker finishes. No automatic resume is promised: File → Import safely
+retries the same source. `make test-application` tests partial publication,
+interrupted status, verification, duplicate-free restart, and multi-document stop.
+
+`make test-corpus-import` runs the single full-directory regression in
+`tests/test_corpus_import.py`, also included in `make test`. It imports the
+actual `tests/data` directory with `--clamav`, compares subjects/raw SHA-256
+and per-source accounting against `tests/expected-corpus.json`, independently
+checks canonical locations and the installed verifier, then reimports and
+checks unchanged-source skipping. Each subprocess has a 600-second deadline
+and a retained pytest-temporary log. The test fingerprints all input files
+before/after; it never changes sources.
+The configured on-demand ClamAV installation is required, just as for the other
+scanner integration tests. Expectations include infected mail without fixing
+its signature-dependent destination; new signatures cannot excuse lost bytes.
+`make update-corpus-expectations` passes `--update-corpus-expectations` to
+pytest and regenerates the expected JSON only after those integrity checks.
+Review the generated diff: updating a golden file is not proof of correctness.
+Git-ignored local additions are recorded separately in
+`.tmp/expected-corpus-private.json`; neither their mail nor their subjects belong
+in the public fixture manifest. CI uses the same test on its tracked directory.
+New or missing files, wrong per-source message membership, and changed exclusion
+counts also fail even when the overall canonical message set is unchanged.
+
+The reported September 7 apparent loop was a completed 208-second import:
+`email-korean-bad-encoding.eml` locally contained 6,884 MBOX records (82 MiB),
+despite its suffix. Content-based MBOX recognition takes precedence over `.eml`;
+the worker legitimately stays on that path while advancing through messages.
 
 [`END_TO_END_TESTING.md`](END_TO_END_TESTING.md) defines the archive-lifecycle,
 browser-acceptance, native-WKWebView, and optional XCUITest layers, including

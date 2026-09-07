@@ -23,15 +23,27 @@ OCR_ENGINES ?= native,ocrmypdf,tesseract
 OCR_INVENTORY_ARGS ?=
 OCR_RUN_ARGS ?=
 
-check: test test-e2e website-check
+check: ruff syntax-check test test-e2e website-check
 
-.PHONY: dmg test-dmg self-test self-test-gui test-packaging
-dmg:
+.PHONY: ruff
+ruff:
+	uv run --locked ruff check .
+
+.PHONY: syntax-check
+syntax-check:
+	uv run python -m compileall -q src scripts tests e2e_tests
+
+.PHONY: dmg test-dmg preview-dmg self-test self-test-gui test-packaging
+dmg: ruff syntax-check
 	uv run --group packaging python scripts/build_macos.py $(ARGS)
 
 test-dmg:
 	@test -n "$(DMG)" || { echo 'usage: make test-dmg DMG=/path/to/Mail-Archiver.dmg'; exit 2; }
 	uv run --group packaging python scripts/build_macos.py --test-dmg "$(DMG)"
+
+preview-dmg: ruff
+	@test -n "$(DMG)" || { echo 'usage: make preview-dmg DMG=/path/to/Mail-Archiver.dmg'; exit 2; }
+	uv run --group packaging python scripts/build_macos.py --preview-dmg "$(DMG)"
 
 self-test:
 	uv run python scripts/desktop_entry.py --self-test $(ARGS)
@@ -118,6 +130,13 @@ release-tag-check:
 
 test:
 	uv run pytest -q
+
+.PHONY: test-corpus-import update-corpus-expectations
+test-corpus-import:
+	uv run pytest -q tests/test_corpus_import.py
+
+update-corpus-expectations:
+	uv run pytest -q -s tests/test_corpus_import.py --update-corpus-expectations
 
 test-application:
 	uv run pytest -q tests/test_application.py tests/test_writer_lock.py tests/test_loopback.py

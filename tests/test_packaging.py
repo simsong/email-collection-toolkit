@@ -7,7 +7,10 @@ import os
 import sqlite3
 import subprocess
 import sys
+from importlib import import_module
 from pathlib import Path
+
+import pytest
 
 from mailarchiver.ingest_status import read_ingest_history
 from mailarchiver.self_test import SelfTestReport
@@ -15,6 +18,39 @@ from mailarchiver.standalone_verify import verify_archive
 from mailarchiver.scanner import clamav_prefix
 
 ROOT = Path(__file__).resolve().parents[1]
+
+
+@pytest.mark.skipif(sys.platform != "darwin", reason="AppKit renders the macOS installer background")
+def test_dmg_retina_background_keeps_text_and_arrow_in_bounds(tmp_path: Path) -> None:
+    """Desktop delivery: Retina background ink must align with the real Finder icons."""
+    from scripts.dmg_layout import background_image, verify_background
+
+    background = tmp_path / "background.tiff"
+    background_image(background)
+    verify_background(background)
+
+
+@pytest.mark.skipif(sys.platform != "darwin", reason="Native import confirmation uses AppKit")
+@pytest.mark.parametrize("buttons", [("Import", "Cancel"), ("Cancel", "Import Without Scanning", "Install ClamAV…")])
+def test_import_confirmation_has_wide_selectable_body(buttons: tuple[str, ...]) -> None:
+    """Import confirmation must retain complete paths in a wider native dialog."""
+    AppKit = import_module("AppKit")
+    from mailarchiver.gui_app import IMPORT_CONFIRMATION_WIDTH, create_macos_alert
+
+    AppKit.NSApplication.sharedApplication()
+    message = ("Destination archive: /Users/example/tiny.mailarchive\n\n"
+               "Read-only sources:\n/Users/example/gits/mail-archiver/tests/data\n\n"
+               "Sent-mail owner names: /Users/example/tiny.mailarchive/owner-names.txt")
+    alert = create_macos_alert("Import into tiny.mailarchive", message, buttons,
+                               body_width=IMPORT_CONFIRMATION_WIDTH)
+    alert.layout()
+    body = alert.accessoryView()
+    assert body.stringValue() == message
+    assert body.isSelectable()
+    assert body.frame().size.width >= IMPORT_CONFIRMATION_WIDTH
+    assert alert.window().frame().size.width >= IMPORT_CONFIRMATION_WIDTH
+    assert [button.title() for button in alert.buttons()] == list(buttons)
+    assert alert.buttons()[0].keyEquivalent() == ("\x1b" if buttons[0] == "Cancel" else "\r")
 
 
 def test_scanner_discovery_requires_both_programs(tmp_path: Path) -> None:

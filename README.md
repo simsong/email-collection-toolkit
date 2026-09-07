@@ -226,7 +226,8 @@ Microsoft 365 from public provider records, supports `--gmail` when detection is
 inconclusive, and stores Gmail refresh tokens in the operating-system credential
 store. It does not ingest mail; Microsoft 365 authorization remains unavailable.
 
-The archive directory is a native BagIt/Mailbag package containing:
+BagIt/Mailbag is the archive's native storage format, not a separate export
+format. The application works directly with this directory, which contains:
 
 * canonical MBOX payloads under `data/mbox/`;
 * `bagit.txt`, `bag-info.txt`, `mailbag.csv`, `manifest-sha256.txt`, and

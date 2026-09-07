@@ -153,6 +153,27 @@ in an actual message body.
 
 ## Deduplication and provenance
 
+On macOS, Command-Q during an active import must offer Cancel or Stop Import
+and Quit. Explain that quitting stops imports, that restarting requires File →
+Import with the same source, and that already archived messages are not imported
+twice. Cancel leaves imports running. Confirmed quit stops all active imports
+cooperatively, disallows new imports, and waits for checkpointing and writer-lease
+release before terminating. Window-close restrictions during ingest remain intact.
+
+The default pytest suite must import the entire local `tests/data/` directory
+through the CLI into a disposable archive, with a ten-minute subprocess
+deadline. A reviewed expectation file lists source fingerprints and every
+retained email's subject and raw SHA-256, plus observation/exclusion counts.
+Failures report both unexpected and missing messages. Verification must read
+canonical bytes, run the installed validator, confirm source immutability, and
+repeat ingest to establish idempotence. Updating expectations requires the
+explicit `--update-corpus-expectations` pytest option. Tracked fixture expectations
+are public; ignored local mailbox expectations remain in an ignored local
+overlay. Unknown local files fail comparison until explicitly reviewed.
+This test uses the real on-demand ClamAV path, as the GUI does. Its subject/hash
+expectations include quarantined mail and do not depend on signature-dependent
+mailbox destinations. Dedicated EICAR tests also verify infected routing.
+
 * A duplicate is only a message with both the same normalized `Message-ID`
   and the same SHA-256 of its RFC 5322 message bytes.  Never collapse all
   messages sharing only a Message-ID.
@@ -551,6 +572,9 @@ the destination archive and its message shows the full destination path.
 Selecting an entire directory, including the currently displayed directory,
 uses recursive discovery. Cancel dismisses the picker without starting ingest.
 Final confirmation shows the Mail Archiver icon and destination heading/path.
+Both scanned and explicitly unscanned import confirmations use a 560-point-wide,
+selectable message area so archive and source paths need less wrapping, while
+retaining their existing buttons and keyboard defaults.
 Import merges `owner-names.txt` from the top level of every selected source
 directory into the destination archive's `owner-names.txt`. Source files remain
 unchanged, and neither the application checkout nor launch directory supplies
@@ -786,7 +810,7 @@ current beta `v1.2.3-beta1`-shaped tag when present, and project discussions.
 Its home page gives equal prominence to individuals consolidating personal
 exports and archivists curating donor collections. A separate use-cases page
 describes both workflows, including an institutional digital-estate scenario,
-BagIt/Mailbag export, MBOX handoff to ePADD, and explicit boundaries between
+native BagIt/Mailbag archive storage, MBOX handoff to ePADD, and explicit boundaries between
 implemented and planned sources. It also provides a clearly labeled index of
 digital-email-curation reports and related organizations; it does not imply
 that planned application features are implemented. Every site page links to a
@@ -794,10 +818,15 @@ public privacy policy covering planned Gmail and Microsoft 365 OAuth access and
 to a rights page stating the software's current GPL distribution, copyright,
 and availability of non-GPL versions. The curation section renders a
 responsive summary of the program's local file discovery, read-only ingest,
-archive creation, search and reporting, export, and verification functions,
+archive creation, search and reporting, verification, and sharing functions,
 followed by its reports and organizations. Public website copy uses language
 for archivists, avoids software-development jargon, and labels unavailable
 functions as planned work.
+The site's About page identifies Simson Garfinkel, summarizes his work with a
+link to his personal website, and links to his GitHub profile and the project
+repository. About links to a dated website changelog that records website
+changes separately from software release notes. Website and documentation
+must describe BagIt/Mailbag as native archive storage, not a separate export.
 The Pages build pins its Zola release and verifies the downloaded archive
 against a source-controlled SHA-256 digest before execution.
 
@@ -996,9 +1025,28 @@ password, or automate the Google Cloud Console DOM.
 
 ## macOS desktop delivery
 
+Ruff must pass with zero diagnostics before validation or packaging succeeds.
+`make ruff` checks the repository using the locked development dependency;
+`make check`, `make dmg`, and release builds must enforce it without ignoring
+its exit status. Ruff is development tooling, not a bundled runtime dependency.
+
+`make syntax-check` must compile all Python source, scripts, and tests without
+executing them. Both `make check` and `make dmg` require this check so a syntax
+error in a build-only script cannot escape ordinary validation.
+
 `make dmg` builds a self-contained, native-architecture PyInstaller `.app` and
 a compressed DMG containing it, an Applications shortcut, and drag-to-install
-instructions. Python, native extension libraries, GUI assets, packaged schemas,
+instructions.
+The Finder window must present a large app icon on the left and the real
+Applications shortcut on the right, with an arrow and drag-to-install
+instructions in the background. Only those two items are visible; instructions
+must not require opening a separate text file. The mounted test verifies saved
+icon positions, background, icon size, and absence of extra visible items.
+The rendered Retina background must keep its title, arrow, and both instruction
+lines within their intended regions without overlapping the icon locations or
+clipping at the window edges. Validate rendered pixels as well as Finder metadata.
+
+Python, native extension libraries, GUI assets, packaged schemas,
 plug-in manifests, and the standalone verifier source travel inside the app.
 ClamAV and experimental command-line tools (Tika/Java, PDF OCR, Apple Intelligence)
 are not prerequisites of the supported local-mail GUI and are not bundled.

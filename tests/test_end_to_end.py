@@ -7,7 +7,6 @@ import hashlib
 import json
 import mailbox
 import os
-import re
 import signal
 import sqlite3
 import subprocess

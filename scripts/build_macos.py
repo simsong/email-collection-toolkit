@@ -1,4 +1,4 @@
-scripts/build_macos.py"""Build an ad-hoc-signed self-contained app, create a DMG, and test it mounted.
+"""Build an ad-hoc-signed self-contained app, create a DMG, and test it mounted.
 
 Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved.
 """
@@ -21,6 +21,8 @@ from pathlib import Path
 from mailarchiver.self_test import SelfTestReport
 from packaging.requirements import Requirement
 from packaging.utils import canonicalize_name
+
+from dmg_layout import create_image, verify_layout
 
 ROOT = Path(__file__).resolve().parents[1]
 APP_NAME = "Mail Archiver"
@@ -124,6 +126,7 @@ def test_image(dmg: Path) -> None:
         if not (mount / "Applications").is_symlink() or os.readlink(mount / "Applications") != "/Applications":
             raise RuntimeError("DMG is missing its Applications shortcut")
         verify_dependencies(app)
+        verify_layout(mount, app.name)
         executable = app / "Contents/MacOS" / APP_NAME
         environment = {key: value for key, value in os.environ.items()
                        if not key.startswith(("PYTHON", "DYLD_", "MAILARCHIVER", "MAIL_ARCHIVE"))}
@@ -190,10 +193,11 @@ def build(signing_identity: str) -> Path:
                     target = notices / str(entry)
                     target.parent.mkdir(parents=True, exist_ok=True)
                     shutil.copyfile(package.locate_file(entry), target)
+        app_icon = icon(work)
         command = [sys.executable, "-m", "PyInstaller", "--noconfirm", "--windowed", "--onedir",
                    "--name", APP_NAME, "--osx-bundle-identifier", IDENTIFIER,
                    "--target-arch", platform.machine(), "--codesign-identity", signing_identity,
-                   "--icon", str(icon(work)), "--distpath", str(bundle_output),
+                   "--icon", str(app_icon), "--distpath", str(bundle_output),
                    "--workpath", str(work / "work"), "--specpath", str(work),
                    "--copy-metadata", "mailarchiver", "--collect-data", "mailarchiver",
                    "--collect-data", "webview", "--hidden-import", "webview.platforms.cocoa",
@@ -206,23 +210,9 @@ def build(signing_identity: str) -> Path:
         run(*command, cwd=ROOT, env=environment)
         app = bundle_output / f"{APP_NAME}.app"
         configure_bundle(app, signing_identity)
-        stage = work / "image"
-        stage.mkdir()
-        shutil.move(app, stage / app.name)
-        (stage / "Applications").symlink_to("/Applications", target_is_directory=True)
-        (stage / "Drag this to Applications.txt").write_text(
-            "Mail Archiver\n\nDrag Mail Archiver.app to Applications (the shortcut in this window).\n"
-            "Then eject this disk and open Mail Archiver from Applications.\n\n"
-            "Python and GUI dependencies are bundled. ClamAV is optional and separately installed.\n"
-            "Without configured ClamAV, Import shows a warning and requires explicit consent to import unscanned mail.\n"
-            "Use Install ClamAV in the import window to open the official download page.\n\n"
-            "This development build is not notarized. macOS may block downloaded copies; only if you trust\n"
-            "the source, use System Settings > Privacy & Security > Open Anyway after trying to open it.\n"
-            "Do not disable Gatekeeper globally.\n\n" + COPYRIGHT + "\n", encoding="utf-8")
         dmg = output / f"Mail-Archiver-{version('mailarchiver')}-{platform.machine()}.dmg"
         candidate = work / "candidate.dmg"
-        run("/usr/bin/hdiutil", "create", "-volname", APP_NAME, "-srcfolder", stage,
-            "-format", "UDZO", "-fs", "HFS+", candidate)
+        create_image(app, app_icon, candidate, work)
         # Keep a previous artifact until both mounted tests have passed.
         test_image(candidate)
         candidate.replace(dmg)
@@ -234,11 +224,16 @@ def build(signing_identity: str) -> Path:
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--test-dmg", type=Path, help="mount and retest an existing DMG")
+    parser.add_argument("--preview-dmg", type=Path, help="open the mounted installer in Finder until Return is pressed")
     parser.add_argument("--signing-identity", default="-", help="codesign identity; default ad-hoc")
     args = parser.parse_args()
     if sys.platform != "darwin":
         parser.error("DMG builds and native tests require macOS")
-    if args.test_dmg:
+    if args.preview_dmg:
+        with mounted_image(args.preview_dmg.resolve(strict=True)) as mount:
+            run("/usr/bin/open", mount)
+            input("Inspect the installer in Finder; press Return to eject: ")
+    elif args.test_dmg:
         test_image(args.test_dmg.resolve(strict=True))
     else:
         print(f"Built and tested: {build(args.signing_identity)}")

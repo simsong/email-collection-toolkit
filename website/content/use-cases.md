@@ -35,8 +35,9 @@ the collection and preview messages and attachments. Collection reports list
 years, senders, and recipients and can provide data for a finding aid. The
 archive records the file and storage source in which each message was found.
 
-Mail Archiver exports a BagIt 1.0 package that conforms to Mailbag 1.0. Email
-is stored in MBOX files under `data/mbox/`, with Mailbag metadata, source
+Each email archive is stored natively as a BagIt 1.0 package conforming to
+Mailbag 1.0; there is no separate BagIt/Mailbag export step. Email is stored
+in MBOX files under `data/mbox/`, with Mailbag metadata, source
 records, and SHA-256 hashes. The MBOX files can be transferred to ePADD for
 additional appraisal, review, and access work. ePADD does not currently open a
 Mailbag package directly.

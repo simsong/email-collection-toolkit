@@ -5,6 +5,13 @@ Mail Archiver reads source mail without changing it. It stores deduplicated
 messages in standard MBOX files, records where every message was found, and
 creates integrity information that can be checked independently.
 
+Each archive directory uses BagIt 1.0 and Mailbag 1.0 as its native storage
+format. Messages live in MBOX files under `data/mbox/`, alongside archive
+metadata and SHA-256 integrity information elsewhere in the archive directory.
+This is the archive the application uses, not a separate export; no conversion
+step is needed to obtain a BagIt/Mailbag archive. SQLite catalogs and search
+indexes are derived data.
+
 On macOS, open the supplied DMG and drag **Mail Archiver.app** to its
 **Applications** shortcut. Eject the disk and open the installed app.
 Python is included. Development builds are ad-hoc signed, not notarized;

@@ -50,7 +50,7 @@
         <h2>Process donor email collections.</h2>
         <p>Library staff can use the local viewer to search the collection and preview messages and attachments. Reports provide data that can be used in finding aids.</p>
         <ul>
-          <li>Export a BagIt 1.0 / Mailbag 1.0 package</li>
+          <li>Store the archive natively in BagIt 1.0 / Mailbag 1.0 format</li>
           <li>Record where each message was found</li>
           <li>Transfer MBOX files to ePADD</li>
         </ul>
@@ -62,7 +62,7 @@
   <section class="principles shell" aria-label="Archive handling">
     <article><span>01</span><h2>Source files</h2><p>Mail Archiver reads source files without modifying them and stores the original message data.</p></article>
     <article><span>02</span><h2>Source records</h2><p>The archive records the drive, export, mailbox, or account in which each message was found.</p></article>
-    <article><span>03</span><h2>Archive formats</h2><p>The export uses MBOX, BagIt 1.0, Mailbag 1.0, and SHA-256 hashes.</p></article>
+    <article><span>03</span><h2>Archive storage</h2><p>The archive itself is a BagIt 1.0 / Mailbag 1.0 package containing MBOX files and SHA-256 hashes. No separate export is needed.</p></article>
   </section>
 
   <section class="resource-grid shell" aria-labelledby="resources-title">

@@ -18,7 +18,7 @@ from mailarchiver.search import decoded_part, message_text
 
 
 SOURCE_FIXTURE = Path(__file__).parent / "data" / "email-korean-bad-encoding.eml"
-KOREAN_MESSAGE_ID = "<E17Vbwd-0006HW-00@sandbox.sandstorm.net>"
+KOREAN_MESSAGE_ID = "<20020719111745.3C1DE9171E@vineyard.net>"
 
 
 def test_declared_ks_c_5601_is_decoded_as_euc_kr() -> None:
@@ -159,7 +159,7 @@ def test_message_text_uses_declared_korean_charset() -> None:
 def test_supplied_korean_source_message_is_readable() -> None:
     """Requirement: the supplied historical message renders without replacement characters."""
     if not SOURCE_FIXTURE.is_file():
-        pytest.skip("local 86 MB source fixture is not present")
+        pytest.skip("local Korean source fixture is not present")
 
     box = mailbox.mbox(SOURCE_FIXTURE, factory=None, create=False)
     try:
@@ -177,6 +177,6 @@ def test_supplied_korean_source_message_is_readable() -> None:
     assert parts
 
     rendered = "\n".join(decoded_part(part) for part in parts)
-    assert "최고의" in rendered
+    assert "컴맹탈출" in rendered
     assert sum("\uac00" <= char <= "\ud7a3" for char in rendered) > 100
     assert "�" not in rendered

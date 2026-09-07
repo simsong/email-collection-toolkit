@@ -31,7 +31,7 @@ from .application import (
     IngestJob,
     SearchWindow,
 )
-from .__main__ import IngestRequest, run_ingest
+from .__main__ import IngestInterrupted, IngestRequest, run_ingest
 from .scanner import CLAMAV_DOWNLOAD_URL, UNSCANNED_WARNING, ScannerAvailability, scanner_availability
 from .configuration import GuiConfiguration, application_configuration
 from .document_options import (
@@ -341,9 +341,44 @@ def application_icon_path() -> Path:
     return APPLICATION_ICON
 
 
-def macos_alert(title: str, message: str, buttons: tuple[str, ...]) -> int:
+IMPORT_CONFIRMATION_WIDTH = 560
+QUIT_IMPORT_MESSAGE = (
+    "Quitting will stop all active imports. To restart an import, reopen Mail Archiver "
+    "and use File → Import to select the same source again. Messages already archived "
+    "will not be imported twice.\n\n"
+    "The application will quit after the current work has stopped and the archive has been checkpointed."
+)
+
+
+def create_macos_alert(title: str, message: str, buttons: tuple[str, ...], *, body_width: int | None = None) -> Any:
+    """Construct a native alert on the main thread without showing it."""
+    from AppKit import NSAlert, NSImage, NSTextField  # pylint: disable=import-outside-toplevel,no-name-in-module,import-error
+
+    alert = NSAlert.alloc().init()
+    icon = NSImage.alloc().initWithContentsOfFile_(str(application_icon_path()))
+    if icon is not None:
+        alert.setIcon_(icon)
+    alert.setMessageText_(title)
+    if body_width is None:
+        alert.setInformativeText_(message)
+    else:
+        body = NSTextField.wrappingLabelWithString_(message)
+        body.setSelectable_(True)
+        size = body.cell().cellSizeForBounds_(((0, 0), (body_width, 10000)))
+        body.setFrame_(((0, 0), (body_width, size.height)))
+        alert.setAccessoryView_(body)
+    alert.window().setTitle_(title)
+    for index, label in enumerate(buttons):
+        button = alert.addButtonWithTitle_(label)
+        if label == "Cancel":
+            button.setKeyEquivalent_("\x1b")
+        elif index == 0:
+            button.setKeyEquivalent_("\r")
+    return alert
+
+
+def macos_alert(title: str, message: str, buttons: tuple[str, ...], *, body_width: int | None = None) -> int:
     """Present an explicitly branded Cocoa alert; return the selected button index."""
-    from AppKit import NSAlert, NSImage  # pylint: disable=import-outside-toplevel,no-name-in-module,import-error
     from Foundation import NSThread  # pylint: disable=import-outside-toplevel,no-name-in-module,import-error
     from PyObjCTools import AppHelper  # pylint: disable=import-outside-toplevel,import-error
 
@@ -351,19 +386,7 @@ def macos_alert(title: str, message: str, buttons: tuple[str, ...]) -> int:
 
     def present() -> None:
         try:
-            alert = NSAlert.alloc().init()
-            icon = NSImage.alloc().initWithContentsOfFile_(str(application_icon_path()))
-            if icon is not None:
-                alert.setIcon_(icon)
-            alert.setMessageText_(title)
-            alert.setInformativeText_(message)
-            alert.window().setTitle_(title)
-            for index, label in enumerate(buttons):
-                button = alert.addButtonWithTitle_(label)
-                if label == "Cancel":
-                    button.setKeyEquivalent_("\x1b")
-                elif index == 0:
-                    button.setKeyEquivalent_("\r")
+            alert = create_macos_alert(title, message, buttons, body_width=body_width)
             result.set_result(int(alert.runModal()) - 1000)
         except Exception as error:  # pylint: disable=broad-exception-caught
             result.set_exception(error)
@@ -1065,6 +1088,7 @@ class PyWebViewApplication:
         self._connectivity: ConnectivityMonitor | None = None
         self._menu_observer: Any = None
         self._lock = RLock()
+        self._quitting = False
 
     def asset_url(
         self, asset: str, parameters: list[tuple[str, str]] | None = None
@@ -1330,7 +1354,8 @@ class PyWebViewApplication:
             f"Sent-mail owner names: {owner_names}\n\n{antivirus.detail}"
         )
         if not antivirus.configured:
-            choice = macos_alert(title, confirmation, ("Cancel", "Import Without Scanning", "Install ClamAV…"))
+            choice = macos_alert(title, confirmation, ("Cancel", "Import Without Scanning", "Install ClamAV…"),
+                                 body_width=IMPORT_CONFIRMATION_WIDTH)
             if choice == 2:
                 import webbrowser  # pylint: disable=import-outside-toplevel
                 webbrowser.open(CLAMAV_DOWNLOAD_URL)
@@ -1339,7 +1364,7 @@ class PyWebViewApplication:
                 return False
             return self.start_import(api, roots, owner_names, owner_additions=additions, scan_policy="not-scanned")
         confirmed = (
-            macos_alert(title, confirmation, ("Import", "Cancel")) == 0
+            macos_alert(title, confirmation, ("Import", "Cancel"), body_width=IMPORT_CONFIRMATION_WIDTH) == 0
             if sys.platform == "darwin" else anchor.create_confirmation_dialog(title, confirmation)
         )
         if not confirmed:
@@ -1351,6 +1376,8 @@ class PyWebViewApplication:
         scan_policy: Literal["clamav", "not-scanned"] = "clamav",
     ) -> bool:
         """Acquire both ingest layers before launching the shared service."""
+        if self._quitting:
+            return False
         document = api.document
         session = api.search_window
         if document is None or document.path is None or session is None:
@@ -1368,7 +1395,10 @@ class PyWebViewApplication:
                 DocumentOptions(document.path).merge(owner_additions, lease)
             remember_import_directory(document.path, roots)
             job = IngestJob(operation_id=operation_id, owner_window_id=session.window_id)
-            self.controller.begin_ingest(document.descriptor.document_id, job, lease)
+            with self._lock:
+                if self._quitting:
+                    raise ValueError("The application is stopping imports and quitting.")
+                self.controller.begin_ingest(document.descriptor.document_id, job, lease)
         except (OSError, ArchiveBusyError, ValueError) as error:
             if "lease" in locals():
                 lease.release()
@@ -1384,13 +1414,27 @@ class PyWebViewApplication:
             roots=[str(root) for root in roots],
             scan_policy=scan_policy,
         )
+        def import_worker() -> None:
+            try:
+                self._run_import(document, operation_id, lease, request, job.stop)
+            finally:
+                job.finished.set()
+
         Thread(
-            target=self._run_import,
-            args=(document, operation_id, lease, request),
+            target=import_worker,
             name=f"mailarchiver-import-{operation_id[:8]}",
             daemon=False,
         ).start()
         return True
+
+    def stop_imports_for_quit(self) -> tuple[IngestJob, ...]:
+        """Called only after confirmation; prevent new imports and stop all existing jobs."""
+        with self._lock:
+            self._quitting = True
+            jobs = tuple(job for document in self.controller.documents() if (job := document.ingest_job) is not None)
+            for job in jobs:
+                job.stop.set()
+            return jobs
 
     def _run_import(
         self,
@@ -1398,10 +1442,11 @@ class PyWebViewApplication:
         operation_id: str,
         lease: WriterLease,
         request: IngestRequest,
+        stop: Event,
     ) -> None:
         error: BaseException | None = None
         try:
-            run_ingest(request, lease)
+            run_ingest(request, lease, stop_event=stop)
         except BaseException as caught:  # pylint: disable=broad-exception-caught
             error = caught
         finally:
@@ -1415,7 +1460,9 @@ class PyWebViewApplication:
                 refresh = ()
             self._refresh_search_windows(refresh)
             self._refresh_menus()
-        if error is None:
+        if isinstance(error, IngestInterrupted):
+            self.add_notice("information", f"Import stopped for {document.display_path}; import the same source again to continue.")
+        elif error is None:
             self.add_notice("information", f"Import completed for {document.display_path}")
         else:
             self.add_notice(
@@ -1845,6 +1892,28 @@ def install_macos_document_events(application: PyWebViewApplication) -> None:
     from webview.platforms.cocoa import BrowserView  # pylint: disable=import-outside-toplevel
 
     class MailArchiverDelegate(BrowserView.AppDelegate):
+        def applicationShouldTerminate_(self, sender):
+            import AppKit  # pylint: disable=import-outside-toplevel,import-error
+            import objc  # pylint: disable=import-outside-toplevel,import-error
+            from PyObjCTools import AppHelper  # pylint: disable=import-outside-toplevel
+
+            if application._quitting:
+                return AppKit.NSTerminateLater
+            if not any(document.ingest_job for document in application.controller.documents()):
+                return objc.super(MailArchiverDelegate, self).applicationShouldTerminate_(sender)
+            if macos_alert("Stop importing and quit?", QUIT_IMPORT_MESSAGE,
+                           ("Cancel", "Stop Import and Quit"), body_width=IMPORT_CONFIRMATION_WIDTH) != 1:
+                return AppKit.NSTerminateCancel
+            jobs = application.stop_imports_for_quit()
+
+            def finish_quit():
+                for job in jobs:
+                    job.finished.wait()
+                AppHelper.callAfter(sender.replyToApplicationShouldTerminate_, True)
+
+            Thread(target=finish_quit, name="mailarchiver-quit", daemon=True).start()
+            return AppKit.NSTerminateLater
+
         def application_openFiles_(self, sender, filenames):
             paths = tuple(Path(str(filename)) for filename in filenames)
 

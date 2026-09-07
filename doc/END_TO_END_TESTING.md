@@ -39,6 +39,26 @@ fixture change.
 
 ## Archive lifecycle
 
+### Complete local test directory
+
+`make test-corpus-import` runs a single complete import of `tests/data/`, with
+the configured on-demand ClamAV scanner, a ten-minute subprocess deadline,
+byte verification, installed archive verification, and a second idempotent
+import. It is also part of ordinary pytest (`make test` / `make check`).
+The reviewed `tests/expected-corpus.json` lists source fingerprints and retained
+subjects/raw SHA-256 hashes. Failures list both found-but-unexpected and
+expected-but-missing emails, including their subjects and hashes.
+
+After an intentional fixture change, run `make update-corpus-expectations`
+(pytest's explicit `--update-corpus-expectations` option), then review the JSON
+diff. The updater requires a successful import, verification, and reimport;
+never accept its output merely to make a failing test green. Git-ignored local
+mailboxes have a separate `.tmp/expected-corpus-private.json` expectation file
+to keep private subjects out of Git. CI tests its complete tracked directory;
+local runs also test the additional files present locally.
+
+### Synthetic lifecycle and browser acceptance
+
 The platform-independent part of the suite performs a real CLI ingest with the
 configured on-demand ClamAV daemon. It checks all of these boundaries together:
 

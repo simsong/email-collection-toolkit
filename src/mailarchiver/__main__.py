@@ -982,7 +982,13 @@ def ingest(args: argparse.Namespace) -> None:
     )
 
 
-def run_ingest(request: IngestRequest, writer_lease: WriterLease | None = None) -> None:
+class IngestInterrupted(KeyboardInterrupt):
+    """A GUI caller requested an orderly, safely rerunnable stop."""
+
+
+def run_ingest(
+    request: IngestRequest, writer_lease: WriterLease | None = None, *, stop_event: threading.Event | None = None,
+) -> None:
     """Run ingest under the archive's OS writer lock."""
     request.archive.mkdir(parents=True, exist_ok=True)
     identity = os.path.normcase(str(request.archive.resolve(strict=True)))
@@ -999,13 +1005,13 @@ def run_ingest(request: IngestRequest, writer_lease: WriterLease | None = None) 
             lease.release()
         raise ValueError("an acquired writer lease for this archive is required")
     try:
-        _run_ingest(request, lease)
+        _run_ingest(request, lease, stop_event)
     finally:
         if owned:
             lease.release()
 
 
-def _run_ingest(request: IngestRequest, writer_lease: WriterLease) -> None:
+def _run_ingest(request: IngestRequest, writer_lease: WriterLease, stop_event: threading.Event | None = None) -> None:
     plugins = load_plugins(request.plugin_dir)
     source_specs = [SourceSpec(locator=root) for root in request.roots]
     selected_sources: list[tuple[SourceSpec, LoadedPlugin]] = []
@@ -1112,6 +1118,16 @@ def _run_ingest(request: IngestRequest, writer_lease: WriterLease) -> None:
     pending_identities: set[tuple[str, str]] = set()
     publication_lock = threading.RLock()
     stop = threading.Event()
+
+    def check_interrupted() -> None:
+        if stop_event is not None and stop_event.is_set():
+            stop.set()
+            raise IngestInterrupted("Import stopped; import the same source again to continue without duplicates.")
+
+    def refresh_import() -> None:
+        progress.refresh()
+        check_interrupted()
+
     scanner: ClamScanner | None = None
     discovery = sqlite3.connect("")
     discovery.executescript(
@@ -1696,6 +1712,7 @@ def _run_ingest(request: IngestRequest, writer_lease: WriterLease) -> None:
         inventory = SourceInventory()
         for source_spec, plugin in selections:
             for item in plugin.implementation.discover(source_spec):
+                check_interrupted()
                 if isinstance(item, MailContainer):
                     if item.source.plugin_kind != plugin.manifest.kind:
                         raise RuntimeError(
@@ -1794,9 +1811,10 @@ def _run_ingest(request: IngestRequest, writer_lease: WriterLease) -> None:
         inventory = capture_discovery(selected_sources, "containers", report_skipped=True)
         verify_stable_discovery()
         progress.finish_inventory(inventory)
+        check_interrupted()
         if request.scan_policy == "clamav":
             progress.set_phase(CLAMAV_START_PHASE)
-            scanner = ClamScanner(progress.refresh)
+            scanner = ClamScanner(refresh_import)
             scanner.__enter__()
         else:
             print("WARNING: importing without antivirus scanning; messages are NOT scanned or certified clean.", file=sys.stderr)
@@ -1806,12 +1824,13 @@ def _run_ingest(request: IngestRequest, writer_lease: WriterLease) -> None:
             request.workers,
             ingest_container,
             stop,
-            progress.refresh,
+            refresh_import,
             concurrency=lambda work: (
                 f"{work.plugin.manifest.kind}:{work.container.concurrency_key}",
                 work.plugin.implementation.capabilities.max_concurrency,
             ),
         )
+        check_interrupted()
         catalog.commit()
         search.commit()
         succeeded = True
@@ -1927,7 +1946,9 @@ def print_report(archive: Path, years: tuple[int, int] | None, top: int | None) 
             )
         )
         if top is not None and top > 0:
-            heading = lambda text: f"\033[1m{text}\033[0m" if sys.stdout.isatty() else text
+            def heading(text: str) -> str:
+                return f"\033[1m{text}\033[0m" if sys.stdout.isatty() else text
+
             owner_addresses = (
                 "owner_addresses AS (SELECT DISTINCT sender_address_pk FROM messages WHERE category = 'Sent') "
             )

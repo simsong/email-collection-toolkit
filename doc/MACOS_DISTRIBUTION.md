@@ -30,8 +30,15 @@ their own validation. Compatibility with older macOS releases must be tested
 on those releases; success on the build Mac is not a compatibility matrix.
 
 Output: `dist/Mail-Archiver-VERSION-ARCH.dmg`. The volume contains
-`Mail Archiver.app`, a shortcut to `/Applications`, and a file saying
-**Drag this to Applications**. The `.mailarchive` package type is declared in
+`Mail Archiver.app` on the left and a shortcut to `/Applications` on the right.
+A pale-blue background shows the app title, a right-pointing arrow, and
+**Drag Mail Archiver to Applications to install**. The 720-by-480-point Finder
+window uses large icons and no toolbar/sidebar; there is no separate instruction
+file to open. Its 720-by-420-point background leaves room for Finder's window
+chrome so the footer stays visible. A build-only `dmgbuild` dependency saves this layout, and the
+mounted checks verify it. Use `make preview-dmg DMG=/absolute/path/to/image.dmg`
+for visual review in Finder; press Return in the terminal to eject afterward.
+The `.mailarchive` package type is declared in
 Info.plist; the Cocoa delegate handles document-open events and retains
 pywebview's close/ingest safeguards. File Open also accepts extensionless archive
 directories. Installation does not force replacement of another default handler.

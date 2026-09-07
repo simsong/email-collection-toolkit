@@ -9,5 +9,10 @@ The workflow resolves exact `v1.2.3`-shaped stable tags and
 `v1.2.3-beta1`-shaped beta tags into `data/releases.toml` during the build.
 The committed data file is the no-release fallback used for local previews.
 
+Describe BagIt/Mailbag as the native email archive storage format, never as a
+separate export. Record website changes in `content/changelog.md`, linked from
+`content/about.md`; application release notes remain separate. About also
+provides the author biography and links to the author and project on GitHub.
+
 Zola `0.23.4` is pinned in the workflow. To preview locally, install that
 version and run `zola serve --root website`.
