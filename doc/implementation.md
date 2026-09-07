@@ -150,7 +150,8 @@ per-run observation review, and year/correspondent reports.  The top-level
 `MAIL_ARCHIVE_DIR` selects the archive for every command by default; the
 `--archive` option overrides it. `ingest` takes one
 or more source roots as positional arguments and `--owner-names-file` selects
-the reusable owner-token list.  Ingest currently requires `--clamav`: it starts
+the reusable owner-token list. Ingest requires `--clamav` or explicit `--no-scan`.
+With `--clamav`, it starts
 a foreground daemon only when no healthy configured socket is available, then
 removes the daemon's stale socket on exit; it never enables persistent or
 on-access scanning. Workers enqueue typed phase/path/offset updates; the main
@@ -204,8 +205,8 @@ or retain file contents. Snapshot ordering interleaves concurrency keys, and
 the framework enforces each plug-in's per-key limit. Each pool task owns one container through source-integrity planning,
 streaming parse and scan, and checkpoint. A never-seen local file is
 ingested before its complete fingerprint is calculated; that fingerprint is
-still required before its checkpoint is committed. ClamAV readiness is an ingest
-precondition, so no worker reads or parses mail until the daemon is healthy.
+still required before its checkpoint is committed. ClamAV readiness is a scanned-ingest
+precondition; explicit `--no-scan` bypasses it and records that choice.
 Modern Apple Mail package traversal recognizes complete
 `Data/.../Messages/*.emlx` payloads and ignores MailData, plist, and detached
 attachment files. It reports missing paths and macOS Full Disk Access failures
@@ -306,12 +307,20 @@ it applies `to:`/`from:`/`subject:` catalog filters, UTC calendar-day
 `message_pk` header lines and reads a numbered message directly from its
 catalogued MBOX byte location, validating its SHA-256 before output.
 
+SQL filenames follow the Flyway convention `V<version>__<description>.sql`;
+only the naming convention is used. No Flyway runtime, Java, or JDBC is required
+for schema management. Python loads the packaged SQL with `importlib.resources`
+and executes it through the standard-library `sqlite3` module.
+
 The authoritative current catalog schema is packaged as `sql/V1__archive.sql`.
 It is initialized only for an empty database; unversioned databases and schema
 versions other than V1 are rejected rather than migrated. Because an earlier
 development schema also used the V1 label, startup validates the required
 tables, columns, and named indexes before accepting an existing database. This
-deliberately supports database replacement while there are no users.
+is validation of the current layout, not an upgrade mechanism. Application-run,
+developer-written catalog migrations with checksummed history, consistent backups,
+writer-lease protection, and transactional history updates remain planned;
+the existing `schema_info` version check does not implement those safeguards.
 `locations` and
 `mbox_generations` are written as part of each message publication.
 
@@ -492,6 +501,8 @@ explicit Command-N/O/W shortcuts. Archive opening uses the File menu rather than
 a toolbar button.
 The search toolbar omits the archive path; the native title bar identifies it.
 The Cocoa adapter reorders File, Edit, View, Window after the application menu.
+It resolves Cocoa focus on the main thread and still builds menus from the
+logical active document or About when a background app has no native key window.
 `WindowBridge` restricts pywebview introspection to explicit callable names,
 excluding public controller and window object graphs. About allows the same
 dynamic bridge generation as the other pages, retries bridge readiness, polls
@@ -975,9 +986,10 @@ An ingest run executes these steps:
    is validated and retained. Index disposable search content afterward only
    for normal Sent and Archive mail.
 
-Deduplication is deliberately before ClamAV: a known archived message has
-already been scanned and classified.  `--rescan` explicitly revisits stored
-messages when virus definitions or policy changes.
+Deduplication is deliberately before ClamAV. A known archived message is not
+scanned again, including one previously imported without scanning. A future
+rescan operation must explicitly revisit those stored messages; no rescan
+command is currently implemented.
 
 ## MBOX mechanics and sorting
 
@@ -1030,6 +1042,41 @@ mailbox.
 
 ## Antivirus and text extraction
 
+`IngestRequest.scan_policy` is `clamav` by default. Explicit `not-scanned`
+requests skip scanner construction and persist an `antivirus` metadata defect
+in the existing catalog transaction for each new message. Run status includes
+the policy (older files default to `unknown`), without changing the catalog
+schema or canonical bytes. Failed required scanning still stops import.
+The native source picker and Ingests page show a missing-configuration banner;
+the final native confirmation defaults to Cancel and gates the opt-out.
+The download action opens only ClamAV's official page. About reports configuration
+presence separately from readiness, which remains an ingest preflight check.
+`make test-packaging` exercises missing-scanner failure, explicit opt-out,
+durable evidence, source immutability, and isolated headless diagnostics.
+
+## macOS packaging
+
+`scripts/build_macos.py`, invoked by `make dmg`, uses project-local PyInstaller
+dependencies, creates the app icon from the existing PNG, collects runtime
+resources and dependency notices, declares `.mailarchive` document registration,
+and signs the resulting bundle ad-hoc unless a signing identity was supplied.
+`scripts/desktop_entry.py` dispatches normal GUI launch, `--cli`, `--self-test`,
+and `--self-test-gui`. Frozen GUI resources use PyInstaller's bundle root;
+the verifier's actual `.py` source is explicitly bundled for archive installation.
+The Cocoa document delegate extends rather than replaces pywebview's quit guards.
+
+`self_test.py` uses temporary source and archive fixtures plus isolated application
+preferences. It verifies ingest, original bytes, FTS search, fixity, idempotence,
+and not-scanned evidence. The visible mode exercises production window bridges
+and cancels the real source picker after inspecting its warning banner.
+The DMG build stages the app, Applications symlink, and instructions, mounts
+the compressed candidate read-only, verifies its seal, runs both frozen tests
+with a system-only PATH, and detaches in `finally`. It publishes the candidate
+and JSON reports only on success. See [MACOS_DISTRIBUTION.md](MACOS_DISTRIBUTION.md)
+for commands, limitations, and Apple's renewal/notarization steps.
+
+### Existing scanner configuration
+
 Homebrew installed these commands:
 
 ```text
@@ -1066,6 +1113,41 @@ must record failures without affecting preservation. Quarantine categories are
 omitted from FTS entirely.
 
 ## Planned remote sources
+
+The implemented `mailarchiver-auth` console entry point is separate from the
+reserved remote-source adapters. It parses and normalizes one account using a
+strict Pydantic model, recognizes well-known consumer domains, and otherwise
+performs bounded DNS MX and `autodiscover.<domain>` CNAME queries. Only Google
+mail hosts and Microsoft `mail.protection.outlook.com` or Autodiscover targets
+are affirmative evidence; gateways such as Proofpoint remain inconclusive by
+themselves. `--gmail` bypasses DNS with recorded override evidence, while
+`--detect-only` makes no external changes beyond public DNS lookup. Microsoft
+365 detection currently stops with `Microsoft Office not yet implemented.`
+
+For Gmail, account-specific Desktop-client configuration lives under the user
+configuration directory, keyed by a truncated SHA-256 of the normalized
+account. Directories are mode `0700` and the client file is atomically installed
+at mode `0600` where meaningful. Pydantic rejects Web-client or malformed JSON
+as well as non-Google client IDs, OAuth endpoints, and redirects; a guided setup
+also rejects a download from a different project. Refresh tokens
+are serialized only into the platform keyring service
+`mailarchiver.gmail.oauth`; they are not written to an archive or fallback token
+file. An existing token is refreshed when possible. Otherwise
+`google-auth-oauthlib` opens an installed-app loopback flow with PKCE, a five
+minute timeout, a login hint for the requested account, and only
+`gmail.readonly`. A typed `users.getProfile` response must match the requested
+address before the token is retained.
+
+The setup command generates an account-neutral personal project ID. With
+`gcloud`, it authenticates the named account, creates the project without
+activating that account or altering the default project, and enables
+`gmail.googleapis.com`; all mutations follow a terminal confirmation. The
+unsupported Google Auth Platform operations
+are explicit user handoffs to project-qualified Branding, Audience, Scope, and
+Client pages. The final Desktop-client download is discovered only in the
+standard Downloads directory after that handoff or is selected by path. There
+is no browser DOM automation or credential scraping. `--client-secrets` skips
+project setup and imports an existing Desktop-client download.
 
 Gmail, IMAP, O365, Microsoft Exchange, and NUL-delimited standard input have
 manifest-loaded reserved source plug-ins. They recognize only their explicit

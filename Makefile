@@ -1,6 +1,6 @@
-.PHONY: benchmark-name-resolution check data-quality-audit data-quality-babyl-audit data-quality-summary extract-pdf-mail fixture-bagit fixture-e2e gui gui-smoke website-build-check website-check release-tag-check
+.PHONY: auth-detect-live benchmark-name-resolution check data-quality-audit data-quality-babyl-audit data-quality-summary extract-pdf-mail fixture-bagit fixture-e2e gui gui-smoke website-build-check website-check release-tag-check
 .PHONY: install-linux install-mac install-test-browser install-tika ocr-analyze ocr-experiment ocr-inventory ocr-profile ocr-run pylint run search summary-smoke test test-bagit test-data-quality
-.PHONY: test-application test-e2e test-encoding test-gui test-headers test-mailsearch test-native-gui test-native-html-find test-pdf-mail test-plugins test-progress test-provenance test-refresh-index test-tika test-website validation-aws-start validation-aws-start-all
+.PHONY: test-application test-auth test-e2e test-encoding test-gui test-headers test-mailsearch test-native-gui test-native-html-find test-pdf-mail test-plugins test-progress test-provenance test-refresh-index test-tika test-website validation-aws-start validation-aws-start-all
 .PHONY: validation-fetch validation-list validation-prepare validation-run validation-run-all validation-sam-build validation-sam-deploy validation-sam-validate validation-test verify
 
 
@@ -24,6 +24,28 @@ OCR_INVENTORY_ARGS ?=
 OCR_RUN_ARGS ?=
 
 check: test test-e2e website-check
+
+.PHONY: dmg test-dmg self-test self-test-gui test-packaging
+dmg:
+	uv run --group packaging python scripts/build_macos.py $(ARGS)
+
+test-dmg:
+	@test -n "$(DMG)" || { echo 'usage: make test-dmg DMG=/path/to/Mail-Archiver.dmg'; exit 2; }
+	uv run --group packaging python scripts/build_macos.py --test-dmg "$(DMG)"
+
+self-test:
+	uv run python scripts/desktop_entry.py --self-test $(ARGS)
+
+self-test-gui:
+	uv run python scripts/desktop_entry.py --self-test-gui $(ARGS)
+
+test-packaging:
+	uv run pytest -q tests/test_packaging.py
+
+auth-detect-live:
+	uv run mailarchiver-auth --detect-only simsong@gmail.com
+	uv run mailarchiver-auth --detect-only simsong@basistech.com
+	uv run mailarchiver-auth --detect-only sgarfinkel@fas.harvard.edu
 
 data-quality-audit:
 	@test -n "$(ARCHIVE)" || { echo 'usage: make data-quality-audit ARCHIVE=/path/to/mailbag EARLY_SOURCE=/path/to/source'; exit 2; }
@@ -99,6 +121,9 @@ test:
 
 test-application:
 	uv run pytest -q tests/test_application.py tests/test_writer_lock.py tests/test_loopback.py
+
+test-auth:
+	uv run pytest -q tests/test_auth.py
 
 test-e2e:
 	uv run pytest -q --browser chromium --tracing=retain-on-failure e2e_tests

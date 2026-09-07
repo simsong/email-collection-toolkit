@@ -35,6 +35,7 @@ function render(status) {
   byId("copyright").textContent = status.metadata.copyright;
   byId("disk").textContent = `${formatBytes(status.disk_free_bytes)} available on ${status.disk_path}`;
   byId("internet").textContent = status.internet.detail;
+  if (byId("antivirus")) byId("antivirus").textContent = status.antivirus?.detail || "Unknown";
   const activity = status.ingests.length ? status.ingests.map(activityCard) : [empty("No saved archive is open.")];
   byId("activity").replaceChildren(...activity);
   const notices = status.notices.length ? [...status.notices].reverse().map(noticeCard) : [empty("No messages.")];

@@ -250,8 +250,13 @@ in an actual message body.
 
 ## Malware handling
 
-* Each new message is streamed to ClamAV before normal archiving.
-* The local CLI currently requires the `--clamav` switch.  This starts one
+* Each new message is streamed to ClamAV unless the user explicitly chooses
+  an unscanned import. Missing or failed scanning must never silently mean clean.
+  The CLI requires exactly one of `--clamav` or `--no-scan`; the latter records
+  `not-scanned` in run status and an antivirus metadata defect on each new message.
+  Earlier run status without this field is unknown, not presumed scanned.
+  Repeat imports do not retroactively scan previously archived messages.
+* The `--clamav` switch starts one
   foreground `clamd` on the main ingest thread when the configured local socket
   is not healthy, waits for a successful health probe before starting mailfile
   workers, reuses a healthy existing daemon without stopping it, and never
@@ -528,7 +533,14 @@ and operational status state, and refuses to overwrite an existing archive or
 nonempty invalid directory. **File → Import…** collects one or more supported
 local files or directories, owner names, explicit final
 confirmation, and starts the same typed ingest service used by the CLI on a
-worker thread. ClamAV must be separately installed and available.
+worker thread. ClamAV is optional and separately installed. Missing executable
+or configuration files produce a warning banner in the Ingests window and
+macOS source picker. Final confirmation defaults to Cancel and offers
+Import Without Scanning or Install ClamAV; the latter opens the official
+download page, without installing software or starting a persistent service.
+Configured scanners must pass the existing startup check; errors stop import,
+never silently switch to unscanned mode. About displays scanner configuration
+availability, and import history retains a visible unscanned warning.
 The Ingests window provides **Import Directory…**, bound to its own archive even
 when another archive is active. It opens the source picker directly, then
 uses the same owner-names setup, confirmation, and writer lease as File Import.
@@ -789,6 +801,39 @@ functions as planned work.
 The Pages build pins its Zola release and verifies the downloaded archive
 against a source-controlled SHA-256 digest before execution.
 
+## Remote account authorization
+
+`mailarchiver-auth ACCOUNT` authorizes a remote account independently of an
+archive or ingest run. It accepts exactly one mailbox address and detects
+consumer Gmail directly, Google Workspace from provider-specific MX records,
+and Microsoft 365 from provider-specific MX or Autodiscover records. Detection
+is bounded and explainable. An inconclusive result fails closed and identifies
+the `--gmail` override; it does not guess from generic gateways or unrelated
+domain-verification records. `--detect-only` reports the evidence without
+authorizing or changing external state. Microsoft 365 authorization is a
+recognized but unavailable stub.
+
+Gmail authorization requests only `gmail.readonly`, opens Google's installed
+application flow in the system browser, and verifies the returned Gmail profile
+against the command-line account before retaining the token. The refresh token
+is stored under that account in the operating-system credential store, never in
+the archive, client configuration, terminal output, logs, fixtures, or reports.
+The downloaded Google Desktop-client JSON is Pydantic-validated, checked
+against the project created by the setup run, and copied outside the archive
+with user-only directory and file modes where the platform supports them.
+
+When no saved Desktop client exists, the interactive setup uses an installed
+Google Cloud CLI to authenticate the named account, then creates one personal
+project and enables only the Gmail API after explicit confirmation. It does not
+change the CLI's active account or default project. Without that CLI, it opens
+project creation and Gmail API pages and asks for the resulting project ID.
+Because Google has
+no supported general API for External consent-screen and Desktop-client
+creation, setup opens project-scoped Branding, Audience, Data Access, and Client
+pages in order, waits for the operator at each boundary, and imports Google's
+downloaded JSON. It must not scrape a browser profile, capture a Google
+password, or automate the Google Cloud Console DOM.
+
 ## Ingest sources
 
 * Recursive local-directory ingest recognizes MBOX streams, Apple Mail MBOX
@@ -949,7 +994,39 @@ against a source-controlled SHA-256 digest before execution.
   committed source-observation log by run, source, and disposition. Derived
   catalog fields and canonical locations are created correctly during ingest.
 
+## macOS desktop delivery
+
+`make dmg` builds a self-contained, native-architecture PyInstaller `.app` and
+a compressed DMG containing it, an Applications shortcut, and drag-to-install
+instructions. Python, native extension libraries, GUI assets, packaged schemas,
+plug-in manifests, and the standalone verifier source travel inside the app.
+ClamAV and experimental command-line tools (Tika/Java, PDF OCR, Apple Intelligence)
+are not prerequisites of the supported local-mail GUI and are not bundled.
+The initial build is ad-hoc signed, not notarized; no Gatekeeper bypass or
+machine-wide security change is performed. The archive extension is declared
+in the bundle's document-type metadata.
+
+The build must mount its DMG read-only, verify the bundle seal, run a headless
+self-test and a visible native self-test using the mounted executable, and
+detach the volume even on test failure. Tests use disposable fixtures and
+preferences, never the last real archive. They exercise no-ClamAV ingest,
+source-byte preservation, search, BagIt verification, repeat-import idempotence,
+native bridge startup, and the missing-antivirus banner. A failed check prevents
+replacement of a prior DMG. JSON reports accompany the successful artifact.
+
 ## Scope boundaries
+
+Schema files retain the Flyway naming convention
+`V<version>__<description>.sql` (double underscore), such as
+`V1__archive.sql`. This is a filename convention only, not a dependency on
+Flyway, Java, or JDBC. Future catalog upgrades will use developer-written SQL
+migrations run automatically by the application through SQLite; users must
+not need a separate migration tool or manual SQL commands. The planned runner
+must record applied versions and checksums, take a consistent SQLite backup,
+hold the archive writer lease and pause affected windows, and commit each
+migration with its history record atomically. It must reject unsupported newer
+schemas and report failures without changing canonical MBOX bytes. Upgrade and
+interruption tests are required before shipping migration support.
 
 The first release is a local command-line normalizer and verifier. Packaged
 configuration holds archive and scanner policy; each archive's `config.yaml`

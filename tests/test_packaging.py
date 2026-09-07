@@ -1,0 +1,69 @@
+"""Desktop delivery requirements: actual no-scanner ingest and headless diagnostics.
+
+Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved.
+"""
+
+import os
+import sqlite3
+import subprocess
+import sys
+from pathlib import Path
+
+from mailarchiver.ingest_status import read_ingest_history
+from mailarchiver.self_test import SelfTestReport
+from mailarchiver.standalone_verify import verify_archive
+from mailarchiver.scanner import clamav_prefix
+
+ROOT = Path(__file__).resolve().parents[1]
+
+
+def test_scanner_discovery_requires_both_programs(tmp_path: Path) -> None:
+    """A partially installed prefix must not hide a complete separate installation."""
+    incomplete, complete = tmp_path / "incomplete", tmp_path / "complete"
+    for prefix in (incomplete, complete):
+        (prefix / "sbin").mkdir(parents=True)
+        (prefix / "sbin/clamd").touch()
+    (complete / "bin").mkdir()
+    (complete / "bin/clamdscan").touch()
+    assert clamav_prefix((incomplete, complete)) == complete
+
+
+def test_headless_self_test_without_scanner_or_display(tmp_path: Path) -> None:
+    """No user archive, saved preference, native window, or installed antivirus is required."""
+    report_path = tmp_path / "report.json"
+    result = subprocess.run(
+        [sys.executable, str(ROOT / "scripts/desktop_entry.py"), "--self-test", "--report", str(report_path)],
+        cwd=tmp_path, capture_output=True, text=True, check=False, timeout=30,
+        env={**os.environ, "DISPLAY": "", "MAIL_ARCHIVE_DIR": str(tmp_path / "must-not-exist")},
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    report = SelfTestReport.model_validate_json(report_path.read_text(encoding="utf-8"))
+    assert report.passed and report.mode == "headless"
+    assert not (tmp_path / "must-not-exist").exists()
+
+
+def test_scanner_failure_never_silently_imports_unscanned(tmp_path: Path) -> None:
+    """Mandatory scanning fails closed; explicit opt-out retains evidence and bytes."""
+    source = tmp_path / "message.eml"
+    raw = b"From: sender@example.net\nDate: Mon, 07 Sep 2026 12:00:00 +0000\nSubject: Scanner regression\n\nOriginal bytes\n"
+    source.write_bytes(raw)
+    owners = tmp_path / "owners.txt"
+    owners.write_text("sender@example.net\n", encoding="utf-8")
+    environment = {**os.environ, "MAILARCHIVER_CLAMD_CONFIG": str(tmp_path / "absent.conf"),
+                   "MAILARCHIVER_CLAMD": str(tmp_path / "missing"),
+                   "MAILARCHIVER_CLAMDSCAN": str(tmp_path / "missing")}
+    archive = tmp_path / "test.mailarchive"
+    command = [sys.executable, str(ROOT / "scripts/desktop_entry.py"), "--cli", "--archive", str(archive),
+               "ingest", str(source), "--owner-names-file", str(owners)]
+    refused = subprocess.run(command + ["--clamav"], env=environment, capture_output=True, check=False, timeout=30)
+    assert refused.returncode != 0
+    with sqlite3.connect(archive / "archive.sqlite3") as catalog:
+        assert catalog.execute("SELECT count(*) FROM messages").fetchone() == (0,)
+    accepted = subprocess.run(command + ["--no-scan"], env=environment, capture_output=True, check=False, timeout=30)
+    assert accepted.returncode == 0, accepted.stdout + accepted.stderr
+    assert b"NOT scanned" in accepted.stderr
+    assert read_ingest_history(archive).statuses[0].scan_policy == "not-scanned"
+    with sqlite3.connect(archive / "archive.sqlite3") as catalog:
+        assert catalog.execute("SELECT count(*) FROM metadata_defects WHERE field='antivirus' AND detail LIKE 'not-scanned:%'").fetchone() == (1,)
+    assert source.read_bytes() == raw
+    assert not verify_archive(archive)

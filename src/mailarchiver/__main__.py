@@ -116,6 +116,7 @@ class IngestRequest(BaseModel):
     workers: int = Field(default_factory=lambda: min(os.cpu_count() or 1, 8), ge=1)
     plugin_dir: list[Path] = Field(default_factory=list)
     index_attachments: bool = False
+    scan_policy: Literal["clamav", "not-scanned"] = "clamav"
 
 
 def positive_integer(value: str) -> int:
@@ -406,6 +407,7 @@ class ProgressReporter:
         self.status_source_roots = source_roots or []
         self.status_write_error: str | None = None
         self.last_status_monotonic: float | None = None
+        self.scan_policy: Literal["clamav", "not-scanned", "unknown"] = "unknown"
 
     def start(self) -> None:
         self.display(self.phase)
@@ -833,6 +835,7 @@ class ProgressReporter:
             counts=state.counts,
             years=state.years,
             failure_detail=failure_detail,
+            scan_policy=self.scan_policy,
         )
         try:
             self.status_file.write(status)
@@ -974,6 +977,7 @@ def ingest(args: argparse.Namespace) -> None:
             workers=args.workers,
             plugin_dir=list(args.plugin_dir),
             index_attachments=args.index_attachments,
+            scan_policy="not-scanned" if args.no_scan else "clamav",
         )
     )
 
@@ -1101,6 +1105,7 @@ def _run_ingest(request: IngestRequest, writer_lease: WriterLease) -> None:
         started_at=started_at,
     )
     boxes: dict[Path, mailbox.mbox] = {}
+    progress.scan_policy = request.scan_policy
     source_file_pks: dict[tuple[str, str, str], int] = {}
     source_volume_pks: dict[str, int] = {}
     pending_duplicate_observations: dict[tuple[str, str], list[int]] = {}
@@ -1456,6 +1461,11 @@ def _run_ingest(request: IngestRequest, writer_lease: WriterLease) -> None:
                 "INSERT OR IGNORE INTO metadata_defects(message_pk, field, detail) VALUES (?, ?, ?)",
                 ((message_pk, defect.field, defect.detail) for defect in parsed.defects),
             )
+            if request.scan_policy == "not-scanned":
+                catalog.execute(
+                    "INSERT INTO metadata_defects(message_pk, field, detail) VALUES (?, ?, ?)",
+                    (message_pk, "antivirus", "not-scanned: explicitly imported without antivirus scanning"),
+                )
             box = boxes.get(destination)
             if box is None:
                 box = mailbox.mbox(destination, create=True)
@@ -1498,6 +1508,8 @@ def _run_ingest(request: IngestRequest, writer_lease: WriterLease) -> None:
         return int(message_pk)
 
     def scan_message(source: MailObject) -> bool:
+        if request.scan_policy == "not-scanned":
+            return False
         assert scanner is not None
         progress.record_worker(
             "scanning",
@@ -1782,9 +1794,12 @@ def _run_ingest(request: IngestRequest, writer_lease: WriterLease) -> None:
         inventory = capture_discovery(selected_sources, "containers", report_skipped=True)
         verify_stable_discovery()
         progress.finish_inventory(inventory)
-        progress.set_phase(CLAMAV_START_PHASE)
-        scanner = ClamScanner(progress.refresh)
-        scanner.__enter__()
+        if request.scan_policy == "clamav":
+            progress.set_phase(CLAMAV_START_PHASE)
+            scanner = ClamScanner(progress.refresh)
+            scanner.__enter__()
+        else:
+            print("WARNING: importing without antivirus scanning; messages are NOT scanned or certified clean.", file=sys.stderr)
         progress.set_phase("checking sources")
         run_file_workers(
             snapshotted_containers(),
@@ -2148,7 +2163,9 @@ def main() -> int:
         default=1900,
         help="reject earlier message dates and use normal fallbacks (default: 1900)",
     )
-    ingest_parser.add_argument("--clamav", action="store_true", required=True, help="scan new messages with on-demand ClamAV")
+    scanning = ingest_parser.add_mutually_exclusive_group(required=True)
+    scanning.add_argument("--clamav", action="store_true", help="scan new messages with on-demand ClamAV")
+    scanning.add_argument("--no-scan", action="store_true", help="explicitly import without antivirus; record messages as not scanned")
     ingest_parser.add_argument("--workers", type=positive_integer, default=min(os.cpu_count() or 1, 8), help="source mailfiles ingested concurrently (default: cores, capped at 8)")
     ingest_parser.add_argument(
         "--plugin-dir",

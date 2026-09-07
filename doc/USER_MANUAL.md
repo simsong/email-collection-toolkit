@@ -5,6 +5,11 @@ Mail Archiver reads source mail without changing it. It stores deduplicated
 messages in standard MBOX files, records where every message was found, and
 creates integrity information that can be checked independently.
 
+On macOS, open the supplied DMG and drag **Mail Archiver.app** to its
+**Applications** shortcut. Eject the disk and open the installed app.
+Python is included. Development builds are ad-hoc signed, not notarized;
+see [installation and signing notes](MACOS_DISTRIBUTION.md).
+
 Mail Archiver currently reads:
 
 * MBOX files;
@@ -43,6 +48,47 @@ Choose two locations:
 
 On macOS, reading Apple Mail or another protected location may require Full
 Disk Access for the terminal application.
+
+## Authorize a Gmail account
+
+Authorization is available before live Gmail ingest. It prepares and retains
+read-only credentials but does not download or change any mail. Run:
+
+```console
+uv run mailarchiver-auth simsong@gmail.com
+```
+
+The command recognizes a Google Workspace address from its public mail records,
+so the same form works for a custom Google-hosted domain:
+
+```console
+uv run mailarchiver-auth simsong@basistech.com
+```
+
+If automatic detection is inconclusive for an account known to use Gmail, use:
+
+```console
+uv run mailarchiver-auth --gmail simsong@basistech.com
+```
+
+The first run asks before creating a personal Google Cloud project. When the
+Google Cloud CLI is installed, the command creates the project and enables the
+Gmail API. It then opens Google's project-specific configuration pages. Complete
+the displayed Branding, External Audience, `gmail.readonly` scope, and Desktop
+client steps, download the JSON file, and return to the terminal. The command
+finds a matching new download or asks for its path, opens Google's authorization
+page, verifies that Google returned the command-line account, and stores the
+refresh token in the operating-system credential store. It does not store the
+token in the archive.
+
+Use `--client-secrets PATH` to import an existing Google Desktop-client JSON.
+Use `--detect-only` to inspect provider detection without creating a project or
+authorizing an account.
+
+Microsoft 365 domains are detected through their mail or Autodiscover records,
+but authorization is not implemented. For example,
+`uv run mailarchiver-auth sgarfinkel@fas.harvard.edu` currently reports
+`Microsoft Office not yet implemented.`
 
 ## Identify the archive owner
 
@@ -212,7 +258,12 @@ ignored, removed from recents, and reported in the About window. **File → New*
 asks for a new or empty `.mailarchive` destination before initializing and
 opening it. On macOS, **File → Import…** opens one picker for local files and
 directories, sets up owner names, shows the destination and sources for final
-confirmation, and starts import using the separately installed ClamAV.
+confirmation, and starts import. When ClamAV is missing or unconfigured, the
+import screen displays an antivirus warning. **Install ClamAV…** opens its
+official download page; it does not install software automatically. You may
+instead explicitly choose **Import Without Scanning**, or Cancel. The unscanned
+warning is retained in import history. Installing ClamAV later does not scan
+previously imported messages automatically.
 The **Import Directory…** button in the Ingests window starts the same workflow
 for that window's archive, opening the same source picker directly.
 In the picker, select files or directories and click **Import**. You can also
