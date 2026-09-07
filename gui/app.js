@@ -96,7 +96,7 @@ async function initialize() {
     await runNativeSmoke();
     return;
   }
-  for (const id of ["search-form", "search", "search-filters", "search-suggestions", "search-help-template", "archive-label", "result-status", "results-pane", "result-list",
+  for (const id of ["search-form", "search", "search-filters", "search-suggestions", "search-help-template", "result-status", "results-pane", "result-list",
     "result-help",
     "sort-by", "sort-direction", "search-attachments", "show-original-folders", "mailbox-browser", "mailbox-tree", "show-source-volumes", "filter-set", "manage-filter-sets",
     "save-filter-dialog", "save-filter-form", "filter-set-name", "cancel-save-filter", "manage-filter-dialog", "filter-set-list", "close-filter-manager",
@@ -446,7 +446,6 @@ function resetArchiveView() {
 function applyStatus(status) {
   state.highlightBackground = status.configuration.search_highlight_background;
   document.documentElement.style.setProperty("--search-highlight-background", state.highlightBackground);
-  elements["archive-label"].textContent = status.archive || "No archive selected";
   document.title = status.ready
     ? `Mail Archiver — ${status.archive} (${status.message_count.toLocaleString()} messages)`
     : status.untitled ? "Untitled — Mail Archiver" : "Mail Archiver";

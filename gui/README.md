@@ -20,10 +20,13 @@ make gui ARGS="--archive /path/to/archive"
 The archive must contain `archive.sqlite3`, `search.sqlite3`, and the canonical
 MBOX files referenced by the catalog. Without `--archive`, the app opens the
 last valid archive or offers Open Existing, Create New, and Cancel.
-Use **File → Open…** (Command-O) to open an archive in a new window, and **File → New Search
+Use **File → Open…** (Command-O) to open an archive in a new window, and **Window → New Search
 Window** for another independently searchable view of the active archive.
 **File → New** selects a permanent destination before initialization, and
-**File → Import…** selects source files/directories and the owner-names file.
+**File → Import…** selects source files/directories and merges source-directory
+`owner-names.txt` files into the document's owner list. Missing names are entered
+in a native multiline editor on macOS. **File → Document Options…** edits the
+document's sorted owner list; changes affect future imports, not existing mail.
 The always-present About window reports version, disk, network, warnings, and
 ingest activity. GUI assets are served only over the application's
 nonce-authenticated loopback server; Python calls still use the native bridge.

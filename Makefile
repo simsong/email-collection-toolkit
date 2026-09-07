@@ -75,6 +75,15 @@ gui:
 
 gui-smoke: test-native-gui
 
+.PHONY: test-native-application
+test-native-application:
+	MAILARCHIVER_NATIVE_APPLICATION_E2E=1 uv run pytest -q e2e_tests/test_ingest_verify.py::test_native_application_lifecycle
+
+.PHONY: check-archive-open
+check-archive-open:
+	@test -n "$(ARCHIVE)" || { echo 'usage: make check-archive-open ARCHIVE=/path/to/archive'; exit 2; }
+	uv run python -c 'import sys; from pathlib import Path; from mailarchiver.application import validate_archive; print(validate_archive(Path(sys.argv[1]))[0])' "$(ARCHIVE)"
+
 website-check:
 	uv run python scripts/check_website.py
 

@@ -677,6 +677,8 @@ def source_inventory(
     for root in roots:
         for path in _source_paths(root, hierarchy):
             path = path.resolve()
+            if _is_silent_metadata(path):
+                continue
             if _source_kind(path) is None:
                 inventory.skipped_file_count += 1
                 if skipped is not None:

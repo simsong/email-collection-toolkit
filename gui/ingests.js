@@ -4,6 +4,7 @@
 let statuses = [];
 let selectedStatusId = new URLSearchParams(window.location.search).get("status");
 let initialized = false;
+let importing = false;
 const byId = id => document.getElementById(id);
 const integer = value => Number(value || 0).toLocaleString();
 
@@ -16,6 +17,7 @@ window.setTimeout(() => {
 async function initialize() {
   if (initialized) return;
   initialized = true;
+  byId("import-directory").addEventListener("click", importDirectory);
   await refreshHistory();
   window.setInterval(refreshHistory, 1000);
 }
@@ -34,8 +36,25 @@ async function refreshHistory() {
       selectedStatusId = statuses[0]?.status_id || null;
     }
     render(history.errors || []);
+    const canImport = await window.pywebview.api.can_import_directory?.();
+    byId("import-directory").disabled = importing || !canImport;
   } catch (error) {
     showError(`Could not read ingest history: ${error}`);
+  }
+}
+
+async function importDirectory() {
+  if (importing) return;
+  importing = true;
+  byId("import-directory").disabled = true;
+  byId("error").hidden = true;
+  try {
+    await window.pywebview.api.import_directory();
+  } catch (error) {
+    showError(`Could not import directory: ${String(error?.message || error)}`);
+  } finally {
+    importing = false;
+    await refreshHistory();
   }
 }
 

@@ -146,8 +146,8 @@ application. Swift Testing is for Swift logic and does not automate the UI.
 ## Native application menus
 
 Mailarchiver passes custom **File** and **Window** menus to `webview.start`.
-File supplies **New**, **Open…**, launch-time **Open Recent**, **New Search
-Window**, **Import…**, and **Close** actions. Window supplies **Ingests** and
+File supplies **New**, **Open…**, launch-time **Open Recent**,
+**Import…**, and **Close** actions. Window supplies **New Search Window**, **Ingests** and
 the current About, search, and Ingests window inventory. Every callback
 resolves the active logical search window when invoked; opening an archive
 creates a new document window rather than retargeting an existing one.
@@ -172,8 +172,12 @@ The cross-platform `MenuAction` interface invokes Python but does not expose
 keyboard equivalents or dynamic enabled state. A small AppKit adapter rebuilds
 the active macOS menu when window or ingest state changes and disables **Close**
 for About and for the search window that owns Import. The controller also
-refuses that menu action and native close event. Standard keyboard equivalents
-still need a more complete native application shell.
+refuses that menu action and native close event. It sets Command-N/O/W and orders
+the native menus as Application, File, Edit, View, Window. The opt-in
+`make test-native-application` runs production About and search bridges, checks
+About's version, disk space, warning rendering and recovery, opens an extensionless
+fixture archive, and inspects native menu order and the Open shortcut. This catches
+CSP and JSON serialization failures that the browser's injected bridge cannot.
 The HTML controls remain available so browser acceptance tests exercise the
 same underlying operations.
 

@@ -412,11 +412,13 @@ user-derived component. They are treated as optional, discardable state.
 `PyWebViewApplication` adapts that model to native pywebview windows without
 putting platform imports in the controller. Its File menu asks for a new or
 empty destination and initializes it before creating a blank window, opens an
-archive in a new search window, opens another search window on the active
-document, runs Import, and closes the active window unless that window owns the
+archive in a new search window, runs Import, and closes the active window unless that window owns the
 running Import. Window close events enforce the same rule. The Window menu
 routes to the active archive's shared Ingests child window and enumerates every
-About, search, and Ingests window. A narrow macOS adapter refreshes pywebview's
+About, search, and Ingests window. **Window → New Search Window** creates another
+view of the active archive; the macOS adapter disables it without an active
+saved archive search window and refreshes on native focus changes.
+A narrow macOS adapter refreshes pywebview's
 process menu when window or ingest state changes and disables the Close item
 when the controller would refuse it. `handle_open_documents` and
 `reopen` are stable host entry points for the extension/activation work in
@@ -429,6 +431,57 @@ runs the service on a non-daemon worker thread, leaves readers usable, polls the
 existing typed status files in every attached search window and the persistent
 About window, and invalidates view caches after the run. Startup and import
 errors are retained as typed notices instead of being available only on stderr.
+The Ingests bridge exposes **Import Directory…** for its bound document. It
+reuses that document's search window (or opens one to own the job) and runs the
+normal confirmed import workflow.
+The UI polls import availability and prevents repeated clicks while dialogs are open.
+Import's final confirmation uses an application-owned macOS NSAlert with the
+bundled icon, destination heading/path, and explicit Import/Cancel actions.
+The shared alert helper marshals presentation onto the Cocoa main thread and
+also supplies the startup chooser's app icon.
+An application-owned NSOpenPanel labels source selection **Import**, displays
+the destination, and enables both file and directory selection, including
+multiple selections. Both import entry points open this panel directly without
+a source-type question; directories use recursive discovery.
+`document_options` owns the typed document owner-list state and atomic UTF-8
+storage. Import reads `owner-names.txt` only from explicitly selected source
+directories (not recursively), unions those aliases with the document list,
+and prompts with a multiline native editor only if the combined list is empty.
+There is no application/launch-directory fallback. Source lists preserve
+multiword entries, ignore blank/comment lines, deduplicate case-insensitively,
+and sort case-insensitively. After final confirmation, `start_import` rereads
+and merges the document list under WriterLease before invoking the existing
+path-based ingest service. No source settings are written. Windows retains its
+owner-file picker as a fallback until its native setup UI is implemented.
+The packaged local-source rules ignore each selected directory's top-level
+`owner-names.txt`, so this configuration file is not reported or ingested as
+an unrecognized mail source.
+
+The document-bound `DocumentOptionsApi` exposes only status and update through
+WindowBridge to `options.html`. One options child window is shared per document
+and registered with the controller and Window menu. Its scrollable multi-select
+list saves Add/Delete actions immediately, splitting Add input on commas,
+semicolons, and whitespace. The service obtains WriterLease and checks a content
+revision before updating; another writer or a stale edit fails visibly.
+The UI polls state and disables edits during this document's GUI ingest.
+CLI and GUI ingest record the aliases actually used at run start in operational
+`status/owner-names-used.txt`. The options panel compares that snapshot with
+the current list, retaining the warning across window/application restarts.
+Earlier runs without a snapshot are explicitly unknown. Neither owner settings
+nor this snapshot is included in preservation manifests. The panel explains
+that edits do not relocate canonical messages or change stored categories;
+FTS has no owner-name list and index rebuilds do not reclassify mail.
+`archive_config.py` stores the last source-picker directory in a strict,
+versioned archive-local `config.yaml`. The value is written atomically only
+after the import has acquired WriterLease; the next picker uses it if it is an
+existing directory and otherwise falls back to the archive's parent. A malformed
+or missing config is discardable navigation state and does not block import.
+The archive catalog schema contains message identities, provenance, ingest
+history, and canonical locations only; no other per-archive user preferences
+were found in SQL. Search query/window geometry and saved filter sets remain
+per-window or per-user UI state outside the archive. Scanner policy remains
+application configuration, while owner aliases remain the archive-local
+`owner-names.txt` because they are the ingest classification input.
 When startup produces a placeholder, the shell discards it without creating a
 native search window. A `webview.start` callback presents a three-button NSAlert
 on the Cocoa main thread: Open Existing, Create New, or Cancel. About anchors
@@ -437,6 +490,21 @@ paths normalize SAVE strings and OPEN/FOLDER sequences before indexing; New
 validates the destination inside its error handler. Cocoa File menu items carry
 explicit Command-N/O/W shortcuts. Archive opening uses the File menu rather than
 a toolbar button.
+The search toolbar omits the archive path; the native title bar identifies it.
+The Cocoa adapter reorders File, Edit, View, Window after the application menu.
+`WindowBridge` restricts pywebview introspection to explicit callable names,
+excluding public controller and window object graphs. About allows the same
+dynamic bridge generation as the other pages, retries bridge readiness, polls
+status each second, and clears stale errors after successful refresh.
+Archive Open validates schema metadata without `PRAGMA quick_check`, which
+previously scanned multi-gigabyte databases before opening any window. Existing
+extensionless directories remain accepted. `make check-archive-open ARCHIVE=...`
+performs this read-only compatibility check without launching windows or saving
+preferences. This check does not certify every database page against corruption.
+
+`make test-native-application` runs the production About and search bridges with
+a disposable extensionless archive, checks rendered notices and native menu order
+and Open shortcut, and closes the application. It runs only on a logged-in Mac.
 
 `LoopbackAssetServer` owns GUI delivery. It binds `127.0.0.1:0`, issues a
 different one-use bootstrap ticket for every new window, sets a random
@@ -684,6 +752,8 @@ then streams the JSON declarations, complete-MBOX `h1` hashes,
 recovered-message `h2` hashes, and semantic-message `h3` hashes. It returns
 nonzero on missing, orphaned, malformed, unsupported, unsafe, unlisted, or
 mismatched files. It neither imports the package nor reads SQLite.
+Its module docstring doubles as formatted `--help`, carrying standalone run
+instructions and verification limits into the installed archive copy.
 
 `write_bag_checkpoint()` streams catalog locations in MBOX byte order through
 `write_integrity_files()` and

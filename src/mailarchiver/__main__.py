@@ -31,6 +31,7 @@ from tabulate import tabulate
 
 from .archive_integrity import MailbagArchiveIntegrityControls
 from .archive_path import add_archive_argument, require_archive
+from .document_options import DocumentOptions
 from .catalog import (
     UnsupportedSearchSchemaError,
     address_pk,
@@ -1066,6 +1067,7 @@ def _run_ingest(request: IngestRequest, writer_lease: WriterLease) -> None:
         checkpoint_archive()
         print(f"recovered: pending message publication {recovery.value}", file=sys.stderr)
     owners = owner_tokens(request.owner_names_file)
+    DocumentOptions(archive).record_import(owners, writer_lease)
     started_at = datetime.now(timezone.utc)
     run_pk = catalog.execute(
         "INSERT INTO ingest_runs(started_at) VALUES (?)", (started_at.isoformat(),)

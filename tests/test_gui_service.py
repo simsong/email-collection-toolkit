@@ -46,7 +46,15 @@ from mailarchiver.gui_app import (
     archive_destination,
     dialog_paths,
     external_link_destination,
+    owner_names_text,
+    DocumentOptionsApi,
 )
+from mailarchiver.document_options import DocumentOptions, read_owner_names, source_owner_names, split_owner_names
+from mailarchiver.archive_config import (
+    ArchiveConfig, config_path, import_directory, load_archive_config,
+    remember_import_directory, save_archive_config,
+)
+from mailarchiver.writer_lock import ArchiveBusyError, WriterLease
 from mailarchiver.mailsearch import RECENT_FTS_SCAN_LIMIT, _search_statement, parse_query
 from mailarchiver.layout import mbox_directory
 from mailarchiver.mailbox_tree import FilterSet, FilterSetStore, MailboxSelection, MailboxTreeNode, mailbox_tree
@@ -54,6 +62,106 @@ from mailarchiver.plugin_api import SourceContainerMetadata, SourceRelationship
 from mailarchiver.mbox import add_message
 from mailarchiver.search import index_message
 from mailarchiver.standalone_verify import semantic_bytes
+
+
+def test_owner_names_merge_sources_and_retain_document_edits(tmp_path: Path) -> None:
+    """GUI import unions source aliases into the document, never mutating sources."""
+    archive = tmp_path / "archive"
+    archive.mkdir()
+    source = tmp_path / "source"
+    source.mkdir()
+    names = source / "owner-names.txt"
+    original = "  José Example  \r\n\n jose@example.org \n# ignored\n"
+    names.write_bytes(original.encode())
+    (tmp_path / "owner-names.txt").write_text("Must not use launch directory\n", encoding="utf-8")
+    assert source_owner_names([source / "message.eml"]) == []
+    additions = source_owner_names([source, source])
+    assert additions == ["jose@example.org", "José Example"]
+    store = DocumentOptions(archive)
+    lease = WriterLease.acquire(archive, "fixture", "test", "test", "test")
+    try:
+        state = store.save(["Existing Owner"], lease)
+        merged = store.merge(additions, lease)
+        assert merged.names == ["Existing Owner", "jose@example.org", "José Example"]
+        assert store.merge(additions, lease).names == merged.names
+        store.record_import(merged.names, lease)
+        assert not store.state().changed_since_import
+        with pytest.raises(ValueError, match="another window"):
+            store.save([], lease, state.revision)
+        changed = store.save(["New Owner"], lease, store.state().revision)
+        assert changed.changed_since_import
+        assert DocumentOptions(archive).state().changed_since_import
+        store.record_import(changed.names, lease)
+        assert not store.state().changed_since_import
+    finally:
+        lease.release()
+    with pytest.raises(ValueError, match="active writer lease"):
+        store.save([], lease)
+    assert names.read_bytes() == original.encode()
+
+
+def test_archive_config_remembers_last_import_directory(tmp_path: Path) -> None:
+    """The next import starts at the prior source directory, not the home directory."""
+    archive = tmp_path / "archive"
+    archive.mkdir()
+    source = tmp_path / "mail" / "nested"
+    source.mkdir(parents=True)
+    message = source / "mail.eml"
+    message.write_text("From: test@example.org\n\nbody\n", encoding="utf-8")
+    assert import_directory(archive) == archive.parent
+    assert remember_import_directory(archive, [source]) == source.absolute()
+    assert load_archive_config(archive).last_import_directory == source.absolute()
+    assert import_directory(archive) == source
+    assert config_path(archive).read_text(encoding="utf-8").startswith("version: 1\n")
+    save_archive_config(archive, ArchiveConfig(last_import_directory=message))
+    assert import_directory(archive) == archive.parent
+    config_path(archive).write_text("last_import_directory: [broken\n", encoding="utf-8")
+    with pytest.raises(ValueError, match="invalid archive configuration"):
+        load_archive_config(archive)
+
+
+def test_document_owner_controls_are_bound_and_locked(tmp_path: Path) -> None:
+    """Options split, sort, deduplicate and delete only in their bound document."""
+    controller = ApplicationController(ApplicationPreferencesStore(tmp_path / "preferences.json"))
+    document = controller.create_document(tmp_path / "one.mailarchive")
+    other = controller.create_document(tmp_path / "two.mailarchive")
+    api = DocumentOptionsApi(document)
+    state = api.status()
+    updated = api.update("Zed;alice@example.org, Bob   zed", [], state["revision"])
+    assert updated["names"] == ["alice@example.org", "Bob", "Zed"]
+    assert split_owner_names("A;B, C\tD\nE") == ["A", "B", "C", "D", "E"]
+    lease = WriterLease.acquire(document.path, document.descriptor.identity, "ingest", "test", "test")
+    try:
+        with pytest.raises(ArchiveBusyError):
+            api.update("Wrong", [], updated["revision"])
+    finally:
+        lease.release()
+    deleted = api.update("", ["Bob", "Zed"], updated["revision"])
+    assert deleted["names"] == ["alice@example.org"]
+    with pytest.raises(ValueError, match="another window"):
+        api.update("Wrong", [], updated["revision"])
+    assert read_owner_names(other.path / "owner-names.txt") == []
+    assert api.update("", ["alice@example.org"], deleted["revision"])["names"] == []
+
+
+@pytest.mark.parametrize("value", ["", " \n\t", "# only comments", "Name\x00"])
+def test_owner_names_reject_invalid_entry_without_writes(tmp_path: Path, value: str) -> None:
+    """The owner editor must not save empty or invalid aliases."""
+    with pytest.raises(ValueError):
+        owner_names_text(value)
+    assert not (tmp_path / "owner-names.txt").exists()
+
+
+def test_invalid_owner_names_are_not_silently_replaced(tmp_path: Path) -> None:
+    """Existing invalid settings produce errors, not guessed aliases or replacement."""
+    archive = tmp_path / "archive"
+    archive.mkdir()
+    path = archive / "owner-names.txt"
+    for content in (b"bad\x00name", b"\xff"):
+        path.write_bytes(content)
+        with pytest.raises(ValueError):
+            DocumentOptions(archive).state()
+        assert path.read_bytes() == content
 
 @pytest.mark.parametrize("as_sequence", [False, True])
 def test_native_save_default_archive_path(tmp_path: Path, as_sequence: bool) -> None:
@@ -305,10 +413,11 @@ def test_native_menus_route_through_the_application_controller(tmp_path: Path) -
 
     assert [menu.title for menu in menus] == ["File", "Window"]
     assert [item.title for item in menus[0].items] == [
-        "New", "Open…", "New Search Window", "Import…", "Close",
+        "New", "Open…", "Import…", "Document Options…", "Close",
     ]
-    assert [item.title for item in menus[1].items] == ["Ingests"]
+    assert [item.title for item in menus[1].items] == ["New Search Window", "Ingests"]
     assert not menus[1].items[0].function()
+    assert not menus[1].items[1].function()
 
 
 def test_gui_api_records_independent_search_window_state(tmp_path: Path) -> None:

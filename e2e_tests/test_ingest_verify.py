@@ -470,6 +470,21 @@ def test_native_search_ui_smoke(native_smoke_archive: Path, tmp_path: Path) -> N
 
 
 @pytest.mark.skipif(
+    sys.platform != "darwin" or os.environ.get("MAILARCHIVER_NATIVE_APPLICATION_E2E") != "1",
+    reason="set MAILARCHIVER_NATIVE_APPLICATION_E2E=1 for production Cocoa lifecycle checks",
+)
+def test_native_application_lifecycle(native_smoke_archive: Path, tmp_path: Path) -> None:
+    """About must populate through its real bridge; extensionless Open and menus must work."""
+    result = subprocess.run(
+        [sys.executable, str(Path(__file__).with_name("native_application_probe.py")),
+         str(native_smoke_archive), str(tmp_path / "preferences.json")],
+        capture_output=True, text=True, timeout=40, check=False,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "Production About, document bridge, and menus passed" in result.stdout
+
+
+@pytest.mark.skipif(
     sys.platform != "darwin" or os.environ.get("MAILARCHIVER_NATIVE_HTML_FIND_E2E") != "1",
     reason="set MAILARCHIVER_NATIVE_HTML_FIND_E2E=1 for the visible macOS HTML-find check",
 )

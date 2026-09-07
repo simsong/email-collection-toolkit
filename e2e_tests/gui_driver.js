@@ -50,7 +50,7 @@
     for (const operator of ["any:", "from:", "to:", "cc:", "bcc:", "subject:", "date:", "before:", "after:"]) {
       assert(help.textContent.includes(operator), `search help documents ${operator}`);
     }
-    assert(document.getElementById("archive-label").textContent.includes("archive"), "archive status displayed");
+    assert(document.getElementById("archive-label") === null, "archive path appears only in the native title bar");
     assert(document.title.includes("archive") && document.title.includes("(207 messages)"), "window title identifies archive and total message count");
     await waitFor(() => document.getElementById("ingest-status-line").textContent.includes("Last ingest completed"), "completed ingest status appears in the main status line");
     document.getElementById("ingest-status-line").click();

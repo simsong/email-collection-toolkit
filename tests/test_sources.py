@@ -102,6 +102,7 @@ def test_source_inventory_totals_only_recognized_message_files(tmp_path: Path) -
     mbox = source / "mailbox"
     mbox.write_bytes(b"From sender@example Fri Feb  2 00:00:00 2024\nmessage\n")
     (source / "ignored.plist").write_bytes(b"not mail" * 100)
+    (source / "owner-names.txt").write_text("owner@example.org\n", encoding="utf-8")
     updates: list[tuple[int, int]] = []
     skipped: list[tuple[Path, str]] = []
 
