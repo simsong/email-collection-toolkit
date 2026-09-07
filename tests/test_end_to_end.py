@@ -136,7 +136,7 @@ def test_ingest_routes_preserves_and_indexes_messages(
     """Requirements: canonical preservation, dedupe, routing, FTS, and audit log."""
     source, raw = source_mail
     archive = tmp_path / "archive"
-    owner_names = Path(__file__).parents[1] / "owner-names.txt"
+    owner_names = Path(__file__).parent / "fixtures" / "owner-names.txt"
 
     result = run_ingest(source, archive, owner_names)
     infected_path = source / "emlx_maildir/2024/infected/003-infected.emlx"
@@ -461,7 +461,7 @@ def test_unchanged_source_files_are_skipped_wholesale(source_mail: tuple[Path, d
     """Requirements: matching source-file SHA-256 avoids per-message reingest."""
     source, _ = source_mail
     archive = tmp_path / "archive"
-    owner_names = Path(__file__).parents[1] / "owner-names.txt"
+    owner_names = Path(__file__).parent / "fixtures" / "owner-names.txt"
     assert_success(run_ingest(source, archive, owner_names))
     before = {path.name: path.read_bytes() for path in mbox_directory(archive).glob("*.mbox")}
     touched = source / "three_messages.mbox"
@@ -511,7 +511,7 @@ def test_unrecognized_input_file_is_printed_with_reason(tmp_path: Path) -> None:
     skipped = source / "Envelope Index"
     skipped.write_bytes(b"not an RFC 5322 message")
     archive = tmp_path / "archive"
-    owner_names = Path(__file__).parents[1] / "owner-names.txt"
+    owner_names = Path(__file__).parent / "fixtures" / "owner-names.txt"
 
     result = run_ingest(source, archive, owner_names)
 
@@ -527,7 +527,7 @@ def test_overlapping_local_roots_are_deduplicated_before_workers(
     """Requirement: overlapping roots schedule one integrity attempt per physical container."""
     source, _messages = source_mail
     archive = tmp_path / "archive"
-    owner_names = Path(__file__).parents[1] / "owner-names.txt"
+    owner_names = Path(__file__).parent / "fixtures" / "owner-names.txt"
     result = subprocess.run(
         [
             sys.executable,
@@ -654,7 +654,7 @@ def create_plugin():
         encoding="utf-8",
     )
     archive = tmp_path / "archive"
-    owner_names = Path(__file__).parents[1] / "owner-names.txt"
+    owner_names = Path(__file__).parent / "fixtures" / "owner-names.txt"
 
     result = subprocess.run(
         [
@@ -743,7 +743,7 @@ def test_discovery_failure_prevents_partial_ingest(tmp_path: Path) -> None:
         b"Date: Thu, 1 Feb 2024 12:00:00 +0000\n\nfirst body\n"
     )
     archive = tmp_path / "archive"
-    owner_names = Path(__file__).parents[1] / "owner-names.txt"
+    owner_names = Path(__file__).parent / "fixtures" / "owner-names.txt"
 
     result = subprocess.run(
         [
@@ -787,7 +787,7 @@ def test_mbox_append_resumes_after_verified_prefix(tmp_path: Path) -> None:
     finally:
         box.close()
     archive = tmp_path / "archive"
-    owner_names = Path(__file__).parents[1] / "owner-names.txt"
+    owner_names = Path(__file__).parent / "fixtures" / "owner-names.txt"
     assert_success(run_ingest(source, archive, owner_names))
     first_length = source.stat().st_size
     box = mailbox.mbox(source, create=False)
@@ -837,7 +837,7 @@ def test_malformed_subject_is_archived_with_metadata_defect(tmp_path: Path) -> N
     )
     source.write_bytes(raw)
     archive = tmp_path / "archive"
-    owner_names = Path(__file__).parents[1] / "owner-names.txt"
+    owner_names = Path(__file__).parent / "fixtures" / "owner-names.txt"
 
     result = run_ingest(source, archive, owner_names)
 
@@ -858,7 +858,7 @@ def test_report_counts_years_people_and_correspondents(source_mail: tuple[Path, 
     """Requirement: owner addresses are catalogued but omitted from top correspondents."""
     source, _ = source_mail
     archive = tmp_path / "archive"
-    owner_names = Path(__file__).parents[1] / "owner-names.txt"
+    owner_names = Path(__file__).parent / "fixtures" / "owner-names.txt"
     assert_success(run_ingest(source, archive, owner_names))
     catalog = sqlite3.connect(archive / "archive.sqlite3")
     try:
@@ -890,7 +890,7 @@ def test_report_labels_missing_sender(tmp_path: Path) -> None:
     source.parent.mkdir()
     source.write_bytes(b"Message-ID: <missing@example>\nDate: Thu, 1 Feb 2024 12:00:00 +0000\n\nbody\n")
     archive = tmp_path / "archive"
-    owner_names = Path(__file__).parents[1] / "owner-names.txt"
+    owner_names = Path(__file__).parent / "fixtures" / "owner-names.txt"
     assert_success(run_ingest(source, archive, owner_names))
 
     result = subprocess.run(
@@ -910,7 +910,7 @@ def test_ingest_accepts_an_empty_babyl_mailbox(tmp_path: Path) -> None:
     raw = b"BABYL OPTIONS:\nVersion: 5\nLabels:\n\x1f"
     source.write_bytes(raw)
     archive = tmp_path / "archive"
-    owner_names = Path(__file__).parents[1] / "owner-names.txt"
+    owner_names = Path(__file__).parent / "fixtures" / "owner-names.txt"
 
     result = run_ingest(source, archive, owner_names)
 
@@ -953,7 +953,7 @@ def test_ingest_checkpoints_babyl_message_with_leading_from_line(tmp_path: Path)
         + b"\nbody\nFrom body\n\x1f"
     )
     archive = tmp_path / "archive"
-    owner_names = Path(__file__).parents[1] / "owner-names.txt"
+    owner_names = Path(__file__).parent / "fixtures" / "owner-names.txt"
 
     result = run_ingest(source, archive, owner_names)
 
@@ -986,7 +986,7 @@ def test_interrupt_stops_cleanly(source_mail: tuple[Path, dict[str, bytes]], tmp
     """Requirement: Ctrl-C exits cleanly without an exception traceback."""
     source, _ = source_mail
     archive = tmp_path / "archive"
-    owner_names = Path(__file__).parents[1] / "owner-names.txt"
+    owner_names = Path(__file__).parent / "fixtures" / "owner-names.txt"
     process = subprocess.Popen(
         [
             sys.executable,
@@ -1024,7 +1024,7 @@ def test_ingest_applies_archive_earliest_year_before_path_fallback(tmp_path: Pat
     )
     source.write_bytes(raw)
     archive = tmp_path / "archive"
-    owner_names = Path(__file__).parents[1] / "owner-names.txt"
+    owner_names = Path(__file__).parent / "fixtures" / "owner-names.txt"
 
     result = run_ingest(source, archive, owner_names, "--earliest-year", "1983")
 
@@ -1049,7 +1049,7 @@ def test_parser_failure_records_source_identity_and_failed_run(tmp_path: Path) -
     raw = b"Message-ID: <undated@example>\nFrom: sender@example.net\n\nbody\n"
     source.write_bytes(raw)
     archive = tmp_path / "archive"
-    owner_names = Path(__file__).parents[1] / "owner-names.txt"
+    owner_names = Path(__file__).parent / "fixtures" / "owner-names.txt"
 
     result = run_ingest(source, archive, owner_names)
 
@@ -1088,7 +1088,7 @@ def test_fresh_catalog_is_refused_beside_existing_mbox(tmp_path: Path) -> None:
     mbox_directory(archive).mkdir(parents=True)
     existing = mbox_directory(archive) / "2024-Archive1.mbox"
     existing.write_bytes(b"existing canonical bytes\n")
-    owner_names = Path(__file__).parents[1] / "owner-names.txt"
+    owner_names = Path(__file__).parent / "fixtures" / "owner-names.txt"
 
     result = run_ingest(source, archive, owner_names)
 
@@ -1117,7 +1117,7 @@ def test_incompatible_catalog_cannot_stale_archive_integrity_metadata(tmp_path: 
     incompatible = sqlite3.connect(archive / "archive.sqlite3")
     incompatible.executescript("CREATE TABLE schema_info(version INTEGER); INSERT INTO schema_info VALUES (1);")
     incompatible.close()
-    owner_names = Path(__file__).parents[1] / "owner-names.txt"
+    owner_names = Path(__file__).parent / "fixtures" / "owner-names.txt"
 
     result = run_ingest(source, archive, owner_names)
 
@@ -1142,7 +1142,7 @@ def test_unusable_source_fails_cleanly(
     if contents is not None:
         source.write_bytes(contents)
     archive = tmp_path / "archive"
-    owner_names = Path(__file__).parents[1] / "owner-names.txt"
+    owner_names = Path(__file__).parent / "fixtures" / "owner-names.txt"
 
     result = run_ingest(source, archive, owner_names)
 
@@ -1159,7 +1159,7 @@ def test_clamav_startup_failure_prevents_worker_activity(tmp_path: Path) -> None
         b"Message-ID: <one@example>\nDate: Thu, 1 Feb 2024 12:00:00 +0000\n\nbody\n"
     )
     archive = tmp_path / "archive"
-    owner_names = Path(__file__).parents[1] / "owner-names.txt"
+    owner_names = Path(__file__).parent / "fixtures" / "owner-names.txt"
     missing_clamd = tmp_path / "missing-clamd"
     environment = os.environ.copy()
     environment[CLAMD_ENV] = str(missing_clamd)
@@ -1203,7 +1203,7 @@ def test_clamav_start_failure_reports_daemon_diagnostics(tmp_path: Path) -> None
     source = tmp_path / "source.eml"
     source.write_bytes(b"Message-ID: <clamd-diagnostic@example>\n\nbody\n")
     archive = tmp_path / "archive"
-    owner_names = Path(__file__).parents[1] / "owner-names.txt"
+    owner_names = Path(__file__).parent / "fixtures" / "owner-names.txt"
     failed_clamd = tmp_path / "failed-clamd"
     failed_clamd.write_text(
         "#!/bin/sh\nprintf 'deliberate clamd diagnostic\\n' >&2\nexit 23\n", encoding="utf-8"
@@ -1228,7 +1228,7 @@ def test_clamav_start_uses_private_runtime_instead_of_configured_files(tmp_path:
         b"Date: Thu, 1 Feb 2024 12:00:00 +0000\n\nbody\n"
     )
     archive = tmp_path / "archive"
-    owner_names = Path(__file__).parents[1] / "owner-names.txt"
+    owner_names = Path(__file__).parent / "fixtures" / "owner-names.txt"
     configured_socket = Path(os.environ.get(CLAMD_SOCKET_ENV, "/private/tmp/clamd.sock"))
     configured_path = Path(
         os.environ.get(CLAMD_CONFIG_ENV, "/opt/homebrew/etc/clamav/clamd.conf")

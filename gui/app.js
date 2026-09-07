@@ -72,7 +72,17 @@ window.addEventListener("resize", () => {
   const frame = elements["body-view"]?.querySelector(".html-frame");
   if (frame) window.setTimeout(() => refreshHtmlFrameLayout(frame), 0);
 });
+window.addEventListener("focus", () => { void window.pywebview?.api?.activate?.(); });
 window.addEventListener("pywebviewready", initialize);
+window.mailArchiverNotice = message => showError(message);
+window.archiveDidChange = async () => {
+  const status = await call(() => window.pywebview.api.status());
+  if (!status) return;
+  state.mailboxTree = [];
+  applyStatus(status);
+  await refreshIngestOverview();
+  if (state.query.trim()) await runSearch();
+};
 window.setTimeout(() => {
   if (window.pywebview?.api?.status) initialize();
   else if (!initialized) showBridgeFailure();
@@ -86,7 +96,7 @@ async function initialize() {
     await runNativeSmoke();
     return;
   }
-  for (const id of ["choose-archive", "search-form", "search", "search-filters", "search-suggestions", "search-help-template", "archive-label", "result-status", "results-pane", "result-list",
+  for (const id of ["search-form", "search", "search-filters", "search-suggestions", "search-help-template", "result-status", "results-pane", "result-list",
     "result-help",
     "sort-by", "sort-direction", "search-attachments", "show-original-folders", "mailbox-browser", "mailbox-tree", "show-source-volumes", "filter-set", "manage-filter-sets",
     "save-filter-dialog", "save-filter-form", "filter-set-name", "cancel-save-filter", "manage-filter-dialog", "filter-set-list", "close-filter-manager",
@@ -96,10 +106,6 @@ async function initialize() {
   }
   initializeResultTable();
   renderSearchHelp();
-  elements["choose-archive"].addEventListener("click", async () => {
-    await chooseArchive();
-    elements["choose-archive"].dataset.completed = String(Number(elements["choose-archive"].dataset.completed || 0) + 1);
-  });
   elements["search-form"].addEventListener("submit", event => {
     event.preventDefault();
     if (state.suggestionIndex >= 0) acceptSuggestion(state.suggestionIndex);
@@ -145,6 +151,7 @@ async function initialize() {
   if (parameters.get("standalone") === "1") document.body.classList.add("standalone");
   const status = await call(() => window.pywebview.api.status());
   if (!status) return;
+  await call(() => window.pywebview.api.activate());
   state.highlightTerms = parameters.getAll("highlight");
   await loadFilterSets();
   applyStatus(status);
@@ -399,7 +406,7 @@ function showBridgeFailure() {
 
 async function chooseArchive() {
   const status = await call(() => window.pywebview.api.choose_archive());
-  if (status) {
+  if (status && !status.opened_in_new_window) {
     resetArchiveView();
     applyStatus(status);
     await refreshIngestOverview();
@@ -439,12 +446,13 @@ function resetArchiveView() {
 function applyStatus(status) {
   state.highlightBackground = status.configuration.search_highlight_background;
   document.documentElement.style.setProperty("--search-highlight-background", state.highlightBackground);
-  elements["archive-label"].textContent = status.archive || "No archive selected";
   document.title = status.ready
     ? `Mail Archiver — ${status.archive} (${status.message_count.toLocaleString()} messages)`
-    : "Mail Archiver";
+    : status.untitled ? "Untitled — Mail Archiver" : "Mail Archiver";
   elements.search.disabled = !status.ready;
-  elements["result-status"].textContent = status.ready ? "Enter a search." : "Choose an archive to begin.";
+  elements["result-status"].textContent = status.ready ? "Enter a search." : "Use File → New or Open to begin.";
+  const notice = status.notices?.at(-1);
+  if (notice && notice.severity !== "information") showError(notice.message);
   if (status.ready) elements.search.focus();
 }
 

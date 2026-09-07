@@ -1,5 +1,46 @@
 #!/usr/bin/env python3
-"""Independently generate and verify Mailbag and message fixity using only stdlib."""
+"""Verify the integrity of a Mail Archiver archive.
+
+HOW TO RUN
+  Requires Python 3.10 or later, using only its standard library. No Mail
+  Archiver installation or additional Python packages are needed.
+
+  From the directory containing this script:
+    macOS / Linux:  python3 verify_mail_archive.py
+    Windows:        py -3 verify_mail_archive.py
+
+  To check another archive, supply its directory (quote paths with spaces):
+    python3 verify_mail_archive.py "/path/to/archive"
+    py -3 verify_mail_archive.py "C:\\path\\to\\archive"
+
+  For these instructions at the command line:
+    python3 verify_mail_archive.py --help
+
+  Without a directory argument, this checks the archive containing this
+  script, even when launched from a different working directory. Wait until
+  imports and other archive writes have stopped before running verification.
+
+WHAT IT CHECKS
+  Checks the BagIt directory declaration, payload and tag SHA-256 manifests,
+  Mailbag metadata and message counts, and the per-mailbox integrity records.
+  Recomputes whole-MBOX, original-message, and semantic-message digests and
+  compares them with the recorded values. Large archives can take a long time:
+  verification reads all archived mail, including quarantined messages.
+
+RESULTS
+  Prints progress for verified mailboxes and "Archive integrity verified."
+  when all checks pass (exit status 0). Reports integrity errors and returns
+  exit status 1 when checks fail; invalid command-line usage returns status 2.
+  An interrupted or failed run is not a successful verification.
+
+  This is read-only: it does not repair, rewrite, or delete archive files.
+  It does not consult or validate SQLite databases, rebuild search indexes,
+  or scan for viruses. Matching hashes establish consistency with the stored
+  integrity records; they do not prove authenticity or completeness against
+  the original mail sources. Keep independent backups and integrity records.
+
+Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved.
+"""
 
 from __future__ import annotations
 
@@ -733,9 +774,12 @@ def install_archive_verifier(archive: Path) -> Path:
 
 def main() -> int:
     parser = argparse.ArgumentParser(
-        description="Validate BagIt, Mailbag, whole-MBOX, raw-message, and semantic-message hashes."
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-    parser.add_argument("archive", nargs="?", type=Path, default=Path(__file__).resolve().parent)
+    parser.add_argument(
+        "archive", nargs="?", type=Path, default=Path(__file__).resolve().parent,
+        help="archive directory (default: the directory containing this script)",
+    )
     archive = parser.parse_args().archive
     if not archive.is_dir():
         parser.error(f"not a directory: {archive}")

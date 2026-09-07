@@ -16,6 +16,9 @@ button { font: inherit; }
 .ingest-history header { position: sticky; top: 0; z-index: 2; display: flex; align-items: baseline; justify-content: space-between; padding: 14px 15px 10px; border-bottom: 1px solid var(--border); background: var(--surface); }
 .ingest-history h1 { margin: 0; font-size: 18px; }
 #history-count { color: var(--muted); }
+.ingest-actions { padding: 10px 15px; border-bottom: 1px solid var(--border); }
+#import-directory { padding: 5px 10px; border: 1px solid var(--border); border-radius: 6px; background: var(--background); color: CanvasText; }
+#import-directory:disabled { opacity: 0.5; }
 .history-row { display: grid; grid-template-columns: 10px 1fr; gap: 8px; width: 100%; padding: 10px 12px; border: 0; border-bottom: 1px solid var(--border); text-align: left; background: transparent; }
 .history-row:hover { background: color-mix(in srgb, AccentColor 10%, transparent); }
 .history-row.selected { background: var(--selection); }

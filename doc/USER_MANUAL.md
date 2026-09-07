@@ -203,13 +203,59 @@ Start the graphical search interface with:
 make gui ARGS='--archive "/path/to/mail-archive"'
 ```
 
-If no archive was supplied, choose one with **Choose Archive…**.
-The window title shows the archive path and the total number of deduplicated,
-searchable messages.
+If no archive was supplied, the application opens the last valid archive or
+offers **Open Existing**, **Create New**, and **Cancel**. Use **File → Open…** (Command-O) to
+open an existing archive in a new window. **Window → New Search Window** opens
+another independently searchable window on the active archive. Recent archives
+are kept in **File → Open Recent**. A missing or invalid saved archive is
+ignored, removed from recents, and reported in the About window. **File → New**
+asks for a new or empty `.mailarchive` destination before initializing and
+opening it. On macOS, **File → Import…** opens one picker for local files and
+directories, sets up owner names, shows the destination and sources for final
+confirmation, and starts import using the separately installed ClamAV.
+The **Import Directory…** button in the Ingests window starts the same workflow
+for that window's archive, opening the same source picker directly.
+In the picker, select files or directories and click **Import**. You can also
+navigate into a directory and import it; directories include supported mail
+files and subdirectories. No separate Files/Folders choice is needed.
+The app combines `owner-names.txt` from each selected source directory with
+the destination archive's owner list. If that list is empty, enter your names
+and email addresses in the owner editor, one per line, and click **Continue**.
+After you confirm **Import**, the merged list is saved in the destination
+archive's `owner-names.txt` for future imports. Source files are unchanged;
+canceling does not save names. The app has no built-in default owner list.
+
+Use **File → Document Options…** to edit this archive's owner names. The sorted
+list scrolls and supports multiple selections. **+** opens an entry field;
+commas, semicolons, or whitespace separate entries. **−** deletes selected names.
+Edits save automatically, and importing blocks edits to the same document.
+The panel warns if the list differs from that used by the last import (older
+imports may not have recorded their names). Changes affect future imports only:
+existing messages are not moved between Sent and Archive mailboxes. There is
+no Reindex button here because owner names are not stored in the search index,
+and reindexing would not change existing classifications.
+
+For each archive, the app remembers the last source-picker directory in the
+human-editable `config.yaml` beside the archive. Future imports start there when
+the directory still exists; otherwise the picker starts beside the archive.
+Malformed or missing navigation config is ignored.
+For a saved document, the window title shows the archive path and total number
+of deduplicated, searchable messages.
+Cancel dismisses the startup dialog without opening a search window. About and
+File New/Open remain available. Create New asks for a destination before opening
+its search window and offering Import; accepting the default Untitled name works.
+Command-N creates an archive and Command-W closes an eligible search window.
+
+The About window remains available for the application run. It shows the
+installed version, free disk space, live Internet reachability, startup errors,
+warnings, and current or latest ingest activity. The Window menu lists it and
+every search and Ingests window. During Import, the search window that started
+the run cannot be closed from **File → Close** or its close box; other windows
+remain searchable and independently closeable.
 
 The status line at the bottom shows a running ingest, or summarizes the most
 recent run. Click it to open the independent Ingests window. You can also use
-**Windows → Ingest**. The window lists all retained runs and shows the selected
+**Window → Ingests**. The window lists all retained runs and shows the selected
 run's sources, totals, failures, and every configured worker thread. It has its
 own close box; opening it again while it is visible brings the same window to
 the front.

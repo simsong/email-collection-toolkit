@@ -455,6 +455,142 @@ Index extraction and insertion happen after canonical MBOX/catalog publication.
 An indexing failure is recorded as a metadata defect and does not reject mail;
 `refresh-index` repairs missing disposable content.
 
+## Desktop application documents and windows
+
+The first macOS and Windows applications retain the Python implementation and
+share the pywebview HTML, CSS, and JavaScript. They use WKWebView on macOS and
+WebView2 on Windows. An application-owned HTTP server binds only to
+`127.0.0.1` on an ephemeral port and serves only packaged GUI assets. Each
+window starts with an unlogged, one-use cryptographic nonce that establishes a
+session-only `HttpOnly`, `SameSite=Strict` cookie and redirects to a clean URL;
+every asset request requires that cookie and the exact loopback host, and any
+request carrying an `Origin` header must name that exact origin.
+The server sends no permissive CORS response and stops with the application.
+Any future state-changing HTTP API must additionally require an explicit CSRF
+header. The applications must be packaged
+with Python and all application dependencies. Users must not need Python,
+`pip`, `pipx`, `uv`, or a source checkout.
+
+An `ApplicationController` owns application preferences, archive-document
+sessions, active-window routing, recent archives, and operating-system open
+and reopen events. Native menu callbacks resolve the active window when they
+are invoked. Discardable, versioned preferences are outside every archive in
+the platform-appropriate per-user application directory. They contain the
+last archive and at most ten recent archive paths, but no archive content or
+credentials.
+
+An `ArchiveDocument` represents one archive. Opening validates the directory
+and the versioned layout and SQLite readable state of both databases without
+creating or modifying anything. A missing or invalid saved archive is removed
+from recent preferences and reported in the persistent About window. The document
+retains the user's absolute display path and also uses a canonical,
+case-normalized path as its process-local identity. Windows opened through
+aliases of the same archive share the document's ingest state, child windows,
+and publication generation. The document remains alive while any search
+window, child window, or ingest operation uses it.
+
+Every search window has a lifetime-stable document binding and independent
+query, sort, selection, mailbox-filter, and geometry state. **New Search
+Window** in the **Window** menu attaches another window to the active document;
+it is disabled when no saved archive search window is active. **Open** and an
+operating-system open event create a window for the requested document; they
+must not silently retarget an existing search window.
+
+Startup opens explicit document paths first, otherwise the last valid archive,
+otherwise a macOS dialog offers **Open Existing**, **Create New**, and **Cancel**.
+A missing or invalid last archive is removed from recent state and reported,
+never recreated. Cancel dismisses the dialog without creating a search window;
+About and File New/Open remain available. New asks for a permanent destination
+before opening a search window, then offers Import. Accepting the default
+Untitled name must work. Native save results may be strings or path sequences;
+neither form may truncate the path. File New/Open/Close have Command-N/O/W
+shortcuts on macOS. Search windows have no Open Archive toolbar button.
+The archive path appears in the native title bar, without a duplicate toolbar label.
+The native menu order is Application, File, Edit, View, Window. Existing archive
+directories do not require an extension. Opening checks SQLite schema and layout
+read-only, without scanning every database page; this is not a full corruption
+audit. Open failures appear in About and stderr even if a document cannot open.
+
+An About window always opens at application startup and remains present while
+the application has another window. It displays the installed version, current
+free space on the active archive's filesystem (or the user's home filesystem),
+live Internet reachability, startup errors, warnings, and each open archive's
+latest ingest status.
+About populates through the real native status bridge and polls once per second.
+Its script policy must permit pywebview's dynamic bridge functions, as the search
+and ingest pages do. A delayed bridge retries and clears its warning on recovery.
+Only explicitly selected window methods are exposed to JavaScript; application
+controllers, documents, and native window objects must not be recursively exposed.
+
+**File → New** asks for a new or empty permanent `.mailarchive` destination
+before creating its blank search window. It initializes BagIt, both databases,
+and operational status state, and refuses to overwrite an existing archive or
+nonempty invalid directory. **File → Import…** collects one or more supported
+local files or directories, owner names, explicit final
+confirmation, and starts the same typed ingest service used by the CLI on a
+worker thread. ClamAV must be separately installed and available.
+The Ingests window provides **Import Directory…**, bound to its own archive even
+when another archive is active. It opens the source picker directly, then
+uses the same owner-names setup, confirmation, and writer lease as File Import.
+The button is disabled during an import or while its dialogs are pending.
+On macOS, one source picker accepts files and directories together with an
+**Import** action, without a preliminary source-type question. Its title names
+the destination archive and its message shows the full destination path.
+Selecting an entire directory, including the currently displayed directory,
+uses recursive discovery. Cancel dismisses the picker without starting ingest.
+Final confirmation shows the Mail Archiver icon and destination heading/path.
+Import merges `owner-names.txt` from the top level of every selected source
+directory into the destination archive's `owner-names.txt`. Source files remain
+unchanged, and neither the application checkout nor launch directory supplies
+default names. Existing multiword file entries remain single entries; merges
+deduplicate case-insensitively and sort the display. If the combined list is empty, a macOS
+multiline editor asks for the owner's names and email addresses, one per line;
+there is no owner-names file picker. At least one nonblank, noncomment entry is
+required to continue from that editor. Invalid settings are reported.
+Merged names are saved atomically as UTF-8 in the archive's `owner-names.txt`
+only after final confirmation and acquisition of the writer lease. The merge
+rereads current document names under the lock to preserve concurrent edits.
+Canceling either dialog starts no ingest and saves no names.
+This is operational, unmanifested configuration; it does not change source
+mail or the existing case-insensitive Sent-classification matching rules.
+The packaged local-source ignore rules exclude a source directory's
+`owner-names.txt` from mail discovery and the unrecognized-file count.
+
+Each archive may contain a human-editable `config.yaml` with version `1` and
+the last source-picker directory. After a successful import, the application
+records the first selected directory, or the containing directory of the first
+selected file. The next File Import or Ingests import starts there when it still
+exists; missing or malformed navigation state is ignored and falls back beside
+the archive. This YAML is discardable operational state and is excluded from
+the BagIt tag manifests.
+
+**File → Document Options…** opens one options window per saved archive, also
+listed in Window. It contains a scrollable, sorted, multi-select owner-name
+list with **+** and **−** actions. Add accepts comma-, semicolon-, or
+whitespace-separated entries; Delete removes all selected entries. Changes
+save immediately under the writer lease; ingest blocks edits and stale edits
+must not overwrite newer settings. The document's other windows share this
+list. Ingest records the names actually used in `status/owner-names-used.txt`.
+Options flags a differing list after that import starts, including after
+reopening, and identifies older imports whose names were not recorded.
+The panel explains that changes affect future imports only: messages are not
+moved between Sent and Archive mailboxes. Owner names are not stored in FTS,
+so reindexing cannot reclassify messages and no owner-name Reindex action is offered.
+
+Only a saved document holding the matching cross-process writer lease may
+start ingest. The process-local document registry prevents duplicate UI jobs
+but is not the operating-system lock. Different documents may ingest
+independently. Successful publication increments the document generation and
+identifies all attached search windows for refresh.
+The OS lease is a nonblocking exclusive lock on
+`status/archive-write.lock`; diagnostic JSON in that file records the operation,
+PID, host, start time, version, and archive identity, but file presence never
+determines ownership and a process crash releases the lock. CLI ingest and
+search-index rebuild use the same lease. During Import, **File → Close** does
+nothing for the owning search window and that window's close box is refused;
+other search and child windows remain independently closeable. The Window menu
+lists the About, search, and Ingests windows and brings a selected window forward.
+
 `mailsearch` is a read-only command-line consumer of both databases.  It
 accepts ordinary full-text terms plus `any:ADDRESS`, `from:ADDRESS`,
 role-specific `to:ADDRESS`, `cc:ADDRESS`, and `bcc:ADDRESS`, `subject:TEXT`,
@@ -554,7 +690,7 @@ body text; for HTML it also copies the displayed message subject and headers.
 The bottom of the main GUI contains a clickable ingest-status line. During a
 run it shows live completion, message count, active/configured workers, and ETA;
 otherwise it summarizes the latest run. Clicking it opens a separate native
-Ingests window with its own close box. The **Windows → Ingest** menu opens the
+Ingests window with its own close box. The **Window → Ingests** menu opens the
 same window. That window browses every retained status file and shows the
 selected run's aggregate statistics, sources, failure detail, and all worker
 threads. If it is already visible, either action brings it to the front and
@@ -786,6 +922,9 @@ against a source-controlled SHA-256 digest before execution.
   and tag manifests, required Mailbag structure, and every declared
   complete-MBOX, raw-message, and semantic-message digest without consulting
   SQLite. It exits nonzero after reporting any mismatch.
+  Its source header and `--help` explain prerequisites, macOS/Linux and Windows
+  commands, the default archive directory, checks performed, exit status, and
+  read-only limitations. Instructions travel with every installed copy.
 * The MBOX container's required separator newline is not part of a source
   message that lacked a terminal newline. Catalog retrieval and standalone
   verification select the candidate matching the recorded source SHA-256.
@@ -812,9 +951,10 @@ against a source-controlled SHA-256 digest before execution.
 
 ## Scope boundaries
 
-The first release is a local command-line normalizer and verifier.  Its TOML
-configuration holds archive and scanner policy; `owner-names.txt` remains a
-separate, one-name-per-line reusable classification input.  A local
+The first release is a local command-line normalizer and verifier. Packaged
+configuration holds archive and scanner policy; each archive's `config.yaml`
+holds discardable navigation state, and `owner-names.txt` remains a separate,
+one-name-per-line classification input. A local
 special-purpose search and message-viewing interface is a consumer of
 the two SQLite databases, not a reason to depend on Thunderbird or FoxTrot.
 No source mailbox is modified by this program.
