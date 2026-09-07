@@ -11,6 +11,7 @@ import os
 import sqlite3
 import sys
 import tempfile
+from importlib import import_module
 from pathlib import Path
 from threading import Event, Timer
 
@@ -121,13 +122,13 @@ def exercise_gui(archive: Path, directory: Path, report: SelfTestReport) -> None
                 raise AssertionError("About bridge did not fill system details")
             report.checks.extend(["visible About, search, and Ingests windows", "native search bridge", "missing-ClamAV banner and history warning"])
             # Exercise the real source picker and its banner without selecting any user data.
-            from AppKit import NSApplication, NSModalPanelRunLoopMode  # pylint: disable=import-outside-toplevel,no-name-in-module
-            from Foundation import NSRunLoop, NSTimer  # pylint: disable=import-outside-toplevel,no-name-in-module
-            from PyObjCTools import AppHelper  # pylint: disable=import-outside-toplevel
+            appkit = import_module("AppKit")
+            foundation = import_module("Foundation")
+            AppHelper = import_module("PyObjCTools.AppHelper")
 
             def inspect_picker(timer):
                 timer.invalidate()
-                native = NSApplication.sharedApplication()
+                native = appkit.NSApplication.sharedApplication()
                 try:
                     panel = native.modalWindow()
                     if "Antivirus unavailable" not in str(panel.accessoryView().stringValue()):
@@ -147,8 +148,8 @@ def exercise_gui(archive: Path, directory: Path, report: SelfTestReport) -> None
                     native.stopModalWithCode_(0)
 
             def schedule_picker_check():
-                timer = NSTimer.timerWithTimeInterval_repeats_block_(0.2, False, inspect_picker)
-                NSRunLoop.mainRunLoop().addTimer_forMode_(timer, NSModalPanelRunLoopMode)
+                timer = foundation.NSTimer.timerWithTimeInterval_repeats_block_(0.2, False, inspect_picker)
+                foundation.NSRunLoop.mainRunLoop().addTimer_forMode_(timer, appkit.NSModalPanelRunLoopMode)
 
             AppHelper.callAfter(schedule_picker_check)
             if application._import_document(api):  # pylint: disable=protected-access
@@ -157,6 +158,7 @@ def exercise_gui(archive: Path, directory: Path, report: SelfTestReport) -> None
         except Exception as error:  # pylint: disable=broad-exception-caught
             failures.append(f"{type(error).__name__}: {error}")
         finally:
+            application.stop_imports_for_quit()
             for window in reversed(list(webview.windows)):
                 window.destroy()
 

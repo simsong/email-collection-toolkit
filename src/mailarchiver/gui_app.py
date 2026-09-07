@@ -13,6 +13,7 @@ import tempfile
 import time
 from concurrent.futures import Future, ThreadPoolExecutor
 from datetime import datetime, timezone
+from importlib import import_module
 from importlib.metadata import version
 from pathlib import Path
 from threading import Event, Lock, RLock, Thread
@@ -415,10 +416,10 @@ def macos_import_picker(
             panel.setTitle_(title)
             panel.setMessage_(message)
             if warning:
-                from AppKit import NSTextField, NSColor  # pylint: disable=import-outside-toplevel,no-name-in-module
-                banner = NSTextField.wrappingLabelWithString_(warning)
+                appkit = import_module("AppKit")
+                banner = appkit.NSTextField.wrappingLabelWithString_(warning)
                 banner.setFrame_(((0, 0), (520, 64)))
-                banner.setTextColor_(NSColor.systemRedColor())
+                banner.setTextColor_(appkit.NSColor.systemRedColor())
                 panel.setAccessoryView_(banner)
             panel.setPrompt_(prompt)
             panel.setCanChooseDirectories_(folders)
@@ -1084,6 +1085,7 @@ class PyWebViewApplication:
         self._native_child_ids: dict[str, str] = {}
         self._about_api = AboutApi(self)
         self._about_window: Any = None
+        self._about_visible = False
         self._notices: list[ApplicationNotice] = []
         self._connectivity: ConnectivityMonitor | None = None
         self._menu_observer: Any = None
@@ -1099,12 +1101,14 @@ class PyWebViewApplication:
         return f"{GUI_DIRECTORY / asset}{suffix}"
 
     def create_about_window(self) -> None:
-        """Create the health window that remains present for the application lifetime."""
+        """Show health at startup or on an explicit About menu request."""
         if self._connectivity is None:
             self._connectivity = ConnectivityMonitor()
         if self._about_window is not None:
+            self._about_visible = True
             self._about_window.restore()
             self._about_window.show()
+            self._refresh_menus()
             return
         window = webview.create_window(
             f"About {APPLICATION_NAME}",
@@ -1117,13 +1121,25 @@ class PyWebViewApplication:
             menu=self.menu(),
         )
         self._about_window = window
+        self._about_visible = True
         window.events.shown += lambda *_args: self._refresh_menus()
+
+        def closing(*_args: object) -> bool:
+            if self._quitting:
+                return True
+            # Keep a hidden native window so closing the last visible window does
+            # not end pywebview's event loop or remove File/New/Open and About.
+            self._about_visible = False
+            window.hide()
+            self._refresh_menus()
+            return False
 
         def closed(*_args: object) -> None:
             self._about_window = None
-            if self._apis or self._ingest_apis:
-                self.create_about_window()
+            self._about_visible = False
+            self._refresh_menus()
 
+        window.events.closing += closing
         window.events.closed += closed
         self._refresh_menus()
 
@@ -1654,7 +1670,7 @@ class PyWebViewApplication:
 
     def window_menu_items(self) -> list[MenuAction]:
         items = []
-        if self._about_window is not None:
+        if self._about_window is not None and self._about_visible:
             items.append(MenuAction(f"About {APPLICATION_NAME}", lambda: self.focus_window(self._about_window.uid)))
         for index, api in enumerate(self._search_apis(), 1):
             if api.window is None:
@@ -1753,6 +1769,9 @@ class PyWebViewApplication:
                 return
             menu = instance._recreate_menus(active.menu)  # pylint: disable=protected-access
             BrowserView.app.setMainMenu_(menu)
+            about_item = menu.itemAtIndex_(0).submenu().itemAtIndex_(0)
+            about_item.setTarget_(BrowserView.app.delegate())
+            about_item.setAction_("showMailArchiverAbout:")
             BrowserView.current_menu = active.menu
             for index, title in enumerate(("File", "Edit", "View", "Window"), 1):
                 item = next(
@@ -1895,12 +1914,16 @@ def install_macos_document_events(application: PyWebViewApplication) -> None:
         def applicationShouldTerminate_(self, sender):
             import AppKit  # pylint: disable=import-outside-toplevel,import-error
             import objc  # pylint: disable=import-outside-toplevel,import-error
-            from PyObjCTools import AppHelper  # pylint: disable=import-outside-toplevel
+            AppHelper = import_module("PyObjCTools.AppHelper")
 
             if application._quitting:
                 return AppKit.NSTerminateLater
             if not any(document.ingest_job for document in application.controller.documents()):
-                return objc.super(MailArchiverDelegate, self).applicationShouldTerminate_(sender)
+                application._quitting = True
+                decision = objc.super(MailArchiverDelegate, self).applicationShouldTerminate_(sender)
+                if decision == AppKit.NSTerminateCancel:
+                    application._quitting = False
+                return decision
             if macos_alert("Stop importing and quit?", QUIT_IMPORT_MESSAGE,
                            ("Cancel", "Stop Import and Quit"), body_width=IMPORT_CONFIRMATION_WIDTH) != 1:
                 return AppKit.NSTerminateCancel
@@ -1918,7 +1941,7 @@ def install_macos_document_events(application: PyWebViewApplication) -> None:
             paths = tuple(Path(str(filename)) for filename in filenames)
 
             def open_documents():
-                from PyObjCTools import AppHelper  # pylint: disable=import-outside-toplevel
+                AppHelper = import_module("PyObjCTools.AppHelper")
                 try:
                     errors = application.handle_open_documents(paths)
                     AppHelper.callAfter(sender.replyToOpenOrPrint_, 1 if errors else 0)
@@ -1928,8 +1951,11 @@ def install_macos_document_events(application: PyWebViewApplication) -> None:
 
             Thread(target=open_documents, name="mailarchiver-open-documents", daemon=True).start()
 
+        def showMailArchiverAbout_(self, _sender):
+            Thread(target=application.create_about_window, name="mailarchiver-about", daemon=True).start()
+
         def applicationShouldHandleReopen_hasVisibleWindows_(self, _sender, _visible):
-            Thread(target=application.create_about_window, name="mailarchiver-reopen", daemon=True).start()
+            # Dock activation must not reopen a dismissed About window.
             return True
 
     BrowserView.AppDelegate = MailArchiverDelegate

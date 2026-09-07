@@ -50,8 +50,13 @@ button { min-height: 28px; }
 .suggestion-empty { padding: 10px 8px; color: var(--muted); }
 .attachment-search { display: flex; align-items: center; gap: 5px; white-space: nowrap; }
 
-.workspace { display: grid; grid-template-columns: minmax(300px, 38%) 1fr; height: calc(100% - 78px); }
-.workspace.tree-visible { grid-template-columns: minmax(235px, 20%) minmax(300px, 31%) 1fr; }
+.workspace { display: grid; grid-template-columns: minmax(0, var(--results-width, 38%)) 7px minmax(0, 1fr); height: calc(100% - 78px); }
+.workspace.tree-visible { grid-template-columns: min(30%, max(235px, 20%)) minmax(0, var(--results-width, 31%)) 7px minmax(0, 1fr); }
+.message-splitter { cursor: col-resize; touch-action: none; background: var(--surface); border-inline: 1px solid var(--border); }
+.message-splitter:hover, .message-splitter:focus-visible { background: var(--selection); }
+.message-splitter:focus-visible { outline: 2px solid AccentColor; outline-offset: -2px; }
+body.resizing-panes, body.resizing-panes * { cursor: col-resize !important; user-select: none !important; -webkit-user-select: none !important; }
+body.resizing-panes iframe { pointer-events: none; }
 .mailbox-browser { overflow: auto; border-right: 1px solid var(--border); background: var(--surface); }
 .mailbox-browser h2 { margin: 0; padding: 12px 12px 7px; font-size: 14px; }
 .mailbox-controls { display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 5px; padding: 0 10px 7px; }
@@ -65,7 +70,7 @@ button { min-height: 28px; }
 .mailbox-node[data-kind="volume"] span { font-weight: 650; }
 .tree-disclosure { width: 18px; min-height: 18px; padding: 0; border: 0; color: var(--muted); background: transparent; }
 .tree-disclosure:disabled { opacity: 0; }
-.results { display: flex; flex-direction: column; min-height: 0; overflow: hidden; border-right: 1px solid var(--border); background: var(--surface); user-select: none; }
+.results { display: flex; flex-direction: column; min-width: 0; min-height: 0; overflow: hidden; background: var(--surface); user-select: none; }
 .result-controls { flex: none; display: flex; align-items: center; gap: 6px; min-height: 42px; padding: 6px 8px 6px 12px; border-bottom: 1px solid var(--border); background: var(--surface); }
 .result-controls label { color: var(--muted); }
 .result-controls select { max-width: 90px; }
@@ -168,7 +173,7 @@ dialog h2 { margin: 0 0 16px; font-size: 18px; }
 .filter-set-row { display: grid; grid-template-columns: 1fr auto auto; gap: 6px; margin: 7px 0; }
 .link-destination { max-height: 12em; overflow: auto; overflow-wrap: anywhere; color: var(--muted); font: 12px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace; }
 
-body.standalone .toolbar, body.standalone .results, body.standalone .mailbox-browser, body.standalone .ingest-status-line { display: none; }
+body.standalone .toolbar, body.standalone .results, body.standalone .mailbox-browser, body.standalone .message-splitter, body.standalone .ingest-status-line { display: none; }
 body.standalone .workspace { display: block; height: 100%; }
 body.standalone .message { height: 100%; overflow: auto; }
 

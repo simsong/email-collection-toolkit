@@ -503,6 +503,11 @@ The search toolbar omits the archive path; the native title bar identifies it.
 The Cocoa adapter reorders File, Edit, View, Window after the application menu.
 It resolves Cocoa focus on the main thread and still builds menus from the
 logical active document or About when a background app has no native key window.
+Closing About hides its retained native window instead of recreating it, keeping
+the event loop alive even when no document is open. The hidden window is omitted
+from the Window menu. The application menu's About command restores it; Dock
+activation does not. Quit permits its actual destruction. The native lifecycle
+probe exercises dismissal, background updates, and explicit menu reopening.
 `WindowBridge` restricts pywebview introspection to explicit callable names,
 excluding public controller and window object graphs. About allows the same
 dynamic bridge generation as the other pages, retries bridge readiness, polls
@@ -592,6 +597,14 @@ Result ordering is a server-side SQL whitelist over date, case-folded subject,
 or case-folded sender with a stable message-number tie break. The Tabulator
 result table owns focus, rendering, and row components, while the application
 maps Up/Down to selection and message display.
+The sole Tabulator column has `resizable: false`. A focusable vertical separator
+uses pointer capture and keyboard controls to adjust a CSS grid track. Its
+per-window fraction is clamped to 300-pixel list and 320-pixel preview minima
+(half the available width when smaller). Resize observers account for the
+folder tree and window dimensions and remeasure HTML previews; Tabulator's own
+container observer refits its column without replacing data or selection.
+The separator is hidden in standalone and print layouts. Headless browser tests
+drag the real divider and check widths, overflow, selection, and keyboard limits.
 The older bounded-recent optimization remains internal to the command-line
 client, whose automatic exact fallback preserves its one-call behavior. The
 GUI always invokes the complete SHA-256/FTS query because an archivist may be
@@ -611,7 +624,8 @@ the typed result batch until it can update visible rows. Its `rowMouseDown` and
 `rowMouseEnter` events provide row components for the small range adapter;
 the result-table boundary cancels native `selectstart` and its row subtree has
 explicit WebKit and standard `user-select: none` rules, so drag selection never
-also selects card text. There is no custom scroll/viewport or pointer-coordinate code. A single
+also selects card text. Result virtualization and range selection need no custom
+scroll/viewport or pointer-coordinate code. A single
 selected row displays its message. A multi-row selection clears its stale
 single-message view, displays the selected-message count with the same file well,
 and an explicit drag from that well prepares a ZIP only when the drag begins.

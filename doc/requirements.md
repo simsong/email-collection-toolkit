@@ -537,8 +537,10 @@ directories do not require an extension. Opening checks SQLite schema and layout
 read-only, without scanning every database page; this is not a full corruption
 audit. Open failures appear in About and stderr even if a document cannot open.
 
-An About window always opens at application startup and remains present while
-the application has another window. It displays the installed version, current
+An About window always opens at application startup. Closing it dismisses it
+until the user chooses the application menu's About command; status updates and
+Dock activation must not reopen it. Closing the last visible window keeps the
+application running with About and File New/Open available. It displays the installed version, current
 free space on the active archive's filesystem (or the user's home filesystem),
 live Internet reachability, startup errors, warnings, and each open archive's
 latest ingest status.
@@ -675,6 +677,14 @@ message, attachments, and source-location evidence. The result list can sort by 
 sender in either direction. When it has keyboard focus, Up Arrow and Down
 Arrow move the selection and display the newly selected message. Result rows
 show the indexed attachment count with a paperclip.
+The single result column is not user-resizable. A draggable divider reallocates
+width between the result list and preview without introducing a horizontal
+result-list scrollbar or changing the current selection. It also supports
+Left/Right Arrow (Shift for larger steps) and Home/End while focused, respects
+minimum pane widths, and adapts to window resizing and the optional folder tree.
+Each search window keeps its own split for its lifetime; standalone message
+windows and printing have no divider. Browser acceptance tests exercise these
+layout and selection invariants.
 An unchecked **Search attachments** control searches only headers and message
 bodies. When checked, the same ordinary full-text expression also matches the
 separate indexed text-attachment table; metadata selectors retain their normal

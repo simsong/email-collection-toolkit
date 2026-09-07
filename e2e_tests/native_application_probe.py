@@ -3,20 +3,27 @@
 Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved.
 """
 
-import sys
+import os
+from importlib import import_module
 from pathlib import Path
 from threading import Event
 
 import webview
-from PyObjCTools import AppHelper
-from AppKit import NSApplication, NSModalPanelRunLoopMode, NSTextView  # pylint: disable=no-name-in-module
-from Foundation import NSRunLoop, NSTimer  # pylint: disable=no-name-in-module
 
 from mailarchiver.application import ApplicationController, ApplicationPreferencesStore, IngestJob
-from mailarchiver.gui_app import GUI_DIRECTORY, PyWebViewApplication, configure_macos_application, macos_import_picker, macos_owner_names
+from mailarchiver.gui_app import GUI_DIRECTORY, PyWebViewApplication, configure_macos_application, install_macos_document_events, macos_import_picker, macos_owner_names
 from mailarchiver.loopback import LoopbackAssetServer
 from mailarchiver.document_options import DocumentOptions
 from mailarchiver.writer_lock import WriterLease
+
+AppHelper = import_module("PyObjCTools.AppHelper")
+NSApplication = import_module("AppKit").NSApplication
+NSModalPanelRunLoopMode = import_module("AppKit").NSModalPanelRunLoopMode
+NSTextView = import_module("AppKit").NSTextView
+NSRunLoop = import_module("Foundation").NSRunLoop
+NSTimer = import_module("Foundation").NSTimer
+PROBE_ARCHIVE_ENV = "MAILARCHIVER_NATIVE_PROBE_ARCHIVE"
+PROBE_PREFERENCES_ENV = "MAILARCHIVER_NATIVE_PROBE_PREFERENCES"
 
 
 def evaluate_async(window: webview.Window, expression: str):
@@ -36,9 +43,11 @@ def evaluate_async(window: webview.Window, expression: str):
 def main() -> None:
     """Open a real extensionless fixture after About, inspect native menus, then quit."""
     configure_macos_application()
+    archive = Path(os.environ[PROBE_ARCHIVE_ENV])
     server = LoopbackAssetServer(GUI_DIRECTORY)
-    controller = ApplicationController(ApplicationPreferencesStore(Path(sys.argv[2])))
+    controller = ApplicationController(ApplicationPreferencesStore(Path(os.environ[PROBE_PREFERENCES_ENV])))
     application = PyWebViewApplication(controller, server)
+    install_macos_document_events(application)
     application.create_about_window()
     about = webview.windows[0]
     failures: list[str] = []
@@ -73,7 +82,47 @@ def main() -> None:
             assert "Native About regression check" in about.evaluate_js("document.getElementById('notices').textContent")
             assert about.evaluate_js("document.getElementById('error').hidden")
             check_new_search(False)
-            api = application.open_document(Path(sys.argv[1]))
+            # Closing the sole visible window must keep menus alive, without
+            # status polling or Dock activation reopening About.
+            AppHelper.callAfter(about.native.performClose_, None)
+            application.add_notice("warning", "Notice while About is dismissed")
+            evaluate_async(about, "refresh().then(() => true)")
+            dismissed = Event()
+
+            def inspect_dismissed() -> None:
+                try:
+                    native = NSApplication.sharedApplication()
+                    assert not about.native.isVisible(), "Dismissed About is still visible"
+                    assert not about.events.closed.is_set(), "About was destroyed instead of hidden"
+                    assert webview.windows == [about], f"Unexpected windows: {[window.title for window in webview.windows]}"
+                    assert application.window_menu_items() == [], "Hidden About remains in Window menu"
+                    native.delegate().applicationShouldHandleReopen_hasVisibleWindows_(native, False)
+                    assert not about.native.isVisible(), "Dock activation reopened About"
+                    menu = native.mainMenu()
+                    assert menu.itemWithTitle_("File").submenu().itemWithTitle_("Open…").isEnabled(), "File/Open is disabled"
+                    item = menu.itemAtIndex_(0).submenu().itemAtIndex_(0)
+                    assert native.sendAction_to_from_(item.action(), item.target(), item), f"About action failed: {item.action()!r}"
+                except Exception as error:  # pylint: disable=broad-exception-caught
+                    failures.append(str(error))
+                finally:
+                    dismissed.set()
+
+            AppHelper.callLater(1.2, inspect_dismissed)
+            assert dismissed.wait(5), "About dismissal check timed out"
+            reopened = Event()
+
+            def inspect_reopened() -> None:
+                try:
+                    assert about.native.isVisible(), "About menu did not restore the window"
+                    assert webview.windows == [about], "About must restore the retained window"
+                except Exception as error:  # pylint: disable=broad-exception-caught
+                    failures.append(str(error))
+                finally:
+                    reopened.set()
+
+            AppHelper.callLater(0.3, inspect_reopened)
+            assert reopened.wait(5), "About menu reopening check timed out"
+            api = application.open_document(archive)
             assert api.window.events.loaded.wait(10), "Document bridge failed to load"
             assert evaluate_async(api.window, "window.pywebview.api.status()")['message_count'] == 1
             assert api.window.evaluate_js("document.getElementById('choose-archive') === null")
@@ -127,7 +176,7 @@ def main() -> None:
                     assert panel is not None, "Directory picker did not appear"
                     assert panel.prompt() == "Import"
                     assert panel.canChooseDirectories() and panel.canChooseFiles()
-                    assert Path(panel.directoryURL().path()) == Path(sys.argv[1])
+                    assert Path(panel.directoryURL().path()) == archive
                     NSApplication.sharedApplication().stopModalWithCode_(1)
                 except Exception as error:  # pylint: disable=broad-exception-caught
                     failures.append(str(error))
@@ -139,10 +188,10 @@ def main() -> None:
 
             AppHelper.callAfter(schedule_directory_selection)
             selected = macos_import_picker(
-                Path(sys.argv[1]), "Import directory test", "Select this entire directory",
+                archive, "Import directory test", "Select this entire directory",
                 "Import", folders=True, multiple=True,
             )
-            assert len(selected) == 1 and selected[0].samefile(Path(sys.argv[1])), selected
+            assert len(selected) == 1 and selected[0].samefile(archive), selected
 
             # GUI requirement: multiline owner entry replaces a second file picker.
             for accept in (False, True):
@@ -220,6 +269,7 @@ def main() -> None:
         except Exception as error:  # pylint: disable=broad-exception-caught
             failures.append(str(error))
         finally:
+            application.stop_imports_for_quit()
             for window in list(webview.windows):
                 if window is not about:
                     window.destroy()
