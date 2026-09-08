@@ -496,6 +496,8 @@ window starts with an unlogged, one-use cryptographic nonce that establishes a
 session-only `HttpOnly`, `SameSite=Strict` cookie and redirects to a clean URL;
 every asset request requires that cookie and the exact loopback host, and any
 request carrying an `Origin` header must name that exact origin.
+Bootstrap redirects explicitly declare an empty body. Asset HEAD responses
+report the GET content length without reading or returning the asset body.
 The server sends no permissive CORS response and stops with the application.
 Any future state-changing HTTP API must additionally require an explicit CSRF
 header. The applications must be packaged

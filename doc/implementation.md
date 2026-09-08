@@ -541,7 +541,9 @@ preferences. This check does not certify every database page against corruption.
 a disposable extensionless archive, checks rendered notices and native menu order
 and Open shortcut, and closes the application. It runs only on a logged-in Mac.
 
-`LoopbackAssetServer` owns GUI delivery. It binds `127.0.0.1:0`, issues a
+`LoopbackAssetServer` owns GUI delivery. Bootstrap redirects send
+`Content-Length: 0`; HEAD obtains the asset length from filesystem metadata
+without reading its contents, while GET sends the asset bytes. It binds `127.0.0.1:0`, issues a
 different one-use bootstrap ticket for every new window, sets a random
 session-cookie name and value, redirects away from the ticket, and serves only
 resolved files below `gui/`. Direct unauthenticated requests, ticket replay,

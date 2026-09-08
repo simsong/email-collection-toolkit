@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+* Clarify installed verifier usage and make GUI asset HEAD/redirect response
+  lengths explicit without reading asset bodies for HEAD.
+
 - Standardize the agent PR workflow as `pr-to-ready`, retain
   `codex-to-complete` and `codex-to-ready` aliases, and add shared
   Codex, Claude, and Copilot implementer/reviewer instructions.

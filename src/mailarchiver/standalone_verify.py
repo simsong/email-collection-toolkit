@@ -5,7 +5,11 @@ HOW TO RUN
   Requires Python 3.10 or later, using only its standard library. No Mail
   Archiver installation or additional Python packages are needed.
 
-  From the directory containing this script:
+  The commands below use the installed archive copy, verify_mail_archive.py.
+  In a source checkout this file is src/mailarchiver/standalone_verify.py;
+  invoke that path with an explicit archive directory instead.
+
+  From the directory containing the installed script:
     macOS / Linux:  python3 verify_mail_archive.py
     Windows:        py -3 verify_mail_archive.py
 
