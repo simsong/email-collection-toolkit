@@ -157,3 +157,19 @@ Before treating a Mail cache as a substantive source, a preflight should:
 
 No real canonical archive should be populated from this Mail store until the
 target archive is identified and the ingest is explicitly authorized.
+
+## Current acquisition boundaries
+
+No release Desktop OAuth client is bundled yet. The shared-client end-user
+flow remains deferred until a maintainer supplies and validates that public
+configuration in release artifacts. Current authorization requires a developer
+client override. Installing that override validates and writes the same bytes.
+Known consumer domains need no DNS lookup; transient DNS and token-refresh
+transport failures are disclosed as errors rather than negative detection or
+fresh consent. Credentials are stored only after the profile matches.
+
+A whole Apple Mail cache containing `.partial.emlx` files cannot currently be
+ingested: discovery rejects those files and stops the run. Only a separately
+staged copy containing complete supported records is an available local-file
+bridge. Do not modify the source cache to prepare that copy; the comparator is
+read-only and does not imply whole-cache ingest support.

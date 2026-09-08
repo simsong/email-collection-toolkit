@@ -209,7 +209,7 @@ def has_pdf_magic(payload: bytes) -> bool:
 
 def inventory(archive: Path, output: Path, max_message_pk: int | None) -> None:
     output.mkdir(parents=True, exist_ok=True)
-    inputs = output / "input-pdfs"
+    output / "input-pdfs"
     instances: list[PdfInstance] = []
     errors: list[str] = []
     rejected: list[str] = []

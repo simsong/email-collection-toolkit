@@ -23,7 +23,7 @@ OCR_ENGINES ?= native,ocrmypdf,tesseract
 OCR_INVENTORY_ARGS ?=
 OCR_RUN_ARGS ?=
 
-check: test test-e2e website-check
+check: ruff test test-e2e website-check
 
 auth-detect-live:
 	uv run mailarchiver-auth --detect-only simsong@gmail.com
@@ -248,3 +248,7 @@ ocr-run:
 	uv run python scripts/ocr_experiment.py run --output "$(OCR_OUTPUT)" --engines "$(OCR_ENGINES)" --workers "$(OCR_WORKERS)" $(OCR_RUN_ARGS)
 
 ocr-experiment: ocr-inventory ocr-run
+
+.PHONY: ruff
+ruff:
+	uv run --locked ruff check $(RUFF_FLAGS) --config pyproject.toml --no-respect-gitignore .

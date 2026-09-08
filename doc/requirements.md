@@ -775,7 +775,7 @@ one-time registration procedure and tell readers to use their own account.
   records and attachment policy before a completeness claim. The observed
   machine-specific access boundary and preflight are maintained in
   `doc/APPLE_MAIL_CACHE.md`. Until direct Gmail, Microsoft 365, and IMAP
-  adapters are implemented, complete Apple Mail cache records are a supported
+  adapters are implemented, separately staged complete Apple Mail cache records are a supported
   local-file bridge for accounts synchronized through those providers; the
   bridge must not be represented as provider-complete acquisition.
 * The Apple Mail/archive comparator is strictly read-only. It indexes complete
@@ -909,3 +909,19 @@ package. A redacted or otherwise restricted release is a separate BagIt bag
 with its own payload, manifests, Mailbag identifiers, and audit mapping. PDF
 and WARC representations remain opt-in, sandboxed publication derivatives and
 must not make remote requests without explicit authorization.
+
+## Current acquisition boundaries
+
+No release Desktop OAuth client is bundled yet. The shared-client end-user
+flow remains deferred until a maintainer supplies and validates that public
+configuration in release artifacts. Current authorization requires a developer
+client override. Installing that override validates and writes the same bytes.
+Known consumer domains need no DNS lookup; transient DNS and token-refresh
+transport failures are disclosed as errors rather than negative detection or
+fresh consent. Credentials are stored only after the profile matches.
+
+A whole Apple Mail cache containing `.partial.emlx` files cannot currently be
+ingested: discovery rejects those files and stops the run. Only a separately
+staged copy containing complete supported records is an available local-file
+bridge. Do not modify the source cache to prepare that copy; the comparator is
+read-only and does not imply whole-cache ingest support.

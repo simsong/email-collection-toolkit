@@ -21,7 +21,7 @@ import dns.exception
 import dns.resolver
 import keyring
 import requests
-from google.auth.exceptions import RefreshError
+from google.auth.exceptions import RefreshError, TransportError
 from google.auth.transport.requests import AuthorizedSession, Request
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow, WSGITimeoutError
@@ -200,15 +200,19 @@ def resolve_dns_evidence(domain: str) -> DnsEvidence:
     resolver.lifetime = 5.0
     try:
         mx_hosts = tuple(_dns_name(answer.exchange) for answer in resolver.resolve(domain, "MX"))
-    except dns.exception.DNSException:
+    except (dns.resolver.NoAnswer, dns.resolver.NXDOMAIN):
         mx_hosts = ()
+    except dns.exception.DNSException as error:
+        raise AuthorizerError(f"DNS MX lookup failed for {domain}: {error}") from error
     try:
         targets = tuple(
             _dns_name(answer.target)
             for answer in resolver.resolve(f"autodiscover.{domain}", "CNAME")
         )
-    except dns.exception.DNSException:
+    except (dns.resolver.NoAnswer, dns.resolver.NXDOMAIN):
         targets = ()
+    except dns.exception.DNSException as error:
+        raise AuthorizerError(f"DNS Autodiscover lookup failed for {domain}: {error}") from error
     return DnsEvidence(domain=domain, mx_hosts=mx_hosts, autodiscover_targets=targets)
 
 
@@ -248,6 +252,8 @@ def classify_provider(evidence: DnsEvidence) -> ProviderDetection:
 def detect_provider(account: MailboxAddress, force_gmail: bool = False) -> ProviderDetection:
     if force_gmail:
         return ProviderDetection(provider=MailProvider.GMAIL, evidence=("--gmail override",))
+    if account.domain in GMAIL_DOMAINS | M365_DOMAINS:
+        return classify_provider(DnsEvidence(domain=account.domain))
     return classify_provider(resolve_dns_evidence(account.domain))
 
 
@@ -299,7 +305,11 @@ def install_client_secrets(
     project_id: str | None = None,
     config_root: Path | None = None,
 ) -> Path:
-    configuration = parse_client_secrets(source)
+    try:
+        raw = source.read_bytes()
+        configuration = ClientSecrets.model_validate_json(raw)
+    except (OSError, ValueError) as error:
+        raise AuthorizerError(f"invalid Google Desktop-client JSON: {source}: {error}") from error
     if project_id is not None and configuration.installed.project_id != project_id:
         raise AuthorizerError(
             f"download belongs to project {configuration.installed.project_id}, expected {project_id}"
@@ -308,7 +318,7 @@ def install_client_secrets(
     destination.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
     os.chmod(destination.parent, stat.S_IRWXU)
     temporary = destination.with_suffix(".tmp")
-    temporary.write_bytes(source.read_bytes())
+    temporary.write_bytes(raw)
     os.chmod(temporary, stat.S_IRUSR | stat.S_IWUSR)
     temporary.replace(destination)
     return destination
@@ -539,6 +549,8 @@ def authorize_gmail(account: MailboxAddress, secrets_path: Path) -> GmailProfile
                 if profile.email_address.casefold() == account.address.casefold():
                     _store_credentials(account, credentials)
                     return profile
+        except TransportError as error:
+            raise AuthorizerError(f"Gmail token refresh transport failed: {error}") from error
         except RefreshError:
             credentials = None
 

@@ -8,7 +8,6 @@ import hashlib
 import json
 import mailbox
 import random
-import re
 import sqlite3
 from collections import Counter
 from datetime import datetime, timezone
