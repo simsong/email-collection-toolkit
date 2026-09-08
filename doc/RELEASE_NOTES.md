@@ -13,7 +13,7 @@
 * Require Ruff and Pylint, followed by ty and Pyright, before tests in
   `make check`, with locked development dependencies and ordered stages.
 
-* Document the browser-driven Copilot-to-complete workflow, ten-minute review
+* Document the browser-driven pr-to-ready workflow, ten-minute review
   checks, signed Codex identity, and explicit human handoff for review loops.
 
 * Make `refresh-index` observable and safe to interrupt: it now reports

@@ -93,7 +93,7 @@ reused.
 
 ## Authorization and identity
 
-A request to perform **copilot-to-complete** (also called **codex-to-complete**)
+A request to perform **pr-to-ready**
 authorizes the commits, pushes, draft PR creation, review requests, review-thread
 replies, fixes, and final human-review request described below. Continue through
 these steps without repeatedly requesting permission. Do not approve or merge a
@@ -108,7 +108,7 @@ that identity. Sign every Codex commit. Verify the result before pushing with
 `git log -1 --format='%G? %GS %an <%ae> %cn <%ce>'`. To correct identity on an
 existing commit, use `git commit --amend --reset-author -S`.
 
-## Copilot-to-complete
+## pr-to-ready
 
 1. Fetch current remote state; inspect the intended diff against the PR base and
    preserve unrelated work. Run the relevant Makefile validation before each
