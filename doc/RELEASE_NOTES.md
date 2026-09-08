@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+* Tighten plug-in method contracts, native-window failure handling, and integrity
+  version validation while adding complete ty and Pyright coverage.
+
 * Require Ruff and Pylint, followed by ty and Pyright, before tests in
   `make check`, with locked development dependencies and ordered stages.
 

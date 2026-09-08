@@ -393,6 +393,55 @@ bytes with the message's declared body charset before RFC 2047 processing, so
 catalog, search, Raw Source display, and MIME-part displays use the same
 source-preserving recovery path.
 
+`mailarchiver.application` is the platform-neutral desktop lifecycle layer.
+`ApplicationController` owns the canonical archive-document registry, logical
+search windows, preferences, recent documents, startup selection, active-window
+routing, and host entry points for operating-system open/reopen events.
+`ArchiveDocument` owns shared per-archive ingest and child-window state and
+retains the typed `WriterLease` for an active import. `WriterLease` uses
+nonblocking `flock` on supported POSIX systems against
+`status/archive-write.lock`. Its UTF-8 JSON is diagnostic only; the open OS lock
+is authoritative and is released automatically if a process dies. CLI ingest,
+GUI import, and search-index replacement enter through the same lock contract.
+`SearchWindow` is a typed record for the independent query, sort, selection,
+mailbox-filter, and geometry state that the JavaScript UI maintains. Preferences
+are written explicitly as UTF-8 and atomically replaced in the platform
+application-data directory; their randomly generated temporary filename has no
+user-derived component. They are treated as optional, discardable state.
+
+`PyWebViewApplication` adapts that model to native pywebview windows without
+putting platform imports in the controller. Its File menu asks for a new or
+empty destination and initializes it before creating a blank window, opens an
+archive in a new search window, opens another search window on the active
+document, runs Import, and closes the active window unless that window owns the
+running Import. Window close events enforce the same rule. The Window menu
+routes to the active archive's shared Ingests child window and enumerates every
+About, search, and Ingests window. A narrow macOS adapter refreshes pywebview's
+process menu when window or ingest state changes and disables the Close item
+when the controller would refuse it. `handle_open_documents` and
+`reopen` are stable host entry points for the extension/activation work in
+issue 76. Windows shell work and frozen application/installers remain owned by
+issues 73, 72, 74, and 75 respectively.
+
+The CLI and GUI construct the same Pydantic `IngestRequest` and call
+`run_ingest()`. The GUI acquires and publishes the per-document writer lease,
+runs the service on a non-daemon worker thread, leaves readers usable, polls the
+existing typed status files in every attached search window and the persistent
+About window, and invalidates view caches after the run. Startup and import
+errors are retained as typed notices instead of being available only on stderr.
+When startup produced Untitled, a `webview.start` callback runs after native
+windows exist, asks for the permanent destination, replaces Untitled with the
+created document, and offers Import; cancellation never creates an implicit
+temporary archive.
+
+`LoopbackAssetServer` owns GUI delivery. It binds `127.0.0.1:0`, issues a
+different one-use bootstrap ticket for every new window, sets a random
+session-cookie name and value, redirects away from the ticket, and serves only
+resolved files below `gui/`. Direct unauthenticated requests, ticket replay,
+foreign `Origin`, an incorrect `Host`, and traversal fail closed. It emits no
+request log and no CORS allowance. WKWebView/WebView2 service calls continue to
+use pywebview's native JavaScript bridge; there is currently no HTTP API.
+
 The `gui/` prototype uses pywebview's Cocoa/WKWebView backend on macOS.  Its
 Python API delegates query parsing, SQLite reads, and direct MBOX retrieval to
 the same typed functions used by `mailsearch`. A nonempty query directly asks
@@ -420,7 +469,7 @@ The main window polls the latest shared `IngestStatus` once per second and
 renders it in a bottom status line. The separate `ingests.html` application
 polls all typed status files and presents run history beside aggregate and
 per-worker detail. Both the status-line action and the native
-**Windows → Ingest** menu route through a singleton window owner: an existing
+**Window → Ingests** menu route through a per-document singleton window owner: an existing
 window is restored and ordered to the front, while a closed one is recreated
 with its own normal close box. A running file whose heartbeat is older than
 five seconds is displayed as stale without rewriting its retained JSON.
@@ -1110,3 +1159,39 @@ Both type checkers cover source, scripts, tests, end-to-end tests, and the AWS
 launcher. Project development dependencies and type stubs are locked with uv;
 static analysis must produce no errors or warnings. Focused `make ruff`,
 `make pylint`, `make ty`, `make pyright`, and `make test` targets remain available.
+
+### Writer and desktop review boundary
+
+Current archive writing is supported on POSIX. Windows writing fails before
+creating an archive or lock metadata; the secure no-reparse-point implementation
+and native Windows subprocess validation are deferred to v1.1.0. The former
+untested msvcrt branch is removed; no Windows locking guarantee is claimed.
+POSIX acquisition pins the archive/status directories and opens lock files
+relative to directory descriptors without following links. Lock files must be
+regular, single-link files. New targets are created under a parent-directory
+creation lock before acquiring the archive lease; creation diagnostics may leave
+`.mailarchiver-create.lock` in the parent. Its presence alone does not lock anything.
+GUI creation rechecks destination emptiness under the lease. File New proceeds
+into Import, About reports the active archive volume, and publication refreshes
+mailbox-only queries as well as text queries.
+
+### PR review validation follow-up
+
+Archive documents identify directories by filesystem device/inode and reject
+symbolic or hard-linked database entries before opening. GUI ingest records
+publication evidence even when a later step fails; only published changes
+advance the shared generation. Progress can write status files without a
+terminal stream, including windowed builds with no stderr. Ingest child windows
+route document actions to an attached search window. Informational notices stay
+in About instead of appearing as errors. Closing an import owner offers waiting
+or keeping the window open. Native macOS Quit is refused with an explanation
+while an import is active; shutdown joins tracked workers before releasing
+resources. Makefile Ruff checks select this checkout's configuration explicitly
+and include ignored linked-worktree paths.
+
+An Ingests child window retains document routing after all search windows close.
+New Search and Ingests use that document directly; Import creates a new search
+owner when needed.
+
+Integrity hash-standard versions must be JSON integers. The standalone verifier
+rejects boolean, floating-point, and string alternatives without coercion.

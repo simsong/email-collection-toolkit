@@ -10,7 +10,6 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
-
 DATASET_ID = "dataset_id"
 RUN_ID = "run_id"
 INSTANCE_TYPE = "instance_type"

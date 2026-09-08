@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Protocol, cast
+
 import errno
 import hashlib
 import mailbox
@@ -132,7 +134,7 @@ def add_message(box: mailbox.mbox, path: Path, raw: bytes) -> MboxLocation:
         box.flush()
         with path.open("rb") as persisted:
             os.fsync(persisted.fileno())
-        start, stop = box._lookup(key)
+        start, stop = message_offsets(box, key)
         return MboxLocation(byte_offset=start, byte_length=stop - start)
     except OSError as error:
         if error.errno != errno.ENOSPC:
@@ -221,7 +223,7 @@ def write_integrity_files(
         assert count_row is not None
         message_count = int(count_row[0])
 
-        def messages():
+        def messages(rows=rows, path=path):
             for ordinal, (message_id, raw_sha256, offset, length) in enumerate(rows, 1):
                 raw = read_verified_location(
                     path,
@@ -250,3 +252,14 @@ def write_integrity_files(
         if result.rowcount != 1:
             raise ValueError(f"MBOX has no catalog generation: {path}")
     return digests
+
+
+class _MboxOffsets(Protocol):
+    """CPython mbox offset API, omitted from the public typeshed interface."""
+
+    def _lookup(self, key: str) -> tuple[int, int]: ...
+
+
+def message_offsets(box: mailbox.mbox, key: str) -> tuple[int, int]:
+    """Read the stdlib record offsets without reserializing canonical bytes."""
+    return cast(_MboxOffsets, box)._lookup(key)

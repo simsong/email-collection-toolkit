@@ -5,7 +5,11 @@ from pathlib import Path
 
 import pytest
 
-from scripts.data_quality.analyze_archive import normalized_date, open_catalog, source_format
+from scripts.data_quality.analyze_archive import (
+    normalized_date,
+    open_catalog,
+    source_format,
+)
 
 
 def test_audit_catalog_connection_cannot_modify_archive(tmp_path: Path) -> None:
@@ -35,4 +39,6 @@ def test_audit_recognizes_extensionless_babyl_and_normalizes_dates(tmp_path: Pat
     babyl.write_bytes(b"BaByL OpTiOnS:\nVersion: 5\n")
 
     assert source_format(babyl) == "babyl"
-    assert normalized_date("1 Jan 1983 01:00:00 +0200").isoformat() == "1982-12-31T23:00:00+00:00"
+    normalized = normalized_date("1 Jan 1983 01:00:00 +0200")
+    assert normalized is not None
+    assert normalized.isoformat() == "1982-12-31T23:00:00+00:00"

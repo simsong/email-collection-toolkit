@@ -41,6 +41,7 @@ mailarchiver = [
 
 [dependency-groups]
 dev = [
+    "boto3>=1.43.89",
     "pylint>=3.3",
     "pyright>=1.1.411",
     "pytest>=8.0",
@@ -66,7 +67,11 @@ select = ["E4", "E7", "E9", "F"]
 [tool.ty.src]
 include = ["src", "scripts", "tests", "e2e_tests", "validation/aws"]
 
+[tool.ty.environment]
+extra-paths = ["typings"]
+
 [tool.pyright]
+stubPath = "typings"
 include = ["src", "scripts", "tests", "e2e_tests", "validation/aws"]
 pythonVersion = "3.12"
 typeCheckingMode = "standard"

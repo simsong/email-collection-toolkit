@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from mailarchiver.mbox import message_offsets
+
 import hashlib
 import mailbox
 import os
@@ -34,7 +36,6 @@ from .plugin_api import (
     SourceSpec,
 )
 from .source_volume import SourceVolume, local_mount_path, local_source_volume
-
 
 SourceKind = str
 BABYL_OPTIONS = b"babyl options:"
@@ -299,7 +300,7 @@ class MboxFileParser(FileParser):
         box = mailbox.mbox(source.path, factory=None, create=False)
         try:
             for key in box.iterkeys():
-                start, end = box._toc[key]
+                start, end = message_offsets(box, key)
                 if start < start_offset:
                     continue
                 envelope_record = box.get_bytes(key, from_=True)
@@ -432,7 +433,7 @@ class LocalSourcePlugin(SourcePlugin):
             )
 
     def messages(
-        self, container: MailContainer, checkpoint: str | None
+        self, container: MailContainer, resume_cursor: str | None
     ) -> Iterator[MailObject | ProgressEvent]:
         source = self.source_file(container)
         parser = next(
@@ -443,7 +444,7 @@ class LocalSourcePlugin(SourcePlugin):
             raise ValueError(f"file parser plug-in is not registered: {container.parser_kind}")
         implementation = parser.implementation
         if isinstance(implementation, FileParser):
-            start_offset = 0 if checkpoint is None else int(checkpoint)
+            start_offset = 0 if resume_cursor is None else int(resume_cursor)
             for message in implementation.messages(source, start_offset):
                 yield MailObject(
                     work_id=container.work_id,
@@ -455,7 +456,7 @@ class LocalSourcePlugin(SourcePlugin):
                     exclusion_reason=message.exclusion_reason,
                 )
             return
-        yield from implementation.messages(container, checkpoint)
+        yield from implementation.messages(container, resume_cursor)
 
     @staticmethod
     def source_file(container: MailContainer) -> SourceFile:
@@ -632,7 +633,7 @@ def _mbcp_exclusion(envelope_sender: bytes, raw: bytes) -> str | None:
     if envelope_sender != MBCP_ENVELOPE_SENDER:
         return None
     message = BytesParser(policy=policy.compat32).parsebytes(raw)
-    names = {name.casefold() for name in message.keys()}
+    names = {name.casefold() for name in message}
     payload = message.get_payload()
     if {"x-uid", "x-mbcp-flags"} <= names <= MBCP_HEADERS and str(payload).strip() == "":
         return "Eudora MBCP metadata stub"
@@ -644,7 +645,7 @@ def _unwrap_xxx_record(raw: bytes) -> bytes:
     if separator is None:
         return raw
     wrapper = BytesParser(policy=policy.compat32).parsebytes(raw[: separator.end()])
-    if not set(name.casefold() for name in wrapper.keys()) <= XXX_WRAPPER_HEADERS:
+    if not {name.casefold() for name in wrapper} <= XXX_WRAPPER_HEADERS:
         return raw
     nested = MBOXRD_QUOTED_FROM.sub(b"", raw[separator.end():])
     envelope, newline, message = nested.partition(b"\n")
@@ -726,7 +727,7 @@ def _without_container_newline(body: bytearray) -> bytes:
     """Remove the one line ending Babyl adds before its record separator."""
     if body.endswith(b"\r\n"):
         return bytes(body[:-2])
-    if body.endswith(b"\n") or body.endswith(b"\r"):
+    if body.endswith((b"\n", b"\r")):
         return bytes(body[:-1])
     return bytes(body)
 

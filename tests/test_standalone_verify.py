@@ -7,10 +7,16 @@ import json
 import mailbox
 import subprocess
 import sys
-from datetime import datetime, timezone
+
+import pytest
+from datetime import UTC, datetime
 from pathlib import Path
 
-from mailarchiver.bagit import initialize_bag, refresh_tag_manifest, write_bag_checkpoint
+from mailarchiver.bagit import (
+    initialize_bag,
+    refresh_tag_manifest,
+    write_bag_checkpoint,
+)
 from mailarchiver.catalog import address_pk, create_catalog
 from mailarchiver.layout import integrity_path, mbox_directory
 from mailarchiver.mbox import add_message
@@ -64,7 +70,7 @@ def make_integrity_archive(tmp_path: Path, raw: bytes | None = None) -> tuple[Pa
     )
     catalog.commit()
     install_archive_verifier(tmp_path)
-    write_bag_checkpoint(tmp_path, catalog, datetime(2026, 8, 22, tzinfo=timezone.utc))
+    write_bag_checkpoint(tmp_path, catalog, datetime(2026, 8, 22, tzinfo=UTC))
     catalog.commit()
     catalog.close()
     return path, integrity_path(tmp_path, path.name), raw
@@ -268,3 +274,17 @@ def test_message_id_field_is_json_null_when_header_is_absent(tmp_path: Path) -> 
     fields = sidecar.read_text(encoding="utf-8").splitlines()[-1].split("\t")
 
     assert fields[1] == "null"
+
+
+@pytest.mark.parametrize("invalid_version", [True, 1.0, "1"])
+def test_verifier_rejects_noninteger_hash_version(tmp_path: Path, invalid_version: object) -> None:
+    """Requirement: integrity hash versions are integer identifiers, never coerced values."""
+    path, integrity, _ = make_integrity_archive(tmp_path)
+    lines = integrity.read_text(encoding="utf-8").splitlines()
+    version_key = "hash_version"
+    standard = json.loads(lines[1])
+    standard[version_key] = invalid_version
+    lines[1] = json.dumps(standard, separators=(",", ":"), sort_keys=True)
+    integrity.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+    assert any("unsupported hash standard" in error for error in verify_mbox(path, integrity))

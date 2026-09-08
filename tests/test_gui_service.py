@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import base64
-from concurrent.futures import ThreadPoolExecutor
 import hashlib
 import json
 import mailbox
@@ -11,14 +10,25 @@ import sqlite3
 import sys
 import time
 import zipfile
+from webview.menu import MenuAction
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import pytest
 from pydantic import ValidationError
 
+from mailarchiver.application import ApplicationController, ApplicationPreferencesStore
 from mailarchiver.bagit import initialize_bag
 from mailarchiver.catalog import address_pk, create_catalog, create_search
 from mailarchiver.configuration import application_configuration, load_configuration
+from mailarchiver.gui_app import (
+    GuiApi,
+    PyWebViewApplication,
+    application_icon_path,
+    application_menu,
+    application_metadata,
+    external_link_destination,
+)
 from mailarchiver.gui_service import (
     LEGACY_X_HTML_PART_ID,
     RAW_PART_ID,
@@ -28,29 +38,31 @@ from mailarchiver.gui_service import (
     is_risky,
     message_previews,
     render_part,
-    searchable_message_count,
     search_count,
     search_page,
     search_suggestions,
+    searchable_message_count,
     write_attachment,
     write_message,
     write_messages_zip,
 )
-from mailarchiver.gui_app import (
-    GuiApi,
-    application_icon_path,
-    application_menu,
-    application_metadata,
-    external_link_destination,
-)
-from mailarchiver.mailsearch import RECENT_FTS_SCAN_LIMIT, _search_statement, parse_query
 from mailarchiver.layout import mbox_directory
-from mailarchiver.mailbox_tree import FilterSet, FilterSetStore, MailboxSelection, MailboxTreeNode, mailbox_tree
-from mailarchiver.plugin_api import SourceContainerMetadata, SourceRelationship
+from mailarchiver.mailbox_tree import (
+    FilterSet,
+    FilterSetStore,
+    MailboxSelection,
+    MailboxTreeNode,
+    mailbox_tree,
+)
+from mailarchiver.mailsearch import (
+    RECENT_FTS_SCAN_LIMIT,
+    _search_statement,
+    parse_query,
+)
 from mailarchiver.mbox import add_message
+from mailarchiver.plugin_api import SourceContainerMetadata, SourceRelationship
 from mailarchiver.search import index_message
 from mailarchiver.standalone_verify import semantic_bytes
-
 
 SIMPLE_MESSAGE = (
     b"Message-ID: <simple@example>\nFrom: sender@example.net\nTo: recipient@example.net\n"
@@ -129,6 +141,7 @@ def make_gui_archive(
                 "VALUES (?, ?, ?, ?, ?, 'date', 'Archive')",
                 (message_id, hashlib.sha256(raw).hexdigest(), sender, subject, timestamp),
             )
+            assert cursor.lastrowid is not None
             message_pks.append(int(cursor.lastrowid))
             catalog.execute(
                 "INSERT INTO recipients(message_pk, address_pk, role) VALUES (?, ?, 'to')",
@@ -261,7 +274,7 @@ def test_gui_application_metadata_names_the_product() -> None:
 
     assert metadata.name == "Mail Archiver"
     assert metadata.version == "0.0.0"
-    assert "Mail Archiver" in metadata.copyright
+    assert metadata.copyright == "Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved."
 
 
 def test_gui_application_uses_the_source_controlled_rainbow_icon() -> None:
@@ -272,16 +285,41 @@ def test_gui_application_uses_the_source_controlled_rainbow_icon() -> None:
     assert icon.is_file()
 
 
-def test_gui_windows_menu_opens_the_ingest_browser(tmp_path: Path) -> None:
-    """Requirement: the native Windows menu exposes the independent ingest browser."""
-    api = GuiApi(None, e2e_directory=tmp_path)
+def test_native_menus_route_through_the_application_controller(tmp_path: Path) -> None:
+    """Requirement: native menu callbacks resolve active state instead of capturing one GuiApi."""
+    controller = ApplicationController(ApplicationPreferencesStore(tmp_path / "preferences.json"))
+    application = PyWebViewApplication(controller)
+
+    menus = application_menu(application)
+
+    assert [menu.title for menu in menus] == ["File", "Window"]
+    assert all(isinstance(item, MenuAction) for menu in menus for item in menu.items)
+    assert [item.title for item in menus[0].items if isinstance(item, MenuAction)] == [
+        "New", "Open…", "New Search Window", "Import…", "Close",
+    ]
+    assert [item.title for item in menus[1].items if isinstance(item, MenuAction)] == ["Ingests"]
+    action = menus[1].items[0]
+    assert isinstance(action, MenuAction)
+    assert not action.function()
+
+
+def test_gui_api_records_independent_search_window_state(tmp_path: Path) -> None:
+    """Requirement: each GUI bridge records search and selection state on its search window."""
+    archive = make_gui_archive(tmp_path)
+    controller = ApplicationController(ApplicationPreferencesStore(tmp_path / "preferences.json"))
+    document = controller.open_document(archive)
+    session = controller.new_search_window(document)
+    api = GuiApi(archive, document=document, search_window=session)
     try:
-        menus = application_menu(api)
-        assert [menu.title for menu in menus] == ["Windows"]
-        assert [item.title for item in menus[0].items] == ["Ingest"]
-        assert menus[0].items[0].function()
+        page = api.search("report", sort_by="subject", direction="ascending")
+        api.message(page["results"][0]["message_pk"])
     finally:
         api.close()
+
+    assert session.query == "report"
+    assert session.sort_by == "subject"
+    assert session.sort_direction == "ascending"
+    assert session.selected_message == 1
 
 
 def test_gui_copy_source_path_reports_missing_macos_bridge(
@@ -339,8 +377,8 @@ def test_gui_suggestions_use_trigram_substrings_and_deduplicated_message_counts(
         sender = address_pk(catalog, "beth@example.org")
         for number, subject in enumerate(("Flight for ELISABETH", "Ordinary subject"), 1):
             raw = "".join((
-                f"Message-ID: <suggestion-{number}@example>\n"
-                "From: Beth Rosenberg <beth@example.org>\n",
+                (f"Message-ID: <suggestion-{number}@example>\n"
+                "From: Beth Rosenberg <beth@example.org>\n"),
                 "Cc: Beth Rosenberg <beth@example.org>\n" if number == 1 else "",
                 f"Subject: {subject}\n\nbody\n",
             )).encode()
@@ -524,7 +562,9 @@ def test_gui_displays_archive_and_source_locations(tmp_path: Path) -> None:
     assert view.source_locations[0].origin == "Local source"
     assert not view.source_locations[0].preferred
     assert view.source_locations[0].copy_path == "/Volumes/Fixture/mail/simple.eml"
-    assert describe_message(archive, 2).archive_path.startswith("data/mbox/2024-Archive1.mbox?offset=")
+    archive_path = describe_message(archive, 2).archive_path
+    assert archive_path is not None
+    assert archive_path.startswith("data/mbox/2024-Archive1.mbox?offset=")
 
     database = sqlite3.connect(archive / "archive.sqlite3")
     try:

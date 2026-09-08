@@ -7,7 +7,6 @@ import hashlib
 import json
 import mailbox
 import os
-import re
 import signal
 import sqlite3
 import subprocess
@@ -19,16 +18,20 @@ from shutil import copy, copytree
 
 import pytest
 
-from mailarchiver.__main__ import REFRESH_INDEX_DEFAULT_WORKERS, nonnegative_integer, positive_integer, report_years
+from e2e_tests.eicar_fixture import write_eicar_emlx
+from mailarchiver.__main__ import (
+    REFRESH_INDEX_DEFAULT_WORKERS,
+    nonnegative_integer,
+    positive_integer,
+    report_years,
+)
 from mailarchiver.catalog import address_pk, create_catalog, create_search
-from mailarchiver.layout import mbox_directory
 from mailarchiver.gui_service import message_locations
+from mailarchiver.layout import mbox_directory
 from mailarchiver.mailbox_tree import mailbox_tree
 from mailarchiver.mbox import MboxLocation, add_message, read_verified_location
 from mailarchiver.source_volume import METADATA_CURRENT_MOUNT_PATH
 from mailarchiver.standalone_verify import semantic_bytes
-from e2e_tests.eicar_fixture import write_eicar_emlx
-
 
 TEST_DATA = Path(__file__).parent / "data"
 CLAMD_ENV = "MAILARCHIVER_CLAMD"
@@ -1004,6 +1007,7 @@ def test_interrupt_stops_cleanly(source_mail: tuple[Path, dict[str, bytes]], tmp
         stderr=subprocess.PIPE,
         text=True,
     )
+    assert process.stderr is not None
     assert process.stderr.readline().startswith("started:")
     process.send_signal(signal.SIGINT)
     stdout, stderr = process.communicate(timeout=20)

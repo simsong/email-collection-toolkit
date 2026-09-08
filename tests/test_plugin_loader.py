@@ -2,13 +2,19 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
 from pydantic import ValidationError
 
-from mailarchiver.plugin_api import FileProbe, MailContainer, MailObject, SourceReference, SourceSpec
+from mailarchiver.plugin_api import (
+    FileProbe,
+    MailContainer,
+    MailObject,
+    SourceReference,
+    SourceSpec,
+)
 from mailarchiver.plugin_loader import PluginDiscoveryError, load_plugins
 
 
@@ -274,7 +280,7 @@ def test_registry_is_frozen_after_loading() -> None:
     registry = load_plugins()
 
     with pytest.raises(ValidationError, match="frozen"):
-        registry.files = ()  # type: ignore[misc]
+        setattr(registry, "files", ())  # type: ignore[misc]
 
 
 def test_entrypoint_must_return_the_declared_parser_kind(tmp_path: Path) -> None:
@@ -360,7 +366,7 @@ def test_mail_byte_boundaries_reject_text_coercion(tmp_path: Path) -> None:
     with pytest.raises(ValidationError, match="bytes_type"):
         MailObject(
             work_id="fixture:message-1",
-            raw="silently encoded text",  # type: ignore[arg-type]
+            raw="silently encoded text",  # type: ignore[arg-type]  # ty: ignore[invalid-argument-type]
             source=reference,
             cursor="message-1",
         )
@@ -368,7 +374,7 @@ def test_mail_byte_boundaries_reject_text_coercion(tmp_path: Path) -> None:
         FileProbe(
             path=tmp_path / "message.eml",
             byte_length=21,
-            prefix="silently encoded text",  # type: ignore[arg-type]
+            prefix="silently encoded text",  # type: ignore[arg-type]  # ty: ignore[invalid-argument-type]
         )
 
 
@@ -387,7 +393,7 @@ def test_source_fallback_date_is_timezone_aware_and_normalized() -> None:
             raw=b"From: sender@example.net\n\nbody\n",
             source=reference,
             cursor="message-1",
-            source_date_utc=datetime(2024, 2, 1, 7),
+            source_date_utc=datetime(2024, 2, 1, 7, tzinfo=UTC).replace(tzinfo=None),
         )
 
     mail = MailObject(
@@ -397,7 +403,7 @@ def test_source_fallback_date_is_timezone_aware_and_normalized() -> None:
         cursor="message-1",
         source_date_utc=datetime(2024, 2, 1, 7, tzinfo=timezone(timedelta(hours=-5))),
     )
-    assert mail.source_date_utc == datetime(2024, 2, 1, 12, tzinfo=timezone.utc)
+    assert mail.source_date_utc == datetime(2024, 2, 1, 12, tzinfo=UTC)
 
 
 def test_path_only_legacy_source_cannot_enter_the_production_registry(tmp_path: Path) -> None:
