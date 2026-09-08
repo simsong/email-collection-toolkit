@@ -343,3 +343,18 @@ def test_quit_keeps_active_import_document_alive(tmp_path: Path) -> None:
     finally:
         application.finish_ingest(document.descriptor.document_id, "quit-test", published=False)
     assert host.prepare_quit()
+
+
+def test_child_window_keeps_document_routing_without_search_windows(tmp_path: Path) -> None:
+    """Requirement: an Ingests window continues routing actions after searches close."""
+    from mailarchiver.gui_app import PyWebViewApplication
+
+    application = controller(tmp_path)
+    document = application.open_document(make_archive(tmp_path / "archive"))
+    session = application.new_search_window(document)
+    application.attach_child_window(document.descriptor.document_id, "ingests-fixture")
+    host = PyWebViewApplication(application)
+    host._native_child_ids["ingests-fixture"] = document.descriptor.document_id
+    application.close_window(session.window_id)
+    assert host.document_for_native_window("ingests-fixture") is document
+    assert host.document_for_native_window("unknown") is None

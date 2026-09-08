@@ -1164,3 +1164,7 @@ or keeping the window open. Native macOS Quit is refused with an explanation
 while an import is active; shutdown joins tracked workers before releasing
 resources. Makefile Ruff checks select this checkout's configuration explicitly
 and include ignored linked-worktree paths.
+
+An Ingests child window retains document routing after all search windows close.
+New Search and Ingests use that document directly; Import creates a new search
+owner when needed.

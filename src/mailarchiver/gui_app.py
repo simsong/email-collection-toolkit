@@ -983,6 +983,20 @@ class PyWebViewApplication:
         self.controller.activate_window(window_id)
         self._refresh_menus()
 
+    def document_for_native_window(self, uid: str) -> ArchiveDocument | None:
+        """Resolve child windows even after the last search window has closed."""
+        with self._lock:
+            document_id = self._native_child_ids.get(uid)
+            if document_id is not None:
+                return self.controller.document(document_id)
+            window_id = self._native_search_ids.get(uid)
+            api = self._apis.get(window_id) if window_id is not None else None
+            return api.document if api is not None else None
+
+    def active_document(self) -> ArchiveDocument | None:
+        native = webview.active_window()
+        return self.document_for_native_window(native.uid) if native is not None else self.controller.active_document
+
     def active_api(self) -> GuiApi | None:
         native = webview.active_window()
         if native is not None:
@@ -1049,15 +1063,17 @@ class PyWebViewApplication:
         self._import_document(created)
 
     def new_search_window(self) -> bool:
-        api = self.active_api()
-        if api is None or api.document is None:
+        document = self.active_document()
+        if document is None:
             return False
-        self.create_search_window(self.controller.new_search_window(api.document))
+        self.create_search_window(self.controller.new_search_window(document))
         return True
 
     def import_active_document(self) -> bool:
         """Collect a supported local source and start typed ingest off the webview thread."""
         api = self.active_api()
+        if api is None and (document := self.active_document()) is not None:
+            api = self.create_search_window(self.controller.new_search_window(document))
         return self._import_document(api) if api is not None else False
 
     def _import_document(self, api: GuiApi) -> bool:
@@ -1246,8 +1262,8 @@ class PyWebViewApplication:
         return True
 
     def open_active_ingest_window(self) -> bool:
-        api = self.active_api()
-        return api.open_ingest_window() if api is not None else False
+        document = self.active_document()
+        return self.open_ingest_window(document) if document is not None else False
 
     def open_ingest_window(self, document: ArchiveDocument, status_id: str | None = None) -> bool:
         if document.path is None:
