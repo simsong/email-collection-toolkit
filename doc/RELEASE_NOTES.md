@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+* Limit Ruff discovery to tracked and non-ignored new Python files, avoiding
+  generated directories while supporting project-local linked worktrees.
+
 * Clarify installed verifier usage and make GUI asset HEAD/redirect response
   lengths explicit without reading asset bodies for HEAD.
 

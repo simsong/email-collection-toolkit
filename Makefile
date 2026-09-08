@@ -38,7 +38,8 @@ lint:
 	$(MAKE) pylint
 
 ruff:
-	uv run --locked ruff check --config pyproject.toml --no-respect-gitignore .
+	git ls-files -z --cached --others --exclude-standard -- '*.py' '*.pyi' | \
+		xargs -0 uv run --locked ruff check --config pyproject.toml
 
 types:
 	$(MAKE) ty

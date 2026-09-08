@@ -1200,8 +1200,9 @@ in About instead of appearing as errors. Closing an import owner offers waiting
 or keeping the window open. Native macOS Quit offers Cancel or Stop Import and Quit while an import is
 active. Confirmed quit signals all imports, retains their leases and windows
 until checkpoint completion, and then exits. Shutdown joins tracked workers
-before releasing resources. Makefile Ruff checks select this checkout's configuration explicitly
-and include ignored linked-worktree paths.
+before releasing resources. Makefile Ruff checks select this checkout's configuration explicitly. Git
+selects tracked and non-ignored new `.py` and `.pyi` files, so linked worktrees
+are checked without descending into ignored generated directories.
 
 An Ingests child window retains document routing after all search windows close.
 New Search and Ingests use that document directly; Import creates a new search

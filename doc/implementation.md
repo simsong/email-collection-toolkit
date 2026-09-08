@@ -1102,7 +1102,8 @@ durable evidence, source immutability, and isolated headless diagnostics.
 
 ## macOS packaging
 
-`make ruff` runs `uv run --locked ruff check .`. It is a required prerequisite
+`make ruff` passes a NUL-delimited list from `git ls-files --cached --others
+--exclude-standard` to `uv run --locked ruff check --config pyproject.toml`. It is a required prerequisite
 of `make check` and `make dmg`, and CI and source-release builds also run it.
 Ruff retains its default error rules (`E4`, `E7`, `E9`, `F`), including unused
 imports/variables and assigned lambdas; no per-file suppressions are
@@ -1485,8 +1486,9 @@ in About instead of appearing as errors. Closing an import owner offers waiting
 or keeping the window open. Native macOS Quit offers Cancel or Stop Import and Quit while an import is
 active. Confirmed quit signals all imports, retains their leases and windows
 until checkpoint completion, and then exits. Shutdown joins tracked workers
-before releasing resources. Makefile Ruff checks select this checkout's configuration explicitly
-and include ignored linked-worktree paths.
+before releasing resources. Makefile Ruff checks select this checkout's configuration explicitly. Git
+selects tracked and non-ignored new `.py` and `.pyi` files, so linked worktrees
+are checked without descending into ignored generated directories.
 
 An Ingests child window retains document routing after all search windows close.
 New Search and Ingests use that document directly; Import creates a new search
