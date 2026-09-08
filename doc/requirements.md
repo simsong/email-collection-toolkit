@@ -1151,3 +1151,7 @@ The included Gmail authorizer shares PR #83's buffer-validation, consumer-domain
 DNS-error, refresh-transport, and verified-token-storage fixes. No public Desktop
 OAuth client is bundled yet; the end-user shared-client flow remains deferred
 until release configuration is supplied and validated.
+
+An Ingests child window retains document routing after all search windows close.
+New Search and Ingests use that document directly; Import creates a new search
+owner when needed.

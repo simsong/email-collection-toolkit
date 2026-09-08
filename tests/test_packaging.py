@@ -129,3 +129,35 @@ def test_dependency_audit_rejects_external_rpath(tmp_path: Path) -> None:
         verify_dependencies(app)
     subprocess.run(["cc", str(source), "-Wl,-rpath,@executable_path", "-o", str(binary)], check=True)
     verify_dependencies(app)
+
+
+@pytest.mark.parametrize("succeeds", [False, True])
+def test_gui_remembers_source_only_after_success(tmp_path: Path, succeeds: bool) -> None:
+    """Requirement: failed GUI imports retain picker state and do not publish a generation."""
+    from threading import Event
+
+    from mailarchiver.__main__ import IngestRequest
+    from mailarchiver.application import ApplicationController, ApplicationPreferencesStore, IngestJob
+    from mailarchiver.archive_config import import_directory, remember_import_directory
+    from mailarchiver.gui_app import PyWebViewApplication
+    from mailarchiver.writer_lock import WriterLease
+
+    controller = ApplicationController(ApplicationPreferencesStore(tmp_path / "preferences.json"))
+    document = controller.create_document(tmp_path / "archive.mailarchive")
+    session = controller.new_search_window(document)
+    previous = tmp_path / "previous"
+    previous.mkdir()
+    remember_import_directory(document.path, [previous])
+    source = tmp_path / "new-source" / "message.eml"
+    source.parent.mkdir()
+    if succeeds:
+        source.write_bytes(b"From: sender@example.net\nDate: Mon, 07 Sep 2026 12:00:00 +0000\nSubject: fixture\n\nbody\n")
+    owners = tmp_path / "owners.txt"
+    owners.write_text("fixture-owner\n", encoding="utf-8")
+    lease = WriterLease.acquire(document.path, document.descriptor.identity, "fixture", "fixture", "test")
+    controller.begin_ingest(document.descriptor.document_id, IngestJob(operation_id="fixture", owner_window_id=session.window_id), lease)
+    host = PyWebViewApplication(controller)
+    host._run_import(document, "fixture", lease, IngestRequest(archive=document.path, owner_names_file=owners, roots=[str(source)], scan_policy="not-scanned"), Event())
+    assert import_directory(document.path) == (source.parent if succeeds else previous)
+    assert document.generation == int(succeeds)
+    assert not lease.acquired
