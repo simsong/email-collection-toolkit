@@ -23,7 +23,31 @@ OCR_ENGINES ?= native,ocrmypdf,tesseract
 OCR_INVENTORY_ARGS ?=
 OCR_RUN_ARGS ?=
 
-check: test test-e2e website-check
+.PHONY: lint ruff types ty pyright
+# Recursive recipes preserve stage ordering even with make -j.
+check:
+	$(MAKE) lint
+	$(MAKE) types
+	$(MAKE) test
+	$(MAKE) test-e2e
+	$(MAKE) website-check
+
+lint:
+	$(MAKE) ruff
+	$(MAKE) pylint
+
+ruff:
+	uv run --locked ruff check .
+
+types:
+	$(MAKE) ty
+	$(MAKE) pyright
+
+ty:
+	uv run --locked ty check --error-on-warning
+
+pyright:
+	uv run --locked pyright --warnings
 
 data-quality-audit:
 	@test -n "$(ARCHIVE)" || { echo 'usage: make data-quality-audit ARCHIVE=/path/to/mailbag EARLY_SOURCE=/path/to/source'; exit 2; }

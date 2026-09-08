@@ -1100,3 +1100,13 @@ requires it and fails clearly.
 4. Add IMAP and Gmail importers with resumable checkpoints.
 5. Build the local search/view interface on the stable database and MBOX
    retrieval API.
+
+## Developer validation gates
+
+`make check` runs Ruff and Pylint (`make lint`), then ty and Pyright
+(`make types`), then pytest, Chromium end-to-end tests, and website validation.
+The stages run sequentially even with parallel make and stop on failure.
+Both type checkers cover source, scripts, tests, end-to-end tests, and the AWS
+launcher. Project development dependencies and type stubs are locked with uv;
+static analysis must produce no errors or warnings. Focused `make ruff`,
+`make pylint`, `make ty`, `make pyright`, and `make test` targets remain available.
