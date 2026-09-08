@@ -12,9 +12,7 @@ from .plugin_api import (
     IntegrityEvidence,
     MailContainer,
     ProgressEvent,
-)
-from .plugin_api import (
-    SourceIntegrityControls as PluginSourceIntegrityControls,
+    SourceIntegrityControls,
 )
 from .sources import SourceFile, SourcePlan
 
@@ -191,7 +189,7 @@ class LocalFileIntegrityControls:
         )
 
 
-class LocalContainerIntegrityControls(PluginSourceIntegrityControls):
+class LocalContainerIntegrityControls(SourceIntegrityControls):
     """Bind local-file controls to the source-neutral plug-in contract."""
 
     control_id = LOCAL_FILE_CONTROL_ID
