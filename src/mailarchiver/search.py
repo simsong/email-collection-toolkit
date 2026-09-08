@@ -259,7 +259,7 @@ def index_message_safely(
         index_message(search, raw, index_attachments, date_utc=date_utc)
         search.commit()
     except Exception as error:
-        logging.getLogger(__name__).exception("Operation failed; preserving the existing recovery path")
+        logging.getLogger(__name__).debug("Best-effort operation failed", exc_info=True)
         search.rollback()
         catalog.execute(
             "INSERT OR IGNORE INTO metadata_defects(message_pk, field, detail) VALUES (?, 'search-index', ?)",

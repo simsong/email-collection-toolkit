@@ -286,7 +286,7 @@ class ArchiveDocument:
                 lease.release()
             if published:
                 self._generation += 1
-            return tuple(self._window_ids)
+            return tuple(self._window_ids) if published else ()
 
     def releasable(self) -> bool:
         with self._lock:

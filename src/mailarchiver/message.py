@@ -98,7 +98,7 @@ def parse_date(value: str | None, earliest_year: int = 1900) -> datetime | None:
     try:
         parsed = parsedate_to_datetime(value)
     except Exception:
-        logging.getLogger(__name__).exception("Operation failed; preserving the existing recovery path")
+        logging.getLogger(__name__).debug("Best-effort operation failed", exc_info=True)
         return None
     if parsed is None:
         return None
@@ -178,7 +178,7 @@ def decode_header_value(value: str) -> DecodedHeaderValue:
     try:
         parts = decode_header(unfolded)
     except Exception as error:
-        logging.getLogger(__name__).exception("Operation failed; preserving the existing recovery path")
+        logging.getLogger(__name__).debug("Best-effort operation failed", exc_info=True)
         return DecodedHeaderValue(value=unfolded, defect=f"{type(error).__name__}: {error}")
     decoded: list[str] = []
     defect: str | None = None
@@ -250,7 +250,7 @@ def header_values(message: Message, name: str, defects: list[MetadataDefect]) ->
     try:
         return [str(value) for value in message.get_all(name, [])]
     except Exception as error:
-        logging.getLogger(__name__).exception("Operation failed; preserving the existing recovery path")
+        logging.getLogger(__name__).debug("Best-effort operation failed", exc_info=True)
         defects.append(MetadataDefect(field=name, detail=f"{type(error).__name__}: {error}"))
         return []
 
@@ -261,7 +261,7 @@ def sender_identity(message: Message, defects: list[MetadataDefect], raw: bytes 
     try:
         address = parseaddr(from_values[0] if from_values else "")[1].lower()
     except Exception as error:
-        logging.getLogger(__name__).exception("Operation failed; preserving the existing recovery path")
+        logging.getLogger(__name__).debug("Best-effort operation failed", exc_info=True)
         defects.append(MetadataDefect(field="From", detail=f"{type(error).__name__}: {error}"))
         address = ""
     if address:
@@ -277,7 +277,7 @@ def sender_identity(message: Message, defects: list[MetadataDefect], raw: bytes 
             try:
                 address = parseaddr(embedded_values[0] if embedded_values else "")[1].lower()
             except Exception as error:
-                logging.getLogger(__name__).exception("Operation failed; preserving the existing recovery path")
+                logging.getLogger(__name__).debug("Best-effort operation failed", exc_info=True)
                 defects.append(MetadataDefect(field="From", detail=f"{type(error).__name__}: {error}"))
                 address = ""
             if address:
@@ -288,7 +288,7 @@ def sender_identity(message: Message, defects: list[MetadataDefect], raw: bytes 
     try:
         address = parseaddr(sender_values[0] if sender_values else "")[1].lower()
     except Exception as error:
-        logging.getLogger(__name__).exception("Operation failed; preserving the existing recovery path")
+        logging.getLogger(__name__).debug("Best-effort operation failed", exc_info=True)
         defects.append(MetadataDefect(field="Sender", detail=f"{type(error).__name__}: {error}"))
         address = ""
     if address:
@@ -315,7 +315,7 @@ def recipient_identities(message: Message, defects: list[MetadataDefect]) -> lis
             values = header_values(message, role.value, defects)
             recipients.update((address.lower(), role) for _, address in getaddresses(values) if address)
     except Exception as error:
-        logging.getLogger(__name__).exception("Operation failed; preserving the existing recovery path")
+        logging.getLogger(__name__).debug("Best-effort operation failed", exc_info=True)
         defects.append(MetadataDefect(field="recipients", detail=f"{type(error).__name__}: {error}"))
     return [RecipientIdentity(address=address, role=role) for address, role in sorted(recipients)]
 

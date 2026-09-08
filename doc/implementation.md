@@ -1160,6 +1160,7 @@ advance the shared generation. Progress can write status files without a
 terminal stream, including windowed builds with no stderr. Ingest child windows
 route document actions to an attached search window. Informational notices stay
 in About instead of appearing as errors. Closing an import owner offers waiting
-or keeping the window open; shutdown joins tracked workers before releasing
+or keeping the window open. Native macOS Quit is refused with an explanation
+while an import is active; shutdown joins tracked workers before releasing
 resources. Makefile Ruff checks select this checkout's configuration explicitly
 and include ignored linked-worktree paths.

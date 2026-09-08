@@ -890,7 +890,7 @@ def run_file_workers[WorkerItem](
                 except StopIteration:
                     exhausted = True
                 except BaseException as error:
-                    logging.getLogger(__name__).exception("Operation failed; preserving the existing recovery path")
+                    logging.getLogger(__name__).debug("Best-effort operation failed", exc_info=True)
                     discovery_error = (error, error.__traceback__)
                     exhausted = True
                 else:
@@ -1850,7 +1850,7 @@ def _run_ingest(request: IngestRequest, writer_lease: WriterLease, outcome: Inge
                 checkpoint_archive()
                 catalog.commit()
             except Exception as error:
-                logging.getLogger(__name__).exception("Operation failed; preserving the existing recovery path")
+                logging.getLogger(__name__).debug("Best-effort operation failed", exc_info=True)
                 integrity_error = error
                 if failure_detail is None:
                     failure_detail = f"{type(error).__name__}: {error}"
@@ -2018,7 +2018,7 @@ def rebuild_search_index(
         uuid4().hex,
         version("mailarchiver"),
     )
-    if not lease.acquired or lease.archive_identity != identity:
+    if not lease.acquired or not lease.lock_path.parent.parent.samefile(archive):
         if owned:
             lease.release()
         raise ValueError("an acquired writer lease for this archive is required")

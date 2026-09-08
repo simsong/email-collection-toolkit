@@ -158,7 +158,7 @@ def header_values(message: Message, name: str) -> list[str]:
     try:
         return [str(value) for value in message.get_all(name, [])]
     except Exception:
-        logging.getLogger(__name__).exception("Operation failed; preserving the existing recovery path")
+        logging.getLogger(__name__).debug("Best-effort operation failed", exc_info=True)
         return []
 
 
@@ -166,7 +166,7 @@ def normalized_date(value: str) -> datetime | None:
     try:
         parsed = parsedate_to_datetime(value)
     except Exception:
-        logging.getLogger(__name__).exception("Operation failed; preserving the existing recovery path")
+        logging.getLogger(__name__).debug("Best-effort operation failed", exc_info=True)
         return None
     if parsed is None:
         return None
@@ -397,7 +397,7 @@ def analyze_early_source(root: Path, output: Path) -> list[EarlySourceFile]:
                     result.first_date = min(dates).isoformat()
                     result.last_date = max(dates).isoformat()
             except Exception as error:  # Preserve a per-file diagnosis rather than dropping it.
-                logging.getLogger(__name__).exception("Operation failed; preserving the existing recovery path")
+                logging.getLogger(__name__).debug("Best-effort operation failed", exc_info=True)
                 result.error = f"{type(error).__name__}: {error}"
         evidence.append(result)
     write_csv(output / "EARLY_SOURCE_FILES.csv", evidence)

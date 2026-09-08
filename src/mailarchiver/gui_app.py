@@ -290,7 +290,7 @@ class NativeSmokeController:
             try:
                 self._window.destroy()
             except Exception as error:  # pylint: disable=broad-exception-caught
-                logging.getLogger(__name__).exception("Operation failed; preserving the existing recovery path")
+                logging.getLogger(__name__).debug("Best-effort operation failed", exc_info=True)
                 self._abort(f"native window destroy failed: {error}")
         if not self._event_loop_stopped.wait(self.SHUTDOWN_TIMEOUT_SECONDS):
             self._abort(f"Cocoa event loop did not stop within {self.SHUTDOWN_TIMEOUT_SECONDS:g} seconds")
@@ -595,7 +595,7 @@ class GuiApi:
                 if generation == self._preview_generation and archive == self.archive:
                     self._preview_cache.update((preview.message_pk, preview) for preview in previews)
         except Exception as error:  # pylint: disable=broad-exception-caught
-            logging.getLogger(__name__).exception("Operation failed; preserving the existing recovery path")
+            logging.getLogger(__name__).debug("Best-effort operation failed", exc_info=True)
             with self._preview_lock:
                 if generation == self._preview_generation:
                     self._preview_error = f"{type(error).__name__}: {error}"
@@ -858,6 +858,7 @@ class PyWebViewApplication:
         self._connectivity: ConnectivityMonitor | None = None
         self._lock = RLock()
         self._import_threads: list[Thread] = []
+        self._quitting = False
 
     def asset_url(
         self, asset: str, parameters: list[tuple[str, str]] | None = None
@@ -1115,7 +1116,10 @@ class PyWebViewApplication:
                 application_metadata().version,
             )
             job = IngestJob(operation_id=operation_id, owner_window_id=session.window_id)
-            self.controller.begin_ingest(document.descriptor.document_id, job, lease)
+            with self._lock:
+                if self._quitting:
+                    raise ValueError("The application is quitting.")
+                self.controller.begin_ingest(document.descriptor.document_id, job, lease)
         except (OSError, ArchiveBusyError, ValueError) as error:
             if "lease" in locals():
                 lease.release()
@@ -1152,7 +1156,7 @@ class PyWebViewApplication:
         try:
             run_ingest(request, lease, outcome=outcome, terminal=False)
         except BaseException as caught:  # pylint: disable=broad-exception-caught
-            logging.getLogger(__name__).exception("Operation failed; preserving the existing recovery path")
+            logging.getLogger(__name__).debug("Best-effort operation failed", exc_info=True)
             error = caught
         finally:
             try:
@@ -1358,6 +1362,14 @@ class PyWebViewApplication:
             worker.join()
         return self.controller.can_close_window(window_id)
 
+    def prepare_quit(self) -> bool:
+        """Keep windows and services alive until every import has completed."""
+        with self._lock:
+            if any(document.ingest_job for document in self.controller.documents()):
+                return False
+            self._quitting = True
+            return True
+
     def shutdown(self) -> None:
         """Release non-document resources after the native event loop exits."""
         with self._lock:
@@ -1516,6 +1528,35 @@ def configure_macos_application() -> None:
         NSApplication.sharedApplication().setApplicationIconImage_(icon)
 
 
+def install_macos_quit_guard(application: PyWebViewApplication) -> None:
+    """Refuse native Quit while an import still needs its status windows."""
+    if sys.platform != "darwin":
+        return
+    from importlib import import_module
+
+    from webview.platforms.cocoa import (
+        BrowserView,  # pylint: disable=import-outside-toplevel
+    )
+
+    class ImportAwareDelegate(BrowserView.AppDelegate):
+        def applicationShouldTerminate_(self, sender):
+            appkit = import_module("AppKit")
+            objc = import_module("objc")
+            if not application.prepare_quit():
+                alert = appkit.NSAlert.alloc().init()
+                alert.setMessageText_("Import is running")
+                alert.setInformativeText_("Wait for the import to finish, then quit. The archive and status windows will remain open.")
+                alert.addButtonWithTitle_("Keep Importing")
+                alert.runModal()
+                return appkit.NSTerminateCancel
+            decision = objc.super(ImportAwareDelegate, self).applicationShouldTerminate_(sender)
+            if decision == appkit.NSTerminateCancel:
+                application._quitting = False
+            return decision
+
+    BrowserView.AppDelegate = ImportAwareDelegate
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Read-only graphical search of a mailarchiver archive.")
     parser.add_argument("--archive", type=Path, help="directory containing archive.sqlite3 and search.sqlite3")
@@ -1581,6 +1622,8 @@ def main() -> int:
         application.create_about_window()
         for session in startup.windows:
             application.create_search_window(session)
+    if application is not None:
+        install_macos_quit_guard(application)
     webview.settings["ALLOW_FILE_URLS"] = False
     webview.settings["OPEN_EXTERNAL_LINKS_IN_BROWSER"] = False
     if smoke:

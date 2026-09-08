@@ -132,7 +132,7 @@ def _mailbag_metadata(raw: bytes, fallback_message_id: str) -> MailbagMessageMet
         defects = "; ".join(type(defect).__name__ for defect in message.defects)
         return MailbagMessageMetadata(message_id=message_id, attachments=attachments, error=defects)
     except Exception as error:
-        logging.getLogger(__name__).exception("Operation failed; preserving the existing recovery path")
+        logging.getLogger(__name__).debug("Best-effort operation failed", exc_info=True)
         return MailbagMessageMetadata(
             message_id=fallback_message_id,
             attachments=0,

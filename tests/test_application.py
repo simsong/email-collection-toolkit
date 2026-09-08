@@ -236,7 +236,8 @@ def test_one_ingest_is_shared_per_document_and_requires_a_writer_lease(tmp_path:
     assert set(refreshed) == {first_window.window_id, second_window.window_id}
     assert first_document.generation == 1
     assert second_document.ingest_job == second_job
-    application.finish_ingest(second_document.descriptor.document_id, "second-ingest", published=False)
+    assert application.finish_ingest(second_document.descriptor.document_id, "second-ingest", published=False) == ()
+    assert second_document.generation == 0
 
 
 def test_child_windows_and_ingest_keep_a_document_alive(tmp_path: Path) -> None:
@@ -323,3 +324,22 @@ def test_failed_discovery_does_not_claim_publication(tmp_path: Path) -> None:
     with pytest.raises(ValueError, match="no source plug-in recognized"):
         run_ingest(request, outcome=outcome, terminal=False)
     assert not outcome.published
+
+
+def test_quit_keeps_active_import_document_alive(tmp_path: Path) -> None:
+    """Requirement: native Quit must retain the UI while an import owns its lease."""
+    from mailarchiver.gui_app import PyWebViewApplication
+
+    application = controller(tmp_path)
+    document = application.open_document(make_archive(tmp_path / "archive"))
+    window = application.new_search_window(document)
+    host = PyWebViewApplication(application)
+    lease = WriterLease.acquire(document.path, document.descriptor.identity, "test", "quit-test", "test")
+    application.begin_ingest(document.descriptor.document_id, IngestJob(operation_id="quit-test", owner_window_id=window.window_id), lease)
+    try:
+        assert not host.prepare_quit()
+        assert lease.acquired
+        assert application.active_document is document
+    finally:
+        application.finish_ingest(document.descriptor.document_id, "quit-test", published=False)
+    assert host.prepare_quit()
