@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Standardize the agent PR workflow as `pr-to-ready`, retain
+  `codex-to-complete` and `codex-to-ready` aliases, and add shared
+  Codex, Claude, and Copilot implementer/reviewer instructions.
+
+
 * Add the desktop document controller, archive writer leases, document options,
   coordinated import/quit handling, and macOS application packaging.
 * Add the Gmail authorization developer preview and read-only Apple Mail cache

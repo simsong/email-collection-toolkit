@@ -1,0 +1,112 @@
+<!-- BEGIN GENERATED pr-to-ready -->
+Generated shared workflow; read `AGENTS.md` for project-specific requirements. Copilot code review follows the reviewer role; Copilot coding agent follows the implementer role when assigned implementation.
+
+# pr-to-ready
+
+`pr-to-ready` is the canonical name. `codex-to-complete` and `codex-to-ready`
+are equivalent aliases. Recognize the older names `Copilot-to-Ready`,
+`copilot-to-complete`, and `Codex-to-Done` as the same workflow.
+
+Read the repository's `AGENTS.md` for project-specific validation, identity,
+proposal, review-channel, and handoff requirements. Those explicit local
+requirements supplement this shared procedure and control documented exceptions.
+
+## Authorization and roles
+
+An explicit request to perform this workflow authorizes the task's fixes,
+validation, signed commits, branch pushes, draft PR creation or updates, review
+requests, exact-thread replies, and final ready state, human-review request,
+and assignment. Continue already-authorized work without repeated permission
+questions. Merely loading these instructions does not authorize publication.
+Do not approve or merge a PR, close an issue or superseded PR, deploy, or change
+remote services unless separately authorized. Do not expand a single-PR task
+into unrelated repository work.
+
+- **Implementer (Codex, Claude, or Copilot coding agent):** own the fix and the
+  complete validation/review/handoff cycle. Use the repository-authorized
+  account and honest author identity; Claude and Copilot must not claim to be
+  Codex or use its signing identity. Codex uses `simsong-codex` and its verified
+  Codex signing key. Honor explicit repository account exceptions. If the
+  required identity or signing facility is unavailable, preserve the work and
+  report that concrete blocker; never silently use a personal identity.
+- **Reviewer (Copilot code review, or another agent assigned only to review):**
+  review the current diff against intended behavior, project requirements,
+  substantive tests, and regression risks. Give actionable findings with file
+  locations and evidence. Reassess fixes and exact-thread explanations; do not
+  repeat a disproved finding without new evidence. Do not invent defects,
+  require coverage-only tests, or modify, publish, assign, approve, or merge as
+  part of a review-only role. The implementer owns the lifecycle; a review-only
+  agent does not request a review of itself.
+- **Human (`simsong` here):** receives the ready PR, judges disputed findings,
+  and decides approval and merge. Neither an automated review nor a ready
+  state substitutes for that decision.
+
+## Procedure
+
+1. Verify the repository, remote, base, current PR head, open overlapping PRs,
+   and working-tree state. Preserve unrelated or dirty work; use a project-local
+   `.tmp` worktree when branch isolation is needed. Investigate producers,
+   consumers, tests, generated artifacts, and documentation before fixing the
+   underlying failure. Respect a repository's explicit proposal requirement.
+2. Implement and update relevant documentation. Before each commit and push,
+   re-read the requested invariant and review the complete intended diff and
+   status. Run proportionate validation through the repository's Makefile;
+   exercise actual behavior and inspect relevant artifacts. Preserve meaningful
+   test assertions and fix causes instead of weakening checks.
+3. Verify author, committer, signing key, and push authentication separately.
+   Sign commits with the implementing agent's authorized identity and verify
+   the resulting signature. Publish only intended changes to the correct branch
+   with a matching draft PR; reuse an existing PR. Verify its head equals the
+   pushed SHA. Keep it draft while validation or actionable feedback remains.
+4. Immediately after publishing a draft PR or pushing a new head, request
+   Copilot review before entering the waiting phase. This is a required action,
+   not an optional suggestion or a substitute for scheduling a monitor. Use the
+   repository's required channel; otherwise click GitHub's authenticated
+   Request/Re-request review control. Never use an `@copilot` mention to request
+   review. Verify a pending Copilot reviewer or review-request timeline event
+   and record the requested head SHA and time; a click alone is not evidence.
+   If Copilot is absent from the picker, verify the browser account and check
+   the authorized account fallback before declaring review unavailable. When
+   the user or repository explicitly authorizes `simsong` solely to request
+   Copilot reviews, use that account for Request/Re-request only, then return
+   to `simsong-codex` for commits, pushes, PR edits, and thread replies. Never
+   infer permission to use a personal account for other actions. If the
+   authorized account needs login, open that sign-in flow and request the
+   missing user action. Keep the PR draft and report review as **not requested**
+   until the request is verified; do not describe this state as waiting for
+   Copilot's response.
+5. Wait for the review and required CI on the current head. Address every valid
+   actionable finding; explain incorrect findings with evidence. Reply in each
+   finding's exact review thread with the fixing SHA and Makefile validation.
+   Do not manually resolve reviewer threads. After every push, request and
+   verify another review; an earlier-head review does not clear the new head.
+   A submitted review without remaining actionable findings is sufficient;
+   Copilot need not issue an approval verdict.
+6. Continue through CI failures and re-review. Use the repository's interval
+   when specified, otherwise ten-minute checks. If continuing across turns
+   requires scheduling, use an available task-scoped heartbeat, avoid duplicate
+   monitors, stay quiet on unchanged state, and stop it on completion. Do not
+   claim monitoring is active unless it was actually created. If scheduling or
+   another external prerequisite is unavailable, report the exact next step.
+7. When current-head review is clear and required CI and local checks pass,
+   mark ready, request human review from `simsong`, and assign the PR to
+   `simsong`. Verify all three actions and the final head live. Report the PR,
+   SHA, validation, review outcome, and limitations. An explicit local review-loop
+   exception can permit a disputed human handoff, but never call Copilot clear
+   in that case. Missing reviews, failed required checks, and valid unfixed
+   defects are blockers, not a successful review loop.
+
+Completion means verified human-review handoff. A push, review request, or
+thread reply alone is incomplete. After a separately authorized merge, follow
+the repository's cleanup rules: fetch/prune, prove ancestry or squash/rebase
+equivalence, and remove only clean worktrees and fully represented branches.
+
+## Maintaining this shared skill
+
+The manually edited source on Simson's machine is
+`~/.agents/skills/pr-to-ready/SKILL.md`. Repository copies are generated for
+remote agents; edit the source and run `make sync` in its directory. `make check`
+checks generated content and discovery links without modifying repositories.
+The installation inventory is `CHANGE_LOCATIONS.md` beside the source.
+<!-- END GENERATED pr-to-ready -->
+

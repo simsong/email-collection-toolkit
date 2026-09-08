@@ -1,3 +1,9 @@
+<!-- BEGIN GENERATED pr-to-ready -->
+## pr-to-ready
+
+For `pr-to-ready`, `codex-to-complete`, or `codex-to-ready`, read and follow [the shared workflow](.agents/skills/pr-to-ready/SKILL.md). Apply the repository-specific rules below.
+<!-- END GENERATED pr-to-ready -->
+
 # AI contributor instructions
 
 ## Scope and source safety
@@ -100,59 +106,36 @@ these steps without repeatedly requesting permission. Do not approve or merge a
 PR, close an issue or superseded PR, or change remote services without explicit
 user authorization for that action.
 
-All Codex GitHub writes and browser actions must use `@simsong-codex`, never
-`@simsong`. Verify the CLI identity, SSH push identity, and browser login
-separately. Before committing, configure and verify author and committer as
+All Codex GitHub writes and browser actions use `@simsong-codex`, except
+that `@simsong` is authorized solely for requesting Copilot reviews when needed.
+Verify the CLI identity, SSH push identity, and browser login separately. Before committing, configure and verify author and committer as
 `Codex AI Assistant <simsong+codex@acm.org>` and verify the signing key belongs to
 that identity. Sign every Codex commit. Verify the result before pushing with
 `git log -1 --format='%G? %GS %an <%ae> %cn <%ce>'`. To correct identity on an
 existing commit, use `git commit --amend --reset-author -S`.
 
-## pr-to-ready
+## pr-to-ready project requirements
 
-1. Fetch current remote state; inspect the intended diff against the PR base and
-   preserve unrelated work. Run the relevant Makefile validation before each
-   commit. Commit, push, and open a matching **draft** PR in the same publication
-   workflow. Verify that GitHub's PR head SHA equals the pushed commit.
-2. Open the PR in an authenticated web browser and verify `simsong-codex` is
-   signed in. In the GitHub reviewers panel, click Copilot's **Request** or
-   **Re-request review** control. Do not use `@copilot review`, another mention,
-   a CLI command, or an API request to trigger a review. If the browser login or
-   control is unavailable, report the exact blocker and keep the PR draft.
-3. Verify a visible pending Copilot review or review-request timeline event.
-   A click alone is not proof. Check for Copilot's response every **10 minutes**,
-   reconciling the live head SHA, review events, review threads, and CI checks.
-   Use a task heartbeat when continuation beyond the current turn is needed;
-   keep it quiet while nothing changes and stop it when the cycle completes.
-   Do not abandon the cycle after requesting a review or pushing a fix.
-4. Read every finding and reply in its **exact GitHub review-panel thread**.
-   Fix valid findings. For an incorrect finding, explain the relevant invariant
-   and evidence; clarify source comments when that explanation helps future
-   readers. Do not add misleading comments or weaken correct behavior merely
-   to satisfy Copilot. After pushing a fix, add its commit SHA and Makefile
-   validation evidence to that same thread. Do not manually resolve Copilot's
-   threads; distinguish automatic resolution from verified correctness.
-5. After every new push, request another Copilot review using the browser
-   control and repeat the 10-minute checks. Previous-head reviews do not clear
-   a new head. Address CI failures as well as review findings. A submitted
-   review with no remaining actionable findings counts as successful; Copilot
-   need not submit an approval verdict.
-6. Continue until the current head has a successful review, or a documented
-   loop remains: the same substantive finding returns in two successive review
-   rounds after an evidence-backed fix or explanation, with no new actionable
-   information. Record the relevant threads, commits, evidence, and remaining
-   disagreement. A missing review, failed check, or unresolved valid defect is
-   not a review loop and must remain a reported blocker.
-7. Once required CI and relevant local validation pass, mark the PR **ready for
-   review** and request review from `@simsong`; also assign the PR to `@simsong`.
-   For a loop handoff, explicitly say that Copilot is not clear and identify the
-   disputed findings for human judgment. Verify ready state, reviewer request,
-   assignment, and final head on GitHub. Never approve or merge automatically.
+Follow the shared workflow with these mail-archiver requirements:
 
-Completion means the verified human-review handoff, not merely a successful
-push, request click, or comment. Report the PR, head, validation, review outcome,
-and any remaining limitation accurately. Preserve progress and the exact next
-step when an external blocker prevents completion.
+- Request and re-request Copilot review with the authenticated GitHub browser
+  Request/Re-request control as `simsong-codex`, or as `simsong` when Copilot
+  is unavailable to the Codex account. This personal-account exception covers
+  only review requests; switch back for all other GitHub writes. Verify the
+  browser identity separately from CLI and SSH identity. Do not trigger review
+  using an API, CLI request, or an `@copilot` mention. An unavailable login/control is a
+  reported blocker; keep the PR draft.
+- Check current-head review, threads, and CI every ten minutes. Continue the
+  cycle through review fixes and re-review, using a quiet task heartbeat when
+  continuation across turns is needed and available; stop it on completion.
+- A documented review loop permits human handoff only when the same
+  substantive finding returns in two successive review rounds after an
+  evidence-backed fix or explanation, with no new actionable information.
+  Record threads, commits, evidence, and disagreement. Required CI and local
+  validation must still pass; missing reviews and valid unfixed defects remain
+  blockers. Mark ready, request review from and assign `simsong`, explicitly
+  stating that Copilot is not clear and identifying the disputed findings.
+  Never represent this exceptional handoff as a successful Copilot review.
 
 ## Validation and cleanup
 
