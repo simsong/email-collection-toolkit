@@ -208,6 +208,23 @@ standard input are reserved stubs, not supported ingest modes yet. Repeatable
 code there executes, so only name directories you trust. See
 [doc/PLUGINS.md](doc/PLUGINS.md).
 
+Google Takeout MBOX is the supported Gmail acquisition path today; see
+[doc/GMAIL.md](doc/GMAIL.md). Microsoft 365 currently has no supported end-user
+acquisition path; its Outlook export and future Graph design are documented in
+[doc/M365.md](doc/M365.md). Apple Mail cache limitations are documented in
+[doc/APPLE_MAIL_CACHE.md](doc/APPLE_MAIL_CACHE.md).
+Until provider adapters are implemented, complete Apple Mail `.emlx` records
+can serve as a best-effort local bridge for synchronized Gmail, Microsoft 365,
+and IMAP accounts. Rerunning ingest adds newly completed messages; byte-identical
+cross-source messages remain one canonical record with multiple observations.
+Use `make compare-apple-mail` to reconcile the default Apple Mail cache with
+`~/mail-archive` by raw and semantic message hashes without changing either.
+
+`uv run mailarchiver-auth ACCOUNT` is a developer preview for the planned live
+Gmail adapter. It detects Google Workspace and Microsoft 365 from public
+provider records, but it does not ingest mail and Microsoft 365 authorization
+remains unavailable.
+
 The archive directory is a native BagIt/Mailbag package containing:
 
 * canonical MBOX payloads under `data/mbox/`;
@@ -435,7 +452,9 @@ make check
 ```
 
 Install the pinned headless Chromium once with `make install-test-browser`.
-`make check` then runs both suites without showing a window. On macOS,
+`make check` runs Ruff and Pylint, then ty and Pyright, then both test suites
+and website validation without showing a window. Use `make lint` and `make types`
+for the static checks alone. On macOS,
 `make test-native-gui` additionally exercises the hidden Cocoa/WKWebView bridge.
 This native target is an explicit local development check and does not run in
 CI/CD, which retains the complete headless Chromium GUI test.

@@ -180,7 +180,12 @@ in an actual message body.
 * Idempotence is at message level.  After a raw message hash and Message-ID
   have been obtained, a matching stored identity is skipped before ClamAV,
   text extraction, and MBOX writing.  A deliberate rescan/reindex mode is
-  separate from normal ingest.
+  separate from normal ingest. Repeated ingest may add newly available source
+  messages. A byte-identical message found in a backup, provider export, and
+  local cache has one canonical record with multiple observations. A record
+  that differs in raw RFC 5322 bytes is preserved even when its semantic `h3`
+  digest matches; semantic identity is reconciliation evidence, not an
+  admission-time discard rule.
 * Every source plug-in declares source integrity controls appropriate to its
   source. The framework executes those controls, displays their progress, and
   persists typed evidence and resume decisions. Cryptographic hashes,
@@ -730,6 +735,50 @@ functions as planned work.
 The Pages build pins its Zola release and verifies the downloaded archive
 against a source-controlled SHA-256 digest before execution.
 
+## Remote account authorization
+
+`mailarchiver-auth ACCOUNT` authorizes a remote account independently of an
+archive or ingest run. It accepts exactly one mailbox address and detects
+consumer Gmail directly, Google Workspace from provider-specific MX records,
+and Microsoft 365 from provider-specific MX or Autodiscover records. Detection
+is bounded and explainable. An inconclusive result fails closed and identifies
+the `--gmail` override; it does not guess from generic gateways or unrelated
+domain-verification records. `--detect-only` reports the evidence without
+authorizing or changing external state. Microsoft 365 authorization is a
+recognized but unavailable stub.
+
+Gmail authorization requests only `gmail.readonly`, opens Google's installed
+application flow in the system browser, and verifies the returned Gmail profile
+against the command-line account before retaining the token. The refresh token
+is stored under that account in the operating-system credential store, never in
+the archive, client configuration, terminal output, logs, fixtures, or reports.
+A release provides one public Google Desktop-client configuration registered by
+the Mail Archiver maintainer. End users do not create Cloud projects, configure
+consent, obtain client IDs, or supply client files. A build without that
+configuration fails with a distributor-facing error; it must not route an end
+user into registration. Account-specific `--client-secrets` remains a developer
+override. The downloaded configuration is Pydantic-validated and restricted to
+Google client IDs, OAuth endpoints, and loopback redirects.
+
+`--register-client` is the explicit one-time maintainer workflow. It uses an
+installed Google Cloud CLI to authenticate the named owner account, then creates
+one project and enables only the Gmail API after explicit confirmation. It does
+not change the CLI's active account or default project. Without that CLI, it
+opens project creation and Gmail API pages and asks for the resulting project
+ID. Because Google has no supported general API for External consent-screen and
+Desktop-client creation, setup opens project-scoped Branding, Audience, Data
+Access, and Client pages in order and imports Google's download. It must not
+scrape a browser profile, capture a Google password, or automate the Console
+DOM.
+
+The project and Desktop client registration persist. In Google's Testing state,
+listed test users reauthorize after seven days; the maintainer does not
+re-register the program. In production, users need not be individually listed.
+An unverified personal-use app warns users and is limited to 100 new users until
+verification. The end-user manual and website explain this distinction with
+generic account examples. Separate maintainer help pages contain the illustrated
+one-time registration procedure and tell readers to use their own account.
+
 ## Ingest sources
 
 * Recursive local-directory ingest recognizes MBOX streams, Apple Mail MBOX
@@ -768,8 +817,12 @@ against a source-controlled SHA-256 digest before execution.
 * Gmail ingest uses OAuth and the Gmail API for incremental acquisition of
   raw messages and labels.  It supports a rolling `--days N` mode using
   Gmail's `newer_than:Nd` query.  Google Takeout MBOX is supported as an offline,
-  one-time baseline input; personal Takeout is not assumed to be
-  programmatically triggerable.
+  one-time baseline input and is the current end-user path; personal Takeout is
+  not assumed to be programmatically triggerable. Direct multi-part Takeout ZIP
+  ingestion remains future work, so current users extract every part and ingest
+  their common parent directory. `doc/GMAIL.md` separately identifies end-user
+  instructions and developer-only OAuth, verification, assessment, and IMAP
+  decisions.
 * IMAP ingest supports TLS and authenticated account configuration, records
   account/folder/UID provenance, and retrieves RFC 5322 bytes without marking
   messages read or modifying the remote mailbox.
@@ -780,6 +833,10 @@ against a source-controlled SHA-256 digest before execution.
   rather than silently omitting them. The current backend decision, fixture
   matrix, and format limitations are maintained in
   [ON_DISK_MAIL_FORMATS.md](ON_DISK_MAIL_FORMATS.md).
+  Microsoft 365 has no platform-neutral Takeout equivalent. Outlook PST export
+  on Windows and OLM export from legacy Outlook for Mac are recognized future
+  acquisition paths, but PST, OST, OLM, Graph, and Exchange Online IMAP are not
+  current end-user sources. `doc/M365.md` must keep that boundary explicit.
 * Eudora ingest recognizes mailbox files together with their table-of-contents,
   attachment, and embedded-content conventions. It records which companion
   files were present and never treats an absent or stale index as proof that a
@@ -789,6 +846,24 @@ against a source-controlled SHA-256 digest before execution.
   folder context when recoverable, and explicitly reports placeholders,
   evicted bodies, partial downloads, and detached parts. It does not contact a
   server unless the user separately configures and authorizes live IMAP ingest.
+  A live Apple Mail cache is best-effort evidence rather than proof of complete
+  provider acquisition. Complete `.emlx` records are accepted, known partial
+  records are rejected, and a cache-completeness preflight must report partial
+  records and attachment policy before a completeness claim. The observed
+  machine-specific access boundary and preflight are maintained in
+  `doc/APPLE_MAIL_CACHE.md`. Until direct Gmail, Microsoft 365, and IMAP
+  adapters are implemented, separately staged complete Apple Mail cache records are a supported
+  local-file bridge for accounts synchronized through those providers; the
+  bridge must not be represented as provider-complete acquisition.
+* The Apple Mail/archive comparator is strictly read-only. It indexes complete
+  `.emlx` records in a disposable database, opens the archive catalog
+  read-only, and classifies exact raw, semantic-only, cache-only, archive-only,
+  and ambiguous matches using semantic-message version 1 (`h3`). It compares
+  header names and DKIM-relaxed values only for semantic-only pairs, outputs no
+  header values or message content, reports excluded partial and unreadable
+  records, and warns when the active Envelope Index WAL changes during the
+  scan. It must never treat `h3` alone as authorization to merge or delete a
+  canonical source variant.
 * Every source adapter emits original RFC 5322 bytes where the source contains
   them. When a proprietary store requires reconstruction or conversion, the
   observation records that fact and the responsible tool/version; reconstructed
@@ -957,3 +1032,19 @@ owner when needed.
 
 Integrity hash-standard versions must be JSON integers. The standalone verifier
 rejects boolean, floating-point, and string alternatives without coercion.
+
+## Current acquisition boundaries
+
+No release Desktop OAuth client is bundled yet. The shared-client end-user
+flow remains deferred until a maintainer supplies and validates that public
+configuration in release artifacts. Current authorization requires a developer
+client override. Installing that override validates and writes the same bytes.
+Known consumer domains need no DNS lookup; transient DNS and token-refresh
+transport failures are disclosed as errors rather than negative detection or
+fresh consent. Credentials are stored only after the profile matches.
+
+A whole Apple Mail cache containing `.partial.emlx` files cannot currently be
+ingested: discovery rejects those files and stops the run. Only a separately
+staged copy containing complete supported records is an available local-file
+bridge. Do not modify the source cache to prepare that copy; the comparator is
+read-only and does not imply whole-cache ingest support.

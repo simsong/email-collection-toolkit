@@ -218,6 +218,25 @@ therefore omits Apple's internal UUID, `Data`, bucket, `Messages`, and message
 filename components while retaining the account path. A `[Gmail].mbox` chain
 also stores a typed cache relationship to the Gmail source kind and retains
 the Apple account UUID as a non-authoritative account hint.
+This same EMLX path is the interim local-file bridge for Gmail, Microsoft 365,
+and ordinary IMAP accounts synchronized by Apple Mail; it makes no provider
+completeness claim. Reingest uses the ordinary source controls and message
+identity, so newly completed EMLX records can be added without duplicating an
+unchanged canonical message.
+
+`apple_mail_compare.py` performs read-only cache/archive reconciliation. It
+walks only complete nonsymlink `.emlx` files, extracts their declared RFC 5322
+payloads, and stores relative paths plus raw and semantic SHA-256 values in a
+temporary SQLite database. It attaches `archive.sqlite3` by a read-only URI and
+uses indexed `messages.sha256` and `observations.semantic_sha256` lookups to
+classify exact, semantic-only, cache-only, archive-only, and ambiguous matches.
+For semantic-only pairs it retrieves hash-verified canonical MBOX bytes and
+compares DKIM-relaxed header multisets. Its report contains only header names
+and aggregate counts, never values or content. It snapshots the active Apple
+Envelope Index WAL metadata before and after the scan to flag a live cache
+change. `make compare-apple-mail` supplies the standard paths and
+`make test-apple-mail-compare` exercises exact, semantic, formatting-only,
+header-added, cache-only, archive-only, and partial-record behavior.
 Emacs RMAIL files are detected by their case-insensitive `BABYL OPTIONS:`
 header because they commonly have no extension. The reader accepts LF and CRLF
 container line endings, streams records without modifying the source, combines
@@ -761,7 +780,9 @@ a checkpoint. The legacy file SHA/check/run columns remain a local display
 cache, not the authority for source decisions. Each observation directly stores raw (`h2`) and semantic
 (`h3`) SHA-256 values for fast forensic lookup. The deduplication lookup is indexed on `(message_id_normalized, sha256)`;
 `messages.sha256` has a separate index for the missing-Message-ID exception and
-FTS result lookup.  Do not make
+FTS result lookup. Thus repeated ingestion and byte-identical cross-source
+copies are idempotent, while Apple- or transport-rewritten records with only an
+`h3` match remain distinct canonical evidence. Do not make
 Message-ID unique.  `email_addresses.address`, `messages.sender_address_pk`,
 and `recipients.address_pk` are indexed. Recipient role preserves To, Cc, or
 Bcc; ordering within a header is not preserved. The catalog also indexes
@@ -993,6 +1014,63 @@ omitted from FTS entirely.
 
 ## Planned remote sources
 
+The implemented `mailarchiver-auth` console entry point is separate from the
+reserved remote-source adapters. It parses and normalizes one account using a
+strict Pydantic model, recognizes well-known consumer domains, and otherwise
+performs bounded DNS MX and `autodiscover.<domain>` CNAME queries. Only Google
+mail hosts and Microsoft `mail.protection.outlook.com` or Autodiscover targets
+are affirmative evidence; gateways such as Proofpoint remain inconclusive by
+themselves. `--gmail` bypasses DNS with recorded override evidence, while
+`--detect-only` makes no external changes beyond public DNS lookup. Microsoft
+365 detection currently stops with `Microsoft Office not yet implemented.`
+
+For Gmail, `existing_client_secrets` first accepts an account-specific developer
+override and otherwise reads the release-wide `gmail_client.json` beside the
+package module. `MAILARCHIVER_GMAIL_CLIENT_JSON` supplies a development or
+packaging override. Pydantic rejects Web-client or malformed JSON as well as
+non-Google client IDs, OAuth endpoints, and redirects. A release without either
+client fails without opening Cloud registration. Refresh tokens are serialized
+only into the platform keyring service `mailarchiver.gmail.oauth`; they are not
+written to an archive or fallback token file. An existing token is refreshed
+when possible. Otherwise `google-auth-oauthlib` opens an installed-app loopback
+flow with PKCE, a five minute timeout, a login hint for the requested account,
+and only `gmail.readonly`. A typed `users.getProfile` response must match the
+requested address before the token is retained.
+
+The maintainer-only `--register-client` command generates an account-neutral
+project ID. With `gcloud`, it authenticates the named account and creates the project without
+activating that account or altering the default project, and enables
+`gmail.googleapis.com`; all mutations follow a terminal confirmation. The
+unsupported Google Auth Platform operations are explicit user handoffs to
+project-qualified Branding, Audience, Scope, and Client pages. The final
+Desktop-client download is discovered only in the standard Downloads directory
+after that handoff or is selected by path. There is no browser DOM automation
+or credential scraping. The validated download is atomically installed with
+user-only modes and its path is printed so the maintainer can package it as
+`src/mailarchiver/gmail_client.json`. `--client-secrets` instead installs an
+account-specific developer override.
+
+`doc/GMAIL.md` is the canonical provider document: its END USER section makes
+Takeout MBOX the current path, while its DEVELOPER section records the API,
+OAuth, verification, security-assessment, and IMAP decisions. The user manual
+and Zola `gmail-authorization` page lead with Takeout rather than an
+unimplemented live adapter. The separate `OAUTH_CLIENT_REGISTRATION.md` and
+Zola `oauth-client-registration` maintainer pages retain the experimental
+one-time numbered registration workflow. Nine 1800-pixel-wide screenshots live
+under
+`website/static/images/gmail-authorization`; the Markdown guide references that
+single asset set rather than duplicating it. The website checker requires both
+pages, the navigation link, a generic maintainer address, and all nine PNG
+assets.
+
+`doc/M365.md` likewise separates the unsupported end-user boundary from the
+developer design. It records Outlook PST and legacy-Mac OLM as the nearest
+offline export paths, Graph delegated `Mail.Read` as the preferred future live
+source, Entra public-client and publisher-verification constraints, and OAuth
+IMAP as a broader compatibility path rather than an authentication shortcut.
+`doc/APPLE_MAIL_CACHE.md` records the best-effort cache boundary and the
+read-only preflight required before completeness claims.
+
 Gmail, IMAP, O365, Microsoft Exchange, and NUL-delimited standard input have
 manifest-loaded reserved source plug-ins. They recognize only their explicit
 source forms and raise a clear unavailable error. The generic provider pipeline
@@ -1012,8 +1090,9 @@ folders and UIDs, fetches RFC 5322 bytes without setting `\\Seen`, and stores
 UIDVALIDITY plus UID so server reset/reuse is detectable.
 
 The `--days N` option uses `newer_than:Nd` on `messages.list`; `--after`
-accepts an epoch for timezone-precise collection.  Google Takeout is an MBOX directory input.  The program does not automate
-personal Takeout creation or download.
+accepts an epoch for timezone-precise collection. Google Takeout is an MBOX
+directory input. The program does not automate personal Takeout creation or
+download and does not yet extract Takeout ZIP parts.
 
 ## Public corpus validation pipeline
 
@@ -1111,8 +1190,9 @@ CLI ingest with the real configured on-demand `clamd`, includes a source message
 without a final newline, requires checkpoint publication, and invokes the
 installed standard-library-only verifier under isolated Python.
 
-`make test` runs the ordinary test tree, while `make check` runs it followed by
-the separate end-to-end suite. The tracked source corpus has enough messages to
+`make test` runs the ordinary test tree. `make check` first requires clean lint
+and type analysis, then runs that tree, the separate end-to-end suite, and website
+validation. The tracked source corpus has enough messages to
 exercise complete scoped searches and rich MIME behavior.
 `make test-e2e` drives
 the complete interface in headless Chromium while binding every bridge method
@@ -1195,3 +1275,19 @@ owner when needed.
 
 Integrity hash-standard versions must be JSON integers. The standalone verifier
 rejects boolean, floating-point, and string alternatives without coercion.
+
+## Current acquisition boundaries
+
+No release Desktop OAuth client is bundled yet. The shared-client end-user
+flow remains deferred until a maintainer supplies and validates that public
+configuration in release artifacts. Current authorization requires a developer
+client override. Installing that override validates and writes the same bytes.
+Known consumer domains need no DNS lookup; transient DNS and token-refresh
+transport failures are disclosed as errors rather than negative detection or
+fresh consent. Credentials are stored only after the profile matches.
+
+A whole Apple Mail cache containing `.partial.emlx` files cannot currently be
+ingested: discovery rejects those files and stops the run. Only a separately
+staged copy containing complete supported records is an available local-file
+bridge. Do not modify the source cache to prepare that copy; the comparator is
+read-only and does not imply whole-cache ingest support.
