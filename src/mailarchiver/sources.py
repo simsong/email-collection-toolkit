@@ -373,6 +373,7 @@ class LocalSourcePlugin(SourcePlugin):
 
     def discover(self, source: SourceSpec) -> Iterator[MailContainer | ProgressEvent | SkippedInput]:
         root = Path(source.locator)
+        root_path = root.resolve()
         for candidate in FileFolderHierarchyParser().paths(root):
             path = candidate.resolve()
             stat = path.stat()
@@ -389,7 +390,7 @@ class LocalSourcePlugin(SourcePlugin):
                     detail="not a regular file",
                 )
                 continue
-            if stat.st_size == 0 or _is_silent_metadata(path):
+            if stat.st_size == 0 or _is_silent_metadata(path, root_path):
                 continue
             parser = self._recognize_file(path, stat.st_size)
             if parser is None:
@@ -488,14 +489,19 @@ class LocalSourcePlugin(SourcePlugin):
         return None if not matches else matches[0]
 
 
-def _is_silent_metadata(path: Path) -> bool:
+def _is_silent_metadata(path: Path, source_root: Path | None = None) -> bool:
     rules = local_source_rules().ignore
-    candidate = path.as_posix()
+    candidates = [path.as_posix()]
+    if source_root is not None:
+        try:
+            candidates.append(path.relative_to(source_root).as_posix())
+        except ValueError:
+            pass
     patterns = rules.globs
     if not rules.case_sensitive:
-        candidate = candidate.casefold()
+        candidates = [candidate.casefold() for candidate in candidates]
         patterns = tuple(pattern.casefold() for pattern in patterns)
-    return any(fnmatchcase(candidate, pattern) for pattern in patterns)
+    return any(fnmatchcase(candidate, pattern) for candidate in candidates for pattern in patterns)
 
 
 def _without_mmdf_delimiter(raw: bytes) -> bytes:
@@ -675,9 +681,10 @@ def source_inventory(
     """Count recognized source files and bytes without hashing or retaining them."""
     inventory = SourceInventory()
     for root in roots:
+        root_path = root.resolve()
         for path in _source_paths(root, hierarchy):
             path = path.resolve()
-            if _is_silent_metadata(path):
+            if _is_silent_metadata(path, root_path):
                 continue
             if _source_kind(path) is None:
                 inventory.skipped_file_count += 1
