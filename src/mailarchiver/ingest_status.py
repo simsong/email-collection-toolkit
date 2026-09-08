@@ -84,6 +84,7 @@ class IngestStatus(BaseModel):
     counts: IngestCounts
     years: list[YearProgress]
     failure_detail: str | None = None
+    scan_policy: Literal["clamav", "not-scanned", "unknown"] = "unknown"
 
     @field_validator("started_at", "updated_at", "completed_at")
     @classmethod

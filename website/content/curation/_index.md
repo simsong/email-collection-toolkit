@@ -28,8 +28,8 @@ description = "Search the collection, preview messages and attachments, and repo
 
 [[extra.stages]]
 number = "05"
-title = "Export and verify"
-description = "Export a BagIt 1.0 and Mailbag 1.0 package, verify its SHA-256 hashes, or transfer its MBOX files to ePADD."
+title = "Verify and share"
+description = "Verify the archive's SHA-256 hashes or transfer its MBOX files to ePADD. The archive already uses BagIt 1.0 and Mailbag 1.0 as its native storage format."
 +++
 
 ## What the program does
@@ -42,8 +42,9 @@ The viewer lets library staff search messages and preview messages and
 attachments. Reports provide message counts by year, sender, and recipient.
 These reports can provide data for a finding aid.
 
-Mail Archiver exports a BagIt 1.0 package that conforms to Mailbag 1.0. The
-package contains MBOX files, Mailbag metadata, source records, and SHA-256
+Mail Archiver uses BagIt 1.0, conforming to Mailbag 1.0, as the native storage
+format for each email archive, not as a separate export format. The archive
+contains MBOX files, Mailbag metadata, source records, and SHA-256
 hashes. Its MBOX files can be transferred to ePADD for additional appraisal,
 review, and access work.
 

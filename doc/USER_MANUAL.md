@@ -5,6 +5,18 @@ Mail Archiver reads source mail without changing it. It stores deduplicated
 messages in standard MBOX files, records where every message was found, and
 creates integrity information that can be checked independently.
 
+Each archive directory uses BagIt 1.0 and Mailbag 1.0 as its native storage
+format. Messages live in MBOX files under `data/mbox/`, alongside archive
+metadata and SHA-256 integrity information elsewhere in the archive directory.
+This is the archive the application uses, not a separate export; no conversion
+step is needed to obtain a BagIt/Mailbag archive. SQLite catalogs and search
+indexes are derived data.
+
+On macOS, open the supplied DMG and drag **Mail Archiver.app** to its
+**Applications** shortcut. Eject the disk and open the installed app.
+Python is included. Development builds are ad-hoc signed, not notarized;
+see [installation and signing notes](MACOS_DISTRIBUTION.md).
+
 Mail Archiver currently reads:
 
 * MBOX files;
@@ -83,8 +95,11 @@ Until direct adapters are written, Apple Mail can provide local complete
 messages for Gmail, Microsoft 365/Exchange Online, Outlook.com, and ordinary
 IMAP accounts that have already been synchronized to this Mac. Quit Mail if
 practical, set **Download Attachments** to **All**, allow synchronization to
-finish, and ingest `~/Library/Mail` as a local source. The invoking terminal
-may require Full Disk Access.
+finish, and export selected mailboxes as MBOX or stage a separate copy containing
+only complete supported messages. Do not ingest the whole `~/Library/Mail` tree
+when it contains `.partial.emlx` files: discovery rejects them and stops the run.
+The invoking terminal may require Full Disk Access. Never alter the source cache
+to prepare the staged copy.
 
 Only complete `.emlx` payloads are accepted. `.partial.emlx`, detached
 attachments, indexes, and plist metadata are not treated as messages. A cache
@@ -282,21 +297,53 @@ Start the graphical search interface with:
 make gui ARGS='--archive "/path/to/mail-archive"'
 ```
 
-If no archive was supplied, the application opens the last valid archive or an
-in-memory **Untitled** document. Use **File → Open…** or **Open Archive…** to
-open an existing archive in a new window. **File → New Search Window** opens
+If no archive was supplied, the application opens the last valid archive or
+offers **Open Existing**, **Create New**, and **Cancel**. Use **File → Open…** (Command-O) to
+open an existing archive in a new window. **Window → New Search Window** opens
 another independently searchable window on the active archive. Recent archives
 are kept in **File → Open Recent**. A missing or invalid saved archive is
 ignored, removed from recents, and reported in the About window. **File → New**
 asks for a new or empty `.mailarchive` destination before initializing and
-opening it. **File → Import…** asks whether to select local files or directories,
-asks for the UTF-8 owner-names file, shows the destination and sources for final
-confirmation, and starts import using the separately installed ClamAV.
+opening it. On macOS, **File → Import…** opens one picker for local files and
+directories, sets up owner names, shows the destination and sources for final
+confirmation, and starts import. When ClamAV is missing or unconfigured, the
+import screen displays an antivirus warning. **Install ClamAV…** opens its
+official download page; it does not install software automatically. You may
+instead explicitly choose **Import Without Scanning**, or Cancel. The unscanned
+warning is retained in import history. Installing ClamAV later does not scan
+previously imported messages automatically.
+The **Import Directory…** button in the Ingests window starts the same workflow
+for that window's archive, opening the same source picker directly.
+In the picker, select files or directories and click **Import**. You can also
+navigate into a directory and import it; directories include supported mail
+files and subdirectories. No separate Files/Folders choice is needed.
+The app combines `owner-names.txt` from each selected source directory with
+the destination archive's owner list. If that list is empty, enter your names
+and email addresses in the owner editor, one per line, and click **Continue**.
+After you confirm **Import**, the merged list is saved in the destination
+archive's `owner-names.txt` for future imports. Source files are unchanged;
+canceling does not save names. The app has no built-in default owner list.
+
+Use **File → Document Options…** to edit this archive's owner names. The sorted
+list scrolls and supports multiple selections. **+** opens an entry field;
+commas, semicolons, or whitespace separate entries. **−** deletes selected names.
+Edits save automatically, and importing blocks edits to the same document.
+The panel warns if the list differs from that used by the last import (older
+imports may not have recorded their names). Changes affect future imports only:
+existing messages are not moved between Sent and Archive mailboxes. There is
+no Reindex button here because owner names are not stored in the search index,
+and reindexing would not change existing classifications.
+
+For each archive, the app remembers the last source-picker directory in the
+human-editable `config.yaml` beside the archive. Future imports start there when
+the directory still exists; otherwise the picker starts beside the archive.
+Malformed or missing navigation config is ignored.
 For a saved document, the window title shows the archive path and total number
 of deduplicated, searchable messages.
-On first launch with no usable archive, the Untitled window immediately offers
-the New destination and then Import dialogs. Canceling leaves the blank window
-open and does not choose or mutate any other path.
+Cancel dismisses the startup dialog without opening a search window. About and
+File New/Open remain available. Create New asks for a destination before opening
+its search window and offering Import; accepting the default Untitled name works.
+Command-N creates an archive and Command-W closes an eligible search window.
 
 The About window remains available for the application run. It shows the
 installed version, free disk space, live Internet reachability, startup errors,

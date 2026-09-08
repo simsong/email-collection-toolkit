@@ -32,6 +32,7 @@ from tabulate import tabulate
 
 from .archive_integrity import MailbagArchiveIntegrityControls
 from .archive_path import add_archive_argument, require_archive
+from .document_options import DocumentOptions
 from .catalog import (
     UnsupportedSearchSchemaError,
     address_pk,
@@ -124,6 +125,7 @@ class IngestRequest(BaseModel):
     workers: int = Field(default_factory=lambda: min(os.cpu_count() or 1, 8), ge=1)
     plugin_dir: list[Path] = Field(default_factory=list)
     index_attachments: bool = False
+    scan_policy: Literal["clamav", "not-scanned"] = "clamav"
 
 
 def positive_integer(value: str) -> int:
@@ -416,6 +418,7 @@ class ProgressReporter:
         self.status_source_roots = source_roots or []
         self.status_write_error: str | None = None
         self.last_status_monotonic: float | None = None
+        self.scan_policy: Literal["clamav", "not-scanned", "unknown"] = "unknown"
 
     def start(self) -> None:
         self.display(self.phase)
@@ -844,6 +847,7 @@ class ProgressReporter:
             counts=state.counts,
             years=state.years,
             failure_detail=failure_detail,
+            scan_policy=self.scan_policy,
         )
         try:
             self.status_file.write(status)
@@ -986,11 +990,18 @@ def ingest(args: argparse.Namespace) -> None:
             workers=args.workers,
             plugin_dir=list(args.plugin_dir),
             index_attachments=args.index_attachments,
+            scan_policy="not-scanned" if args.no_scan else "clamav",
         )
     )
 
 
-def run_ingest(request: IngestRequest, writer_lease: WriterLease | None = None, *, outcome: IngestOutcome | None = None, terminal: bool = True) -> None:
+class IngestInterrupted(KeyboardInterrupt):
+    """A GUI caller requested an orderly, safely rerunnable stop."""
+
+
+def run_ingest(
+    request: IngestRequest, writer_lease: WriterLease | None = None, *, outcome: IngestOutcome | None = None, terminal: bool = True, stop_event: threading.Event | None = None,
+) -> None:
     """Run ingest under the archive's OS writer lock."""
     identity = os.path.normcase(str(request.archive.resolve()))
     owned = writer_lease is None
@@ -1007,13 +1018,13 @@ def run_ingest(request: IngestRequest, writer_lease: WriterLease | None = None, 
             lease.release()
         raise ValueError("an acquired writer lease for this archive is required")
     try:
-        _run_ingest(request, lease, outcome if outcome is not None else IngestOutcome(), terminal)
+        _run_ingest(request, lease, outcome if outcome is not None else IngestOutcome(), terminal, stop_event)
     finally:
         if owned:
             lease.release()
 
 
-def _run_ingest(request: IngestRequest, writer_lease: WriterLease, outcome: IngestOutcome, terminal: bool) -> None:
+def _run_ingest(request: IngestRequest, writer_lease: WriterLease, outcome: IngestOutcome, terminal: bool, stop_event: threading.Event | None = None) -> None:
     plugins = load_plugins(request.plugin_dir)
     source_specs = [SourceSpec(locator=root) for root in request.roots]
     selected_sources: list[tuple[SourceSpec, LoadedPlugin]] = []
@@ -1080,6 +1091,7 @@ def _run_ingest(request: IngestRequest, writer_lease: WriterLease, outcome: Inge
         checkpoint_archive()
         print(f"recovered: pending message publication {recovery.value}", file=sys.stderr)
     owners = owner_tokens(request.owner_names_file)
+    DocumentOptions(archive).record_import(owners, writer_lease)
     started_at = datetime.now(UTC)
     run_pk = catalog.execute(
         "INSERT INTO ingest_runs(started_at) VALUES (?)", (started_at.isoformat(),)
@@ -1114,12 +1126,23 @@ def _run_ingest(request: IngestRequest, writer_lease: WriterLease, outcome: Inge
         terminal=terminal,
     )
     boxes: dict[Path, mailbox.mbox] = {}
+    progress.scan_policy = request.scan_policy
     source_file_pks: dict[tuple[str, str, str], int] = {}
     source_volume_pks: dict[str, int] = {}
     pending_duplicate_observations: dict[tuple[str, str], list[int]] = {}
     pending_identities: set[tuple[str, str]] = set()
     publication_lock = threading.RLock()
     stop = threading.Event()
+
+    def check_interrupted() -> None:
+        if stop_event is not None and stop_event.is_set():
+            stop.set()
+            raise IngestInterrupted("Import stopped; import the same source again to continue without duplicates.")
+
+    def refresh_import() -> None:
+        progress.refresh()
+        check_interrupted()
+
     scanner: ClamScanner | None = None
     discovery = sqlite3.connect("")
     discovery.executescript(
@@ -1472,6 +1495,11 @@ def _run_ingest(request: IngestRequest, writer_lease: WriterLease, outcome: Inge
                 "INSERT OR IGNORE INTO metadata_defects(message_pk, field, detail) VALUES (?, ?, ?)",
                 ((message_pk, defect.field, defect.detail) for defect in parsed.defects),
             )
+            if request.scan_policy == "not-scanned":
+                catalog.execute(
+                    "INSERT INTO metadata_defects(message_pk, field, detail) VALUES (?, ?, ?)",
+                    (message_pk, "antivirus", "not-scanned: explicitly imported without antivirus scanning"),
+                )
             box = boxes.get(destination)
             if box is None:
                 box = mailbox.mbox(destination, create=True)
@@ -1515,6 +1543,8 @@ def _run_ingest(request: IngestRequest, writer_lease: WriterLease, outcome: Inge
         return int(message_pk)
 
     def scan_message(source: MailObject) -> bool:
+        if request.scan_policy == "not-scanned":
+            return False
         assert scanner is not None
         progress.record_worker(
             "scanning",
@@ -1701,6 +1731,7 @@ def _run_ingest(request: IngestRequest, writer_lease: WriterLease, outcome: Inge
         inventory = SourceInventory()
         for source_spec, plugin in selections:
             for item in plugin.implementation.discover(source_spec):
+                check_interrupted()
                 if isinstance(item, MailContainer):
                     if item.source.plugin_kind != plugin.manifest.kind:
                         raise RuntimeError(
@@ -1799,21 +1830,26 @@ def _run_ingest(request: IngestRequest, writer_lease: WriterLease, outcome: Inge
         inventory = capture_discovery(selected_sources, "containers", report_skipped=True)
         verify_stable_discovery()
         progress.finish_inventory(inventory)
-        progress.set_phase(CLAMAV_START_PHASE)
-        scanner = ClamScanner(progress.refresh)
-        scanner.__enter__()
+        check_interrupted()
+        if request.scan_policy == "clamav":
+            progress.set_phase(CLAMAV_START_PHASE)
+            scanner = ClamScanner(refresh_import)
+            scanner.__enter__()
+        else:
+            print("WARNING: importing without antivirus scanning; messages are NOT scanned or certified clean.", file=sys.stderr)
         progress.set_phase("checking sources")
         run_file_workers(
             snapshotted_containers(),
             request.workers,
             ingest_container,
             stop,
-            progress.refresh,
+            refresh_import,
             concurrency=lambda work: (
                 f"{work.plugin.manifest.kind}:{work.container.concurrency_key}",
                 work.plugin.implementation.capabilities.max_concurrency,
             ),
         )
+        check_interrupted()
         catalog.commit()
         search.commit()
         succeeded = True
@@ -1932,6 +1968,7 @@ def print_report(archive: Path, years: tuple[int, int] | None, top: int | None) 
         if top is not None and top > 0:
             def heading(text: str) -> str:
                 return f"\033[1m{text}\033[0m" if sys.stdout.isatty() else text
+
             owner_addresses = (
                 "owner_addresses AS (SELECT DISTINCT sender_address_pk FROM messages WHERE category = 'Sent') "
             )
@@ -2167,7 +2204,9 @@ def main() -> int:
         default=1900,
         help="reject earlier message dates and use normal fallbacks (default: 1900)",
     )
-    ingest_parser.add_argument("--clamav", action="store_true", required=True, help="scan new messages with on-demand ClamAV")
+    scanning = ingest_parser.add_mutually_exclusive_group(required=True)
+    scanning.add_argument("--clamav", action="store_true", help="scan new messages with on-demand ClamAV")
+    scanning.add_argument("--no-scan", action="store_true", help="explicitly import without antivirus; record messages as not scanned")
     ingest_parser.add_argument("--workers", type=positive_integer, default=min(os.cpu_count() or 1, 8), help="source mailfiles ingested concurrently (default: cores, capped at 8)")
     ingest_parser.add_argument(
         "--plugin-dir",

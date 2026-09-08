@@ -102,6 +102,10 @@ def test_source_inventory_totals_only_recognized_message_files(tmp_path: Path) -
     mbox = source / "mailbox"
     mbox.write_bytes(b"From sender@example Fri Feb  2 00:00:00 2024\nmessage\n")
     (source / "ignored.plist").write_bytes(b"not mail" * 100)
+    (source / "owner-names.txt").write_text("owner@example.org\n", encoding="utf-8")
+    nested = source / "nested"
+    nested.mkdir()
+    (nested / "owner-names.txt").write_text("nested-owner@example.org\n", encoding="utf-8")
     updates: list[tuple[int, int]] = []
     skipped: list[tuple[Path, str]] = []
 
@@ -113,8 +117,11 @@ def test_source_inventory_totals_only_recognized_message_files(tmp_path: Path) -
 
     assert inventory.file_count == 2
     assert inventory.byte_count == eml.stat().st_size + mbox.stat().st_size
-    assert inventory.skipped_file_count == 1
-    assert skipped == [(source / "ignored.plist", "no file parser recognized it")]
+    assert inventory.skipped_file_count == 2
+    assert skipped == [
+        (source / "ignored.plist", "no file parser recognized it"),
+        (nested / "owner-names.txt", "no file parser recognized it"),
+    ]
     assert updates[-1] == (inventory.file_count, inventory.byte_count)
 
 

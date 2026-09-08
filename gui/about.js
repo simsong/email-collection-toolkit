@@ -5,14 +5,17 @@ const byId = id => document.getElementById(id);
 let initialized = false;
 
 window.addEventListener("pywebviewready", initialize);
-window.setTimeout(() => {
+const bridgeTimer = window.setInterval(() => {
   if (window.pywebview?.api?.status) initialize();
-  else if (!initialized) showError("The native application bridge did not start.");
-}, 1500);
+}, 250);
+window.setTimeout(() => {
+  if (!initialized) showError("Waiting for the native application bridge…");
+}, 10000);
 
 async function initialize() {
   if (initialized) return;
   initialized = true;
+  window.clearInterval(bridgeTimer);
   await refresh();
   window.setInterval(refresh, 1000);
 }
@@ -20,6 +23,7 @@ async function initialize() {
 async function refresh() {
   try {
     render(await window.pywebview.api.status());
+    byId("error").hidden = true;
   } catch (error) {
     showError(`Could not read application status: ${String(error?.message || error)}`);
   }
@@ -31,6 +35,7 @@ function render(status) {
   byId("copyright").textContent = status.metadata.copyright;
   byId("disk").textContent = `${formatBytes(status.disk_free_bytes)} available on ${status.disk_path}`;
   byId("internet").textContent = status.internet.detail;
+  if (byId("antivirus")) byId("antivirus").textContent = status.antivirus?.detail || "Unknown";
   const activity = status.ingests.length ? status.ingests.map(activityCard) : [empty("No saved archive is open.")];
   byId("activity").replaceChildren(...activity);
   const notices = status.notices.length ? [...status.notices].reverse().map(noticeCard) : [empty("No messages.")];

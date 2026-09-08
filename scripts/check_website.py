@@ -37,7 +37,10 @@ REQUIRED_TEXT = (
     "The non-GPL versions may be available",
     "Identify email files",
     "Search and report",
-    "Export and verify",
+    "Verify and share",
+    "Website changelog",
+    "@/changelog.md",
+    "https://github.com/simsong",
     "(C) 2026 Simson L. Garfinkel, authored with Codex.",
 )
 
@@ -47,6 +50,9 @@ FORBIDDEN_TEXT = (
     "Built for personal memory and archival stewardship",
     "Search the decades you already saved",
     "Preserve the messages. Understand the collection",
+    "Mail Archiver exports a BagIt",
+    "Export a BagIt",
+    "The export uses MBOX, BagIt",
 )
 
 
@@ -77,6 +83,7 @@ def main() -> int:
     required = [
         root / "website/config.toml", root / "website/content/_index.md",
         root / "website/content/use-cases.md",
+        root / "website/content/about.md", root / "website/content/changelog.md",
         root / "website/content/privacy.md", root / "website/content/rights.md",
         root / "website/themes/envelope-rainbow/theme.toml",
         root / "website/themes/envelope-rainbow/templates/base.html",

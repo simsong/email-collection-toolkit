@@ -86,5 +86,5 @@ jobs:
         uses: astral-sh/setup-uv@v10.0.1
       - name: Install dependencies
         run: uv sync --locked --all-groups
-      - name: Pylint
-        run: make pylint
+      - name: Ruff and Pylint
+        run: make ruff pylint

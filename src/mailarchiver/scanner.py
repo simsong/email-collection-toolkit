@@ -12,12 +12,44 @@ from contextlib import AbstractContextManager
 from pathlib import Path
 from typing import BinaryIO, Self
 
-CLAMD = os.environ.get("MAILARCHIVER_CLAMD", "/opt/homebrew/sbin/clamd")
-CLAMDSCAN = os.environ.get("MAILARCHIVER_CLAMDSCAN", "/opt/homebrew/bin/clamdscan")
-CLAMD_CONFIG = os.environ.get("MAILARCHIVER_CLAMD_CONFIG", "/opt/homebrew/etc/clamav/clamd.conf")
+from pydantic import BaseModel
+
+
+def clamav_prefix(prefixes: tuple[Path, ...] = (Path("/opt/homebrew"), Path("/usr/local/clamav"), Path("/usr/local"))) -> Path:
+    """Recognize ARM/Intel Homebrew and the official macOS package without PATH edits."""
+    return next((prefix for prefix in prefixes if (prefix / "sbin/clamd").is_file()
+                 and (prefix / "bin/clamdscan").is_file()), prefixes[0])
+
+
+CLAMAV_PREFIX = clamav_prefix()
+CLAMD = os.environ.get("MAILARCHIVER_CLAMD", str(CLAMAV_PREFIX / "sbin/clamd"))
+CLAMDSCAN = os.environ.get("MAILARCHIVER_CLAMDSCAN", str(CLAMAV_PREFIX / "bin/clamdscan"))
+CLAMD_CONFIG = os.environ.get("MAILARCHIVER_CLAMD_CONFIG", str(CLAMAV_PREFIX / (
+    "etc/clamd.conf" if CLAMAV_PREFIX == Path("/usr/local/clamav") else "etc/clamav/clamd.conf")))
 CLAMD_SOCKET = Path(os.environ.get("MAILARCHIVER_CLAMD_SOCKET", "/private/tmp/clamd.sock"))
 CLAMD_START_TIMEOUT_SECONDS = 120
 CLAMD_START_POLL_SECONDS = 0.25
+
+CLAMAV_DOWNLOAD_URL = "https://www.clamav.net/downloads"
+UNSCANNED_WARNING = "Antivirus unavailable. Importing without scanning may retain infected messages and attachments."
+
+
+class ScannerAvailability(BaseModel):
+    """Configuration presence, not a claim that the daemon or definitions are healthy."""
+
+    configured: bool
+    detail: str
+
+
+def scanner_availability() -> ScannerAvailability:
+    missing = [path for path in (CLAMD, CLAMDSCAN) if not Path(path).is_file() or not os.access(path, os.X_OK)]
+    if not Path(CLAMD_CONFIG).is_file() or not os.access(CLAMD_CONFIG, os.R_OK):
+        missing.append(CLAMD_CONFIG)
+    return ScannerAvailability(
+        configured=not missing,
+        detail=(UNSCANNED_WARNING + " Missing ClamAV executable or configuration: " + ", ".join(missing))
+        if missing else "ClamAV configured; scanner readiness is checked before import.",
+    )
 
 
 class ClamScannerStartupError(RuntimeError):

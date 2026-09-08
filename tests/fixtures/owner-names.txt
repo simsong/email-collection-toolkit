@@ -1,0 +1,8 @@
+# Test fixture only. Applications have no default owner aliases.
+# Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved.
+sgarfinkel
+simson
+simsong
+slg
+slgarfin
+slgarfinkel

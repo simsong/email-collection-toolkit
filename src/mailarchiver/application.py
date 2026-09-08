@@ -10,7 +10,7 @@ import tempfile
 from hashlib import sha256
 from importlib.metadata import version
 from pathlib import Path
-from threading import RLock
+from threading import Event, RLock
 from typing import Literal
 from uuid import uuid4
 
@@ -83,10 +83,12 @@ class ArchiveDescriptor(BaseModel):
 class IngestJob(BaseModel):
     """One operation shared by every window on an archive document."""
 
-    model_config = ConfigDict(frozen=True)
+    model_config = ConfigDict(frozen=True, arbitrary_types_allowed=True)
 
     operation_id: str
     owner_window_id: str
+    stop: Event = Field(default_factory=Event, exclude=True)
+    finished: Event = Field(default_factory=Event, exclude=True)
 
 
 class WindowGeometry(BaseModel):

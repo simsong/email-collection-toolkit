@@ -14,7 +14,7 @@ import time
 from pathlib import Path
 
 import pytest
-from playwright.sync_api import Page
+from playwright.sync_api import Page, expect
 from pydantic import BaseModel
 
 from e2e_tests.eicar_fixture import write_eicar_emlx
@@ -50,6 +50,8 @@ NATIVE_SMOKE_MESSAGE = (
     b"The message viewer bridge is ready.\n"
 )
 NATIVE_SMOKE_API_METHODS = ("status", "search", "native_smoke_complete")
+PROBE_ARCHIVE_ENV = "MAILARCHIVER_NATIVE_PROBE_ARCHIVE"
+PROBE_PREFERENCES_ENV = "MAILARCHIVER_NATIVE_PROBE_PREFERENCES"
 
 
 class BuiltArchive(BaseModel):
@@ -238,6 +240,93 @@ def test_search_ui_end_to_end_without_a_window(
     assert {"saved-tiny.png", "saved-review.command", "filter-sets.json"} <= exports
     assert any(name.startswith("saved-Rich UI message-") and name.endswith(".eml") for name in exports)
     assert any(name.startswith("Rich UI message-") and name.endswith(".eml") for name in exports)
+
+
+def test_message_splitter_resizes_panes_not_columns(
+    built_archive: BuiltArchive, tmp_path: Path, page: Page,
+) -> None:
+    """Requirement: real pointer/keyboard resizing preserves results and avoids list overflow."""
+    api = GuiApi(built_archive.archive, tmp_path, tmp_path, tmp_path / "filters.json")
+    try:
+        for name in GUI_API_METHODS:
+            page.expose_function(f"mailarchive_{name}", getattr(api, name))
+        page.add_init_script(
+            f"const names = {json.dumps(GUI_API_METHODS)}; window.pywebview = {{api: {{}}}}; "
+            "for (const name of names) window.pywebview.api[name] = "
+            "(...args) => window[`mailarchive_${name}`](...args); "
+            "window.addEventListener('DOMContentLoaded', () => "
+            "window.dispatchEvent(new Event('pywebviewready')));",
+        )
+        page.set_viewport_size({"width": 1400, "height": 900})
+        page.goto((GUI_DIRECTORY / "index.html").as_uri())
+        expect(page.locator("#result-status")).to_have_text("Enter a search.")
+        page.locator("#search").fill("message")
+        page.locator("#search").press("Enter")
+        page.locator(".result").first.click()
+        page.wait_for_function("state.selected !== null && state.view !== null")
+        selection = page.evaluate("[state.selected, [...state.resultSelection], state.results.length]")
+        splitter = page.get_by_role("separator", name="Message list width")
+        results = page.locator("#results-pane")
+        preview = page.locator("#message-pane")
+
+        def width(selector: str) -> float:
+            return page.locator(selector).evaluate("element => element.getBoundingClientRect().width")
+
+        def assert_fitted() -> None:
+            page.wait_for_function("""() => {
+                const holder = document.querySelector('#result-list .tabulator-tableholder');
+                const cell = document.querySelector('#result-list .tabulator-cell');
+                return holder && cell && holder.scrollWidth <= holder.clientWidth
+                    && Math.abs(cell.getBoundingClientRect().width - holder.clientWidth) <= 2;
+            }""")
+            assert preview.evaluate("element => element.getBoundingClientRect().right <= innerWidth + 1")
+
+        before_list = width("#results-pane")
+        before_preview = width("#message-pane")
+        box = splitter.bounding_box()
+        assert box is not None
+        page.mouse.move(box["x"] + box["width"] / 2, box["y"] + 100)
+        page.mouse.down()
+        page.mouse.move(box["x"] + box["width"] / 2 + 150, box["y"] + 100, steps=12)
+        page.mouse.up()
+        assert abs(width("#results-pane") - before_list - 150) < 2
+        assert abs(width("#message-pane") - before_preview + 150) < 2
+        assert page.evaluate("[state.selected, [...state.resultSelection], state.results.length]") == selection
+        assert_fitted()
+
+        # The old column-edge gesture must no longer resize a Tabulator cell.
+        cell = page.locator("#result-list .tabulator-cell").first.bounding_box()
+        assert cell is not None
+        page.mouse.move(cell["x"] + cell["width"] - 2, cell["y"] + 10)
+        page.mouse.down()
+        page.mouse.move(cell["x"] + cell["width"] - 100, cell["y"] + 10, steps=6)
+        page.mouse.up()
+        assert abs(width("#results-pane") - before_list - 150) < 2
+        assert_fitted()
+
+        splitter.focus()
+        splitter.press("ArrowLeft")
+        assert abs(width("#results-pane") - before_list - 140) < 2
+        splitter.press("Home")
+        assert abs(width("#results-pane") - 300) < 2
+        splitter.press("End")
+        assert abs(width("#message-pane") - 320) < 2
+        assert_fitted()
+        page.locator("#show-original-folders").check()
+        expect(page.locator("#mailbox-browser")).to_be_visible()
+        assert_fitted()
+        page.set_viewport_size({"width": 800, "height": 700})
+        assert_fitted()
+        assert results.evaluate("element => element.getBoundingClientRect().width > 200")
+        page.locator("#show-original-folders").uncheck()
+        assert_fitted()
+        # Standalone message windows must allocate their entire width to the preview.
+        page.goto((GUI_DIRECTORY / "index.html").as_uri() + f"?standalone=1&message={selection[0]}")
+        expect(splitter).to_be_hidden()
+        expect(preview).to_be_visible()
+        assert abs(width("#message-pane") - 800) < 2
+    finally:
+        api.close()
 
 
 def test_ingest_history_ui_end_to_end(built_archive: BuiltArchive, page: Page) -> None:
@@ -474,6 +563,26 @@ def run_native_smoke(native_smoke_archive: Path, tmp_path: Path, *, html_find: b
 def test_native_search_ui_smoke(native_smoke_archive: Path, tmp_path: Path) -> None:
     """Exercise one bounded real search through a hidden pywebview bridge process."""
     run_native_smoke(native_smoke_archive, tmp_path)
+
+
+@pytest.mark.skipif(
+    sys.platform != "darwin" or os.environ.get("MAILARCHIVER_NATIVE_APPLICATION_E2E") != "1",
+    reason="set MAILARCHIVER_NATIVE_APPLICATION_E2E=1 for production Cocoa lifecycle checks",
+)
+def test_native_application_lifecycle(native_smoke_archive: Path, tmp_path: Path) -> None:
+    """About must populate through its real bridge; extensionless Open and menus must work."""
+    result = subprocess.run(
+        [sys.executable, str(Path(__file__).with_name("native_application_probe.py"))],
+        # Cocoa treats positional filesystem paths as document-open requests.
+        # Pass fixtures out of band so the probe can first test About alone.
+        env=os.environ | {
+            PROBE_ARCHIVE_ENV: str(native_smoke_archive),
+            PROBE_PREFERENCES_ENV: str(tmp_path / "preferences.json"),
+        },
+        capture_output=True, text=True, timeout=40, check=False,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "Production About, document bridge, and menus passed" in result.stdout
 
 
 @pytest.mark.skipif(

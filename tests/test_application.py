@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 import sqlite3
+import hashlib
 from pathlib import Path
+from threading import Event, Thread
+from time import monotonic, sleep
 
 import pytest
 
@@ -19,6 +22,9 @@ from mailarchiver.application import (
 )
 from mailarchiver.bagit import initialize_bag
 from mailarchiver.catalog import create_catalog, create_search
+from mailarchiver.__main__ import IngestInterrupted, IngestRequest, run_ingest
+from mailarchiver.ingest_status import read_ingest_history
+from mailarchiver.standalone_verify import verify_archive
 
 
 def make_archive(path: Path) -> Path:
@@ -32,13 +38,99 @@ def controller(tmp_path: Path) -> ApplicationController:
     return ApplicationController(ApplicationPreferencesStore(tmp_path / "preferences.json"))
 
 
+def test_gui_stop_checkpoints_partial_import_and_reimport_has_no_duplicates(tmp_path: Path) -> None:
+    """Quit stops the shared ingest service, preserves committed bytes, and permits manual restart."""
+    source = tmp_path / "source.mbox"
+    digests = set()
+    with source.open("wb") as output:
+        for number in range(600):
+            raw = (f"Message-ID: <stop-{number}@example.test>\nFrom: sender@example.test\n"
+                   f"Date: Mon, 07 Sep 2026 12:00:00 +0000\nSubject: Stop fixture {number}\n\nBody\n").encode()
+            digests.add(hashlib.sha256(raw).hexdigest())
+            output.write(b"From sender@example.test Mon Sep  7 12:00:00 2026\n" + raw + b"\n")
+    with source.open("rb") as stream:
+        source_digest = hashlib.file_digest(stream, "sha256").hexdigest()
+    owners = tmp_path / "owners.txt"
+    owners.write_text("owner@example.test\n", encoding="utf-8")
+    archive = tmp_path / "archive"
+    request = IngestRequest(archive=archive, roots=[str(source)], owner_names_file=owners, scan_policy="not-scanned")
+    stop = Event()
+    errors: list[BaseException] = []
+
+    def import_mail() -> None:
+        try:
+            run_ingest(request, stop_event=stop)
+        except BaseException as error:
+            errors.append(error)
+
+    worker = Thread(target=import_mail, daemon=True)
+    worker.start()
+    count = 0
+    deadline = monotonic() + 20
+    try:
+        while worker.is_alive() and monotonic() < deadline:
+            try:
+                with sqlite3.connect(f"{archive.as_uri()}/archive.sqlite3?mode=ro", uri=True) as catalog:
+                    count = catalog.execute("SELECT COUNT(*) FROM messages").fetchone()[0]
+            except sqlite3.OperationalError:
+                pass  # The worker may not have created the catalog yet.
+            if count:
+                break
+            sleep(0.005)
+    finally:
+        stop.set()
+        worker.join(timeout=30)
+    assert not worker.is_alive() and count > 0
+    assert len(errors) == 1 and isinstance(errors[0], IngestInterrupted)
+    assert read_ingest_history(archive).statuses[0].state == "interrupted"
+    assert not verify_archive(archive)
+    with sqlite3.connect(archive / "archive.sqlite3") as catalog:
+        partial = catalog.execute("SELECT COUNT(*) FROM messages").fetchone()[0]
+    assert 0 < partial < len(digests)
+    run_ingest(request)
+    with sqlite3.connect(archive / "archive.sqlite3") as catalog:
+        rows = catalog.execute("SELECT sha256 FROM messages").fetchall()
+    assert len(rows) == len(digests) and {row[0] for row in rows} == digests
+    assert not verify_archive(archive)
+    with source.open("rb") as stream:
+        assert hashlib.file_digest(stream, "sha256").hexdigest() == source_digest
+
+
+def test_confirmed_quit_stops_every_document_without_releasing_active_leases(tmp_path: Path) -> None:
+    """All imports stop together; leases and owner-close guards remain until checkpoint completion."""
+    from mailarchiver.gui_app import PyWebViewApplication
+
+    state = controller(tmp_path)
+    application = PyWebViewApplication(state)
+    jobs = []
+    try:
+        for number in range(2):
+            document = state.open_document(make_archive(tmp_path / f"archive-{number}"))
+            assert document.path is not None
+            window = state.new_search_window(document)
+            job = IngestJob(operation_id=f"import-{number}", owner_window_id=window.window_id)
+            lease = WriterLease.acquire(document.path, document.descriptor.identity, "test", job.operation_id, "test")
+            state.begin_ingest(document.descriptor.document_id, job, lease)
+            jobs.append(job)
+        assert all(not job.stop.is_set() for job in jobs)
+        assert application.stop_imports_for_quit() == tuple(jobs)
+        assert all(job.stop.is_set() and not job.finished.is_set() for job in jobs)
+        assert all(not state.can_close_window(job.owner_window_id) for job in jobs)
+    finally:
+        for document in state.documents():
+            if document.ingest_job is not None:
+                state.finish_ingest(document.descriptor.document_id, document.ingest_job.operation_id, published=False)
+
+
 def test_same_archive_reuses_document_while_search_windows_remain_independent(tmp_path: Path) -> None:
     """Requirement: path aliases share one document while each search window owns its state."""
     archive = make_archive(tmp_path / "archive")
     application = controller(tmp_path)
 
     first_document = application.open_document(archive)
+    assert first_document.path is not None
     second_document = application.open_document(archive / ".." / archive.name)
+    assert second_document.path is not None
     first = application.new_search_window(first_document)
     second = application.new_search_window(second_document)
     first.query = "alpha"
@@ -92,6 +184,7 @@ def test_preference_write_failure_does_not_block_opening_an_archive(tmp_path: Pa
     )
 
     document = application.open_document(archive)
+    assert document.path is not None
 
     assert document.display_path == archive
     assert application.preferences.last_archive == archive
@@ -202,7 +295,9 @@ def test_one_ingest_is_shared_per_document_and_requires_a_writer_lease(tmp_path:
     second = make_archive(tmp_path / "second")
     application = controller(tmp_path)
     first_document = application.open_document(first)
+    assert first_document.path is not None
     second_document = application.open_document(second)
+    assert second_document.path is not None
     first_window = application.new_search_window(first_document)
     second_window = application.new_search_window(first_document)
     other_window = application.new_search_window(second_document)
@@ -245,6 +340,7 @@ def test_child_windows_and_ingest_keep_a_document_alive(tmp_path: Path) -> None:
     archive = make_archive(tmp_path / "archive")
     application = controller(tmp_path)
     document = application.open_document(archive)
+    assert document.path is not None
     window = application.new_search_window(document)
     application.attach_child_window(document.descriptor.document_id, "ingest-history")
 
@@ -255,6 +351,7 @@ def test_child_windows_and_ingest_keep_a_document_alive(tmp_path: Path) -> None:
         application.document(document.descriptor.document_id)
 
     document = application.open_document(archive)
+    assert document.path is not None
     window = application.new_search_window(document)
     job = IngestJob(operation_id="active-ingest", owner_window_id=window.window_id)
     lease = WriterLease.acquire(
@@ -332,6 +429,7 @@ def test_quit_keeps_active_import_document_alive(tmp_path: Path) -> None:
 
     application = controller(tmp_path)
     document = application.open_document(make_archive(tmp_path / "archive"))
+    assert document.path is not None
     window = application.new_search_window(document)
     host = PyWebViewApplication(application)
     assert document.path is not None
@@ -352,6 +450,7 @@ def test_child_window_keeps_document_routing_without_search_windows(tmp_path: Pa
 
     application = controller(tmp_path)
     document = application.open_document(make_archive(tmp_path / "archive"))
+    assert document.path is not None
     session = application.new_search_window(document)
     application.attach_child_window(document.descriptor.document_id, "ingests-fixture")
     host = PyWebViewApplication(application)

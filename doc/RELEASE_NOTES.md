@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+* Add the desktop document controller, archive writer leases, document options,
+  coordinated import/quit handling, and macOS application packaging.
+* Add the Gmail authorization developer preview and read-only Apple Mail cache
+  comparison. Direct Gmail and Microsoft 365 ingestion remain unavailable.
+
 * Tighten plug-in method contracts, native-window failure handling, and integrity
   version validation while adding complete ty and Pyright coverage.
 

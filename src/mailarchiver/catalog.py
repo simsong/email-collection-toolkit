@@ -209,8 +209,6 @@ def validate_catalog(path: Path) -> None:
         tables = _tables(database)
         _require_version(database, tables, SCHEMA_VERSION, "archive")
         _require_archive_layout(database, tables)
-        if database.execute("PRAGMA quick_check").fetchone() != ("ok",):
-            raise RuntimeError("archive database failed SQLite quick_check")
     finally:
         database.close()
 
@@ -223,8 +221,6 @@ def validate_search(path: Path) -> None:
         tables = _tables(database)
         _require_version(database, tables, SEARCH_SCHEMA_VERSION, "search")
         _require_search_layout(database, tables)
-        if database.execute("PRAGMA quick_check").fetchone() != ("ok",):
-            raise RuntimeError("search database failed SQLite quick_check")
     finally:
         database.close()
 

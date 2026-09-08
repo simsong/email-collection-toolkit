@@ -150,7 +150,8 @@ per-run observation review, and year/correspondent reports.  The top-level
 `MAIL_ARCHIVE_DIR` selects the archive for every command by default; the
 `--archive` option overrides it. `ingest` takes one
 or more source roots as positional arguments and `--owner-names-file` selects
-the reusable owner-token list.  Ingest currently requires `--clamav`: it starts
+the reusable owner-token list. Ingest requires `--clamav` or explicit `--no-scan`.
+With `--clamav`, it starts
 a foreground daemon only when no healthy configured socket is available, then
 removes the daemon's stale socket on exit; it never enables persistent or
 on-access scanning. Workers enqueue typed phase/path/offset updates; the main
@@ -204,8 +205,8 @@ or retain file contents. Snapshot ordering interleaves concurrency keys, and
 the framework enforces each plug-in's per-key limit. Each pool task owns one container through source-integrity planning,
 streaming parse and scan, and checkpoint. A never-seen local file is
 ingested before its complete fingerprint is calculated; that fingerprint is
-still required before its checkpoint is committed. ClamAV readiness is an ingest
-precondition, so no worker reads or parses mail until the daemon is healthy.
+still required before its checkpoint is committed. ClamAV readiness is a scanned-ingest
+precondition; explicit `--no-scan` bypasses it and records that choice.
 Modern Apple Mail package traversal recognizes complete
 `Data/.../Messages/*.emlx` payloads and ignores MailData, plist, and detached
 attachment files. It reports missing paths and macOS Full Disk Access failures
@@ -325,12 +326,20 @@ it applies `to:`/`from:`/`subject:` catalog filters, UTC calendar-day
 `message_pk` header lines and reads a numbered message directly from its
 catalogued MBOX byte location, validating its SHA-256 before output.
 
+SQL filenames follow the Flyway convention `V<version>__<description>.sql`;
+only the naming convention is used. No Flyway runtime, Java, or JDBC is required
+for schema management. Python loads the packaged SQL with `importlib.resources`
+and executes it through the standard-library `sqlite3` module.
+
 The authoritative current catalog schema is packaged as `sql/V1__archive.sql`.
 It is initialized only for an empty database; unversioned databases and schema
 versions other than V1 are rejected rather than migrated. Because an earlier
 development schema also used the V1 label, startup validates the required
 tables, columns, and named indexes before accepting an existing database. This
-deliberately supports database replacement while there are no users.
+is validation of the current layout, not an upgrade mechanism. Application-run,
+developer-written catalog migrations with checksummed history, consistent backups,
+writer-lease protection, and transactional history updates remain planned;
+the existing `schema_info` version check does not implement those safeguards.
 `locations` and
 `mbox_generations` are written as part of each message publication.
 
@@ -431,11 +440,13 @@ user-derived component. They are treated as optional, discardable state.
 `PyWebViewApplication` adapts that model to native pywebview windows without
 putting platform imports in the controller. Its File menu asks for a new or
 empty destination and initializes it before creating a blank window, opens an
-archive in a new search window, opens another search window on the active
-document, runs Import, and closes the active window unless that window owns the
+archive in a new search window, runs Import, and closes the active window unless that window owns the
 running Import. Window close events enforce the same rule. The Window menu
 routes to the active archive's shared Ingests child window and enumerates every
-About, search, and Ingests window. A narrow macOS adapter refreshes pywebview's
+About, search, and Ingests window. **Window → New Search Window** creates another
+view of the active archive; the macOS adapter disables it without an active
+saved archive search window and refreshes on native focus changes.
+A narrow macOS adapter refreshes pywebview's
 process menu when window or ingest state changes and disables the Close item
 when the controller would refuse it. `handle_open_documents` and
 `reopen` are stable host entry points for the extension/activation work in
@@ -448,10 +459,87 @@ runs the service on a non-daemon worker thread, leaves readers usable, polls the
 existing typed status files in every attached search window and the persistent
 About window, and invalidates view caches after the run. Startup and import
 errors are retained as typed notices instead of being available only on stderr.
-When startup produced Untitled, a `webview.start` callback runs after native
-windows exist, asks for the permanent destination, replaces Untitled with the
-created document, and offers Import; cancellation never creates an implicit
-temporary archive.
+The Ingests bridge exposes **Import Directory…** for its bound document. It
+reuses that document's search window (or opens one to own the job) and runs the
+normal confirmed import workflow.
+The UI polls import availability and prevents repeated clicks while dialogs are open.
+Import's final confirmation uses an application-owned macOS NSAlert with the
+bundled icon, destination heading/path, and explicit Import/Cancel actions.
+The shared alert helper marshals presentation onto the Cocoa main thread and
+also supplies the startup chooser's app icon.
+An application-owned NSOpenPanel labels source selection **Import**, displays
+the destination, and enables both file and directory selection, including
+multiple selections. Both import entry points open this panel directly without
+a source-type question; directories use recursive discovery.
+`document_options` owns the typed document owner-list state and atomic UTF-8
+storage. Import reads `owner-names.txt` only from explicitly selected source
+directories (not recursively), unions those aliases with the document list,
+and prompts with a multiline native editor only if the combined list is empty.
+There is no application/launch-directory fallback. Source lists preserve
+multiword entries, ignore blank/comment lines, deduplicate case-insensitively,
+and sort case-insensitively. After final confirmation, `start_import` rereads
+and merges the document list under WriterLease before invoking the existing
+path-based ingest service. No source settings are written. Windows retains its
+owner-file picker as a fallback until its native setup UI is implemented.
+The packaged local-source rules ignore each selected directory's top-level
+`owner-names.txt`, so this configuration file is not reported or ingested as
+an unrecognized mail source.
+
+The document-bound `DocumentOptionsApi` exposes only status and update through
+WindowBridge to `options.html`. One options child window is shared per document
+and registered with the controller and Window menu. Its scrollable multi-select
+list saves Add/Delete actions immediately, splitting Add input on commas,
+semicolons, and whitespace. The service obtains WriterLease and checks a content
+revision before updating; another writer or a stale edit fails visibly.
+The UI polls state and disables edits during this document's GUI ingest.
+CLI and GUI ingest record the aliases actually used at run start in operational
+`status/owner-names-used.txt`. The options panel compares that snapshot with
+the current list, retaining the warning across window/application restarts.
+Earlier runs without a snapshot are explicitly unknown. Neither owner settings
+nor this snapshot is included in preservation manifests. The panel explains
+that edits do not relocate canonical messages or change stored categories;
+FTS has no owner-name list and index rebuilds do not reclassify mail.
+`archive_config.py` stores the last source-picker directory in a strict,
+versioned archive-local `config.yaml`. The value is written atomically only
+after the import succeeds, while it still holds WriterLease; the next picker uses it if it is an
+existing directory and otherwise falls back to the archive's parent. A malformed
+or missing config is discardable navigation state and does not block import.
+The archive catalog schema contains message identities, provenance, ingest
+history, and canonical locations only; no other per-archive user preferences
+were found in SQL. Search query/window geometry and saved filter sets remain
+per-window or per-user UI state outside the archive. Scanner policy remains
+application configuration, while owner aliases remain the archive-local
+`owner-names.txt` because they are the ingest classification input.
+When startup produces a placeholder, the shell discards it without creating a
+native search window. A `webview.start` callback presents a three-button NSAlert
+on the Cocoa main thread: Open Existing, Create New, or Cancel. About anchors
+subsequent dialogs and retains File New/Open after cancellation. Native dialog
+paths normalize SAVE strings and OPEN/FOLDER sequences before indexing; New
+validates the destination inside its error handler. Cocoa File menu items carry
+explicit Command-N/O/W shortcuts. Archive opening uses the File menu rather than
+a toolbar button.
+The search toolbar omits the archive path; the native title bar identifies it.
+The Cocoa adapter reorders File, Edit, View, Window after the application menu.
+It resolves Cocoa focus on the main thread and still builds menus from the
+logical active document or About when a background app has no native key window.
+Closing About hides its retained native window instead of recreating it, keeping
+the event loop alive even when no document is open. The hidden window is omitted
+from the Window menu. The application menu's About command restores it; Dock
+activation does not. Quit permits its actual destruction. The native lifecycle
+probe exercises dismissal, background updates, and explicit menu reopening.
+`WindowBridge` restricts pywebview introspection to explicit callable names,
+excluding public controller and window object graphs. About allows the same
+dynamic bridge generation as the other pages, retries bridge readiness, polls
+status each second, and clears stale errors after successful refresh.
+Archive Open validates schema metadata without `PRAGMA quick_check`, which
+previously scanned multi-gigabyte databases before opening any window. Existing
+extensionless directories remain accepted. `make check-archive-open ARCHIVE=...`
+performs this read-only compatibility check without launching windows or saving
+preferences. This check does not certify every database page against corruption.
+
+`make test-native-application` runs the production About and search bridges with
+a disposable extensionless archive, checks rendered notices and native menu order
+and Open shortcut, and closes the application. It runs only on a logged-in Mac.
 
 `LoopbackAssetServer` owns GUI delivery. It binds `127.0.0.1:0`, issues a
 different one-use bootstrap ticket for every new window, sets a random
@@ -502,7 +590,7 @@ SHA-256 verifies the pinned Zola archive before extraction, resolves the newest
 exact stable and beta tags into Zola data, then deploys a Pages artifact. The
 home-page template presents equal individual and archivist columns, while the
 `use-cases.md` content page supplies the detailed personal-archive and donor
-digital-estate narratives. It describes BagIt/Mailbag as an export and standard
+digital-estate narratives. It describes BagIt/Mailbag as native archive storage and standard
 MBOX as the ePADD handoff, with planned direct-provider, first-class package
 import, and automated interoperability work labeled explicitly.
 The base template links every page to `privacy.md` and `rights.md`. The privacy
@@ -513,8 +601,13 @@ current GPL distribution, copyright, and possible non-GPL availability.
 The reusable `section.html` template renders section content and child-page
 cards through the site theme. The curation section adds a responsive five-part
 summary of local file discovery, read-only ingest, archive creation, search and
-reporting, export, and verification. Public copy describes implemented and
+reporting, verification, and sharing. Public copy describes implemented and
 planned functions in language intended for archivists.
+The primary navigation links to `about.md`, which describes Simson Garfinkel
+and links to his personal website, GitHub profile, and project repository.
+About links to `changelog.md`, a dated record of website changes distinct from
+application release notes. The 2026-09-07 entry records the storage-format
+wording correction and the new About/changelog pages.
 The release workflow follows the repository's draft-release
 pattern: it requires a version-matching signed annotated tag, builds a source
 distribution, writes `SHA256SUMS`, and creates a draft GitHub Release.
@@ -523,6 +616,14 @@ Result ordering is a server-side SQL whitelist over date, case-folded subject,
 or case-folded sender with a stable message-number tie break. The Tabulator
 result table owns focus, rendering, and row components, while the application
 maps Up/Down to selection and message display.
+The sole Tabulator column has `resizable: false`. A focusable vertical separator
+uses pointer capture and keyboard controls to adjust a CSS grid track. Its
+per-window fraction is clamped to 300-pixel list and 320-pixel preview minima
+(half the available width when smaller). Resize observers account for the
+folder tree and window dimensions and remeasure HTML previews; Tabulator's own
+container observer refits its column without replacing data or selection.
+The separator is hidden in standalone and print layouts. Headless browser tests
+drag the real divider and check widths, overflow, selection, and keyboard limits.
 The older bounded-recent optimization remains internal to the command-line
 client, whose automatic exact fallback preserves its one-call behavior. The
 GUI always invokes the complete SHA-256/FTS query because an archivist may be
@@ -542,7 +643,8 @@ the typed result batch until it can update visible rows. Its `rowMouseDown` and
 `rowMouseEnter` events provide row components for the small range adapter;
 the result-table boundary cancels native `selectstart` and its row subtree has
 explicit WebKit and standard `user-select: none` rules, so drag selection never
-also selects card text. There is no custom scroll/viewport or pointer-coordinate code. A single
+also selects card text. Result virtualization and range selection need no custom
+scroll/viewport or pointer-coordinate code. A single
 selected row displays its message. A multi-row selection clears its stale
 single-message view, displays the selected-message count with the same file well,
 and an explicit drag from that well prepares a ZIP only when the drag begins.
@@ -714,6 +816,8 @@ then streams the JSON declarations, complete-MBOX `h1` hashes,
 recovered-message `h2` hashes, and semantic-message `h3` hashes. It returns
 nonzero on missing, orphaned, malformed, unsupported, unsafe, unlisted, or
 mismatched files. It neither imports the package nor reads SQLite.
+Its module docstring doubles as formatted `--help`, carrying standalone run
+instructions and verification limits into the installed archive copy.
 
 `write_bag_checkpoint()` streams catalog locations in MBOX byte order through
 `write_integrity_files()` and
@@ -922,9 +1026,10 @@ An ingest run executes these steps:
    is validated and retained. Index disposable search content afterward only
    for normal Sent and Archive mail.
 
-Deduplication is deliberately before ClamAV: a known archived message has
-already been scanned and classified.  `--rescan` explicitly revisits stored
-messages when virus definitions or policy changes.
+Deduplication is deliberately before ClamAV. A known archived message is not
+scanned again, including one previously imported without scanning. A future
+rescan operation must explicitly revisit those stored messages; no rescan
+command is currently implemented.
 
 ## MBOX mechanics and sorting
 
@@ -976,6 +1081,73 @@ file until validation succeeds and delete it only then. `INFECTED` and
 mailbox.
 
 ## Antivirus and text extraction
+
+`IngestRequest.scan_policy` is `clamav` by default. Explicit `not-scanned`
+requests skip scanner construction and persist an `antivirus` metadata defect
+in the existing catalog transaction for each new message. Run status includes
+the policy (older files default to `unknown`), without changing the catalog
+schema or canonical bytes. Failed required scanning still stops import.
+The native source picker and Ingests page show a missing-configuration banner;
+the final native confirmation defaults to Cancel and gates the opt-out.
+Import confirmations use a 560-point-wide selectable AppKit accessory label,
+keeping archive/source/owner paths readable without changing default or Cancel
+actions. `make test-packaging` checks real alert layout and both button sets
+without showing a modal dialog.
+The download action opens only ClamAV's official page. About reports configuration
+presence separately from readiness, which remains an ingest preflight check.
+`make test-packaging` exercises missing-scanner failure, explicit opt-out,
+durable evidence, source immutability, and isolated headless diagnostics.
+
+## macOS packaging
+
+`make ruff` runs `uv run --locked ruff check .`. It is a required prerequisite
+of `make check` and `make dmg`, and CI and source-release builds also run it.
+Ruff retains its default error rules (`E4`, `E7`, `E9`, `F`), including unused
+imports/variables and assigned lambdas; no per-file suppressions are
+introduced. Pylint remains a complementary check.
+
+`make syntax-check` uses standard-library `compileall` on `src`, `scripts`,
+`tests`, and `e2e_tests`. It is a prerequisite of `make check` and `make dmg`;
+the regression with a stray filename before the build script's opening
+docstring fails this check before packaging starts.
+
+`scripts/build_macos.py`, invoked by `make dmg`, uses project-local PyInstaller
+dependencies, creates the app icon from the existing PNG, collects runtime
+resources and dependency notices, declares `.mailarchive` document registration,
+and signs the resulting bundle ad-hoc unless a signing identity was supplied.
+`scripts/desktop_entry.py` dispatches normal GUI launch, `--cli`, `--self-test`,
+and `--self-test-gui`. Frozen GUI resources use PyInstaller's bundle root;
+the verifier's actual `.py` source is explicitly bundled for archive installation.
+The Cocoa document delegate extends rather than replaces pywebview's quit guards.
+
+`scripts/dmg_layout.py` uses build-only `dmgbuild` to write the Finder `.DS_Store`
+and background into the image without changing global Finder preferences.
+AppKit draws a 2x-resolution TIFF at a logical 720-by-420-point size. The two
+scales are linked by the bitmap's logical size; no additional drawing transform
+is applied. `make test-packaging` renders the background and checks its logical
+and pixel dimensions, ink bounds, and presence of title, arrow, and instructions.
+The same pixel check runs before image creation and against the mounted image,
+catching the double-scaling regression that metadata-only checks missed. The
+real icons are 128 points, positioned app-left and Applications-right; the
+background contains the title, arrow, and install/eject instructions.
+Finder's outer window is 720 by 480 points, reserving 60 points for window
+chrome so the background footer is not cropped if Finder shows its status bar.
+The mounted build test decodes `.DS_Store` to verify layout metadata and
+requires exactly the app and Applications as visible root items.
+`make preview-dmg DMG=...` opens the mounted image in Finder for visual review
+and ejects it when Return is pressed. This preview does not install the app.
+
+`self_test.py` uses temporary source and archive fixtures plus isolated application
+preferences. It verifies ingest, original bytes, FTS search, fixity, idempotence,
+and not-scanned evidence. The visible mode exercises production window bridges
+and cancels the real source picker after inspecting its warning banner.
+The DMG build stages the app, Applications symlink, and instructions, mounts
+the compressed candidate read-only, verifies its seal, runs both frozen tests
+with a system-only PATH, and detaches in `finally`. It publishes the candidate
+and JSON reports only on success. See [MACOS_DISTRIBUTION.md](MACOS_DISTRIBUTION.md)
+for commands, limitations, and Apple's renewal/notarization steps.
+
+### Existing scanner configuration
 
 Homebrew installed these commands:
 
@@ -1169,6 +1341,41 @@ provenance reports can declare how they were produced.
 
 ## Validation and tests
 
+The Cocoa termination delegate confirms an active-import quit and returns
+`NSTerminateLater`, keeping the event loop alive while `IngestJob.stop` requests
+cooperative cancellation. The shared service checks this event during discovery,
+scanner startup, and worker status refresh; ordinary worker failures remain
+distinct from cancellation. It follows the existing interrupted-run checkpoint
+and lease-release path. A completion event allows Cocoa termination only after
+the GUI worker finishes. No automatic resume is promised: File → Import safely
+retries the same source. `make test-application` tests partial publication,
+interrupted status, verification, duplicate-free restart, and multi-document stop.
+
+`make test-corpus-import` runs the single full-directory regression in
+`tests/test_corpus_import.py`, also included in `make test`. It imports the
+actual `tests/data` directory with `--clamav`, compares subjects/raw SHA-256
+and per-source accounting against `tests/expected-corpus.json`, independently
+checks canonical locations and the installed verifier, then reimports and
+checks unchanged-source skipping. Each subprocess has a 600-second deadline
+and a retained pytest-temporary log. The test fingerprints all input files
+before/after; it never changes sources.
+The configured on-demand ClamAV installation is required, just as for the other
+scanner integration tests. Expectations include infected mail without fixing
+its signature-dependent destination; new signatures cannot excuse lost bytes.
+`make update-corpus-expectations` passes `--update-corpus-expectations` to
+pytest and regenerates the expected JSON only after those integrity checks.
+Review the generated diff: updating a golden file is not proof of correctness.
+Git-ignored local additions are recorded separately in
+`.tmp/expected-corpus-private.json`; neither their mail nor their subjects belong
+in the public fixture manifest. CI uses the same test on its tracked directory.
+New or missing files, wrong per-source message membership, and changed exclusion
+counts also fail even when the overall canonical message set is unchanged.
+
+The reported September 7 apparent loop was a completed 208-second import:
+`email-korean-bad-encoding.eml` locally contained 6,884 MBOX records (82 MiB),
+despite its suffix. Content-based MBOX recognition takes precedence over `.eml`;
+the worker legitimately stays on that path while advancing through messages.
+
 [`END_TO_END_TESTING.md`](END_TO_END_TESTING.md) defines the archive-lifecycle,
 browser-acceptance, native-WKWebView, and optional XCUITest layers, including
 which layer owns macOS menu-bar verification.
@@ -1240,6 +1447,15 @@ launcher. Project development dependencies and type stubs are locked with uv;
 static analysis must produce no errors or warnings. Focused `make ruff`,
 `make pylint`, `make ty`, `make pyright`, and `make test` targets remain available.
 
+### Desktop review follow-up
+
+The portability audit reads each Mach-O LC_RPATH command, expands loader and
+executable-relative paths, rejects search paths outside the bundle, and requires
+non-system dependencies to resolve to bundled files. Missing antivirus uses a
+platform-neutral confirmation on non-macOS hosts. Source-picker navigation is
+saved only after successful ingest while the writer lease is retained; a failed
+import leaves the previous directory unchanged.
+
 ### Writer and desktop review boundary
 
 Current archive writing is supported on POSIX. Windows writing fails before
@@ -1264,9 +1480,10 @@ advance the shared generation. Progress can write status files without a
 terminal stream, including windowed builds with no stderr. Ingest child windows
 route document actions to an attached search window. Informational notices stay
 in About instead of appearing as errors. Closing an import owner offers waiting
-or keeping the window open. Native macOS Quit is refused with an explanation
-while an import is active; shutdown joins tracked workers before releasing
-resources. Makefile Ruff checks select this checkout's configuration explicitly
+or keeping the window open. Native macOS Quit offers Cancel or Stop Import and Quit while an import is
+active. Confirmed quit signals all imports, retains their leases and windows
+until checkpoint completion, and then exits. Shutdown joins tracked workers
+before releasing resources. Makefile Ruff checks select this checkout's configuration explicitly
 and include ignored linked-worktree paths.
 
 An Ingests child window retains document routing after all search windows close.

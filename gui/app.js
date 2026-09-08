@@ -96,7 +96,7 @@ async function initialize() {
     await runNativeSmoke();
     return;
   }
-  for (const id of ["choose-archive", "search-form", "search", "search-filters", "search-suggestions", "search-help-template", "archive-label", "result-status", "results-pane", "result-list",
+  for (const id of ["search-form", "search", "search-filters", "search-suggestions", "search-help-template", "result-status", "results-pane", "result-list",
     "result-help",
     "sort-by", "sort-direction", "search-attachments", "show-original-folders", "mailbox-browser", "mailbox-tree", "show-source-volumes", "filter-set", "manage-filter-sets",
     "save-filter-dialog", "save-filter-form", "filter-set-name", "cancel-save-filter", "manage-filter-dialog", "filter-set-list", "close-filter-manager",
@@ -105,11 +105,8 @@ async function initialize() {
     elements[id] = byId(id);
   }
   initializeResultTable();
+  initializeMessageSplitter();
   renderSearchHelp();
-  elements["choose-archive"].addEventListener("click", async () => {
-    await chooseArchive();
-    elements["choose-archive"].dataset.completed = String(Number(elements["choose-archive"].dataset.completed || 0) + 1);
-  });
   elements["search-form"].addEventListener("submit", event => {
     event.preventDefault();
     if (state.suggestionIndex >= 0) acceptSuggestion(state.suggestionIndex);
@@ -450,7 +447,6 @@ function resetArchiveView() {
 function applyStatus(status) {
   state.highlightBackground = status.configuration.search_highlight_background;
   document.documentElement.style.setProperty("--search-highlight-background", state.highlightBackground);
-  elements["archive-label"].textContent = status.archive || "No archive selected";
   document.title = status.ready
     ? `Mail Archiver — ${status.archive} (${status.message_count.toLocaleString()} messages)`
     : status.untitled ? "Untitled — Mail Archiver" : "Mail Archiver";
@@ -1043,6 +1039,7 @@ function initializeResultTable() {
       field: "subject",
       formatter: resultCardFormatter,
       headerSort: false,
+      resizable: false,
       widthGrow: 1,
     }],
   });
@@ -1058,6 +1055,73 @@ function initializeResultTable() {
       void selectMessage(selected[0].message_pk);
     }
   });
+}
+
+function initializeMessageSplitter() {
+  const workspace = document.querySelector(".workspace");
+  const splitter = byId("message-splitter");
+  const results = elements["results-pane"];
+  const tree = elements["mailbox-browser"];
+  let fraction = 0.38;
+  let dragOffset = null;
+  const bounds = () => {
+    const available = Math.max(0, workspace.clientWidth - tree.getBoundingClientRect().width - splitter.offsetWidth);
+    return {available, minimum: Math.min(300, available / 2), maximum: Math.max(available / 2, available - 320)};
+  };
+  const resize = (requested = null) => {
+    if (document.body.classList.contains("standalone")) return;
+    const {available, minimum, maximum} = bounds();
+    const width = Math.max(minimum, Math.min(maximum, requested ?? available * fraction));
+    if (requested !== null && available) fraction = width / available;
+    workspace.style.setProperty("--results-width", `${width}px`);
+    splitter.setAttribute("aria-valuemin", Math.round(minimum));
+    splitter.setAttribute("aria-valuemax", Math.round(maximum));
+    splitter.setAttribute("aria-valuenow", Math.round(width));
+    splitter.setAttribute("aria-valuetext", `${Math.round(width)} pixels`);
+  };
+  splitter.addEventListener("pointerdown", event => {
+    if (event.button !== 0 || !event.isPrimary) return;
+    event.preventDefault();
+    dragOffset = event.clientX - results.getBoundingClientRect().right;
+    splitter.setPointerCapture(event.pointerId);
+    splitter.focus();
+    document.body.classList.add("resizing-panes");
+  });
+  splitter.addEventListener("pointermove", event => {
+    if (dragOffset !== null) resize(event.clientX - results.getBoundingClientRect().left - dragOffset);
+  });
+  const stop = () => {
+    dragOffset = null;
+    document.body.classList.remove("resizing-panes");
+  };
+  splitter.addEventListener("lostpointercapture", stop);
+  splitter.addEventListener("pointercancel", stop);
+  splitter.addEventListener("pointerup", stop);
+  splitter.addEventListener("keydown", event => {
+    const {minimum, maximum} = bounds();
+    const width = results.getBoundingClientRect().width;
+    const step = event.shiftKey ? 50 : 10;
+    let requested;
+    switch (event.key) {
+      case "ArrowLeft": requested = width - step; break;
+      case "ArrowRight": requested = width + step; break;
+      case "Home": requested = minimum; break;
+      case "End": requested = maximum; break;
+      default: return;
+    }
+    event.preventDefault();
+    resize(requested);
+  });
+  const observer = new ResizeObserver(() => resize());
+  observer.observe(workspace);
+  observer.observe(tree);
+  // Tabulator observes its own container; only the HTML preview needs remeasurement.
+  const previewObserver = new ResizeObserver(() => {
+    const frame = elements["body-view"].querySelector(".html-frame");
+    if (frame) refreshHtmlFrameLayout(frame);
+  });
+  previewObserver.observe(elements["message-pane"]);
+  resize();
 }
 
 function resultCardFormatter(cell) {

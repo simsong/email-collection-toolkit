@@ -39,6 +39,26 @@ fixture change.
 
 ## Archive lifecycle
 
+### Complete local test directory
+
+`make test-corpus-import` runs a single complete import of `tests/data/`, with
+the configured on-demand ClamAV scanner, a ten-minute subprocess deadline,
+byte verification, installed archive verification, and a second idempotent
+import. It is also part of ordinary pytest (`make test` / `make check`).
+The reviewed `tests/expected-corpus.json` lists source fingerprints and retained
+subjects/raw SHA-256 hashes. Failures list both found-but-unexpected and
+expected-but-missing emails, including their subjects and hashes.
+
+After an intentional fixture change, run `make update-corpus-expectations`
+(pytest's explicit `--update-corpus-expectations` option), then review the JSON
+diff. The updater requires a successful import, verification, and reimport;
+never accept its output merely to make a failing test green. Git-ignored local
+mailboxes have a separate `.tmp/expected-corpus-private.json` expectation file
+to keep private subjects out of Git. CI tests its complete tracked directory;
+local runs also test the additional files present locally.
+
+### Synthetic lifecycle and browser acceptance
+
 The platform-independent part of the suite performs a real CLI ingest with the
 configured on-demand ClamAV daemon. It checks all of these boundaries together:
 
@@ -146,8 +166,8 @@ application. Swift Testing is for Swift logic and does not automate the UI.
 ## Native application menus
 
 Mailarchiver passes custom **File** and **Window** menus to `webview.start`.
-File supplies **New**, **Open…**, launch-time **Open Recent**, **New Search
-Window**, **Import…**, and **Close** actions. Window supplies **Ingests** and
+File supplies **New**, **Open…**, launch-time **Open Recent**,
+**Import…**, and **Close** actions. Window supplies **New Search Window**, **Ingests** and
 the current About, search, and Ingests window inventory. Every callback
 resolves the active logical search window when invoked; opening an archive
 creates a new document window rather than retargeting an existing one.
@@ -172,8 +192,12 @@ The cross-platform `MenuAction` interface invokes Python but does not expose
 keyboard equivalents or dynamic enabled state. A small AppKit adapter rebuilds
 the active macOS menu when window or ingest state changes and disables **Close**
 for About and for the search window that owns Import. The controller also
-refuses that menu action and native close event. Standard keyboard equivalents
-still need a more complete native application shell.
+refuses that menu action and native close event. It sets Command-N/O/W and orders
+the native menus as Application, File, Edit, View, Window. The opt-in
+`make test-native-application` runs production About and search bridges, checks
+About's version, disk space, warning rendering and recovery, opens an extensionless
+fixture archive, and inspects native menu order and the Open shortcut. This catches
+CSP and JSON serialization failures that the browser's injected bridge cannot.
 The HTML controls remain available so browser acceptance tests exercise the
 same underlying operations.
 

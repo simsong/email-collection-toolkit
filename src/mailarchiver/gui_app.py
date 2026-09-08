@@ -13,8 +13,9 @@ import subprocess
 import sys
 import tempfile
 import time
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import Future, ThreadPoolExecutor
 from datetime import UTC, datetime
+from importlib import import_module
 from importlib.metadata import version
 from pathlib import Path
 from threading import Event, Lock, RLock, Thread
@@ -27,14 +28,23 @@ import webview
 from pydantic import BaseModel, Field
 from webview.menu import Menu, MenuAction, MenuSeparator
 
-from .__main__ import IngestOutcome, IngestRequest, run_ingest
+from .__main__ import IngestInterrupted, IngestOutcome, IngestRequest, run_ingest
 from .application import (
     ApplicationController,
     ArchiveDocument,
     IngestJob,
     SearchWindow,
 )
+from .scanner import CLAMAV_DOWNLOAD_URL, UNSCANNED_WARNING, ScannerAvailability, scanner_availability
 from .configuration import GuiConfiguration, application_configuration
+from .document_options import (
+    DocumentOptions, OWNER_NAMES_FILENAME, read_owner_names, sorted_owner_names,
+    source_owner_names, split_owner_names,
+)
+from .archive_config import (
+    import_directory as configured_import_directory,
+    remember_import_directory,
+)
 from .gui_service import (
     MessagePreview,
     MessageView,
@@ -66,7 +76,7 @@ from .loopback import LoopbackAssetServer
 from .mailbox_tree import FilterSet, FilterSetStore, MailboxSelection, mailbox_tree
 from .writer_lock import ArchiveBusyError, WriterLease
 
-GUI_DIRECTORY = Path(__file__).parents[2] / "gui"
+GUI_DIRECTORY = (Path(getattr(sys, "_MEIPASS")) if getattr(sys, "frozen", False) else Path(__file__).parents[2]) / "gui"
 E2E_DRIVER = Path(__file__).parents[2] / "e2e_tests" / "gui_driver.js"
 DEFAULT_PAGE_SIZE = 100
 APPLICATION_NAME = "Mail Archiver"
@@ -74,6 +84,14 @@ APPLICATION_ICON = GUI_DIRECTORY / "icons" / "rainbow-post-192.png"
 EXTERNAL_LINK_SCHEMES = frozenset({"http", "https", "mailto"})
 INTERNET_CHECK_URL = "https://www.example.com/"
 INTERNET_CHECK_INTERVAL_SECONDS = 30.0
+
+
+def owner_names_text(value: str) -> str:
+    """Normalize one alias per line without changing the existing matching rules."""
+    lines = sorted_owner_names(value.splitlines())
+    if not lines or "\x00" in value:
+        raise ValueError("Enter at least one name or email address, one per line.")
+    return "\n".join(lines) + "\n"
 
 
 def external_link_destination(value: str) -> str:
@@ -159,6 +177,7 @@ class AboutStatus(BaseModel):
     internet: InternetStatus
     notices: list[ApplicationNotice]
     ingests: list[AboutIngestStatus]
+    antivirus: ScannerAvailability
 
 
 class ConnectivityMonitor:
@@ -186,7 +205,7 @@ class ConnectivityMonitor:
                 request = Request(self.url, method="HEAD")
                 with urlopen(request, timeout=3) as response:  # nosec B310 - fixed HTTPS health URL
                     online = 200 <= response.status < 500
-                    detail = f"Connected ({response.status})" if online else f"HTTP {response.status}"
+                    detail = "Connected" if online else f"HTTP {response.status}"
             except OSError as error:
                 online = False
                 detail = f"Offline: {error}"
@@ -331,12 +350,163 @@ def application_icon_path() -> Path:
     return APPLICATION_ICON
 
 
-class IngestWindowApi:
-    """Read-only bridge for the independent ingest-history window."""
+IMPORT_CONFIRMATION_WIDTH = 560
+QUIT_IMPORT_MESSAGE = (
+    "Quitting will stop all active imports. To restart an import, reopen Mail Archiver "
+    "and use File → Import to select the same source again. Messages already archived "
+    "will not be imported twice.\n\n"
+    "The application will quit after the current work has stopped and the archive has been checkpointed."
+)
 
-    def __init__(self, archive: Path | None) -> None:
+
+def create_macos_alert(title: str, message: str, buttons: tuple[str, ...], *, body_width: int | None = None) -> Any:
+    """Construct a native alert on the main thread without showing it."""
+    from AppKit import NSAlert, NSImage, NSTextField  # pylint: disable=import-outside-toplevel,no-name-in-module,import-error
+
+    alert = NSAlert.alloc().init()
+    icon = NSImage.alloc().initWithContentsOfFile_(str(application_icon_path()))
+    if icon is not None:
+        alert.setIcon_(icon)
+    alert.setMessageText_(title)
+    if body_width is None:
+        alert.setInformativeText_(message)
+    else:
+        body = NSTextField.wrappingLabelWithString_(message)
+        body.setSelectable_(True)
+        size = body.cell().cellSizeForBounds_(((0, 0), (body_width, 10000)))
+        body.setFrame_(((0, 0), (body_width, size.height)))
+        alert.setAccessoryView_(body)
+    alert.window().setTitle_(title)
+    for index, label in enumerate(buttons):
+        button = alert.addButtonWithTitle_(label)
+        if label == "Cancel":
+            button.setKeyEquivalent_("\x1b")
+        elif index == 0:
+            button.setKeyEquivalent_("\r")
+    return alert
+
+
+def macos_alert(title: str, message: str, buttons: tuple[str, ...], *, body_width: int | None = None) -> int:
+    """Present an explicitly branded Cocoa alert; return the selected button index."""
+    from Foundation import NSThread  # pylint: disable=import-outside-toplevel,no-name-in-module,import-error
+    from PyObjCTools import AppHelper  # pylint: disable=import-outside-toplevel,import-error
+
+    result: Future[int] = Future()
+
+    def present() -> None:
+        try:
+            alert = create_macos_alert(title, message, buttons, body_width=body_width)
+            result.set_result(int(alert.runModal()) - 1000)
+        except Exception as error:  # pylint: disable=broad-exception-caught
+            result.set_exception(error)
+
+    if NSThread.isMainThread():
+        present()
+    else:
+        AppHelper.callAfter(present)
+    return result.result()
+
+
+def macos_import_picker(
+    directory: Path, title: str, message: str, prompt: str, *, folders: bool = False,
+    multiple: bool = False, warning: str | None = None,
+) -> tuple[Path, ...]:
+    """Choose files, optionally allowing whole directories in the same panel."""
+    from AppKit import NSOpenPanel  # pylint: disable=import-outside-toplevel,no-name-in-module,import-error
+    from Foundation import NSThread, NSURL  # pylint: disable=import-outside-toplevel,no-name-in-module,import-error
+    from PyObjCTools import AppHelper  # pylint: disable=import-outside-toplevel,import-error
+
+    result: Future[tuple[Path, ...]] = Future()
+
+    def present() -> None:
+        try:
+            panel = NSOpenPanel.openPanel()
+            panel.setTitle_(title)
+            panel.setMessage_(message)
+            if warning:
+                appkit = import_module("AppKit")
+                banner = appkit.NSTextField.wrappingLabelWithString_(warning)
+                banner.setFrame_(((0, 0), (520, 64)))
+                banner.setTextColor_(appkit.NSColor.systemRedColor())
+                panel.setAccessoryView_(banner)
+            panel.setPrompt_(prompt)
+            panel.setCanChooseDirectories_(folders)
+            panel.setCanChooseFiles_(True)
+            panel.setAllowsMultipleSelection_(multiple)
+            panel.setCanCreateDirectories_(False)
+            panel.setDirectoryURL_(NSURL.fileURLWithPath_(str(directory)))
+            selected = tuple(Path(url.path()) for url in panel.URLs()) if panel.runModal() == 1 else ()
+            result.set_result(selected)
+        except Exception as error:  # pylint: disable=broad-exception-caught
+            result.set_exception(error)
+
+    if NSThread.isMainThread():
+        present()
+    else:
+        AppHelper.callAfter(present)
+    return result.result()
+
+
+def macos_owner_names(destination: Path) -> str | None:
+    """Collect multiline Sent-classification aliases on the Cocoa main thread."""
+    from AppKit import NSAlert, NSImage, NSScrollView, NSTextView  # pylint: disable=import-outside-toplevel,no-name-in-module,import-error
+    from Foundation import NSThread  # pylint: disable=import-outside-toplevel,no-name-in-module,import-error
+    from PyObjCTools import AppHelper  # pylint: disable=import-outside-toplevel,import-error
+
+    result: Future[str | None] = Future()
+
+    def present() -> None:
+        try:
+            alert = NSAlert.alloc().init()
+            alert.setIcon_(NSImage.alloc().initWithContentsOfFile_(str(application_icon_path())))
+            title = f"Owner names for {destination.name}"
+            alert.setMessageText_(title)
+            alert.window().setTitle_(title)
+            instructions = (
+                "Enter the archive owner's names and email addresses, one per line.\n"
+                "These identify your sent mail.\n\n"
+                f"Saved after import confirmation to: {destination / OWNER_NAMES_FILENAME}"
+            )
+            alert.setInformativeText_(instructions)
+            editor = NSTextView.alloc().initWithFrame_(((0, 0), (420, 160)))
+            editor.setRichText_(False)
+            editor.setAutomaticQuoteSubstitutionEnabled_(False)
+            editor.setAutomaticDashSubstitutionEnabled_(False)
+            scroll = NSScrollView.alloc().initWithFrame_(((0, 0), (420, 160)))
+            scroll.setHasVerticalScroller_(True)
+            scroll.setDocumentView_(editor)
+            alert.setAccessoryView_(scroll)
+            alert.addButtonWithTitle_("Continue").setKeyEquivalent_("")
+            alert.addButtonWithTitle_("Cancel").setKeyEquivalent_("\x1b")
+            alert.window().setInitialFirstResponder_(editor)
+            while alert.runModal() == 1000:
+                try:
+                    result.set_result(owner_names_text(str(editor.string())))
+                    return
+                except ValueError as error:
+                    alert.setInformativeText_(f"{error}\n\n{instructions}")
+            result.set_result(None)
+        except Exception as error:  # pylint: disable=broad-exception-caught
+            result.set_exception(error)
+
+    if NSThread.isMainThread():
+        present()
+    else:
+        AppHelper.callAfter(present)
+    return result.result()
+
+
+class IngestWindowApi:
+    """History and explicit import actions bound to one archive."""
+
+    def __init__(
+        self, archive: Path | None, *, application: "PyWebViewApplication | None" = None,
+        document: ArchiveDocument | None = None,
+    ) -> None:
         self.archive = archive
         self.window: Any = None
+        self._application = application
+        self._document = document
 
     def set_window(self, window: Any) -> None:
         self.window = window
@@ -346,18 +516,93 @@ class IngestWindowApi:
             return IngestHistory(statuses=[], errors=[]).model_dump(mode="json")
         return read_ingest_history(self.archive).model_dump(mode="json")
 
+    def antivirus(self) -> dict[str, object]:
+        return scanner_availability().model_dump(mode="json")
+
+    def install_antivirus(self) -> bool:
+        """User action opens the official download page; never silently installs software."""
+        import webbrowser  # pylint: disable=import-outside-toplevel
+        return webbrowser.open(CLAMAV_DOWNLOAD_URL)
+
     def close(self, *_args: object) -> None:
         self.window = None
+
+    def can_import_directory(self) -> bool:
+        return bool(
+            self._application and self._document and self._document.path
+            and self._document.ingest_job is None and self.window is not None
+        )
+
+    def import_directory(self) -> bool:
+        if not self.can_import_directory():
+            return False
+        assert self._application is not None and self._document is not None
+        return self._application.import_directory(self._document, self.window)
 
 
 class AboutApi:
     """Read-only bridge for persistent application health and activity."""
 
-    def __init__(self, application: PyWebViewApplication) -> None:
-        self.application = application
+    def __init__(self, application: "PyWebViewApplication") -> None:
+        self._application = application
 
     def status(self) -> dict[str, Any]:
-        return self.application.about_status().model_dump(mode="json")
+        return self._application.about_status().model_dump(mode="json")
+
+
+class DocumentOptionsApi:
+    """Explicit options bridge permanently bound to one document."""
+
+    def __init__(self, document: ArchiveDocument) -> None:
+        if document.path is None:
+            raise ValueError("Document options require a saved archive")
+        self._document = document
+        self._archive = document.path
+        self.window: Any = None
+
+    def status(self) -> dict[str, Any]:
+        state = DocumentOptions(self._archive).state()
+        state.editable = self._document.ingest_job is None
+        return state.model_dump(mode="json")
+
+    def update(self, additions: str, removed: list[str], revision: str) -> dict[str, Any]:
+        document = self._document
+        store = DocumentOptions(self._archive)
+        lease = WriterLease.acquire(
+            self._archive, document.descriptor.identity, "Document options", uuid4().hex,
+            application_metadata().version,
+        )
+        try:
+            current = store.state()
+            names = [name for name in current.names if name not in removed]
+            return store.save(names + split_owner_names(additions), lease, revision).model_dump(mode="json")
+        finally:
+            lease.release()
+
+
+class WindowBridge:
+    """Expose only the selected methods, never traverse application/native object state."""
+
+    def __init__(self, api: Any, methods: tuple[str, ...]) -> None:
+        self._api = api
+        self._methods = methods
+
+    def __dir__(self) -> list[str]:
+        return list(self._methods)
+
+    def __getattr__(self, name: str) -> Any:
+        if name not in self._methods:
+            raise AttributeError(name)
+        return getattr(self._api, name)
+
+
+SEARCH_BRIDGE_METHODS = (
+    "status", "activate", "search", "suggestions", "ingest_overview", "open_ingest_window",
+    "mailbox_tree", "saved_filter_sets", "save_filter_set", "rename_filter_set", "delete_filter_set",
+    "open_message_window", "request_previews", "take_previews", "message", "part", "attachment",
+    "copy_source_path", "copy_visible_text", "copy_link", "open_link", "open_attachment",
+    "save_message", "save_attachment", "prepare_drag",
+)
 
 
 class GuiApi:
@@ -436,7 +681,7 @@ class GuiApi:
             opened_in_new_window=opened_in_new_window,
             configuration=application_configuration().gui,
             notices=self.application.notices() if self.application else [],
-        ).model_dump()
+        ).model_dump(mode="json")
 
     def activate(self) -> bool:
         """Route subsequent native actions through this window's current document."""
@@ -468,7 +713,7 @@ class GuiApi:
             window = webview.create_window(
                 "Mail Archiver — Ingests",
                 str(GUI_DIRECTORY / f"ingests.html{selected}"),
-                js_api=api,
+                js_api=WindowBridge(api, ("history", "can_import_directory", "import_directory", "antivirus", "install_antivirus")),
                 width=1050,
                 height=700,
                 min_size=(720, 440),
@@ -711,7 +956,7 @@ class GuiApi:
         )
         if not selected:
             return None
-        destination = Path(selected[0])
+        destination = dialog_paths(selected)[0]
         if destination.suffix.casefold() != ".eml":
             destination = destination.with_suffix(".eml")
         write_message(self._archive(), message_pk, destination)
@@ -731,7 +976,7 @@ class GuiApi:
         )
         if not selected:
             return None
-        destination = Path(selected[0])
+        destination = dialog_paths(selected)[0]
         write_attachment(self._archive(), message_pk, part_id, destination)
         return str(destination)
 
@@ -780,7 +1025,7 @@ class GuiApi:
         child = webview.create_window(
             view.subject,
             f"{base_url}?{urlencode(parameters)}",
-            js_api=child_api,
+            js_api=WindowBridge(child_api, SEARCH_BRIDGE_METHODS),
             width=900,
             height=760,
             min_size=(560, 420),
@@ -863,15 +1108,18 @@ class PyWebViewApplication:
         self.asset_server = asset_server
         self._apis: dict[str, GuiApi] = {}
         self._ingest_apis: dict[str, IngestWindowApi] = {}
+        self._options_apis: dict[str, DocumentOptionsApi] = {}
         self._native_search_ids: dict[str, str] = {}
         self._native_child_ids: dict[str, str] = {}
         self._about_api = AboutApi(self)
         self._about_window: Any = None
+        self._about_visible = False
         self._notices: list[ApplicationNotice] = []
         self._connectivity: ConnectivityMonitor | None = None
+        self._menu_observer: Any = None
         self._lock = RLock()
-        self._import_threads: list[Thread] = []
         self._quitting = False
+        self._import_threads: list[Thread] = []
 
     def asset_url(
         self, asset: str, parameters: list[tuple[str, str]] | None = None
@@ -882,17 +1130,19 @@ class PyWebViewApplication:
         return f"{GUI_DIRECTORY / asset}{suffix}"
 
     def create_about_window(self) -> None:
-        """Create the health window that remains present for the application lifetime."""
+        """Show health at startup or on an explicit About menu request."""
         if self._connectivity is None:
             self._connectivity = ConnectivityMonitor()
         if self._about_window is not None:
+            self._about_visible = True
             self._about_window.restore()
             self._about_window.show()
+            self._refresh_menus()
             return
         window = webview.create_window(
             f"About {APPLICATION_NAME}",
             self.asset_url("about.html"),
-            js_api=self._about_api,
+            js_api=WindowBridge(self._about_api, ("status",)),
             width=620,
             height=620,
             min_size=(480, 420),
@@ -902,12 +1152,25 @@ class PyWebViewApplication:
         if window is None:
             raise RuntimeError("pywebview failed to create a window")
         self._about_window = window
+        self._about_visible = True
+        window.events.shown += lambda *_args: self._refresh_menus()
+
+        def closing(*_args: object) -> bool:
+            if self._quitting:
+                return True
+            # Keep a hidden native window so closing the last visible window does
+            # not end pywebview's event loop or remove File/New/Open and About.
+            self._about_visible = False
+            window.hide()
+            self._refresh_menus()
+            return False
 
         def closed(*_args: object) -> None:
             self._about_window = None
-            if self._apis or self._ingest_apis:
-                self.create_about_window()
+            self._about_visible = False
+            self._refresh_menus()
 
+        window.events.closing += closing
         window.events.closed += closed
         self._refresh_menus()
 
@@ -959,6 +1222,7 @@ class PyWebViewApplication:
             internet=self._connectivity.status() if self._connectivity else InternetStatus(),
             notices=self.notices(),
             ingests=ingests,
+            antivirus=scanner_availability(),
         )
 
     def create_search_window(self, session: SearchWindow) -> GuiApi:
@@ -973,7 +1237,7 @@ class PyWebViewApplication:
         window = webview.create_window(
             _window_title(document, int(status["message_count"])),
             self.asset_url("index.html"),
-            js_api=api,
+            js_api=WindowBridge(api, SEARCH_BRIDGE_METHODS),
             width=session.geometry.width,
             height=session.geometry.height,
             x=session.geometry.x,
@@ -1049,10 +1313,8 @@ class PyWebViewApplication:
         )
         if not selected:
             return None
-        destination = Path(selected[0])
-        if destination.suffix.casefold() != ".mailarchive":
-            destination = destination.with_suffix(".mailarchive")
         try:
+            destination = archive_destination(selected)
             document = self.controller.create_document(destination)
         except (OSError, ValueError) as error:
             self.add_notice("error", f"Could not create archive: {error}")
@@ -1060,24 +1322,21 @@ class PyWebViewApplication:
         return self.create_search_window(self.controller.new_search_window(document))
 
     def prompt_for_startup_archive(self) -> None:
-        """Offer destination and import when startup had no usable saved archive."""
-        untitled = next(
-            (
-                api
-                for api in self._search_apis()
-                if api.document is not None and api.document.descriptor.untitled
-            ),
-            None,
+        """Offer Open, New, or Cancel without creating an unsaved search window."""
+        self._refresh_menus()
+        if sys.platform != "darwin":
+            return
+        choice = macos_alert(
+            "Open or create an archive",
+            "Open an existing archive or choose where to create a new one.",
+            ("Open Existing…", "Create New…", "Cancel"),
         )
-        if untitled is None or untitled.window is None:
-            return
-        created = self._create_new_document(untitled.window)
-        if created is None:
-            return
-        untitled.window.destroy()
-        if created.search_window is not None:
-            self.controller.activate_window(created.search_window.window_id)
-        self._import_document(created)
+        if choice == 0:
+            self.open_archive_dialog()
+        elif choice == 1:
+            created = self._create_new_document(self._about_window)
+            if created is not None:
+                self._import_document(created)
 
     def new_search_window(self) -> bool:
         document = self.active_document()
@@ -1093,7 +1352,18 @@ class PyWebViewApplication:
             api = self.create_search_window(self.controller.new_search_window(document))
         return self._import_document(api) if api is not None else False
 
-    def _import_document(self, api: GuiApi) -> bool:
+    def import_directory(self, document: ArchiveDocument, anchor: Any) -> bool:
+        """Use the Ingests window's document, independently of the active search window."""
+        if document.path is None or document.ingest_job is not None:
+            return False
+        api = next((item for item in self._search_apis() if item.document is document), None)
+        if api is None:
+            api = self.create_search_window(self.controller.new_search_window(document))
+        return self._import_document(api, directory_only=True, dialog_window=anchor)
+
+    def _import_document(
+        self, api: GuiApi, *, directory_only: bool = False, dialog_window: Any = None,
+    ) -> bool:
         if api.window is None or api.document is None or api.document.path is None:
             return False
         if api.search_window is not None:
@@ -1103,38 +1373,93 @@ class PyWebViewApplication:
         except (ArchiveBusyError, ValueError) as error:
             self.add_notice("warning", str(error))
             return False
-        choose_folders = api.window.create_confirmation_dialog(
-            "Choose Import Source Type",
-            "Choose OK to select one or more source folders. Choose Cancel to select one or more source files.",
-        )
-        selected_sources = api.window.create_file_dialog(
-            webview.FileDialog.FOLDER if choose_folders else webview.FileDialog.OPEN,
-            directory=str(document.display_path.parent if document.display_path else Path.home()),
-            allow_multiple=True,
-            file_types=() if choose_folders else ("Mail source files (*.*)",),
-        )
+        anchor = dialog_window or api.window
+        if document.path is None:
+            raise ValueError("Import requires a saved archive")
+        destination = document.display_path or document.path
+        title = f"Import into {destination.name}"
+        antivirus = scanner_availability()
+        try:
+            picker_directory = configured_import_directory(document.path)
+        except ValueError as error:
+            self.add_notice("warning", str(error))
+            picker_directory = destination.parent
+        if sys.platform == "darwin":
+            selected_sources = macos_import_picker(
+                picker_directory, title,
+                f"Destination archive: {destination}\n"
+                "Choose mail files or directories. Directories include supported mail files and subdirectories.",
+                "Import", folders=True, multiple=True,
+                warning=None if antivirus.configured else UNSCANNED_WARNING,
+            )
+        else:
+            choose_folders = directory_only or anchor.create_confirmation_dialog(
+                title, f"Destination archive: {destination}\n\nChoose OK for folders or Cancel for files.",
+            )
+            selected_sources = anchor.create_file_dialog(
+                webview.FileDialog.FOLDER if choose_folders else webview.FileDialog.OPEN,
+                directory=str(picker_directory), allow_multiple=True,
+                file_types=() if choose_folders else ("Mail source files (*.*)",),
+            )
         if not selected_sources:
             return False
-        selected_owners = api.window.create_file_dialog(
-            webview.FileDialog.OPEN,
-            directory=str(Path.home()),
-            file_types=("Owner names text file (*.txt)", "All files (*.*)"),
-        )
-        if not selected_owners:
-            return False
-        roots = [Path(path) for path in selected_sources]
-        owner_names = Path(selected_owners[0])
+        roots = list(dialog_paths(selected_sources))
+        additions = []
+        if sys.platform == "darwin":
+            try:
+                additions = source_owner_names(roots)
+                if not sorted_owner_names(read_owner_names(document.path / OWNER_NAMES_FILENAME) + additions):
+                    names_text = macos_owner_names(destination)
+                    if names_text is None:
+                        return False
+                    additions = names_text.splitlines()
+            except (OSError, ValueError) as error:
+                self.add_notice("error", f"Could not load owner names: {error}")
+                macos_alert(title, str(error), ("OK",))
+                return False
+        else:
+            selected_owners = anchor.create_file_dialog(
+                webview.FileDialog.OPEN, directory=str(Path.home()),
+                file_types=("Owner names text file (*.txt)", "All files (*.*)"),
+            )
+            if not selected_owners:
+                return False
+            additions = source_owner_names(roots) + read_owner_names(dialog_paths(selected_owners)[0])
+        owner_names = document.path / OWNER_NAMES_FILENAME
         summary = "\n".join(str(root) for root in roots)
-        if not api.window.create_confirmation_dialog(
-            "Import Mail",
-            f"Import these read-only sources into {document.display_path}?\n\n{summary}\n\n"
-            f"Sent-mail owner names: {owner_names}\n\nClamAV must be installed and available.",
-        ):
+        confirmation = (
+            f"Destination archive: {destination}\n\nRead-only sources:\n{summary}\n\n"
+            f"Sent-mail owner names: {owner_names}\n\n{antivirus.detail}"
+        )
+        if not antivirus.configured:
+            choice = (
+                macos_alert(title, confirmation, ("Cancel", "Import Without Scanning", "Install ClamAV…"),
+                            body_width=IMPORT_CONFIRMATION_WIDTH)
+                if sys.platform == "darwin" else
+                (1 if anchor.create_confirmation_dialog(title, confirmation + "\n\nImport WITHOUT antivirus scanning?") else 0)
+            )
+            if choice == 2:
+                import webbrowser  # pylint: disable=import-outside-toplevel
+                webbrowser.open(CLAMAV_DOWNLOAD_URL)
+                return False
+            if choice != 1:
+                return False
+            return self.start_import(api, roots, owner_names, owner_additions=additions, scan_policy="not-scanned")
+        confirmed = (
+            macos_alert(title, confirmation, ("Import", "Cancel"), body_width=IMPORT_CONFIRMATION_WIDTH) == 0
+            if sys.platform == "darwin" else anchor.create_confirmation_dialog(title, confirmation)
+        )
+        if not confirmed:
             return False
-        return self.start_import(api, roots, owner_names)
+        return self.start_import(api, roots, owner_names, owner_additions=additions)
 
-    def start_import(self, api: GuiApi, roots: list[Path], owner_names: Path) -> bool:
+    def start_import(
+        self, api: GuiApi, roots: list[Path], owner_names: Path, *, owner_additions: list[str] | None = None,
+        scan_policy: Literal["clamav", "not-scanned"] = "clamav",
+    ) -> bool:
         """Acquire both ingest layers before launching the shared service."""
+        if self._quitting:
+            return False
         document = api.document
         session = api.search_window
         if document is None or document.path is None or session is None:
@@ -1149,10 +1474,12 @@ class PyWebViewApplication:
                 operation_id,
                 application_metadata().version,
             )
+            if owner_additions is not None:
+                DocumentOptions(document.path).merge(owner_additions, lease)
             job = IngestJob(operation_id=operation_id, owner_window_id=session.window_id)
             with self._lock:
                 if self._quitting:
-                    raise ValueError("The application is quitting.")
+                    raise ValueError("The application is stopping imports and quitting.")
                 self.controller.begin_ingest(document.descriptor.document_id, job, lease)
         except (OSError, ArchiveBusyError, ValueError) as error:
             if lease is not None:
@@ -1160,15 +1487,23 @@ class PyWebViewApplication:
             self.add_notice("warning", f"Import did not start: {error}")
             return False
         self.add_notice("information", f"Import started for {document.display_path}")
+        if scan_policy == "not-scanned":
+            self.add_notice("warning", f"{document.display_path}: importing WITHOUT antivirus scanning.")
         self._refresh_menus()
         request = IngestRequest(
             archive=document.path,
             owner_names_file=owner_names,
             roots=[str(root) for root in roots],
+            scan_policy=scan_policy,
         )
+        def import_worker() -> None:
+            try:
+                self._run_import(document, operation_id, lease, request, job.stop)
+            finally:
+                job.finished.set()
+
         worker = Thread(
-            target=self._run_import,
-            args=(document, operation_id, lease, request),
+            target=import_worker,
             name=f"mailarchiver-import-{operation_id[:8]}",
             daemon=False,
         )
@@ -1178,17 +1513,31 @@ class PyWebViewApplication:
             worker.start()
         return True
 
+    def stop_imports_for_quit(self) -> tuple[IngestJob, ...]:
+        """Called only after confirmation; prevent new imports and stop all existing jobs."""
+        with self._lock:
+            self._quitting = True
+            jobs = tuple(job for document in self.controller.documents() if (job := document.ingest_job) is not None)
+            for job in jobs:
+                job.stop.set()
+            return jobs
+
     def _run_import(
         self,
         document: ArchiveDocument,
         operation_id: str,
         lease: WriterLease,
         request: IngestRequest,
+        stop: Event,
     ) -> None:
         error: BaseException | None = None
         outcome = IngestOutcome()
         try:
-            run_ingest(request, lease, outcome=outcome, terminal=False)
+            run_ingest(request, lease, stop_event=stop, outcome=outcome, terminal=False)
+            try:
+                remember_import_directory(request.archive, [Path(root) for root in request.roots])
+            except (OSError, ValueError) as config_error:
+                self.add_notice("warning", f"Import completed but the source directory could not be saved: {config_error}")
         except BaseException as caught:  # pylint: disable=broad-exception-caught
             logging.getLogger(__name__).debug("Best-effort operation failed", exc_info=True)
             error = caught
@@ -1203,7 +1552,9 @@ class PyWebViewApplication:
                 refresh = ()
             self._refresh_search_windows(refresh)
             self._refresh_menus()
-        if error is None:
+        if isinstance(error, IngestInterrupted):
+            self.add_notice("information", f"Import stopped for {document.display_path}; import the same source again to continue.")
+        elif error is None:
             self.add_notice("information", f"Import completed for {document.display_path}")
         else:
             self.add_notice(
@@ -1216,21 +1567,21 @@ class PyWebViewApplication:
         if anchor is None:
             return False
         api = self.active_api()
-        selected = anchor.create_file_dialog(
-            webview.FileDialog.FOLDER,
-            directory=str(
-                api.document.display_path.parent
-                if api and api.document and api.document.display_path
-                else Path.home()
-            ),
+        directory = api.document.display_path.parent if api and api.document and api.document.display_path else Path.home()
+        selected = (
+            macos_import_picker(directory, "Open Mail Archive", "Select a .mailarchive package or an existing archive directory.", "Open", folders=True)
+            if sys.platform == "darwin" else anchor.create_file_dialog(webview.FileDialog.FOLDER, directory=str(directory))
         )
         if not selected:
             return False
         try:
-            self.open_document(Path(selected[0]))
+            self.add_notice("information", f"Opening archive: {dialog_paths(selected)[0]}")
+            self.open_document(dialog_paths(selected)[0])
             return True
         except (OSError, ValueError) as error:
-            self.add_notice("error", f"Could not open archive: {error}")
+            message = f"Could not open archive: {error}"
+            print(f"mailsearch-gui: {message}", file=sys.stderr)
+            self.add_notice("error", message)
             return False
 
     def open_document(self, path: Path, *, recent: bool = False) -> GuiApi:
@@ -1283,6 +1634,46 @@ class PyWebViewApplication:
         document = self.active_document()
         return self.open_ingest_window(document) if document is not None else False
 
+    def open_document_options(self, document: ArchiveDocument | None = None) -> bool:
+        if document is None:
+            native = webview.active_window()
+            child_id = self._native_child_ids.get(native.uid) if native else None
+            api = self.active_api()
+            document = self.controller.document(child_id) if child_id else (api.document if api else None)
+        if document is None or document.path is None:
+            return False
+        document_id = document.descriptor.document_id
+        with self._lock:
+            options = self._options_apis.get(document_id)
+            if options is not None:
+                options.window.restore()
+                options.window.show()
+                return True
+            options = DocumentOptionsApi(document)
+            window = webview.create_window(
+                f"{APPLICATION_NAME} — Document Options — {document.display_path}",
+                self.asset_url("options.html"),
+                js_api=WindowBridge(options, ("status", "update")),
+                width=640, height=600, min_size=(480, 420), menu=self.menu(),
+            )
+            if window is None:
+                raise RuntimeError("pywebview failed to create a window")
+            options.window = window
+            self._options_apis[document_id] = options
+            self._native_child_ids[window.uid] = document_id
+            self.controller.attach_child_window(document_id, window.uid)
+
+            def closed(*_args: object) -> None:
+                with self._lock:
+                    self._options_apis.pop(document_id, None)
+                    self._native_child_ids.pop(window.uid, None)
+                self.controller.close_child_window(document_id, window.uid)
+                self._refresh_menus()
+
+            window.events.closed += closed
+        self._refresh_menus()
+        return True
+
     def open_ingest_window(self, document: ArchiveDocument, status_id: str | None = None) -> bool:
         if document.path is None:
             return False
@@ -1295,14 +1686,14 @@ class PyWebViewApplication:
                 api.window.restore()
                 api.window.show()
                 return True
-            api = IngestWindowApi(document.path)
+            api = IngestWindowApi(document.path, application=self, document=document)
             window = webview.create_window(
                 f"{APPLICATION_NAME} — Ingests — {document.display_path}",
                 self.asset_url(
                     "ingests.html",
                     [("status", status_id)] if status_id is not None else None,
                 ),
-                js_api=api,
+                js_api=WindowBridge(api, ("history", "can_import_directory", "import_directory", "antivirus", "install_antivirus")),
                 width=1050,
                 height=700,
                 min_size=(720, 440),
@@ -1345,6 +1736,7 @@ class PyWebViewApplication:
     def focus_window(self, uid: str) -> bool:
         windows = [api.window for api in self._search_apis()]
         windows.extend(api.window for api in self._ingest_apis.values())
+        windows.extend(api.window for api in self._options_apis.values())
         windows.append(self._about_window)
         window = next((candidate for candidate in windows if candidate is not None and candidate.uid == uid), None)
         if window is None:
@@ -1358,7 +1750,7 @@ class PyWebViewApplication:
 
     def window_menu_items(self) -> list[MenuAction]:
         items = []
-        if self._about_window is not None:
+        if self._about_window is not None and self._about_visible:
             items.append(MenuAction(f"About {APPLICATION_NAME}", lambda: self.focus_window(self._about_window.uid)))
         for index, api in enumerate(self._search_apis(), 1):
             if api.window is None:
@@ -1382,6 +1774,8 @@ class PyWebViewApplication:
                     lambda uid=api.window.uid: self.focus_window(uid),
                 )
             )
+        for api in tuple(self._options_apis.values()):
+            items.append(MenuAction(api.window.title, lambda uid=api.window.uid: self.focus_window(uid)))
         return items
 
     def _can_close_search_window(self, window_id: str, window: Any) -> bool:
@@ -1412,6 +1806,10 @@ class PyWebViewApplication:
             workers = tuple(self._import_threads)
         for worker in workers:
             worker.join()
+        if self._menu_observer is not None:
+            from Foundation import NSNotificationCenter  # pylint: disable=import-outside-toplevel,no-name-in-module,import-error
+            NSNotificationCenter.defaultCenter().removeObserver_(self._menu_observer)
+            self._menu_observer = None
         if self._connectivity is not None:
             self._connectivity.close()
         if self.asset_server is not None:
@@ -1448,28 +1846,67 @@ class PyWebViewApplication:
         """Refresh pywebview's process menu and its dynamic Close enabled state."""
         if sys.platform != "darwin":
             return
-        active = webview.active_window()
-        if active is None:
-            return
         try:
-            from PyObjCTools import (
-                AppHelper,  # pylint: disable=import-error,import-outside-toplevel
-            )
-            from webview.platforms.cocoa import (
-                BrowserView,  # pylint: disable=import-error,import-outside-toplevel
-            )
+            from PyObjCTools import AppHelper  # pylint: disable=import-error,import-outside-toplevel
+            from webview.platforms.cocoa import BrowserView  # pylint: disable=import-error,import-outside-toplevel
+            from Foundation import NSNotificationCenter  # pylint: disable=import-error,import-outside-toplevel,no-name-in-module
         except ImportError:
             return
 
         def refresh() -> None:
+            # A launched/background app or native modal panel may have no webview key window.
+            # Build the menu anyway, resolving Cocoa focus only on its main thread.
+            active = webview.active_window()
+            if active is None:
+                session = self.controller.active_window
+                api = self._apis.get(session.window_id) if session else None
+                active = api.window if api is not None else self._about_window
+            if active is None:
+                return
+            if self._menu_observer is None:
+                self._menu_observer = NSNotificationCenter.defaultCenter().addObserverForName_object_queue_usingBlock_(
+                    "NSWindowDidBecomeKeyNotification", None, None,
+                    lambda _notification: self._refresh_macos_menu(),
+                )
+            for native in BrowserView.instances.values():
+                native.menu = active.menu
             instance = BrowserView.instances.get(active.uid)
             if instance is None:
                 return
             menu = instance._recreate_menus(active.menu)  # pylint: disable=protected-access
             BrowserView.app.setMainMenu_(menu)
+            about_item = menu.itemAtIndex_(0).submenu().itemAtIndex_(0)
+            about_item.setTarget_(BrowserView.app.delegate())
+            about_item.setAction_("showMailArchiverAbout:")
             setattr(BrowserView, "current_menu", active.menu)
+            for index, title in enumerate(("File", "Edit", "View", "Window"), 1):
+                item = next(
+                    (entry for entry in menu.itemArray()
+                     if entry.title() == title or (entry.submenu() and entry.submenu().title() == title)),
+                    None,
+                )
+                if item is not None:
+                    item.setTitle_(title)
+                    menu.removeItem_(item)
+                    menu.insertItem_atIndex_(item, index)
             file_item = menu.itemWithTitle_("File")
+            if file_item is not None:
+                for title, key in (("New", "n"), ("Open…", "o"), ("Close", "w")):
+                    item = file_item.submenu().itemWithTitle_(title)
+                    if item is not None:
+                        item.setKeyEquivalent_(key)
+                        item.setKeyEquivalentModifierMask_(1 << 20)
             close_item = file_item.submenu().itemWithTitle_("Close") if file_item else None
+            window_item = menu.itemWithTitle_("Window")
+            if window_item is not None:
+                submenu = window_item.submenu()
+                submenu.setAutoenablesItems_(False)
+                new_search = submenu.itemWithTitle_("New Search Window")
+                if new_search is not None:
+                    with self._lock:
+                        search_id = self._native_search_ids.get(active.uid)
+                        search_api = self._apis.get(search_id) if search_id is not None else None
+                    new_search.setEnabled_(bool(search_api and search_api.document and search_api.document.path))
             if close_item is not None:
                 with self._lock:
                     search_id = self._native_search_ids.get(active.uid)
@@ -1480,6 +1917,21 @@ class PyWebViewApplication:
                 close_item.setEnabled_(enabled)
 
         AppHelper.callAfter(refresh)
+
+
+def dialog_paths(selected: str | tuple[str | Path, ...] | list[str]) -> tuple[Path, ...]:
+    """Normalize native SAVE strings and OPEN/FOLDER sequences without splitting strings."""
+    return tuple(Path(item) for item in ((selected,) if isinstance(selected, str) else selected))
+
+
+def archive_destination(selected: str | tuple[str, ...] | list[str]) -> Path:
+    """Validate a save choice before adding the archive extension."""
+    destination = dialog_paths(selected)[0]
+    if not destination.name:
+        raise ValueError("Choose an archive name, not a filesystem root")
+    if destination.suffix.casefold() != ".mailarchive":
+        destination = destination.with_name(destination.name + ".mailarchive")
+    return destination
 
 
 def _is_archive(path: Path) -> bool:
@@ -1521,8 +1973,8 @@ def application_menu(application: PyWebViewApplication) -> list[Menu]:
         file_items.append(Menu("Open Recent", recent))
     file_items.extend(
         (
-            MenuAction("New Search Window", application.new_search_window),
             MenuAction("Import…", application.import_active_document),
+            MenuAction("Document Options…", application.open_document_options),
             MenuAction("Close", application.close_active_window),
         )
     )
@@ -1530,7 +1982,8 @@ def application_menu(application: PyWebViewApplication) -> list[Menu]:
         Menu("File", file_items),
         Menu(
             "Window",
-            [MenuAction("Ingests", application.open_active_ingest_window), *application.window_menu_items()],
+            [MenuAction("New Search Window", application.new_search_window),
+             MenuAction("Ingests", application.open_active_ingest_window), *application.window_menu_items()],
         ),
     ]
 
@@ -1564,36 +2017,61 @@ def configure_macos_application() -> None:
         NSApplication.sharedApplication().setApplicationIconImage_(icon)
 
 
-def install_macos_quit_guard(application: PyWebViewApplication) -> None:
-    """Refuse native Quit while an import still needs its status windows."""
+def install_macos_document_events(application: PyWebViewApplication) -> None:
+    """Extend pywebview's delegate without replacing its quit/ingest safeguards."""
     if sys.platform != "darwin":
         return
-    from importlib import import_module
+    from webview.platforms.cocoa import BrowserView  # pylint: disable=import-outside-toplevel
 
-    from webview.platforms.cocoa import (
-        BrowserView,  # pylint: disable=import-outside-toplevel
-    )
-
-    owner = application
-
-    class ImportAwareDelegate(BrowserView.AppDelegate):
+    class MailArchiverDelegate(BrowserView.AppDelegate):
         def applicationShouldTerminate_(self, app):
-            appkit = import_module("AppKit")
-            objc = import_module("objc")
-            if not owner.prepare_quit():
-                alert = appkit.NSAlert.alloc().init()
-                alert.setMessageText_("Import is running")
-                alert.setInformativeText_("Wait for the import to finish, then quit. The archive and status windows will remain open.")
-                alert.addButtonWithTitle_("Keep Importing")
-                alert.runModal()
-                return appkit.NSTerminateCancel
-            decision = objc.super(ImportAwareDelegate, self).applicationShouldTerminate_(app)
-            if decision == appkit.NSTerminateCancel:
-                owner._quitting = False
-            return decision
+            import AppKit  # pylint: disable=import-outside-toplevel,import-error
+            import objc  # pylint: disable=import-outside-toplevel,import-error
+            AppHelper = import_module("PyObjCTools.AppHelper")
 
-    # pywebview replaces this Objective-C delegate class at startup.
-    setattr(BrowserView, "AppDelegate", ImportAwareDelegate)
+            if application._quitting:
+                return AppKit.NSTerminateLater
+            if not any(document.ingest_job for document in application.controller.documents()):
+                application._quitting = True
+                decision = objc.super(MailArchiverDelegate, self).applicationShouldTerminate_(app)
+                if decision == AppKit.NSTerminateCancel:
+                    application._quitting = False
+                return decision
+            if macos_alert("Stop importing and quit?", QUIT_IMPORT_MESSAGE,
+                           ("Cancel", "Stop Import and Quit"), body_width=IMPORT_CONFIRMATION_WIDTH) != 1:
+                return AppKit.NSTerminateCancel
+            jobs = application.stop_imports_for_quit()
+
+            def finish_quit():
+                for job in jobs:
+                    job.finished.wait()
+                AppHelper.callAfter(app.replyToApplicationShouldTerminate_, True)
+
+            Thread(target=finish_quit, name="mailarchiver-quit", daemon=True).start()
+            return AppKit.NSTerminateLater
+
+        def application_openFiles_(self, sender, filenames):
+            paths = tuple(Path(str(filename)) for filename in filenames)
+
+            def open_documents():
+                AppHelper = import_module("PyObjCTools.AppHelper")
+                try:
+                    errors = application.handle_open_documents(paths)
+                    AppHelper.callAfter(sender.replyToOpenOrPrint_, 1 if errors else 0)
+                except Exception as error:  # pylint: disable=broad-exception-caught
+                    application.add_notice("error", f"Could not open archive: {error}")
+                    AppHelper.callAfter(sender.replyToOpenOrPrint_, 1)
+
+            Thread(target=open_documents, name="mailarchiver-open-documents", daemon=True).start()
+
+        def showMailArchiverAbout_(self, _sender):
+            Thread(target=application.create_about_window, name="mailarchiver-about", daemon=True).start()
+
+        def applicationShouldHandleReopen_hasVisibleWindows_(self, _sender, _visible):
+            # Dock activation must not reopen a dismissed About window.
+            return True
+
+    setattr(BrowserView, "AppDelegate", MailArchiverDelegate)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -1652,6 +2130,7 @@ def main() -> int:
     else:
         controller = ApplicationController()
         application = PyWebViewApplication(controller, asset_server)
+        install_macos_document_events(application)
         startup = controller.startup((archive,) if archive is not None else ())
         prompt_for_archive = any(
             controller.document(session.document_id).descriptor.untitled
@@ -1662,9 +2141,10 @@ def main() -> int:
             application.add_notice("error", error)
         application.create_about_window()
         for session in startup.windows:
-            application.create_search_window(session)
-    if application is not None:
-        install_macos_quit_guard(application)
+            if controller.document(session.document_id).descriptor.untitled:
+                controller.close_window(session.window_id)
+            else:
+                application.create_search_window(session)
     webview.settings["ALLOW_FILE_URLS"] = False
     webview.settings["OPEN_EXTERNAL_LINKS_IN_BROWSER"] = False
     if smoke:

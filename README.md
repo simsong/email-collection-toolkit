@@ -9,6 +9,14 @@ always be discarded and rebuilt.
 
 _NOTE --- THIS PROGRAM IS UNDER ACTIVE DEVELOPMENT. DO NOT USE OPERATIONALLY UNTIL VERSION 1.0 SHIPS_
 
+## macOS application
+
+For the macOS drag-to-Applications build, run `make dmg`. Python and GUI
+dependencies are bundled; ClamAV is optional. The target mounts its DMG and
+runs headless and visible native self-tests before publishing the local artifact.
+See [macOS distribution](doc/MACOS_DISTRIBUTION.md) for installation, test commands,
+architecture limits, and Developer ID renewal/signing instructions.
+
 ## Goals
 
 `mailarchiver` is preservation infrastructure for personal and research email
@@ -144,7 +152,11 @@ than exposed as UUID, `Data`, `Messages`, and individual filename nodes.
 
 ### `--clamav`
 
-`--clamav` is currently required on every ingest.  It scans each new
+Every CLI ingest requires either `--clamav` or `--no-scan`. The latter is an
+explicit antivirus opt-out and records each new message as not scanned; it
+does not certify mail as clean. A scanner failure never selects it automatically.
+
+Choose `--clamav` to scan each new
 message through the locally configured `clamd` socket before the message is
 written to a normal MBOX. Before starting any mailfile workers, the main
 ingest thread verifies that ClamAV is ready. If no healthy daemon is listening,

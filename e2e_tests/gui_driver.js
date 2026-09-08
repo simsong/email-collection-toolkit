@@ -50,7 +50,7 @@
     for (const operator of ["any:", "from:", "to:", "cc:", "bcc:", "subject:", "date:", "before:", "after:"]) {
       assert(help.textContent.includes(operator), `search help documents ${operator}`);
     }
-    assert(document.getElementById("archive-label").textContent.includes("archive"), "archive status displayed");
+    assert(document.getElementById("archive-label") === null, "archive path appears only in the native title bar");
     assert(document.title.includes("archive") && document.title.includes("(207 messages)"), "window title identifies archive and total message count");
     await waitFor(() => document.getElementById("ingest-status-line").textContent.includes("Last ingest completed"), "completed ingest status appears in the main status line");
     document.getElementById("ingest-status-line").click();
@@ -210,13 +210,8 @@
     document.dispatchEvent(new KeyboardEvent("keydown", {key: "a", metaKey: true, bubbles: true}));
     assert(state.resultSelection.size === state.results.length && rows().every(isSelected),
       "Command-A in the message list selects every result row");
-    const chooseArchive = document.getElementById("choose-archive");
-    const completedChoices = chooseArchive.dataset.completed || "0";
-    chooseArchive.click();
-    await waitFor(
-      () => chooseArchive.dataset.completed !== completedChoices && state.results.length === 0,
-      "open-archive control leaves the current test document without searching",
-    );
+    assert(document.getElementById("choose-archive") === null,
+      "document windows use File Open instead of an archive-switching toolbar button");
 
     await search("bulk", 203, false);
     const sort = document.getElementById("sort-by");

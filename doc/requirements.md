@@ -153,6 +153,27 @@ in an actual message body.
 
 ## Deduplication and provenance
 
+On macOS, Command-Q during an active import must offer Cancel or Stop Import
+and Quit. Explain that quitting stops imports, that restarting requires File →
+Import with the same source, and that already archived messages are not imported
+twice. Cancel leaves imports running. Confirmed quit stops all active imports
+cooperatively, disallows new imports, and waits for checkpointing and writer-lease
+release before terminating. Window-close restrictions during ingest remain intact.
+
+The default pytest suite must import the entire local `tests/data/` directory
+through the CLI into a disposable archive, with a ten-minute subprocess
+deadline. A reviewed expectation file lists source fingerprints and every
+retained email's subject and raw SHA-256, plus observation/exclusion counts.
+Failures report both unexpected and missing messages. Verification must read
+canonical bytes, run the installed validator, confirm source immutability, and
+repeat ingest to establish idempotence. Updating expectations requires the
+explicit `--update-corpus-expectations` pytest option. Tracked fixture expectations
+are public; ignored local mailbox expectations remain in an ignored local
+overlay. Unknown local files fail comparison until explicitly reviewed.
+This test uses the real on-demand ClamAV path, as the GUI does. Its subject/hash
+expectations include quarantined mail and do not depend on signature-dependent
+mailbox destinations. Dedicated EICAR tests also verify infected routing.
+
 * A duplicate is only a message with both the same normalized `Message-ID`
   and the same SHA-256 of its RFC 5322 message bytes.  Never collapse all
   messages sharing only a Message-ID.
@@ -255,8 +276,13 @@ in an actual message body.
 
 ## Malware handling
 
-* Each new message is streamed to ClamAV before normal archiving.
-* The local CLI currently requires the `--clamav` switch.  This starts one
+* Each new message is streamed to ClamAV unless the user explicitly chooses
+  an unscanned import. Missing or failed scanning must never silently mean clean.
+  The CLI requires exactly one of `--clamav` or `--no-scan`; the latter records
+  `not-scanned` in run status and an antivirus metadata defect on each new message.
+  Earlier run status without this field is unknown, not presumed scanned.
+  Repeat imports do not retroactively scan previously archived messages.
+* The `--clamav` switch starts one
   foreground `clamd` on the main ingest thread when the configured local socket
   is not healthy, waits for a successful health probe before starting mailfile
   workers, reuses a healthy existing daemon without stopping it, and never
@@ -496,32 +522,103 @@ window, child window, or ingest operation uses it.
 
 Every search window has a lifetime-stable document binding and independent
 query, sort, selection, mailbox-filter, and geometry state. **New Search
-Window** attaches another window to the active document. **Open** and an
+Window** in the **Window** menu attaches another window to the active document;
+it is disabled when no saved archive search window is active. **Open** and an
 operating-system open event create a window for the requested document; they
 must not silently retarget an existing search window.
 
 Startup opens explicit document paths first, otherwise the last valid archive,
-otherwise a new in-memory **Untitled** document. A missing or invalid last
-archive is removed from recent state and reported, never recreated. Untitled
-documents cannot write until the creation/import workflow chooses and creates
-a destination archive. After the native event loop starts, first-launch
-Untitled immediately offers the same destination dialog and then the Import
-source workflow; canceling either dialog safely leaves the appropriate blank
-document open.
+otherwise a macOS dialog offers **Open Existing**, **Create New**, and **Cancel**.
+A missing or invalid last archive is removed from recent state and reported,
+never recreated. Cancel dismisses the dialog without creating a search window;
+About and File New/Open remain available. New asks for a permanent destination
+before opening a search window, then offers Import. Accepting the default
+Untitled name must work. Native save results may be strings or path sequences;
+neither form may truncate the path. File New/Open/Close have Command-N/O/W
+shortcuts on macOS. Search windows have no Open Archive toolbar button.
+The archive path appears in the native title bar, without a duplicate toolbar label.
+The native menu order is Application, File, Edit, View, Window. Existing archive
+directories do not require an extension. Opening checks SQLite schema and layout
+read-only, without scanning every database page; this is not a full corruption
+audit. Open failures appear in About and stderr even if a document cannot open.
 
-An About window always opens at application startup and remains present while
-the application has another window. It displays the installed version, current
+An About window always opens at application startup. Closing it dismisses it
+until the user chooses the application menu's About command; status updates and
+Dock activation must not reopen it. Closing the last visible window keeps the
+application running with About and File New/Open available. It displays the installed version, current
 free space on the active archive's filesystem (or the user's home filesystem),
 live Internet reachability, startup errors, warnings, and each open archive's
 latest ingest status.
+About populates through the real native status bridge and polls once per second.
+Its script policy must permit pywebview's dynamic bridge functions, as the search
+and ingest pages do. A delayed bridge retries and clears its warning on recovery.
+Only explicitly selected window methods are exposed to JavaScript; application
+controllers, documents, and native window objects must not be recursively exposed.
 
 **File → New** asks for a new or empty permanent `.mailarchive` destination
 before creating its blank search window. It initializes BagIt, both databases,
 and operational status state, and refuses to overwrite an existing archive or
 nonempty invalid directory. **File → Import…** collects one or more supported
-local files or directories, an owner-names UTF-8 text file, explicit final
+local files or directories, owner names, explicit final
 confirmation, and starts the same typed ingest service used by the CLI on a
-worker thread. ClamAV must be separately installed and available.
+worker thread. ClamAV is optional and separately installed. Missing executable
+or configuration files produce a warning banner in the Ingests window and
+macOS source picker. Final confirmation defaults to Cancel and offers
+Import Without Scanning or Install ClamAV; the latter opens the official
+download page, without installing software or starting a persistent service.
+Configured scanners must pass the existing startup check; errors stop import,
+never silently switch to unscanned mode. About displays scanner configuration
+availability, and import history retains a visible unscanned warning.
+The Ingests window provides **Import Directory…**, bound to its own archive even
+when another archive is active. It opens the source picker directly, then
+uses the same owner-names setup, confirmation, and writer lease as File Import.
+The button is disabled during an import or while its dialogs are pending.
+On macOS, one source picker accepts files and directories together with an
+**Import** action, without a preliminary source-type question. Its title names
+the destination archive and its message shows the full destination path.
+Selecting an entire directory, including the currently displayed directory,
+uses recursive discovery. Cancel dismisses the picker without starting ingest.
+Final confirmation shows the Mail Archiver icon and destination heading/path.
+Both scanned and explicitly unscanned import confirmations use a 560-point-wide,
+selectable message area so archive and source paths need less wrapping, while
+retaining their existing buttons and keyboard defaults.
+Import merges `owner-names.txt` from the top level of every selected source
+directory into the destination archive's `owner-names.txt`. Source files remain
+unchanged, and neither the application checkout nor launch directory supplies
+default names. Existing multiword file entries remain single entries; merges
+deduplicate case-insensitively and sort the display. If the combined list is empty, a macOS
+multiline editor asks for the owner's names and email addresses, one per line;
+there is no owner-names file picker. At least one nonblank, noncomment entry is
+required to continue from that editor. Invalid settings are reported.
+Merged names are saved atomically as UTF-8 in the archive's `owner-names.txt`
+only after final confirmation and acquisition of the writer lease. The merge
+rereads current document names under the lock to preserve concurrent edits.
+Canceling either dialog starts no ingest and saves no names.
+This is operational, unmanifested configuration; it does not change source
+mail or the existing case-insensitive Sent-classification matching rules.
+The packaged local-source ignore rules exclude a source directory's
+`owner-names.txt` from mail discovery and the unrecognized-file count.
+
+Each archive may contain a human-editable `config.yaml` with version `1` and
+the last source-picker directory. After a successful import, the application
+records the first selected directory, or the containing directory of the first
+selected file. The next File Import or Ingests import starts there when it still
+exists; missing or malformed navigation state is ignored and falls back beside
+the archive. This YAML is discardable operational state and is excluded from
+the BagIt tag manifests.
+
+**File → Document Options…** opens one options window per saved archive, also
+listed in Window. It contains a scrollable, sorted, multi-select owner-name
+list with **+** and **−** actions. Add accepts comma-, semicolon-, or
+whitespace-separated entries; Delete removes all selected entries. Changes
+save immediately under the writer lease; ingest blocks edits and stale edits
+must not overwrite newer settings. The document's other windows share this
+list. Ingest records the names actually used in `status/owner-names-used.txt`.
+Options flags a differing list after that import starts, including after
+reopening, and identifies older imports whose names were not recorded.
+The panel explains that changes affect future imports only: messages are not
+moved between Sent and Archive mailboxes. Owner names are not stored in FTS,
+so reindexing cannot reclassify messages and no owner-name Reindex action is offered.
 
 Only a saved document holding the matching cross-process writer lease may
 start ingest. The process-local document registry prevents duplicate UI jobs
@@ -585,6 +682,14 @@ message, attachments, and source-location evidence. The result list can sort by 
 sender in either direction. When it has keyboard focus, Up Arrow and Down
 Arrow move the selection and display the newly selected message. Result rows
 show the indexed attachment count with a paperclip.
+The single result column is not user-resizable. A draggable divider reallocates
+width between the result list and preview without introducing a horizontal
+result-list scrollbar or changing the current selection. It also supports
+Left/Right Arrow (Shift for larger steps) and Home/End while focused, respects
+minimum pane widths, and adapts to window resizing and the optional folder tree.
+Each search window keeps its own split for its lifetime; standalone message
+windows and printing have no divider. Browser acceptance tests exercise these
+layout and selection invariants.
 An unchecked **Search attachments** control searches only headers and message
 bodies. When checked, the same ordinary full-text expression also matches the
 separate indexed text-attachment table; metadata selectors retain their normal
@@ -720,7 +825,7 @@ current beta `v1.2.3-beta1`-shaped tag when present, and project discussions.
 Its home page gives equal prominence to individuals consolidating personal
 exports and archivists curating donor collections. A separate use-cases page
 describes both workflows, including an institutional digital-estate scenario,
-BagIt/Mailbag export, MBOX handoff to ePADD, and explicit boundaries between
+native BagIt/Mailbag archive storage, MBOX handoff to ePADD, and explicit boundaries between
 implemented and planned sources. It also provides a clearly labeled index of
 digital-email-curation reports and related organizations; it does not imply
 that planned application features are implemented. Every site page links to a
@@ -728,10 +833,15 @@ public privacy policy covering planned Gmail and Microsoft 365 OAuth access and
 to a rights page stating the software's current GPL distribution, copyright,
 and availability of non-GPL versions. The curation section renders a
 responsive summary of the program's local file discovery, read-only ingest,
-archive creation, search and reporting, export, and verification functions,
+archive creation, search and reporting, verification, and sharing functions,
 followed by its reports and organizations. Public website copy uses language
 for archivists, avoids software-development jargon, and labels unavailable
 functions as planned work.
+The site's About page identifies Simson Garfinkel, summarizes his work with a
+link to his personal website, and links to his GitHub profile and the project
+repository. About links to a dated website changelog that records website
+changes separately from software release notes. Website and documentation
+must describe BagIt/Mailbag as native archive storage, not a separate export.
 The Pages build pins its Zola release and verifies the downloaded archive
 against a source-controlled SHA-256 digest before execution.
 
@@ -938,6 +1048,9 @@ one-time registration procedure and tell readers to use their own account.
   and tag manifests, required Mailbag structure, and every declared
   complete-MBOX, raw-message, and semantic-message digest without consulting
   SQLite. It exits nonzero after reporting any mismatch.
+  Its source header and `--help` explain prerequisites, macOS/Linux and Windows
+  commands, the default archive directory, checks performed, exit status, and
+  read-only limitations. Instructions travel with every installed copy.
 * The MBOX container's required separator newline is not part of a source
   message that lacked a terminal newline. Catalog retrieval and standalone
   verification select the candidate matching the recorded source SHA-256.
@@ -962,11 +1075,63 @@ one-time registration procedure and tell readers to use their own account.
   committed source-observation log by run, source, and disposition. Derived
   catalog fields and canonical locations are created correctly during ingest.
 
+## macOS desktop delivery
+
+Ruff must pass with zero diagnostics before validation or packaging succeeds.
+`make ruff` checks the repository using the locked development dependency;
+`make check`, `make dmg`, and release builds must enforce it without ignoring
+its exit status. Ruff is development tooling, not a bundled runtime dependency.
+
+`make syntax-check` must compile all Python source, scripts, and tests without
+executing them. Both `make check` and `make dmg` require this check so a syntax
+error in a build-only script cannot escape ordinary validation.
+
+`make dmg` builds a self-contained, native-architecture PyInstaller `.app` and
+a compressed DMG containing it, an Applications shortcut, and drag-to-install
+instructions.
+The Finder window must present a large app icon on the left and the real
+Applications shortcut on the right, with an arrow and drag-to-install
+instructions in the background. Only those two items are visible; instructions
+must not require opening a separate text file. The mounted test verifies saved
+icon positions, background, icon size, and absence of extra visible items.
+The rendered Retina background must keep its title, arrow, and both instruction
+lines within their intended regions without overlapping the icon locations or
+clipping at the window edges. Validate rendered pixels as well as Finder metadata.
+
+Python, native extension libraries, GUI assets, packaged schemas,
+plug-in manifests, and the standalone verifier source travel inside the app.
+ClamAV and experimental command-line tools (Tika/Java, PDF OCR, Apple Intelligence)
+are not prerequisites of the supported local-mail GUI and are not bundled.
+The initial build is ad-hoc signed, not notarized; no Gatekeeper bypass or
+machine-wide security change is performed. The archive extension is declared
+in the bundle's document-type metadata.
+
+The build must mount its DMG read-only, verify the bundle seal, run a headless
+self-test and a visible native self-test using the mounted executable, and
+detach the volume even on test failure. Tests use disposable fixtures and
+preferences, never the last real archive. They exercise no-ClamAV ingest,
+source-byte preservation, search, BagIt verification, repeat-import idempotence,
+native bridge startup, and the missing-antivirus banner. A failed check prevents
+replacement of a prior DMG. JSON reports accompany the successful artifact.
+
 ## Scope boundaries
 
-The first release is a local command-line normalizer and verifier.  Its TOML
-configuration holds archive and scanner policy; `owner-names.txt` remains a
-separate, one-name-per-line reusable classification input.  A local
+Schema files retain the Flyway naming convention
+`V<version>__<description>.sql` (double underscore), such as
+`V1__archive.sql`. This is a filename convention only, not a dependency on
+Flyway, Java, or JDBC. Future catalog upgrades will use developer-written SQL
+migrations run automatically by the application through SQLite; users must
+not need a separate migration tool or manual SQL commands. The planned runner
+must record applied versions and checksums, take a consistent SQLite backup,
+hold the archive writer lease and pause affected windows, and commit each
+migration with its history record atomically. It must reject unsupported newer
+schemas and report failures without changing canonical MBOX bytes. Upgrade and
+interruption tests are required before shipping migration support.
+
+The first release is a local command-line normalizer and verifier. Packaged
+configuration holds archive and scanner policy; each archive's `config.yaml`
+holds discardable navigation state, and `owner-names.txt` remains a separate,
+one-name-per-line classification input. A local
 special-purpose search and message-viewing interface is a consumer of
 the two SQLite databases, not a reason to depend on Thunderbird or FoxTrot.
 No source mailbox is modified by this program.
@@ -997,6 +1162,15 @@ launcher. Project development dependencies and type stubs are locked with uv;
 static analysis must produce no errors or warnings. Focused `make ruff`,
 `make pylint`, `make ty`, `make pyright`, and `make test` targets remain available.
 
+### Desktop review follow-up
+
+The portability audit reads each Mach-O LC_RPATH command, expands loader and
+executable-relative paths, rejects search paths outside the bundle, and requires
+non-system dependencies to resolve to bundled files. Missing antivirus uses a
+platform-neutral confirmation on non-macOS hosts. Source-picker navigation is
+saved only after successful ingest while the writer lease is retained; a failed
+import leaves the previous directory unchanged.
+
 ### Writer and desktop review boundary
 
 Current archive writing is supported on POSIX. Windows writing fails before
@@ -1021,9 +1195,10 @@ advance the shared generation. Progress can write status files without a
 terminal stream, including windowed builds with no stderr. Ingest child windows
 route document actions to an attached search window. Informational notices stay
 in About instead of appearing as errors. Closing an import owner offers waiting
-or keeping the window open. Native macOS Quit is refused with an explanation
-while an import is active; shutdown joins tracked workers before releasing
-resources. Makefile Ruff checks select this checkout's configuration explicitly
+or keeping the window open. Native macOS Quit offers Cancel or Stop Import and Quit while an import is
+active. Confirmed quit signals all imports, retains their leases and windows
+until checkpoint completion, and then exits. Shutdown joins tracked workers
+before releasing resources. Makefile Ruff checks select this checkout's configuration explicitly
 and include ignored linked-worktree paths.
 
 An Ingests child window retains document routing after all search windows close.

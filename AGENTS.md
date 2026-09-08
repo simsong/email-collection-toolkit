@@ -51,6 +51,13 @@ the stated requirement and report any remaining gap.
 
 ## Tests and validation
 
+At the completion of every Codex turn in this repository, including discussion
+and documentation-only turns, run `make ruff` against the current final source.
+Ruff must pass with zero diagnostics; if it fails or cannot run, report that
+explicitly rather than claiming a clean handoff. Do not suppress rules or ignore
+failures to make a build pass. `make check` and `make dmg` must retain Ruff as a required
+prerequisite; Ruff complements rather than replaces tests and Pylint.
+
 Write only substantive tests that test a requirement or a demonstrated
 regression. No coverage-only tests and no mocks unless unavoidable.
 
