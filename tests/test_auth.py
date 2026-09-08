@@ -228,3 +228,124 @@ def test_google_client_download_rejects_lookalike_endpoints(
             MailboxAddress.parse("simsong@gmail.com"),
             config_root=tmp_path / "config",
         )
+
+
+@pytest.mark.parametrize("address", ["person@gmail.com", "person@outlook.com"])
+def test_known_domains_do_not_resolve_dns(address: str, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Requirement: decisive domain evidence must not depend on network availability."""
+    from mailarchiver import auth
+
+    def unavailable(_domain: str) -> DnsEvidence:
+        raise AssertionError("DNS must not be consulted")
+
+    monkeypatch.setattr(auth, "resolve_dns_evidence", unavailable)
+    assert detect_provider(MailboxAddress.parse(address)).provider is not MailProvider.UNKNOWN
+
+
+@pytest.mark.parametrize("negative", [True, False])
+def test_dns_negative_answers_are_distinct_from_outages(
+    negative: bool, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Requirement: resolver outages cannot be reported as absent provider records."""
+    from mailarchiver import auth
+
+    def resolve(*_args: object, **_kwargs: object) -> None:
+        if negative:
+            raise auth.dns.resolver.NoAnswer()
+        raise auth.dns.exception.Timeout()
+
+    monkeypatch.setattr(auth.dns.resolver.Resolver, "resolve", resolve)
+    if negative:
+        assert auth.resolve_dns_evidence("example.test").mx_hosts == ()
+    else:
+        with pytest.raises(AuthorizerError, match="DNS MX lookup failed"):
+            auth.resolve_dns_evidence("example.test")
+
+
+def test_client_install_uses_one_validated_read(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Requirement: a changed download cannot replace the validated client bytes."""
+    source = tmp_path / "download.json"
+    original = client_document().encode()
+    source.write_bytes(original)
+    read_bytes = Path.read_bytes
+
+    def read_and_change(path: Path) -> bytes:
+        payload = read_bytes(path)
+        if path == source:
+            path.write_bytes(b"unvalidated replacement")
+        return payload
+
+    monkeypatch.setattr(Path, "read_bytes", read_and_change)
+    destination = install_client_secrets(
+        source, MailboxAddress.parse("person@gmail.com"), config_root=tmp_path / "config"
+    )
+    assert read_bytes(destination) == original
+
+
+@pytest.mark.parametrize("case", ["new", "mismatch", "refresh", "transport", "store-failure"])
+def test_authorization_verifies_identity_before_persisting(
+    case: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Requirement: consent/refresh/profile/keyring ordering never stores a wrong identity.
+
+    Substitutes are confined to external OAuth and OS keyring boundaries so no
+    real account, browser consent, network, or user credential store is touched.
+    """
+    from datetime import datetime, timedelta, timezone
+    from mailarchiver import auth
+
+    account = MailboxAddress.parse("person@gmail.com")
+    events: list[str] = []
+    stored: list[str] = []
+
+    class TestCredentials(auth.Credentials):
+        def refresh(self, request: object) -> None:
+            events.append("refresh")
+            if case == "transport":
+                raise auth.TransportError("offline")
+            self.token = "refreshed-test-token"
+            self.expiry = datetime.now(timezone.utc).replace(tzinfo=None) + timedelta(hours=1)
+
+    credentials = TestCredentials(
+        token="test-token", refresh_token="test-refresh", token_uri=auth.GOOGLE_TOKEN_URI,
+        client_id="test.apps.googleusercontent.com", client_secret="public",
+        scopes=[GMAIL_READONLY_SCOPE],
+    )
+    credentials.expiry = datetime.now(timezone.utc).replace(tzinfo=None) + timedelta(
+        hours=-1 if case in {"refresh", "transport"} else 1
+    )
+
+    class Flow:
+        def run_local_server(self, **_kwargs: object) -> auth.Credentials:
+            events.append("consent")
+            return credentials
+
+    def profile(_credentials: auth.Credentials) -> auth.GmailProfile:
+        events.append("profile")
+        return auth.GmailProfile(
+            emailAddress="wrong@gmail.com" if case == "mismatch" else account.address,
+            messagesTotal=1, threadsTotal=1, historyId="1",
+        )
+
+    def store(_service: str, _username: str, value: str) -> None:
+        events.append("store")
+        if case == "store-failure":
+            raise auth.KeyringError("locked")
+        stored.append(value)
+
+    monkeypatch.setattr(auth, "_load_credentials", lambda _account: credentials if case in {"refresh", "transport"} else None)
+    monkeypatch.setattr(auth.InstalledAppFlow, "from_client_secrets_file", lambda *_a, **_k: Flow())
+    monkeypatch.setattr(auth, "_profile", profile)
+    monkeypatch.setattr(auth.keyring, "set_password", store)
+    if case in {"mismatch", "transport", "store-failure"}:
+        with pytest.raises(AuthorizerError):
+            auth.authorize_gmail(account, tmp_path / "client.json")
+        assert stored == []
+        if case == "transport":
+            assert events == ["refresh"]
+        elif case == "mismatch":
+            assert events == ["consent", "profile"]
+    else:
+        assert auth.authorize_gmail(account, tmp_path / "client.json").email_address == account.address
+        assert len(stored) == 1
+        assert events == ["refresh" if case == "refresh" else "consent", "profile", "store"]

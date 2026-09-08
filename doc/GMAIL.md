@@ -160,3 +160,18 @@ creation and download, direct Takeout ZIP ingestion, structured
 `X-Gmail-Labels` indexing, and live Gmail API acquisition are not implemented.
 The `mailarchiver-auth` command exercises the proposed shared-client
 authorization boundary but does not ingest Gmail.
+
+
+### Authorization review boundary
+
+No shared `gmail_client.json` is shipped in the current tree. Public-client
+packaging and an end-user OAuth release remain deferred; the authorizer currently
+requires a maintainer-provided configuration or explicit developer override.
+Google Takeout MBOX remains the supported Gmail acquisition path.
+Known consumer domains require no DNS query. Authoritative negative DNS answers
+are distinct from disclosed transient lookup failures. Client installation writes
+exactly the bytes validated in one read. Refresh transport failures are disclosed
+without launching consent; tokens are stored only after the profile matches.
+Directory discovery reports and skips incomplete Apple Mail `.partial.emlx`
+records while continuing to complete records; selecting a partial file directly
+still fails. Skipped partial records prevent any whole-mailbox completeness claim.

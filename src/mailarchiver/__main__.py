@@ -1844,7 +1844,8 @@ def print_report(archive: Path, years: tuple[int, int] | None, top: int | None) 
             )
         )
         if top is not None and top > 0:
-            heading = lambda text: f"\033[1m{text}\033[0m" if sys.stdout.isatty() else text
+            def heading(text: str) -> str:
+                return f"\033[1m{text}\033[0m" if sys.stdout.isatty() else text
             owner_addresses = (
                 "owner_addresses AS (SELECT DISTINCT sender_address_pk FROM messages WHERE category = 'Sent') "
             )

@@ -675,7 +675,7 @@ application flow in the system browser, and verifies the returned Gmail profile
 against the command-line account before retaining the token. The refresh token
 is stored under that account in the operating-system credential store, never in
 the archive, client configuration, terminal output, logs, fixtures, or reports.
-A release provides one public Google Desktop-client configuration registered by
+A future OAuth release must provide one public Google Desktop-client configuration registered by
 the Mail Archiver maintainer. End users do not create Cloud projects, configure
 consent, obtain client IDs, or supply client files. A build without that
 configuration fails with a distributor-facing error; it must not route an end
@@ -771,7 +771,8 @@ one-time registration procedure and tell readers to use their own account.
   server unless the user separately configures and authorizes live IMAP ingest.
   A live Apple Mail cache is best-effort evidence rather than proof of complete
   provider acquisition. Complete `.emlx` records are accepted, known partial
-  records are rejected, and a cache-completeness preflight must report partial
+  records are reported and skipped during directory discovery (direct selection
+  fails), and a cache-completeness preflight must report partial
   records and attachment policy before a completeness claim. The observed
   machine-specific access boundary and preflight are maintained in
   `doc/APPLE_MAIL_CACHE.md`. Until direct Gmail, Microsoft 365, and IMAP
@@ -909,3 +910,18 @@ package. A redacted or otherwise restricted release is a separate BagIt bag
 with its own payload, manifests, Mailbag identifiers, and audit mapping. PDF
 and WARC representations remain opt-in, sandboxed publication derivatives and
 must not make remote requests without explicit authorization.
+
+
+### Authorization review boundary
+
+No shared `gmail_client.json` is shipped in the current tree. Public-client
+packaging and an end-user OAuth release remain deferred; the authorizer currently
+requires a maintainer-provided configuration or explicit developer override.
+Google Takeout MBOX remains the supported Gmail acquisition path.
+Known consumer domains require no DNS query. Authoritative negative DNS answers
+are distinct from disclosed transient lookup failures. Client installation writes
+exactly the bytes validated in one read. Refresh transport failures are disclosed
+without launching consent; tokens are stored only after the profile matches.
+Directory discovery reports and skips incomplete Apple Mail `.partial.emlx`
+records while continuing to complete records; selecting a partial file directly
+still fails. Skipped partial records prevent any whole-mailbox completeness claim.

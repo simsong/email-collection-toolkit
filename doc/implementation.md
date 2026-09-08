@@ -1179,3 +1179,18 @@ requires it and fails clearly.
 4. Add IMAP and Gmail importers with resumable checkpoints.
 5. Build the local search/view interface on the stable database and MBOX
    retrieval API.
+
+
+### Authorization review boundary
+
+No shared `gmail_client.json` is shipped in the current tree. Public-client
+packaging and an end-user OAuth release remain deferred; the authorizer currently
+requires a maintainer-provided configuration or explicit developer override.
+Google Takeout MBOX remains the supported Gmail acquisition path.
+Known consumer domains require no DNS query. Authoritative negative DNS answers
+are distinct from disclosed transient lookup failures. Client installation writes
+exactly the bytes validated in one read. Refresh transport failures are disclosed
+without launching consent; tokens are stored only after the profile matches.
+Directory discovery reports and skips incomplete Apple Mail `.partial.emlx`
+records while continuing to complete records; selecting a partial file directly
+still fails. Skipped partial records prevent any whole-mailbox completeness claim.

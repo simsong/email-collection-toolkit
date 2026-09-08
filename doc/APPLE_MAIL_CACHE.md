@@ -71,8 +71,8 @@ The local-source importer already:
 - discovers complete `.emlx` files recursively;
 - uses each file's leading byte count to isolate the RFC 5322 message;
 - excludes Apple trailing plist metadata from the canonical message bytes;
-- rejects `.partial.emlx` because detached payloads cannot be reconstructed
-  byte-for-byte;
+- reports and skips `.partial.emlx` during directory discovery because detached
+  payloads cannot be reconstructed byte-for-byte; directly selecting one fails;
 - ignores Mail databases, plist files, attachment directories, and
   `.emlxpart` fragments as independent messages; and
 - derives logical mailbox names from the containing `.mbox` package hierarchy
