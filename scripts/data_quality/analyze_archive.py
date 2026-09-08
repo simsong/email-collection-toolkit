@@ -2,16 +2,18 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
+
 import argparse
 import csv
 import hashlib
 import json
+import logging
 import mailbox
 import random
-import re
 import sqlite3
 from collections import Counter
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from email import policy
 from email.message import Message
 from email.parser import BytesParser
@@ -25,7 +27,6 @@ from mailarchiver.layout import mbox_path
 from mailarchiver.mbox import MboxLocation, read_verified_location
 from mailarchiver.source_volume import METADATA_CURRENT_MOUNT_PATH
 from mailarchiver.sources import source_files, source_messages
-
 
 SAMPLE_SEED = 20260827
 MIN_REAL_YEAR = 1983
@@ -159,6 +160,7 @@ def header_values(message: Message, name: str) -> list[str]:
     try:
         return [str(value) for value in message.get_all(name, [])]
     except Exception:
+        logging.getLogger(__name__).debug("Best-effort operation failed", exc_info=True)
         return []
 
 
@@ -166,10 +168,11 @@ def normalized_date(value: str) -> datetime | None:
     try:
         parsed = parsedate_to_datetime(value)
     except Exception:
+        logging.getLogger(__name__).debug("Best-effort operation failed", exc_info=True)
         return None
     if parsed is None:
         return None
-    return parsed.replace(tzinfo=timezone.utc) if parsed.tzinfo is None else parsed.astimezone(timezone.utc)
+    return parsed.replace(tzinfo=UTC) if parsed.tzinfo is None else parsed.astimezone(UTC)
 
 
 def received_dates(message: Message) -> list[datetime]:
@@ -256,7 +259,7 @@ def write_mbox(path: Path, messages: list[bytes]) -> None:
             box.close()
 
 
-def write_csv(path: Path, models: list[BaseModel]) -> None:
+def write_csv(path: Path, models: Sequence[BaseModel]) -> None:
     if path.exists():
         raise FileExistsError(f"refusing to replace {path}")
     if not models:
@@ -396,6 +399,7 @@ def analyze_early_source(root: Path, output: Path) -> list[EarlySourceFile]:
                     result.first_date = min(dates).isoformat()
                     result.last_date = max(dates).isoformat()
             except Exception as error:  # Preserve a per-file diagnosis rather than dropping it.
+                logging.getLogger(__name__).debug("Best-effort operation failed", exc_info=True)
                 result.error = f"{type(error).__name__}: {error}"
         evidence.append(result)
     write_csv(output / "EARLY_SOURCE_FILES.csv", evidence)

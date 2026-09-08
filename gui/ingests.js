@@ -4,6 +4,7 @@
 let statuses = [];
 let selectedStatusId = new URLSearchParams(window.location.search).get("status");
 let initialized = false;
+let importing = false;
 const byId = id => document.getElementById(id);
 const integer = value => Number(value || 0).toLocaleString();
 
@@ -16,6 +17,8 @@ window.setTimeout(() => {
 async function initialize() {
   if (initialized) return;
   initialized = true;
+  byId("import-directory").addEventListener("click", importDirectory);
+  byId("install-antivirus").addEventListener("click", () => window.pywebview.api.install_antivirus());
   await refreshHistory();
   window.setInterval(refreshHistory, 1000);
 }
@@ -28,14 +31,34 @@ window.selectIngest = statusId => {
 
 async function refreshHistory() {
   try {
+    const antivirus = await window.pywebview.api.antivirus?.();
+    byId("antivirus-warning").hidden = !antivirus || antivirus.configured;
+    byId("antivirus-detail").textContent = antivirus?.detail || "";
     const history = await window.pywebview.api.history();
     statuses = history.statuses || [];
     if (!statuses.some(status => status.status_id === selectedStatusId)) {
       selectedStatusId = statuses[0]?.status_id || null;
     }
     render(history.errors || []);
+    const canImport = await window.pywebview.api.can_import_directory?.();
+    byId("import-directory").disabled = importing || !canImport;
   } catch (error) {
     showError(`Could not read ingest history: ${error}`);
+  }
+}
+
+async function importDirectory() {
+  if (importing) return;
+  importing = true;
+  byId("import-directory").disabled = true;
+  byId("error").hidden = true;
+  try {
+    await window.pywebview.api.import_directory();
+  } catch (error) {
+    showError(`Could not import directory: ${String(error?.message || error)}`);
+  } finally {
+    importing = false;
+    await refreshHistory();
   }
 }
 
@@ -97,6 +120,10 @@ function renderDetail(status) {
   title.textContent = `Ingest ${status.run_pk}`;
   const subtitle = document.createElement("p");
   subtitle.textContent = `${new Date(status.started_at).toLocaleString()} · process ${status.process_id}`;
+  if (status.scan_policy === "not-scanned") {
+    subtitle.textContent += " · WARNING: imported without antivirus scanning";
+    subtitle.className = "failure";
+  }
   headingText.append(title, subtitle);
   const badge = document.createElement("span");
   badge.className = "state-badge";

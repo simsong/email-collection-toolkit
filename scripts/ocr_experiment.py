@@ -3,6 +3,8 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
+
 import argparse
 import csv
 import hashlib
@@ -22,7 +24,6 @@ from statistics import median
 from pydantic import BaseModel
 
 from mailarchiver.mbox import MboxLocation, read_verified_location
-
 
 PDFINFO_ENCRYPTED = "Encrypted"
 PDFINFO_PAGES = "Pages"
@@ -198,7 +199,7 @@ def payload_for(message, part_id: int) -> bytes:
     return b""
 
 
-def write_jsonl(path: Path, models: list[BaseModel]) -> None:
+def write_jsonl[T: BaseModel](path: Path, models: Sequence[T]) -> None:
     text = "".join(model.model_dump_json() + "\n" for model in models)
     atomic_write(path, text.encode("utf-8"))
 
@@ -209,7 +210,6 @@ def has_pdf_magic(payload: bytes) -> bool:
 
 def inventory(archive: Path, output: Path, max_message_pk: int | None) -> None:
     output.mkdir(parents=True, exist_ok=True)
-    inputs = output / "input-pdfs"
     instances: list[PdfInstance] = []
     errors: list[str] = []
     rejected: list[str] = []
@@ -295,7 +295,7 @@ def inventory(archive: Path, output: Path, max_message_pk: int | None) -> None:
 
 
 def command_output(command: list[str], timeout: int = 1800) -> bytes:
-    result = subprocess.run(command, check=False, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=timeout)
+    result = subprocess.run(command, check=False, capture_output=True, timeout=timeout)
     if result.returncode:
         detail = result.stderr.decode("utf-8", "replace").strip()
         raise RuntimeError(f"exit {result.returncode}: {detail[-4000:]}")

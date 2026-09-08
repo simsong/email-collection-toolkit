@@ -42,6 +42,10 @@ jobs:
         run: |
           tag_object="$(git rev-parse "refs/tags/$RELEASE_TAG")"
           test "$(gh api "repos/$GITHUB_REPOSITORY/git/tags/$tag_object" --jq '.verification.verified')" = true
+      # make ruff uses uv run --locked, which syncs the default dev group
+      # (including Ruff) even when the runner has no project virtualenv yet.
+      - name: Require clean Ruff checks
+        run: make ruff
       - name: Build source distribution
         run: uv build --sdist --out-dir dist
       - name: Write checksums

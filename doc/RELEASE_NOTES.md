@@ -2,6 +2,31 @@
 
 ## Unreleased
 
+* Limit Ruff discovery to tracked and non-ignored new Python files, avoiding
+  generated directories while supporting project-local linked worktrees.
+
+* Clarify installed verifier usage and make GUI asset HEAD/redirect response
+  lengths explicit without reading asset bodies for HEAD.
+
+- Standardize the agent PR workflow as `pr-to-ready`, retain
+  `codex-to-complete` and `codex-to-ready` aliases, and add shared
+  Codex, Claude, and Copilot implementer/reviewer instructions.
+
+
+* Add the desktop document controller, archive writer leases, document options,
+  coordinated import/quit handling, and macOS application packaging.
+* Add the Gmail authorization developer preview and read-only Apple Mail cache
+  comparison. Direct Gmail and Microsoft 365 ingestion remain unavailable.
+
+* Tighten plug-in method contracts, native-window failure handling, and integrity
+  version validation while adding complete ty and Pyright coverage.
+
+* Require Ruff and Pylint, followed by ty and Pyright, before tests in
+  `make check`, with locked development dependencies and ordered stages.
+
+* Document the browser-driven pr-to-ready workflow, ten-minute review
+  checks, signed Codex identity, and explicit human handoff for review loops.
+
 * Make `refresh-index` observable and safe to interrupt: it now reports
   message-weighted verification/indexing progress bars with ETA, announces its
   Ctrl-C safety before work begins, and discards an incomplete replacement

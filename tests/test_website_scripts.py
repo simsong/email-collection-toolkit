@@ -6,7 +6,6 @@ import pytest
 
 from scripts.check_website import validate_png
 
-
 ZOLA_SHA256 = "54d1a347781b2f32330914fcc02def81c7e3ddb6111b36d1cc89c06557aed1de"
 
 

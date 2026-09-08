@@ -24,6 +24,8 @@ ignore:
     - "**/maildirfolder"
     # Courier-IMAP keyword indexes and per-message keyword state.
     - "**/courierimapkeywords/**"
+    # Mail Archiver per-source Sent-classification aliases, not mail content.
+    - "owner-names.txt"
 
 file_probe:
   # Maximum prefix supplied to file recognizers during read-only discovery.

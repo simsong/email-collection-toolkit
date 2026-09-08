@@ -4,6 +4,7 @@ import mailbox
 from email import policy
 from email.parser import BytesParser
 from pathlib import Path
+from typing import Self, SupportsIndex, overload
 
 import pytest
 
@@ -16,9 +17,8 @@ from mailarchiver.encoding import (
 )
 from mailarchiver.search import decoded_part, message_text
 
-
 SOURCE_FIXTURE = Path(__file__).parent / "data" / "email-korean-bad-encoding.eml"
-KOREAN_MESSAGE_ID = "<E17Vbwd-0006HW-00@sandbox.sandstorm.net>"
+KOREAN_MESSAGE_ID = "<20020719111745.3C1DE9171E@vineyard.net>"
 
 
 def test_declared_ks_c_5601_is_decoded_as_euc_kr() -> None:
@@ -72,13 +72,19 @@ def test_large_payload_is_ranked_on_a_sample_before_one_full_fallback_decode() -
         calls: list[str]
         slices: list[slice]
 
-        def __new__(cls, value: bytes) -> "DecodeCountingBytes":
+        def __new__(cls, value: bytes) -> Self:
             instance = super().__new__(cls, value)
             instance.calls = []
             instance.slices = []
             return instance
 
-        def __getitem__(self, key: int | slice) -> int | bytes:
+        @overload
+        def __getitem__(self, key: SupportsIndex, /) -> int: ...
+
+        @overload
+        def __getitem__(self, key: slice, /) -> bytes: ...
+
+        def __getitem__(self, key: SupportsIndex | slice, /) -> int | bytes:
             if isinstance(key, slice):
                 self.slices.append(key)
             return super().__getitem__(key)
@@ -104,13 +110,19 @@ def test_failed_declared_codec_is_not_retried_after_a_clean_sample() -> None:
         calls: list[str]
         slices: list[slice]
 
-        def __new__(cls, value: bytes) -> "DecodeCountingBytes":
+        def __new__(cls, value: bytes) -> Self:
             instance = super().__new__(cls, value)
             instance.calls = []
             instance.slices = []
             return instance
 
-        def __getitem__(self, key: int | slice) -> int | bytes:
+        @overload
+        def __getitem__(self, key: SupportsIndex, /) -> int: ...
+
+        @overload
+        def __getitem__(self, key: slice, /) -> bytes: ...
+
+        def __getitem__(self, key: SupportsIndex | slice, /) -> int | bytes:
             if isinstance(key, slice):
                 self.slices.append(key)
             return super().__getitem__(key)
@@ -131,7 +143,7 @@ def test_failed_declared_codec_is_not_retried_after_a_clean_sample() -> None:
 
 def test_ftfy_repairs_mojibake_after_valid_utf8_decode() -> None:
     """Requirement: clear UTF-8 mojibake is repaired in derived text only."""
-    result = decode_text("cafÃ©".encode("utf-8"), "utf-8")
+    result = decode_text("cafÃ©".encode(), "utf-8")
 
     assert result.value == "café"
     assert result.encoding == "utf-8"
@@ -159,7 +171,7 @@ def test_message_text_uses_declared_korean_charset() -> None:
 def test_supplied_korean_source_message_is_readable() -> None:
     """Requirement: the supplied historical message renders without replacement characters."""
     if not SOURCE_FIXTURE.is_file():
-        pytest.skip("local 86 MB source fixture is not present")
+        pytest.skip("local Korean source fixture is not present")
 
     box = mailbox.mbox(SOURCE_FIXTURE, factory=None, create=False)
     try:
@@ -177,6 +189,6 @@ def test_supplied_korean_source_message_is_readable() -> None:
     assert parts
 
     rendered = "\n".join(decoded_part(part) for part in parts)
-    assert "최고의" in rendered
+    assert "컴맹탈출" in rendered
     assert sum("\uac00" <= char <= "\ud7a3" for char in rendered) > 100
     assert "�" not in rendered

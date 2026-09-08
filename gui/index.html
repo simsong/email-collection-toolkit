@@ -11,7 +11,6 @@
   <body>
     <main id="app">
       <header class="toolbar no-print">
-        <button id="choose-archive" type="button">Choose Archive…</button>
         <form id="search-form" role="search">
           <div id="search-control" class="search-control">
             <div id="search-filters" class="search-filters"></div>
@@ -21,7 +20,6 @@
         </form>
         <label class="attachment-search"><input id="search-attachments" type="checkbox"> Search attachments</label>
         <label class="attachment-search"><input id="show-original-folders" type="checkbox"> Show original folder structure</label>
-        <span id="archive-label"></span>
       </header>
 
       <section class="workspace">
@@ -40,7 +38,7 @@
         </aside>
         <aside id="results-pane" class="results no-print">
           <div class="result-controls">
-            <div id="result-status" class="status">Choose an archive to begin.</div>
+            <div id="result-status" class="status">Use File → New or Open to begin.</div>
             <label for="sort-by">Sort:</label>
             <select id="sort-by" aria-label="Sort messages by">
               <option value="date">Date</option>
@@ -77,6 +75,8 @@
           </template>
         </aside>
 
+        <div id="message-splitter" class="message-splitter no-print" role="separator" tabindex="0"
+             aria-label="Message list width" aria-orientation="vertical" aria-controls="results-pane message-pane"></div>
         <article class="message" id="message-pane">
           <div id="message-content" hidden>
             <div class="message-actions no-print">

@@ -4,13 +4,14 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import logging
+import mailbox
 import math
 import os
-import mailbox
 import queue
 import re
-import signal
 import shutil
+import signal
 import sqlite3
 import sys
 import threading
@@ -18,17 +19,20 @@ import time
 from collections import Counter, deque
 from collections.abc import Callable, Iterable
 from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
-from datetime import datetime, timezone
+from datetime import UTC, datetime
+from importlib.metadata import version
 from pathlib import Path
 from types import TracebackType
-from typing import Literal, TypeVar
+from typing import Literal, TextIO, TypeVar
 from urllib.parse import quote
+from uuid import uuid4
 
 from pydantic import BaseModel, Field
 from tabulate import tabulate
 
 from .archive_integrity import MailbagArchiveIntegrityControls
 from .archive_path import add_archive_argument, require_archive
+from .document_options import DocumentOptions
 from .catalog import (
     UnsupportedSearchSchemaError,
     address_pk,
@@ -37,17 +41,18 @@ from .catalog import (
     owner_tokens,
 )
 from .ingest_status import (
+    STATUS_REFRESH_SECONDS,
     IngestCounts,
     IngestState,
     IngestStatus,
     IngestStatusFile,
-    IngestWorkerStatus as WorkerProgress,
-    STATUS_REFRESH_SECONDS,
     YearProgress,
     new_status_id,
 )
+from .ingest_status import (
+    IngestWorkerStatus as WorkerProgress,
+)
 from .layout import mbox_directory, mbox_path
-from .message import ParsedMessage, parse_message
 from .mbox import (
     DiskFullError,
     MboxLocation,
@@ -60,15 +65,7 @@ from .mbox import (
     read_verified_location,
     recover_publication,
 )
-from .scanner import ClamScanner, ClamScannerStartupError
-from .search import (
-    QUARANTINE_MAILBOX,
-    SEARCH_CATEGORIES,
-    PreparedSearchMessage,
-    index_message_safely,
-    prepare_search_message,
-    write_prepared_search_message,
-)
+from .message import ParsedMessage, parse_message
 from .plugin_api import (
     ArchiveReference,
     IntegrityDecision,
@@ -82,6 +79,15 @@ from .plugin_api import (
     SourceSpec,
 )
 from .plugin_loader import PluginDiscoveryError, load_plugins
+from .scanner import ClamScanner, ClamScannerStartupError
+from .search import (
+    QUARANTINE_MAILBOX,
+    SEARCH_CATEGORIES,
+    PreparedSearchMessage,
+    index_message_safely,
+    prepare_search_message,
+    write_prepared_search_message,
+)
 from .sources import (
     IncompleteAppleMailMessageError,
     LocalSourcePlugin,
@@ -90,6 +96,7 @@ from .sources import (
     local_hierarchy_path,
 )
 from .standalone_verify import semantic_bytes
+from .writer_lock import ArchiveBusyError, WriterLease
 
 DEFAULT_REPORT_TOP = 10
 PROGRESS_REFRESH_SECONDS = 0.25
@@ -100,6 +107,25 @@ DISCOVERY_PHASE = "discovering sources"
 TOP_LINE_STYLE = "\x1b[37;44m"
 ANSI_RESET = "\x1b[0m"
 WorkerItem = TypeVar("WorkerItem")
+
+
+class IngestOutcome(BaseModel):
+    """Publication evidence retained even when an ingest raises."""
+
+    published: bool = False
+
+
+class IngestRequest(BaseModel):
+    """Typed ingest service request shared by command-line and GUI callers."""
+
+    archive: Path
+    owner_names_file: Path
+    roots: list[str] = Field(min_length=1)
+    earliest_year: int = Field(default=1900, ge=1)
+    workers: int = Field(default_factory=lambda: min(os.cpu_count() or 1, 8), ge=1)
+    plugin_dir: list[Path] = Field(default_factory=list)
+    index_attachments: bool = False
+    scan_policy: Literal["clamav", "not-scanned"] = "clamav"
 
 
 def positive_integer(value: str) -> int:
@@ -281,10 +307,15 @@ class RefreshIndexPublication:
     """Make the final paired derived-data publication uninterruptible."""
 
     def __enter__(self) -> None:
-        self.previous_handler = signal.signal(signal.SIGINT, signal.SIG_IGN)
+        self.previous_handler = (
+            signal.signal(signal.SIGINT, signal.SIG_IGN)
+            if threading.current_thread() is threading.main_thread()
+            else None
+        )
 
     def __exit__(self, exception_type: type[BaseException] | None, _value: BaseException | None, _traceback: TracebackType | None) -> None:
-        signal.signal(signal.SIGINT, self.previous_handler)
+        if self.previous_handler is not None:
+            signal.signal(signal.SIGINT, self.previous_handler)
 
 
 def formatted_bytes(value: int) -> str:
@@ -362,15 +393,17 @@ class ProgressReporter:
         run_pk: int | None = None,
         source_roots: list[str] | None = None,
         started_at: datetime | None = None,
+        terminal: bool = True,
     ) -> None:
         self.state = ProgressState(
-            started_at=started_at or datetime.now(timezone.utc),
+            started_at=started_at or datetime.now(UTC),
             started_monotonic=time.monotonic(),
             workers=[WorkerProgress(worker=worker) for worker in range(1, worker_count + 1)],
         )
         self.updates: queue.SimpleQueue[ProgressUpdate] = queue.SimpleQueue()
         self.driver_thread = threading.get_ident()
-        self.tty = sys.stderr.isatty()
+        self.output: TextIO | None = sys.stderr if terminal else None
+        self.tty = self.output is not None and self.output.isatty()
         self.terminal_columns = max(shutil.get_terminal_size((120, 24)).columns, 20)
         self.rendered_lines = 0
         self.base_phase = "started"
@@ -385,6 +418,7 @@ class ProgressReporter:
         self.status_source_roots = source_roots or []
         self.status_write_error: str | None = None
         self.last_status_monotonic: float | None = None
+        self.scan_policy: Literal["clamav", "not-scanned", "unknown"] = "unknown"
 
     def start(self) -> None:
         self.display(self.phase)
@@ -647,13 +681,13 @@ class ProgressReporter:
             for notice in self.notices - self.emitted_notices
             if kinds is None or notice[0] in kinds
         ]
-        if not selected:
+        if not selected or self.output is None:
             return
-        if self.tty and self.rendered_lines:
-            sys.stderr.write("\n")
+        if self.tty and self.rendered_lines and self.output is not None:
+            self.output.write("\n")
             self.rendered_lines = 0
         for kind, path, reason in sorted(selected):
-            print(f"{kind}: {path} ({reason})", file=sys.stderr)
+            print(f"{kind}: {path} ({reason})", file=self.output)
         self.emitted_notices.update(selected)
 
     def _worker_phase(self) -> str:
@@ -703,31 +737,31 @@ class ProgressReporter:
         elapsed = max(now - state.started_monotonic, 0.001)
         phase_elapsed = max(now - self.phase_started_monotonic, 0.0)
         overall = overall_progress(state, now)
-        dates = "none" if state.earliest_date is None else f"{state.earliest_date.date()}..{state.latest_date.date()}"
+        dates = "none" if state.earliest_date is None or state.latest_date is None else f"{state.earliest_date.date()}..{state.latest_date.date()}"
         year = "none" if state.current_year is None else str(state.current_year)
         if display_label == CLAMAV_START_PHASE:
             display_label = f"{CLAMAV_START_PHASE}: {phase_elapsed:.1f}s"
         active = sum(worker.phase != "idle" for worker in state.workers)
-        if self.tty:
+        if self.tty and self.output is not None:
             top_line = self._fit(overall_line(state, now), self.terminal_columns).ljust(self.terminal_columns)
             lines = [
                 f"{TOP_LINE_STYLE}{top_line}{ANSI_RESET}",
                 f"mailarchiver ingest  [{display_label}]",
-                f"Processed: {state.processed:,} messages in {state.files_processed:,} files  "
-                f"Rate: {state.processed / elapsed:.2f} messages/s  Elapsed: {elapsed:.0f}s",
+                (f"Processed: {state.processed:,} messages in {state.files_processed:,} files  "
+                f"Rate: {state.processed / elapsed:.2f} messages/s  Elapsed: {elapsed:.0f}s"),
                 f"Workers:   {active:,} active; peak {state.peak_active_files:,}; {len(state.workers):,} configured",
                 *(self._worker_line(worker, self.terminal_columns) for worker in state.workers),
                 f"Dates:     {dates}  Current year: {year} ({state.current_year_messages:,} messages)",
-                f"Archived:  {state.counts.archived:,}  Seen/skipped: {state.counts.duplicates:,}  "
+                (f"Archived:  {state.counts.archived:,}  Seen/skipped: {state.counts.duplicates:,}  "
                 f"Autosaved: {state.counts.autosaves:,}  Metadata: {state.counts.metadata_excluded:,}  "
                 f"Infected: {state.counts.infected:,}  Files skipped: {state.counts.skipped_files:,}  "
-                f"Unchanged: {state.counts.unchanged_sources:,}",
+                f"Unchanged: {state.counts.unchanged_sources:,}"),
             ]
             lines = [lines[0], *(self._fit(line, self.terminal_columns) for line in lines[1:])]
             rewind = f"\x1b[{self.rendered_lines}A" if self.rendered_lines else ""
-            sys.stderr.write(rewind + "\n".join(f"\r\x1b[2K{line}" for line in lines) + "\n")
+            self.output.write(rewind + "\n".join(f"\r\x1b[2K{line}" for line in lines) + "\n")
             self.rendered_lines = len(lines)
-        else:
+        elif self.output is not None:
             workers = " ".join(
                 f"{worker.worker}:{worker.phase}:{Path(worker.path).name if worker.path else '-'}"
                 for worker in state.workers
@@ -744,7 +778,7 @@ class ProgressReporter:
                 f"autosaved={state.counts.autosaves} metadata_excluded={state.counts.metadata_excluded} "
                 f"infected={state.counts.infected} skipped_files={state.counts.skipped_files} "
                 f"unchanged_sources={state.counts.unchanged_sources}",
-                file=sys.stderr,
+                file=self.output,
             )
         self._write_status(
             state,
@@ -756,7 +790,8 @@ class ProgressReporter:
             ingest_state,
             failure_detail,
         )
-        sys.stderr.flush()
+        if self.output is not None:
+            self.output.flush()
 
     def _write_status(
         self,
@@ -779,7 +814,7 @@ class ProgressReporter:
         ):
             return
         assert self.status_archive is not None and self.status_run_pk is not None
-        updated_at = datetime.now(timezone.utc)
+        updated_at = datetime.now(UTC)
         status = IngestStatus(
             status_id=self.status_file.path.stem,
             archive=str(self.status_archive.resolve()),
@@ -812,6 +847,7 @@ class ProgressReporter:
             counts=state.counts,
             years=state.years,
             failure_detail=failure_detail,
+            scan_policy=self.scan_policy,
         )
         try:
             self.status_file.write(status)
@@ -819,10 +855,10 @@ class ProgressReporter:
         except OSError as error:
             self.status_write_error = f"cannot update {self.status_file.path}: {error}"
             self.status_file = None
-            if self.tty and self.rendered_lines:
-                sys.stderr.write("\n")
+            if self.tty and self.rendered_lines and self.output is not None:
+                self.output.write("\n")
                 self.rendered_lines = 0
-            print(f"ingest status disabled: {self.status_write_error}", file=sys.stderr)
+            print(f"ingest status disabled: {self.status_write_error}", file=self.output)
 
     def finish(self, status: IngestState, failure_detail: str | None = None) -> None:
         self._drain_updates()
@@ -830,7 +866,7 @@ class ProgressReporter:
         self.display(status, status, failure_detail)
 
 
-def run_file_workers(
+def run_file_workers[WorkerItem](
     items: Iterable[WorkerItem],
     worker_count: int,
     process: Callable[[WorkerItem], None],
@@ -858,6 +894,7 @@ def run_file_workers(
                 except StopIteration:
                     exhausted = True
                 except BaseException as error:
+                    logging.getLogger(__name__).debug("Best-effort operation failed", exc_info=True)
                     discovery_error = (error, error.__traceback__)
                     exhausted = True
                 else:
@@ -917,6 +954,7 @@ def open_ingest_search(
     archive: Path,
     catalog: sqlite3.Connection,
     index_attachments: bool,
+    writer_lease: WriterLease,
 ) -> tuple[sqlite3.Connection, PublicationRecovery]:
     """Open the disposable index, rebuilding an obsolete layout before ingest."""
     path = archive / "search.sqlite3"
@@ -932,7 +970,7 @@ def open_ingest_search(
         finally:
             recovery_search.close()
             recovery_path.unlink(missing_ok=True)
-        rebuild_search_index(archive, index_attachments)
+        rebuild_search_index(archive, index_attachments, writer_lease=writer_lease)
         return create_search(path, check_same_thread=False), recovery
     try:
         return search, recover_publication(archive, catalog, search)
@@ -942,8 +980,53 @@ def open_ingest_search(
 
 
 def ingest(args: argparse.Namespace) -> None:
-    plugins = load_plugins(args.plugin_dir)
-    source_specs = [SourceSpec(locator=root) for root in args.roots]
+    """Adapt parsed CLI options to the shared typed ingest service."""
+    run_ingest(
+        IngestRequest(
+            archive=Path(args.archive),
+            owner_names_file=Path(args.owner_names_file),
+            roots=list(args.roots),
+            earliest_year=args.earliest_year,
+            workers=args.workers,
+            plugin_dir=list(args.plugin_dir),
+            index_attachments=args.index_attachments,
+            scan_policy="not-scanned" if args.no_scan else "clamav",
+        )
+    )
+
+
+class IngestInterrupted(KeyboardInterrupt):
+    """A GUI caller requested an orderly, safely rerunnable stop."""
+
+
+def run_ingest(
+    request: IngestRequest, writer_lease: WriterLease | None = None, *, outcome: IngestOutcome | None = None, terminal: bool = True, stop_event: threading.Event | None = None,
+) -> None:
+    """Run ingest under the archive's OS writer lock."""
+    identity = os.path.normcase(str(request.archive.resolve()))
+    owned = writer_lease is None
+    lease = writer_lease or WriterLease.acquire(
+        request.archive,
+        identity,
+        "ingest",
+        uuid4().hex,
+        version("mailarchiver"),
+        create=True,
+    )
+    if not lease.acquired or not lease.lock_path.parent.parent.samefile(request.archive):
+        if owned:
+            lease.release()
+        raise ValueError("an acquired writer lease for this archive is required")
+    try:
+        _run_ingest(request, lease, outcome if outcome is not None else IngestOutcome(), terminal, stop_event)
+    finally:
+        if owned:
+            lease.release()
+
+
+def _run_ingest(request: IngestRequest, writer_lease: WriterLease, outcome: IngestOutcome, terminal: bool, stop_event: threading.Event | None = None) -> None:
+    plugins = load_plugins(request.plugin_dir)
+    source_specs = [SourceSpec(locator=root) for root in request.roots]
     selected_sources: list[tuple[SourceSpec, LoadedPlugin]] = []
     selected_source_keys: set[tuple[str, str, str | None]] = set()
     for source_spec in source_specs:
@@ -961,7 +1044,7 @@ def ingest(args: argparse.Namespace) -> None:
         if key not in selected_source_keys:
             selected_sources.append((source_spec, matches[0]))
             selected_source_keys.add(key)
-    archive = Path(args.archive)
+    archive = request.archive
     archive.mkdir(parents=True, exist_ok=True)
     catalog_path = archive / "archive.sqlite3"
     existing_output = (
@@ -997,15 +1080,19 @@ def ingest(args: argparse.Namespace) -> None:
                 progress.display(safe_status_text(event.phase))
 
     try:
-        search, recovery = open_ingest_search(archive, catalog, args.index_attachments)
+        search, recovery = open_ingest_search(
+            archive, catalog, request.index_attachments, writer_lease
+        )
     except BaseException:
         catalog.close()
         raise
     if recovery is not PublicationRecovery.NONE:
+        outcome.published = True
         checkpoint_archive()
         print(f"recovered: pending message publication {recovery.value}", file=sys.stderr)
-    owners = owner_tokens(Path(args.owner_names_file))
-    started_at = datetime.now(timezone.utc)
+    owners = owner_tokens(request.owner_names_file)
+    DocumentOptions(archive).record_import(owners, writer_lease)
+    started_at = datetime.now(UTC)
     run_pk = catalog.execute(
         "INSERT INTO ingest_runs(started_at) VALUES (?)", (started_at.isoformat(),)
     ).lastrowid
@@ -1020,7 +1107,7 @@ def ingest(args: argparse.Namespace) -> None:
         catalog.execute(
             "UPDATE ingest_runs SET completed_at = ?, result = 'failed', detail = ? WHERE run_pk = ?",
             (
-                datetime.now(timezone.utc).isoformat(),
+                datetime.now(UTC).isoformat(),
                 f"{type(error).__name__}: {error}",
                 run_pk,
             ),
@@ -1030,20 +1117,32 @@ def ingest(args: argparse.Namespace) -> None:
         catalog.close()
         raise
     progress = ProgressReporter(
-        args.workers,
+        request.workers,
         status_file=status_file,
         archive=archive,
         run_pk=int(run_pk),
         source_roots=[source.locator for source, _plugin in selected_sources],
         started_at=started_at,
+        terminal=terminal,
     )
     boxes: dict[Path, mailbox.mbox] = {}
+    progress.scan_policy = request.scan_policy
     source_file_pks: dict[tuple[str, str, str], int] = {}
     source_volume_pks: dict[str, int] = {}
     pending_duplicate_observations: dict[tuple[str, str], list[int]] = {}
     pending_identities: set[tuple[str, str]] = set()
     publication_lock = threading.RLock()
     stop = threading.Event()
+
+    def check_interrupted() -> None:
+        if stop_event is not None and stop_event.is_set():
+            stop.set()
+            raise IngestInterrupted("Import stopped; import the same source again to continue without duplicates.")
+
+    def refresh_import() -> None:
+        progress.refresh()
+        check_interrupted()
+
     scanner: ClamScanner | None = None
     discovery = sqlite3.connect("")
     discovery.executescript(
@@ -1064,7 +1163,7 @@ def ingest(args: argparse.Namespace) -> None:
         cached = source_volume_pks.get(identity_json)
         if cached is not None:
             return cached
-        now = datetime.now(timezone.utc).isoformat()
+        now = datetime.now(UTC).isoformat()
         catalog.execute(
             "INSERT INTO source_volumes(identity_json, metadata_json, first_observed_at, last_observed_at) VALUES (?, ?, ?, ?) "
             "ON CONFLICT(identity_json) DO UPDATE SET metadata_json = excluded.metadata_json, last_observed_at = excluded.last_observed_at",
@@ -1172,7 +1271,8 @@ def ingest(args: argparse.Namespace) -> None:
             (run_pk, message_pk, source_file_pk, source_offset, source.cursor, sha256,
              hashlib.sha256(semantic_bytes(source.raw)).hexdigest(), disposition, detail),
         )
-        return int(cursor.lastrowid)
+        assert cursor.lastrowid is not None
+        return cursor.lastrowid
 
     def prior_source_evidence(source_file_pk: int, control_id: str) -> tuple[IntegrityEvidence, ...]:
         row = catalog.execute(
@@ -1256,10 +1356,11 @@ def ingest(args: argparse.Namespace) -> None:
                 result.decision.action,
                 result.decision.resume_cursor,
                 result.decision.reason,
-                datetime.now(timezone.utc).isoformat(),
+                datetime.now(UTC).isoformat(),
             ),
         )
-        integrity_check_pk = int(cursor.lastrowid)
+        assert cursor.lastrowid is not None
+        integrity_check_pk = cursor.lastrowid
         record_integrity_evidence(integrity_check_pk, result.evidence)
         catalog.commit()
         return integrity_check_pk
@@ -1348,7 +1449,7 @@ def ingest(args: argparse.Namespace) -> None:
             record_integrity_evidence(integrity_check_pk, evidence)
             catalog.execute(
                 "UPDATE source_integrity_checks SET subject_id = ?, completed_at = ? WHERE integrity_check_pk = ?",
-                (next(iter(subjects)), datetime.now(timezone.utc).isoformat(), integrity_check_pk),
+                (next(iter(subjects)), datetime.now(UTC).isoformat(), integrity_check_pk),
             )
             catalog.execute(
                 "UPDATE source_files SET modified_at_ns = ?, byte_length = ?, sha256 = ?, checked_at = ?, "
@@ -1357,7 +1458,7 @@ def ingest(args: argparse.Namespace) -> None:
                     modified_at_ns,
                     catalog_byte_length,
                     digest,
-                    datetime.now(timezone.utc).isoformat(),
+                    datetime.now(UTC).isoformat(),
                     run_pk,
                     source_file_pk,
                 ),
@@ -1382,6 +1483,7 @@ def ingest(args: argparse.Namespace) -> None:
             catalog.execute("BEGIN")
             sender_pk = address_pk(catalog, parsed.sender)
             message_pk = catalog.execute("INSERT INTO messages(message_id_normalized, sha256, sender_address_pk, subject, date_utc, date_source, category) VALUES (?, ?, ?, ?, ?, ?, ?)", (parsed.message_id, parsed.sha256, sender_pk, parsed.subject, parsed.date_utc, parsed.date_source, category)).lastrowid
+            assert message_pk is not None
             catalog.executemany(
                 "INSERT INTO recipients(message_pk, address_pk, role) VALUES (?, ?, ?)",
                 (
@@ -1393,6 +1495,11 @@ def ingest(args: argparse.Namespace) -> None:
                 "INSERT OR IGNORE INTO metadata_defects(message_pk, field, detail) VALUES (?, ?, ?)",
                 ((message_pk, defect.field, defect.detail) for defect in parsed.defects),
             )
+            if request.scan_policy == "not-scanned":
+                catalog.execute(
+                    "INSERT INTO metadata_defects(message_pk, field, detail) VALUES (?, ?, ?)",
+                    (message_pk, "antivirus", "not-scanned: explicitly imported without antivirus scanning"),
+                )
             box = boxes.get(destination)
             if box is None:
                 box = mailbox.mbox(destination, create=True)
@@ -1411,6 +1518,7 @@ def ingest(args: argparse.Namespace) -> None:
             )
             observe(candidate.source, "archived", category, parsed.sha256, message_pk)
             catalog.commit()
+            outcome.published = True
             clear_publication_journal(archive)
         except BaseException:
             catalog.rollback()
@@ -1422,7 +1530,12 @@ def ingest(args: argparse.Namespace) -> None:
             raise
         if category in SEARCH_CATEGORIES:
             index_message_safely(
-                catalog, search, message_pk, raw, args.index_attachments, date_utc=parsed.date_utc
+                catalog,
+                search,
+                message_pk,
+                raw,
+                request.index_attachments,
+                date_utc=parsed.date_utc,
             )
         progress.record_disposition("archived")
         if category == "INFECTED":
@@ -1430,6 +1543,8 @@ def ingest(args: argparse.Namespace) -> None:
         return int(message_pk)
 
     def scan_message(source: MailObject) -> bool:
+        if request.scan_policy == "not-scanned":
+            return False
         assert scanner is not None
         progress.record_worker(
             "scanning",
@@ -1514,7 +1629,7 @@ def ingest(args: argparse.Namespace) -> None:
                         None if source_file is None else source_file.path,
                         prior_date,
                         source.source_date_utc,
-                        args.earliest_year,
+                        request.earliest_year,
                     )
                 except Exception as error:
                     digest = hashlib.sha256(raw).hexdigest()
@@ -1616,6 +1731,7 @@ def ingest(args: argparse.Namespace) -> None:
         inventory = SourceInventory()
         for source_spec, plugin in selections:
             for item in plugin.implementation.discover(source_spec):
+                check_interrupted()
                 if isinstance(item, MailContainer):
                     if item.source.plugin_kind != plugin.manifest.kind:
                         raise RuntimeError(
@@ -1714,21 +1830,26 @@ def ingest(args: argparse.Namespace) -> None:
         inventory = capture_discovery(selected_sources, "containers", report_skipped=True)
         verify_stable_discovery()
         progress.finish_inventory(inventory)
-        progress.set_phase(CLAMAV_START_PHASE)
-        scanner = ClamScanner(progress.refresh)
-        scanner.__enter__()
+        check_interrupted()
+        if request.scan_policy == "clamav":
+            progress.set_phase(CLAMAV_START_PHASE)
+            scanner = ClamScanner(refresh_import)
+            scanner.__enter__()
+        else:
+            print("WARNING: importing without antivirus scanning; messages are NOT scanned or certified clean.", file=sys.stderr)
         progress.set_phase("checking sources")
         run_file_workers(
             snapshotted_containers(),
-            args.workers,
+            request.workers,
             ingest_container,
             stop,
-            progress.refresh,
+            refresh_import,
             concurrency=lambda work: (
                 f"{work.plugin.manifest.kind}:{work.container.concurrency_key}",
                 work.plugin.implementation.capabilities.max_concurrency,
             ),
         )
+        check_interrupted()
         catalog.commit()
         search.commit()
         succeeded = True
@@ -1759,7 +1880,7 @@ def ingest(args: argparse.Namespace) -> None:
         result = "completed" if succeeded else "interrupted" if interrupted else "disk-full" if disk_full else "failed"
         catalog.execute(
             "UPDATE ingest_runs SET completed_at = ?, result = ?, detail = ? WHERE run_pk = ?",
-            (datetime.now(timezone.utc).isoformat(), result, failure_detail, run_pk),
+            (datetime.now(UTC).isoformat(), result, failure_detail, run_pk),
         )
         catalog.commit()
         integrity_error: Exception | None = None
@@ -1768,6 +1889,7 @@ def ingest(args: argparse.Namespace) -> None:
                 checkpoint_archive()
                 catalog.commit()
             except Exception as error:
+                logging.getLogger(__name__).debug("Best-effort operation failed", exc_info=True)
                 integrity_error = error
                 if failure_detail is None:
                     failure_detail = f"{type(error).__name__}: {error}"
@@ -1844,7 +1966,9 @@ def print_report(archive: Path, years: tuple[int, int] | None, top: int | None) 
             )
         )
         if top is not None and top > 0:
-            heading = lambda text: f"\033[1m{text}\033[0m" if sys.stdout.isatty() else text
+            def heading(text: str) -> str:
+                return f"\033[1m{text}\033[0m" if sys.stdout.isatty() else text
+
             owner_addresses = (
                 "owner_addresses AS (SELECT DISTINCT sender_address_pk FROM messages WHERE category = 'Sent') "
             )
@@ -1918,9 +2042,36 @@ def prepare_refresh_index_message(
 
 
 def rebuild_search_index(
-    archive: Path, index_attachments: bool, workers: int = REFRESH_INDEX_DEFAULT_WORKERS
+    archive: Path,
+    index_attachments: bool,
+    workers: int = REFRESH_INDEX_DEFAULT_WORKERS,
+    *,
+    writer_lease: WriterLease | None = None,
 ) -> None:
-    """Build and validate a replacement search database before publishing it."""
+    """Build and publish a replacement search database under the writer lease."""
+    identity = os.path.normcase(str(archive.resolve(strict=True)))
+    owned = writer_lease is None
+    lease = writer_lease or WriterLease.acquire(
+        archive,
+        identity,
+        "refresh search index",
+        uuid4().hex,
+        version("mailarchiver"),
+    )
+    if not lease.acquired or not lease.lock_path.parent.parent.samefile(archive):
+        if owned:
+            lease.release()
+        raise ValueError("an acquired writer lease for this archive is required")
+    try:
+        _rebuild_search_index(archive, index_attachments, workers)
+    finally:
+        if owned:
+            lease.release()
+
+
+def _rebuild_search_index(
+    archive: Path, index_attachments: bool, workers: int
+) -> None:
     temporary = archive / "search.sqlite3.tmp"
     temporary.unlink(missing_ok=True)
     catalog = create_catalog(archive / "archive.sqlite3")
@@ -2053,7 +2204,9 @@ def main() -> int:
         default=1900,
         help="reject earlier message dates and use normal fallbacks (default: 1900)",
     )
-    ingest_parser.add_argument("--clamav", action="store_true", required=True, help="scan new messages with on-demand ClamAV")
+    scanning = ingest_parser.add_mutually_exclusive_group(required=True)
+    scanning.add_argument("--clamav", action="store_true", help="scan new messages with on-demand ClamAV")
+    scanning.add_argument("--no-scan", action="store_true", help="explicitly import without antivirus; record messages as not scanned")
     ingest_parser.add_argument("--workers", type=positive_integer, default=min(os.cpu_count() or 1, 8), help="source mailfiles ingested concurrently (default: cores, capped at 8)")
     ingest_parser.add_argument(
         "--plugin-dir",
@@ -2102,6 +2255,9 @@ def main() -> int:
         return 1
     except ClamScannerStartupError as error:
         print(f"ClamAV startup failed: {error}", file=sys.stderr, flush=True)
+        return 1
+    except ArchiveBusyError as error:
+        print(f"archive busy: {error}", file=sys.stderr, flush=True)
         return 1
     except PluginDiscoveryError as error:
         print(f"plug-in discovery failed: {error}", file=sys.stderr, flush=True)

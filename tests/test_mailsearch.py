@@ -14,13 +14,13 @@ from mailarchiver.bagit import initialize_bag
 from mailarchiver.catalog import address_pk, create_catalog, create_search
 from mailarchiver.layout import mbox_directory
 from mailarchiver.mailsearch import (
-    MessageHeader,
     RECENT_FTS_SCAN_LIMIT,
+    MessageHeader,
     SearchTerms,
     SortDirection,
     SortField,
-    _search_statement,
     _recent_text_statement,
+    _search_statement,
     format_header,
     render_message,
     search_header_page,
@@ -72,6 +72,7 @@ def make_archive(tmp_path: Path) -> tuple[Path, bytes]:
             "VALUES (?, ?, ?, ?, ?, ?, ?)",
             ("one@example", hashlib.sha256(raw).hexdigest(), sender, "planning meeting", "2024-01-03T10:00:00+00:00", "date", "Archive"),
         )
+        assert cursor.lastrowid is not None
         message_pk = int(cursor.lastrowid)
         catalog.execute(
             "INSERT INTO recipients(message_pk, address_pk, role) VALUES (?, ?, 'to')",
@@ -348,6 +349,7 @@ def test_numbered_empty_message_restores_zero_source_bytes(tmp_path: Path) -> No
             "VALUES (?, ?, ?, '', '2024-01-01T00:00:00+00:00', 'path-year', 'Archive')",
             (hashlib.sha256(b"").hexdigest(), hashlib.sha256(b"").hexdigest(), blank),
         )
+        assert cursor.lastrowid is not None
         message_pk = int(cursor.lastrowid)
         catalog.commit()
     finally:
@@ -377,6 +379,7 @@ def test_numbered_message_preserves_literal_quoted_from_line(tmp_path: Path) -> 
             "VALUES ('quoted@example', ?, ?, '', '2024-01-01T00:00:00+00:00', 'date', 'Archive')",
             (hashlib.sha256(raw).hexdigest(), blank),
         )
+        assert cursor.lastrowid is not None
         message_pk = int(cursor.lastrowid)
         catalog.commit()
     finally:

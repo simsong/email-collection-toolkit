@@ -8,7 +8,6 @@ import re
 import sys
 from pathlib import Path
 
-
 STABLE = re.compile(r"^v(\d+)\.(\d+)\.(\d+)$")
 BETA = re.compile(r"^v(\d+)\.(\d+)\.(\d+)-beta(\d+)$")
 REPOSITORY = "https://github.com/simsong/mail-archiver"

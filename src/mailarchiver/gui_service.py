@@ -19,6 +19,7 @@ from bs4 import BeautifulSoup
 from pydantic import BaseModel, Field
 
 from .encoding import decode_text
+from .mailbox_tree import MailboxSelection
 from .mailsearch import (
     MessageHeader,
     SearchTerms,
@@ -29,7 +30,6 @@ from .mailsearch import (
     search_header_page,
     search_result_count,
 )
-from .mailbox_tree import MailboxSelection
 from .message import decoded_message_header
 from .plugin_api import SourceContainerMetadata
 from .search import SEARCH_CATEGORIES, decoded_part, is_attachment
@@ -331,7 +331,7 @@ def describe_message(archive: Path, message_pk: int) -> MessageView:
     raw, message = parsed_message(archive, message_pk)
     header_names: list[str] = []
     headers = []
-    for name, _ in message.items():
+    for name in message:
         occurrence = sum(previous.casefold() == name.casefold() for previous in header_names)
         header_names.append(name)
         headers.append(HeaderField(name=name, value=decoded_message_header(raw, message, name, occurrence)))
