@@ -361,6 +361,8 @@ QUIT_IMPORT_MESSAGE = (
 
 def create_macos_alert(title: str, message: str, buttons: tuple[str, ...], *, body_width: int | None = None) -> Any:
     """Construct a native alert on the main thread without showing it."""
+    if sys.platform != "darwin":
+        raise RuntimeError("native dialogs require macOS")
     from AppKit import NSAlert, NSImage, NSTextField  # pylint: disable=import-outside-toplevel,no-name-in-module,import-error
 
     alert = NSAlert.alloc().init()
@@ -388,6 +390,8 @@ def create_macos_alert(title: str, message: str, buttons: tuple[str, ...], *, bo
 
 def macos_alert(title: str, message: str, buttons: tuple[str, ...], *, body_width: int | None = None) -> int:
     """Present an explicitly branded Cocoa alert; return the selected button index."""
+    if sys.platform != "darwin":
+        raise RuntimeError("native dialogs require macOS")
     from Foundation import NSThread  # pylint: disable=import-outside-toplevel,no-name-in-module,import-error
     from PyObjCTools import AppHelper  # pylint: disable=import-outside-toplevel,import-error
 
@@ -412,6 +416,8 @@ def macos_import_picker(
     multiple: bool = False, warning: str | None = None,
 ) -> tuple[Path, ...]:
     """Choose files, optionally allowing whole directories in the same panel."""
+    if sys.platform != "darwin":
+        raise RuntimeError("native dialogs require macOS")
     from AppKit import NSOpenPanel  # pylint: disable=import-outside-toplevel,no-name-in-module,import-error
     from Foundation import NSThread, NSURL  # pylint: disable=import-outside-toplevel,no-name-in-module,import-error
     from PyObjCTools import AppHelper  # pylint: disable=import-outside-toplevel,import-error
@@ -449,6 +455,8 @@ def macos_import_picker(
 
 def macos_owner_names(destination: Path) -> str | None:
     """Collect multiline Sent-classification aliases on the Cocoa main thread."""
+    if sys.platform != "darwin":
+        raise RuntimeError("native dialogs require macOS")
     from AppKit import NSAlert, NSImage, NSScrollView, NSTextView  # pylint: disable=import-outside-toplevel,no-name-in-module,import-error
     from Foundation import NSThread  # pylint: disable=import-outside-toplevel,no-name-in-module,import-error
     from PyObjCTools import AppHelper  # pylint: disable=import-outside-toplevel,import-error
@@ -875,6 +883,8 @@ class GuiApi:
             raise ValueError("unknown source location") from error
         if path is None:
             raise ValueError("source location has no local filesystem path")
+        if sys.platform != "darwin":
+            raise ValueError("copying source paths requires macOS with PyObjC installed")
         try:
             import AppKit  # pylint: disable=import-error,import-outside-toplevel
             from Foundation import (
@@ -894,6 +904,8 @@ class GuiApi:
 
     def copy_visible_text(self, text: str) -> str:
         """Copy the user-visible message text to the macOS pasteboard."""
+        if sys.platform != "darwin":
+            raise ValueError("copying visible text requires macOS with PyObjC installed")
         try:
             import AppKit  # pylint: disable=import-error,import-outside-toplevel
         except ImportError as error:
@@ -907,6 +919,8 @@ class GuiApi:
     def copy_link(self, destination: str) -> str:
         """Copy an approved message link as both text and a macOS URL."""
         destination = external_link_destination(destination)
+        if sys.platform != "darwin":
+            raise ValueError("copying links requires macOS with PyObjC installed")
         try:
             import AppKit  # pylint: disable=import-error,import-outside-toplevel
         except ImportError as error:
@@ -923,6 +937,8 @@ class GuiApi:
         destination = external_link_destination(destination)
         if self.e2e_directory is not None:
             return destination
+        if sys.platform != "darwin":
+            raise ValueError("opening links requires macOS with PyObjC installed")
         try:
             import AppKit  # pylint: disable=import-error,import-outside-toplevel
             from Foundation import (
@@ -1806,7 +1822,7 @@ class PyWebViewApplication:
             workers = tuple(self._import_threads)
         for worker in workers:
             worker.join()
-        if self._menu_observer is not None:
+        if sys.platform == "darwin" and self._menu_observer is not None:
             from Foundation import NSNotificationCenter  # pylint: disable=import-outside-toplevel,no-name-in-module,import-error
             NSNotificationCenter.defaultCenter().removeObserver_(self._menu_observer)
             self._menu_observer = None
