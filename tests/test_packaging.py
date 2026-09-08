@@ -103,3 +103,29 @@ def test_scanner_failure_never_silently_imports_unscanned(tmp_path: Path) -> Non
         assert catalog.execute("SELECT count(*) FROM metadata_defects WHERE field='antivirus' AND detail LIKE 'not-scanned:%'").fetchone() == (1,)
     assert source.read_bytes() == raw
     assert not verify_archive(archive)
+
+
+@pytest.mark.skipif(sys.platform != "darwin", reason="Mach-O linkage requires Apple's toolchain")
+def test_dependency_audit_rejects_external_rpath(tmp_path: Path) -> None:
+    """Requirement: an @rpath dependency cannot hide a build-machine LC_RPATH."""
+    import shutil
+
+    if shutil.which("cc") is None:
+        pytest.skip("C compiler is unavailable")
+    # build_macos is also an executable script importing its adjacent module.
+    scripts = str(ROOT / "scripts")
+    sys.path.insert(0, scripts)
+    try:
+        from build_macos import verify_dependencies
+    finally:
+        sys.path.remove(scripts)
+    app = tmp_path / "Fixture.app"
+    binary = app / "Contents/MacOS/fixture"
+    binary.parent.mkdir(parents=True)
+    source = tmp_path / "fixture.c"
+    source.write_text("int main(void) { return 0; }\n", encoding="utf-8")
+    subprocess.run(["cc", str(source), "-Wl,-rpath,/opt/homebrew/lib", "-o", str(binary)], check=True)
+    with pytest.raises(RuntimeError, match="nonportable binary search path"):
+        verify_dependencies(app)
+    subprocess.run(["cc", str(source), "-Wl,-rpath,@executable_path", "-o", str(binary)], check=True)
+    verify_dependencies(app)

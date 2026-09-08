@@ -1370,8 +1370,12 @@ class PyWebViewApplication:
             f"Sent-mail owner names: {owner_names}\n\n{antivirus.detail}"
         )
         if not antivirus.configured:
-            choice = macos_alert(title, confirmation, ("Cancel", "Import Without Scanning", "Install ClamAV…"),
-                                 body_width=IMPORT_CONFIRMATION_WIDTH)
+            choice = (
+                macos_alert(title, confirmation, ("Cancel", "Import Without Scanning", "Install ClamAV…"),
+                            body_width=IMPORT_CONFIRMATION_WIDTH)
+                if sys.platform == "darwin" else
+                (1 if anchor.create_confirmation_dialog(title, confirmation + "\n\nImport WITHOUT antivirus scanning?") else 0)
+            )
             if choice == 2:
                 import webbrowser  # pylint: disable=import-outside-toplevel
                 webbrowser.open(CLAMAV_DOWNLOAD_URL)
@@ -1409,7 +1413,6 @@ class PyWebViewApplication:
             )
             if owner_additions is not None:
                 DocumentOptions(document.path).merge(owner_additions, lease)
-            remember_import_directory(document.path, roots)
             job = IngestJob(operation_id=operation_id, owner_window_id=session.window_id)
             with self._lock:
                 if self._quitting:
@@ -1463,6 +1466,10 @@ class PyWebViewApplication:
         error: BaseException | None = None
         try:
             run_ingest(request, lease, stop_event=stop)
+            try:
+                remember_import_directory(document.path, [Path(root) for root in request.roots])
+            except (OSError, ValueError) as config_error:
+                self.add_notice("warning", f"Import completed but the source directory could not be saved: {config_error}")
         except BaseException as caught:  # pylint: disable=broad-exception-caught
             error = caught
         finally:

@@ -482,7 +482,7 @@ that edits do not relocate canonical messages or change stored categories;
 FTS has no owner-name list and index rebuilds do not reclassify mail.
 `archive_config.py` stores the last source-picker directory in a strict,
 versioned archive-local `config.yaml`. The value is written atomically only
-after the import has acquired WriterLease; the next picker uses it if it is an
+after the import succeeds, while it still holds WriterLease; the next picker uses it if it is an
 existing directory and otherwise falls back to the archive's parent. A malformed
 or missing config is discardable navigation state and does not block import.
 The archive catalog schema contains message identities, provenance, ingest
@@ -1391,3 +1391,12 @@ requires it and fails clearly.
 4. Add IMAP and Gmail importers with resumable checkpoints.
 5. Build the local search/view interface on the stable database and MBOX
    retrieval API.
+
+### Desktop review follow-up
+
+The portability audit reads each Mach-O LC_RPATH command, expands loader and
+executable-relative paths, rejects search paths outside the bundle, and requires
+non-system dependencies to resolve to bundled files. Missing antivirus uses a
+platform-neutral confirmation on non-macOS hosts. Source-picker navigation is
+saved only after successful ingest while the writer lease is retained; a failed
+import leaves the previous directory unchanged.

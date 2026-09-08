@@ -140,9 +140,40 @@ def test_image(dmg: Path) -> None:
                 raise RuntimeError(f"mounted {mode} failed: {report}")
 
 
+def load_rpaths(commands: str) -> tuple[str, ...]:
+    """Read LC_RPATH values from otool load-command output, preserving spaces."""
+    paths = []
+    in_rpath = False
+    for line in commands.splitlines():
+        value = line.strip()
+        if value.startswith("cmd "):
+            in_rpath = value == "cmd LC_RPATH"
+        elif in_rpath and value.startswith("path "):
+            paths.append(value[5:].rsplit(" (offset ", 1)[0])
+            in_rpath = False
+    return tuple(paths)
+
+
+def bundle_loader_path(app: Path, binary: Path, value: str) -> Path:
+    """Expand loader paths and reject build-machine or escaping search paths."""
+    if value == "@loader_path" or value.startswith("@loader_path/"):
+        target = binary.parent / value.removeprefix("@loader_path").lstrip("/")
+    elif value == "@executable_path" or value.startswith("@executable_path/"):
+        target = app / "Contents/MacOS" / value.removeprefix("@executable_path").lstrip("/")
+    else:
+        target = Path(value)
+        if not target.is_absolute():
+            raise RuntimeError(f"unsupported binary search path: {binary}: {value}")
+    resolved = target.resolve()
+    if not resolved.is_relative_to(app.resolve()):
+        raise RuntimeError(f"nonportable binary search path: {binary}: {value}")
+    return resolved
+
+
 def verify_dependencies(app: Path) -> None:
     """Reject accidental Homebrew/build-machine linkage in every bundled Mach-O file."""
     checked: set[Path] = set()
+    rpaths: set[Path] = set()
     for candidate in app.rglob("*"):
         if not candidate.is_file():
             continue
@@ -155,11 +186,22 @@ def verify_dependencies(app: Path) -> None:
             if handle.read(4) not in MACHO_MAGIC:
                 continue
         checked.add(path)
+        commands = run("/usr/bin/otool", "-l", path, capture_output=True, text=True).stdout
+        rpaths.update(bundle_loader_path(app, path, value) for value in load_rpaths(commands))
+    for path in checked:
         linked = run("/usr/bin/otool", "-L", path, capture_output=True, text=True).stdout
         for line in linked.splitlines()[1:]:
             dependency = line.strip().split(" (", 1)[0]
-            if dependency.startswith("/") and not dependency.startswith(("/usr/lib/", "/System/Library/")):
-                raise RuntimeError(f"nonportable binary dependency: {path}: {dependency}")
+            if dependency.startswith(("/usr/lib/", "/System/Library/")):
+                continue
+            if dependency.startswith("@rpath/"):
+                candidates = [(root / dependency.removeprefix("@rpath/")).resolve() for root in rpaths]
+                if not any(item.is_relative_to(app.resolve()) and item.is_file() for item in candidates):
+                    raise RuntimeError(f"unresolved bundled dependency: {path}: {dependency}")
+            else:
+                target = bundle_loader_path(app, path, dependency)
+                if not target.is_file():
+                    raise RuntimeError(f"missing bundled dependency: {path}: {dependency}")
     if not checked:
         raise RuntimeError("no native executable found inside app")
     print(f"Verified {len(checked)} bundled Mach-O files: no external non-system library paths")
