@@ -5,7 +5,11 @@ from pathlib import Path
 
 import pytest
 
-from scripts.data_quality.analyze_archive import normalized_date, open_catalog, source_format
+from scripts.data_quality.analyze_archive import (
+    normalized_date,
+    open_catalog,
+    source_format,
+)
 
 
 def test_audit_catalog_connection_cannot_modify_archive(tmp_path: Path) -> None:

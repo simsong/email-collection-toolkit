@@ -5,15 +5,15 @@ from __future__ import annotations
 from collections.abc import Iterator
 
 from .plugin_api import (
-    MailContainer,
-    MailObject,
     IntegrityDecision,
     IntegrityEvidence,
+    MailContainer,
+    MailObject,
     PluginCapabilities,
     ProgressEvent,
     SkippedInput,
-    SourcePlugin,
     SourceIntegrityControls,
+    SourcePlugin,
     SourceSpec,
 )
 

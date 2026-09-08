@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import base64
-from concurrent.futures import ThreadPoolExecutor
 import hashlib
 import json
 import mailbox
@@ -11,6 +10,7 @@ import sqlite3
 import sys
 import time
 import zipfile
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import pytest
@@ -20,6 +20,14 @@ from mailarchiver.application import ApplicationController, ApplicationPreferenc
 from mailarchiver.bagit import initialize_bag
 from mailarchiver.catalog import address_pk, create_catalog, create_search
 from mailarchiver.configuration import application_configuration, load_configuration
+from mailarchiver.gui_app import (
+    GuiApi,
+    PyWebViewApplication,
+    application_icon_path,
+    application_menu,
+    application_metadata,
+    external_link_destination,
+)
 from mailarchiver.gui_service import (
     LEGACY_X_HTML_PART_ID,
     RAW_PART_ID,
@@ -29,30 +37,31 @@ from mailarchiver.gui_service import (
     is_risky,
     message_previews,
     render_part,
-    searchable_message_count,
     search_count,
     search_page,
     search_suggestions,
+    searchable_message_count,
     write_attachment,
     write_message,
     write_messages_zip,
 )
-from mailarchiver.gui_app import (
-    GuiApi,
-    PyWebViewApplication,
-    application_icon_path,
-    application_menu,
-    application_metadata,
-    external_link_destination,
-)
-from mailarchiver.mailsearch import RECENT_FTS_SCAN_LIMIT, _search_statement, parse_query
 from mailarchiver.layout import mbox_directory
-from mailarchiver.mailbox_tree import FilterSet, FilterSetStore, MailboxSelection, MailboxTreeNode, mailbox_tree
-from mailarchiver.plugin_api import SourceContainerMetadata, SourceRelationship
+from mailarchiver.mailbox_tree import (
+    FilterSet,
+    FilterSetStore,
+    MailboxSelection,
+    MailboxTreeNode,
+    mailbox_tree,
+)
+from mailarchiver.mailsearch import (
+    RECENT_FTS_SCAN_LIMIT,
+    _search_statement,
+    parse_query,
+)
 from mailarchiver.mbox import add_message
+from mailarchiver.plugin_api import SourceContainerMetadata, SourceRelationship
 from mailarchiver.search import index_message
 from mailarchiver.standalone_verify import semantic_bytes
-
 
 SIMPLE_MESSAGE = (
     b"Message-ID: <simple@example>\nFrom: sender@example.net\nTo: recipient@example.net\n"
@@ -363,8 +372,8 @@ def test_gui_suggestions_use_trigram_substrings_and_deduplicated_message_counts(
         sender = address_pk(catalog, "beth@example.org")
         for number, subject in enumerate(("Flight for ELISABETH", "Ordinary subject"), 1):
             raw = "".join((
-                f"Message-ID: <suggestion-{number}@example>\n"
-                "From: Beth Rosenberg <beth@example.org>\n",
+                (f"Message-ID: <suggestion-{number}@example>\n"
+                "From: Beth Rosenberg <beth@example.org>\n"),
                 "Cc: Beth Rosenberg <beth@example.org>\n" if number == 1 else "",
                 f"Subject: {subject}\n\nbody\n",
             )).encode()

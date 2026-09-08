@@ -14,13 +14,13 @@ from mailarchiver.bagit import initialize_bag
 from mailarchiver.catalog import address_pk, create_catalog, create_search
 from mailarchiver.layout import mbox_directory
 from mailarchiver.mailsearch import (
-    MessageHeader,
     RECENT_FTS_SCAN_LIMIT,
+    MessageHeader,
     SearchTerms,
     SortDirection,
     SortField,
-    _search_statement,
     _recent_text_statement,
+    _search_statement,
     format_header,
     render_message,
     search_header_page,

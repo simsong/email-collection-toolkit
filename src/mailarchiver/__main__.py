@@ -4,13 +4,14 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import logging
+import mailbox
 import math
 import os
-import mailbox
 import queue
 import re
-import signal
 import shutil
+import signal
 import sqlite3
 import sys
 import threading
@@ -18,11 +19,11 @@ import time
 from collections import Counter, deque
 from collections.abc import Callable, Iterable
 from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from importlib.metadata import version
 from pathlib import Path
 from types import TracebackType
-from typing import Literal, TypeVar
+from typing import Literal, TextIO, TypeVar
 from urllib.parse import quote
 from uuid import uuid4
 
@@ -39,17 +40,18 @@ from .catalog import (
     owner_tokens,
 )
 from .ingest_status import (
+    STATUS_REFRESH_SECONDS,
     IngestCounts,
     IngestState,
     IngestStatus,
     IngestStatusFile,
-    IngestWorkerStatus as WorkerProgress,
-    STATUS_REFRESH_SECONDS,
     YearProgress,
     new_status_id,
 )
+from .ingest_status import (
+    IngestWorkerStatus as WorkerProgress,
+)
 from .layout import mbox_directory, mbox_path
-from .message import ParsedMessage, parse_message
 from .mbox import (
     DiskFullError,
     MboxLocation,
@@ -62,15 +64,7 @@ from .mbox import (
     read_verified_location,
     recover_publication,
 )
-from .scanner import ClamScanner, ClamScannerStartupError
-from .search import (
-    QUARANTINE_MAILBOX,
-    SEARCH_CATEGORIES,
-    PreparedSearchMessage,
-    index_message_safely,
-    prepare_search_message,
-    write_prepared_search_message,
-)
+from .message import ParsedMessage, parse_message
 from .plugin_api import (
     ArchiveReference,
     IntegrityDecision,
@@ -84,6 +78,15 @@ from .plugin_api import (
     SourceSpec,
 )
 from .plugin_loader import PluginDiscoveryError, load_plugins
+from .scanner import ClamScanner, ClamScannerStartupError
+from .search import (
+    QUARANTINE_MAILBOX,
+    SEARCH_CATEGORIES,
+    PreparedSearchMessage,
+    index_message_safely,
+    prepare_search_message,
+    write_prepared_search_message,
+)
 from .sources import (
     IncompleteAppleMailMessageError,
     LocalSourcePlugin,
@@ -103,6 +106,12 @@ DISCOVERY_PHASE = "discovering sources"
 TOP_LINE_STYLE = "\x1b[37;44m"
 ANSI_RESET = "\x1b[0m"
 WorkerItem = TypeVar("WorkerItem")
+
+
+class IngestOutcome(BaseModel):
+    """Publication evidence retained even when an ingest raises."""
+
+    published: bool = False
 
 
 class IngestRequest(BaseModel):
@@ -382,15 +391,17 @@ class ProgressReporter:
         run_pk: int | None = None,
         source_roots: list[str] | None = None,
         started_at: datetime | None = None,
+        terminal: bool = True,
     ) -> None:
         self.state = ProgressState(
-            started_at=started_at or datetime.now(timezone.utc),
+            started_at=started_at or datetime.now(UTC),
             started_monotonic=time.monotonic(),
             workers=[WorkerProgress(worker=worker) for worker in range(1, worker_count + 1)],
         )
         self.updates: queue.SimpleQueue[ProgressUpdate] = queue.SimpleQueue()
         self.driver_thread = threading.get_ident()
-        self.tty = sys.stderr.isatty()
+        self.output: TextIO | None = sys.stderr if terminal else None
+        self.tty = self.output is not None and self.output.isatty()
         self.terminal_columns = max(shutil.get_terminal_size((120, 24)).columns, 20)
         self.rendered_lines = 0
         self.base_phase = "started"
@@ -667,13 +678,13 @@ class ProgressReporter:
             for notice in self.notices - self.emitted_notices
             if kinds is None or notice[0] in kinds
         ]
-        if not selected:
+        if not selected or self.output is None:
             return
         if self.tty and self.rendered_lines:
-            sys.stderr.write("\n")
+            self.output.write("\n")
             self.rendered_lines = 0
         for kind, path, reason in sorted(selected):
-            print(f"{kind}: {path} ({reason})", file=sys.stderr)
+            print(f"{kind}: {path} ({reason})", file=self.output)
         self.emitted_notices.update(selected)
 
     def _worker_phase(self) -> str:
@@ -733,21 +744,21 @@ class ProgressReporter:
             lines = [
                 f"{TOP_LINE_STYLE}{top_line}{ANSI_RESET}",
                 f"mailarchiver ingest  [{display_label}]",
-                f"Processed: {state.processed:,} messages in {state.files_processed:,} files  "
-                f"Rate: {state.processed / elapsed:.2f} messages/s  Elapsed: {elapsed:.0f}s",
+                (f"Processed: {state.processed:,} messages in {state.files_processed:,} files  "
+                f"Rate: {state.processed / elapsed:.2f} messages/s  Elapsed: {elapsed:.0f}s"),
                 f"Workers:   {active:,} active; peak {state.peak_active_files:,}; {len(state.workers):,} configured",
                 *(self._worker_line(worker, self.terminal_columns) for worker in state.workers),
                 f"Dates:     {dates}  Current year: {year} ({state.current_year_messages:,} messages)",
-                f"Archived:  {state.counts.archived:,}  Seen/skipped: {state.counts.duplicates:,}  "
+                (f"Archived:  {state.counts.archived:,}  Seen/skipped: {state.counts.duplicates:,}  "
                 f"Autosaved: {state.counts.autosaves:,}  Metadata: {state.counts.metadata_excluded:,}  "
                 f"Infected: {state.counts.infected:,}  Files skipped: {state.counts.skipped_files:,}  "
-                f"Unchanged: {state.counts.unchanged_sources:,}",
+                f"Unchanged: {state.counts.unchanged_sources:,}"),
             ]
             lines = [lines[0], *(self._fit(line, self.terminal_columns) for line in lines[1:])]
             rewind = f"\x1b[{self.rendered_lines}A" if self.rendered_lines else ""
-            sys.stderr.write(rewind + "\n".join(f"\r\x1b[2K{line}" for line in lines) + "\n")
+            self.output.write(rewind + "\n".join(f"\r\x1b[2K{line}" for line in lines) + "\n")
             self.rendered_lines = len(lines)
-        else:
+        elif self.output is not None:
             workers = " ".join(
                 f"{worker.worker}:{worker.phase}:{Path(worker.path).name if worker.path else '-'}"
                 for worker in state.workers
@@ -764,7 +775,7 @@ class ProgressReporter:
                 f"autosaved={state.counts.autosaves} metadata_excluded={state.counts.metadata_excluded} "
                 f"infected={state.counts.infected} skipped_files={state.counts.skipped_files} "
                 f"unchanged_sources={state.counts.unchanged_sources}",
-                file=sys.stderr,
+                file=self.output,
             )
         self._write_status(
             state,
@@ -776,7 +787,8 @@ class ProgressReporter:
             ingest_state,
             failure_detail,
         )
-        sys.stderr.flush()
+        if self.output is not None:
+            self.output.flush()
 
     def _write_status(
         self,
@@ -799,7 +811,7 @@ class ProgressReporter:
         ):
             return
         assert self.status_archive is not None and self.status_run_pk is not None
-        updated_at = datetime.now(timezone.utc)
+        updated_at = datetime.now(UTC)
         status = IngestStatus(
             status_id=self.status_file.path.stem,
             archive=str(self.status_archive.resolve()),
@@ -840,9 +852,9 @@ class ProgressReporter:
             self.status_write_error = f"cannot update {self.status_file.path}: {error}"
             self.status_file = None
             if self.tty and self.rendered_lines:
-                sys.stderr.write("\n")
+                self.output.write("\n")
                 self.rendered_lines = 0
-            print(f"ingest status disabled: {self.status_write_error}", file=sys.stderr)
+            print(f"ingest status disabled: {self.status_write_error}", file=self.output)
 
     def finish(self, status: IngestState, failure_detail: str | None = None) -> None:
         self._drain_updates()
@@ -850,7 +862,7 @@ class ProgressReporter:
         self.display(status, status, failure_detail)
 
 
-def run_file_workers(
+def run_file_workers[WorkerItem](
     items: Iterable[WorkerItem],
     worker_count: int,
     process: Callable[[WorkerItem], None],
@@ -878,6 +890,7 @@ def run_file_workers(
                 except StopIteration:
                     exhausted = True
                 except BaseException as error:
+                    logging.getLogger(__name__).exception("Operation failed; preserving the existing recovery path")
                     discovery_error = (error, error.__traceback__)
                     exhausted = True
                 else:
@@ -977,7 +990,7 @@ def ingest(args: argparse.Namespace) -> None:
     )
 
 
-def run_ingest(request: IngestRequest, writer_lease: WriterLease | None = None) -> None:
+def run_ingest(request: IngestRequest, writer_lease: WriterLease | None = None, *, outcome: IngestOutcome | None = None, terminal: bool = True) -> None:
     """Run ingest under the archive's OS writer lock."""
     identity = os.path.normcase(str(request.archive.resolve()))
     owned = writer_lease is None
@@ -989,18 +1002,18 @@ def run_ingest(request: IngestRequest, writer_lease: WriterLease | None = None) 
         version("mailarchiver"),
         create=True,
     )
-    if not lease.acquired or lease.archive_identity != identity:
+    if not lease.acquired or not lease.lock_path.parent.parent.samefile(request.archive):
         if owned:
             lease.release()
         raise ValueError("an acquired writer lease for this archive is required")
     try:
-        _run_ingest(request, lease)
+        _run_ingest(request, lease, outcome if outcome is not None else IngestOutcome(), terminal)
     finally:
         if owned:
             lease.release()
 
 
-def _run_ingest(request: IngestRequest, writer_lease: WriterLease) -> None:
+def _run_ingest(request: IngestRequest, writer_lease: WriterLease, outcome: IngestOutcome, terminal: bool) -> None:
     plugins = load_plugins(request.plugin_dir)
     source_specs = [SourceSpec(locator=root) for root in request.roots]
     selected_sources: list[tuple[SourceSpec, LoadedPlugin]] = []
@@ -1063,10 +1076,11 @@ def _run_ingest(request: IngestRequest, writer_lease: WriterLease) -> None:
         catalog.close()
         raise
     if recovery is not PublicationRecovery.NONE:
+        outcome.published = True
         checkpoint_archive()
         print(f"recovered: pending message publication {recovery.value}", file=sys.stderr)
     owners = owner_tokens(request.owner_names_file)
-    started_at = datetime.now(timezone.utc)
+    started_at = datetime.now(UTC)
     run_pk = catalog.execute(
         "INSERT INTO ingest_runs(started_at) VALUES (?)", (started_at.isoformat(),)
     ).lastrowid
@@ -1081,7 +1095,7 @@ def _run_ingest(request: IngestRequest, writer_lease: WriterLease) -> None:
         catalog.execute(
             "UPDATE ingest_runs SET completed_at = ?, result = 'failed', detail = ? WHERE run_pk = ?",
             (
-                datetime.now(timezone.utc).isoformat(),
+                datetime.now(UTC).isoformat(),
                 f"{type(error).__name__}: {error}",
                 run_pk,
             ),
@@ -1097,6 +1111,7 @@ def _run_ingest(request: IngestRequest, writer_lease: WriterLease) -> None:
         run_pk=int(run_pk),
         source_roots=[source.locator for source, _plugin in selected_sources],
         started_at=started_at,
+        terminal=terminal,
     )
     boxes: dict[Path, mailbox.mbox] = {}
     source_file_pks: dict[tuple[str, str, str], int] = {}
@@ -1125,7 +1140,7 @@ def _run_ingest(request: IngestRequest, writer_lease: WriterLease) -> None:
         cached = source_volume_pks.get(identity_json)
         if cached is not None:
             return cached
-        now = datetime.now(timezone.utc).isoformat()
+        now = datetime.now(UTC).isoformat()
         catalog.execute(
             "INSERT INTO source_volumes(identity_json, metadata_json, first_observed_at, last_observed_at) VALUES (?, ?, ?, ?) "
             "ON CONFLICT(identity_json) DO UPDATE SET metadata_json = excluded.metadata_json, last_observed_at = excluded.last_observed_at",
@@ -1317,7 +1332,7 @@ def _run_ingest(request: IngestRequest, writer_lease: WriterLease) -> None:
                 result.decision.action,
                 result.decision.resume_cursor,
                 result.decision.reason,
-                datetime.now(timezone.utc).isoformat(),
+                datetime.now(UTC).isoformat(),
             ),
         )
         integrity_check_pk = int(cursor.lastrowid)
@@ -1409,7 +1424,7 @@ def _run_ingest(request: IngestRequest, writer_lease: WriterLease) -> None:
             record_integrity_evidence(integrity_check_pk, evidence)
             catalog.execute(
                 "UPDATE source_integrity_checks SET subject_id = ?, completed_at = ? WHERE integrity_check_pk = ?",
-                (next(iter(subjects)), datetime.now(timezone.utc).isoformat(), integrity_check_pk),
+                (next(iter(subjects)), datetime.now(UTC).isoformat(), integrity_check_pk),
             )
             catalog.execute(
                 "UPDATE source_files SET modified_at_ns = ?, byte_length = ?, sha256 = ?, checked_at = ?, "
@@ -1418,7 +1433,7 @@ def _run_ingest(request: IngestRequest, writer_lease: WriterLease) -> None:
                     modified_at_ns,
                     catalog_byte_length,
                     digest,
-                    datetime.now(timezone.utc).isoformat(),
+                    datetime.now(UTC).isoformat(),
                     run_pk,
                     source_file_pk,
                 ),
@@ -1472,6 +1487,7 @@ def _run_ingest(request: IngestRequest, writer_lease: WriterLease) -> None:
             )
             observe(candidate.source, "archived", category, parsed.sha256, message_pk)
             catalog.commit()
+            outcome.published = True
             clear_publication_journal(archive)
         except BaseException:
             catalog.rollback()
@@ -1825,7 +1841,7 @@ def _run_ingest(request: IngestRequest, writer_lease: WriterLease) -> None:
         result = "completed" if succeeded else "interrupted" if interrupted else "disk-full" if disk_full else "failed"
         catalog.execute(
             "UPDATE ingest_runs SET completed_at = ?, result = ?, detail = ? WHERE run_pk = ?",
-            (datetime.now(timezone.utc).isoformat(), result, failure_detail, run_pk),
+            (datetime.now(UTC).isoformat(), result, failure_detail, run_pk),
         )
         catalog.commit()
         integrity_error: Exception | None = None
@@ -1834,6 +1850,7 @@ def _run_ingest(request: IngestRequest, writer_lease: WriterLease) -> None:
                 checkpoint_archive()
                 catalog.commit()
             except Exception as error:
+                logging.getLogger(__name__).exception("Operation failed; preserving the existing recovery path")
                 integrity_error = error
                 if failure_detail is None:
                     failure_detail = f"{type(error).__name__}: {error}"

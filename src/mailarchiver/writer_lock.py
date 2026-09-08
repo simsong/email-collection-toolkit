@@ -3,18 +3,17 @@
 from __future__ import annotations
 
 import errno
-from contextlib import contextmanager
-from collections.abc import Iterator
 import json
 import os
 import socket
 import stat
-from datetime import datetime, timezone
+from collections.abc import Iterator
+from contextlib import contextmanager
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import BinaryIO
+from typing import BinaryIO, Self
 
 from pydantic import BaseModel, ConfigDict, PrivateAttr
-
 
 LOCK_RELATIVE_PATH = Path("status") / "archive-write.lock"
 
@@ -56,7 +55,7 @@ class WriterLease(BaseModel):
         application_version: str,
         *,
         create: bool = False,
-    ) -> "WriterLease":
+    ) -> WriterLease:
         if os.name == "nt":
             raise OSError("Windows archive writing is not supported; planned for v1.1.0")
         lock_path = archive / LOCK_RELATIVE_PATH
@@ -88,7 +87,7 @@ class WriterLease(BaseModel):
                 operation_id=operation_id,
                 process_id=os.getpid(),
                 hostname=socket.gethostname(),
-                started_at=datetime.now(timezone.utc),
+                started_at=datetime.now(UTC),
                 application_version=application_version,
                 archive_identity=archive_identity,
             )
@@ -116,7 +115,7 @@ class WriterLease(BaseModel):
             handle.close()
             self.acquired = False
 
-    def __enter__(self) -> "WriterLease":
+    def __enter__(self) -> Self:
         return self
 
     def __exit__(self, *_args: object) -> None:

@@ -13,7 +13,6 @@ from .bagit import initialize_bag, write_bag_checkpoint
 from .plugin_api import ArchiveReference, IntegrityEvidence, ProgressEvent
 from .standalone_verify import install_archive_verifier, verify_archive
 
-
 BAGIT_DECLARATION_CONTROL = "mailarchiver.archive.bagit-declaration.v1"
 STANDALONE_VERIFIER_CONTROL = "mailarchiver.archive.standalone-verifier.v1"
 PAYLOAD_MANIFEST_CONTROL = "mailarchiver.archive.payload-manifest.v1"

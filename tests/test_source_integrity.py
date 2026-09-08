@@ -7,7 +7,10 @@ import pytest
 from pydantic import ValidationError
 
 from mailarchiver.plugin_api import IntegrityDecision, IntegrityEvidence, ProgressEvent
-from mailarchiver.source_integrity import LocalFileIntegrityControls, SourceIntegrityCheckpoint
+from mailarchiver.source_integrity import (
+    LocalFileIntegrityControls,
+    SourceIntegrityCheckpoint,
+)
 from mailarchiver.source_volume import SourceVolume
 from mailarchiver.sources import SourceFile
 

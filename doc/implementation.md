@@ -1150,3 +1150,16 @@ creation lock before acquiring the archive lease; creation diagnostics may leave
 GUI creation rechecks destination emptiness under the lease. File New proceeds
 into Import, About reports the active archive volume, and publication refreshes
 mailbox-only queries as well as text queries.
+
+### PR review validation follow-up
+
+Archive documents identify directories by filesystem device/inode and reject
+symbolic or hard-linked database entries before opening. GUI ingest records
+publication evidence even when a later step fails; only published changes
+advance the shared generation. Progress can write status files without a
+terminal stream, including windowed builds with no stderr. Ingest child windows
+route document actions to an attached search window. Informational notices stay
+in About instead of appearing as errors. Closing an import owner offers waiting
+or keeping the window open; shutdown joins tracked workers before releasing
+resources. Makefile Ruff checks select this checkout's configuration explicitly
+and include ignored linked-worktree paths.

@@ -9,7 +9,6 @@ from pathlib import Path
 
 import yaml
 
-
 SIZES = (48, 64, 128, 192)
 REQUIRED_TEXT = ("doc/RELEASE_NOTES.md", "README.md", "/releases", "/discussions/55", "/discussions/56")
 

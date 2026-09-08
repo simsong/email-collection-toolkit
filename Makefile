@@ -239,8 +239,9 @@ ocr-run:
 ocr-experiment: ocr-inventory ocr-run
 
 .PHONY: ruff
+RUFF_FLAGS ?= --no-respect-gitignore
 ruff:
-	uv run --locked ruff check .
+	uv run --locked ruff check --config pyproject.toml $(RUFF_FLAGS) .
 
 .PHONY: test-writer-lock
 test-writer-lock:

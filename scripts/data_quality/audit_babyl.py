@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import logging
 from collections import Counter
 from datetime import datetime
 from pathlib import Path
@@ -67,6 +68,7 @@ def main() -> None:
                 evidence.subject = parsed.subject
                 evidence.defects = " || ".join(f"{defect.field}: {defect.detail}" for defect in parsed.defects)
             except Exception as error:  # Record every unreadable message without dropping later evidence.
+                logging.getLogger(__name__).exception("Operation failed; preserving the existing recovery path")
                 evidence.error = f"{type(error).__name__}: {error}"
             records.append(evidence)
     destination = args.output / "BABYL_MESSAGES.csv"

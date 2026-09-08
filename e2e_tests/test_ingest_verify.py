@@ -5,8 +5,8 @@ from __future__ import annotations
 import hashlib
 import json
 import os
-import signal
 import shutil
+import signal
 import sqlite3
 import subprocess
 import sys
@@ -17,12 +17,13 @@ import pytest
 from playwright.sync_api import Page
 from pydantic import BaseModel
 
+from e2e_tests.eicar_fixture import write_eicar_emlx
 from mailarchiver.application import ApplicationController, ApplicationPreferencesStore
 from mailarchiver.catalog import address_pk, create_catalog, create_search
 from mailarchiver.gui_app import (
-    AboutApi,
     E2E_DRIVER,
     GUI_DIRECTORY,
+    AboutApi,
     GuiApi,
     GuiE2EClientResult,
     IngestWindowApi,
@@ -33,8 +34,6 @@ from mailarchiver.gui_app import (
 )
 from mailarchiver.ingest_status import read_ingest_history
 from mailarchiver.search import index_message
-from e2e_tests.eicar_fixture import write_eicar_emlx
-
 
 DATA = Path(__file__).parent / "data"
 NORMAL_MESSAGE_COUNT = 207

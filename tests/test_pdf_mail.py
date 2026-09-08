@@ -10,7 +10,6 @@ import pytest
 
 from mailarchiver.pdf_mail import extract_pdf_mail, write_pdf_mbox
 
-
 DATA = Path(__file__).parent / "data"
 PDF = DATA / "sipbadmin.pdf"
 GROUND_TRUTH = DATA / "sipbadmin.mbox"

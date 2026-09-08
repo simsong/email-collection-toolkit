@@ -2,13 +2,19 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
 from pydantic import ValidationError
 
-from mailarchiver.plugin_api import FileProbe, MailContainer, MailObject, SourceReference, SourceSpec
+from mailarchiver.plugin_api import (
+    FileProbe,
+    MailContainer,
+    MailObject,
+    SourceReference,
+    SourceSpec,
+)
 from mailarchiver.plugin_loader import PluginDiscoveryError, load_plugins
 
 
@@ -387,7 +393,7 @@ def test_source_fallback_date_is_timezone_aware_and_normalized() -> None:
             raw=b"From: sender@example.net\n\nbody\n",
             source=reference,
             cursor="message-1",
-            source_date_utc=datetime(2024, 2, 1, 7),
+            source_date_utc=datetime(2024, 2, 1, 7, tzinfo=UTC).replace(tzinfo=None),
         )
 
     mail = MailObject(
@@ -397,7 +403,7 @@ def test_source_fallback_date_is_timezone_aware_and_normalized() -> None:
         cursor="message-1",
         source_date_utc=datetime(2024, 2, 1, 7, tzinfo=timezone(timedelta(hours=-5))),
     )
-    assert mail.source_date_utc == datetime(2024, 2, 1, 12, tzinfo=timezone.utc)
+    assert mail.source_date_utc == datetime(2024, 2, 1, 12, tzinfo=UTC)
 
 
 def test_path_only_legacy_source_cannot_enter_the_production_registry(tmp_path: Path) -> None:
