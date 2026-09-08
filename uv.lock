@@ -739,7 +739,7 @@ requires-dist = [
     { name = "charset-normalizer", specifier = ">=3.4.0" },
     { name = "dnspython", specifier = ">=2.8.0" },
     { name = "ftfy", specifier = ">=6.3.0" },
-    { name = "google-auth-oauthlib", specifier = ">=1.2.3" },
+    { name = "google-auth-oauthlib", specifier = ">=1.4.1" },
     { name = "keyring", specifier = ">=25.6.0" },
     { name = "py7zr", specifier = ">=1.0.0" },
     { name = "pydantic", specifier = ">=2.13.4" },
