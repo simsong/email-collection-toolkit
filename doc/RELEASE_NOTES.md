@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+* Document the browser-driven Copilot-to-complete workflow, ten-minute review
+  checks, signed Codex identity, and explicit human handoff for review loops.
+
 * Make `refresh-index` observable and safe to interrupt: it now reports
   message-weighted verification/indexing progress bars with ETA, announces its
   Ctrl-C safety before work begins, and discards an incomplete replacement

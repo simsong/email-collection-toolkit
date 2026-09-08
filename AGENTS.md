@@ -84,8 +84,83 @@ verify that the PR head matches the pushed commit. Never leave work only on a
 GitHub non-`main` branch, including when a previously merged branch name is
 reused.
 
-Do not commit, push, open or modify pull requests, approve, merge, close
-issues, or change remote services unless the user explicitly requests it.
-When authorized, Codex GitHub activity uses `@simsong-codex`; signed commits use
-`Codex AI Assistant <simsong+codex@acm.org>` and the configured Codex GPG key.
-Verify identity and signature after committing.
+## Authorization and identity
+
+A request to perform **copilot-to-complete** (also called **codex-to-complete**)
+authorizes the commits, pushes, draft PR creation, review requests, review-thread
+replies, fixes, and final human-review request described below. Continue through
+these steps without repeatedly requesting permission. Do not approve or merge a
+PR, close an issue or superseded PR, or change remote services without explicit
+user authorization for that action.
+
+All Codex GitHub writes and browser actions must use `@simsong-codex`, never
+`@simsong`. Verify the CLI identity, SSH push identity, and browser login
+separately. Before committing, configure and verify author and committer as
+`Codex AI Assistant <simsong+codex@acm.org>` and verify the signing key belongs to
+that identity. Sign every Codex commit. Verify the result before pushing with
+`git log -1 --format='%G? %GS %an <%ae> %cn <%ce>'`. To correct identity on an
+existing commit, use `git commit --amend --reset-author -S`.
+
+## Copilot-to-complete
+
+1. Fetch current remote state; inspect the intended diff against the PR base and
+   preserve unrelated work. Run the relevant Makefile validation before each
+   commit. Commit, push, and open a matching **draft** PR in the same publication
+   workflow. Verify that GitHub's PR head SHA equals the pushed commit.
+2. Open the PR in an authenticated web browser and verify `simsong-codex` is
+   signed in. In the GitHub reviewers panel, click Copilot's **Request** or
+   **Re-request review** control. Do not use `@copilot review`, another mention,
+   a CLI command, or an API request to trigger a review. If the browser login or
+   control is unavailable, report the exact blocker and keep the PR draft.
+3. Verify a visible pending Copilot review or review-request timeline event.
+   A click alone is not proof. Check for Copilot's response every **10 minutes**,
+   reconciling the live head SHA, review events, review threads, and CI checks.
+   Use a task heartbeat when continuation beyond the current turn is needed;
+   keep it quiet while nothing changes and stop it when the cycle completes.
+   Do not abandon the cycle after requesting a review or pushing a fix.
+4. Read every finding and reply in its **exact GitHub review-panel thread**.
+   Fix valid findings. For an incorrect finding, explain the relevant invariant
+   and evidence; clarify source comments when that explanation helps future
+   readers. Do not add misleading comments or weaken correct behavior merely
+   to satisfy Copilot. After pushing a fix, add its commit SHA and Makefile
+   validation evidence to that same thread. Do not manually resolve Copilot's
+   threads; distinguish automatic resolution from verified correctness.
+5. After every new push, request another Copilot review using the browser
+   control and repeat the 10-minute checks. Previous-head reviews do not clear
+   a new head. Address CI failures as well as review findings. A submitted
+   review with no remaining actionable findings counts as successful; Copilot
+   need not submit an approval verdict.
+6. Continue until the current head has a successful review, or a documented
+   loop remains: the same substantive finding returns in two successive review
+   rounds after an evidence-backed fix or explanation, with no new actionable
+   information. Record the relevant threads, commits, evidence, and remaining
+   disagreement. A missing review, failed check, or unresolved valid defect is
+   not a review loop and must remain a reported blocker.
+7. Once required CI and relevant local validation pass, mark the PR **ready for
+   review** and request review from `@simsong`; also assign the PR to `@simsong`.
+   For a loop handoff, explicitly say that Copilot is not clear and identify the
+   disputed findings for human judgment. Verify ready state, reviewer request,
+   assignment, and final head on GitHub. Never approve or merge automatically.
+
+Completion means the verified human-review handoff, not merely a successful
+push, request click, or comment. Report the PR, head, validation, review outcome,
+and any remaining limitation accurately. Preserve progress and the exact next
+step when an external blocker prevents completion.
+
+## Validation and cleanup
+
+Use Makefile targets for Ruff and Pylint linting, then ty and Pyright type
+analysis, then pytest. Keep these stages ordered in the aggregate check target,
+even under parallel make. Treat all diagnostics as failures; fix the underlying
+logic or precise types rather than broadly excluding files, disabling checks,
+or adding blanket ignores. Add focused third-party stubs only where needed.
+Update requirements, implementation documentation, and release notes when the
+corresponding behavior or developer workflow changes. Report skipped tests and
+external prerequisites separately from passing validation.
+
+After a branch is merged into `origin/main`, fetch and prune, prove its work is
+represented in the current main (ancestry, or explicit squash/rebase evidence),
+and verify the linked worktree has no modified or untracked files. Only then
+remove its linked worktree and delete its local branch. Preserve dirty,
+unmerged, or uncertain worktrees. A superseded PR closed during consolidation
+is not proof that its branch has reached main.
