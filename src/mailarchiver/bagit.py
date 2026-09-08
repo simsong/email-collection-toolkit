@@ -4,12 +4,13 @@ from __future__ import annotations
 
 import csv
 import hashlib
+import logging
 import math
 import os
 import re
 import sqlite3
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from email import policy
 from email.parser import BytesParser
 from pathlib import Path
@@ -131,6 +132,7 @@ def _mailbag_metadata(raw: bytes, fallback_message_id: str) -> MailbagMessageMet
         defects = "; ".join(type(defect).__name__ for defect in message.defects)
         return MailbagMessageMetadata(message_id=message_id, attachments=attachments, error=defects)
     except Exception as error:
+        logging.getLogger(__name__).debug("Best-effort operation failed", exc_info=True)
         return MailbagMessageMetadata(
             message_id=fallback_message_id,
             attachments=0,
@@ -275,7 +277,7 @@ def _read_external_identifier(path: Path) -> str | None:
 def _write_bag_info(archive: Path, byte_count: int, file_count: int, packaged_at: datetime) -> None:
     if packaged_at.tzinfo is None:
         raise ValueError("Bagging-Timestamp must be timezone-aware")
-    packaged_at = packaged_at.astimezone(timezone.utc)
+    packaged_at = packaged_at.astimezone(UTC)
     identifier = _read_external_identifier(archive / BAG_INFO) or str(uuid.uuid4())
     content = "\n".join(
         (
@@ -339,5 +341,5 @@ def write_bag_checkpoint(
         writer.abort()
         raise
     byte_count, file_count = _write_payload_manifest(archive, mbox_digests)
-    _write_bag_info(archive, byte_count, file_count, packaged_at or datetime.now(timezone.utc))
+    _write_bag_info(archive, byte_count, file_count, packaged_at or datetime.now(UTC))
     _write_tag_manifest(archive, csv_paths)

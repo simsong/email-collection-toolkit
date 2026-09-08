@@ -8,7 +8,8 @@ import shutil
 import sqlite3
 import sys
 import textwrap
-from datetime import date as CalendarDate, timedelta
+from datetime import date as CalendarDate
+from datetime import timedelta
 from email import policy
 from email.message import Message
 from email.parser import BytesParser
@@ -20,8 +21,8 @@ from pydantic import BaseModel, Field
 from .archive_path import add_archive_argument, require_archive
 from .layout import mbox_path
 from .mailbox_tree import MailboxSelection
-from .message import decoded_header
 from .mbox import MboxLocation, read_verified_location
+from .message import decoded_header
 from .search import SEARCH_CATEGORIES, decoded_part, html_text, is_attachment
 
 DEFAULT_LIMIT = 10

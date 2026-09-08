@@ -5,8 +5,8 @@ from __future__ import annotations
 import hashlib
 import json
 import os
-import signal
 import shutil
+import signal
 import sqlite3
 import subprocess
 import sys
@@ -17,12 +17,13 @@ import pytest
 from playwright.sync_api import Page, expect
 from pydantic import BaseModel
 
+from e2e_tests.eicar_fixture import write_eicar_emlx
 from mailarchiver.application import ApplicationController, ApplicationPreferencesStore
 from mailarchiver.catalog import address_pk, create_catalog, create_search
 from mailarchiver.gui_app import (
-    AboutApi,
     E2E_DRIVER,
     GUI_DIRECTORY,
+    AboutApi,
     GuiApi,
     GuiE2EClientResult,
     IngestWindowApi,
@@ -33,8 +34,6 @@ from mailarchiver.gui_app import (
 )
 from mailarchiver.ingest_status import read_ingest_history
 from mailarchiver.search import index_message
-from e2e_tests.eicar_fixture import write_eicar_emlx
-
 
 DATA = Path(__file__).parent / "data"
 NORMAL_MESSAGE_COUNT = 207
@@ -354,6 +353,13 @@ def test_about_window_displays_version_disk_and_warnings(tmp_path: Path, page: P
     """Requirement: the persistent About UI surfaces health and application diagnostics."""
     controller = ApplicationController(ApplicationPreferencesStore(tmp_path / "preferences.json"))
     application = PyWebViewApplication(controller)
+    first = controller.create_document(tmp_path / "first.mailarchive")
+    first_window = controller.new_search_window(first)
+    second = controller.create_document(tmp_path / "second.mailarchive")
+    controller.new_search_window(second)
+    assert application.about_status().disk_path == str(second.path)
+    controller.activate_window(first_window.window_id)
+    assert application.about_status().disk_path == str(first.path)
     application.add_notice("warning", "Saved archive was ignored because its database was invalid.")
     api = AboutApi(application)
     page.expose_function("mailarchive_about_status", api.status)

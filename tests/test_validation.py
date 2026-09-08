@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-import mailbox
 import gzip
+import mailbox
 import stat
 import subprocess
 import tarfile
@@ -29,7 +29,6 @@ from mailarchiver.validation import (
     load_datasets,
     prepare,
 )
-
 
 CONFIG_DIR = Path(__file__).parents[1] / "validation" / "datasets"
 

@@ -7,10 +7,14 @@ import json
 import mailbox
 import subprocess
 import sys
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
-from mailarchiver.bagit import initialize_bag, refresh_tag_manifest, write_bag_checkpoint
+from mailarchiver.bagit import (
+    initialize_bag,
+    refresh_tag_manifest,
+    write_bag_checkpoint,
+)
 from mailarchiver.catalog import address_pk, create_catalog
 from mailarchiver.layout import integrity_path, mbox_directory
 from mailarchiver.mbox import add_message
@@ -64,7 +68,7 @@ def make_integrity_archive(tmp_path: Path, raw: bytes | None = None) -> tuple[Pa
     )
     catalog.commit()
     install_archive_verifier(tmp_path)
-    write_bag_checkpoint(tmp_path, catalog, datetime(2026, 8, 22, tzinfo=timezone.utc))
+    write_bag_checkpoint(tmp_path, catalog, datetime(2026, 8, 22, tzinfo=UTC))
     catalog.commit()
     catalog.close()
     return path, integrity_path(tmp_path, path.name), raw

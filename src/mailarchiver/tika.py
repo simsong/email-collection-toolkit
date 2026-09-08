@@ -11,7 +11,6 @@ from pathlib import Path, PurePosixPath
 
 from pydantic import BaseModel
 
-
 SHA512_PATTERN = re.compile(r"[0-9a-fA-F]{128}\Z")
 
 

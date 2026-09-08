@@ -14,7 +14,14 @@ from types import ModuleType
 
 from pydantic import BaseModel, ConfigDict, ValidationError
 
-from .plugin_api import LoadedPlugin, PluginCapabilities, PluginContext, PluginManifest, PluginRegistry, PluginType
+from .plugin_api import (
+    LoadedPlugin,
+    PluginCapabilities,
+    PluginContext,
+    PluginManifest,
+    PluginRegistry,
+    PluginType,
+)
 
 
 class PluginDiscoveryError(RuntimeError):

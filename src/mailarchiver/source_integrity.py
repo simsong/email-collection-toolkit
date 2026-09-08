@@ -12,10 +12,11 @@ from .plugin_api import (
     IntegrityEvidence,
     MailContainer,
     ProgressEvent,
+)
+from .plugin_api import (
     SourceIntegrityControls as PluginSourceIntegrityControls,
 )
 from .sources import SourceFile, SourcePlan
-
 
 LOCAL_FILE_CONTROL_ID = "local-file-sha256-v1"
 LOCAL_FILE_PREFIX_CONTROL_ID = "local-file-prefix-sha256-v1"

@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import logging
 import os
 import shutil
 import subprocess
@@ -12,27 +13,27 @@ import sys
 import tempfile
 import time
 from concurrent.futures import Future, ThreadPoolExecutor
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from importlib import import_module
 from importlib.metadata import version
 from pathlib import Path
 from threading import Event, Lock, RLock, Thread
 from typing import Any, Literal
-from urllib.request import Request, urlopen
 from urllib.parse import urlencode, urlsplit
+from urllib.request import Request, urlopen
 from uuid import uuid4
 
 import webview
 from pydantic import BaseModel, Field
 from webview.menu import MenuAction
 
+from .__main__ import IngestInterrupted, IngestOutcome, IngestRequest, run_ingest
 from .application import (
     ApplicationController,
     ArchiveDocument,
     IngestJob,
     SearchWindow,
 )
-from .__main__ import IngestInterrupted, IngestRequest, run_ingest
 from .scanner import CLAMAV_DOWNLOAD_URL, UNSCANNED_WARNING, ScannerAvailability, scanner_availability
 from .configuration import GuiConfiguration, application_configuration
 from .document_options import (
@@ -44,8 +45,8 @@ from .archive_config import (
     remember_import_directory,
 )
 from .gui_service import (
-    MessageView,
     MessagePreview,
+    MessageView,
     PreviewBatch,
     attachment_content,
     attachment_descriptor,
@@ -57,14 +58,19 @@ from .gui_service import (
     render_part,
     safe_filename,
     search_count,
-    searchable_message_count,
     search_page,
     search_suggestions,
+    searchable_message_count,
     write_attachment,
     write_message,
     write_messages_zip,
 )
-from .ingest_status import IngestHistory, IngestStatus, latest_ingest_status, read_ingest_history
+from .ingest_status import (
+    IngestHistory,
+    IngestStatus,
+    latest_ingest_status,
+    read_ingest_history,
+)
 from .loopback import LoopbackAssetServer
 from .mailbox_tree import FilterSet, FilterSetStore, MailboxSelection, mailbox_tree
 from .writer_lock import ArchiveBusyError, WriterLease
@@ -111,7 +117,7 @@ class ApplicationMetadata(BaseModel):
 class ApplicationNotice(BaseModel):
     """One startup, warning, import, or failure message retained for About."""
 
-    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     severity: Literal["information", "warning", "error"]
     message: str
 
@@ -205,7 +211,7 @@ class ConnectivityMonitor:
             with self._lock:
                 self._status = InternetStatus(
                     online=online,
-                    checked_at=datetime.now(timezone.utc),
+                    checked_at=datetime.now(UTC),
                     detail=detail,
                 )
             self._stop.wait(INTERNET_CHECK_INTERVAL_SECONDS)
@@ -303,6 +309,7 @@ class NativeSmokeController:
             try:
                 self._window.destroy()
             except Exception as error:  # pylint: disable=broad-exception-caught
+                logging.getLogger(__name__).debug("Best-effort operation failed", exc_info=True)
                 self._abort(f"native window destroy failed: {error}")
         if not self._event_loop_stopped.wait(self.SHUTDOWN_TIMEOUT_SECONDS):
             self._abort(f"Cocoa event loop did not stop within {self.SHUTDOWN_TIMEOUT_SECONDS:g} seconds")
@@ -604,7 +611,7 @@ class GuiApi:
         e2e_directory: Path | None = None,
         preferences_file: Path | None = None,
         *,
-        application: "PyWebViewApplication | None" = None,
+        application: PyWebViewApplication | None = None,
         document: ArchiveDocument | None = None,
         search_window: SearchWindow | None = None,
     ) -> None:
@@ -830,6 +837,7 @@ class GuiApi:
                 if generation == self._preview_generation and archive == self.archive:
                     self._preview_cache.update((preview.message_pk, preview) for preview in previews)
         except Exception as error:  # pylint: disable=broad-exception-caught
+            logging.getLogger(__name__).debug("Best-effort operation failed", exc_info=True)
             with self._preview_lock:
                 if generation == self._preview_generation:
                     self._preview_error = f"{type(error).__name__}: {error}"
@@ -855,7 +863,9 @@ class GuiApi:
             raise ValueError("source location has no local filesystem path")
         try:
             import AppKit  # pylint: disable=import-error,import-outside-toplevel
-            from Foundation import NSURL  # pylint: disable=import-error,import-outside-toplevel,no-name-in-module
+            from Foundation import (
+                NSURL,  # pylint: disable=import-error,import-outside-toplevel,no-name-in-module
+            )
         except ImportError as error:
             raise ValueError("copying source paths requires macOS with PyObjC installed") from error
 
@@ -901,7 +911,9 @@ class GuiApi:
             return destination
         try:
             import AppKit  # pylint: disable=import-error,import-outside-toplevel
-            from Foundation import NSURL  # pylint: disable=import-error,import-outside-toplevel,no-name-in-module
+            from Foundation import (
+                NSURL,  # pylint: disable=import-error,import-outside-toplevel,no-name-in-module
+            )
         except ImportError as error:
             raise ValueError("opening links requires macOS with PyObjC installed") from error
 
@@ -1091,6 +1103,7 @@ class PyWebViewApplication:
         self._menu_observer: Any = None
         self._lock = RLock()
         self._quitting = False
+        self._import_threads: list[Thread] = []
 
     def asset_url(
         self, asset: str, parameters: list[tuple[str, str]] | None = None
@@ -1150,9 +1163,10 @@ class PyWebViewApplication:
                 return
             self._notices.append(notice)
             self._notices = self._notices[-100:]
-        for api in self._search_apis():
-            if api.window is not None:
-                api.window.run_js(f"window.mailArchiverNotice?.({json.dumps(message)});")
+        if severity != "information":
+            for api in self._search_apis():
+                if api.window is not None:
+                    api.window.run_js(f"window.mailArchiverNotice?.({json.dumps(message)});")
 
     def notices(self) -> list[ApplicationNotice]:
         with self._lock:
@@ -1160,7 +1174,10 @@ class PyWebViewApplication:
 
     def about_status(self) -> AboutStatus:
         documents = self.controller.documents()
-        disk_path = next((document.path for document in documents if document.path), Path.home())
+        active = self.controller.active_document
+        disk_path = (active.path if active else None) or next(
+            (document.path for document in documents if document.path), Path.home()
+        )
         assert disk_path is not None
         try:
             free = shutil.disk_usage(disk_path).free
@@ -1218,7 +1235,7 @@ class PyWebViewApplication:
             self._native_search_ids[window.uid] = session.window_id
         window.events.shown += lambda *_args: self.activate_window(session.window_id)
         window.events.restored += lambda *_args: self.activate_window(session.window_id)
-        window.events.closing += lambda *_args: self.controller.can_close_window(session.window_id)
+        window.events.closing += lambda *_args: self._can_close_search_window(session.window_id, window)
         window.events.closed += lambda *_args: self._close_window(session.window_id)
         self._refresh_menus()
         return api
@@ -1232,6 +1249,9 @@ class PyWebViewApplication:
         if native is not None:
             with self._lock:
                 window_id = self._native_search_ids.get(native.uid)
+                document_id = self._native_child_ids.get(native.uid)
+                if window_id is None and document_id is not None:
+                    window_id = next((key for key, value in self._apis.items() if value.document is self.controller.document(document_id)), None)
                 api = self._apis.get(window_id) if window_id else None
             if window_id is not None:
                 self.controller.activate_window(window_id)
@@ -1244,7 +1264,11 @@ class PyWebViewApplication:
         anchor = self._dialog_window()
         if anchor is None:
             return False
-        return self._create_new_document(anchor) is not None
+        created = self._create_new_document(anchor)
+        if created is None:
+            return False
+        self._import_document(created)
+        return True
 
     def _create_new_document(self, anchor: Any) -> GuiApi | None:
         selected = anchor.create_file_dialog(
@@ -1439,11 +1463,15 @@ class PyWebViewApplication:
             finally:
                 job.finished.set()
 
-        Thread(
+        worker = Thread(
             target=import_worker,
             name=f"mailarchiver-import-{operation_id[:8]}",
             daemon=False,
-        ).start()
+        )
+        with self._lock:
+            self._import_threads = [thread for thread in self._import_threads if thread.is_alive()]
+            self._import_threads.append(worker)
+            worker.start()
         return True
 
     def stop_imports_for_quit(self) -> tuple[IngestJob, ...]:
@@ -1464,20 +1492,22 @@ class PyWebViewApplication:
         stop: Event,
     ) -> None:
         error: BaseException | None = None
+        outcome = IngestOutcome()
         try:
-            run_ingest(request, lease, stop_event=stop)
+            run_ingest(request, lease, stop_event=stop, outcome=outcome, terminal=False)
             try:
                 remember_import_directory(document.path, [Path(root) for root in request.roots])
             except (OSError, ValueError) as config_error:
                 self.add_notice("warning", f"Import completed but the source directory could not be saved: {config_error}")
         except BaseException as caught:  # pylint: disable=broad-exception-caught
+            logging.getLogger(__name__).debug("Best-effort operation failed", exc_info=True)
             error = caught
         finally:
             try:
                 refresh = self.controller.finish_ingest(
                     document.descriptor.document_id,
                     operation_id,
-                    published=True,
+                    published=outcome.published,
                 )
             except ValueError:
                 refresh = ()
@@ -1705,8 +1735,26 @@ class PyWebViewApplication:
             items.append(MenuAction(api.window.title, lambda uid=api.window.uid: self.focus_window(uid)))
         return items
 
+    def _can_close_search_window(self, window_id: str, window: Any) -> bool:
+        if self.controller.can_close_window(window_id):
+            return True
+        if not window.create_confirmation_dialog(
+            "Import is running",
+            "Wait for the import to finish before closing? Cancel keeps this window open.",
+        ):
+            return False
+        with self._lock:
+            workers = tuple(self._import_threads)
+        for worker in workers:
+            worker.join()
+        return self.controller.can_close_window(window_id)
+
     def shutdown(self) -> None:
         """Release non-document resources after the native event loop exits."""
+        with self._lock:
+            workers = tuple(self._import_threads)
+        for worker in workers:
+            worker.join()
         if self._menu_observer is not None:
             from Foundation import NSNotificationCenter  # pylint: disable=import-outside-toplevel,no-name-in-module,import-error
             NSNotificationCenter.defaultCenter().removeObserver_(self._menu_observer)
@@ -1892,8 +1940,14 @@ def configure_macos_application() -> None:
     """Replace the bare Python process identity before pywebview builds Cocoa menus."""
     if sys.platform != "darwin":
         return
-    from AppKit import NSApplication, NSImage  # pylint: disable=import-outside-toplevel,no-name-in-module,import-error
-    from Foundation import NSBundle, NSProcessInfo  # pylint: disable=import-outside-toplevel,no-name-in-module,import-error
+    from AppKit import (  # pylint: disable=import-outside-toplevel,no-name-in-module,import-error
+        NSApplication,
+        NSImage,
+    )
+    from Foundation import (  # pylint: disable=import-outside-toplevel,no-name-in-module,import-error
+        NSBundle,
+        NSProcessInfo,
+    )
 
     metadata = application_metadata()
     bundle = NSBundle.mainBundle()

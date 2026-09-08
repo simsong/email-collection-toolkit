@@ -25,9 +25,6 @@ OCR_RUN_ARGS ?=
 
 check: ruff syntax-check test test-e2e website-check
 
-.PHONY: ruff
-ruff:
-	uv run --locked ruff check .
 
 .PHONY: syntax-check
 syntax-check:
@@ -290,3 +287,12 @@ ocr-run:
 	uv run python scripts/ocr_experiment.py run --output "$(OCR_OUTPUT)" --engines "$(OCR_ENGINES)" --workers "$(OCR_WORKERS)" $(OCR_RUN_ARGS)
 
 ocr-experiment: ocr-inventory ocr-run
+
+.PHONY: ruff
+RUFF_FLAGS ?= --no-respect-gitignore
+ruff:
+	uv run --locked ruff check --config pyproject.toml $(RUFF_FLAGS) .
+
+.PHONY: test-writer-lock
+test-writer-lock:
+	uv run pytest -q tests/test_writer_lock.py

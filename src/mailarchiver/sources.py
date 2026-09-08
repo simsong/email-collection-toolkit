@@ -35,7 +35,6 @@ from .plugin_api import (
 )
 from .source_volume import SourceVolume, local_mount_path, local_source_volume
 
-
 SourceKind = str
 BABYL_OPTIONS = b"babyl options:"
 BABYL_RECORD = b"\x1f\x0c"
@@ -638,7 +637,7 @@ def _mbcp_exclusion(envelope_sender: bytes, raw: bytes) -> str | None:
     if envelope_sender != MBCP_ENVELOPE_SENDER:
         return None
     message = BytesParser(policy=policy.compat32).parsebytes(raw)
-    names = {name.casefold() for name in message.keys()}
+    names = {name.casefold() for name in message}
     payload = message.get_payload()
     if {"x-uid", "x-mbcp-flags"} <= names <= MBCP_HEADERS and str(payload).strip() == "":
         return "Eudora MBCP metadata stub"
@@ -650,7 +649,7 @@ def _unwrap_xxx_record(raw: bytes) -> bytes:
     if separator is None:
         return raw
     wrapper = BytesParser(policy=policy.compat32).parsebytes(raw[: separator.end()])
-    if not set(name.casefold() for name in wrapper.keys()) <= XXX_WRAPPER_HEADERS:
+    if not {name.casefold() for name in wrapper} <= XXX_WRAPPER_HEADERS:
         return raw
     nested = MBOXRD_QUOTED_FROM.sub(b"", raw[separator.end():])
     envelope, newline, message = nested.partition(b"\n")
@@ -735,7 +734,7 @@ def _without_container_newline(body: bytearray) -> bytes:
     """Remove the one line ending Babyl adds before its record separator."""
     if body.endswith(b"\r\n"):
         return bytes(body[:-2])
-    if body.endswith(b"\n") or body.endswith(b"\r"):
+    if body.endswith((b"\n", b"\r")):
         return bytes(body[:-1])
     return bytes(body)
 

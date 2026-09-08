@@ -23,7 +23,6 @@ from pydantic import BaseModel
 
 from mailarchiver.mbox import MboxLocation, read_verified_location
 
-
 PDFINFO_ENCRYPTED = "Encrypted"
 PDFINFO_PAGES = "Pages"
 
@@ -294,7 +293,7 @@ def inventory(archive: Path, output: Path, max_message_pk: int | None) -> None:
 
 
 def command_output(command: list[str], timeout: int = 1800) -> bytes:
-    result = subprocess.run(command, check=False, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=timeout)
+    result = subprocess.run(command, check=False, capture_output=True, timeout=timeout)
     if result.returncode:
         detail = result.stderr.decode("utf-8", "replace").strip()
         raise RuntimeError(f"exit {result.returncode}: {detail[-4000:]}")

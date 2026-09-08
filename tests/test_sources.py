@@ -19,13 +19,13 @@ from mailarchiver.sources import (
     emlx_bytes,
     local_hierarchy_path,
     mailbox_hierarchy_parsers,
-    register_mailbox_hierarchy_parser,
     register_file_parser,
+    register_mailbox_hierarchy_parser,
     source_files,
     source_inventory,
     source_messages,
-    unregister_mailbox_hierarchy_parser,
     unregister_file_parser,
+    unregister_mailbox_hierarchy_parser,
 )
 
 

@@ -325,7 +325,8 @@ def test_one_ingest_is_shared_per_document_and_requires_a_writer_lease(tmp_path:
     assert set(refreshed) == {first_window.window_id, second_window.window_id}
     assert first_document.generation == 1
     assert second_document.ingest_job == second_job
-    application.finish_ingest(second_document.descriptor.document_id, "second-ingest", published=False)
+    assert application.finish_ingest(second_document.descriptor.document_id, "second-ingest", published=False) == ()
+    assert second_document.generation == 0
 
 
 def test_child_windows_and_ingest_keep_a_document_alive(tmp_path: Path) -> None:
@@ -372,3 +373,43 @@ def test_recent_archives_are_bounded_and_preserve_display_paths(tmp_path: Path) 
         archives[-3], archives[-1], archives[-2], *reversed(archives[2:-3])
     ]
     assert len(application.preferences.recent_archives) == 10
+
+
+@pytest.mark.parametrize("name", ["archive.sqlite3", "search.sqlite3"])
+@pytest.mark.parametrize("alias", ["symlink", "hardlink"])
+def test_database_aliases_are_rejected_without_mutation(tmp_path: Path, name: str, alias: str) -> None:
+    """Requirement: aliased databases cannot bypass another archive's writer lease."""
+    archive = make_archive(tmp_path / "archive")
+    outside = make_archive(tmp_path / "outside") / name
+    before = outside.read_bytes()
+    target = archive / name
+    target.unlink()
+    if alias == "symlink":
+        target.symlink_to(outside)
+    else:
+        target.hardlink_to(outside)
+    with pytest.raises(InvalidArchiveError, match="regular file with one link"):
+        controller(tmp_path).open_document(archive)
+    assert outside.read_bytes() == before
+
+
+def test_case_alias_shares_document_on_case_insensitive_filesystem(tmp_path: Path) -> None:
+    """Requirement: directory identity survives alternate case on macOS volumes."""
+    archive = make_archive(tmp_path / "CaseArchive")
+    alias = tmp_path / "casearchive"
+    if not alias.exists():
+        pytest.skip("requires a case-insensitive filesystem")
+    application = controller(tmp_path)
+    assert application.open_document(archive) is application.open_document(alias)
+
+
+def test_failed_discovery_does_not_claim_publication(tmp_path: Path) -> None:
+    """Requirement: pre-publication failure must not trigger a document refresh."""
+    from mailarchiver.__main__ import IngestOutcome, IngestRequest, run_ingest
+
+    archive = make_archive(tmp_path / "archive")
+    outcome = IngestOutcome()
+    request = IngestRequest(archive=archive, owner_names_file=tmp_path / "owners.txt", roots=["unsupported://fixture"])
+    with pytest.raises(ValueError, match="no source plug-in recognized"):
+        run_ingest(request, outcome=outcome, terminal=False)
+    assert not outcome.published

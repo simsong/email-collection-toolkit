@@ -1,7 +1,7 @@
 """Verify malformed metadata is recorded while message identity and dates stay stable."""
 
 import hashlib
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta, timezone
 from email import policy
 from email.header import Header
 from email.parser import BytesParser
@@ -72,7 +72,7 @@ def test_source_date_resolves_undated_virtual_message() -> None:
     """Requirement: source metadata preserves undated provider mail without inventing path state."""
     raw = b"Message-ID: <source-date@example>\nFrom: sender@example.net\n\nbody\n"
     source_date = datetime(2024, 2, 1, 7, tzinfo=timezone(timedelta(hours=-5)))
-    prior_date = datetime(2001, 1, 1, tzinfo=timezone.utc)
+    prior_date = datetime(2001, 1, 1, tzinfo=UTC)
 
     parsed = parse_message(raw, None, prior_date, source_date)
 
@@ -211,7 +211,7 @@ def test_implausible_date_uses_received_fallback() -> None:
 def test_configured_earliest_year_rejects_epoch_date_and_uses_stream_context() -> None:
     """Requirement: archive-specific chronology rejects a pre-email epoch-like Date."""
     raw = b"From: sender@example.net\nDate: Thu, 1 Jan 1970 00:00:00 +0000\n\nbody\n"
-    prior = datetime(2002, 4, 5, 12, tzinfo=timezone.utc)
+    prior = datetime(2002, 4, 5, 12, tzinfo=UTC)
 
     parsed = parse_message(raw, Path("/input/2002/outbox.mbox"), prior, earliest_year=1983)
 

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import sqlite3
+import stat
 import sys
 import tempfile
 from hashlib import sha256
@@ -18,7 +19,6 @@ from pydantic import BaseModel, ConfigDict, Field
 from .bagit import initialize_bag
 from .catalog import create_catalog, create_search, validate_catalog, validate_search
 from .writer_lock import ArchiveBusyError, WriterLease
-
 
 APPLICATION_PREFERENCES_VERSION = 1
 RECENT_ARCHIVE_LIMIT = 10
@@ -143,7 +143,12 @@ def validate_archive(path: Path) -> tuple[Path, Path, str]:
     if missing:
         raise InvalidArchiveError(f"archive is missing {', '.join(missing)}: {display}")
     canonical = display.resolve(strict=True)
-    identity = os.path.normcase(str(canonical))
+    for name in ("archive.sqlite3", "search.sqlite3"):
+        metadata = (canonical / name).lstat()
+        if not stat.S_ISREG(metadata.st_mode) or metadata.st_nlink != 1:
+            raise InvalidArchiveError(f"archive database must be a regular file with one link: {name}")
+    metadata = canonical.stat()
+    identity = f"{metadata.st_dev}:{metadata.st_ino}"
     try:
         validate_catalog(canonical / "archive.sqlite3")
         validate_search(canonical / "search.sqlite3")
@@ -152,7 +157,7 @@ def validate_archive(path: Path) -> tuple[Path, Path, str]:
     return display, canonical, identity
 
 
-def create_empty_archive(path: Path) -> "ArchiveDocument":
+def create_empty_archive(path: Path) -> ArchiveDocument:
     """Initialize a selected new or empty destination while holding its writer lease."""
     display = Path(os.path.abspath(path.expanduser()))
     if display.is_symlink() or (display.exists() and not display.is_dir()):
@@ -161,8 +166,7 @@ def create_empty_archive(path: Path) -> "ArchiveDocument":
         if (display / "archive.sqlite3").is_file() and (display / "search.sqlite3").is_file():
             raise InvalidArchiveError(f"archive already exists; use Open instead: {display}")
         raise InvalidArchiveError(f"new archive destination is not empty: {display}")
-    display.mkdir(parents=False, exist_ok=True)
-    canonical = display.resolve(strict=True)
+    canonical = display.resolve()
     identity = os.path.normcase(str(canonical))
     lease = WriterLease.acquire(
         canonical,
@@ -170,8 +174,11 @@ def create_empty_archive(path: Path) -> "ArchiveDocument":
         "create archive",
         uuid4().hex,
         version("mailarchiver"),
+        create=True,
     )
     try:
+        if any(entry.name != "status" for entry in canonical.iterdir()):
+            raise InvalidArchiveError(f"new archive destination is not empty: {display}")
         initialize_bag(canonical)
         create_catalog(canonical / "archive.sqlite3").close()
         create_search(canonical / "search.sqlite3").close()
@@ -193,7 +200,7 @@ class ArchiveDocument:
         self._lock = RLock()
 
     @classmethod
-    def open(cls, path: Path) -> "ArchiveDocument":
+    def open(cls, path: Path) -> ArchiveDocument:
         display, canonical, identity = validate_archive(path)
         digest = sha256(identity.encode("utf-8")).hexdigest()[:20]
         return cls(
@@ -206,7 +213,7 @@ class ArchiveDocument:
         )
 
     @classmethod
-    def untitled(cls) -> "ArchiveDocument":
+    def untitled(cls) -> ArchiveDocument:
         identifier = uuid4().hex
         return cls(
             ArchiveDescriptor(
@@ -281,7 +288,7 @@ class ArchiveDocument:
                 lease.release()
             if published:
                 self._generation += 1
-            return tuple(self._window_ids)
+            return tuple(self._window_ids) if published else ()
 
     def releasable(self) -> bool:
         with self._lock:

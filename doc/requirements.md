@@ -510,7 +510,7 @@ and the versioned layout and SQLite readable state of both databases without
 creating or modifying anything. A missing or invalid saved archive is removed
 from recent preferences and reported in the persistent About window. The document
 retains the user's absolute display path and also uses a canonical,
-case-normalized path as its process-local identity. Windows opened through
+filesystem device/inode pair as its process-local identity. Windows opened through
 aliases of the same archive share the document's ingest state, child windows,
 and publication generation. The document remains alive while any search
 window, child window, or ingest operation uses it.
@@ -1118,3 +1118,36 @@ non-system dependencies to resolve to bundled files. Missing antivirus uses a
 platform-neutral confirmation on non-macOS hosts. Source-picker navigation is
 saved only after successful ingest while the writer lease is retained; a failed
 import leaves the previous directory unchanged.
+
+### Writer and desktop review boundary
+
+Current archive writing is supported on POSIX. Windows writing fails before
+creating an archive or lock metadata; the secure no-reparse-point implementation
+and native Windows subprocess validation are deferred to v1.1.0. The former
+untested msvcrt branch is removed; no Windows locking guarantee is claimed.
+POSIX acquisition pins the archive/status directories and opens lock files
+relative to directory descriptors without following links. Lock files must be
+regular, single-link files. New targets are created under a parent-directory
+creation lock before acquiring the archive lease; creation diagnostics may leave
+`.mailarchiver-create.lock` in the parent. Its presence alone does not lock anything.
+GUI creation rechecks destination emptiness under the lease. File New proceeds
+into Import, About reports the active archive volume, and publication refreshes
+mailbox-only queries as well as text queries.
+
+### PR review validation follow-up
+
+Archive documents identify directories by filesystem device/inode and reject
+symbolic or hard-linked database entries before opening. GUI ingest records
+publication evidence even when a later step fails; only published changes
+advance the shared generation. Progress can write status files without a
+terminal stream, including windowed builds with no stderr. Ingest child windows
+route document actions to an attached search window. Informational notices stay
+in About instead of appearing as errors. Closing an import owner offers waiting
+or keeping the window open; shutdown joins tracked workers before releasing
+resources. Makefile Ruff checks select this checkout's configuration explicitly
+and include ignored linked-worktree paths.
+
+The included Gmail authorizer shares PR #83's buffer-validation, consumer-domain,
+DNS-error, refresh-transport, and verified-token-storage fixes. No public Desktop
+OAuth client is bundled yet; the end-user shared-client flow remains deferred
+until release configuration is supplied and validated.

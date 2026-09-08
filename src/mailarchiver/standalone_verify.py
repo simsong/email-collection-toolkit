@@ -53,11 +53,10 @@ import mailbox
 import os
 import re
 import sys
+from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import datetime
-from pathlib import Path
-from pathlib import PurePosixPath
-from typing import Iterable
+from pathlib import Path, PurePosixPath
 
 BUFFER_SIZE = 1024 * 1024
 FORMAT_ID = "tag:simson.net,2026:mailarchiver/integrity"
@@ -147,7 +146,7 @@ class HashStandard:
 
 def _json_bytes(value: object) -> bytes:
     encoded = json.dumps(value, ensure_ascii=True, separators=(",", ":"), sort_keys=True)
-    return f"{encoded}\n".encode("utf-8")
+    return f"{encoded}\n".encode()
 
 
 def _normalize_line_endings(raw: bytes) -> bytes:
@@ -299,7 +298,7 @@ def _load_json(line: bytes) -> dict[str, object]:
 
     value = json.loads(line, object_pairs_hook=object_hook)
     if not isinstance(value, dict):
-        raise ValueError("control record must be a JSON object")
+        raise TypeError("control record must be a JSON object")
     if _json_bytes(value) != line:
         raise ValueError("control record is not deterministically encoded")
     return value
@@ -339,7 +338,7 @@ def _parse_standard(record: dict[str, object], prior: list[HashStandard]) -> Has
 
 def _parse_token(token: object, standards: list[HashStandard]) -> tuple[HashStandard, str]:
     if not isinstance(token, str):
-        raise ValueError("hash token must be a string")
+        raise TypeError("hash token must be a string")
     code, separator, digest = token.partition(":")
     standard = next((item for item in standards if item.code == code), None)
     if not separator or standard is None or not HEX_PATTERN.fullmatch(digest):
@@ -485,7 +484,7 @@ def verify_mbox(path: Path, integrity: Path) -> list[str]:
                 box.close()
             if rows != mbox_record.get(MESSAGES):
                 errors.append(f"{path.name}: message count mismatch")
-    except (OSError, UnicodeError, ValueError, json.JSONDecodeError, mailbox.Error) as error:
+    except (OSError, UnicodeError, TypeError, ValueError, json.JSONDecodeError, mailbox.Error) as error:
         return [f"{integrity.name}: {error}"]
     if not errors:
         print(f"OK {path.name}: {rows} messages")
@@ -543,7 +542,7 @@ def _verify_bagit_manifest(path: Path, archive: Path, payload: bool) -> tuple[li
             actual = _digest_file(target, ("sha256",))["sha256"]
             if actual.lower() != fields[0].lower():
                 errors.append(f"{path.name}: SHA-256 mismatch for {logical}: expected {fields[0]}, found {actual}")
-    except (OSError, UnicodeError, ValueError) as error:
+    except (OSError, UnicodeError, TypeError, ValueError) as error:
         return [f"{path.name}: {error}"], declared
     return errors, declared
 
@@ -576,7 +575,7 @@ def _bag_info(archive: Path, payloads: list[Path]) -> list[str]:
         expected_oxum = f"{sum(item.stat().st_size for item in payloads)}.{len(payloads)}"
         if fields.get("Payload-Oxum") != expected_oxum:
             raise ValueError(f"Payload-Oxum mismatch: expected {expected_oxum}")
-    except (OSError, UnicodeError, ValueError) as error:
+    except (OSError, UnicodeError, TypeError, ValueError) as error:
         return [f"bag-info.txt: {error}"]
     return []
 
@@ -654,7 +653,7 @@ def _verify_mailbag_csv(
             raise ValueError(f"Mailbag CSV has {rows} messages; expected {expected_messages}")
         if references != expected_mailboxes:
             raise ValueError("Mailbag CSV message counts do not match their MBOX containers")
-    except (OSError, UnicodeError, ValueError, csv.Error) as error:
+    except (OSError, UnicodeError, TypeError, ValueError, csv.Error) as error:
         return [str(error)], paths
     return [], paths
 

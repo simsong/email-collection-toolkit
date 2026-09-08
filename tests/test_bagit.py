@@ -8,10 +8,9 @@ import sys
 from pathlib import Path
 from shutil import copytree
 
+from mailarchiver import standalone_verify
 from mailarchiver.bagit import refresh_tag_manifest
 from mailarchiver.standalone_verify import verify_archive
-import mailarchiver.standalone_verify as standalone_verify
-
 
 FIXTURE = Path(__file__).parent / "data" / "three-message-mailbag"
 

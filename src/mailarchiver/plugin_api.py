@@ -4,12 +4,11 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from collections.abc import Iterator
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
-
 
 API_VERSION = 1
 PluginType = Literal["source", "file"]
@@ -134,7 +133,7 @@ class MailObject(FrozenModel):
             return None
         if value.tzinfo is None or value.utcoffset() is None:
             raise ValueError("source_date_utc must be timezone-aware")
-        return value.astimezone(timezone.utc)
+        return value.astimezone(UTC)
 
 
 class ProgressEvent(FrozenModel):

@@ -25,10 +25,10 @@ class LoopbackAssetServer:
         owner = self
 
         class Handler(BaseHTTPRequestHandler):
-            def do_GET(self) -> None:  # noqa: N802
+            def do_GET(self) -> None:
                 owner._get(self)
 
-            def do_HEAD(self) -> None:  # noqa: N802
+            def do_HEAD(self) -> None:
                 owner._get(self, head=True)
 
             def log_message(self, _format: str, *_args: object) -> None:

@@ -20,7 +20,6 @@ from pydantic import Field, model_validator
 
 from .plugin_api import FrozenModel
 
-
 PDF_MAGIC = b"%PDF-"
 PDF_TEXT_POLICY = "native-pdf-text-v1"
 SEGMENTATION_POLICY = "printed-email-page-v1"

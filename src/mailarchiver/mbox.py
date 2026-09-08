@@ -221,7 +221,7 @@ def write_integrity_files(
         assert count_row is not None
         message_count = int(count_row[0])
 
-        def messages():
+        def messages(rows=rows, path=path):
             for ordinal, (message_id, raw_sha256, offset, length) in enumerate(rows, 1):
                 raw = read_verified_location(
                     path,

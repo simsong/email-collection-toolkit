@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 import hashlib
+import logging
 import re
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
+from email import policy
 from email.header import decode_header
 from email.message import Message
-from email import policy
 from email.parser import BytesParser
 from email.utils import getaddresses, parseaddr, parsedate_to_datetime
 from enum import StrEnum
@@ -19,7 +20,6 @@ from pydantic import BaseModel, Field
 from yaml import safe_load
 
 from .encoding import decode_text
-
 
 YEAR = re.compile(r"^(19|20)\d{2}$")
 DATE_RECEIVED_TOLERANCE = timedelta(days=2)
@@ -89,7 +89,7 @@ class SenderIdentity(BaseModel):
 
 
 def plausible_year(year: int, earliest_year: int = 1900) -> bool:
-    return earliest_year <= year <= datetime.now(timezone.utc).year + 1
+    return earliest_year <= year <= datetime.now(UTC).year + 1
 
 
 def parse_date(value: str | None, earliest_year: int = 1900) -> datetime | None:
@@ -98,10 +98,11 @@ def parse_date(value: str | None, earliest_year: int = 1900) -> datetime | None:
     try:
         parsed = parsedate_to_datetime(value)
     except Exception:
+        logging.getLogger(__name__).debug("Best-effort operation failed", exc_info=True)
         return None
     if parsed is None:
         return None
-    normalized = parsed.replace(tzinfo=timezone.utc) if parsed.tzinfo is None else parsed.astimezone(timezone.utc)
+    normalized = parsed.replace(tzinfo=UTC) if parsed.tzinfo is None else parsed.astimezone(UTC)
     return normalized if plausible_year(normalized.year, earliest_year) else None
 
 
@@ -162,7 +163,7 @@ def embedded_body_date(message: Message, earliest_year: int = 1900) -> datetime 
         for value in pattern.findall(body):
             for format_string in ("%B %d, %Y, at %I:%M %p", "%b %d, %Y, at %I:%M %p"):
                 try:
-                    candidate = datetime.strptime(value, format_string).replace(tzinfo=timezone.utc)
+                    candidate = datetime.strptime(value, format_string).replace(tzinfo=UTC)
                 except ValueError:
                     continue
                 if plausible_year(candidate.year, earliest_year):
@@ -177,6 +178,7 @@ def decode_header_value(value: str) -> DecodedHeaderValue:
     try:
         parts = decode_header(unfolded)
     except Exception as error:
+        logging.getLogger(__name__).debug("Best-effort operation failed", exc_info=True)
         return DecodedHeaderValue(value=unfolded, defect=f"{type(error).__name__}: {error}")
     decoded: list[str] = []
     defect: str | None = None
@@ -248,6 +250,7 @@ def header_values(message: Message, name: str, defects: list[MetadataDefect]) ->
     try:
         return [str(value) for value in message.get_all(name, [])]
     except Exception as error:
+        logging.getLogger(__name__).debug("Best-effort operation failed", exc_info=True)
         defects.append(MetadataDefect(field=name, detail=f"{type(error).__name__}: {error}"))
         return []
 
@@ -258,6 +261,7 @@ def sender_identity(message: Message, defects: list[MetadataDefect], raw: bytes 
     try:
         address = parseaddr(from_values[0] if from_values else "")[1].lower()
     except Exception as error:
+        logging.getLogger(__name__).debug("Best-effort operation failed", exc_info=True)
         defects.append(MetadataDefect(field="From", detail=f"{type(error).__name__}: {error}"))
         address = ""
     if address:
@@ -273,6 +277,7 @@ def sender_identity(message: Message, defects: list[MetadataDefect], raw: bytes 
             try:
                 address = parseaddr(embedded_values[0] if embedded_values else "")[1].lower()
             except Exception as error:
+                logging.getLogger(__name__).debug("Best-effort operation failed", exc_info=True)
                 defects.append(MetadataDefect(field="From", detail=f"{type(error).__name__}: {error}"))
                 address = ""
             if address:
@@ -283,6 +288,7 @@ def sender_identity(message: Message, defects: list[MetadataDefect], raw: bytes 
     try:
         address = parseaddr(sender_values[0] if sender_values else "")[1].lower()
     except Exception as error:
+        logging.getLogger(__name__).debug("Best-effort operation failed", exc_info=True)
         defects.append(MetadataDefect(field="Sender", detail=f"{type(error).__name__}: {error}"))
         address = ""
     if address:
@@ -309,6 +315,7 @@ def recipient_identities(message: Message, defects: list[MetadataDefect]) -> lis
             values = header_values(message, role.value, defects)
             recipients.update((address.lower(), role) for _, address in getaddresses(values) if address)
     except Exception as error:
+        logging.getLogger(__name__).debug("Best-effort operation failed", exc_info=True)
         defects.append(MetadataDefect(field="recipients", detail=f"{type(error).__name__}: {error}"))
     return [RecipientIdentity(address=address, role=role) for address, role in sorted(recipients)]
 
@@ -336,14 +343,14 @@ def parse_message(
     if source_date_utc is not None:
         if source_date_utc.tzinfo is None or source_date_utc.utcoffset() is None:
             raise ValueError("source fallback date must be timezone-aware")
-        candidate = source_date_utc.astimezone(timezone.utc)
+        candidate = source_date_utc.astimezone(UTC)
         source_date = candidate if plausible_year(candidate.year, earliest_year) else None
     resolved_prior = None
     if prior_date is not None:
         candidate = (
-            prior_date.replace(tzinfo=timezone.utc)
+            prior_date.replace(tzinfo=UTC)
             if prior_date.tzinfo is None
-            else prior_date.astimezone(timezone.utc)
+            else prior_date.astimezone(UTC)
         )
         resolved_prior = candidate if plausible_year(candidate.year, earliest_year) else None
     if date_value is not None and date is None:
@@ -382,7 +389,7 @@ def parse_message(
         if year is None or not plausible_year(year, earliest_year):
             detail = "non-filesystem source" if path is None else str(path)
             raise ValueError(f"no date or year path fallback for {detail}")
-        date, date_source = datetime(year, 1, 1, tzinfo=timezone.utc), "path-year"
+        date, date_source = datetime(year, 1, 1, tzinfo=UTC), "path-year"
     subject_values = raw_header_values(raw, "Subject")
     subject = (
         decoded_header_bytes(subject_values[0], message.get_content_charset())
