@@ -979,8 +979,7 @@ def ingest(args: argparse.Namespace) -> None:
 
 def run_ingest(request: IngestRequest, writer_lease: WriterLease | None = None) -> None:
     """Run ingest under the archive's OS writer lock."""
-    request.archive.mkdir(parents=True, exist_ok=True)
-    identity = os.path.normcase(str(request.archive.resolve(strict=True)))
+    identity = os.path.normcase(str(request.archive.resolve()))
     owned = writer_lease is None
     lease = writer_lease or WriterLease.acquire(
         request.archive,
@@ -988,6 +987,7 @@ def run_ingest(request: IngestRequest, writer_lease: WriterLease | None = None) 
         "ingest",
         uuid4().hex,
         version("mailarchiver"),
+        create=True,
     )
     if not lease.acquired or lease.archive_identity != identity:
         if owned:
@@ -1910,7 +1910,8 @@ def print_report(archive: Path, years: tuple[int, int] | None, top: int | None) 
             )
         )
         if top is not None and top > 0:
-            heading = lambda text: f"\033[1m{text}\033[0m" if sys.stdout.isatty() else text
+            def heading(text: str) -> str:
+                return f"\033[1m{text}\033[0m" if sys.stdout.isatty() else text
             owner_addresses = (
                 "owner_addresses AS (SELECT DISTINCT sender_address_pk FROM messages WHERE category = 'Sent') "
             )

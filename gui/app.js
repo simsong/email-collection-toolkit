@@ -81,7 +81,7 @@ window.archiveDidChange = async () => {
   state.mailboxTree = [];
   applyStatus(status);
   await refreshIngestOverview();
-  if (state.query.trim()) await runSearch();
+  if (state.query.trim() || (state.showTree && state.mailboxSelections.size)) await runSearch();
 };
 window.setTimeout(() => {
   if (window.pywebview?.api?.status) initialize();

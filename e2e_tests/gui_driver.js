@@ -473,6 +473,9 @@
     );
     treeNode("Inbox").querySelector("input[type=checkbox]").click();
     await waitFor(() => state.results.length === 204, "mailbox selection returns its complete archive result set");
+    state.results = [];
+    await window.archiveDidChange();
+    await waitFor(() => state.results.length === 204, "publication refresh reruns a mailbox-only search");
 
     showTree.checked = false;
     showTree.dispatchEvent(new Event("change", {bubbles: true}));

@@ -265,6 +265,13 @@ def test_about_window_displays_version_disk_and_warnings(tmp_path: Path, page: P
     """Requirement: the persistent About UI surfaces health and application diagnostics."""
     controller = ApplicationController(ApplicationPreferencesStore(tmp_path / "preferences.json"))
     application = PyWebViewApplication(controller)
+    first = controller.create_document(tmp_path / "first.mailarchive")
+    first_window = controller.new_search_window(first)
+    second = controller.create_document(tmp_path / "second.mailarchive")
+    controller.new_search_window(second)
+    assert application.about_status().disk_path == str(second.path)
+    controller.activate_window(first_window.window_id)
+    assert application.about_status().disk_path == str(first.path)
     application.add_notice("warning", "Saved archive was ignored because its database was invalid.")
     api = AboutApi(application)
     page.expose_function("mailarchive_about_status", api.status)

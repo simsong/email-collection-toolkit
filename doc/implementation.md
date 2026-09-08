@@ -399,7 +399,7 @@ search windows, preferences, recent documents, startup selection, active-window
 routing, and host entry points for operating-system open/reopen events.
 `ArchiveDocument` owns shared per-archive ingest and child-window state and
 retains the typed `WriterLease` for an active import. `WriterLease` uses
-nonblocking `flock` on POSIX and one-byte `msvcrt.locking` on Windows against
+nonblocking `flock` on supported POSIX systems against
 `status/archive-write.lock`. Its UTF-8 JSON is diagnostic only; the open OS lock
 is authoritative and is released automatically if a process dies. CLI ingest,
 GUI import, and search-index replacement enter through the same lock contract.
@@ -1134,3 +1134,19 @@ requires it and fails clearly.
 4. Add IMAP and Gmail importers with resumable checkpoints.
 5. Build the local search/view interface on the stable database and MBOX
    retrieval API.
+
+
+### Writer and desktop review boundary
+
+Current archive writing is supported on POSIX. Windows writing fails before
+creating an archive or lock metadata; the secure no-reparse-point implementation
+and native Windows subprocess validation are deferred to v1.1.0. The former
+untested msvcrt branch is removed; no Windows locking guarantee is claimed.
+POSIX acquisition pins the archive/status directories and opens lock files
+relative to directory descriptors without following links. Lock files must be
+regular, single-link files. New targets are created under a parent-directory
+creation lock before acquiring the archive lease; creation diagnostics may leave
+`.mailarchiver-create.lock` in the parent. Its presence alone does not lock anything.
+GUI creation rechecks destination emptiness under the lease. File New proceeds
+into Import, About reports the active archive volume, and publication refreshes
+mailbox-only queries as well as text queries.
