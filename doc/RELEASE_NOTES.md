@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+* Inspect Apple Mail provider metadata using private database/WAL copies, avoiding
+  source shared-memory writes. Abort on scanner helper execution errors before
+  removing a daemon socket or launching a replacement.
+
 * Reject empty-domain contacts and report zero-byte partial EMLX files instead
   of silently skipping them; direct selection of partial records still fails.
 

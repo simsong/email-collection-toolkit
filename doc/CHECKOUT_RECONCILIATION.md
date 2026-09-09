@@ -85,6 +85,14 @@ The following review's body found empty-domain contacts and zero-byte partial
 EMLX files bypassing validation. Empty domains are now rejected after local-part
 checks. Empty partial EMLX records reach the same direct-error/directory-skip
 path as nonempty ones, with discovery and full import/idempotence regressions.
+The next review identified source-side SQLite shared-memory writes and scanner
+probe errors reaching socket replacement. Apple provider metadata now uses
+private checked database/WAL copies; actual WAL fixtures verify metadata and
+unchanged source sidecars. Helper execution errors now abort scanner startup
+and release its lock before socket removal/daemon launch; isolated subprocess
+tests cover both an existing Unix socket and no socket. The preceding CI run
+failed before tests because Google's apt index returned a hash mismatch; no
+integrity checks were bypassed or source changes made to hide that external failure.
 
 After human merge, fetch/prune and prove each source tip is represented in
 current main before removing its exact clean worktree and local branch.

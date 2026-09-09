@@ -6,9 +6,12 @@ import argparse
 import hashlib
 import os
 import re
+import shutil
 import sqlite3
 import sys
 from collections import Counter
+from collections.abc import Iterator
+from contextlib import closing, contextmanager
 from itertools import groupby
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -116,6 +119,35 @@ def _service_inventory(inventory: CacheInventory, service: str) -> ServiceCompar
     return item
 
 
+def _index_file_state(path: Path) -> tuple[int, int, int, int, int] | None:
+    try:
+        stat = path.stat()
+    except FileNotFoundError:
+        return None
+    return stat.st_dev, stat.st_ino, stat.st_size, stat.st_mtime_ns, stat.st_ctime_ns
+
+
+@contextmanager
+def mail_index_snapshot(index_path: Path) -> Iterator[sqlite3.Connection]:
+    """Read database/WAL bytes without asking SQLite to open the source store."""
+    sources = tuple(Path(str(index_path) + suffix) for suffix in ("", "-wal", "-journal"))
+    before = tuple(_index_file_state(path) for path in sources)
+    with TemporaryDirectory(prefix="mailarchiver-mail-index-") as temporary:
+        directory = Path(temporary)
+        for source, state in zip(sources, before, strict=True):
+            if state is None:
+                continue
+            destination = directory / source.name
+            descriptor = os.open(destination, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+            with os.fdopen(descriptor, "wb") as output, source.open("rb") as input_file:
+                shutil.copyfileobj(input_file, output)
+        if before[0] is None or before != tuple(_index_file_state(path) for path in sources):
+            raise RuntimeError("Apple Mail index changed during snapshot; quit Mail and retry")
+        # Any WAL recovery or shared-memory writes happen only in this private copy.
+        with closing(sqlite3.connect(directory / index_path.name)) as database:
+            yield database
+
+
 def _account_services(root: Path) -> dict[str, str]:
     schemes: dict[str, set[str]] = {}
     gmail_accounts: set[str] = set()
@@ -131,15 +163,12 @@ def _account_services(root: Path) -> dict[str, str]:
         index_path = version / "MailData" / "Envelope Index"
         if not index_path.is_file():
             continue
-        index = sqlite3.connect(index_path.as_uri() + "?mode=ro", uri=True)
-        try:
+        with mail_index_snapshot(index_path) as index:
             for (url,) in index.execute("SELECT url FROM mailboxes"):
                 parsed = urlsplit(str(url))
                 account = (parsed.hostname or parsed.netloc).casefold()
                 if account:
                     schemes.setdefault(account, set()).add(parsed.scheme.casefold())
-        finally:
-            index.close()
     services: dict[str, str] = {}
     for account in schemes.keys() | gmail_accounts:
         account_schemes = schemes.get(account, set())

@@ -88,10 +88,15 @@ class ClamScanner(AbstractContextManager["ClamScanner"]):
 
     def __enter__(self) -> Self:
         self.start_lock = Path(CLAMD_CONFIG).open("rb")
-        fcntl.flock(self.start_lock.fileno(), fcntl.LOCK_EX)
-        if CLAMD_SOCKET.exists() and self.available():
-            self.release_start_lock()
-            return self
+        try:
+            fcntl.flock(self.start_lock.fileno(), fcntl.LOCK_EX)
+            ready = self.available()  # Validate the helper even when no socket exists.
+            if CLAMD_SOCKET.exists() and ready:
+                self.release_start_lock()
+                return self
+        except BaseException:
+            self.__exit__()
+            raise
         CLAMD_SOCKET.unlink(missing_ok=True)
         configuration_path = self.prepare_runtime_files()
         self.configuration_path = configuration_path
@@ -208,8 +213,10 @@ class ClamScanner(AbstractContextManager["ClamScanner"]):
                 capture_output=True,
                 timeout=self.ping_timeout_seconds,
             ).returncode == 0
-        except (subprocess.TimeoutExpired, OSError):
+        except subprocess.TimeoutExpired:
             return False
+        except OSError as error:
+            raise ClamScannerStartupError(f"cannot execute scanner health probe {self.clamdscan}: {error}") from error
 
     def infected(self, raw: bytes) -> bool:
         with tempfile.NamedTemporaryFile(

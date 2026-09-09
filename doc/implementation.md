@@ -3,8 +3,9 @@
 ## Recovered tool safety and validation
 
 ClamAV health probes have a five-second deadline and message scans a five-minute
-deadline. Probe timeout or OS execution error means unavailable; scan timeout
-fails import and removes temporary plaintext. Typed unscannable/scanner-error
+deadline. Probe timeout means unavailable; a helper execution error raises
+`ClamScannerStartupError` before socket removal or daemon launch and releases
+the startup lock. Scan timeout fails import and removes temporary plaintext. Typed unscannable/scanner-error
 outcomes remain planned.
 
 `make h3-ambiguous-review ARGS='--apple-mail SOURCE --archive ARCHIVE --output REVIEW'`
@@ -438,7 +439,13 @@ For semantic-only pairs it retrieves hash-verified canonical MBOX bytes and
 compares DKIM-relaxed header multisets. Its report contains only header names
 and aggregate counts, never values or content. It snapshots the active Apple
 Envelope Index WAL metadata before and after the scan to flag a live cache
-change. `make compare-apple-mail` supplies the standard paths and
+change. Provider metadata is queried only from a private byte copy of the
+Envelope Index plus existing WAL/rollback journal, never by opening the source
+with SQLite. Source shared-memory files are not copied; SQLite reconstructs them
+privately. File identity, size, modification and change times must remain stable
+across copying, otherwise the operation asks the user to quit Mail and retry.
+This is a checked quiet-copy interval, not a live SQLite transaction snapshot.
+`make compare-apple-mail` supplies the standard paths and
 `make test-apple-mail-compare` exercises exact, semantic, formatting-only,
 header-added, cache-only, archive-only, and partial-record behavior.
 `h3_review.py` uses the same disposable index to select high-multiplicity h3

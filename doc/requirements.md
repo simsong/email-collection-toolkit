@@ -365,6 +365,8 @@ mailbox destinations. Dedicated EICAR tests also verify infected routing.
   caller-enforced deadline, and every message scan has a five-minute deadline.
   A missing, non-executable, or otherwise unlaunchable health-check helper
   means the scanner is unavailable, not a missing mail source or a clean scan.
+  Execution failures must abort startup before removing an existing daemon
+  socket or launching a new daemon, and release the startup lock.
   A timeout is a scanner failure, never a clean or infected result, and plaintext
   temporary message bytes are removed after every outcome.
 * Control-C is a graceful stop: close scanner and MBOX resources, commit
@@ -1128,7 +1130,10 @@ and retain the current explicit-path CLI instructions.
   header names and DKIM-relaxed values only for semantic-only pairs, outputs no
   header values or message content, reports excluded partial and unreadable
   records, and warns when the active Envelope Index WAL changes during the
-  scan. Its privacy-preserving service breakdown classifies Gmail from the
+  scan. Provider metadata must be read from a private database/WAL snapshot:
+  SQLite must not open the source Envelope Index or create/change its sidecars.
+  Changes detected while copying the snapshot must fail with a retry diagnostic.
+  Its privacy-preserving service breakdown classifies Gmail from the
   special mailbox hierarchy, Microsoft Exchange from Apple's EWS scheme, and
   retains other IMAP, POP, local, and unknown stores separately without
   reporting account addresses or opaque identifiers. It must never treat `h3`

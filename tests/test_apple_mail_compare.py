@@ -4,19 +4,41 @@ from __future__ import annotations
 
 import hashlib
 import mailbox
+import shutil
 import sqlite3
 from contextlib import closing
 from pathlib import Path
 
 import pytest
 
-from mailarchiver.apple_mail_compare import compare_apple_mail
+from mailarchiver.apple_mail_compare import compare_apple_mail, mail_index_snapshot
 from mailarchiver.bagit import initialize_bag
 from mailarchiver.catalog import address_pk, create_catalog
 from mailarchiver.h3_review import export_ambiguous_h3_examples, open_review_database, publish_review, refresh_review_report
 from mailarchiver.layout import mbox_directory
 from mailarchiver.mbox import add_message
 from mailarchiver.standalone_verify import semantic_bytes
+
+
+@pytest.mark.parametrize("include_shm", [False, True])
+def test_mail_index_snapshot_reads_wal_without_changing_source_sidecars(tmp_path: Path, include_shm: bool) -> None:
+    """Requirement: provider inspection includes committed WAL metadata without source SQLite writes."""
+    working = tmp_path / "working.sqlite3"
+    source = tmp_path / "source"
+    source.mkdir()
+    index = source / "Envelope Index"
+    with closing(sqlite3.connect(working)) as writer:
+        writer.execute("CREATE TABLE mailboxes (url TEXT NOT NULL)")
+        writer.commit()
+        assert writer.execute("PRAGMA journal_mode=WAL").fetchone() == ("wal",)
+        writer.execute("INSERT INTO mailboxes VALUES ('ews://exchange-account/Inbox')")
+        writer.commit()
+        for suffix in ("", "-wal", "-shm") if include_shm else ("", "-wal"):
+            shutil.copyfile(Path(str(working) + suffix), Path(str(index) + suffix))
+        before = {path.name: (path.read_bytes(), path.stat().st_mtime_ns) for path in source.iterdir()}
+        with mail_index_snapshot(index) as snapshot:
+            assert snapshot.execute("SELECT url FROM mailboxes").fetchall() == [("ews://exchange-account/Inbox",)]
+        assert {path.name: (path.read_bytes(), path.stat().st_mtime_ns) for path in source.iterdir()} == before
 
 
 def _write_emlx(path: Path, raw: bytes, *, partial: bool = False) -> None:
