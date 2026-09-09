@@ -1,13 +1,18 @@
 # Name Resolution Record Linkage
 
-## Operating decision for librarians
+## Current research status
 
-The name-resolution system will use the open-source Python [`dedupe`](https://github.com/dedupeio/dedupe)
-library as its matching engine. Dedupe compares structured records, learns
-weights and blocking rules from a small set of human-labeled matches and
-non-matches, and produces likely entity clusters. Its documentation describes
-this workflow as machine-learning-assisted deduplication and entity resolution
-for structured data; the project is MIT-licensed.
+The earlier design selected the open-source Python
+[`dedupe`](https://github.com/dedupeio/dedupe) library before comparative
+experiments had been run. That decision is reopened. Dedupe remains one candidate
+alongside deterministic rules, Fellegi-Sunter/logistic linkage, Splink, collective
+graph methods, and bounded LLM adjudication.
+
+The active research charter, architecture, literature map, evaluation protocol,
+and executable evidence extractor are in
+[`doc/research/name-matcher/`](research/name-matcher/README.md). No matching
+engine will be selected until it is evaluated on frozen candidate sets with a
+precision-first policy and external test evidence.
 
 The application will also provide conservative default rules before any local
 training occurs. Those rules will normalize addresses, preserve explicit RFC
@@ -29,10 +34,8 @@ provenance, and raw messages remain unchanged. Match decisions and canonical
 names are rebuildable analysis metadata. An accepted match is therefore a
 reviewed assertion about identity, not a rewrite of the preserved email.
 
-As of 2026-08-30, this is the selected design, not an implemented feature in
-the repository. The repository currently extracts explicit display names and
-maintains address suggestions, and it contains a synthetic benchmark, but it
-does not yet integrate Dedupe or provide the match-review editor.
+As of 2026-09-03, the repository has an experimental, read-only observation and
+signature extractor but no selected production matcher or match-review editor.
 
 ## Do librarians need to edit configuration files?
 
@@ -133,7 +136,7 @@ RFC headers and catalog metadata
     generate candidates using default rules
               |
               v
-       score pairs with Dedupe
+    score pairs with compared engines
               |
               v
        cluster likely matching records
@@ -184,11 +187,12 @@ blocked or down-weighted.
 
 ### 3. Score and cluster
 
-Dedupe should receive structured fields and the default feature decisions. A
-small reviewed training set can teach the match weights for this archive. The
-result must retain pair scores, the fields that contributed to the score, the
-blocking rule, and the resolver version. Clustering should be deterministic
-for a fixed input, configuration, training set, and software version.
+Each candidate engine should receive the same structured fields and default
+feature decisions. A small reviewed training set may teach match weights for
+this archive. The result must retain pair scores, the fields that contributed
+to the score, the blocking rule, and the resolver version. Clustering should be
+deterministic for a fixed input, configuration, training set, and software
+version.
 
 Automatic acceptance should be limited to high-confidence, explainable cases.
 Intermediate scores should enter the librarian's review queue. Low-confidence
@@ -241,7 +245,7 @@ The first reviewable export should contain at least:
 | `left_record` / `right_record` | Records being compared |
 | `left_address` / `right_address` | Addresses shown to the reviewer |
 | `left_name` / `right_name` | Best observed names, with access to all observations |
-| `score` | Dedupe or deterministic score |
+| `score` | Versioned engine score and its calibration semantics |
 | `evidence` | Human-readable contributing signals |
 | `suggested_group` | Proposed person-group identifier |
 | `status` | `pending`, `accepted`, `rejected`, or `deferred` |
@@ -258,11 +262,12 @@ file should not be the only editing path.
 
 ### Dedupe
 
-[`dedupe`](https://github.com/dedupeio/dedupe) is the selected first engine. It
+[`dedupe`](https://github.com/dedupeio/dedupe) is one engine to evaluate. It
 is a Python library for fuzzy matching, record deduplication, and entity
 resolution. Its workflow uses human-labeled examples to learn useful weights
 and blocking rules and is designed to cluster structured records. It is the
-closest fit for a local bag of name/email records.
+plausible fit for a local bag of name/email records, subject to the same
+held-out evaluation as every other engine.
 
 ### Splink
 
@@ -302,22 +307,28 @@ identity resolution.
 
 Current repository support:
 
-* explicit display-name extraction from `From`, `To`, `Cc`, and `Bcc`;
+* read-only, SHA-256-verified extraction of every display-name/address
+  observation from `From`, `To`, `Cc`, and `Bcc`;
+* a separate heuristic signature/contact evidence extractor;
+* a private, provenance-rich prototype SQLite schema and YAML run summary;
+* parallel MBOX-generation shards with deterministic merge;
+* one typed module for deferred local, OpenAI, and Gemini LLM experiments;
 * per-address search suggestions with deduplicated message counts;
 * a YAML synthetic benchmark with expected person groups; and
-* a Makefile benchmark command.
+* Makefile extraction and test commands.
 
 Not yet implemented:
 
-* Dedupe dependency and adapter;
-* a versioned resolver-input derivative;
+* repeated-tail and supervised signature extractors;
+* interchangeable matcher adapters and calibrated scores;
 * labeled match/non-match training data beyond the synthetic benchmark;
 * candidate scoring and persistent person groups;
 * match-list export and review persistence; and
-* a librarian-facing review UI.
+* production UX, which is intentionally excluded from the research branch.
 
-The next useful implementation slice is an offline adapter that runs Dedupe on
-the synthetic benchmark and emits a typed, explainable match list. It should
-be evaluated against the YAML benchmark before it is connected to a real
-archive. No external profile lookup, web scraping, SMTP probing, or canonical
-archive mutation is required for this design.
+The next useful implementation slice is a frozen candidate generator plus
+deterministic and Fellegi-Sunter baselines, followed by a repeated-tail
+signature experiment. Dedupe and Splink adapters can then consume the same
+candidates and emit the same typed, explainable match-list format. No external
+profile lookup, web scraping, SMTP probing, or canonical archive mutation is
+required for this design.

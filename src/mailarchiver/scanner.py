@@ -29,6 +29,8 @@ CLAMD_CONFIG = os.environ.get("MAILARCHIVER_CLAMD_CONFIG", str(CLAMAV_PREFIX / (
 CLAMD_SOCKET = Path(os.environ.get("MAILARCHIVER_CLAMD_SOCKET", "/private/tmp/clamd.sock"))
 CLAMD_START_TIMEOUT_SECONDS = 120
 CLAMD_START_POLL_SECONDS = 0.25
+CLAMD_PING_TIMEOUT_SECONDS = 5.0
+CLAMD_SCAN_TIMEOUT_SECONDS = 300.0
 
 CLAMAV_DOWNLOAD_URL = "https://www.clamav.net/downloads"
 UNSCANNED_WARNING = "Antivirus unavailable. Importing without scanning may retain infected messages and attachments."
@@ -59,9 +61,23 @@ class ClamScannerStartupError(RuntimeError):
 class ClamScanner(AbstractContextManager["ClamScanner"]):
     """Use an existing daemon or one temporary daemon for one ingest run."""
 
-    def __init__(self, status_callback: Callable[[], None] | None = None) -> None:
+    def __init__(
+        self,
+        status_callback: Callable[[], None] | None = None,
+        *,
+        clamdscan: str = CLAMDSCAN,
+        ping_timeout_seconds: float = CLAMD_PING_TIMEOUT_SECONDS,
+        scan_timeout_seconds: float = CLAMD_SCAN_TIMEOUT_SECONDS,
+        scan_temporary_directory: Path | None = None,
+    ) -> None:
+        if ping_timeout_seconds <= 0 or scan_timeout_seconds <= 0:
+            raise ValueError("ClamAV subprocess timeouts must be positive")
         self.process: subprocess.Popen[bytes] | None = None
         self.status_callback = status_callback
+        self.clamdscan = clamdscan
+        self.ping_timeout_seconds = ping_timeout_seconds
+        self.scan_timeout_seconds = scan_timeout_seconds
+        self.scan_temporary_directory = scan_temporary_directory
         self.diagnostics: BinaryIO | None = None
         self.runtime_directory: tempfile.TemporaryDirectory[str] | None = None
         self.start_lock: BinaryIO | None = None
@@ -72,10 +88,15 @@ class ClamScanner(AbstractContextManager["ClamScanner"]):
 
     def __enter__(self) -> Self:
         self.start_lock = Path(CLAMD_CONFIG).open("rb")
-        fcntl.flock(self.start_lock.fileno(), fcntl.LOCK_EX)
-        if CLAMD_SOCKET.exists() and self.available():
-            self.release_start_lock()
-            return self
+        try:
+            fcntl.flock(self.start_lock.fileno(), fcntl.LOCK_EX)
+            ready = self.available()  # Validate the helper even when no socket exists.
+            if CLAMD_SOCKET.exists() and ready:
+                self.release_start_lock()
+                return self
+        except BaseException:
+            self.__exit__()
+            raise
         CLAMD_SOCKET.unlink(missing_ok=True)
         configuration_path = self.prepare_runtime_files()
         self.configuration_path = configuration_path
@@ -185,22 +206,36 @@ class ClamScanner(AbstractContextManager["ClamScanner"]):
             start_lock.close()
 
     def available(self) -> bool:
-        return subprocess.run(
-            [CLAMDSCAN, f"--config-file={self.configuration_path}", "--ping=1"],
-            check=False,
-            capture_output=True,
-        ).returncode == 0
+        try:
+            return subprocess.run(
+                [self.clamdscan, f"--config-file={self.configuration_path}", "--ping=1"],
+                check=False,
+                capture_output=True,
+                timeout=self.ping_timeout_seconds,
+            ).returncode == 0
+        except subprocess.TimeoutExpired:
+            return False
+        except OSError as error:
+            raise ClamScannerStartupError(f"cannot execute scanner health probe {self.clamdscan}: {error}") from error
 
     def infected(self, raw: bytes) -> bool:
-        with tempfile.NamedTemporaryFile(prefix="mailarchiver-", delete=False) as handle:
+        with tempfile.NamedTemporaryFile(
+            prefix="mailarchiver-", delete=False, dir=self.scan_temporary_directory
+        ) as handle:
             handle.write(raw)
             temporary = handle.name
         try:
-            result = subprocess.run(
-                [CLAMDSCAN, f"--config-file={self.configuration_path}", "--stream", temporary],
-                check=False,
-                capture_output=True,
-            )
+            try:
+                result = subprocess.run(
+                    [self.clamdscan, f"--config-file={self.configuration_path}", "--stream", temporary],
+                    check=False,
+                    capture_output=True,
+                    timeout=self.scan_timeout_seconds,
+                )
+            except subprocess.TimeoutExpired as error:
+                raise RuntimeError(
+                    f"clamdscan timed out after {self.scan_timeout_seconds:g} seconds"
+                ) from error
             if result.returncode not in (0, 1):
                 raise RuntimeError(result.stderr.decode("utf-8", "replace"))
             return result.returncode == 1

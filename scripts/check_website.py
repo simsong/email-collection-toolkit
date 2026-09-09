@@ -22,9 +22,13 @@ REQUIRED_TEXT = (
     "/discussions/55",
     "/discussions/56",
     "gmail-authorization/",
+    "importing/",
     "advanced/",
     "h3 semantic-message v1",
     "Apple Mail as a temporary provider adapter",
+    "Import/Refresh",
+    "Import/Rebuild",
+    "credential_ref",
     "your.name@gmail.com",
     "For Individuals",
     "For Archivists",
@@ -91,6 +95,7 @@ def main() -> int:
         root / "website/themes/envelope-rainbow/templates/page.html",
         root / "website/themes/envelope-rainbow/templates/section.html",
         root / "website/content/gmail-authorization.md",
+        root / "website/content/importing.md",
         root / "website/content/advanced.md",
         root / "website/content/oauth-client-registration.md",
         root / "website/static/icons/rainbow-post.svg", root / "gui/icons/rainbow-post.svg",
@@ -100,7 +105,11 @@ def main() -> int:
     missing = [str(path) for path in required if not path.is_file()]
     if missing:
         raise SystemExit("missing website files: " + ", ".join(missing))
-    for path in (root / ".github/workflows/pages.yml", root / ".github/workflows/release.yml"):
+    for path in (
+        root / ".github/workflows/continuous-integration.yml",
+        root / ".github/workflows/pages.yml",
+        root / ".github/workflows/release.yml",
+    ):
         try:
             yaml.safe_load(path.read_text(encoding="utf-8"))
         except yaml.YAMLError as error:

@@ -80,6 +80,7 @@ class LocalSourceRules(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     version: Literal[1]
+    mode: Literal["replace", "extend"]
     ignore: IgnoreRules
     file_probe: FileProbeRules
     mbox: MboxRules
@@ -391,9 +392,22 @@ class LocalSourcePlugin(SourcePlugin):
                     detail="not a regular file",
                 )
                 continue
-            if stat.st_size == 0 or _is_silent_metadata(path, root_path):
+            if (stat.st_size == 0 and not path.name.lower().endswith(".partial.emlx")) or _is_silent_metadata(path, root_path):
                 continue
-            parser = self._recognize_file(path, stat.st_size)
+            try:
+                parser = self._recognize_file(path, stat.st_size)
+            except IncompleteAppleMailMessageError as error:
+                if not root.is_dir():
+                    raise
+                yield SkippedInput(
+                    source=SourceReference(
+                        plugin_kind=self.kind, source_id=str(root.resolve()), hierarchy=(),
+                        native_id=str(path), display_name=str(path),
+                    ),
+                    reason_code="incomplete-apple-mail-message",
+                    detail=str(error),
+                )
+                continue
             if parser is None:
                 yield SkippedInput(
                     source=SourceReference(

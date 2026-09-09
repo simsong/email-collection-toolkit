@@ -1,5 +1,29 @@
 # Mail archive normalizer requirements
 
+## Recovered offline diagnostic boundaries
+
+ClamAV health and message-scan subprocesses must have hard deadlines and remove
+temporary plaintext even on timeout. Known incomplete EMLX records must be
+reported without blocking complete messages in a directory import, while direct
+selection fails explicitly.
+
+Private h3 review exports and name-evidence databases must be new derivatives
+outside source stores. Canonical message bytes are verified before extraction;
+neither tool changes an archive, chooses deduplication by h3 alone, or sends
+message evidence to a remote model. Edited review manifests must not redirect
+reads or writes through escaping paths or symbolic links.
+H3 review publication must reserve a new destination exclusively, refusing even
+an empty directory created during extraction, and publish its completion manifest
+last. Deferred AI correlation must reject duplicate request IDs, including
+identical requests that produce the same deterministic ID.
+Name-evidence publication must not replace an output created concurrently.
+Both database and summary must be staged before publication; failure to publish
+the summary must remove the database link created by that attempt, preserving
+any competing output. The h3 comparison index must attach the source catalog
+explicitly read-only with SQLite URI handling enabled.
+The current prototype requires hard-link support and owner-only permissions on
+its output filesystem; it must not substitute an overwriting rename.
+
 ## Purpose
 
 Create and maintain a cleartext, personal, long-lived archive of all user
@@ -7,6 +31,10 @@ email. The archive is canonical; all databases and user interfaces are derived
 from it and may be recreated. It must support unified search across decades of
 mail, non-destructive redacted derivatives, and reproducible research reports
 from structured metadata.
+
+This document specifies the target system. Items explicitly marked **Planned**
+are requirements whose implementation is incomplete; `README.md` and
+`implementation.md` describe the current executable feature set.
 
 The system must harvest backup drives and active sources, including Outlook
 `.pst` and `.ost`, Eudora backups, Emacs RMAIL Babyl, working IMAP client-cache
@@ -103,7 +131,9 @@ directory, and a `data/mbox/` payload directory.
 
 `archive.sqlite3` and the disposable `search.sqlite3` are operational BagIt
 tag files but are deliberately not listed in the tag manifest; their live
-SQLite state is outside the portable preservation checkpoint.
+SQLite state is outside the portable preservation checkpoint. An optional
+archive-local copy of geographic reference data is also operational metadata;
+it is explicitly copied by the user and is never refreshed implicitly.
 The top-level `status/` directory likewise contains operational, unmanifested
 JSON tag files. Each ingest creates a distinct file and atomically replaces
 only that file with its current typed status; the final replacement retains
@@ -112,6 +142,10 @@ the run's complete statistics as append-by-run history.
 The archive lives on the encrypted laptop filesystem.  BorgBackup and
 Backblaze provide independent backup; archive-internal encryption is not a
 requirement.
+
+Each new BagIt checkpoint records the installed application version as
+`Mailbag-Agent-Version`. Existing historical bags are not rewritten merely
+because a new software version is installed.
 
 Read-only data-quality audit tools may create derived MBOX, CSV, and JSON
 evidence from a source tree and canonical archive. Those outputs contain
@@ -327,7 +361,14 @@ mailbox destinations. Dedicated EICAR tests also verify infected routing.
   refresh explicitly identifies that wait and shows its increasing startup
   elapsed time instead of a stale source-file status. A newly started daemon is
   ready only after the configured scanner health probe succeeds, not merely when
-  its socket appears.
+  its socket appears. Every scanner health-check subprocess has a five-second
+  caller-enforced deadline, and every message scan has a five-minute deadline.
+  A missing, non-executable, or otherwise unlaunchable health-check helper
+  means the scanner is unavailable, not a missing mail source or a clean scan.
+  Execution failures must abort startup before removing an existing daemon
+  socket or launching a new daemon, and release the startup lock.
+  A timeout is a scanner failure, never a clean or infected result, and plaintext
+  temporary message bytes are removed after every outcome.
 * Control-C is a graceful stop: close scanner and MBOX resources, commit
   completed messages and observations, publish a complete BagIt/Mailbag
   checkpoint, report interruption,
@@ -401,6 +442,62 @@ Email address text is normalized into `email_addresses(address_pk, address)`.
 `messages.sender_address_pk` and `recipients.address_pk` reference that table;
 `recipients.role` retains To, Cc, or Bcc while header order is not retained. The address
 table also stores explicitly labeled non-email Google Chat identities.
+
+## Contacts and geographic reference data
+
+The CLI and policy below are implemented; the Contacts window and geography
+features remain planned.
+
+Contacts are address-level records derived from `From`, `To`, `Cc`, and `Bcc`
+headers; they are not authoritative People records. Each address occurs at
+most once per message in all-header counts and date ranges. The Contacts view
+shall offer a default-checked **Meaningful** filter. Meaningful means a direct
+To or outgoing Bcc recipient of owner-sent mail, or an incoming sender where an
+exact configured owner address occurs in `To`. Cc recipients are not
+meaningful; multiple To recipients are. A mailing-list message counts only
+when that direct-owner-in-To condition is met.
+The existing owner-token file remains the ingest classifier until archive setup
+collects exact owner addresses and **File → Properties** can revise them;
+meaningful-contact semantics use those exact addresses, never a name fragment.
+The read-only `human-contacts` command shall provide this initial address-level
+projection in table, TSV, and JSON forms before the Contacts window exists.
+It opens the catalog read-only using a platform-correct file URI, including archive
+paths with spaces, Unicode, and URI-sensitive characters; it never creates a
+missing catalog. It shall accept a reusable owner-alias file whose values are separated by newlines,
+commas, or semicolons; blank lines and comment lines are ignored. Aliases resolve
+only to catalogued Sent sender addresses, and those resulting exact addresses
+drive the meaningful-contact predicate.
+It shall suppress mailing-list, automated-service, and malformed identities
+using a versioned, explainable packaged policy. The human-contact local-part
+limit is 48 characters and is configurable; the RFC address limit is not itself
+a claim that every shorter address is human.
+Classification reasons distinguish invalid-domain rules from invalid-local-part
+rules; when both match, the local-part reason takes precedence. An empty domain
+is `invalid-domain`, after evaluating local-part rules.
+The packaged `contact_filters.yaml` may be copied to an archive root. Its
+required `mode` is `replace` for a complete replacement policy or `extend` to
+add only rule lists to the packaged policy. Extension preserves packaged order,
+appends new rules, and removes duplicates; scalar thresholds remain packaged.
+A malformed archive copy shall fail the command rather than silently changing
+its classification. Validate every regex when the policy loads, including unused
+rules and empty catalogs. YAML and regex errors identify the policy file and
+offending rule without a traceback, partial output, or archive writes.
+
+Geographic evidence shall preserve source, observation date, confidence, and
+whether it is **located** (contact-specific evidence, such as a signature) or
+**affiliated** (an institutional/domain relationship). Affiliation shall not
+be presented as a person's location. The initial United States lookup accepts
+a five-digit ZCTA and displays its city, state, and country. Radius lookup is
+straight-line distance from representative latitude/longitude.
+
+The installed application shall include a seed US ZCTA reference database with
+representative latitude/longitude, city, state, and country. `make
+geography-data` and the future **Tools → Update Geo Database** command shall
+use the same verified bulk-data update path. No public per-contact geocoding or
+domain lookup is permitted in this phase. Installation-level geography data is
+per-user, not per archive; an archive snapshot may be copied or read only
+through an explicit user action. See
+[CONTACTS_AND_GEOGRAPHY.md](CONTACTS_AND_GEOGRAPHY.md).
 
 ## Search database
 
@@ -774,7 +871,9 @@ document is available, its text remains displayable while permitted remote
 resources resolve; a slow remote resource must not blank or delay the part.
 Attachments appear in a list,
 safe images and PDFs can be previewed inline, and opening any attachment is an
-explicit action with an additional warning for executable or container types.
+explicit action with confirmation for active, unknown, or mismatched MIME/suffix
+pairs. Only allowlisted matching PDF, static image, and plain-text pairs bypass
+that extra confirmation.
 For a non-multipart message whose complete raw body, apart from surrounding
 ASCII whitespace, is enclosed by case-insensitive `<x-html>` and `</x-html>`
 tags, the GUI exposes the enclosed content as a preferred **HTML — legacy
@@ -862,6 +961,12 @@ must describe BagIt/Mailbag as native archive storage, not a separate export.
 The Pages build pins its Zola release and verifies the downloaded archive
 against a source-controlled SHA-256 digest before execution.
 
+All primary navigation links remain visible at narrow widths and after
+reordering; the header wraps instead of hiding positional links.
+Release assembly verifies the annotated tag's signature and package version
+before installing project dependencies, building artifacts, or executing their
+entry points. Tag/version validation must not install the project itself.
+
 ## Remote account authorization
 
 `mailarchiver-auth ACCOUNT` authorizes a remote account independently of an
@@ -906,6 +1011,55 @@ verification. The end-user manual and website explain this distinction with
 generic account examples. Separate maintainer help pages contain the illustrated
 one-time registration procedure and tell readers to use their own account.
 
+## Per-archive sources and import modes
+
+This source registry and Refresh/Rebuild workflow are planned. The current
+`archive.yaml` stores document preferences, not this registry.
+
+Each archive has a versioned top-level `archive.yaml` operational configuration
+containing an ordered `sources` list. Every source has a stable, unique `id`
+and exactly one of these kinds:
+
+* `file` names one local file;
+* `local-folder` names one recursively discovered local directory; and
+* `imap` names one remote IMAP account and records its server, port, username,
+  TLS mode, authentication mode, folder selection, and a non-secret credential
+  reference.
+
+Local paths and IMAP usernames are private operational metadata. Passwords,
+app passwords, OAuth access tokens, and OAuth refresh tokens must never appear
+in `archive.yaml`, either SQLite database, status files, logs, reports,
+manifests, or fixtures. The credential reference identifies an entry in the
+operating-system keychain or configured secrets provider. When that entry is
+absent, an interactive import prompts securely for a password or starts the
+configured OAuth authorization flow; a noninteractive import fails without
+printing or persisting a secret outside the credential store.
+
+**Import/Refresh** visits every enabled configured source. It walks each local
+folder to discover new files, but a known local file whose recorded nanosecond
+modification time is unchanged since its last completed import is not opened,
+hashed, or parsed. A configured `file` source uses the same fast path. This is
+an intentional performance tradeoff: a file changed while retaining its prior
+modification time is not detected by Refresh. New paths and paths with changed
+modification times are processed normally. IMAP sources use their native
+folder/UID and version checkpoints to retrieve new or changed messages without
+marking messages read or changing server state.
+
+**Import/Rebuild** also visits every enabled source, but ignores the local
+modification-time shortcut and recomputes the complete SHA-256 of every local
+source file. An unchanged digest may skip parsing after hashing; a changed
+digest is reprocessed. For IMAP, Rebuild performs a complete folder and UID
+reconciliation rather than relying only on the incremental cursor. Both modes
+remain message-idempotent, retain source observations, and never clear or
+recreate canonical mail. `refresh-index` is unrelated: it rebuilds only the
+disposable search database from already archived messages.
+
+The user manual and the website importing page must show the three source
+kinds, the secret-storage boundary, and a side-by-side explanation of
+Import/Refresh and Import/Rebuild. Until the archive configuration and live
+IMAP adapter are implemented, those pages must label this workflow as planned
+and retain the current explicit-path CLI instructions.
+
 ## Ingest sources
 
 * Recursive local-directory ingest recognizes MBOX streams, Apple Mail MBOX
@@ -941,9 +1095,11 @@ one-time registration procedure and tell readers to use their own account.
   `.mbox` package, with each `.mbox` suffix removed. Account and parent mailbox
   components remain in the path; internal UUID, `Data`, numeric bucket,
   `Messages`, and `.emlx` filename components do not.
-* Gmail ingest uses OAuth and the Gmail API for incremental acquisition of
-  raw messages and labels.  It supports a rolling `--days N` mode using
-  Gmail's `newer_than:Nd` query.  Google Takeout MBOX is supported as an offline,
+* Generic read-only IMAP is the first planned cloud importer and covers Gmail,
+  Microsoft 365/Outlook.com, and conventional IMAP services through
+  provider-specific authentication profiles. A later Gmail API adapter may
+  provide richer label and history metadata and supports a rolling `--days N`
+  mode using Gmail's `newer_than:Nd` query. Google Takeout MBOX is supported as an offline,
   one-time baseline input and is the current end-user path; personal Takeout is
   not assumed to be programmatically triggerable. Direct multi-part Takeout ZIP
   ingestion remains future work, so current users extract every part and ingest
@@ -989,8 +1145,29 @@ one-time registration procedure and tell readers to use their own account.
   header names and DKIM-relaxed values only for semantic-only pairs, outputs no
   header values or message content, reports excluded partial and unreadable
   records, and warns when the active Envelope Index WAL changes during the
-  scan. It must never treat `h3` alone as authorization to merge or delete a
-  canonical source variant.
+  scan. Provider metadata must be read from a private database/WAL snapshot:
+  SQLite must not open the source Envelope Index or create/change its sidecars.
+  Changes detected while copying the snapshot must fail with a retry diagnostic.
+  Its privacy-preserving service breakdown classifies Gmail from the
+  special mailbox hierarchy, Microsoft Exchange from Apple's EWS scheme, and
+  retains other IMAP, POP, local, and unknown stores separately without
+  reporting account addresses or opaque identifiers. It must never treat `h3`
+  alone as authorization to merge or delete a canonical source variant.
+* The ambiguous-h3 review exporter selects a requested number of distinct
+  equivalence classes deterministically by descending archive-variant count,
+  descending cache-occurrence count, and h3. For each selected class it copies
+  every matching complete cache occurrence and every matching hash-verified
+  canonical representation without changing either source. It refuses to
+  overwrite an output directory and writes private owner-only EML files,
+  per-case manifests, a root manifest, and a CSV/Markdown index. Reports assign
+  identical raw `h2` values to explicit equivalence groups, identify groups
+  shared across cache and archive, compare the canonicalized `Date` and
+  `Subject` components used by `h3`, and report `X-Apple-Auto-Saved` per file.
+  Existing reports can be refreshed only after every exported file passes both
+  its recorded `h2` and case `h3`; source messages are not needed for refresh.
+  Private
+  messages belong only in the gitignored project `.tmp` area and must never be
+  committed as fixtures or documentation.
 * Every source adapter emits original RFC 5322 bytes where the source contains
   them. When a proprietary store requires reconstruction or conversion, the
   observation records that fact and the responsible tool/version; reconstructed
@@ -1049,12 +1226,13 @@ one-time registration procedure and tell readers to use their own account.
 
 ## Sorting, validation, and recovery
 
-* At the end of an ingest run, touched normal MBOX files are sorted by
-  resolved timestamp and then message SHA-256 for deterministic ties.
-* Sorting writes a same-directory temporary replacement and preserves the
-  prior file as a backup.
-* The replacement and backup are parsed end-to-end.  Their unordered sets of
-  `(Message-ID, SHA-256)` must match exactly before the backup is deleted.
+* **Planned sorting:** At the end of an ingest run, touched normal MBOX files are
+  sorted by resolved timestamp and then message SHA-256 for deterministic ties.
+* **Planned sorting:** Sorting writes a same-directory temporary replacement and
+  preserves the prior file as a backup.
+* **Planned sorting:** The replacement and backup are parsed end-to-end. Their
+  unordered sets of `(Message-ID, SHA-256)` must match exactly before the backup
+  is deleted.
 * The MBOX byte hash, integrity tags, Mailbag CSV, payload manifest, tag
   manifest, locations, and metadata database updates are published in the
   documented checkpoint order. Interrupted runs leave either the preceding
@@ -1253,8 +1431,10 @@ Known consumer domains need no DNS lookup; transient DNS and token-refresh
 transport failures are disclosed as errors rather than negative detection or
 fresh consent. Credentials are stored only after the profile matches.
 
-A whole Apple Mail cache containing `.partial.emlx` files cannot currently be
-ingested: discovery rejects those files and stops the run. Only a separately
-staged copy containing complete supported records is an available local-file
-bridge. Do not modify the source cache to prepare that copy; the comparator is
-read-only and does not imply whole-cache ingest support.
+Directory import reports and skips `.partial.emlx` records while retaining
+complete supported records. Direct selection of a partial record is rejected,
+including zero-byte partial records; the generic empty-file shortcut does not
+silence them.
+This is not a complete mailbox acquisition: detached attachment bytes are not
+reconstructed. Do not modify the source cache; export mail through Apple Mail
+when a complete MBOX source is required.

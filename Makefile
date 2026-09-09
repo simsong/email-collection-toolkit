@@ -6,6 +6,24 @@
 .PHONY: validation-fetch validation-list validation-prepare validation-run validation-run-all validation-sam-build validation-sam-deploy validation-sam-validate validation-test verify
 
 TIKA_VERSION ?= 4.0.0
+.PHONY: sync-dependencies test-reconciliation distribution-check name-matcher-observations h3-ambiguous-review
+
+sync-dependencies:
+	uv sync
+
+test-reconciliation:
+	uv run pytest -q tests/test_contacts.py tests/test_contact_filtering.py tests/test_name_matcher_research.py tests/test_apple_mail_compare.py tests/test_scanner.py
+
+distribution-check:
+	uv run python scripts/check_distribution.py
+
+name-matcher-observations:
+	@test -n "$(ARCHIVE)" -a -n "$(OUTPUT)" || { echo 'usage: make name-matcher-observations ARCHIVE=/path/to/archive OUTPUT=/path/to/evidence.sqlite3'; exit 2; }
+	uv run python -m scripts.name_matcher.build_observations --archive "$(ARCHIVE)" --output "$(OUTPUT)" $(ARGS)
+
+h3-ambiguous-review:
+	uv run mailarchiver-h3-review $(ARGS)
+
 TIKA_DIR ?= $(CURDIR)/.tools/tika/$(TIKA_VERSION)
 TIKA_JAR := $(TIKA_DIR)/tika-app-$(TIKA_VERSION).jar
 TIKA_DOWNLOAD_DIR ?= $(CURDIR)/.tools/tika/downloads
@@ -151,7 +169,7 @@ website-build-check: website-check
 
 release-tag-check:
 	@test -n "$(GITHUB_REF_NAME)" || { echo 'usage: make release-tag-check GITHUB_REF_NAME=v1.2.3'; exit 2; }
-	uv run python scripts/release_tag.py --tag "$(GITHUB_REF_NAME)"
+	uv run --no-project --python '>=3.12' python scripts/release_tag.py --tag "$(GITHUB_REF_NAME)" $(ARGS)
 
 test:
 	uv run pytest -q
@@ -199,7 +217,7 @@ test-mailsearch:
 	uv run pytest -q tests/test_mailsearch.py
 
 test-name-resolution:
-	uv run pytest -q tests/test_name_resolution_benchmark.py
+	uv run pytest -q tests/test_name_resolution_benchmark.py tests/test_name_matcher_research.py
 
 test-gui:
 	uv run pytest -q tests/test_gui_service.py
@@ -221,6 +239,10 @@ test-tika:
 
 test-website:
 	uv run pytest -q tests/test_website_scripts.py
+
+.PHONY: test-website-navigation
+test-website-navigation:
+	uv run pytest -q --browser chromium e2e_tests/test_website_navigation.py
 
 test-plugins:
 	uv run pytest -q tests/test_plugin_loader.py tests/test_source_integrity.py tests/test_archive_integrity.py
