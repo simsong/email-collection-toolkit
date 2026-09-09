@@ -6,6 +6,24 @@
 .PHONY: validation-fetch validation-list validation-prepare validation-run validation-run-all validation-sam-build validation-sam-deploy validation-sam-validate validation-test verify
 
 TIKA_VERSION ?= 4.0.0
+.PHONY: sync-dependencies test-reconciliation distribution-check name-matcher-observations h3-ambiguous-review
+
+sync-dependencies:
+	uv sync
+
+test-reconciliation:
+	uv run pytest -q tests/test_contacts.py tests/test_contact_filtering.py tests/test_name_matcher_research.py tests/test_apple_mail_compare.py tests/test_scanner.py
+
+distribution-check:
+	uv run python scripts/check_distribution.py
+
+name-matcher-observations:
+	@test -n "$(ARCHIVE)" -a -n "$(OUTPUT)" || { echo 'usage: make name-matcher-observations ARCHIVE=/path/to/archive OUTPUT=/path/to/evidence.sqlite3'; exit 2; }
+	uv run python -m scripts.name_matcher.build_observations --archive "$(ARCHIVE)" --output "$(OUTPUT)" $(ARGS)
+
+h3-ambiguous-review:
+	uv run mailarchiver-h3-review $(ARGS)
+
 TIKA_DIR ?= $(CURDIR)/.tools/tika/$(TIKA_VERSION)
 TIKA_JAR := $(TIKA_DIR)/tika-app-$(TIKA_VERSION).jar
 TIKA_DOWNLOAD_DIR ?= $(CURDIR)/.tools/tika/downloads
@@ -199,7 +217,7 @@ test-mailsearch:
 	uv run pytest -q tests/test_mailsearch.py
 
 test-name-resolution:
-	uv run pytest -q tests/test_name_resolution_benchmark.py
+	uv run pytest -q tests/test_name_resolution_benchmark.py tests/test_name_matcher_research.py
 
 test-gui:
 	uv run pytest -q tests/test_gui_service.py

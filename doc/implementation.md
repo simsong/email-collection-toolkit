@@ -1,5 +1,26 @@
 # Mail archive normalizer implementation
 
+## Recovered tool safety and validation
+
+ClamAV health probes have a five-second deadline and message scans a five-minute
+deadline. Probe timeout means unavailable; scan timeout fails import and removes
+temporary plaintext. Typed unscannable/scanner-error outcomes remain planned.
+
+`make h3-ambiguous-review ARGS='--apple-mail SOURCE --archive ARCHIVE --output REVIEW'`
+writes hash-verified ambiguous classes to a new private directory outside both
+source stores. Refresh validates manifest paths and hashes; it does not import
+or deduplicate. Annotation reads one message variant at a time.
+
+`make name-matcher-observations ARCHIVE=... OUTPUT=... ARGS='--limit 100'`
+builds a private SQLite derivative outside the canonical archive, using verified
+MBOX locations and a read-only catalog. Extraction errors are recorded. The
+prototype makes no provider requests and selects no production matcher.
+
+`make test-reconciliation` exercises these recovered boundaries.
+`make distribution-check` builds and installs wheel and sdist, checks packaged
+resources, and invokes console entry points without a GUI. This smoke does not
+validate installed GUI resources; separate DMG tests exercise the desktop bundle.
+
 ## Technology decision
 
 Implement the normalizer in Python 3.12+.  It needs reliable streaming I/O,
@@ -54,6 +75,161 @@ future derivative packaging when it can operate without moving or
 reserializing canonical files. It is not the ingestion engine. Restricted or
 redacted releases are separate bags; PDF and WARC derivatives remain opt-in
 and sandboxed because rendering message HTML can contact remote resources.
+
+## Deduplication and semantic reconciliation
+
+Mail Archiver separates exact storage identity from semantic reconciliation.
+The admission-time deduplication key is the tuple of normalized `Message-ID`
+and `h2`, where `h2` is SHA-256 over the source adapter's recovered RFC 5322
+bytes. When `Message-ID` is absent, the raw digest supplies the stable fallback
+identifier. This conservative rule makes repeated ingest idempotent and stores
+a byte-identical message found in multiple backups or caches only once, while
+retaining every source observation. It does not collapse messages merely
+because they reuse a `Message-ID`, nor does it discard a source variant whose
+raw bytes differ.
+
+The `h3` semantic-message version 1 digest provides the second identity layer.
+Its byte stream begins with a versioned domain separator, followed by selected
+headers under RFC 6376 DKIM-relaxed canonicalization, one CRLF, and the complete
+MIME body under DKIM-simple body canonicalization. Repeated selected headers
+are processed from the physical bottom upward in this fixed order:
+
+```text
+From, Sender, Reply-To, To, Cc, Bcc, Delivered-To, Date, Message-ID,
+Subject, MIME-Version, Content-Type, Content-Transfer-Encoding,
+Content-Disposition
+```
+
+`Delivered-To` distinguishes deliveries. Mutable client and transport fields,
+including `Status`, `X-Status`, `Received`, `Return-Path`,
+`Authentication-Results`, `DKIM-Signature`, and other unselected headers, do
+not affect `h3`. The entire encoded MIME body—including attachment encodings
+and nested MIME headers—does affect it. Thus “normalized header hash” is useful
+shorthand but technically incomplete: `h3` is a domain-separated,
+canonicalized whole-message digest. `h2` remains the authority for exact byte
+identity; `h3` identifies a relationship for investigation and never by itself
+authorizes a merge or deletion.
+
+### Apple Mail cache experiment
+
+On September 6, 2026, the read-only `make compare-apple-mail` experiment
+compared every complete `.emlx` record then present under `~/Library/Mail`
+with 1,200,791 canonical records in `~/mail-archive`. For each EMLX file, the
+program excluded Apple's decimal prefix and trailing plist, calculated `h2`
+and `h3` over the declared RFC 5322 payload, tested the indexed raw hash first,
+and then queried recorded observation `h3` values. For semantic-only pairs, it
+retrieved the hash-verified canonical MBOX bytes and compared DKIM-relaxed
+header-name/value multisets. Only aggregate header names and counts were
+reported; message content, addresses, subjects, and header values were not
+emitted.
+
+The Apple store contained multiple mail services. Classification used only
+local structural evidence: an IMAP account with a `[Gmail].mbox` or
+`[Google Mail].mbox` hierarchy was classified as Gmail; Apple's `ews` scheme
+was classified as Microsoft Exchange; remaining `imap`, `pop`, and `local`
+schemes were retained as separate categories. No account address or opaque
+Apple account identifier was included. This method establishes client adapter
+type, not the legal or organizational identity of a provider; in particular,
+an EWS row is not proof that every record came from the Microsoft 365 cloud.
+
+| Apple Mail service | Complete EMLX | Partial excluded | Exact `h2` match | `h3`-only match | No archive `h3` | Archive records represented | Ambiguous `h3` | Formatting-only pair |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| Gmail | 93,531 | 98,285 | 10,825 | 20,015 | 62,691 | 41,438 | 11,468 | 19,506 |
+| Microsoft Exchange (EWS) | 7,273 | 1,154 | 1,601 | 31 | 5,641 | 1,628 | 0 | 31 |
+| Other IMAP | 1,084 | 224 | 0 | 0 | 1,084 | 0 | 0 | 0 |
+| Local | 204 | 0 | 0 | 0 | 204 | 0 | 0 | 0 |
+| POP | 101 | 0 | 0 | 0 | 101 | 0 | 0 | 0 |
+| **Total** | **102,193** | **99,663** | **12,426** | **20,046** | **69,721** | **43,066** | **11,468** | **19,537** |
+
+An exact raw match was found for 12.16% of complete cache records. `h3`
+identified another 19.62%, increasing the observed overlap to 31.78%; 68.22%
+of complete cache records had no semantic match in the canonical archive.
+Because one cache digest can match more than one canonical record, “archive
+records represented” is a distinct count and must not be added to the cache
+classifications. The 11,468 ambiguous cases were all in the Gmail category and
+were reported rather than resolved heuristically.
+
+Of the 20,046 semantic-only pairs, 19,537 (97.46%) differed only in header
+formatting after DKIM-relaxed comparison. The remaining aggregate differences
+were confined to Gmail-classified cache records: Apple-only `Received`,
+`Return-Path`, and `X-Mailer` each appeared 508 times;
+`X-Universally-Unique-Identifier` was absent from Apple Mail 508 times; and one
+Apple copy lacked `X-GM-THRID` and `X-Gmail-Labels`. No selected header had a
+changed normalized value. These observations empirically demonstrate that
+raw-byte identity alone understates cross-client overlap, while also showing
+why semantic equality should not erase the distinct source representations.
+
+The store remained live during measurement. Its Envelope Index WAL changed,
+and one additional complete Gmail EMLX appeared between the aggregate run and
+the provider-stratified run. The table is therefore a point-in-time experiment,
+not a transactionally consistent provider census or a completeness claim.
+Known `.partial.emlx` records were excluded because they can omit detached
+attachment bytes. The result supports `h3` as a reconciliation instrument but
+does not measure false-positive identity against an independently labeled
+ground-truth corpus.
+
+### Diagnostic ambiguous-class review set
+
+To support qualitative review of the ambiguity mechanism, a separate export
+selected 20 distinct h3 classes by descending canonical-archive variant count,
+then descending Apple-cache occurrence count, with h3 as the deterministic
+tie-breaker. This is a purposive diagnostic selection of high-multiplicity
+classes, not a random or representative sample. For each class, the exporter
+copied every matching complete Apple EMLX payload and every hash-verified
+canonical archive representation into separate subdirectories and wrote h2/h3
+manifests without modifying either source store.
+
+The resulting private review set contains 20 Gmail classes, 100 EML files, and
+568,056 bytes. Every selected class has two Apple-cache occurrences sharing one
+raw h2 and three canonical archive records with three distinct h2 values. Four
+classes contain one raw representation shared exactly across the cache and
+archive; the other 16 overlap only through h3. This structure makes the term
+“ambiguous” concrete: one semantic identifier denotes three distinct raw
+representations in four classes and four distinct raw representations in the
+other 16. Every class has five source/canonical files because the cache
+contains the same raw representation twice.
+
+The augmented manifests assign each distinct raw digest a stable per-case h2
+group and flag a group when both stores contain it. They also verify separately
+that all occurrences of `Date` and `Subject`, after the same DKIM-relaxed
+canonicalization used by h3, agree within each class. All 20 classes have the
+same present normalized `Date` and the same present normalized `Subject`.
+This does not imply byte-identical raw header lines: field-name case, folding,
+and whitespace may differ. None of the 100 exported messages contains an
+`X-Apple-Auto-Saved` header.
+
+| Case | H2 relationship | Distinct h2 | h3 | Date component | Subject component | Autosave files |
+| ---: | --- | ---: | --- | --- | --- | ---: |
+| 01 | no cache/archive h2 match | 4 | same | same, present | same, present | 0 |
+| 02 | no cache/archive h2 match | 4 | same | same, present | same, present | 0 |
+| 03 | no cache/archive h2 match | 4 | same | same, present | same, present | 0 |
+| 04 | no cache/archive h2 match | 4 | same | same, present | same, present | 0 |
+| 05 | no cache/archive h2 match | 4 | same | same, present | same, present | 0 |
+| 06 | one h2 shared across stores | 3 | same | same, present | same, present | 0 |
+| 07 | one h2 shared across stores | 3 | same | same, present | same, present | 0 |
+| 08 | no cache/archive h2 match | 4 | same | same, present | same, present | 0 |
+| 09 | no cache/archive h2 match | 4 | same | same, present | same, present | 0 |
+| 10 | no cache/archive h2 match | 4 | same | same, present | same, present | 0 |
+| 11 | no cache/archive h2 match | 4 | same | same, present | same, present | 0 |
+| 12 | no cache/archive h2 match | 4 | same | same, present | same, present | 0 |
+| 13 | no cache/archive h2 match | 4 | same | same, present | same, present | 0 |
+| 14 | no cache/archive h2 match | 4 | same | same, present | same, present | 0 |
+| 15 | one h2 shared across stores | 3 | same | same, present | same, present | 0 |
+| 16 | no cache/archive h2 match | 4 | same | same, present | same, present | 0 |
+| 17 | no cache/archive h2 match | 4 | same | same, present | same, present | 0 |
+| 18 | no cache/archive h2 match | 4 | same | same, present | same, present | 0 |
+| 19 | no cache/archive h2 match | 4 | same | same, present | same, present | 0 |
+| 20 | one h2 shared across stores | 3 | same | same, present | same, present | 0 |
+
+The review material is stored under the project-local, gitignored
+`.tmp/h3-ambiguous-review/` directory with owner-only permissions. Each case
+contains `apple-cache/`, `canonical-archive/`, and `manifest.json`; the root
+contains a warning, a compact h2/header/autosave table, CSV summary, and
+complete manifest. A refresh mode re-hashes every private EML before updating
+these derived reports and does not reread either source store. Raw
+messages are private research evidence and must not be committed or
+distributed. The checked-in exporter and synthetic test are reproducibility
+infrastructure; the private corpus is not part of the software distribution.
 
 The [on-disk format inventory](ON_DISK_MAIL_FORMATS.md) is the authoritative
 PST/OST research and selection record. The selected first backend is libpff
@@ -210,7 +386,8 @@ precondition; explicit `--no-scan` bypasses it and records that choice.
 Modern Apple Mail package traversal recognizes complete
 `Data/.../Messages/*.emlx` payloads and ignores MailData, plist, and detached
 attachment files. It reports missing paths and macOS Full Disk Access failures
-instead of treating them as empty input. `.partial.emlx` is rejected because
+instead of treating them as empty input. Directory discovery reports and skips
+`.partial.emlx`; direct selection is rejected because
 the cached RFC 5322 representation omits detached attachment bytes; use Apple
 Mail's mailbox export to obtain a complete MBOX source. Physical `.emlx` paths
 remain source identities and integrity boundaries. Their catalog hierarchy
@@ -231,6 +408,9 @@ payloads, and stores relative paths plus raw and semantic SHA-256 values in a
 temporary SQLite database. It attaches `archive.sqlite3` by a read-only URI and
 uses indexed `messages.sha256` and `observations.semantic_sha256` lookups to
 classify exact, semantic-only, cache-only, archive-only, and ambiguous matches.
+Apple mailbox URL schemes and Gmail special-folder structure produce
+privacy-preserving Gmail, Exchange/EWS, other IMAP, POP, local, and unknown
+aggregates without exposing account identifiers.
 For semantic-only pairs it retrieves hash-verified canonical MBOX bytes and
 compares DKIM-relaxed header multisets. Its report contains only header names
 and aggregate counts, never values or content. It snapshots the active Apple
@@ -238,6 +418,13 @@ Envelope Index WAL metadata before and after the scan to flag a live cache
 change. `make compare-apple-mail` supplies the standard paths and
 `make test-apple-mail-compare` exercises exact, semantic, formatting-only,
 header-added, cache-only, archive-only, and partial-record behavior.
+`h3_review.py` uses the same disposable index to select high-multiplicity h3
+classes deterministically and exports all matching cache occurrences and
+hash-verified canonical variants. It refuses to overwrite its destination,
+writes owner-only private EML and manifest files, and is invoked by
+`make h3-ambiguous-review`. Its synthetic acceptance test verifies complete
+variant export, exact bytes, service classification, manifests, and overwrite
+refusal.
 Emacs RMAIL files are detected by their case-insensitive `BABYL OPTIONS:`
 header because they commonly have no extension. The reader accepts LF and CRLF
 container line endings, streams records without modifying the source, combines
@@ -342,6 +529,63 @@ writer-lease protection, and transactional history updates remain planned;
 the existing `schema_info` version check does not implement those safeguards.
 `locations` and
 `mbox_generations` are written as part of each message publication.
+
+### Planned Contacts and geography
+
+Contacts are a derived address-level projection over the catalog. Extraction
+will stream each message's `From`, `To`, `Cc`, and `Bcc` headers once and write
+one deduplicated address appearance per message. It will separately derive the
+default **Meaningful** relation: outgoing direct To/Bcc recipients and incoming
+From addresses only when an exact configured owner address is in To. This
+preserves all-header statistics while avoiding Cc and indirect mailing-list
+traffic in meaningful-contact results.
+The current owner-token file continues to route Sent mail. Archive creation and
+File → Properties will later maintain a separate exact owner-address set for
+the direct-owner predicate; fragment matching is not adequate for that use.
+`mailarchiver human-contacts` is the initial read-only consumer. Its
+`--owner-address-file` accepts the existing owner aliases with newline, comma,
+or semicolon separators; it resolves them only to catalogued Sent sender
+addresses. Optional repeatable `--owner-address` values are exact overrides.
+The command defaults to meaningful Contacts and exposes the all-header
+projection only with `--all`; table, TSV, and JSON output share one typed row
+model.
+Before rendering, it applies the strict versioned `contact_filters.yaml`
+policy. It classifies malformed Unicode/control values and forbidden local-part
+characters as bogus, configured provider/list patterns as mailing lists,
+configured automated patterns as service identities, and only then includes
+the remaining addresses. The policy deliberately keeps ordinary SMTPUTF8
+addresses possible; it does not use non-ASCII alone as a rejection rule.
+The policy resolver first checks `<archive>/contact_filters.yaml`; when
+that file is absent it uses `src/mailarchiver/contact_filters.yaml` from
+the installed package. A `mode: replace` archive policy is a complete strict
+Pydantic replacement. A `mode: extend` policy may provide rule lists only; it
+is unioned with the packaged lists in order, removing duplicates, while
+packaged scalar values remain authoritative. The effective policy is therefore
+complete and reproducible without field-by-field scalar merging.
+
+Location evidence will retain a typed source, extraction method, observation
+time, confidence, and `located` or `affiliated` relation. Signature extraction
+may add located evidence; downloaded university domain/main-campus data adds
+only affiliated evidence. A Contact remains an address even when future
+authoritative-name work associates several Contacts with one Person.
+
+The geography reference database is an installation-level SQLite database,
+stored under `~/Library/Application Support/Mail Archiver/geography/` on macOS,
+`%LOCALAPPDATA%\\Mail Archiver\\geography\\` on Windows, and
+`$XDG_DATA_HOME/mailarchiver/geography/` (or
+`~/.local/share/mailarchiver/geography/`) on Linux. The planned `make geography-data` and
+Tools-menu updater will share a downloader that validates a versioned
+bulk-data manifest and atomically installs the replacement. The planned package will ship
+a US ZCTA seed. It contains representative coordinates and display geography;
+the ZCTA lookup treats `02139` as an exact ZCTA, not ZIP3.
+
+Future archive schema migration will use a dedicated
+versioned Python-managed SQL migration history (Flyway filenames only). Search keeps its
+independent disposable rebuild path. Geography data has its own database
+version, while an optional geography snapshot copied into an archive uses the
+archive migration stream. The snapshot is only copied or selected for reading
+by an explicit user action. See
+[CONTACTS_AND_GEOGRAPHY.md](CONTACTS_AND_GEOGRAPHY.md) for the complete design.
 
 Header parsing decodes and unfolds RFC 2047 Subject values before catalog and
 FTS insertion. `mailsearch` displays that catalog value directly. The verified
@@ -1189,6 +1433,60 @@ omitted from FTS entirely.
 
 ## Planned remote sources
 
+### Archive source registry and import actions
+
+The planned top-level `archive.yaml` is an operational per-archive file, not a
+payload file or portable fixity assertion. A strict Pydantic configuration
+model will use a `kind` discriminator over `FileSource`, `LocalFolderSource`,
+and `ImapSource`; reject unknown keys, duplicate IDs, invalid ports, relative
+ambiguity, and secrets embedded as values; and preserve source order for the
+user interface. Source checkpoints and observations remain in
+`archive.sqlite3`, rather than being rewritten into YAML after each import.
+
+```yaml
+version: 1
+sources:
+  - id: takeout-2026
+    kind: file
+    path: /Users/your.name/Downloads/takeout-mail.mbox
+  - id: historical-mail
+    kind: local-folder
+    path: /Volumes/Archive/Old Mail
+  - id: personal-imap
+    kind: imap
+    server: imap.example.org
+    port: 993
+    username: your.name@example.org
+    tls: implicit
+    authentication: password
+    credential_ref: keyring://mail-archiver/personal-imap
+    folders: all
+```
+
+`credential_ref` is an identifier, never the password or token. Password
+authentication prompts through a no-echo UI when the keychain item is absent;
+OAuth profiles instead start system-browser authorization and retain their
+tokens through the same secrets boundary. Noninteractive missing credentials
+fail closed.
+
+The planned **Import/Refresh** action enumerates every enabled source. For
+`file` and every known file found beneath `local-folder`, it compares the
+current nanosecond modification time with the last completed checkpoint. An
+unchanged value skips opening and hashing that file; directory traversal still
+discovers new paths. This deliberately misses a content change that preserves
+mtime. IMAP Refresh uses `UIDVALIDITY`, UID, `UIDNEXT`, and `HIGHESTMODSEQ`
+where supported and advances a checkpoint only after durable canonical
+publication.
+
+**Import/Rebuild** uses the same source registry and publication pipeline, but
+bypasses the local mtime shortcut and hashes every local source file. It can
+stop after a matching complete digest or reprocess changed content. IMAP
+Rebuild performs a complete selected-folder/UID reconciliation; a changed
+`UIDVALIDITY` is disclosed and handled through that same path. Neither action
+deletes canonical mail or defeats message-level deduplication. This terminology
+is distinct from `refresh-index`, which reads canonical MBOX and replaces only
+derived search data.
+
 The implemented `mailarchiver-auth` console entry point is separate from the
 reserved remote-source adapters. It parses and normalizes one account using a
 strict Pydantic model, recognizes well-known consumer domains, and otherwise
@@ -1240,9 +1538,9 @@ assets.
 
 `doc/M365.md` likewise separates the unsupported end-user boundary from the
 developer design. It records Outlook PST and legacy-Mac OLM as the nearest
-offline export paths, Graph delegated `Mail.Read` as the preferred future live
-source, Entra public-client and publisher-verification constraints, and OAuth
-IMAP as a broader compatibility path rather than an authentication shortcut.
+offline export paths, generic OAuth IMAP as the first planned live source,
+Graph delegated `Mail.Read` as a later provider-specific path, and Entra
+public-client and publisher-verification constraints.
 `doc/APPLE_MAIL_CACHE.md` records the best-effort cache boundary and the
 read-only preflight required before completeness claims.
 
@@ -1254,11 +1552,11 @@ evidence, per-account concurrency keys, and raw RFC 5322 messages. The reserved
 adapters remain unavailable until each implements actual account/stream access
 with substantive provider-local acceptance coverage.
 
-Gmail will use least-privilege OAuth where the required raw-message read scope is
-available, paginates message IDs, fetches raw bytes and labels, and records
-Gmail ID/thread ID/labels as provenance.  Incremental Gmail sync stores the
-last successfully committed history checkpoint, with a complete-list fallback
-when history has expired.
+The later Gmail API adapter will use least-privilege OAuth where the required
+raw-message read scope is available, paginate message IDs, fetch raw bytes and
+labels, and record Gmail ID/thread ID/labels as provenance. Incremental Gmail
+API sync stores the last successfully committed history checkpoint, with a
+complete-list fallback when history has expired.
 
 IMAP will use TLS and read-only SELECT/EXAMINE where supported. It will enumerate
 folders and UIDs, fetches RFC 5322 bytes without setting `\\Seen`, and stores
@@ -1436,8 +1734,11 @@ requires it and fails clearly.
 2. Implement recursive local ingest, exact dedupe, autosave exclusion,
    integrity files, sorting, recovery, and ClamAV routing.
 3. Add `review`, `refresh-index`, FTS5 rebuilding, and conservative body/HTML extraction.
-4. Add IMAP and Gmail importers with resumable checkpoints.
-5. Build the local search/view interface on the stable database and MBOX
+4. Add the generic IMAP importer with resumable provider checkpoints, Gmail
+   and Microsoft OAuth profiles, and archive-configured Refresh/Rebuild.
+5. Add provider-specific Gmail API and Microsoft Graph importers when their
+   richer metadata justifies the separate transports.
+6. Build the local search/view interface on the stable database and MBOX
    retrieval API.
 
 ## Developer validation gates
@@ -1522,8 +1823,8 @@ Known consumer domains need no DNS lookup; transient DNS and token-refresh
 transport failures are disclosed as errors rather than negative detection or
 fresh consent. Credentials are stored only after the profile matches.
 
-A whole Apple Mail cache containing `.partial.emlx` files cannot currently be
-ingested: discovery rejects those files and stops the run. Only a separately
-staged copy containing complete supported records is an available local-file
-bridge. Do not modify the source cache to prepare that copy; the comparator is
-read-only and does not imply whole-cache ingest support.
+Directory import reports and skips `.partial.emlx` records while retaining
+complete supported records. Direct selection of a partial record is rejected.
+This is not a complete mailbox acquisition: detached attachment bytes are not
+reconstructed. Do not modify the source cache; export mail through Apple Mail
+when a complete MBOX source is required.

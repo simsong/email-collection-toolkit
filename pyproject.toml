@@ -1,6 +1,6 @@
 [project]
 name = "mailarchiver"
-version = "0.0.0"
+version = "0.1.0.dev1"
 description = "Personal MBOX archive normalizer"
 requires-python = ">=3.12"
 dependencies = [
@@ -22,6 +22,7 @@ dependencies = [
 mailarchiver = "mailarchiver.__main__:main"
 mailarchiver-auth = "mailarchiver.auth:main"
 mailarchiver-compare-apple-mail = "mailarchiver.apple_mail_compare:main"
+mailarchiver-h3-review = "mailarchiver.h3_review:main"
 mailsearch = "mailarchiver.mailsearch:main"
 mailsearch-gui = "mailarchiver.gui_app:main"
 summarize = "mailarchiver.aisummarize:main"

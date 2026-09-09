@@ -506,7 +506,7 @@ def test_partial_apple_mail_message_is_rejected(tmp_path: Path) -> None:
     path.write_bytes(str(len(raw)).encode() + b"\n" + raw)
 
     with pytest.raises(IncompleteAppleMailMessageError, match="omits detached attachment bytes"):
-        list(source_files(tmp_path))
+        list(source_files(path))
 
 
 def test_missing_source_is_not_silently_empty(tmp_path: Path) -> None:

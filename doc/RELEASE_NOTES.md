@@ -125,3 +125,17 @@
   `source-metadata-excluded` observation, and unwrap narrowly recognized
   `From XXX` status containers so the nested RFC 5322 message supplies its
   actual sender and metadata.
+# Checkout reconciliation — 2026-09-08
+
+Recovered work from historical development checkouts:
+
+- Read-only human-contact reports and archive-local filtering policies.
+- Provider-stratified Apple Mail comparison and private, hash-verified h3 review exports.
+- Experimental name/signature evidence extraction, kept separate from production matching.
+- Bounded ClamAV subprocesses and confirmation for active, unknown, or mismatched attachments.
+- Directory imports report partial EMLX records and continue with complete records.
+- Wheel/sdist installation checks, website-build CI, and retained browser failure traces.
+
+Contacts/geography GUI, live IMAP sources, and Refresh/Rebuild are documented
+plans, not newly implemented features. No source mailbox or real archive is
+changed by reconciliation or its fixture tests.
