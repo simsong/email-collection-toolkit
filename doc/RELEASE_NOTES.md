@@ -2,6 +2,37 @@
 
 ## Unreleased
 
+* Inspect Apple Mail provider metadata using private database/WAL copies, avoiding
+  source shared-memory writes. Abort on scanner helper execution errors before
+  removing a daemon socket or launching a replacement.
+
+* Reject empty-domain contacts and report zero-byte partial EMLX files instead
+  of silently skipping them; direct selection of partial records still fails.
+
+* Reject duplicate deferred AI request IDs and reserve h3 review destinations
+  exclusively so a late-created empty directory is not overwritten.
+
+* Explicitly attach h3 review catalogs read-only, stage name-evidence summaries
+  before publication, and roll back database publication if the summary link
+  fails. Restore the CSS-injection regression's intended validation path.
+
+* Treat missing, non-executable, and invalid-format ClamAV health-check helpers
+  as unavailable instead of allowing OS execution errors to escape the probe.
+
+* Validate all contact-filter regexes at policy load time and report YAML or
+  regex typos as path-qualified CLI errors, without tracebacks or archive writes.
+
+* Use platform-correct read-only catalog URIs for Contacts. The standalone
+  message scrolling regression now guarantees overflow and verifies actual
+  scrolling to source locations, independent of platform font metrics.
+
+* Distinguish bogus-domain contact-filter diagnostics from bogus local parts
+  without changing which addresses are excluded.
+
+* Use installed package metadata for BagIt writer versions, verify release tags
+  before project installation/artifact execution, and keep all mobile navigation
+  links visible regardless of their order.
+
 * Use `gh` with the authorized review-request-only identity for Copilot requests
   instead of controlling the browser.
 
@@ -125,3 +156,18 @@
   `source-metadata-excluded` observation, and unwrap narrowly recognized
   `From XXX` status containers so the nested RFC 5322 message supplies its
   actual sender and metadata.
+
+### Checkout reconciliation — 2026-09-08
+
+Recovered work from historical development checkouts:
+
+- Read-only human-contact reports and archive-local filtering policies.
+- Provider-stratified Apple Mail comparison and private, hash-verified h3 review exports.
+- Experimental name/signature evidence extraction, kept separate from production matching.
+- Bounded ClamAV subprocesses and confirmation for active, unknown, or mismatched attachments.
+- Directory imports report partial EMLX records and continue with complete records.
+- Wheel/sdist installation checks, website-build CI, and retained browser failure traces.
+
+Contacts/geography GUI, live IMAP sources, and Refresh/Rebuild are documented
+plans, not newly implemented features. No source mailbox or real archive is
+changed by reconciliation or its fixture tests.

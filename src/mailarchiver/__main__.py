@@ -32,6 +32,7 @@ from tabulate import tabulate
 
 from .archive_integrity import MailbagArchiveIntegrityControls
 from .archive_path import add_archive_argument, require_archive
+from .contacts import contacts, load_owner_addresses, print_contacts
 from .document_options import DocumentOptions
 from .catalog import (
     UnsupportedSearchSchemaError,
@@ -113,6 +114,25 @@ class IngestOutcome(BaseModel):
     """Publication evidence retained even when an ingest raises."""
 
     published: bool = False
+
+
+class ContactInputError(ValueError):
+    """Invalid input specific to the human-contacts command."""
+
+
+def contact_list(args: argparse.Namespace) -> None:
+    """Render address-level Contacts without changing the archive."""
+    try:
+        from_file = () if args.owner_address_file is None else load_owner_addresses(args.owner_address_file)
+        rows = contacts(
+            Path(args.archive),
+            owner_addresses=tuple(args.owner_address),
+            owner_aliases=from_file,
+            meaningful_only=not args.all,
+        )
+    except ValueError as error:
+        raise ContactInputError(str(error)) from error
+    print_contacts(rows, args.format)
 
 
 class IngestRequest(BaseModel):
@@ -2225,6 +2245,12 @@ def main() -> int:
     report_parser.add_argument("--year", help="year or inclusive year range, for example 2016 or 2010-2020")
     report_parser.add_argument("--top", type=nonnegative_integer, default=DEFAULT_REPORT_TOP, help="top senders and recipients to show (default: 10; use 0 to suppress)")
     report_parser.set_defaults(function=report)
+    contacts_parser = commands.add_parser("human-contacts", help="list human address-level Contacts")
+    contacts_parser.add_argument("--owner-address-file", type=Path, help="owner alias file; matches Sent sender addresses")
+    contacts_parser.add_argument("--owner-address", action="append", default=[], metavar="ADDRESS", help="exact owner address; repeatable")
+    contacts_parser.add_argument("--all", action="store_true", help="include all human header addresses, not only direct Contacts")
+    contacts_parser.add_argument("--format", choices=("table", "tsv", "json"), default="table")
+    contacts_parser.set_defaults(function=contact_list)
     refresh_parser = commands.add_parser("refresh-index")
     refresh_parser.add_argument("--index-attachments", action="store_true", help="include text attachments; non-text attachments require the planned Tika extractor")
     refresh_parser.add_argument(
@@ -2238,6 +2264,8 @@ def main() -> int:
     args.archive = require_archive(parser, args.archive)
     try:
         args.function(args)
+    except ContactInputError as error:
+        parser.error(str(error))
     except RefreshIndexInterrupted as error:
         message = (
             "interrupted: the rebuilt search index was already published; no partial index exists"

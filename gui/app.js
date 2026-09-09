@@ -1933,7 +1933,7 @@ async function previewAttachment(attachment) {
 
 async function openAttachment(attachment) {
   let result = await call(() => window.pywebview.api.open_attachment(state.selected, attachment.part_id, false));
-  if (result?.requires_confirmation && confirm(`${attachment.filename} may contain executable content. Open it anyway?`)) {
+  if (result?.requires_confirmation && confirm(`${attachment.filename} may contain active or unrecognized content. Open it anyway?`)) {
     result = await call(() => window.pywebview.api.open_attachment(state.selected, attachment.part_id, true));
   }
 }

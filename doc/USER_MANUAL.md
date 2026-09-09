@@ -57,6 +57,71 @@ Choose two locations:
 On macOS, reading Apple Mail or another protected location may require Full
 Disk Access for the terminal application.
 
+## Configure archive sources
+
+The planned archive-wide import interface stores an ordered source list in
+`archive.yaml` at the top of the archive. This workflow is not implemented in
+the current release; current imports still use the explicit source paths shown
+under [Create or add to an archive](#create-or-add-to-an-archive).
+
+An archive can contain three kinds of source:
+
+| Source kind | What it identifies |
+| --- | --- |
+| **FILE** | One local MBOX, EML, Babyl, EMLX, or other supported mail file |
+| **LOCAL FOLDER** | A local directory recursively searched for supported mail files |
+| **IMAP** | A remote account identified by server, port, and username |
+
+Each source has a permanent ID so its observations and last successful check
+remain associated with the same source after later imports. For example:
+
+```yaml
+version: 1
+sources:
+  - id: takeout-2026
+    kind: file
+    path: /Users/your.name/Downloads/takeout-mail.mbox
+  - id: historical-mail
+    kind: local-folder
+    path: /Volumes/Archive/Old Mail
+  - id: personal-imap
+    kind: imap
+    server: imap.example.org
+    port: 993
+    username: your.name@example.org
+    tls: implicit
+    authentication: password
+    credential_ref: keyring://mail-archiver/personal-imap
+    folders: all
+```
+
+`archive.yaml` contains no password or OAuth token. `credential_ref` is only
+the name of an item in the operating-system keychain or configured secrets
+provider. When a password is missing, an interactive import asks for it without
+echoing it and stores it in that credential system. An OAuth IMAP source opens
+the provider's browser authorization instead. A noninteractive import with a
+missing credential stops without printing or saving the secret elsewhere.
+
+### Import/Refresh and Import/Rebuild
+
+Both actions visit every enabled FILE, LOCAL FOLDER, and IMAP source and are
+safe to repeat. Neither action deletes or recreates archived messages.
+
+| Action | Local files | IMAP accounts |
+| --- | --- | --- |
+| **Import/Refresh** | Walk folders to find new paths. Do not open or hash a known file when its modification time has not changed since its last completed import. | Use saved folder and UID checkpoints to retrieve new or changed messages. |
+| **Import/Rebuild** | Ignore modification-time shortcuts and recompute the complete SHA-256 of every file. A matching hash can then skip parsing; changed files are processed again. | Perform a complete folder and UID reconciliation rather than relying only on the incremental cursor. |
+
+Refresh intentionally trusts local modification times. If another program
+changes a file but preserves its old modification time, Refresh will not find
+that change; use Rebuild when that is possible or when validating a copied or
+restored source. Directory traversal is still required during Refresh so new
+files can be discovered.
+
+These actions concern acquisition sources. They are different from
+`refresh-index`, which reads mail already in the archive and rebuilds only the
+disposable search database.
+
 ## Import Gmail
 
 Use Google Takeout for Gmail today. It creates MBOX files without granting Mail
@@ -131,6 +196,9 @@ parsed `From:` address contains one of these values, without regard to case.
 
 ## Create or add to an archive
 
+The following is the currently implemented explicit-path interface. It does
+not yet read the planned `archive.yaml` source registry.
+
 From the Mail Archiver checkout, run:
 
 ```console
@@ -203,9 +271,10 @@ changing the database schema.
 Press Control-C once for a controlled stop. Mail Archiver closes its files,
 commits completed messages, writes an archive checkpoint, and prints a summary.
 
-It is safe to run the same ingest command again. An unchanged source file is
-verified by its source plug-in's complete-file control and skipped; its path
-and reason are printed. A safely appended MBOX can
+It is safe to run the same ingest command again. The current CLI verifies an
+unchanged source file with its source plug-in's complete-file control before
+skipping it; this corresponds to the stronger hashing performed by the planned
+Import/Rebuild action. A safely appended MBOX can
 resume at its append boundary. Other changes cause the source file to be read
 again; already archived messages remain deduplicated.
 
@@ -502,7 +571,9 @@ see the source evidence and the resulting routing decision. The original header
 and canonical message remain unchanged.
 
 Attachments and their previews appear below the body. Opening an attachment is
-always explicit, with an additional warning for executable or container types.
+always explicit, with confirmation for active, unknown, or mismatched MIME/suffix
+pairs. Only allowlisted matching PDF, static image, and plain-text pairs bypass
+that extra confirmation.
 The bottom of the message view separately lists the canonical archive mailbox
 and every source volume and source or forensic path where the message was found.
 **Save Message…** exports an exact, SHA-256-verified `.eml` copy without changing
@@ -609,7 +680,78 @@ include supported text attachments.
 * `search.sqlite3` is disposable and may be rebuilt from the canonical mail.
 * Preserve the entire archive directory, including hidden and small tag files.
 
+## Contacts command
+
+The read-only Contacts command is the first address-level Contacts interface:
+
+```console
+make run ARGS='--archive "/path/to/mail-archive" human-contacts --owner-address-file owner-names.txt --format table'
+```
+
+It reports each likely human direct correspondent's email address, first appearance, last
+appearance, and all-header message count. The owner-address file accepts the
+same identifying address fragments as `owner-names.txt`, separated by newlines,
+commas, or semicolons; blank lines and `#` comments are ignored. It resolves
+those aliases only to catalogued **Sent** sender addresses, then uses the
+resulting exact addresses for meaningful-contact tests. Repeat `--owner-address`
+for a temporary exact additional address. The default meaningful selection includes outgoing To/Bcc recipients
+and incoming senders only when an exact owner address is in To; it excludes Cc
+traffic and mailing-list mail addressed only indirectly. Use `--all` to inspect
+all From/To/Cc/Bcc addresses instead, and `--format tsv` or `--format json` for
+scripts. Mailing lists, automated/no-reply services, malformed addresses, and
+local parts longer than 48 characters are excluded by a versioned packaged
+policy. Shared role inboxes such as root, staff, support, and webmaster are
+also excluded. The command only reads archive.sqlite3.
+Exceptional valid human identities are explicit allow rules in that same policy;
+they take precedence over the generic malformed-address checks.
+
+### Contact-filter policy
+
+The packaged default is `src/mailarchiver/contact_filters.yaml`. To
+preserve archive-specific decisions, copy that complete file to
+`/path/to/mail-archive/contact_filters.yaml` and edit the copy. The
+archive copy takes precedence whenever it exists; without one, Mail Archiver
+uses the packaged default. Set `mode: replace` for a complete, valid versioned
+replacement policy. Set `mode: extend` to add rule lists to the packaged
+policy; duplicates are removed and the packaged scalar threshold remains in
+effect. Invalid policies fail rather than silently falling back.
+
+## Planned: Contacts window and geography
+
+The forthcoming **Contacts** window will list one email address per contact,
+with first appearance, last appearance, and message count. Its checked-by-
+default **Meaningful** option will show direct correspondents: people you sent
+to in To or Bcc, and people who sent to an owner address directly in To. Cc
+traffic and messages sent only through a mailing list will not qualify.
+The current `owner-names.txt` continues to classify sent mail. A future archive
+creation dialog and **File → Properties** will maintain the exact owner
+addresses used by Contacts.
+
+The same window will support US ZCTA input such as `02139`, displaying its city,
+state, and country, and later a rough straight-line radius around a place. A
+contact's **located** evidence (for example, a signature address) is distinct
+from an **affiliated** institution (for example, a university domain); an
+affiliation is not treated as a home location.
+
+The application will ship with a seed US geography database. `make
+geography-data` and **Tools → Update Geo Database** will refresh the shared,
+per-user reference data. It lives outside individual archives: on macOS in
+`~/Library/Application Support/Mail Archiver/geography/`; on Windows in
+`%LOCALAPPDATA%\\Mail Archiver\\geography\\`; and on Linux in
+`$XDG_DATA_HOME/mailarchiver/geography/` (or
+`~/.local/share/mailarchiver/geography/`). A future explicit command will let
+you copy a geography snapshot into an archive or choose that snapshot instead
+of your installed data. These features are documented design commitments and
+are not in the current release.
+
 ## Configuration
+
+The planned top-level `archive.yaml` belongs to one archive and contains that
+archive's FILE, LOCAL FOLDER, and IMAP source definitions. It contains local
+paths and account names but no passwords or tokens. Source credentials remain
+in the operating-system keychain or configured secrets provider. Import
+checkpoints and observations remain in `archive.sqlite3`; successful imports
+do not rewrite checkpoint state into the YAML file.
 
 Mail Archiver's current application-level configuration is the versioned YAML
 file `src/mailarchiver/configuration.yaml` in the source checkout. It currently
@@ -630,6 +772,7 @@ versions, and invalid color values instead of passing them to the viewer.
 This YAML file contains packaged application display policy. It does not
 replace:
 
+* the planned per-archive `archive.yaml` source registry;
 * `owner-names.txt`, which identifies the archive owner for Sent routing;
 * `MAIL_ARCHIVE_DIR` or `--archive`, which selects an archive;
 * the installed ClamAV configuration; or
@@ -637,3 +780,9 @@ replace:
 
 Changing the highlight color affects only derived display rendering. It does
 not modify the source mail, canonical MBOX files, catalog, or search database.
+Versioned policy files that affect archive-derived interpretation, such as
+`contact_filters.yaml`, may instead be copied in full to the archive
+root. An archive-local copy takes precedence over the packaged source copy, so
+the archive retains the policy that produced its derived contact results.
+Packaged runtime YAML files declare `mode: replace`; an archive-local policy
+that supports `mode: extend` documents the lists it adds to that default.
