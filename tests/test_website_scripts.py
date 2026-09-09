@@ -73,3 +73,17 @@ def test_zola_config_rejects_accidental_template(tmp_path: Path) -> None:
         validate_config(config)
     config.write_text('base_url = "https://example.org/"', encoding="utf-8")
     validate_config(config)
+
+
+@pytest.mark.parametrize("failure", ["invalid-utf8", "missing", "directory"])
+def test_zola_config_reports_read_failures(tmp_path: Path, failure: str) -> None:
+    """Requirement: unreadable or non-UTF-8 configuration fails without a traceback."""
+    config = tmp_path / "config.toml"
+    if failure == "invalid-utf8":
+        config.write_bytes(b'title = "\xff"')
+    elif failure == "directory":
+        config.mkdir()
+    with pytest.raises(SystemExit, match="invalid Zola configuration") as caught:
+        validate_config(config)
+    assert str(config) in str(caught.value)
+    assert caught.value.__suppress_context__

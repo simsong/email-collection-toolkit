@@ -85,7 +85,7 @@ def validate_config(path: Path) -> None:
     """Reject malformed Zola configuration before the site build."""
     try:
         tomllib.loads(path.read_text(encoding="utf-8"))
-    except tomllib.TOMLDecodeError as error:
+    except (OSError, UnicodeDecodeError, tomllib.TOMLDecodeError) as error:
         raise SystemExit(f"invalid Zola configuration {path}: {error}") from None
 
 

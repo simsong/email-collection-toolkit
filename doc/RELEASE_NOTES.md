@@ -4,7 +4,7 @@
 
 * Introduce the Email Collection Toolkit website identity and stacked-envelope
   application icons; preserve Gmail setup and Advanced navigation, responsive
-  access, and equal personal and archival use cases. Validate Zola TOML before builds.
+  access, and equal personal and archival use cases. Validate Zola TOML before builds and report read/decode failures without a traceback.
 
 * Inspect Apple Mail provider metadata using private database/WAL copies, avoiding
   source shared-memory writes. Abort on scanner helper execution errors before
