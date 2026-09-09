@@ -209,3 +209,14 @@ def test_deferred_ai_results_are_correlated_independently_of_return_order() -> N
         ("a@example.test", "yes"),
         ("c@example.test", "no"),
     ]
+    duplicate = make_request(
+        provider=AIProvider.GEMINI,
+        model="example-model",
+        prompt_version="v1",
+        identity_1="a@example.test",
+        identity_2="b@example.test",
+        prompt="Are these the same person?",
+    )
+    assert duplicate.request_id == first.request_id
+    with pytest.raises(ValueError, match="duplicate request IDs"):
+        correlate_results([first, duplicate], [returned[1]])

@@ -88,6 +88,8 @@ def correlate_results(requests: list[AIRequest], results: list[AIResult]) -> lis
     """Return results in request order and reject missing, duplicate, or foreign IDs."""
     by_id: dict[str, AIResult] = {}
     expected = {request.request_id for request in requests}
+    if len(expected) != len(requests):
+        raise ValueError("duplicate request IDs")
     for result in results:
         if result.request_id not in expected:
             raise ValueError(f"unknown result request_id: {result.request_id}")

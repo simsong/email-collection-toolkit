@@ -13,7 +13,7 @@ import pytest
 from mailarchiver.apple_mail_compare import compare_apple_mail
 from mailarchiver.bagit import initialize_bag
 from mailarchiver.catalog import address_pk, create_catalog
-from mailarchiver.h3_review import export_ambiguous_h3_examples, open_review_database, refresh_review_report
+from mailarchiver.h3_review import export_ambiguous_h3_examples, open_review_database, publish_review, refresh_review_report
 from mailarchiver.layout import mbox_directory
 from mailarchiver.mbox import add_message
 from mailarchiver.standalone_verify import semantic_bytes
@@ -183,6 +183,38 @@ def test_comparison_distinguishes_exact_semantic_header_and_missing_records(tmp_
             "formatting_only_pairs": 0,
         },
     ]
+
+
+@pytest.mark.parametrize("existing_kind", ["empty-directory", "populated-directory", "file"])
+def test_review_publication_refuses_a_destination_created_after_staging(tmp_path: Path, existing_kind: str) -> None:
+    """Requirement: another publisher's late destination must not be replaced, even if empty."""
+    staging = tmp_path / "staging"
+    staging.mkdir()
+    case = staging / "case-001"
+    case.mkdir()
+    (case / "message.eml").write_bytes(b"From: example@example.test\n\nretained bytes\n")
+    (staging / "manifest.json").write_text("{}\n", encoding="utf-8")
+    output = tmp_path / "review"
+    if existing_kind == "file":
+        output.write_bytes(b"competitor")
+    else:
+        output.mkdir()
+        if existing_kind == "populated-directory":
+            (output / "other").write_bytes(b"competitor")
+    original_stat = output.stat()
+
+    with pytest.raises(FileExistsError):
+        publish_review(staging, output)
+
+    assert output.stat().st_ino == original_stat.st_ino
+    assert (case / "message.eml").read_bytes().endswith(b"retained bytes\n")
+    assert (staging / "manifest.json").read_text(encoding="utf-8") == "{}\n"
+    if existing_kind == "file":
+        assert output.read_bytes() == b"competitor"
+    elif existing_kind == "populated-directory":
+        assert (output / "other").read_bytes() == b"competitor"
+    else:
+        assert list(output.iterdir()) == []
 
 
 def test_review_index_is_writable_but_attached_archive_is_read_only(tmp_path: Path) -> None:

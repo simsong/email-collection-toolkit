@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+* Reject duplicate deferred AI request IDs and reserve h3 review destinations
+  exclusively so a late-created empty directory is not overwritten.
+
 * Explicitly attach h3 review catalogs read-only, stage name-evidence summaries
   before publication, and roll back database publication if the summary link
   fails. Restore the CSS-injection regression's intended validation path.

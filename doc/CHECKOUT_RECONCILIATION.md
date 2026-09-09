@@ -76,6 +76,11 @@ staged before linking with rollback on second-link failure. Real SQLite and
 filesystem tests verify write refusal, collision preservation and retry.
 The GUI fixture supplies `mode: replace` and asserts the highlight-color field
 causes rejection; reconciliation notes remain within the Unreleased section.
+The next balanced review found duplicate deterministic AI request IDs being
+collapsed and h3 publication replacing late-created empty directories. Correlation
+now rejects duplicate requests; h3 publication reserves a new private directory
+and moves the completion manifest last. Regressions exercise identical requests
+and late-created empty directories, populated directories and files.
 
 After human merge, fetch/prune and prove each source tip is represented in
 current main before removing its exact clean worktree and local branch.

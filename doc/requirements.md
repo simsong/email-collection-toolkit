@@ -12,6 +12,10 @@ outside source stores. Canonical message bytes are verified before extraction;
 neither tool changes an archive, chooses deduplication by h3 alone, or sends
 message evidence to a remote model. Edited review manifests must not redirect
 reads or writes through escaping paths or symbolic links.
+H3 review publication must reserve a new destination exclusively, refusing even
+an empty directory created during extraction, and publish its completion manifest
+last. Deferred AI correlation must reject duplicate request IDs, including
+identical requests that produce the same deterministic ID.
 Name-evidence publication must not replace an output created concurrently.
 Both database and summary must be staged before publication; failure to publish
 the summary must remove the database link created by that attempt, preserving

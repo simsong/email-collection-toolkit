@@ -386,6 +386,22 @@ def refresh_review_report(output: Path) -> ReviewSet:
     return updated
 
 
+def publish_review(staging: Path, output: Path) -> None:
+    """Reserve a new destination and publish its completion manifest last."""
+    children = sorted(staging.iterdir(), key=lambda path: (path.name == "manifest.json", path.name))
+    output.mkdir(mode=0o700)
+    published: list[Path] = []
+    try:
+        for child in children:
+            child.rename(output / child.name)
+            published.append(child)
+    except BaseException:
+        for child in reversed(published):
+            (output / child.name).rename(child)
+        output.rmdir()
+        raise
+
+
 def open_review_database(path: Path, catalog_path: Path) -> sqlite3.Connection:
     """Create a writable comparison index with an explicitly read-only archive."""
     database = sqlite3.connect(path, uri=True)
@@ -475,7 +491,7 @@ def export_ambiguous_h3_examples(
             cases=cases,
         )
         _write_index(staging, review)
-        staging.replace(output)
+        publish_review(staging, output)
     return review
 
 

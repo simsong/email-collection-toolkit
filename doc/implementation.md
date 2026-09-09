@@ -13,11 +13,18 @@ source stores. Refresh validates manifest paths and hashes; it does not import
 or deduplicate. Its writable SQLite comparison index enables URI handling and
 attaches the canonical catalog with `mode=ro`. Annotation reads one message
 variant at a time.
+Publication uses exclusive directory creation instead of replacing the destination.
+Staged children move into that reserved directory with the top-level manifest
+last; caught move failures roll completed moves back to staging. A process crash
+can leave an incomplete reserved directory without a manifest; publication is
+not a crash-atomic directory swap. Other publishers never reuse that directory.
 
 `make name-matcher-observations ARCHIVE=... OUTPUT=... ARGS='--limit 100'`
 builds a private SQLite derivative outside the canonical archive, using verified
 MBOX locations and a read-only catalog. Extraction errors are recorded. The
 prototype makes no provider requests and selects no production matcher.
+Deferred result correlation rejects duplicate request IDs before reading results,
+including independently constructed identical requests with deterministic IDs.
 Evidence publication requires a filesystem supporting hard links and owner-only
 permissions. The completed database is linked exclusively from same-filesystem
 temporary storage; plain rename is not a safe no-overwrite fallback on Unix.
