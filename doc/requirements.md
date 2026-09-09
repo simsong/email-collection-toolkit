@@ -13,6 +13,10 @@ neither tool changes an archive, chooses deduplication by h3 alone, or sends
 message evidence to a remote model. Edited review manifests must not redirect
 reads or writes through escaping paths or symbolic links.
 Name-evidence publication must not replace an output created concurrently.
+Both database and summary must be staged before publication; failure to publish
+the summary must remove the database link created by that attempt, preserving
+any competing output. The h3 comparison index must attach the source catalog
+explicitly read-only with SQLite URI handling enabled.
 The current prototype requires hard-link support and owner-only permissions on
 its output filesystem; it must not substitute an overwriting rename.
 

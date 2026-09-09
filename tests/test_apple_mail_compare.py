@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import mailbox
 import sqlite3
+from contextlib import closing
 from pathlib import Path
 
 import pytest
@@ -12,7 +13,7 @@ import pytest
 from mailarchiver.apple_mail_compare import compare_apple_mail
 from mailarchiver.bagit import initialize_bag
 from mailarchiver.catalog import address_pk, create_catalog
-from mailarchiver.h3_review import export_ambiguous_h3_examples, refresh_review_report
+from mailarchiver.h3_review import export_ambiguous_h3_examples, open_review_database, refresh_review_report
 from mailarchiver.layout import mbox_directory
 from mailarchiver.mbox import add_message
 from mailarchiver.standalone_verify import semantic_bytes
@@ -182,6 +183,26 @@ def test_comparison_distinguishes_exact_semantic_header_and_missing_records(tmp_
             "formatting_only_pairs": 0,
         },
     ]
+
+
+def test_review_index_is_writable_but_attached_archive_is_read_only(tmp_path: Path) -> None:
+    """Requirement: private h3 work may write its index but never the source catalog."""
+    archive = tmp_path / "archive #100% café"
+    _archive(archive, [b"From: sender@example\n\nbody\n"])
+    catalog = archive / "archive.sqlite3"
+    original = catalog.read_bytes()
+    with closing(open_review_database(tmp_path / "comparison.sqlite3", catalog)) as database:
+        database.execute("CREATE TABLE main.probe (value TEXT)")
+        database.execute("INSERT INTO main.probe VALUES ('writable')")
+        database.commit()
+        assert database.execute("SELECT count(*) FROM archive.messages").fetchone() == (1,)
+        with pytest.raises(sqlite3.OperationalError, match="readonly"):
+            database.execute("DELETE FROM archive.messages")
+    assert catalog.read_bytes() == original
+    missing = archive / "missing.sqlite3"
+    with pytest.raises(sqlite3.OperationalError, match="unable to open"):
+        open_review_database(tmp_path / "missing-comparison.sqlite3", missing)
+    assert not missing.exists()
 
 
 def test_ambiguous_review_exports_every_cache_and_archive_variant(tmp_path: Path) -> None:

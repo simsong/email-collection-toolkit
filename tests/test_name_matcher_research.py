@@ -8,10 +8,11 @@ import sqlite3
 from pathlib import Path
 
 import pytest
+import yaml
 
 from mailarchiver.mbox import add_message
 from scripts.name_matcher.ai import AIProvider, AIResult, correlate_results, make_request
-from scripts.name_matcher.build_observations import build_database
+from scripts.name_matcher.build_observations import build_database, publish_evidence
 from scripts.name_matcher.models import SignatureFactKind, SignatureMethod
 from scripts.name_matcher.observations import extract_message_evidence
 from scripts.name_matcher.signatures import extract_signature
@@ -121,8 +122,14 @@ def test_builder_reads_verified_mbox_and_creates_private_reproducible_derivative
     assert summary.messages == 1
     assert summary.signature_blocks == 1
     assert output.stat().st_mode & 0o777 == 0o600
+    summary_path = output.with_suffix(".sqlite3.summary.yaml")
+    assert summary_path.stat().st_mode & 0o777 == 0o600
+    recorded_summary = yaml.safe_load(summary_path.read_text(encoding="utf-8"))
+    run_id = recorded_summary.pop("run_id")
+    assert recorded_summary == summary.model_dump()
     assert hashlib.sha256((archive / "data" / "mbox" / "2024-Archive1.mbox").read_bytes()).hexdigest() == archive_digest
     with sqlite3.connect(output) as database:
+        assert database.execute("SELECT run_id FROM extraction_runs").fetchone() == (run_id,)
         assert database.execute(
             "SELECT role, address, display_name FROM header_observations ORDER BY role"
         ).fetchall() == [
@@ -138,6 +145,39 @@ def test_builder_reads_verified_mbox_and_creates_private_reproducible_derivative
     with pytest.raises(ValueError, match="outside the source"):
         build_database(archive, archive / "evidence.sqlite3", workers=1, limit=None)
     assert not (archive / "evidence.sqlite3").exists()
+
+
+@pytest.mark.parametrize("failure", ["database-exists", "summary-exists", "summary-missing"])
+def test_evidence_publication_failure_preserves_competitors_and_allows_retry(tmp_path: Path, failure: str) -> None:
+    """Requirement: a failed pair publication leaves no new output or overwritten competitor."""
+    staged = tmp_path / "staged.sqlite3"
+    with sqlite3.connect(staged) as database:
+        database.execute("CREATE TABLE evidence (value TEXT)")
+        database.execute("INSERT INTO evidence VALUES ('retained')")
+    staged_summary = tmp_path / "staged.yaml"
+    staged_summary.write_text("messages: 1\n", encoding="utf-8")
+    output = tmp_path / "evidence.sqlite3"
+    summary = tmp_path / "evidence.sqlite3.summary.yaml"
+    competitor = output if failure == "database-exists" else summary
+    if failure == "summary-missing":
+        staged_summary.unlink()
+    else:
+        competitor.write_bytes(b"another publisher's output")
+
+    with pytest.raises(OSError):
+        publish_evidence(staged, staged_summary, output, summary)
+
+    if failure == "summary-missing":
+        assert not output.exists()
+        assert not summary.exists()
+        staged_summary.write_text("messages: 1\n", encoding="utf-8")
+    else:
+        assert competitor.read_bytes() == b"another publisher's output"
+        assert not (summary if competitor == output else output).exists()
+        competitor.unlink()
+    publish_evidence(staged, staged_summary, output, summary)
+    assert output.read_bytes() == staged.read_bytes()
+    assert summary.read_bytes() == staged_summary.read_bytes()
 
 
 def test_deferred_ai_results_are_correlated_independently_of_return_order() -> None:

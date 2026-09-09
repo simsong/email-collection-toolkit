@@ -10,7 +10,9 @@ outcomes remain planned.
 `make h3-ambiguous-review ARGS='--apple-mail SOURCE --archive ARCHIVE --output REVIEW'`
 writes hash-verified ambiguous classes to a new private directory outside both
 source stores. Refresh validates manifest paths and hashes; it does not import
-or deduplicate. Annotation reads one message variant at a time.
+or deduplicate. Its writable SQLite comparison index enables URI handling and
+attaches the canonical catalog with `mode=ro`. Annotation reads one message
+variant at a time.
 
 `make name-matcher-observations ARCHIVE=... OUTPUT=... ARGS='--limit 100'`
 builds a private SQLite derivative outside the canonical archive, using verified
@@ -19,6 +21,10 @@ prototype makes no provider requests and selects no production matcher.
 Evidence publication requires a filesystem supporting hard links and owner-only
 permissions. The completed database is linked exclusively from same-filesystem
 temporary storage; plain rename is not a safe no-overwrite fallback on Unix.
+The summary is fully written and closed in staging before either publication
+link is created. If the second link fails, the first is removed so ordinary
+publication errors do not strand an output. This is rollback on caught errors,
+not a crash-atomic transaction across two directory entries.
 
 `make test-reconciliation` exercises these recovered boundaries.
 `make distribution-check` builds and installs wheel and sdist, checks packaged

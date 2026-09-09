@@ -386,6 +386,18 @@ def refresh_review_report(output: Path) -> ReviewSet:
     return updated
 
 
+def open_review_database(path: Path, catalog_path: Path) -> sqlite3.Connection:
+    """Create a writable comparison index with an explicitly read-only archive."""
+    database = sqlite3.connect(path, uri=True)
+    try:
+        create_cache_index(database)
+        database.execute("ATTACH DATABASE ? AS archive", (catalog_path.resolve().as_uri() + "?mode=ro",))
+    except BaseException:
+        database.close()
+        raise
+    return database
+
+
 def export_ambiguous_h3_examples(
     apple_root: Path,
     archive_root: Path,
@@ -417,11 +429,9 @@ def export_ambiguous_h3_examples(
         temporary_root = Path(temporary)
         staging = temporary_root / "review"
         staging.mkdir(mode=0o700)
-        database = sqlite3.connect(temporary_root / "comparison.sqlite3")
+        database = open_review_database(temporary_root / "comparison.sqlite3", catalog_path)
         try:
-            create_cache_index(database)
             index_apple_mail_cache(database, apple_root, progress_every)
-            database.execute("ATTACH DATABASE ? AS archive", (catalog_path.as_uri() + "?mode=ro",))
             rows = database.execute(
                 """
                 WITH archive_groups AS (

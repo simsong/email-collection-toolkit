@@ -167,6 +167,16 @@ def database_summary(database: sqlite3.Connection) -> EvidenceSummary:
     )
 
 
+def publish_evidence(database: Path, summary: Path, output_path: Path, summary_path: Path) -> None:
+    """Publish staged files exclusively, undoing the first link if the second fails."""
+    os.link(database, output_path)
+    try:
+        os.link(summary, summary_path)
+    except BaseException:
+        output_path.unlink()
+        raise
+
+
 def build_database(archive: Path, output_path: Path, *, workers: int, limit: int | None) -> EvidenceSummary:
     config = ExtractionConfiguration(limit=limit, workers=workers)
     archive = archive.resolve()
@@ -204,10 +214,11 @@ def build_database(archive: Path, output_path: Path, *, workers: int, limit: int
         summary = database_summary(output)
         output.commit()
         output.close()
-        os.link(temporary_output, output_path)
-    descriptor = os.open(summary_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
-    with os.fdopen(descriptor, "w", encoding="utf-8") as stream:
-        stream.write(yaml.safe_dump({"run_id": run_id, **summary.model_dump()}, sort_keys=False))
+        temporary_summary = shard_directory / "summary.yaml"
+        descriptor = os.open(temporary_summary, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        with os.fdopen(descriptor, "w", encoding="utf-8") as stream:
+            stream.write(yaml.safe_dump({"run_id": run_id, **summary.model_dump()}, sort_keys=False))
+        publish_evidence(temporary_output, temporary_summary, output_path, summary_path)
     return summary
 
 

@@ -346,10 +346,10 @@ def test_gui_highlight_configuration_is_packaged_and_rejects_css_injection(tmp_p
     assert application_configuration().gui.search_highlight_background == "#fff59d"
     invalid = tmp_path / "configuration.yaml"
     invalid.write_text(
-        "version: 1\ngui:\n  search_highlight_background: 'yellow; } body { display: none'\n",
+        "version: 1\nmode: replace\ngui:\n  search_highlight_background: 'yellow; } body { display: none'\n",
         encoding="utf-8",
     )
-    with pytest.raises(ValidationError):
+    with pytest.raises(ValidationError, match="gui.search_highlight_background"):
         load_configuration(invalid)
 
 

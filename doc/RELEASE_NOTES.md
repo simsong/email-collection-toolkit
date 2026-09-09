@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+* Explicitly attach h3 review catalogs read-only, stage name-evidence summaries
+  before publication, and roll back database publication if the summary link
+  fails. Restore the CSS-injection regression's intended validation path.
+
 * Treat missing, non-executable, and invalid-format ClamAV health-check helpers
   as unavailable instead of allowing OS execution errors to escape the probe.
 
@@ -142,7 +146,8 @@
   `source-metadata-excluded` observation, and unwrap narrowly recognized
   `From XXX` status containers so the nested RFC 5322 message supplies its
   actual sender and metadata.
-# Checkout reconciliation — 2026-09-08
+
+### Checkout reconciliation — 2026-09-08
 
 Recovered work from historical development checkouts:
 

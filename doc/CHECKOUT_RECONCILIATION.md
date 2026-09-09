@@ -68,6 +68,14 @@ owner-only-permission filesystem prerequisites rather than add an unsafe fallbac
 The eighth review identified OS execution errors escaping the scanner health
 probe. Missing, non-executable, and invalid-format helpers now report unavailable;
 real subprocess regressions exercise all three cases without starting a daemon.
+The user-requested balanced review found missing URI enablement in the h3
+exporter, a stranded database when summary publication failed, a CSS-injection
+fixture rejected for missing `mode`, and an incorrect release-notes heading.
+The exporter now uses an explicitly read-only attachment; evidence pairs are
+staged before linking with rollback on second-link failure. Real SQLite and
+filesystem tests verify write refusal, collision preservation and retry.
+The GUI fixture supplies `mode: replace` and asserts the highlight-color field
+causes rejection; reconciliation notes remain within the Unreleased section.
 
 After human merge, fetch/prune and prove each source tip is represented in
 current main before removing its exact clean worktree and local branch.
