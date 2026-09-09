@@ -41,6 +41,9 @@ def test_classify_contact_addresses(address: str, kind: ContactKind) -> None:
     ("address", "reason"),
     (
         ("person@.", "invalid-domain"),
+        ("person@", "invalid-domain"),
+        ("*@", "invalid-local-part"),
+        ("@", "invalid-local-part"),
         ("person@example..org", "invalid-domain"),
         ("*@example.org", "invalid-local-part"),
         ("*@.", "invalid-local-part"),

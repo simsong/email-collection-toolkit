@@ -409,7 +409,8 @@ Modern Apple Mail package traversal recognizes complete
 `Data/.../Messages/*.emlx` payloads and ignores MailData, plist, and detached
 attachment files. It reports missing paths and macOS Full Disk Access failures
 instead of treating them as empty input. Directory discovery reports and skips
-`.partial.emlx`; direct selection is rejected because
+`.partial.emlx`, including zero-byte records excluded from the generic empty-file
+shortcut; direct selection is rejected because
 the cached RFC 5322 representation omits detached attachment bytes; use Apple
 Mail's mailbox export to obtain a complete MBOX source. Physical `.emlx` paths
 remain source identities and integrity boundaries. Their catalog hierarchy
@@ -581,7 +582,8 @@ configured automated patterns as service identities, and only then includes
 the remaining addresses. The policy deliberately keeps ordinary SMTPUTF8
 addresses possible; it does not use non-ASCII alone as a rejection rule.
 Bogus local-part and domain patterns report `invalid-local-part` and
-`invalid-domain` respectively, with local-part rules evaluated first.
+`invalid-domain` respectively, with local-part rules evaluated first. Empty
+domains are also rejected as `invalid-domain` after the local-part checks.
 The policy resolver first checks `<archive>/contact_filters.yaml`; when
 that file is absent it uses `src/mailarchiver/contact_filters.yaml` from
 the installed package. A `mode: replace` archive policy is a complete strict

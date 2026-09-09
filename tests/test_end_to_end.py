@@ -1276,7 +1276,8 @@ def test_clamav_start_uses_private_runtime_instead_of_configured_files(tmp_path:
         assert not list(test_runtime.glob("mailarchiver-clamd-*"))
 
 
-def test_mixed_apple_cache_retains_complete_and_reports_partial(tmp_path: Path) -> None:
+@pytest.mark.parametrize("empty_partial", [False, True])
+def test_mixed_apple_cache_retains_complete_and_reports_partial(tmp_path: Path, empty_partial: bool) -> None:
     """Requirement: directory import continues past partial EMLX without losing complete mail."""
     source = tmp_path / "cache"
     source.mkdir()
@@ -1285,7 +1286,8 @@ def test_mixed_apple_cache_retains_complete_and_reports_partial(tmp_path: Path) 
     complete = source / "1.emlx"
     partial = source / "2.partial.emlx"
     complete.write_bytes(framed)
-    partial.write_bytes(framed)
+    partial_content = b"" if empty_partial else framed
+    partial.write_bytes(partial_content)
     owner = tmp_path / "owners.txt"
     owner.write_text("owner@example.test\n")
     archive = tmp_path / "archive"
@@ -1295,7 +1297,7 @@ def test_mixed_apple_cache_retains_complete_and_reports_partial(tmp_path: Path) 
     with sqlite3.connect(archive / "archive.sqlite3") as database:
         assert database.execute("SELECT COUNT(*) FROM messages").fetchone()[0] == 1
     assert complete.read_bytes() == framed
-    assert partial.read_bytes() == framed
+    assert partial.read_bytes() == partial_content
     assert_success(run_ingest(source, archive, owner))
     with sqlite3.connect(archive / "archive.sqlite3") as database:
         assert database.execute("SELECT COUNT(*) FROM messages").fetchone()[0] == 1

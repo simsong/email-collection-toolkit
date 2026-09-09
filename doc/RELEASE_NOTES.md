@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+* Reject empty-domain contacts and report zero-byte partial EMLX files instead
+  of silently skipping them; direct selection of partial records still fails.
+
 * Reject duplicate deferred AI request IDs and reserve h3 review destinations
   exclusively so a late-created empty directory is not overwritten.
 

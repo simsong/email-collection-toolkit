@@ -470,7 +470,8 @@ using a versioned, explainable packaged policy. The human-contact local-part
 limit is 48 characters and is configurable; the RFC address limit is not itself
 a claim that every shorter address is human.
 Classification reasons distinguish invalid-domain rules from invalid-local-part
-rules; when both match, the local-part reason takes precedence.
+rules; when both match, the local-part reason takes precedence. An empty domain
+is `invalid-domain`, after evaluating local-part rules.
 The packaged `contact_filters.yaml` may be copied to an archive root. Its
 required `mode` is `replace` for a complete replacement policy or `extend` to
 add only rule lists to the packaged policy. Extension preserves packaged order,
@@ -1411,7 +1412,9 @@ transport failures are disclosed as errors rather than negative detection or
 fresh consent. Credentials are stored only after the profile matches.
 
 Directory import reports and skips `.partial.emlx` records while retaining
-complete supported records. Direct selection of a partial record is rejected.
+complete supported records. Direct selection of a partial record is rejected,
+including zero-byte partial records; the generic empty-file shortcut does not
+silence them.
 This is not a complete mailbox acquisition: detached attachment bytes are not
 reconstructed. Do not modify the source cache; export mail through Apple Mail
 when a complete MBOX source is required.

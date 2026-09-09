@@ -81,6 +81,10 @@ collapsed and h3 publication replacing late-created empty directories. Correlati
 now rejects duplicate requests; h3 publication reserves a new private directory
 and moves the completion manifest last. Regressions exercise identical requests
 and late-created empty directories, populated directories and files.
+The following review's body found empty-domain contacts and zero-byte partial
+EMLX files bypassing validation. Empty domains are now rejected after local-part
+checks. Empty partial EMLX records reach the same direct-error/directory-skip
+path as nonempty ones, with discovery and full import/idempotence regressions.
 
 After human merge, fetch/prune and prove each source tip is represented in
 current main before removing its exact clean worktree and local branch.

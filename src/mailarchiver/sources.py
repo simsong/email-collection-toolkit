@@ -392,7 +392,7 @@ class LocalSourcePlugin(SourcePlugin):
                     detail="not a regular file",
                 )
                 continue
-            if stat.st_size == 0 or _is_silent_metadata(path, root_path):
+            if (stat.st_size == 0 and not path.name.lower().endswith(".partial.emlx")) or _is_silent_metadata(path, root_path):
                 continue
             try:
                 parser = self._recognize_file(path, stat.st_size)
