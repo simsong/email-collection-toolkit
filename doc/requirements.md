@@ -12,6 +12,9 @@ outside source stores. Canonical message bytes are verified before extraction;
 neither tool changes an archive, chooses deduplication by h3 alone, or sends
 message evidence to a remote model. Edited review manifests must not redirect
 reads or writes through escaping paths or symbolic links.
+Name-evidence publication must not replace an output created concurrently.
+The current prototype requires hard-link support and owner-only permissions on
+its output filesystem; it must not substitute an overwriting rename.
 
 ## Purpose
 

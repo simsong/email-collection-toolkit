@@ -60,6 +60,11 @@ The sixth review identified POSIX-only scanner test executables and an
 indentation-sensitive Pages release-trigger assertion. Scanner deadline tests
 now explicitly skip Windows before importing the POSIX scanner; the Pages
 assertion reads the YAML trigger structure, including PyYAML's `on`/`True` quirk.
+The seventh review suggested replacing exclusive hard-link publication with
+rename. That suggestion does not preserve no-overwrite behavior on Unix:
+`os.rename()` can replace a destination created after the initial existence
+check. Keep the exclusive link, and document the prototype's hard-link and
+owner-only-permission filesystem prerequisites rather than add an unsafe fallback.
 
 After human merge, fetch/prune and prove each source tip is represented in
 current main before removing its exact clean worktree and local branch.

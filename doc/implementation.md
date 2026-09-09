@@ -15,6 +15,9 @@ or deduplicate. Annotation reads one message variant at a time.
 builds a private SQLite derivative outside the canonical archive, using verified
 MBOX locations and a read-only catalog. Extraction errors are recorded. The
 prototype makes no provider requests and selects no production matcher.
+Evidence publication requires a filesystem supporting hard links and owner-only
+permissions. The completed database is linked exclusively from same-filesystem
+temporary storage; plain rename is not a safe no-overwrite fallback on Unix.
 
 `make test-reconciliation` exercises these recovered boundaries.
 `make distribution-check` builds and installs wheel and sdist, checks packaged

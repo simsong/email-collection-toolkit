@@ -56,6 +56,14 @@ candidates and their names, email addresses, phone numbers, URLs, and retained
 text lines. It does not use Subject text or ordinary body text as name-search
 evidence.
 
+The output filesystem must support hard links and owner-only file permissions.
+The builder publishes a completed database with an exclusive hard link from
+its same-filesystem temporary directory, so a destination created during
+extraction is not overwritten. If hard-link publication is unsupported, the
+build fails; there is no rename fallback. A plain
+[Python `os.rename`](https://docs.python.org/3/library/os.html#os.rename)
+can overwrite an existing file on Unix, even within the same filesystem.
+
 The first signature detector is deliberately non-LLM. It uses standard signature
 delimiters, mobile footers, bottom-of-message contact anchors, short signoffs,
 and quoted-reply boundaries. Each result is evidence with a method and
