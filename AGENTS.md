@@ -99,10 +99,12 @@ reused.
 
 ## Authorization and identity
 
-A request to perform **pr-to-ready**
+A request to perform **pr-to-ready** (including **codex-to-complete** or
+**codex-to-ready**)
 authorizes the commits, pushes, draft PR creation, review requests, review-thread
 replies, fixes, and final human-review request described below. Continue through
-these steps without repeatedly requesting permission. Do not approve or merge a
+these steps without repeatedly requesting permission. Otherwise, do not commit,
+push, or modify PRs without a user request. Do not approve or merge a
 PR, close an issue or superseded PR, or change remote services without explicit
 user authorization for that action.
 
@@ -118,13 +120,14 @@ existing commit, use `git commit --amend --reset-author -S`.
 
 Follow the shared workflow with these mail-archiver requirements:
 
-- Request and re-request Copilot review with the authenticated GitHub browser
-  Request/Re-request control as `simsong-codex`, or as `simsong` when Copilot
-  is unavailable to the Codex account. This personal-account exception covers
-  only review requests; switch back for all other GitHub writes. Verify the
-  browser identity separately from CLI and SSH identity. Do not trigger review
-  using an API, CLI request, or an `@copilot` mention. An unavailable login/control is a
-  reported blocker; keep the PR draft.
+- Request and re-request Copilot review through `gh pr edit <number>
+  --add-reviewer '@copilot'`, authenticated as `simsong`. This personal-account
+  exception covers only Copilot review requests; restore `simsong-codex`
+  afterward, including on failure, for all other GitHub writes. Verify the
+  request through reviewer or timeline evidence, not command success alone.
+  Do not control the browser or post an `@copilot` comment to request review.
+  Unavailable authentication or a failed request is a reported blocker; keep
+  the PR draft.
 - Check current-head review, threads, and CI every ten minutes. Continue the
   cycle through review fixes and re-review, using a quiet task heartbeat when
   continuation across turns is needed and available; stop it on completion.

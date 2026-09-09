@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+* Use `gh` with the authorized review-request-only identity for Copilot requests
+  instead of controlling the browser.
+
+* Resolve committed cleanup-conflict markers and restore generated skill
+  wrappers. Require pr-to-ready to integrate stranded task work before handoff
+  and perform verified post-merge checkout cleanup. Retain dirty, unmerged,
+  and private evidence-bearing worktrees until their disposition is settled.
+
 * Limit Ruff discovery to tracked and non-ignored new Python files, avoiding
   generated directories while supporting project-local linked worktrees.
 
