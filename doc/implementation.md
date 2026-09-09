@@ -1760,6 +1760,11 @@ requires it and fails clearly.
 
 ## Developer validation gates
 
+The two scanner deadline tests run real POSIX subprocesses and explicitly skip
+Windows before importing the `fcntl`-based scanner. They do not establish Windows
+scanner support. Pages release-trigger checks parse YAML rather than relying on
+indentation, accepting PyYAML's YAML 1.1 interpretation of an unquoted `on` key.
+
 Release assembly checks the GitHub tag signature, then runs the standard-library
 tag/version validator through `make release-tag-check` with `uv --no-project`.
 Only afterward does it install project dependencies and smoke built artifacts.

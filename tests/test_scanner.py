@@ -2,11 +2,15 @@
 
 from __future__ import annotations
 
+import sys
 from pathlib import Path
 
 import pytest
 
-from mailarchiver.scanner import ClamScanner
+pytestmark = pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="ClamScanner uses POSIX fcntl locking and these deadline fixtures require /bin/sh",
+)
 
 
 def sleeping_executable(path: Path) -> Path:
@@ -18,6 +22,8 @@ def sleeping_executable(path: Path) -> Path:
 
 def test_clamav_health_probe_has_a_hard_deadline(tmp_path: Path) -> None:
     """Requirement: a stuck health probe cannot consume the daemon startup deadline."""
+    from mailarchiver.scanner import ClamScanner
+
     scanner = ClamScanner(
         clamdscan=str(sleeping_executable(tmp_path / "sleeping-clamdscan")),
         ping_timeout_seconds=0.05,
@@ -28,6 +34,8 @@ def test_clamav_health_probe_has_a_hard_deadline(tmp_path: Path) -> None:
 
 def test_clamav_scan_timeout_cleans_up_message_bytes(tmp_path: Path) -> None:
     """Requirement: a stuck scan fails and removes its plaintext temporary message."""
+    from mailarchiver.scanner import ClamScanner
+
     scan_directory = tmp_path / "scan"
     scan_directory.mkdir()
     scanner = ClamScanner(

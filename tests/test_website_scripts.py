@@ -3,10 +3,14 @@
 from pathlib import Path
 
 import pytest
+from yaml import safe_load
 
 from scripts.check_website import validate_png
 
 ZOLA_SHA256 = "54d1a347781b2f32330914fcc02def81c7e3ddb6111b36d1cc89c06557aed1de"
+WORKFLOW_ON = "on"
+RELEASE = "release"
+TYPES = "types"
 
 
 def test_missing_png_reports_a_clear_failure(tmp_path: Path) -> None:
@@ -24,7 +28,10 @@ def test_pages_workflow_pins_and_checks_the_zola_archive() -> None:
 
     assert f"ZOLA_SHA256: {ZOLA_SHA256}" in text
     assert "sha256sum --check" in text
-    assert "release:\n    types: [published]" in text
+    configuration = safe_load(text)
+    # PyYAML's YAML 1.1 resolver treats an unquoted "on" key as boolean True.
+    triggers = configuration.get(WORKFLOW_ON, configuration.get(True))
+    assert triggers[RELEASE][TYPES] == ["published"]
 
 
 def test_ci_builds_distributions_and_site_and_retains_browser_traces() -> None:

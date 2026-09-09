@@ -56,6 +56,10 @@ The fifth review identified a Windows-invalid `?` in a research fixture path.
 The fixture now exercises spaces, `#`, `%`, and Unicode instead, retaining
 URI-escaping coverage without that filename restriction. Native Windows
 execution remains unvalidated locally.
+The sixth review identified POSIX-only scanner test executables and an
+indentation-sensitive Pages release-trigger assertion. Scanner deadline tests
+now explicitly skip Windows before importing the POSIX scanner; the Pages
+assertion reads the YAML trigger structure, including PyYAML's `on`/`True` quirk.
 
 After human merge, fetch/prune and prove each source tip is represented in
 current main before removing its exact clean worktree and local branch.
