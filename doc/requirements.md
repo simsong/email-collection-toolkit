@@ -1156,6 +1156,11 @@ must not make remote requests without explicit authorization.
 
 ## Developer validation gates
 
+Copilot review requests must use `gh` with the authorized `simsong` identity,
+not browser control. That exception is review-request-only; all other Codex
+GitHub writes retain `simsong-codex`. A successful command alone does not prove
+that review was requested.
+
 Before pr-to-ready handoff, intended task changes and local-only commits in
 every task checkout must be reconciled, validated, and published in the delivery
 PR. Moving or backing up a dirty checkout is not integration. Unrelated or

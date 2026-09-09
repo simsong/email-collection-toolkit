@@ -1443,7 +1443,10 @@ requires it and fails clearly.
 ## Developer validation gates
 
 The shared pr-to-ready source generates the repository skill and Copilot
-instructions. Before handoff it inventories task checkouts, reconciles intended
+instructions. Copilot review requests use `gh pr edit --add-reviewer '@copilot'`
+as `simsong`, followed by restoration of `simsong-codex` for all other writes.
+Review-request timeline or reviewer evidence verifies the request; no browser
+control is used. Before handoff it inventories task checkouts, reconciles intended
 uncommitted changes and unpublished commits into the delivery branch, and records
 the resulting commit or evidence of inclusion/supersession for each checkout.
 Preservation elsewhere is not a completed integration. Its ten-minute heartbeat

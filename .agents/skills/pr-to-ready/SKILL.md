@@ -71,20 +71,20 @@ the conversation continues or context is compacted.
 4. Immediately after publishing a draft PR or pushing a new head, request
    Copilot review before entering the waiting phase. This is a required action,
    not an optional suggestion or a substitute for scheduling a monitor. Use the
-   repository's required channel; otherwise click GitHub's authenticated
-   Request/Re-request review control. Never use an `@copilot` mention to request
-   review. Verify a pending Copilot reviewer or review-request timeline event
-   and record the requested head SHA and time; a click alone is not evidence.
-   If Copilot is absent from the picker, verify the browser account and check
-   the authorized account fallback before declaring review unavailable. When
-   the user or repository explicitly authorizes `simsong` solely to request
-   Copilot reviews, use that account for Request/Re-request only, then return
-   to `simsong-codex` for commits, pushes, PR edits, and thread replies. Never
-   infer permission to use a personal account for other actions. If the
-   authorized account needs login, open that sign-in flow and request the
-   missing user action. Keep the PR draft and report review as **not requested**
-   until the request is verified; do not describe this state as waiting for
-   Copilot's response.
+   repository's required channel; otherwise prefer
+   `gh pr edit <number> --add-reviewer '@copilot'`. This reviewer argument is not
+   an `@copilot` comment mention; never request review through a comment mention.
+   Verify a pending Copilot reviewer or review-request timeline event and record
+   the requested head SHA and time; command success alone is not evidence.
+   If a request fails, verify authentication and the explicitly authorized
+   account fallback. When the user or repository authorizes `simsong` solely
+   for Copilot review requests, use that account only for the request, then
+   restore `simsong-codex` even on failure. Keep commits, pushes, other PR edits,
+   and thread replies under `simsong-codex`. Never infer permission to use a
+   personal account for other actions or switch to browser control against the
+   user's preference. If authorized authentication is unavailable, report the
+   exact missing login action. Keep the PR draft and report review as **not
+   requested** until verified; do not describe that state as waiting for Copilot.
 5. Wait for the review and required CI on the current head. Address every valid
    actionable finding; explain incorrect findings with evidence. Reply in each
    finding's exact review thread with the fixing SHA and Makefile validation.
