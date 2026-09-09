@@ -3,6 +3,12 @@ title = "Website changelog"
 description = "Changes to the Mail Archiver website, separate from application releases."
 +++
 
+## 2026-09-09
+
+- Introduce the Email Collection Toolkit website identity and stacked-envelope
+  application icons; preserve Gmail setup and Advanced navigation, responsive
+  access, and equal personal and archival use cases. Validate Zola TOML before builds.
+
 ## 2026-09-08
 
 - Keep all navigation links visible on narrow screens, including Gmail setup

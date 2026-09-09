@@ -877,8 +877,13 @@ Python application and its About/Dock identity use a stable project asset. The
 `envelope-rainbow` theme. GitHub Pages builds it from `main`; the workflow
 SHA-256 verifies the pinned Zola archive before extraction, resolves the newest
 exact stable and beta tags into Zola data, then deploys a Pages artifact. The
-home-page template presents equal individual and archivist columns, while the
-`use-cases.md` content page supplies the detailed personal-archive and donor
+home-page template uses a light rainbow design with capability and story cards
+and equal individual and archivist columns. The Zola configuration retains the
+existing project URLs under the Email Collection Toolkit title. The checker
+parses its TOML before checking assets; `make website-icons` regenerates PNGs
+from the shared SVG using Chromium. Navigation wraps at every width; long
+documentation code blocks scroll within the page. The `use-cases.md` content
+page supplies the detailed personal-archive and donor
 digital-estate narratives. It describes BagIt/Mailbag as native archive storage and standard
 MBOX as the ePADD handoff, with planned direct-provider, first-class package
 import, and automated interoperability work labeled explicitly.

@@ -923,6 +923,9 @@ The project also publishes a Zola-generated GitHub Pages site at
 `https://simsong.github.io/mail-archiver/`. The site links to the README,
 release notes, GitHub releases, the current stable `v1.2.3`-shaped tag and
 current beta `v1.2.3-beta1`-shaped tag when present, and project discussions.
+The site uses the Email Collection Toolkit identity and shared stacked-envelope
+SVG and derived PNG icons. Site validation rejects malformed Zola TOML.
+Decorative homepage icons are hidden from assistive technology.
 Its home page gives equal prominence to individuals consolidating personal
 exports and archivists curating donor collections. A separate use-cases page
 describes both workflows, including an institutional digital-estate scenario,
@@ -947,7 +950,8 @@ The Pages build pins its Zola release and verifies the downloaded archive
 against a source-controlled SHA-256 digest before execution.
 
 All primary navigation links remain visible at narrow widths and after
-reordering; the header wraps instead of hiding positional links.
+reordering; the header wraps instead of hiding positional links. Long code
+examples scroll within their block without widening the mobile page.
 Release assembly verifies the annotated tag's signature and package version
 before installing project dependencies, building artifacts, or executing their
 entry points. Tag/version validation must not install the project itself.

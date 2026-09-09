@@ -344,3 +344,7 @@ ocr-experiment: ocr-inventory ocr-run
 .PHONY: test-writer-lock
 test-writer-lock:
 	uv run pytest -q tests/test_writer_lock.py
+
+.PHONY: website-icons
+website-icons:
+	uv run python -m scripts.render_website_icons

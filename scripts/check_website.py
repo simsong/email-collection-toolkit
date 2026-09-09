@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import struct
+import tomllib
 from pathlib import Path
 
 import yaml
@@ -80,6 +81,14 @@ def validate_png(path: Path, expected_size: int) -> None:
         raise SystemExit(f"{path} is not {expected_size}x{expected_size}")
 
 
+def validate_config(path: Path) -> None:
+    """Reject malformed Zola configuration before the site build."""
+    try:
+        tomllib.loads(path.read_text(encoding="utf-8"))
+    except tomllib.TOMLDecodeError as error:
+        raise SystemExit(f"invalid Zola configuration {path}: {error}") from None
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--root", type=Path, default=Path(__file__).parents[1])
@@ -105,6 +114,7 @@ def main() -> int:
     missing = [str(path) for path in required if not path.is_file()]
     if missing:
         raise SystemExit("missing website files: " + ", ".join(missing))
+    validate_config(root / "website/config.toml")
     for path in (
         root / ".github/workflows/continuous-integration.yml",
         root / ".github/workflows/pages.yml",

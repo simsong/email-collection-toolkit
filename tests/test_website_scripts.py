@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 from yaml import safe_load
 
-from scripts.check_website import validate_png
+from scripts.check_website import validate_config, validate_png
 
 ZOLA_SHA256 = "54d1a347781b2f32330914fcc02def81c7e3ddb6111b36d1cc89c06557aed1de"
 WORKFLOW_ON = "on"
@@ -63,3 +63,13 @@ def test_release_workflow_validates_built_distributions() -> None:
     assert [text.index(gate) for gate in gates] == sorted(text.index(gate) for gate in gates)
     makefile = (workflow.parents[2] / "Makefile").read_text(encoding="utf-8")
     assert "uv run --no-project --python '>=3.12' python scripts/release_tag.py" in makefile
+
+
+def test_zola_config_rejects_accidental_template(tmp_path: Path) -> None:
+    """Requirement: website validation rejects HTML pasted over Zola TOML."""
+    config = tmp_path / "config.toml"
+    config.write_text('{% extends "base.html" %}', encoding="utf-8")
+    with pytest.raises(SystemExit, match="invalid Zola configuration"):
+        validate_config(config)
+    config.write_text('base_url = "https://example.org/"', encoding="utf-8")
+    validate_config(config)
