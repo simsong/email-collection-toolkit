@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Standardize the agent PR workflow as `pr-to-ready`, retain
+  `codex-to-complete` and `codex-to-ready` aliases, and add shared
+  Codex, Claude, and Copilot implementer/reviewer instructions.
+
+
 * Make `refresh-index` observable and safe to interrupt: it now reports
   message-weighted verification/indexing progress bars with ETA, announces its
   Ctrl-C safety before work begins, and discards an incomplete replacement

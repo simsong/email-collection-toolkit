@@ -1,3 +1,9 @@
+<!-- BEGIN GENERATED pr-to-ready -->
+## pr-to-ready
+
+For `pr-to-ready`, `codex-to-complete`, or `codex-to-ready`, read and follow [the shared workflow](.agents/skills/pr-to-ready/SKILL.md). Apply the repository-specific rules below.
+<!-- END GENERATED pr-to-ready -->
+
 # AI contributor instructions
 
 ## Scope and source safety
@@ -91,8 +97,34 @@ verify that the PR head matches the pushed commit. Never leave work only on a
 GitHub non-`main` branch, including when a previously merged branch name is
 reused.
 
-Do not commit, push, open or modify pull requests, approve, merge, close
-issues, or change remote services unless the user explicitly requests it.
+An explicit `pr-to-ready` request (including `codex-to-complete` or
+`codex-to-ready`) authorizes the shared publication/review workflow.
+Otherwise, do not commit, push, or modify PRs without a user request.
+Approval, merge, issue closure, and remote-service changes need their
+own explicit authorization.
 When authorized, Codex GitHub activity uses `@simsong-codex`; signed commits use
 `Codex AI Assistant <simsong+codex@acm.org>` and the configured Codex GPG key.
 Verify identity and signature after committing.
+
+## pr-to-ready project requirements
+
+Follow the shared workflow with these mail-archiver requirements:
+
+- Request and re-request Copilot review with the authenticated GitHub browser
+  Request/Re-request control as `simsong-codex`, or as `simsong` when Copilot
+  is unavailable to the Codex account. This personal-account exception covers
+  only review requests; switch back for all other GitHub writes. Verify the
+  browser identity separately from CLI and SSH identity. Do not trigger review
+  using an API, CLI request, or an `@copilot` mention. An unavailable login/control is a
+  reported blocker; keep the PR draft.
+- Check current-head review, threads, and CI every ten minutes. Continue the
+  cycle through review fixes and re-review, using a quiet task heartbeat when
+  continuation across turns is needed and available; stop it on completion.
+- A documented review loop permits human handoff only when the same
+  substantive finding returns in two successive review rounds after an
+  evidence-backed fix or explanation, with no new actionable information.
+  Record threads, commits, evidence, and disagreement. Required CI and local
+  validation must still pass; missing reviews and valid unfixed defects remain
+  blockers. Mark ready, request review from and assign `simsong`, explicitly
+  stating that Copilot is not clear and identifying the disputed findings.
+  Never represent this exceptional handoff as a successful Copilot review.
