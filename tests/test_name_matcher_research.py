@@ -105,7 +105,7 @@ def _one_message_archive(path: Path, raw: bytes) -> None:
 
 def test_builder_reads_verified_mbox_and_creates_private_reproducible_derivative(tmp_path: Path) -> None:
     """Requirement: the prototype reads verified canonical bytes and writes only a new private derivative."""
-    archive = tmp_path / "archive #1?"
+    archive = tmp_path / "archive #100% café"
     raw = (
         b"Message-ID: <one@example.test>\r\n"
         b"From: Sim Example <sender@example.test>\r\n"

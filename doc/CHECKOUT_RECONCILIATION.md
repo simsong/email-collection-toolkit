@@ -52,6 +52,10 @@ that scrolling actually brings source locations into view.
 The fourth review identified invalid contact-filter regexes escaping as
 tracebacks. Patterns now validate on load, with path-qualified YAML/regex errors
 and CLI regressions covering empty/populated catalogs and replace/extend rules.
+The fifth review identified a Windows-invalid `?` in a research fixture path.
+The fixture now exercises spaces, `#`, `%`, and Unicode instead, retaining
+URI-escaping coverage without that filename restriction. Native Windows
+execution remains unvalidated locally.
 
 After human merge, fetch/prune and prove each source tip is represented in
 current main before removing its exact clean worktree and local branch.
