@@ -208,7 +208,7 @@ class ClamScanner(AbstractContextManager["ClamScanner"]):
                 capture_output=True,
                 timeout=self.ping_timeout_seconds,
             ).returncode == 0
-        except subprocess.TimeoutExpired:
+        except (subprocess.TimeoutExpired, OSError):
             return False
 
     def infected(self, raw: bytes) -> bool:

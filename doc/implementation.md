@@ -3,8 +3,9 @@
 ## Recovered tool safety and validation
 
 ClamAV health probes have a five-second deadline and message scans a five-minute
-deadline. Probe timeout means unavailable; scan timeout fails import and removes
-temporary plaintext. Typed unscannable/scanner-error outcomes remain planned.
+deadline. Probe timeout or OS execution error means unavailable; scan timeout
+fails import and removes temporary plaintext. Typed unscannable/scanner-error
+outcomes remain planned.
 
 `make h3-ambiguous-review ARGS='--apple-mail SOURCE --archive ARCHIVE --output REVIEW'`
 writes hash-verified ambiguous classes to a new private directory outside both
@@ -1763,8 +1764,8 @@ requires it and fails clearly.
 
 ## Developer validation gates
 
-The two scanner deadline tests run real POSIX subprocesses and explicitly skip
-Windows before importing the `fcntl`-based scanner. They do not establish Windows
+Scanner deadline and helper-execution regressions use real POSIX subprocesses
+and explicitly skip Windows before importing the `fcntl`-based scanner. They do not establish Windows
 scanner support. Pages release-trigger checks parse YAML rather than relying on
 indentation, accepting PyYAML's YAML 1.1 interpretation of an unquoted `on` key.
 

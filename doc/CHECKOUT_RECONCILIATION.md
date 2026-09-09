@@ -65,6 +65,9 @@ rename. That suggestion does not preserve no-overwrite behavior on Unix:
 `os.rename()` can replace a destination created after the initial existence
 check. Keep the exclusive link, and document the prototype's hard-link and
 owner-only-permission filesystem prerequisites rather than add an unsafe fallback.
+The eighth review identified OS execution errors escaping the scanner health
+probe. Missing, non-executable, and invalid-format helpers now report unavailable;
+real subprocess regressions exercise all three cases without starting a daemon.
 
 After human merge, fetch/prune and prove each source tip is represented in
 current main before removing its exact clean worktree and local branch.

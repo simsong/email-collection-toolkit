@@ -32,6 +32,19 @@ def test_clamav_health_probe_has_a_hard_deadline(tmp_path: Path) -> None:
     assert not scanner.available()
 
 
+@pytest.mark.parametrize("helper_state", ["missing", "not-executable", "invalid-executable"])
+def test_clamav_health_probe_execution_failure_is_unavailable(tmp_path: Path, helper_state: str) -> None:
+    """Requirement: OS execution errors cannot escape the scanner readiness probe."""
+    from mailarchiver.scanner import ClamScanner
+
+    helper = tmp_path / "clamdscan"
+    if helper_state != "missing":
+        helper.write_text("not an executable format\n", encoding="utf-8")
+        helper.chmod(0o755 if helper_state == "invalid-executable" else 0o644)
+
+    assert not ClamScanner(clamdscan=str(helper)).available()
+
+
 def test_clamav_scan_timeout_cleans_up_message_bytes(tmp_path: Path) -> None:
     """Requirement: a stuck scan fails and removes its plaintext temporary message."""
     from mailarchiver.scanner import ClamScanner

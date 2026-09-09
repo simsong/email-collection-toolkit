@@ -355,6 +355,8 @@ mailbox destinations. Dedicated EICAR tests also verify infected routing.
   ready only after the configured scanner health probe succeeds, not merely when
   its socket appears. Every scanner health-check subprocess has a five-second
   caller-enforced deadline, and every message scan has a five-minute deadline.
+  A missing, non-executable, or otherwise unlaunchable health-check helper
+  means the scanner is unavailable, not a missing mail source or a clean scan.
   A timeout is a scanner failure, never a clean or infected result, and plaintext
   temporary message bytes are removed after every outcome.
 * Control-C is a graceful stop: close scanner and MBOX resources, commit

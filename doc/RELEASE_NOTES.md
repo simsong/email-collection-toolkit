@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+* Treat missing, non-executable, and invalid-format ClamAV health-check helpers
+  as unavailable instead of allowing OS execution errors to escape the probe.
+
 * Validate all contact-filter regexes at policy load time and report YAML or
   regex typos as path-qualified CLI errors, without tracebacks or archive writes.
 
