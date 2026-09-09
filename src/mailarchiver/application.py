@@ -161,8 +161,7 @@ def create_empty_archive(path: Path) -> "ArchiveDocument":
         if (display / "archive.sqlite3").is_file() and (display / "search.sqlite3").is_file():
             raise InvalidArchiveError(f"archive already exists; use Open instead: {display}")
         raise InvalidArchiveError(f"new archive destination is not empty: {display}")
-    display.mkdir(parents=False, exist_ok=True)
-    canonical = display.resolve(strict=True)
+    canonical = display.resolve()
     identity = os.path.normcase(str(canonical))
     lease = WriterLease.acquire(
         canonical,
@@ -170,8 +169,11 @@ def create_empty_archive(path: Path) -> "ArchiveDocument":
         "create archive",
         uuid4().hex,
         version("mailarchiver"),
+        create=True,
     )
     try:
+        if any(entry.name != "status" for entry in canonical.iterdir()):
+            raise InvalidArchiveError(f"new archive destination is not empty: {display}")
         initialize_bag(canonical)
         create_catalog(canonical / "archive.sqlite3").close()
         create_search(canonical / "search.sqlite3").close()

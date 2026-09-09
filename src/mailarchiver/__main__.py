@@ -990,8 +990,7 @@ def run_ingest(
     request: IngestRequest, writer_lease: WriterLease | None = None, *, stop_event: threading.Event | None = None,
 ) -> None:
     """Run ingest under the archive's OS writer lock."""
-    request.archive.mkdir(parents=True, exist_ok=True)
-    identity = os.path.normcase(str(request.archive.resolve(strict=True)))
+    identity = os.path.normcase(str(request.archive.resolve()))
     owned = writer_lease is None
     lease = writer_lease or WriterLease.acquire(
         request.archive,
@@ -999,6 +998,7 @@ def run_ingest(
         "ingest",
         uuid4().hex,
         version("mailarchiver"),
+        create=True,
     )
     if not lease.acquired or lease.archive_identity != identity:
         if owned:

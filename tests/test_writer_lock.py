@@ -129,3 +129,40 @@ def test_different_archives_do_not_contend(tmp_path: Path) -> None:
     second_lease = acquire(second, "second")
     second_lease.release()
     first_lease.release()
+
+
+@pytest.mark.parametrize("target", ["status", "file", "hardlink"])
+def test_writer_lock_cannot_redirect_metadata(tmp_path: Path, target: str) -> None:
+    """Requirement: status links, file links and hard links cannot overwrite another file."""
+    archive = tmp_path / "archive"
+    archive.mkdir()
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    victim = outside / "archive-write.lock"
+    victim.write_bytes(b"preserve me")
+    status = archive / "status"
+    if target == "status":
+        status.symlink_to(outside, target_is_directory=True)
+    else:
+        status.mkdir()
+        if target == "file":
+            (status / "archive-write.lock").symlink_to(victim)
+        else:
+            os.link(victim, status / "archive-write.lock")
+    with pytest.raises((OSError, ValueError)):
+        acquire(archive, "redirected")
+    assert victim.read_bytes() == b"preserve me"
+
+
+def test_parent_creation_lock_precedes_target_creation(tmp_path: Path) -> None:
+    """Requirement: a contending creator cannot create its target before acquiring the guard."""
+    import fcntl
+
+    archive = tmp_path / "not-created"
+    with (tmp_path / ".mailarchiver-create.lock").open("w+b") as guard:
+        fcntl.flock(guard.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        with pytest.raises(ArchiveBusyError, match="creator"):
+            WriterLease.acquire(archive, str(archive), "create", "test", "test", create=True)
+        assert not archive.exists()
+    with WriterLease.acquire(archive, str(archive), "create", "test", "test", create=True):
+        assert archive.is_dir()

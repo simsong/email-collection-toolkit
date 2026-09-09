@@ -1160,7 +1160,10 @@ class PyWebViewApplication:
 
     def about_status(self) -> AboutStatus:
         documents = self.controller.documents()
-        disk_path = next((document.path for document in documents if document.path), Path.home())
+        active = self.controller.active_document
+        disk_path = (active.path if active else None) or next(
+            (document.path for document in documents if document.path), Path.home()
+        )
         assert disk_path is not None
         try:
             free = shutil.disk_usage(disk_path).free
@@ -1244,7 +1247,11 @@ class PyWebViewApplication:
         anchor = self._dialog_window()
         if anchor is None:
             return False
-        return self._create_new_document(anchor) is not None
+        created = self._create_new_document(anchor)
+        if created is None:
+            return False
+        self._import_document(created)
+        return True
 
     def _create_new_document(self, anchor: Any) -> GuiApi | None:
         selected = anchor.create_file_dialog(
