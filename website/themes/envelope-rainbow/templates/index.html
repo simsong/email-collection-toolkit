@@ -3,23 +3,69 @@
 {% block content %}
 {% set releases = load_data(path="data/releases.toml") %}
 <main>
-  <section class="hero shell">
-    <div class="hero-copy">
-      <p class="eyebrow">Local email archive software</p>
-      <h1>Ingest, preserve, search, and report on email archives.</h1>
-      <p class="lede">Mail Archiver reads supported email files, stores the original message data in MBOX files, records where each message came from, and builds a local search index.</p>
-      <div class="actions">
-        <a class="button primary" href="{{ get_url(path='use-cases/') }}">View use cases</a>
-        <a class="button secondary" href="{{ config.extra.readme }}">Read the README</a>
+  <section class="hero-wrap">
+    <div class="rainbow-flow" aria-hidden="true"></div>
+    <div class="hero shell">
+      <div class="hero-copy">
+        <p class="eyebrow">Collect · Preserve · Search · Understand</p>
+        <h1>Email Collection Toolkit</h1>
+        <p class="lede">A modern, open-source toolkit for making email a lasting part of the historical record.</p>
+        <div class="actions">
+          <a class="button primary" href="{{ get_url(path='use-cases/') }}">Get started <span aria-hidden="true">→</span></a>
+          <a class="button secondary" href="{{ config.extra.repository }}">View on GitHub</a>
+        </div>
+      </div>
+      <div class="hero-message">
+        <p>Email has<br>a history.<br><strong>Keep it.</strong></p>
       </div>
     </div>
-    <div class="hero-art"><img src="{{ get_url(path='icons/rainbow-post.svg') }}" alt="Rainbow over an envelope"></div>
   </section>
 
-  <section class="release-band shell" aria-labelledby="release-title">
+  <section class="capabilities shell" aria-label="Core capabilities">
+    <article><span class="cap-icon">⇩</span><h2>Collect</h2><p>Import from many sources and old backups.</p></article>
+    <article><span class="cap-icon">◇</span><h2>Preserve</h2><p>Standards-based archives with BagIt and Mailbag.</p></article>
+    <article><span class="cap-icon">⌕</span><h2>Search</h2><p>Fast full-text search, with semantic search planned.</p></article>
+    <article><span class="cap-icon">▤</span><h2>Understand</h2><p>Finding aids, provenance, reports, and context.</p></article>
+  </section>
+
+  <section class="story-grid shell">
+    <article class="story-card">
+      <div class="story-copy">
+        <p class="eyebrow">Collections are evidence</p>
+        <h2>Email tells a story.</h2>
+        <p>Whether it is your own inbox or the papers of someone you admire, Email Collection Toolkit helps keep those stories safe, searchable, and meaningful.</p>
+        <a class="text-link" href="{{ get_url(path='use-cases/') }}">See how it works <span aria-hidden="true">→</span></a>
+      </div>
+      <div class="typing-art" role="img" aria-label="Hands typing at a keyboard">
+        <div class="keyboard">
+          <span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span>
+          <span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span>
+          <span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span>
+        </div>
+        <div class="hand hand-left"></div><div class="hand hand-right"></div>
+      </div>
+    </article>
+
+    <article class="insight-card">
+      <p class="eyebrow">From inbox to insight</p>
+      <h2>Preservation-ready by design.</h2>
+      <p>Turn scattered mailboxes into a collection with strong provenance and open formats.</p>
+      <ul>
+        <li>Supported MBOX, Maildir, EML, Apple Mail, and Babyl today</li>
+        <li>Native BagIt / Mailbag packaging</li>
+        <li>SHA-256 integrity and source tracking</li>
+        <li>Local FTS5 search with rebuildable indexes</li>
+        <li>Archivist-friendly workflows and ePADD interoperability</li>
+      </ul>
+      <a class="text-link" href="{{ get_url(path='curation/') }}">Explore features <span aria-hidden="true">→</span></a>
+    </article>
+  </section>
+
+  <section class="release-card shell" aria-labelledby="release-title">
     <div>
       <p class="eyebrow">Project status</p>
-      <h2 id="release-title">Current release: <a href="{{ releases.current_url }}">{{ releases.current_version }}</a></h2>
+      <h2 id="release-title">Open source and under active development.</h2>
+      <p>Current release: <a href="{{ releases.current_url }}">{{ releases.current_version }}</a></p>
     </div>
     <div class="release-links">
       <a href="{{ releases.stable.url }}"><span>Stable</span><strong>{{ releases.stable.version }}</strong></a>
@@ -27,54 +73,11 @@
     </div>
   </section>
 
-  <section class="audiences shell" aria-labelledby="audiences-title">
-    <div class="section-heading audience-heading">
-      <p class="eyebrow">Users</p>
-      <h2 id="audiences-title">For personal and institutional email collections.</h2>
-      <p>The program uses the same archive format and search interface for both kinds of collection.</p>
-    </div>
-    <div class="audience-grid">
-      <article class="audience-card individual">
-        <p class="audience-label">For Individuals</p>
-        <h2>Consolidate exported email.</h2>
-        <p>Read supported email files from old computers and backup drives into one local archive, then search the combined collection.</p>
-        <ul>
-          <li>Store original message data in MBOX files</li>
-          <li>Search across accounts and backup sets</li>
-          <li>Verify files and messages with SHA-256 hashes</li>
-        </ul>
-        <a class="text-link" href="{{ get_url(path='use-cases/') }}#for-individuals">Individual use case <span aria-hidden="true">→</span></a>
-      </article>
-      <article class="audience-card archivist">
-        <p class="audience-label">For Archivists</p>
-        <h2>Process donor email collections.</h2>
-        <p>Library staff can use the local viewer to search the collection and preview messages and attachments. Reports provide data that can be used in finding aids.</p>
-        <ul>
-          <li>Store the archive natively in BagIt 1.0 / Mailbag 1.0 format</li>
-          <li>Record where each message was found</li>
-          <li>Transfer MBOX files to ePADD</li>
-        </ul>
-        <a class="text-link" href="{{ get_url(path='use-cases/') }}#for-archivists">Archivist use case <span aria-hidden="true">→</span></a>
-      </article>
-    </div>
-  </section>
-
-  <section class="principles shell" aria-label="Archive handling">
-    <article><span>01</span><h2>Source files</h2><p>Mail Archiver reads source files without modifying them and stores the original message data.</p></article>
-    <article><span>02</span><h2>Source records</h2><p>The archive records the drive, export, mailbox, or account in which each message was found.</p></article>
-    <article><span>03</span><h2>Archive storage</h2><p>The archive itself is a BagIt 1.0 / Mailbag 1.0 package containing MBOX files and SHA-256 hashes. No separate export is needed.</p></article>
-  </section>
-
   <section class="resource-grid shell" aria-labelledby="resources-title">
-    <div class="section-heading"><p class="eyebrow">Documentation</p><h2 id="resources-title">Project information.</h2></div>
-    <a class="resource-card" href="{{ get_url(path='curation/') }}"><span>↗</span><h3>Curation</h3><p>Functions, supported formats, planned work, reports, and related organizations.</p></a>
-    <a class="resource-card" href="{{ get_url(path='discussions/') }}"><span>↗</span><h3>Project discussions</h3><p>Announcements belong in Discussions #55; feature requests belong in #56.</p></a>
+    <div class="section-heading"><p class="eyebrow">Documentation</p><h2 id="resources-title">Go deeper.</h2></div>
+    <a class="resource-card" href="{{ get_url(path='curation/') }}"><span>↗</span><h3>Curation</h3><p>Formats, preservation, reports, and related archival resources.</p></a>
+    <a class="resource-card" href="{{ get_url(path='discussions/') }}"><span>↗</span><h3>Community</h3><p>Announcements, feature requests, and project discussion.</p></a>
     <a class="resource-card" href="{{ config.extra.release_notes }}"><span>↗</span><h3>Release notes</h3><p>Changes included in current and previous releases.</p></a>
-  </section>
-
-  <section class="closing shell">
-    <div><p class="eyebrow">Project status</p><h2>Open-source software under active development.</h2></div>
-    <a class="button primary" href="{{ config.extra.announcements }}">View announcements</a>
   </section>
 </main>
 {% endblock content %}
