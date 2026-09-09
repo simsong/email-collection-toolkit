@@ -24,6 +24,7 @@ class ApplicationConfiguration(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
 
     version: Literal[1]
+    mode: Literal["replace", "extend"]
     gui: GuiConfiguration
 
 

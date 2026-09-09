@@ -103,7 +103,9 @@ directory, and a `data/mbox/` payload directory.
 
 `archive.sqlite3` and the disposable `search.sqlite3` are operational BagIt
 tag files but are deliberately not listed in the tag manifest; their live
-SQLite state is outside the portable preservation checkpoint.
+SQLite state is outside the portable preservation checkpoint. An optional
+archive-local copy of geographic reference data is also operational metadata;
+it is explicitly copied by the user and is never refreshed implicitly.
 The top-level `status/` directory likewise contains operational, unmanifested
 JSON tag files. Each ingest creates a distinct file and atomically replaces
 only that file with its current typed status; the final replacement retains
@@ -370,6 +372,52 @@ Email address text is normalized into `email_addresses(address_pk, address)`.
 `messages.sender_address_pk` and `recipients.address_pk` reference that table;
 `recipients.role` retains To, Cc, or Bcc while header order is not retained. The address
 table also stores explicitly labeled non-email Google Chat identities.
+
+## Contacts and geographic reference data
+
+Contacts are address-level records derived from `From`, `To`, `Cc`, and `Bcc`
+headers; they are not authoritative People records. Each address occurs at
+most once per message in all-header counts and date ranges. The Contacts view
+shall offer a default-checked **Meaningful** filter. Meaningful means a direct
+To or outgoing Bcc recipient of owner-sent mail, or an incoming sender where an
+exact configured owner address occurs in `To`. Cc recipients are not
+meaningful; multiple To recipients are. A mailing-list message counts only
+when that direct-owner-in-To condition is met.
+The existing owner-token file remains the ingest classifier until archive setup
+collects exact owner addresses and **File → Properties** can revise them;
+meaningful-contact semantics use those exact addresses, never a name fragment.
+The read-only `human-contacts` command shall provide this initial address-level
+projection in table, TSV, and JSON forms before the Contacts window exists. It
+shall accept a reusable owner-alias file whose values are separated by newlines,
+commas, or semicolons; blank lines and comment lines are ignored. Aliases resolve
+only to catalogued Sent sender addresses, and those resulting exact addresses
+drive the meaningful-contact predicate.
+It shall suppress mailing-list, automated-service, and malformed identities
+using a versioned, explainable packaged policy. The human-contact local-part
+limit is 48 characters and is configurable; the RFC address limit is not itself
+a claim that every shorter address is human.
+The packaged `contact_filters.yaml` may be copied to an archive root. Its
+required `mode` is `replace` for a complete replacement policy or `extend` to
+add only rule lists to the packaged policy. Extension preserves packaged order,
+appends new rules, and removes duplicates; scalar thresholds remain packaged.
+A malformed archive copy shall fail the command rather than silently changing
+its classification.
+
+Geographic evidence shall preserve source, observation date, confidence, and
+whether it is **located** (contact-specific evidence, such as a signature) or
+**affiliated** (an institutional/domain relationship). Affiliation shall not
+be presented as a person's location. The initial United States lookup accepts
+a five-digit ZCTA and displays its city, state, and country. Radius lookup is
+straight-line distance from representative latitude/longitude.
+
+The installed application shall include a seed US ZCTA reference database with
+representative latitude/longitude, city, state, and country. `make
+geography-data` and the future **Tools → Update Geo Database** command shall
+use the same verified bulk-data update path. No public per-contact geocoding or
+domain lookup is permitted in this phase. Installation-level geography data is
+per-user, not per archive; an archive snapshot may be copied or read only
+through an explicit user action. See
+[CONTACTS_AND_GEOGRAPHY.md](CONTACTS_AND_GEOGRAPHY.md).
 
 ## Search database
 
@@ -806,15 +854,17 @@ special-purpose search and message-viewing interface is a consumer of
 the two SQLite databases, not a reason to depend on Thunderbird or FoxTrot.
 No source mailbox is modified by this program.
 The complete current catalog DDL is the packaged `sql/V1__archive.sql` resource
-and is created only for a fresh archive. An unversioned catalog or any version
-other than V1 is rejected rather than migrated. The separate disposable search
-database likewise has exactly one packaged `sql/V1__search.sql`; before ingest
-workers start, an obsolete search database is rebuilt from catalogued canonical
-MBOX into a temporary file and atomically replaced, not migrated in place. A
-failed rebuild preserves the prior database. A fresh catalog is also
-refused beside existing canonical MBOX or `.mbox.integrity` output because that
-would defeat deduplication. Those outputs are detected in `data/mbox/` and
-`integrity/`; unsupported root-level legacy output is never imported.
+and is created only for a fresh archive. Until the Contacts/geography migration
+work lands, an unversioned catalog or any version other than V1 is rejected.
+That work replaces this fresh-schema-only boundary with a dedicated Flyway
+migration history and independently managed archive schema version. The
+separate disposable search database continues to be rebuilt, not migrated, in
+place. The installation geography database has a separate version and update
+history; an archive-local geography snapshot is part of the archive migration
+stream. A fresh catalog is also refused beside existing canonical MBOX or
+`.mbox.integrity` output because that would defeat deduplication. Those outputs
+are detected in `data/mbox/` and `integrity/`; unsupported root-level legacy
+output is never imported.
 
 The live appendable archive itself is the Mailbag interchange and preservation
 package. A redacted or otherwise restricted release is a separate BagIt bag

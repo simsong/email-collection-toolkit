@@ -79,6 +79,7 @@ class LocalSourceRules(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     version: Literal[1]
+    mode: Literal["replace", "extend"]
     ignore: IgnoreRules
     file_probe: FileProbeRules
     mbox: MboxRules

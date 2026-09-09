@@ -464,6 +464,70 @@ include supported text attachments.
 * `search.sqlite3` is disposable and may be rebuilt from the canonical mail.
 * Preserve the entire archive directory, including hidden and small tag files.
 
+## Contacts command
+
+The read-only Contacts command is the first address-level Contacts interface:
+
+```console
+make run ARGS='--archive "/path/to/mail-archive" human-contacts --owner-address-file owner-names.txt --format table'
+```
+
+It reports each likely human direct correspondent's email address, first appearance, last
+appearance, and all-header message count. The owner-address file accepts the
+same identifying address fragments as `owner-names.txt`, separated by newlines,
+commas, or semicolons; blank lines and `#` comments are ignored. It resolves
+those aliases only to catalogued **Sent** sender addresses, then uses the
+resulting exact addresses for meaningful-contact tests. Repeat `--owner-address`
+for a temporary exact additional address. The default meaningful selection includes outgoing To/Bcc recipients
+and incoming senders only when an exact owner address is in To; it excludes Cc
+traffic and mailing-list mail addressed only indirectly. Use `--all` to inspect
+all From/To/Cc/Bcc addresses instead, and `--format tsv` or `--format json` for
+scripts. Mailing lists, automated/no-reply services, malformed addresses, and
+local parts longer than 48 characters are excluded by a versioned packaged
+policy. Shared role inboxes such as root, staff, support, and webmaster are
+also excluded. The command only reads archive.sqlite3.
+Exceptional valid human identities are explicit allow rules in that same policy;
+they take precedence over the generic malformed-address checks.
+
+### Contact-filter policy
+
+The packaged default is `src/mailarchiver/contact_filters.yaml`. To
+preserve archive-specific decisions, copy that complete file to
+`/path/to/mail-archive/contact_filters.yaml` and edit the copy. The
+archive copy takes precedence whenever it exists; without one, Mail Archiver
+uses the packaged default. Set `mode: replace` for a complete, valid versioned
+replacement policy. Set `mode: extend` to add rule lists to the packaged
+policy; duplicates are removed and the packaged scalar threshold remains in
+effect. Invalid policies fail rather than silently falling back.
+
+## Planned: Contacts window and geography
+
+The forthcoming **Contacts** window will list one email address per contact,
+with first appearance, last appearance, and message count. Its checked-by-
+default **Meaningful** option will show direct correspondents: people you sent
+to in To or Bcc, and people who sent to an owner address directly in To. Cc
+traffic and messages sent only through a mailing list will not qualify.
+The current `owner-names.txt` continues to classify sent mail. A future archive
+creation dialog and **File → Properties** will maintain the exact owner
+addresses used by Contacts.
+
+The same window will support US ZCTA input such as `02139`, displaying its city,
+state, and country, and later a rough straight-line radius around a place. A
+contact's **located** evidence (for example, a signature address) is distinct
+from an **affiliated** institution (for example, a university domain); an
+affiliation is not treated as a home location.
+
+The application will ship with a seed US geography database. `make
+geography-data` and **Tools → Update Geo Database** will refresh the shared,
+per-user reference data. It lives outside individual archives: on macOS in
+`~/Library/Application Support/Mail Archiver/geography/`; on Windows in
+`%LOCALAPPDATA%\\Mail Archiver\\geography\\`; and on Linux in
+`$XDG_DATA_HOME/mailarchiver/geography/` (or
+`~/.local/share/mailarchiver/geography/`). A future explicit command will let
+you copy a geography snapshot into an archive or choose that snapshot instead
+of your installed data. These features are documented design commitments and
+are not in the current release.
+
 ## Configuration
 
 Mail Archiver's current application-level configuration is the versioned YAML
@@ -492,3 +556,9 @@ replace:
 
 Changing the highlight color affects only derived display rendering. It does
 not modify the source mail, canonical MBOX files, catalog, or search database.
+Versioned policy files that affect archive-derived interpretation, such as
+`contact_filters.yaml`, may instead be copied in full to the archive
+root. An archive-local copy takes precedence over the packaged source copy, so
+the archive retains the policy that produced its derived contact results.
+Packaged runtime YAML files declare `mode: replace`; an archive-local policy
+that supports `mode: extend` documents the lists it adds to that default.

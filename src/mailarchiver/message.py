@@ -36,6 +36,7 @@ BODY_DATE_HEADER = re.compile(r"(?im)^[ \t>]*Date:[ \t]*(.+)$")
 class MessagePatternConfig(BaseModel):
     """Localized patterns used while recovering dates from quoted message text."""
 
+    mode: Literal["replace", "extend"]
     quoted_body_date: list[str] = Field(min_length=1)
 
 

@@ -315,6 +315,63 @@ deliberately supports database replacement while there are no users.
 `locations` and
 `mbox_generations` are written as part of each message publication.
 
+### Planned Contacts and geography
+
+Contacts are a derived address-level projection over the catalog. Extraction
+will stream each message's `From`, `To`, `Cc`, and `Bcc` headers once and write
+one deduplicated address appearance per message. It will separately derive the
+default **Meaningful** relation: outgoing direct To/Bcc recipients and incoming
+From addresses only when an exact configured owner address is in To. This
+preserves all-header statistics while avoiding Cc and indirect mailing-list
+traffic in meaningful-contact results.
+The current owner-token file continues to route Sent mail. Archive creation and
+File → Properties will later maintain a separate exact owner-address set for
+the direct-owner predicate; fragment matching is not adequate for that use.
+`mailarchiver human-contacts` is the initial read-only consumer. Its
+`--owner-address-file` accepts the existing owner aliases with newline, comma,
+or semicolon separators; it resolves them only to catalogued Sent sender
+addresses. Optional repeatable `--owner-address` values are exact overrides.
+The command defaults to meaningful Contacts and exposes the all-header
+projection only with `--all`; table, TSV, and JSON output share one typed row
+model.
+Before rendering, it applies the strict versioned `contact_filters.yaml`
+policy. It classifies malformed Unicode/control values and forbidden local-part
+characters as bogus, configured provider/list patterns as mailing lists,
+configured automated patterns as service identities, and only then includes
+the remaining addresses. The policy deliberately keeps ordinary SMTPUTF8
+addresses possible; it does not use non-ASCII alone as a rejection rule.
+The policy resolver first checks `<archive>/contact_filters.yaml`; when
+that file is absent it uses `src/mailarchiver/contact_filters.yaml` from
+the installed package. A `mode: replace` archive policy is a complete strict
+Pydantic replacement. A `mode: extend` policy may provide rule lists only; it
+is unioned with the packaged lists in order, removing duplicates, while
+packaged scalar values remain authoritative. The effective policy is therefore
+complete and reproducible without field-by-field scalar merging.
+
+Location evidence will retain a typed source, extraction method, observation
+time, confidence, and `located` or `affiliated` relation. Signature extraction
+may add located evidence; downloaded university domain/main-campus data adds
+only affiliated evidence. A Contact remains an address even when future
+authoritative-name work associates several Contacts with one Person.
+
+The geography reference database is an installation-level SQLite database,
+stored under `~/Library/Application Support/Mail Archiver/geography/` on macOS,
+`%LOCALAPPDATA%\\Mail Archiver\\geography\\` on Windows, and
+`$XDG_DATA_HOME/mailarchiver/geography/` (or
+`~/.local/share/mailarchiver/geography/`) on Linux. `make geography-data` and
+the future Tools-menu updater share a downloader that validates a versioned
+bulk-data manifest and atomically installs the replacement. The package ships
+a US ZCTA seed. It contains representative coordinates and display geography;
+the ZCTA lookup treats `02139` as an exact ZCTA, not ZIP3.
+
+Archive schema migration will move from the current V1-only guard to a dedicated
+Flyway archive migration location and schema history. Search keeps its
+independent disposable rebuild path. Geography data has its own database
+version, while an optional geography snapshot copied into an archive uses the
+archive migration stream. The snapshot is only copied or selected for reading
+by an explicit user action. See
+[CONTACTS_AND_GEOGRAPHY.md](CONTACTS_AND_GEOGRAPHY.md) for the complete design.
+
 Header parsing decodes and unfolds RFC 2047 Subject values before catalog and
 FTS insertion. `mailsearch` displays that catalog value directly. The verified
 MBOX traversal in `refresh-index` rederives that catalog field while rebuilding

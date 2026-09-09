@@ -36,6 +36,7 @@ from .catalog import (
     create_search,
     owner_tokens,
 )
+from .contacts import contacts, load_owner_addresses, print_contacts
 from .ingest_status import (
     IngestCounts,
     IngestState,
@@ -46,6 +47,8 @@ from .ingest_status import (
     YearProgress,
     new_status_id,
 )
+
+
 from .layout import mbox_directory, mbox_path
 from .message import ParsedMessage, parse_message
 from .mbox import (
@@ -100,6 +103,10 @@ DISCOVERY_PHASE = "discovering sources"
 TOP_LINE_STYLE = "\x1b[37;44m"
 ANSI_RESET = "\x1b[0m"
 WorkerItem = TypeVar("WorkerItem")
+
+
+class ContactInputError(ValueError):
+    """Invalid input specific to the human-contacts command."""
 
 
 def positive_integer(value: str) -> int:
@@ -1901,6 +1908,21 @@ def report(args: argparse.Namespace) -> None:
     print_report(Path(args.archive), report_years(args.year), args.top)
 
 
+def contact_list(args: argparse.Namespace) -> None:
+    """Render address-level Contacts without changing the archive."""
+    try:
+        from_file = () if args.owner_address_file is None else load_owner_addresses(args.owner_address_file)
+        rows = contacts(
+            Path(args.archive),
+            owner_addresses=tuple(args.owner_address),
+            owner_aliases=from_file,
+            meaningful_only=not args.all,
+        )
+    except ValueError as error:
+        raise ContactInputError(str(error)) from error
+    print_contacts(rows, args.format)
+
+
 def prepare_refresh_index_message(
     archive: Path, index_attachments: bool, work: RefreshIndexWork
 ) -> PreparedRefreshIndexMessage:
@@ -2072,6 +2094,26 @@ def main() -> int:
     report_parser.add_argument("--year", help="year or inclusive year range, for example 2016 or 2010-2020")
     report_parser.add_argument("--top", type=nonnegative_integer, default=DEFAULT_REPORT_TOP, help="top senders and recipients to show (default: 10; use 0 to suppress)")
     report_parser.set_defaults(function=report)
+    contacts_parser = commands.add_parser("human-contacts", help="list human address-level Contacts")
+    contacts_parser.add_argument(
+        "--owner-address-file",
+        type=Path,
+        help="file containing one exact archive-owner address per line",
+    )
+    contacts_parser.add_argument(
+        "--owner-address",
+        action="append",
+        default=[],
+        metavar="ADDRESS",
+        help="exact archive-owner address; repeat for multiple owners",
+    )
+    contacts_parser.add_argument(
+        "--all",
+        action="store_true",
+        help="include every header address instead of only direct meaningful Contacts",
+    )
+    contacts_parser.add_argument("--format", choices=("table", "tsv", "json"), default="table")
+    contacts_parser.set_defaults(function=contact_list)
     refresh_parser = commands.add_parser("refresh-index")
     refresh_parser.add_argument("--index-attachments", action="store_true", help="include text attachments; non-text attachments require the planned Tika extractor")
     refresh_parser.add_argument(
@@ -2085,6 +2127,8 @@ def main() -> int:
     args.archive = require_archive(parser, args.archive)
     try:
         args.function(args)
+    except ContactInputError as error:
+        parser.error(str(error))
     except RefreshIndexInterrupted as error:
         message = (
             "interrupted: the rebuilt search index was already published; no partial index exists"
