@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+* Validate all contact-filter regexes at policy load time and report YAML or
+  regex typos as path-qualified CLI errors, without tracebacks or archive writes.
+
 * Use platform-correct read-only catalog URIs for Contacts. The standalone
   message scrolling regression now guarantees overflow and verifies actual
   scrolling to source locations, independent of platform font metrics.

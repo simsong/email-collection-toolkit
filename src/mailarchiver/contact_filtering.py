@@ -9,8 +9,20 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Annotated, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, TypeAdapter
-from yaml import safe_load
+from pydantic import AfterValidator, BaseModel, ConfigDict, Field, TypeAdapter
+from yaml import YAMLError, safe_load
+
+
+def _validate_regex(pattern: str) -> str:
+    """Reject policy typos before matching, even for empty catalogs or unused rules."""
+    try:
+        re.compile(pattern, re.IGNORECASE)
+    except re.error as error:
+        raise ValueError(f"invalid regular expression {pattern!r}: {error}") from error
+    return pattern
+
+
+RegexPattern = Annotated[str, AfterValidator(_validate_regex)]
 
 
 class ContactKind(StrEnum):
@@ -25,8 +37,8 @@ class PatternSet(BaseModel):
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
-    domain_patterns: tuple[str, ...] = ()
-    local_part_patterns: tuple[str, ...] = ()
+    domain_patterns: tuple[RegexPattern, ...] = ()
+    local_part_patterns: tuple[RegexPattern, ...] = ()
 
 
 class ContactFilterConfiguration(BaseModel):
@@ -37,11 +49,11 @@ class ContactFilterConfiguration(BaseModel):
     version: Literal[1]
     mode: Literal["replace"]
     max_human_local_part_length: int = Field(ge=1, le=64)
-    allow_address_patterns: tuple[str, ...]
+    allow_address_patterns: tuple[RegexPattern, ...]
     mailing_list: PatternSet
     service: PatternSet
-    bogus_local_part_patterns: tuple[str, ...]
-    bogus_domain_patterns: tuple[str, ...]
+    bogus_local_part_patterns: tuple[RegexPattern, ...]
+    bogus_domain_patterns: tuple[RegexPattern, ...]
 
 
 class ContactFilterExtension(BaseModel):
@@ -51,11 +63,11 @@ class ContactFilterExtension(BaseModel):
 
     version: Literal[1]
     mode: Literal["extend"]
-    allow_address_patterns: tuple[str, ...] = ()
+    allow_address_patterns: tuple[RegexPattern, ...] = ()
     mailing_list: PatternSet = PatternSet()
     service: PatternSet = PatternSet()
-    bogus_local_part_patterns: tuple[str, ...] = ()
-    bogus_domain_patterns: tuple[str, ...] = ()
+    bogus_local_part_patterns: tuple[RegexPattern, ...] = ()
+    bogus_domain_patterns: tuple[RegexPattern, ...] = ()
 
 
 class AddressClassification(BaseModel):
@@ -67,11 +79,14 @@ class AddressClassification(BaseModel):
 
 def load_contact_filters(path: Path) -> ContactFilterConfiguration | ContactFilterExtension:
     """Load one strict contact-filter policy."""
-    with path.open(encoding="utf-8") as source:
-        contents = safe_load(source)
-    return TypeAdapter(
-        Annotated[ContactFilterConfiguration | ContactFilterExtension, Field(discriminator="mode")]
-    ).validate_python(contents)
+    try:
+        with path.open(encoding="utf-8") as source:
+            contents = safe_load(source)
+        return TypeAdapter(
+            Annotated[ContactFilterConfiguration | ContactFilterExtension, Field(discriminator="mode")]
+        ).validate_python(contents)
+    except (ValueError, YAMLError) as error:
+        raise ValueError(f"invalid contact-filter policy {path}: {error}") from error
 
 
 def _extend(base: tuple[str, ...], additions: tuple[str, ...]) -> tuple[str, ...]:

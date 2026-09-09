@@ -572,6 +572,10 @@ Pydantic replacement. A `mode: extend` policy may provide rule lists only; it
 is unioned with the packaged lists in order, removing duplicates, while
 packaged scalar values remain authoritative. The effective policy is therefore
 complete and reproducible without field-by-field scalar merging.
+Each pattern uses a Pydantic `AfterValidator` to compile with the same
+case-insensitive flags used by classification. Regex and YAML errors become
+path-qualified `ValueError` diagnostics handled by the Contacts CLI; invalid
+rules cannot remain hidden behind earlier matches or an empty catalog.
 
 Location evidence will retain a typed source, extraction method, observation
 time, confidence, and `located` or `affiliated` relation. Signature extraction

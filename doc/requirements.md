@@ -463,7 +463,9 @@ required `mode` is `replace` for a complete replacement policy or `extend` to
 add only rule lists to the packaged policy. Extension preserves packaged order,
 appends new rules, and removes duplicates; scalar thresholds remain packaged.
 A malformed archive copy shall fail the command rather than silently changing
-its classification.
+its classification. Validate every regex when the policy loads, including unused
+rules and empty catalogs. YAML and regex errors identify the policy file and
+offending rule without a traceback, partial output, or archive writes.
 
 Geographic evidence shall preserve source, observation date, confidence, and
 whether it is **located** (contact-specific evidence, such as a signature) or

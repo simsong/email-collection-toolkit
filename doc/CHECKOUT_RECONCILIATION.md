@@ -49,6 +49,9 @@ special-path and missing-catalog regressions cover the connection behavior.
 CI also exposed a standalone-scroll test that cleared its forced overflow before
 checking for a scrollbar. The test now retains explicit tall content and checks
 that scrolling actually brings source locations into view.
+The fourth review identified invalid contact-filter regexes escaping as
+tracebacks. Patterns now validate on load, with path-qualified YAML/regex errors
+and CLI regressions covering empty/populated catalogs and replace/extend rules.
 
 After human merge, fetch/prune and prove each source tip is represented in
 current main before removing its exact clean worktree and local branch.

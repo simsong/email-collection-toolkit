@@ -126,3 +126,40 @@ def test_contacts_missing_catalog_is_not_created(tmp_path: Path) -> None:
     result = _contacts("--archive", str(tmp_path), "human-contacts", "--all")
     assert result.returncode != 0
     assert not (tmp_path / "archive.sqlite3").exists()
+
+
+@pytest.mark.parametrize("empty", [False, True])
+@pytest.mark.parametrize(
+    "policy",
+    (
+        "version: 1\nmode: extend\nallow_address_patterns: ['.*', '[']\n",
+        "version: 1\nmode: extend\nservice: {domain_patterns: ['[']}\n",
+        "version: 1\nmode: replace\nmax_human_local_part_length: 48\n"
+        "allow_address_patterns: []\nmailing_list: {}\nservice: {}\n"
+        "bogus_local_part_patterns: []\nbogus_domain_patterns: ['[']\n",
+        "version: 1\nmode: extend\nservice: [\n",
+    ),
+)
+def test_contacts_rejects_invalid_policy_without_traceback(tmp_path: Path, policy: str, empty: bool) -> None:
+    """Requirement: all policy rules validate before querying, with actionable non-mutating errors."""
+    if empty:
+        archive = tmp_path / "archive"
+        archive.mkdir()
+        create_catalog(archive / "archive.sqlite3").close()
+    else:
+        archive = _archive(tmp_path)
+    policy_path = archive / "contact_filters.yaml"
+    policy_path.write_text(policy, encoding="utf-8")
+    catalog = archive / "archive.sqlite3"
+    original = catalog.read_bytes()
+
+    result = _contacts("--archive", str(archive), "human-contacts", "--all")
+
+    assert result.returncode == 2
+    assert str(policy_path) in result.stderr
+    assert "invalid contact-filter policy" in result.stderr
+    if "'['" in policy:
+        assert "invalid regular expression '['" in result.stderr
+    assert "Traceback" not in result.stderr
+    assert result.stdout == ""
+    assert catalog.read_bytes() == original
