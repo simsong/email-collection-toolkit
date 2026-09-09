@@ -97,22 +97,14 @@ verify that the PR head matches the pushed commit. Never leave work only on a
 GitHub non-`main` branch, including when a previously merged branch name is
 reused.
 
-<<<<<<< HEAD
-An explicit `pr-to-ready` request (including `codex-to-complete` or
-`codex-to-ready`) authorizes the shared publication/review workflow.
-Otherwise, do not commit, push, or modify PRs without a user request.
-Approval, merge, issue closure, and remote-service changes need their
-own explicit authorization.
-When authorized, Codex GitHub activity uses `@simsong-codex`; signed commits use
-`Codex AI Assistant <simsong+codex@acm.org>` and the configured Codex GPG key.
-Verify identity and signature after committing.
-=======
 ## Authorization and identity
 
-A request to perform **pr-to-ready**
+A request to perform **pr-to-ready** (including **codex-to-complete** or
+**codex-to-ready**)
 authorizes the commits, pushes, draft PR creation, review requests, review-thread
 replies, fixes, and final human-review request described below. Continue through
-these steps without repeatedly requesting permission. Do not approve or merge a
+these steps without repeatedly requesting permission. Otherwise, do not commit,
+push, or modify PRs without a user request. Do not approve or merge a
 PR, close an issue or superseded PR, or change remote services without explicit
 user authorization for that action.
 
@@ -123,7 +115,6 @@ Verify the CLI identity, SSH push identity, and browser login separately. Before
 that identity. Sign every Codex commit. Verify the result before pushing with
 `git log -1 --format='%G? %GS %an <%ae> %cn <%ce>'`. To correct identity on an
 existing commit, use `git commit --amend --reset-author -S`.
->>>>>>> origin
 
 ## pr-to-ready project requirements
 
@@ -147,8 +138,6 @@ Follow the shared workflow with these mail-archiver requirements:
   blockers. Mark ready, request review from and assign `simsong`, explicitly
   stating that Copilot is not clear and identifying the disputed findings.
   Never represent this exceptional handoff as a successful Copilot review.
-<<<<<<< HEAD
-=======
 
 ## Validation and cleanup
 
@@ -167,4 +156,3 @@ and verify the linked worktree has no modified or untracked files. Only then
 remove its linked worktree and delete its local branch. Preserve dirty,
 unmerged, or uncertain worktrees. A superseded PR closed during consolidation
 is not proof that its branch has reached main.
->>>>>>> origin

@@ -2,22 +2,22 @@
 
 ## Unreleased
 
-<<<<<<< HEAD
-=======
+* Resolve committed cleanup-conflict markers and restore generated skill
+  wrappers. Require pr-to-ready to integrate stranded task work before handoff
+  and perform verified post-merge checkout cleanup,
+  retaining dirty, unmerged, and private evidence-bearing worktrees.
+
 * Limit Ruff discovery to tracked and non-ignored new Python files, avoiding
   generated directories while supporting project-local linked worktrees.
 
 * Clarify installed verifier usage and make GUI asset HEAD/redirect response
   lengths explicit without reading asset bodies for HEAD.
 
->>>>>>> origin
 - Standardize the agent PR workflow as `pr-to-ready`, retain
   `codex-to-complete` and `codex-to-ready` aliases, and add shared
   Codex, Claude, and Copilot implementer/reviewer instructions.
 
 
-<<<<<<< HEAD
-=======
 * Add the desktop document controller, archive writer leases, document options,
   coordinated import/quit handling, and macOS application packaging.
 * Add the Gmail authorization developer preview and read-only Apple Mail cache
@@ -32,7 +32,6 @@
 * Document the browser-driven pr-to-ready workflow, ten-minute review
   checks, signed Codex identity, and explicit human handoff for review loops.
 
->>>>>>> origin
 * Make `refresh-index` observable and safe to interrupt: it now reports
   message-weighted verification/indexing progress bars with ETA, announces its
   Ctrl-C safety before work begins, and discards an incomplete replacement

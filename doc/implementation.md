@@ -1442,6 +1442,18 @@ requires it and fails clearly.
 
 ## Developer validation gates
 
+The shared pr-to-ready source generates the repository skill and Copilot
+instructions. Before handoff it inventories task checkouts, reconciles intended
+uncommitted changes and unpublished commits into the delivery branch, and records
+the resulting commit or evidence of inclusion/supersession for each checkout.
+Preservation elsewhere is not a completed integration. Its ten-minute heartbeat
+changes from review monitoring to post-merge cleanup after handoff. Cleanup
+fetches/prunes, verifies GitHub merge
+state and current-main inclusion, checks tracked/untracked/ignored files, and
+removes only safe task-owned worktrees and represented local branches. It stops
+on completion or a reported preservation decision. Repository Claude entries
+are generated regular wrapper files, not directory symlinks.
+
 `make check` runs Ruff and Pylint (`make lint`), then ty and Pyright
 (`make types`), then pytest, Chromium end-to-end tests, and website validation.
 The stages run sequentially even with parallel make and stop on failure.
