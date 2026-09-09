@@ -12,6 +12,7 @@ from collections import Counter
 from itertools import groupby
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from urllib.parse import urlsplit
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -25,6 +26,12 @@ SEMANTIC_STANDARD = "h3 semantic-message v1"
 DEDUPLICATION_STANDARD = "normalized Message-ID + h2 raw-message SHA-256"
 HEADER_SEPARATOR = b"\r\n\r\n"
 LINE_ENDINGS = re.compile(rb"\r\n|\r|\n")
+SERVICE_GMAIL = "Gmail"
+SERVICE_EXCHANGE = "Microsoft Exchange (EWS)"
+SERVICE_IMAP = "Other IMAP"
+SERVICE_POP = "POP"
+SERVICE_LOCAL = "Local"
+SERVICE_UNKNOWN = "Unknown"
 
 
 class HeaderChange(BaseModel):
@@ -33,6 +40,23 @@ class HeaderChange(BaseModel):
     name: str
     messages: int = Field(ge=0)
     occurrences: int = Field(ge=0)
+
+
+class ServiceComparison(BaseModel):
+    """One privacy-preserving provider/protocol aggregate."""
+
+    service: str
+    complete_emlx: int = 0
+    partial_emlx: int = 0
+    unreadable_emlx: int = 0
+    compared_emlx: int = 0
+    exact_raw_matches: int = 0
+    semantic_only_matches: int = 0
+    cache_only_messages: int = 0
+    archive_semantic_matches: int = 0
+    ambiguous_semantic_matches: int = 0
+    header_pairs_analyzed: int = 0
+    formatting_only_pairs: int = 0
 
 
 class ComparisonReport(BaseModel):
@@ -59,6 +83,7 @@ class ComparisonReport(BaseModel):
     apple_added_headers: list[HeaderChange] = Field(default_factory=list)
     apple_missing_headers: list[HeaderChange] = Field(default_factory=list)
     changed_headers: list[HeaderChange] = Field(default_factory=list)
+    services: list[ServiceComparison] = Field(default_factory=list)
 
 
 class ArchiveCandidate(BaseModel):
@@ -79,6 +104,66 @@ class CacheInventory(BaseModel):
     complete: int = 0
     partial: int = 0
     unreadable: int = 0
+    services: list[ServiceComparison] = Field(default_factory=list)
+
+
+def _service_inventory(inventory: CacheInventory, service: str) -> ServiceComparison:
+    for item in inventory.services:
+        if item.service == service:
+            return item
+    item = ServiceComparison(service=service)
+    inventory.services.append(item)
+    return item
+
+
+def _account_services(root: Path) -> dict[str, str]:
+    schemes: dict[str, set[str]] = {}
+    gmail_accounts: set[str] = set()
+    for version in sorted(root.glob("V*")):
+        if not version.is_dir():
+            continue
+        for account in version.iterdir():
+            if not account.is_dir() or account.name == "MailData":
+                continue
+            markers = {child.name.casefold() for child in account.iterdir() if child.is_dir()}
+            if {"[gmail].mbox", "[google mail].mbox"} & markers:
+                gmail_accounts.add(account.name.casefold())
+        index_path = version / "MailData" / "Envelope Index"
+        if not index_path.is_file():
+            continue
+        index = sqlite3.connect(index_path.as_uri() + "?mode=ro", uri=True)
+        try:
+            for (url,) in index.execute("SELECT url FROM mailboxes"):
+                parsed = urlsplit(str(url))
+                account = (parsed.hostname or parsed.netloc).casefold()
+                if account:
+                    schemes.setdefault(account, set()).add(parsed.scheme.casefold())
+        finally:
+            index.close()
+    services: dict[str, str] = {}
+    for account in schemes.keys() | gmail_accounts:
+        account_schemes = schemes.get(account, set())
+        if account in gmail_accounts:
+            service = SERVICE_GMAIL
+        elif "ews" in account_schemes:
+            service = SERVICE_EXCHANGE
+        elif "imap" in account_schemes:
+            service = SERVICE_IMAP
+        elif "pop" in account_schemes:
+            service = SERVICE_POP
+        elif "local" in account_schemes:
+            service = SERVICE_LOCAL
+        else:
+            service = SERVICE_UNKNOWN
+        services[account] = service
+    return services
+
+
+def _service_for_path(relative_path: Path, account_services: dict[str, str]) -> str:
+    parts = relative_path.parts
+    if len(parts) >= 2 and parts[0].startswith("V"):
+        return account_services.get(parts[1].casefold(), SERVICE_UNKNOWN)
+    return SERVICE_UNKNOWN
 
 
 def _mail_state(root: Path) -> tuple[tuple[str, int, int], ...]:
@@ -93,13 +178,31 @@ def _walk_error(error: OSError) -> None:
     raise error
 
 
-def _index_cache(
+def create_cache_index(database: sqlite3.Connection) -> None:
+    """Create the disposable Apple Mail comparison tables."""
+    database.executescript(
+        """
+        CREATE TABLE cache_messages (
+            cache_pk INTEGER PRIMARY KEY,
+            relative_path TEXT NOT NULL UNIQUE,
+            raw_sha256 TEXT NOT NULL,
+            semantic_sha256 TEXT NOT NULL,
+            service TEXT NOT NULL
+        );
+        CREATE INDEX cache_raw_sha256 ON cache_messages(raw_sha256);
+        CREATE INDEX cache_semantic_sha256 ON cache_messages(semantic_sha256);
+        """
+    )
+
+
+def index_apple_mail_cache(
     database: sqlite3.Connection,
     root: Path,
     progress_every: int,
 ) -> CacheInventory:
     inventory = CacheInventory()
-    inserts: list[tuple[str, str, str]] = []
+    account_services = _account_services(root)
+    inserts: list[tuple[str, str, str, str]] = []
     for directory, directories, filenames in os.walk(root, onerror=_walk_error, followlinks=False):
         directories.sort()
         for filename in sorted(filenames):
@@ -109,25 +212,34 @@ def _index_cache(
             path = Path(directory) / filename
             if path.is_symlink():
                 continue
+            relative_path = path.relative_to(root)
+            service_inventory = _service_inventory(
+                inventory, _service_for_path(relative_path, account_services)
+            )
             if lowered.endswith(".partial.emlx"):
                 inventory.partial += 1
+                service_inventory.partial_emlx += 1
                 continue
             inventory.complete += 1
+            service_inventory.complete_emlx += 1
             try:
                 raw = emlx_bytes(path)
             except (OSError, ValueError):
                 inventory.unreadable += 1
+                service_inventory.unreadable_emlx += 1
                 continue
             inserts.append(
                 (
-                    path.relative_to(root).as_posix(),
+                    relative_path.as_posix(),
                     hashlib.sha256(raw).hexdigest(),
                     hashlib.sha256(semantic_bytes(raw)).hexdigest(),
+                    service_inventory.service,
                 )
             )
             if len(inserts) == 1_000:
                 database.executemany(
-                    "INSERT INTO cache_messages(relative_path, raw_sha256, semantic_sha256) VALUES (?, ?, ?)",
+                    "INSERT INTO cache_messages(relative_path, raw_sha256, semantic_sha256, service) "
+                    "VALUES (?, ?, ?, ?)",
                     inserts,
                 )
                 database.commit()
@@ -136,7 +248,8 @@ def _index_cache(
                 print(f"indexed {inventory.complete:,} complete EMLX records", file=sys.stderr)
     if inserts:
         database.executemany(
-            "INSERT INTO cache_messages(relative_path, raw_sha256, semantic_sha256) VALUES (?, ?, ?)",
+            "INSERT INTO cache_messages(relative_path, raw_sha256, semantic_sha256, service) "
+            "VALUES (?, ?, ?, ?)",
             inserts,
         )
         database.commit()
@@ -194,11 +307,75 @@ def _changes(occurrences: Counter[str], messages: Counter[str]) -> list[HeaderCh
     ]
 
 
-def _scalar(database: sqlite3.Connection, statement: str) -> int:
-    row = database.execute(statement).fetchone()
+def _scalar(
+    database: sqlite3.Connection,
+    statement: str,
+    parameters: tuple[object, ...] = (),
+) -> int:
+    row = database.execute(statement, parameters).fetchone()
     if row is None:
         raise RuntimeError("aggregate query returned no row")
     return int(row[0])
+
+
+def _service_comparisons(
+    database: sqlite3.Connection,
+    inventory: CacheInventory,
+    analyzed: Counter[str],
+    formatting: Counter[str],
+) -> list[ServiceComparison]:
+    results: list[ServiceComparison] = []
+    for item in sorted(inventory.services, key=lambda value: value.service):
+        service = item.service
+        compared = _scalar(
+            database, "SELECT count(*) FROM cache_messages WHERE service = ?", (service,)
+        )
+        exact = _scalar(
+            database,
+            "SELECT count(*) FROM cache_messages AS c WHERE c.service = ? AND EXISTS "
+            "(SELECT 1 FROM archive.messages AS m WHERE m.sha256 = c.raw_sha256)",
+            (service,),
+        )
+        semantic_only = _scalar(
+            database,
+            "SELECT count(*) FROM cache_messages AS c WHERE c.service = ? AND NOT EXISTS "
+            "(SELECT 1 FROM archive.messages AS m WHERE m.sha256 = c.raw_sha256) AND EXISTS "
+            "(SELECT 1 FROM archive.observations AS o WHERE o.message_pk IS NOT NULL "
+            "AND o.semantic_sha256 = c.semantic_sha256)",
+            (service,),
+        )
+        archive_matches = _scalar(
+            database,
+            "SELECT count(DISTINCT o.message_pk) FROM archive.observations AS o "
+            "JOIN cache_messages AS c ON c.semantic_sha256 = o.semantic_sha256 "
+            "WHERE o.message_pk IS NOT NULL AND c.service = ?",
+            (service,),
+        )
+        ambiguous = _scalar(
+            database,
+            "SELECT count(*) FROM (SELECT c.cache_pk FROM cache_messages AS c "
+            "JOIN archive.observations AS o ON o.semantic_sha256 = c.semantic_sha256 "
+            "WHERE o.message_pk IS NOT NULL AND c.service = ? GROUP BY c.cache_pk "
+            "HAVING count(DISTINCT o.message_pk) > 1)",
+            (service,),
+        )
+        results.append(
+            ServiceComparison(
+                service=service,
+                complete_emlx=item.complete_emlx,
+                partial_emlx=item.partial_emlx,
+                unreadable_emlx=item.unreadable_emlx,
+                compared_emlx=compared,
+                exact_raw_matches=exact,
+                semantic_only_matches=semantic_only,
+                cache_only_messages=compared - exact - semantic_only,
+                archive_semantic_matches=archive_matches,
+                ambiguous_semantic_matches=ambiguous,
+                header_pairs_analyzed=analyzed[service],
+                formatting_only_pairs=formatting[service],
+            )
+        )
+    return results
 
 
 def _candidate(row: tuple[object, ...]) -> ArchiveCandidate:
@@ -215,10 +392,19 @@ def _analyze_headers(
     database: sqlite3.Connection,
     apple_root: Path,
     archive_root: Path,
-) -> tuple[int, int, list[HeaderChange], list[HeaderChange], list[HeaderChange]]:
+) -> tuple[
+    int,
+    int,
+    list[HeaderChange],
+    list[HeaderChange],
+    list[HeaderChange],
+    Counter[str],
+    Counter[str],
+]:
     statement = """
         SELECT c.cache_pk, c.relative_path, c.raw_sha256, c.semantic_sha256,
-               m.message_pk, m.sha256, g.filename, l.byte_offset, l.byte_length
+               m.message_pk, m.sha256, g.filename, l.byte_offset, l.byte_length,
+               c.service
         FROM cache_messages AS c
         JOIN archive.observations AS o ON o.semantic_sha256 = c.semantic_sha256
         JOIN archive.messages AS m ON m.message_pk = o.message_pk
@@ -236,6 +422,8 @@ def _analyze_headers(
     added_messages = Counter[str]()
     missing_messages = Counter[str]()
     changed_messages = Counter[str]()
+    analyzed_services = Counter[str]()
+    formatting_services = Counter[str]()
     analyzed = formatting_only = 0
     for _cache_pk, rows_iter in groupby(database.execute(statement), key=lambda row: int(row[0])):
         rows = list(rows_iter)
@@ -262,9 +450,12 @@ def _analyze_headers(
         if best is None:
             continue
         analyzed += 1
+        service = str(rows[0][9])
+        analyzed_services[service] += 1
         _score, _message_pk, added, missing, changed = best
         if not added and not missing and not changed:
             formatting_only += 1
+            formatting_services[service] += 1
         for source, occurrence_target, message_target in (
             (added, added_occurrences, added_messages),
             (missing, missing_occurrences, missing_messages),
@@ -278,6 +469,8 @@ def _analyze_headers(
         _changes(added_occurrences, added_messages),
         _changes(missing_occurrences, missing_messages),
         _changes(changed_occurrences, changed_messages),
+        analyzed_services,
+        formatting_services,
     )
 
 
@@ -299,19 +492,8 @@ def compare_apple_mail(
     with TemporaryDirectory(prefix="mailarchiver-apple-compare-") as temporary:
         database = sqlite3.connect(Path(temporary) / "comparison.sqlite3", uri=True)
         try:
-            database.executescript(
-                """
-                CREATE TABLE cache_messages (
-                    cache_pk INTEGER PRIMARY KEY,
-                    relative_path TEXT NOT NULL UNIQUE,
-                    raw_sha256 TEXT NOT NULL,
-                    semantic_sha256 TEXT NOT NULL
-                );
-                CREATE INDEX cache_raw_sha256 ON cache_messages(raw_sha256);
-                CREATE INDEX cache_semantic_sha256 ON cache_messages(semantic_sha256);
-                """
-            )
-            inventory = _index_cache(database, apple_mail_root, progress_every)
+            create_cache_index(database)
+            inventory = index_apple_mail_cache(database, apple_mail_root, progress_every)
             database.execute(
                 "ATTACH DATABASE ? AS archive",
                 (catalog_path.as_uri() + "?mode=ro",),
@@ -345,8 +527,17 @@ def compare_apple_mail(
                 "WHERE o.message_pk IS NOT NULL GROUP BY c.cache_pk "
                 "HAVING count(DISTINCT o.message_pk) > 1)",
             )
-            analyzed, formatting, added, missing, changed = _analyze_headers(
-                database, apple_mail_root, archive_root
+            (
+                analyzed,
+                formatting,
+                added,
+                missing,
+                changed,
+                analyzed_services,
+                formatting_services,
+            ) = _analyze_headers(database, apple_mail_root, archive_root)
+            services = _service_comparisons(
+                database, inventory, analyzed_services, formatting_services
             )
         finally:
             database.close()
@@ -371,6 +562,7 @@ def compare_apple_mail(
         apple_added_headers=added,
         apple_missing_headers=missing,
         changed_headers=changed,
+        services=services,
     )
 
 
@@ -403,6 +595,18 @@ def print_report(report: ComparisonReport) -> None:
     _print_changes("Headers present only in Apple Mail", report.apple_added_headers)
     _print_changes("Headers absent from Apple Mail", report.apple_missing_headers)
     _print_changes("Headers with changed normalized values", report.changed_headers)
+    print("By mail service:")
+    print(
+        "  Service | Complete | Partial | Exact | Semantic-only | Cache-only | "
+        "Archive represented | Ambiguous | Formatting-only"
+    )
+    for service in report.services:
+        print(
+            f"  {service.service} | {service.complete_emlx:,} | {service.partial_emlx:,} | "
+            f"{service.exact_raw_matches:,} | {service.semantic_only_matches:,} | "
+            f"{service.cache_only_messages:,} | {service.archive_semantic_matches:,} | "
+            f"{service.ambiguous_semantic_matches:,} | {service.formatting_only_pairs:,}"
+        )
 
 
 def main(argv: list[str] | None = None) -> int:

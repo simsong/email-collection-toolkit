@@ -702,6 +702,52 @@ verification. The end-user manual and website explain this distinction with
 generic account examples. Separate maintainer help pages contain the illustrated
 one-time registration procedure and tell readers to use their own account.
 
+## Per-archive sources and import modes
+
+Each archive has a versioned top-level `archive.yaml` operational configuration
+containing an ordered `sources` list. Every source has a stable, unique `id`
+and exactly one of these kinds:
+
+* `file` names one local file;
+* `local-folder` names one recursively discovered local directory; and
+* `imap` names one remote IMAP account and records its server, port, username,
+  TLS mode, authentication mode, folder selection, and a non-secret credential
+  reference.
+
+Local paths and IMAP usernames are private operational metadata. Passwords,
+app passwords, OAuth access tokens, and OAuth refresh tokens must never appear
+in `archive.yaml`, either SQLite database, status files, logs, reports,
+manifests, or fixtures. The credential reference identifies an entry in the
+operating-system keychain or configured secrets provider. When that entry is
+absent, an interactive import prompts securely for a password or starts the
+configured OAuth authorization flow; a noninteractive import fails without
+printing or persisting a secret outside the credential store.
+
+**Import/Refresh** visits every enabled configured source. It walks each local
+folder to discover new files, but a known local file whose recorded nanosecond
+modification time is unchanged since its last completed import is not opened,
+hashed, or parsed. A configured `file` source uses the same fast path. This is
+an intentional performance tradeoff: a file changed while retaining its prior
+modification time is not detected by Refresh. New paths and paths with changed
+modification times are processed normally. IMAP sources use their native
+folder/UID and version checkpoints to retrieve new or changed messages without
+marking messages read or changing server state.
+
+**Import/Rebuild** also visits every enabled source, but ignores the local
+modification-time shortcut and recomputes the complete SHA-256 of every local
+source file. An unchanged digest may skip parsing after hashing; a changed
+digest is reprocessed. For IMAP, Rebuild performs a complete folder and UID
+reconciliation rather than relying only on the incremental cursor. Both modes
+remain message-idempotent, retain source observations, and never clear or
+recreate canonical mail. `refresh-index` is unrelated: it rebuilds only the
+disposable search database from already archived messages.
+
+The user manual and the website importing page must show the three source
+kinds, the secret-storage boundary, and a side-by-side explanation of
+Import/Refresh and Import/Rebuild. Until the archive configuration and live
+IMAP adapter are implemented, those pages must label this workflow as planned
+and retain the current explicit-path CLI instructions.
+
 ## Ingest sources
 
 * Recursive local-directory ingest recognizes MBOX streams, Apple Mail MBOX
@@ -737,9 +783,11 @@ one-time registration procedure and tell readers to use their own account.
   `.mbox` package, with each `.mbox` suffix removed. Account and parent mailbox
   components remain in the path; internal UUID, `Data`, numeric bucket,
   `Messages`, and `.emlx` filename components do not.
-* Gmail ingest uses OAuth and the Gmail API for incremental acquisition of
-  raw messages and labels.  It supports a rolling `--days N` mode using
-  Gmail's `newer_than:Nd` query.  Google Takeout MBOX is supported as an offline,
+* Generic read-only IMAP is the first planned cloud importer and covers Gmail,
+  Microsoft 365/Outlook.com, and conventional IMAP services through
+  provider-specific authentication profiles. A later Gmail API adapter may
+  provide richer label and history metadata and supports a rolling `--days N`
+  mode using Gmail's `newer_than:Nd` query. Google Takeout MBOX is supported as an offline,
   one-time baseline input and is the current end-user path; personal Takeout is
   not assumed to be programmatically triggerable. Direct multi-part Takeout ZIP
   ingestion remains future work, so current users extract every part and ingest
@@ -785,8 +833,26 @@ one-time registration procedure and tell readers to use their own account.
   header names and DKIM-relaxed values only for semantic-only pairs, outputs no
   header values or message content, reports excluded partial and unreadable
   records, and warns when the active Envelope Index WAL changes during the
-  scan. It must never treat `h3` alone as authorization to merge or delete a
-  canonical source variant.
+  scan. Its privacy-preserving service breakdown classifies Gmail from the
+  special mailbox hierarchy, Microsoft Exchange from Apple's EWS scheme, and
+  retains other IMAP, POP, local, and unknown stores separately without
+  reporting account addresses or opaque identifiers. It must never treat `h3`
+  alone as authorization to merge or delete a canonical source variant.
+* The ambiguous-h3 review exporter selects a requested number of distinct
+  equivalence classes deterministically by descending archive-variant count,
+  descending cache-occurrence count, and h3. For each selected class it copies
+  every matching complete cache occurrence and every matching hash-verified
+  canonical representation without changing either source. It refuses to
+  overwrite an output directory and writes private owner-only EML files,
+  per-case manifests, a root manifest, and a CSV/Markdown index. Reports assign
+  identical raw `h2` values to explicit equivalence groups, identify groups
+  shared across cache and archive, compare the canonicalized `Date` and
+  `Subject` components used by `h3`, and report `X-Apple-Auto-Saved` per file.
+  Existing reports can be refreshed only after every exported file passes both
+  its recorded `h2` and case `h3`; source messages are not needed for refresh.
+  Private
+  messages belong only in the gitignored project `.tmp` area and must never be
+  committed as fixtures or documentation.
 * Every source adapter emits original RFC 5322 bytes where the source contains
   them. When a proprietary store requires reconstruction or conversion, the
   observation records that fact and the responsible tool/version; reconstructed
@@ -887,8 +953,10 @@ one-time registration procedure and tell readers to use their own account.
 
 ## Scope boundaries
 
-The first release is a local command-line normalizer and verifier.  Its TOML
-configuration holds archive and scanner policy; `owner-names.txt` remains a
+The first release is a local command-line normalizer and verifier. The planned
+per-archive `archive.yaml` holds source definitions and non-secret archive
+policy; packaged application YAML holds shared display policy;
+`owner-names.txt` remains a
 separate, one-name-per-line reusable classification input.  A local
 special-purpose search and message-viewing interface is a consumer of
 the two SQLite databases, not a reason to depend on Thunderbird or FoxTrot.

@@ -107,14 +107,17 @@ The September 6, 2026 comparison on this computer found:
 
 | Classification | Count |
 | --- | ---: |
-| Complete Apple Mail records compared | 102,192 |
+| Complete Apple Mail records compared | 102,193 |
 | Exact raw-byte matches | 12,426 |
 | h3 matches with different raw bytes | 20,046 |
-| Complete cache records with no archive h3 match | 69,720 |
+| Complete cache records with no archive h3 match | 69,721 |
 | Canonical archive messages represented by a cache h3 | 43,066 |
 | Canonical archive messages with no cache h3 | 1,157,725 |
 
 Of the 20,046 semantic-only pairs, 19,537 differed only in header formatting.
+The provider-stratified run found five populated categories: Gmail, Microsoft
+Exchange/EWS, other IMAP, POP, and local mail; no account was unknown. Its
+complete EMLX counts were 93,531, 7,273, 1,084, 101, and 204 respectively.
 The aggregate report found 508 occurrences each of Apple-only `Received`,
 `Return-Path`, and `X-Mailer`, and 508 occurrences of archive-only
 `X-Universally-Unique-Identifier`. One pair lacked `X-GM-THRID` and
@@ -122,7 +125,8 @@ The aggregate report found 508 occurrences each of Apple-only `Received`,
 value. Some h3 values identify more than one canonical archive record, so the
 tool reports ambiguous matches and chooses the candidate with the smallest
 header delta only for aggregate header analysis. The Envelope Index WAL
-changed during the scan, so these remain point-in-time results.
+changed during the scan, and one new complete Gmail record appeared between
+the initial and provider-stratified runs, so these remain point-in-time results.
 
 ## Rerunning ingest and duplicate identity
 

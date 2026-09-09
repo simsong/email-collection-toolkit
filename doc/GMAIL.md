@@ -67,14 +67,16 @@ References:
 ### Acquisition strategy
 
 Google Takeout is the baseline acquisition path. A future Gmail API adapter may
-provide incremental collection after the baseline. Generic IMAP remains useful
-for compatibility, but it does not avoid Google OAuth.
+provide richer label and history metadata after the baseline. Generic IMAP is
+the first planned live cloud importer because the same read-only acquisition
+engine can serve Gmail, Microsoft 365, and conventional IMAP accounts. It does
+not avoid Google OAuth.
 
 | Path | End-user registration | Authorization | Intended role |
 | --- | --- | --- | --- |
 | Takeout MBOX | None | User signs into Google Takeout | Supported offline baseline |
-| Gmail API | None | Shared Desktop OAuth client with `gmail.readonly` | Future incremental collection |
-| Gmail IMAP | None | Shared OAuth client with `https://mail.google.com/` | Compatibility only |
+| Gmail IMAP | None | Shared OAuth client with `https://mail.google.com/` | First planned live import |
+| Gmail API | None | Shared Desktop OAuth client with `gmail.readonly` | Later provider-specific metadata |
 | IMAP app password | User creates a 16-digit password | Password-like credential | Limited fallback, not a distribution strategy |
 
 Apple Mail cache acquisition is an implemented local-file bridge, not a Gmail
@@ -136,7 +138,7 @@ References:
 - [Changes to an approved app](https://support.google.com/cloud/answer/13464018)
 - [Personal-use exception](https://support.google.com/cloud/answer/13464323)
 
-### Why IMAP is not the preferred Gmail path
+### IMAP still requires broad Google authorization
 
 Gmail no longer permits a generally distributed client to authenticate using
 the user's ordinary password. OAuth IMAP requires the full
@@ -145,7 +147,8 @@ access than this read-only archive needs. Google explicitly recommends the
 Gmail API when an application does not require that full scope. App passwords
 require two-step verification, are unavailable for some Workspace,
 security-key-only, and Advanced Protection accounts, and are discouraged by
-Google.
+Google. Choosing IMAP first reduces implementation duplication; it does not
+make the Gmail authorization or verification boundary smaller.
 
 References:
 

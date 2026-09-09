@@ -45,6 +45,71 @@ Choose two locations:
 On macOS, reading Apple Mail or another protected location may require Full
 Disk Access for the terminal application.
 
+## Configure archive sources
+
+The planned archive-wide import interface stores an ordered source list in
+`archive.yaml` at the top of the archive. This workflow is not implemented in
+the current release; current imports still use the explicit source paths shown
+under [Create or add to an archive](#create-or-add-to-an-archive).
+
+An archive can contain three kinds of source:
+
+| Source kind | What it identifies |
+| --- | --- |
+| **FILE** | One local MBOX, EML, Babyl, EMLX, or other supported mail file |
+| **LOCAL FOLDER** | A local directory recursively searched for supported mail files |
+| **IMAP** | A remote account identified by server, port, and username |
+
+Each source has a permanent ID so its observations and last successful check
+remain associated with the same source after later imports. For example:
+
+```yaml
+version: 1
+sources:
+  - id: takeout-2026
+    kind: file
+    path: /Users/your.name/Downloads/takeout-mail.mbox
+  - id: historical-mail
+    kind: local-folder
+    path: /Volumes/Archive/Old Mail
+  - id: personal-imap
+    kind: imap
+    server: imap.example.org
+    port: 993
+    username: your.name@example.org
+    tls: implicit
+    authentication: password
+    credential_ref: keyring://mail-archiver/personal-imap
+    folders: all
+```
+
+`archive.yaml` contains no password or OAuth token. `credential_ref` is only
+the name of an item in the operating-system keychain or configured secrets
+provider. When a password is missing, an interactive import asks for it without
+echoing it and stores it in that credential system. An OAuth IMAP source opens
+the provider's browser authorization instead. A noninteractive import with a
+missing credential stops without printing or saving the secret elsewhere.
+
+### Import/Refresh and Import/Rebuild
+
+Both actions visit every enabled FILE, LOCAL FOLDER, and IMAP source and are
+safe to repeat. Neither action deletes or recreates archived messages.
+
+| Action | Local files | IMAP accounts |
+| --- | --- | --- |
+| **Import/Refresh** | Walk folders to find new paths. Do not open or hash a known file when its modification time has not changed since its last completed import. | Use saved folder and UID checkpoints to retrieve new or changed messages. |
+| **Import/Rebuild** | Ignore modification-time shortcuts and recompute the complete SHA-256 of every file. A matching hash can then skip parsing; changed files are processed again. | Perform a complete folder and UID reconciliation rather than relying only on the incremental cursor. |
+
+Refresh intentionally trusts local modification times. If another program
+changes a file but preserves its old modification time, Refresh will not find
+that change; use Rebuild when that is possible or when validating a copied or
+restored source. Directory traversal is still required during Refresh so new
+files can be discovered.
+
+These actions concern acquisition sources. They are different from
+`refresh-index`, which reads mail already in the archive and rebuilds only the
+disposable search database.
+
 ## Import Gmail
 
 Use Google Takeout for Gmail today. It creates MBOX files without granting Mail
@@ -115,6 +180,9 @@ Review this file before ingest. A message is classified as sent when its
 parsed `From:` address contains one of these values, without regard to case.
 
 ## Create or add to an archive
+
+The following is the currently implemented explicit-path interface. It does
+not yet read the planned `archive.yaml` source registry.
 
 From the Mail Archiver checkout, run:
 
@@ -188,9 +256,10 @@ changing the database schema.
 Press Control-C once for a controlled stop. Mail Archiver closes its files,
 commits completed messages, writes an archive checkpoint, and prints a summary.
 
-It is safe to run the same ingest command again. An unchanged source file is
-verified by its source plug-in's complete-file control and skipped; its path
-and reason are printed. A safely appended MBOX can
+It is safe to run the same ingest command again. The current CLI verifies an
+unchanged source file with its source plug-in's complete-file control before
+skipping it; this corresponds to the stronger hashing performed by the planned
+Import/Rebuild action. A safely appended MBOX can
 resume at its append boundary. Other changes cause the source file to be read
 again; already archived messages remain deduplicated.
 
@@ -545,6 +614,13 @@ include supported text attachments.
 
 ## Configuration
 
+The planned top-level `archive.yaml` belongs to one archive and contains that
+archive's FILE, LOCAL FOLDER, and IMAP source definitions. It contains local
+paths and account names but no passwords or tokens. Source credentials remain
+in the operating-system keychain or configured secrets provider. Import
+checkpoints and observations remain in `archive.sqlite3`; successful imports
+do not rewrite checkpoint state into the YAML file.
+
 Mail Archiver's current application-level configuration is the versioned YAML
 file `src/mailarchiver/configuration.yaml` in the source checkout. It currently
 controls the search-highlight background used by the graphical message viewer:
@@ -564,6 +640,7 @@ versions, and invalid color values instead of passing them to the viewer.
 This YAML file contains packaged application display policy. It does not
 replace:
 
+* the planned per-archive `archive.yaml` source registry;
 * `owner-names.txt`, which identifies the archive owner for Sent routing;
 * `MAIL_ARCHIVE_DIR` or `--archive`, which selects an archive;
 * the installed ClamAV configuration; or

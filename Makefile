@@ -1,5 +1,5 @@
-.PHONY: auth-detect-live benchmark-name-resolution check compare-apple-mail data-quality-audit data-quality-babyl-audit data-quality-summary extract-pdf-mail fixture-bagit fixture-e2e gui gui-smoke website-build-check website-check release-tag-check
-.PHONY: install-linux install-mac install-test-browser install-tika ocr-analyze ocr-experiment ocr-inventory ocr-profile ocr-run pylint run search summary-smoke test test-bagit test-data-quality
+.PHONY: auth-detect-live benchmark-name-resolution check compare-apple-mail data-quality-audit data-quality-babyl-audit data-quality-summary extract-pdf-mail fixture-bagit fixture-e2e gui gui-smoke h3-ambiguous-review website-build-check website-check release-tag-check
+.PHONY: install-linux install-mac install-test-browser install-tika ocr-analyze ocr-experiment ocr-inventory ocr-profile ocr-run pylint ruff run search summary-smoke test test-bagit test-data-quality
 .PHONY: test-apple-mail-compare test-auth test-e2e test-encoding test-gui test-headers test-mailsearch test-native-gui test-native-html-find test-pdf-mail test-plugins test-progress test-provenance test-refresh-index test-tika test-website validation-aws-start validation-aws-start-all
 .PHONY: validation-fetch validation-list validation-prepare validation-run validation-run-all validation-sam-build validation-sam-deploy validation-sam-validate validation-test verify
 
@@ -22,8 +22,9 @@ OCR_WORKERS ?= 4
 OCR_ENGINES ?= native,ocrmypdf,tesseract
 OCR_INVENTORY_ARGS ?=
 OCR_RUN_ARGS ?=
+H3_REVIEW_OUTPUT ?= $(CURDIR)/.tmp/h3-ambiguous-review
 
-check: test test-e2e website-check
+check: ruff test test-e2e website-check
 
 auth-detect-live:
 	uv run mailarchiver-auth --detect-only simsong@gmail.com
@@ -32,6 +33,9 @@ auth-detect-live:
 
 compare-apple-mail:
 	uv run mailarchiver-compare-apple-mail --apple-mail "$(HOME)/Library/Mail" --archive "$(HOME)/mail-archive" $(ARGS)
+
+h3-ambiguous-review:
+	uv run mailarchiver-h3-review --apple-mail "$(HOME)/Library/Mail" --archive "$(HOME)/mail-archive" --output "$(H3_REVIEW_OUTPUT)" --limit 20 $(ARGS)
 
 data-quality-audit:
 	@test -n "$(ARCHIVE)" || { echo 'usage: make data-quality-audit ARCHIVE=/path/to/mailbag EARLY_SOURCE=/path/to/source'; exit 2; }
@@ -64,6 +68,9 @@ extract-pdf-mail:
 
 pylint:
 	uv run pylint src tests e2e_tests scripts
+
+ruff:
+	uv run ruff check src tests e2e_tests scripts
 
 run:
 	uv run mailarchiver $(ARGS)
