@@ -128,10 +128,10 @@ def classify_address(
         return AddressClassification(kind=ContactKind.BOGUS, reason="malformed-at-sign")
     if any(character == "\ufffd" or unicodedata.category(character) in {"Cc", "Cs"} for character in address):
         return AddressClassification(kind=ContactKind.BOGUS, reason="invalid-unicode")
-    if _matches(local, configuration.bogus_local_part_patterns) or _matches(
-        domain, configuration.bogus_domain_patterns
-    ):
+    if _matches(local, configuration.bogus_local_part_patterns):
         return AddressClassification(kind=ContactKind.BOGUS, reason="invalid-local-part")
+    if _matches(domain, configuration.bogus_domain_patterns):
+        return AddressClassification(kind=ContactKind.BOGUS, reason="invalid-domain")
     if _matches(domain, configuration.mailing_list.domain_patterns) or _matches(
         local, configuration.mailing_list.local_part_patterns
     ):

@@ -39,6 +39,10 @@ version, and mobile navigation hid links by position. The follow-up moves the
 release gates before project installation, reads installed writer metadata, and
 keeps navigation visible with wrapping. Regression checks exercise checkpoint
 output, release step order, and actual browser layout with reordered links.
+The second review's body identified an additional contact-filter diagnostic:
+domain exclusions were labelled as local-part failures. Separate reasons now
+identify the matched component; exclusions and local-part precedence are
+unchanged. The four regression cases and the reconciliation tests pass.
 
 After human merge, fetch/prune and prove each source tip is represented in
 current main before removing its exact clean worktree and local branch.

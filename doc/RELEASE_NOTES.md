@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+* Distinguish bogus-domain contact-filter diagnostics from bogus local parts
+  without changing which addresses are excluded.
+
 * Use installed package metadata for BagIt writer versions, verify release tags
   before project installation/artifact execution, and keep all mobile navigation
   links visible regardless of their order.

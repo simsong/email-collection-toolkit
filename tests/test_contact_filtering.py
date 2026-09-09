@@ -37,6 +37,22 @@ def test_classify_contact_addresses(address: str, kind: ContactKind) -> None:
     assert classify_address(address).kind is kind
 
 
+@pytest.mark.parametrize(
+    ("address", "reason"),
+    (
+        ("person@.", "invalid-domain"),
+        ("person@example..org", "invalid-domain"),
+        ("*@example.org", "invalid-local-part"),
+        ("*@.", "invalid-local-part"),
+    ),
+)
+def test_bogus_reason_identifies_the_matching_address_component(address: str, reason: str) -> None:
+    """Requirement: diagnostics distinguish domain rules from local-part rules."""
+    result = classify_address(address)
+    assert result.kind is ContactKind.BOGUS
+    assert result.reason == reason
+
+
 def test_archive_contact_filter_policy_overrides_the_packaged_default(tmp_path) -> None:
     """Requirement: an archive-local policy takes precedence over the packaged policy."""
     archive = tmp_path / "archive"

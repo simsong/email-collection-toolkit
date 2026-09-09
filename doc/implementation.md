@@ -560,6 +560,8 @@ characters as bogus, configured provider/list patterns as mailing lists,
 configured automated patterns as service identities, and only then includes
 the remaining addresses. The policy deliberately keeps ordinary SMTPUTF8
 addresses possible; it does not use non-ASCII alone as a rejection rule.
+Bogus local-part and domain patterns report `invalid-local-part` and
+`invalid-domain` respectively, with local-part rules evaluated first.
 The policy resolver first checks `<archive>/contact_filters.yaml`; when
 that file is absent it uses `src/mailarchiver/contact_filters.yaml` from
 the installed package. A `mode: replace` archive policy is a complete strict

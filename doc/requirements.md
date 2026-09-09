@@ -454,6 +454,8 @@ It shall suppress mailing-list, automated-service, and malformed identities
 using a versioned, explainable packaged policy. The human-contact local-part
 limit is 48 characters and is configurable; the RFC address limit is not itself
 a claim that every shorter address is human.
+Classification reasons distinguish invalid-domain rules from invalid-local-part
+rules; when both match, the local-part reason takes precedence.
 The packaged `contact_filters.yaml` may be copied to an archive root. Its
 required `mode` is `replace` for a complete replacement policy or `extend` to
 add only rule lists to the packaged policy. Extension preserves packaged order,
