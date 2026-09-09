@@ -3,25 +3,22 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <meta name="theme-color" content="#182239">
+    <meta name="theme-color" content="#f8fbff">
     <meta name="description" content="{{ config.description }}">
     <title>{% block title %}{{ config.title }}{% endblock title %}</title>
     <link rel="icon" type="image/svg+xml" href="{{ get_url(path='icons/rainbow-post.svg') }}">
-    <link rel="icon" type="image/png" sizes="48x48" href="{{ get_url(path='icons/rainbow-post-48.png') }}">
-    <link rel="apple-touch-icon" sizes="192x192" href="{{ get_url(path='icons/rainbow-post-192.png') }}">
     <link rel="stylesheet" href="{{ get_url(path='styles.css') }}">
   </head>
   <body>
     <header class="site-header shell">
-      <a class="brand" href="{{ get_url(path='') }}"><img src="{{ get_url(path='icons/rainbow-post.svg') }}" alt=""><span>Mail Archiver</span></a>
+      <a class="brand" href="{{ get_url(path='') }}"><img src="{{ get_url(path='icons/rainbow-post.svg') }}" alt=""><span>Email Collection Toolkit</span></a>
       <nav aria-label="Primary navigation">
-        <a href="{{ get_url(path='use-cases/') }}">Use cases</a>
-        <a href="{{ get_url(path='gmail-authorization/') }}">Gmail setup</a>
-        <a href="{{ get_url(path='curation/') }}">Curation</a>
-        <a href="{{ get_url(path='advanced/') }}">Advanced</a>
-        <a href="{{ get_url(path='discussions/') }}">Discussions</a>
+        <a href="{{ get_url(path='use-cases/') }}">Features</a>
+        <a href="{{ get_url(path='gmail-authorization/') }}">Guide</a>
+        <a href="{{ get_url(path='curation/') }}">Documentation</a>
+        <a href="{{ get_url(path='discussions/') }}">Community</a>
         <a href="{{ get_url(path='about/') }}">About</a>
-        <a href="{{ config.extra.repository }}">GitHub</a>
+        <a class="nav-cta" href="{{ config.extra.repository }}">GitHub</a>
       </nav>
     </header>
     {% block content %}{% endblock content %}
