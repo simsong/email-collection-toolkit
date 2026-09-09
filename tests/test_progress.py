@@ -10,7 +10,7 @@ import traceback
 from collections import Counter
 from collections.abc import Iterable
 from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
@@ -29,15 +29,19 @@ from mailarchiver.__main__ import (
     refresh_index_line,
     run_file_workers,
 )
+from mailarchiver.ingest_status import (
+    IngestStatusFile,
+    new_status_id,
+    read_ingest_history,
+)
 from mailarchiver.plugin_api import ProgressEvent
 from mailarchiver.sources import SourceInventory
-from mailarchiver.ingest_status import IngestStatusFile, new_status_id, read_ingest_history
 
 
 def test_overall_progress_uses_concurrent_source_bytes_for_percentage_and_eta() -> None:
     """Requirement: aggregate percentage and ETA include every active source worker."""
     state = ProgressState(
-        started_at=datetime.now(timezone.utc),
+        started_at=datetime.now(UTC),
         started_monotonic=0,
         files_processed=2,
         source_files_total=4,
@@ -91,7 +95,7 @@ def test_empty_refresh_index_progress_is_complete() -> None:
 def test_overall_progress_reports_finalizing_before_last_checkpoint() -> None:
     """Requirement: complete byte input does not claim completion before its stable checkpoint."""
     state = ProgressState(
-        started_at=datetime.now(timezone.utc),
+        started_at=datetime.now(UTC),
         started_monotonic=0,
         source_files_total=1,
         source_bytes_total=100,
@@ -108,7 +112,7 @@ def test_overall_progress_reports_finalizing_before_last_checkpoint() -> None:
 def test_unknown_byte_inventory_uses_completed_containers_for_percentage() -> None:
     """Requirement: provider work with no byte estimate cannot display 100% before completion."""
     state = ProgressState(
-        started_at=datetime.now(timezone.utc),
+        started_at=datetime.now(UTC),
         started_monotonic=0,
         files_processed=1,
         source_files_total=4,
@@ -356,7 +360,7 @@ def test_numbered_worker_rows_are_main_rendered_without_wrapping(capsys: pytest.
 def test_progress_status_file_preserves_final_run_statistics(tmp_path: Path) -> None:
     """Requirement: one atomic JSON file retains each ingest's final typed statistics."""
     archive = tmp_path / "archive"
-    started_at = datetime.now(timezone.utc)
+    started_at = datetime.now(UTC)
     status_file = IngestStatusFile(archive, new_status_id(started_at, 7, 1234))
     progress = ProgressReporter(
         worker_count=2,
@@ -398,7 +402,7 @@ def test_status_history_retains_prior_runs_and_reports_corruption(tmp_path: Path
     """Requirement: starting a later ingest neither replaces nor hides prior run evidence."""
     archive = tmp_path / "archive"
     for run_pk in (1, 2):
-        started_at = datetime.now(timezone.utc)
+        started_at = datetime.now(UTC)
         status_file = IngestStatusFile(archive, new_status_id(started_at, run_pk, 1234))
         progress = ProgressReporter(
             status_file=status_file,
@@ -420,7 +424,7 @@ def test_status_history_retains_prior_runs_and_reports_corruption(tmp_path: Path
 def test_status_history_marks_an_abandoned_running_snapshot_stale(tmp_path: Path) -> None:
     """Requirement: the UI cannot present an expired heartbeat as a live ingest."""
     archive = tmp_path / "archive"
-    started_at = datetime(2026, 8, 29, 12, tzinfo=timezone.utc)
+    started_at = datetime(2026, 8, 29, 12, tzinfo=UTC)
     status_file = IngestStatusFile(archive, new_status_id(started_at, 1, 1234))
     progress = ProgressReporter(
         status_file=status_file,
@@ -431,14 +435,28 @@ def test_status_history_marks_an_abandoned_running_snapshot_stale(tmp_path: Path
     progress.tty = False
     progress.start()
     status = read_ingest_history(
-        archive, now=datetime(2026, 8, 29, 12, 0, 1, tzinfo=timezone.utc)
+        archive, now=datetime(2026, 8, 29, 12, 0, 1, tzinfo=UTC)
     ).statuses[0]
     assert status.state == "running"
     status_file.write(status.model_copy(update={"state": "running", "updated_at": started_at}))
 
     expired = read_ingest_history(
-        archive, now=datetime(2026, 8, 29, 12, 0, 6, tzinfo=timezone.utc)
+        archive, now=datetime(2026, 8, 29, 12, 0, 6, tzinfo=UTC)
     ).statuses[0]
 
     assert expired.state == "stale"
     assert expired.phase == "status heartbeat lost"
+
+
+def test_status_progress_without_terminal(tmp_path: Path) -> None:
+    """Requirement: windowed GUI progress writes status without any terminal output."""
+    from mailarchiver.ingest_status import IngestStatusFile, read_ingest_history
+
+    archive = tmp_path / "archive"
+    archive.mkdir()
+    status = IngestStatusFile(archive, "ingest-windowed-test")
+    reporter = ProgressReporter(status_file=status, archive=archive, run_pk=1, terminal=False)
+    reporter.start()
+    reporter.finish("completed")
+    assert reporter.output is None
+    assert read_ingest_history(archive).statuses[0].state == "completed"

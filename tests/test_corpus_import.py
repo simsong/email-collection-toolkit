@@ -37,6 +37,9 @@ class MessageExpectation(BaseModel):
     subject: str
     sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
 
+    def __hash__(self) -> int:
+        return hash((self.subject, self.sha256))
+
 
 class FileExpectation(BaseModel):
     model_config = ConfigDict(extra="forbid")

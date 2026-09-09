@@ -8,7 +8,12 @@ from pathlib import Path
 from bs4 import XMLParsedAsHTMLWarning
 
 from mailarchiver.catalog import create_search
-from mailarchiver.search import body_preview, index_message, index_message_safely, message_text
+from mailarchiver.search import (
+    body_preview,
+    index_message,
+    index_message_safely,
+    message_text,
+)
 
 
 def test_plain_body_wins_and_attachment_requires_opt_in() -> None:

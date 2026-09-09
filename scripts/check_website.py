@@ -9,14 +9,23 @@ from pathlib import Path
 
 import yaml
 
-
 SIZES = (48, 64, 128, 192)
+GMAIL_AUTH_IMAGES = tuple(f"{number:02d}-{name}.png" for number, name in enumerate((
+    "get-started", "app-information", "external-audience", "contact-information",
+    "user-data-policy", "create-configuration", "configuration-created", "add-test-user",
+    "branding-requirements",
+), start=1))
 REQUIRED_TEXT = (
     "doc/RELEASE_NOTES.md",
     "README.md",
     "/releases",
     "/discussions/55",
     "/discussions/56",
+    "gmail-authorization/",
+    "advanced/",
+    "h3 semantic-message v1",
+    "Apple Mail as a temporary provider adapter",
+    "your.name@gmail.com",
     "For Individuals",
     "For Archivists",
     "BagIt 1.0",
@@ -81,8 +90,13 @@ def main() -> int:
         root / "website/themes/envelope-rainbow/templates/index.html",
         root / "website/themes/envelope-rainbow/templates/page.html",
         root / "website/themes/envelope-rainbow/templates/section.html",
+        root / "website/content/gmail-authorization.md",
+        root / "website/content/advanced.md",
+        root / "website/content/oauth-client-registration.md",
         root / "website/static/icons/rainbow-post.svg", root / "gui/icons/rainbow-post.svg",
     ]
+    auth_image_directory = root / "website/static/images/gmail-authorization"
+    required.extend(auth_image_directory / name for name in GMAIL_AUTH_IMAGES)
     missing = [str(path) for path in required if not path.is_file()]
     if missing:
         raise SystemExit("missing website files: " + ", ".join(missing))
@@ -99,6 +113,9 @@ def main() -> int:
     for required_text in REQUIRED_TEXT:
         if required_text not in text:
             raise SystemExit(f"website is missing required link text: {required_text}")
+    for path in (root / "doc/USER_MANUAL.md", root / "website/content/gmail-authorization.md"):
+        if "simsong@gmail.com" in path.read_text(encoding="utf-8"):
+            raise SystemExit(f"end-user help contains the maintainer example address: {path}")
     for forbidden_text in FORBIDDEN_TEXT:
         if forbidden_text in text:
             raise SystemExit(f"website contains retired promotional text: {forbidden_text}")
@@ -110,6 +127,11 @@ def main() -> int:
         for directory in (root / "gui/icons", root / "website/static/icons"):
             path = directory / f"rainbow-post-{size}.png"
             validate_png(path, size)
+    for name in GMAIL_AUTH_IMAGES:
+        path = auth_image_directory / name
+        width, height = png_size(path)
+        if width != 1800 or height < 1200:
+            raise SystemExit(f"unexpected Gmail authorization screenshot size: {path}")
     print("website assets and required links are valid")
     return 0
 

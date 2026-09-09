@@ -10,7 +10,7 @@ import time
 from collections.abc import Callable
 from contextlib import AbstractContextManager
 from pathlib import Path
-from typing import BinaryIO
+from typing import BinaryIO, Self
 
 from pydantic import BaseModel
 
@@ -70,7 +70,7 @@ class ClamScanner(AbstractContextManager["ClamScanner"]):
         self.socket_path = CLAMD_SOCKET
         self.owns_socket = False
 
-    def __enter__(self) -> "ClamScanner":
+    def __enter__(self) -> Self:
         self.start_lock = Path(CLAMD_CONFIG).open("rb")
         fcntl.flock(self.start_lock.fileno(), fcntl.LOCK_EX)
         if CLAMD_SOCKET.exists() and self.available():

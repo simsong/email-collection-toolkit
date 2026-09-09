@@ -97,6 +97,7 @@ verify that the PR head matches the pushed commit. Never leave work only on a
 GitHub non-`main` branch, including when a previously merged branch name is
 reused.
 
+<<<<<<< HEAD
 An explicit `pr-to-ready` request (including `codex-to-complete` or
 `codex-to-ready`) authorizes the shared publication/review workflow.
 Otherwise, do not commit, push, or modify PRs without a user request.
@@ -105,6 +106,24 @@ own explicit authorization.
 When authorized, Codex GitHub activity uses `@simsong-codex`; signed commits use
 `Codex AI Assistant <simsong+codex@acm.org>` and the configured Codex GPG key.
 Verify identity and signature after committing.
+=======
+## Authorization and identity
+
+A request to perform **pr-to-ready**
+authorizes the commits, pushes, draft PR creation, review requests, review-thread
+replies, fixes, and final human-review request described below. Continue through
+these steps without repeatedly requesting permission. Do not approve or merge a
+PR, close an issue or superseded PR, or change remote services without explicit
+user authorization for that action.
+
+All Codex GitHub writes and browser actions use `@simsong-codex`, except
+that `@simsong` is authorized solely for requesting Copilot reviews when needed.
+Verify the CLI identity, SSH push identity, and browser login separately. Before committing, configure and verify author and committer as
+`Codex AI Assistant <simsong+codex@acm.org>` and verify the signing key belongs to
+that identity. Sign every Codex commit. Verify the result before pushing with
+`git log -1 --format='%G? %GS %an <%ae> %cn <%ce>'`. To correct identity on an
+existing commit, use `git commit --amend --reset-author -S`.
+>>>>>>> origin
 
 ## pr-to-ready project requirements
 
@@ -128,3 +147,24 @@ Follow the shared workflow with these mail-archiver requirements:
   blockers. Mark ready, request review from and assign `simsong`, explicitly
   stating that Copilot is not clear and identifying the disputed findings.
   Never represent this exceptional handoff as a successful Copilot review.
+<<<<<<< HEAD
+=======
+
+## Validation and cleanup
+
+Use Makefile targets for Ruff and Pylint linting, then ty and Pyright type
+analysis, then pytest. Keep these stages ordered in the aggregate check target,
+even under parallel make. Treat all diagnostics as failures; fix the underlying
+logic or precise types rather than broadly excluding files, disabling checks,
+or adding blanket ignores. Add focused third-party stubs only where needed.
+Update requirements, implementation documentation, and release notes when the
+corresponding behavior or developer workflow changes. Report skipped tests and
+external prerequisites separately from passing validation.
+
+After a branch is merged into `origin/main`, fetch and prune, prove its work is
+represented in the current main (ancestry, or explicit squash/rebase evidence),
+and verify the linked worktree has no modified or untracked files. Only then
+remove its linked worktree and delete its local branch. Preserve dirty,
+unmerged, or uncertain worktrees. A superseded PR closed during consolidation
+is not proof that its branch has reached main.
+>>>>>>> origin

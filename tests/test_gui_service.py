@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import base64
-from concurrent.futures import ThreadPoolExecutor
 import hashlib
 import json
 import mailbox
@@ -11,6 +10,8 @@ import sqlite3
 import sys
 import time
 import zipfile
+from webview.menu import MenuAction
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import pytest
@@ -20,6 +21,14 @@ from mailarchiver.application import ApplicationController, ApplicationPreferenc
 from mailarchiver.bagit import initialize_bag
 from mailarchiver.catalog import address_pk, create_catalog, create_search
 from mailarchiver.configuration import application_configuration, load_configuration
+from mailarchiver.gui_app import (
+    GuiApi,
+    PyWebViewApplication,
+    application_icon_path,
+    application_menu,
+    application_metadata,
+    external_link_destination,
+)
 from mailarchiver.gui_service import (
     LEGACY_X_HTML_PART_ID,
     RAW_PART_ID,
@@ -29,23 +38,17 @@ from mailarchiver.gui_service import (
     is_risky,
     message_previews,
     render_part,
-    searchable_message_count,
     search_count,
     search_page,
     search_suggestions,
+    searchable_message_count,
     write_attachment,
     write_message,
     write_messages_zip,
 )
 from mailarchiver.gui_app import (
-    GuiApi,
-    PyWebViewApplication,
-    application_icon_path,
-    application_menu,
-    application_metadata,
     archive_destination,
     dialog_paths,
-    external_link_destination,
     owner_names_text,
     DocumentOptionsApi,
 )
@@ -57,9 +60,15 @@ from mailarchiver.archive_config import (
 from mailarchiver.writer_lock import ArchiveBusyError, WriterLease
 from mailarchiver.mailsearch import RECENT_FTS_SCAN_LIMIT, _search_statement, parse_query
 from mailarchiver.layout import mbox_directory
-from mailarchiver.mailbox_tree import FilterSet, FilterSetStore, MailboxSelection, MailboxTreeNode, mailbox_tree
-from mailarchiver.plugin_api import SourceContainerMetadata, SourceRelationship
+from mailarchiver.mailbox_tree import (
+    FilterSet,
+    FilterSetStore,
+    MailboxSelection,
+    MailboxTreeNode,
+    mailbox_tree,
+)
 from mailarchiver.mbox import add_message
+from mailarchiver.plugin_api import SourceContainerMetadata, SourceRelationship
 from mailarchiver.search import index_message
 from mailarchiver.standalone_verify import semantic_bytes
 
@@ -124,7 +133,9 @@ def test_document_owner_controls_are_bound_and_locked(tmp_path: Path) -> None:
     """Options split, sort, deduplicate and delete only in their bound document."""
     controller = ApplicationController(ApplicationPreferencesStore(tmp_path / "preferences.json"))
     document = controller.create_document(tmp_path / "one.mailarchive")
+    assert document.path is not None
     other = controller.create_document(tmp_path / "two.mailarchive")
+    assert other.path is not None
     api = DocumentOptionsApi(document)
     state = api.status()
     updated = api.update("Zed;alice@example.org, Bob   zed", [], state["revision"])
@@ -170,6 +181,7 @@ def test_native_save_default_archive_path(tmp_path: Path, as_sequence: bool) -> 
     destination = archive_destination((selected,) if as_sequence else selected)
     controller = ApplicationController(ApplicationPreferencesStore(tmp_path / "preferences.json"))
     document = controller.create_document(destination)
+    assert document.path is not None
     assert document.path == tmp_path / "Untitled.mailarchive"
     assert (document.path / "archive.sqlite3").is_file()
     assert (document.path / "search.sqlite3").is_file()
@@ -261,6 +273,7 @@ def make_gui_archive(
                 "VALUES (?, ?, ?, ?, ?, 'date', 'Archive')",
                 (message_id, hashlib.sha256(raw).hexdigest(), sender, subject, timestamp),
             )
+            assert cursor.lastrowid is not None
             message_pks.append(int(cursor.lastrowid))
             catalog.execute(
                 "INSERT INTO recipients(message_pk, address_pk, role) VALUES (?, ?, 'to')",
@@ -412,12 +425,14 @@ def test_native_menus_route_through_the_application_controller(tmp_path: Path) -
     menus = application_menu(application)
 
     assert [menu.title for menu in menus] == ["File", "Window"]
-    assert [item.title for item in menus[0].items] == [
+    assert all(isinstance(item, MenuAction) for menu in menus for item in menu.items)
+    assert [item.title for item in menus[0].items if isinstance(item, MenuAction)] == [
         "New", "Open…", "Import…", "Document Options…", "Close",
     ]
-    assert [item.title for item in menus[1].items] == ["New Search Window", "Ingests"]
-    assert not menus[1].items[0].function()
-    assert not menus[1].items[1].function()
+    assert [item.title for item in menus[1].items if isinstance(item, MenuAction)] == ["New Search Window", "Ingests"]
+    for action in menus[1].items:
+        assert isinstance(action, MenuAction)
+        assert not action.function()
 
 
 def test_gui_api_records_independent_search_window_state(tmp_path: Path) -> None:
@@ -425,6 +440,7 @@ def test_gui_api_records_independent_search_window_state(tmp_path: Path) -> None
     archive = make_gui_archive(tmp_path)
     controller = ApplicationController(ApplicationPreferencesStore(tmp_path / "preferences.json"))
     document = controller.open_document(archive)
+    assert document.path is not None
     session = controller.new_search_window(document)
     api = GuiApi(archive, document=document, search_window=session)
     try:
@@ -494,8 +510,8 @@ def test_gui_suggestions_use_trigram_substrings_and_deduplicated_message_counts(
         sender = address_pk(catalog, "beth@example.org")
         for number, subject in enumerate(("Flight for ELISABETH", "Ordinary subject"), 1):
             raw = "".join((
-                f"Message-ID: <suggestion-{number}@example>\n"
-                "From: Beth Rosenberg <beth@example.org>\n",
+                (f"Message-ID: <suggestion-{number}@example>\n"
+                "From: Beth Rosenberg <beth@example.org>\n"),
                 "Cc: Beth Rosenberg <beth@example.org>\n" if number == 1 else "",
                 f"Subject: {subject}\n\nbody\n",
             )).encode()
@@ -679,7 +695,9 @@ def test_gui_displays_archive_and_source_locations(tmp_path: Path) -> None:
     assert view.source_locations[0].origin == "Local source"
     assert not view.source_locations[0].preferred
     assert view.source_locations[0].copy_path == "/Volumes/Fixture/mail/simple.eml"
-    assert describe_message(archive, 2).archive_path.startswith("data/mbox/2024-Archive1.mbox?offset=")
+    archive_path = describe_message(archive, 2).archive_path
+    assert archive_path is not None
+    assert archive_path.startswith("data/mbox/2024-Archive1.mbox?offset=")
 
     database = sqlite3.connect(archive / "archive.sqlite3")
     try:

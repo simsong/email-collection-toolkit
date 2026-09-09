@@ -2,7 +2,6 @@
 
 from scripts.benchmark_name_resolution import CORPUS, load_cases
 
-
 EXPECTED_PATTERNS = {
     "short-initials",
     "concatenated-full-name",

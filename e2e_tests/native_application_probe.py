@@ -84,7 +84,9 @@ def main() -> None:
             check_new_search(False)
             # Closing the sole visible window must keep menus alive, without
             # status polling or Dock activation reopening About.
-            AppHelper.callAfter(about.native.performClose_, None)
+            native_about = about.native
+            assert native_about is not None
+            AppHelper.callAfter(native_about.performClose_, None)
             application.add_notice("warning", "Notice while About is dismissed")
             evaluate_async(about, "refresh().then(() => true)")
             dismissed = Event()
@@ -92,12 +94,12 @@ def main() -> None:
             def inspect_dismissed() -> None:
                 try:
                     native = NSApplication.sharedApplication()
-                    assert not about.native.isVisible(), "Dismissed About is still visible"
+                    assert not native_about.isVisible(), "Dismissed About is still visible"
                     assert not about.events.closed.is_set(), "About was destroyed instead of hidden"
                     assert webview.windows == [about], f"Unexpected windows: {[window.title for window in webview.windows]}"
                     assert application.window_menu_items() == [], "Hidden About remains in Window menu"
                     native.delegate().applicationShouldHandleReopen_hasVisibleWindows_(native, False)
-                    assert not about.native.isVisible(), "Dock activation reopened About"
+                    assert not native_about.isVisible(), "Dock activation reopened About"
                     menu = native.mainMenu()
                     assert menu.itemWithTitle_("File").submenu().itemWithTitle_("Open…").isEnabled(), "File/Open is disabled"
                     item = menu.itemAtIndex_(0).submenu().itemAtIndex_(0)
@@ -113,7 +115,7 @@ def main() -> None:
 
             def inspect_reopened() -> None:
                 try:
-                    assert about.native.isVisible(), "About menu did not restore the window"
+                    assert native_about.isVisible(), "About menu did not restore the window"
                     assert webview.windows == [about], "About must restore the retained window"
                 except Exception as error:  # pylint: disable=broad-exception-caught
                     failures.append(str(error))
@@ -123,6 +125,9 @@ def main() -> None:
             AppHelper.callLater(0.3, inspect_reopened)
             assert reopened.wait(5), "About menu reopening check timed out"
             api = application.open_document(archive)
+            document = api.document
+            assert document is not None and document.path is not None and document.display_path is not None
+            assert api.search_window is not None
             assert api.window.events.loaded.wait(10), "Document bridge failed to load"
             assert evaluate_async(api.window, "window.pywebview.api.status()")['message_count'] == 1
             assert api.window.evaluate_js("document.getElementById('choose-archive') === null")
@@ -151,8 +156,9 @@ def main() -> None:
                 modal = app.modalWindow()
                 try:
                     assert modal is not None, "Import picker did not appear"
-                    assert api.document.display_path.name in modal.title()
-                    assert str(api.document.display_path) in modal.message()
+                    assert document.display_path is not None
+                    assert document.display_path.name in modal.title()
+                    assert str(document.display_path) in modal.message()
                     assert modal.prompt() == "Import"
                     assert modal.canChooseDirectories() and modal.canChooseFiles()
                     assert modal.allowsMultipleSelection()
@@ -167,7 +173,7 @@ def main() -> None:
 
             AppHelper.callAfter(schedule_inspection)
             assert not application._import_document(api)  # pylint: disable=protected-access
-            assert api.document.ingest_job is None, "Cancel must not start ingest"
+            assert document.ingest_job is None, "Cancel must not start ingest"
 
             def accept_directory(timer) -> None:
                 timer.invalidate()
@@ -220,9 +226,9 @@ def main() -> None:
                     NSRunLoop.mainRunLoop().addTimer_forMode_(timer, NSModalPanelRunLoopMode)
 
                 AppHelper.callAfter(schedule_owner_entry)
-                entered = macos_owner_names(api.document.display_path)
+                entered = macos_owner_names(document.display_path)
                 assert entered == ("jose@example.org\nJosé Example\n" if accept else None)
-                assert not (api.document.path / "owner-names.txt").exists(), "Entry alone must not save"
+                assert not (document.path / "owner-names.txt").exists(), "Entry alone must not save"
             assert application.open_document_options(api.document)
             options = next(window for window in webview.windows if " — Document Options — " in window.title)
             assert options.events.loaded.wait(10), "Options bridge failed to load"
@@ -231,8 +237,8 @@ def main() -> None:
             assert not options.evaluate_js("document.getElementById('add-form').hidden")
             evaluate_async(options, "updateOptions('Zed;alice@example.org, Bob zed', []).then(() => true)")
             assert options.evaluate_js("Array.from(document.getElementById('owners').options, o => o.value)") == ["alice@example.org", "Bob", "Zed"]
-            store = DocumentOptions(api.document.path)
-            owner_lease = WriterLease.acquire(api.document.path, api.document.descriptor.identity, "test", "options", "test")
+            store = DocumentOptions(document.path)
+            owner_lease = WriterLease.acquire(document.path, document.descriptor.identity, "test", "options", "test")
             try:
                 store.record_import(store.state().names, owner_lease)
             finally:
@@ -247,14 +253,14 @@ def main() -> None:
             assert options.events.loaded.wait(10)
             evaluate_async(options, "refreshOptions().then(() => true)")
             assert not options.evaluate_js("document.getElementById('changed').hidden")
-            assert application.open_ingest_window(api.document)
+            assert application.open_ingest_window(document)
             ingest = next(window for window in webview.windows if " — Ingests — " in window.title)
             assert ingest.events.loaded.wait(10), "Ingest bridge failed to load"
             evaluate_async(ingest, "refreshHistory().then(() => true)")
             assert ingest.evaluate_js("document.getElementById('import-directory').textContent") == "Import Directory…"
             assert not ingest.evaluate_js("document.getElementById('import-directory').disabled")
-            document_id = api.document.descriptor.document_id
-            lease = WriterLease.acquire(api.document.path, api.document.descriptor.identity, "test", "button-test", "test")
+            document_id = document.descriptor.document_id
+            lease = WriterLease.acquire(document.path, document.descriptor.identity, "test", "button-test", "test")
             controller.begin_ingest(document_id, IngestJob(operation_id="button-test", owner_window_id=api.search_window.window_id), lease)
             try:
                 evaluate_async(options, "refreshOptions().then(() => true)")

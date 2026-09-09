@@ -2,14 +2,15 @@
 
 from __future__ import annotations
 
-import mailbox
 import gzip
+import mailbox
 import stat
 import subprocess
 import tarfile
 import zipfile
 from email.message import EmailMessage
 from pathlib import Path
+from typing import Literal
 
 import py7zr
 import pytest
@@ -30,11 +31,10 @@ from mailarchiver.validation import (
     prepare,
 )
 
-
 CONFIG_DIR = Path(__file__).parents[1] / "validation" / "datasets"
 
 
-def dataset(dataset_id: str, kind: str) -> DatasetConfig:
+def dataset(dataset_id: str, kind: Literal["messages", "mailboxes", "mixed", "sf-lovers", "public-inbox"]) -> DatasetConfig:
     return DatasetConfig(
         schema_version=1,
         id=dataset_id,

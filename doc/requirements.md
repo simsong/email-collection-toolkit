@@ -201,7 +201,12 @@ mailbox destinations. Dedicated EICAR tests also verify infected routing.
 * Idempotence is at message level.  After a raw message hash and Message-ID
   have been obtained, a matching stored identity is skipped before ClamAV,
   text extraction, and MBOX writing.  A deliberate rescan/reindex mode is
-  separate from normal ingest.
+  separate from normal ingest. Repeated ingest may add newly available source
+  messages. A byte-identical message found in a backup, provider export, and
+  local cache has one canonical record with multiple observations. A record
+  that differs in raw RFC 5322 bytes is preserved even when its semantic `h3`
+  digest matches; semantic identity is reconciliation evidence, not an
+  admission-time discard rule.
 * Every source plug-in declares source integrity controls appropriate to its
   source. The framework executes those controls, displays their progress, and
   persists typed evidence and resume decisions. Cryptographic hashes,
@@ -491,6 +496,8 @@ window starts with an unlogged, one-use cryptographic nonce that establishes a
 session-only `HttpOnly`, `SameSite=Strict` cookie and redirects to a clean URL;
 every asset request requires that cookie and the exact loopback host, and any
 request carrying an `Origin` header must name that exact origin.
+Bootstrap redirects explicitly declare an empty body. Asset HEAD responses
+report the GET content length without reading or returning the asset body.
 The server sends no permissive CORS response and stops with the application.
 Any future state-changing HTTP API must additionally require an explicit CSRF
 header. The applications must be packaged
@@ -510,7 +517,7 @@ and the versioned layout and SQLite readable state of both databases without
 creating or modifying anything. A missing or invalid saved archive is removed
 from recent preferences and reported in the persistent About window. The document
 retains the user's absolute display path and also uses a canonical,
-case-normalized path as its process-local identity. Windows opened through
+filesystem device/inode pair as its process-local identity. Windows opened through
 aliases of the same archive share the document's ingest state, child windows,
 and publication generation. The document remains alive while any search
 window, child window, or ingest operation uses it.
@@ -857,21 +864,32 @@ application flow in the system browser, and verifies the returned Gmail profile
 against the command-line account before retaining the token. The refresh token
 is stored under that account in the operating-system credential store, never in
 the archive, client configuration, terminal output, logs, fixtures, or reports.
-The downloaded Google Desktop-client JSON is Pydantic-validated, checked
-against the project created by the setup run, and copied outside the archive
-with user-only directory and file modes where the platform supports them.
+A release provides one public Google Desktop-client configuration registered by
+the Mail Archiver maintainer. End users do not create Cloud projects, configure
+consent, obtain client IDs, or supply client files. A build without that
+configuration fails with a distributor-facing error; it must not route an end
+user into registration. Account-specific `--client-secrets` remains a developer
+override. The downloaded configuration is Pydantic-validated and restricted to
+Google client IDs, OAuth endpoints, and loopback redirects.
 
-When no saved Desktop client exists, the interactive setup uses an installed
-Google Cloud CLI to authenticate the named account, then creates one personal
-project and enables only the Gmail API after explicit confirmation. It does not
-change the CLI's active account or default project. Without that CLI, it opens
-project creation and Gmail API pages and asks for the resulting project ID.
-Because Google has
-no supported general API for External consent-screen and Desktop-client
-creation, setup opens project-scoped Branding, Audience, Data Access, and Client
-pages in order, waits for the operator at each boundary, and imports Google's
-downloaded JSON. It must not scrape a browser profile, capture a Google
-password, or automate the Google Cloud Console DOM.
+`--register-client` is the explicit one-time maintainer workflow. It uses an
+installed Google Cloud CLI to authenticate the named owner account, then creates
+one project and enables only the Gmail API after explicit confirmation. It does
+not change the CLI's active account or default project. Without that CLI, it
+opens project creation and Gmail API pages and asks for the resulting project
+ID. Because Google has no supported general API for External consent-screen and
+Desktop-client creation, setup opens project-scoped Branding, Audience, Data
+Access, and Client pages in order and imports Google's download. It must not
+scrape a browser profile, capture a Google password, or automate the Console
+DOM.
+
+The project and Desktop client registration persist. In Google's Testing state,
+listed test users reauthorize after seven days; the maintainer does not
+re-register the program. In production, users need not be individually listed.
+An unverified personal-use app warns users and is limited to 100 new users until
+verification. The end-user manual and website explain this distinction with
+generic account examples. Separate maintainer help pages contain the illustrated
+one-time registration procedure and tell readers to use their own account.
 
 ## Ingest sources
 
@@ -911,8 +929,12 @@ password, or automate the Google Cloud Console DOM.
 * Gmail ingest uses OAuth and the Gmail API for incremental acquisition of
   raw messages and labels.  It supports a rolling `--days N` mode using
   Gmail's `newer_than:Nd` query.  Google Takeout MBOX is supported as an offline,
-  one-time baseline input; personal Takeout is not assumed to be
-  programmatically triggerable.
+  one-time baseline input and is the current end-user path; personal Takeout is
+  not assumed to be programmatically triggerable. Direct multi-part Takeout ZIP
+  ingestion remains future work, so current users extract every part and ingest
+  their common parent directory. `doc/GMAIL.md` separately identifies end-user
+  instructions and developer-only OAuth, verification, assessment, and IMAP
+  decisions.
 * IMAP ingest supports TLS and authenticated account configuration, records
   account/folder/UID provenance, and retrieves RFC 5322 bytes without marking
   messages read or modifying the remote mailbox.
@@ -923,6 +945,10 @@ password, or automate the Google Cloud Console DOM.
   rather than silently omitting them. The current backend decision, fixture
   matrix, and format limitations are maintained in
   [ON_DISK_MAIL_FORMATS.md](ON_DISK_MAIL_FORMATS.md).
+  Microsoft 365 has no platform-neutral Takeout equivalent. Outlook PST export
+  on Windows and OLM export from legacy Outlook for Mac are recognized future
+  acquisition paths, but PST, OST, OLM, Graph, and Exchange Online IMAP are not
+  current end-user sources. `doc/M365.md` must keep that boundary explicit.
 * Eudora ingest recognizes mailbox files together with their table-of-contents,
   attachment, and embedded-content conventions. It records which companion
   files were present and never treats an absent or stale index as proof that a
@@ -932,6 +958,24 @@ password, or automate the Google Cloud Console DOM.
   folder context when recoverable, and explicitly reports placeholders,
   evicted bodies, partial downloads, and detached parts. It does not contact a
   server unless the user separately configures and authorizes live IMAP ingest.
+  A live Apple Mail cache is best-effort evidence rather than proof of complete
+  provider acquisition. Complete `.emlx` records are accepted, known partial
+  records are rejected, and a cache-completeness preflight must report partial
+  records and attachment policy before a completeness claim. The observed
+  machine-specific access boundary and preflight are maintained in
+  `doc/APPLE_MAIL_CACHE.md`. Until direct Gmail, Microsoft 365, and IMAP
+  adapters are implemented, separately staged complete Apple Mail cache records are a supported
+  local-file bridge for accounts synchronized through those providers; the
+  bridge must not be represented as provider-complete acquisition.
+* The Apple Mail/archive comparator is strictly read-only. It indexes complete
+  `.emlx` records in a disposable database, opens the archive catalog
+  read-only, and classifies exact raw, semantic-only, cache-only, archive-only,
+  and ambiguous matches using semantic-message version 1 (`h3`). It compares
+  header names and DKIM-relaxed values only for semantic-only pairs, outputs no
+  header values or message content, reports excluded partial and unreadable
+  records, and warns when the active Envelope Index WAL changes during the
+  scan. It must never treat `h3` alone as authorization to merge or delete a
+  canonical source variant.
 * Every source adapter emits original RFC 5322 bytes where the source contains
   them. When a proprietary store requires reconstruction or conversion, the
   observation records that fact and the responsible tool/version; reconstructed
@@ -1109,3 +1153,76 @@ package. A redacted or otherwise restricted release is a separate BagIt bag
 with its own payload, manifests, Mailbag identifiers, and audit mapping. PDF
 and WARC representations remain opt-in, sandboxed publication derivatives and
 must not make remote requests without explicit authorization.
+
+## Developer validation gates
+
+`make check` runs Ruff and Pylint (`make lint`), then ty and Pyright
+(`make types`), then pytest, Chromium end-to-end tests, and website validation.
+The stages run sequentially even with parallel make and stop on failure.
+Both type checkers cover source, scripts, tests, end-to-end tests, and the AWS
+launcher. Project development dependencies and type stubs are locked with uv;
+static analysis must produce no errors or warnings. Focused `make ruff`,
+`make pylint`, `make ty`, `make pyright`, and `make test` targets remain available.
+
+### Desktop review follow-up
+
+The portability audit reads each Mach-O LC_RPATH command, expands loader and
+executable-relative paths, rejects search paths outside the bundle, and requires
+non-system dependencies to resolve to bundled files. Missing antivirus uses a
+platform-neutral confirmation on non-macOS hosts. Source-picker navigation is
+saved only after successful ingest while the writer lease is retained; a failed
+import leaves the previous directory unchanged.
+
+### Writer and desktop review boundary
+
+Current archive writing is supported on POSIX. Windows writing fails before
+creating an archive or lock metadata; the secure no-reparse-point implementation
+and native Windows subprocess validation are deferred to v1.1.0. The former
+untested msvcrt branch is removed; no Windows locking guarantee is claimed.
+POSIX acquisition pins the archive/status directories and opens lock files
+relative to directory descriptors without following links. Lock files must be
+regular, single-link files. New targets are created under a parent-directory
+creation lock before acquiring the archive lease; creation diagnostics may leave
+`.mailarchiver-create.lock` in the parent. Its presence alone does not lock anything.
+GUI creation rechecks destination emptiness under the lease. File New proceeds
+into Import, About reports the active archive volume, and publication refreshes
+mailbox-only queries as well as text queries.
+
+### PR review validation follow-up
+
+Archive documents identify directories by filesystem device/inode and reject
+symbolic or hard-linked database entries before opening. GUI ingest records
+publication evidence even when a later step fails; only published changes
+advance the shared generation. Progress can write status files without a
+terminal stream, including windowed builds with no stderr. Ingest child windows
+route document actions to an attached search window. Informational notices stay
+in About instead of appearing as errors. Closing an import owner offers waiting
+or keeping the window open. Native macOS Quit offers Cancel or Stop Import and Quit while an import is
+active. Confirmed quit signals all imports, retains their leases and windows
+until checkpoint completion, and then exits. Shutdown joins tracked workers
+before releasing resources. Makefile Ruff checks select this checkout's configuration explicitly. Git
+selects tracked and non-ignored new `.py` and `.pyi` files, so linked worktrees
+are checked without descending into ignored generated directories.
+
+An Ingests child window retains document routing after all search windows close.
+New Search and Ingests use that document directly; Import creates a new search
+owner when needed.
+
+Integrity hash-standard versions must be JSON integers. The standalone verifier
+rejects boolean, floating-point, and string alternatives without coercion.
+
+## Current acquisition boundaries
+
+No release Desktop OAuth client is bundled yet. The shared-client end-user
+flow remains deferred until a maintainer supplies and validates that public
+configuration in release artifacts. Current authorization requires a developer
+client override. Installing that override validates and writes the same bytes.
+Known consumer domains need no DNS lookup; transient DNS and token-refresh
+transport failures are disclosed as errors rather than negative detection or
+fresh consent. Credentials are stored only after the profile matches.
+
+A whole Apple Mail cache containing `.partial.emlx` files cannot currently be
+ingested: discovery rejects those files and stops the run. Only a separately
+staged copy containing complete supported records is an available local-file
+bridge. Do not modify the source cache to prepare that copy; the comparator is
+read-only and does not imply whole-cache ingest support.

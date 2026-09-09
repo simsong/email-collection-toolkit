@@ -32,8 +32,9 @@ old record has no original-header block, its visible headers are used instead.
 RMAIL labels and redundant visible headers remain only in the source Babyl
 container and are not email content.
 
-Outlook PST and OST files, Gmail, Microsoft 365, and live IMAP accounts are
-planned but are not yet supported.
+Outlook PST and OST files and direct Gmail, Microsoft 365, and live IMAP
+connections are planned but are not yet supported. Complete local Apple Mail
+cache records from those providers can be imported now.
 The code has inactive integration points for Gmail, IMAP, Microsoft Exchange,
 and standard input containing NUL-separated messages; these are not CLI ingest
 modes yet.
@@ -56,46 +57,59 @@ Choose two locations:
 On macOS, reading Apple Mail or another protected location may require Full
 Disk Access for the terminal application.
 
-## Authorize a Gmail account
+## Import Gmail
 
-Authorization is available before live Gmail ingest. It prepares and retains
-read-only credentials but does not download or change any mail. Run:
+Use Google Takeout for Gmail today. It creates MBOX files without granting Mail
+Archiver access to the account. Download every Takeout ZIP part, extract them
+beneath one directory, and ingest that directory as the local source. See
+[GMAIL.md](GMAIL.md) for the complete end-user procedure and the separate
+developer discussion of Gmail API, OAuth, IMAP, verification, and security
+assessment requirements.
 
-```console
-uv run mailarchiver-auth simsong@gmail.com
-```
+Live Gmail authorization is a developer preview for an unimplemented future
+adapter. End users should not run `mailarchiver-auth` or create a Google Cloud
+project for ordinary Takeout ingestion.
 
-The command recognizes a Google Workspace address from its public mail records,
-so the same form works for a custom Google-hosted domain:
+As an interim incremental path, add the Gmail account to Apple Mail, configure
+it to download attachments, allow the wanted mailboxes to synchronize, and
+import its cache as described in [Use Apple Mail as a provider bridge](#use-apple-mail-as-a-provider-bridge).
+This is best-effort recovery and is not a substitute for Takeout when a
+completeness claim matters.
 
-```console
-uv run mailarchiver-auth simsong@basistech.com
-```
+## Import Microsoft 365
 
-If automatic detection is inconclusive for an account known to use Gmail, use:
+Microsoft has no platform-neutral Takeout equivalent. Outlook can export PST
+on Windows or OLM from legacy Outlook for Mac, but Mail Archiver does not yet
+ingest those formats and its Microsoft authorization adapter is only a stub.
+There is currently no complete Microsoft 365 export workflow supported by Mail
+Archiver. See [M365.md](M365.md) for the end-user status and developer design.
 
-```console
-uv run mailarchiver-auth --gmail simsong@basistech.com
-```
+Apple Mail can export selected mailboxes as MBOX, and Mail Archiver can read
+complete messages from an Apple Mail cache. A cache can be incomplete, however;
+see [APPLE_MAIL_CACHE.md](APPLE_MAIL_CACHE.md) before treating it as an
+acquisition source.
 
-The first run asks before creating a personal Google Cloud project. When the
-Google Cloud CLI is installed, the command creates the project and enables the
-Gmail API. It then opens Google's project-specific configuration pages. Complete
-the displayed Branding, External Audience, `gmail.readonly` scope, and Desktop
-client steps, download the JSON file, and return to the terminal. The command
-finds a matching new download or asks for its path, opens Google's authorization
-page, verifies that Google returned the command-line account, and stores the
-refresh token in the operating-system credential store. It does not store the
-token in the archive.
+## Use Apple Mail as a provider bridge
 
-Use `--client-secrets PATH` to import an existing Google Desktop-client JSON.
-Use `--detect-only` to inspect provider detection without creating a project or
-authorizing an account.
+Until direct adapters are written, Apple Mail can provide local complete
+messages for Gmail, Microsoft 365/Exchange Online, Outlook.com, and ordinary
+IMAP accounts that have already been synchronized to this Mac. Quit Mail if
+practical, set **Download Attachments** to **All**, allow synchronization to
+finish, and export selected mailboxes as MBOX or stage a separate copy containing
+only complete supported messages. Do not ingest the whole `~/Library/Mail` tree
+when it contains `.partial.emlx` files: discovery rejects them and stops the run.
+The invoking terminal may require Full Disk Access. Never alter the source cache
+to prepare the staged copy.
 
-Microsoft 365 domains are detected through their mail or Autodiscover records,
-but authorization is not implemented. For example,
-`uv run mailarchiver-auth sgarfinkel@fas.harvard.edu` currently reports
-`Microsoft Office not yet implemented.`
+Only complete `.emlx` payloads are accepted. `.partial.emlx`, detached
+attachments, indexes, and plist metadata are not treated as messages. A cache
+is therefore best-effort recovery, not evidence that every server message was
+downloaded. See [APPLE_MAIL_CACHE.md](APPLE_MAIL_CACHE.md) for the measured
+limitations and preflight guidance.
+
+Ingest may be rerun whenever Apple Mail has downloaded more messages. Unchanged
+containers are skipped, and messages already present under the exact archive
+identity are not written again.
 
 ## Identify the archive owner
 
@@ -152,8 +166,10 @@ Mail Archiver:
 7. prints a summary by year when ingest finishes.
 
 Two messages are duplicates only when both their normalized `Message-ID` and
-their raw-message SHA-256 match. A message found in several source mailboxes is
-stored once, but every source location is remembered. Infected messages are
+their raw-message SHA-256 match. A byte-identical message found in a backup,
+Takeout export, and Apple Mail cache is stored once, but every source location
+is remembered. If Apple Mail rewrites the raw headers, that source variant is
+preserved separately even when its semantic hash matches. Infected messages are
 retained in the quarantine MBOX rather than silently discarded. Apple
 `X-Apple-Auto-Saved` messages are recorded but are not copied into the
 canonical mailboxes.
@@ -200,6 +216,31 @@ trust. Gmail, IMAP, O365, Microsoft Exchange, and NUL-delimited stdin are
 currently reserved names rather than working adapters. See `doc/PLUGINS.md`.
 
 Do not edit files under `data/mbox/` while ingest is running.
+
+## Compare Apple Mail with the archive
+
+Run the read-only reconciliation before or after another cache ingest:
+
+```console
+make compare-apple-mail
+```
+
+The defaults are `~/Library/Mail` and `~/mail-archive`; use
+`ARGS='--apple-mail /path/to/Mail --archive /path/to/archive'` for other
+locations. The report separates exact raw matches, semantic-only matches,
+cache-only messages, and archive-only messages. It also lists aggregate header
+names that Apple added, removed, or changed, without displaying values or
+message content.
+
+The lookup uses the archive's `h3` semantic-message v1 SHA-256. Despite the
+informal phrase “normalized header hash,” h3 is a **whole-message** identity:
+it applies DKIM-relaxed normalization to the selected stable and delivery
+headers and includes the complete canonicalized body. It deliberately ignores
+mutable transport and mail-client headers. `h3` supports reconciliation; the
+admission/deduplication identity remains normalized `Message-ID` plus the `h2`
+raw-message SHA-256. See [INTEGRITY_CONTROLS.md](INTEGRITY_CONTROLS.md) for the
+exact algorithm and [APPLE_MAIL_CACHE.md](APPLE_MAIL_CACHE.md) for measured
+results from this computer.
 
 ## Extract printed email from a standalone PDF
 

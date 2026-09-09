@@ -106,6 +106,7 @@ def test_confirmed_quit_stops_every_document_without_releasing_active_leases(tmp
     try:
         for number in range(2):
             document = state.open_document(make_archive(tmp_path / f"archive-{number}"))
+            assert document.path is not None
             window = state.new_search_window(document)
             job = IngestJob(operation_id=f"import-{number}", owner_window_id=window.window_id)
             lease = WriterLease.acquire(document.path, document.descriptor.identity, "test", job.operation_id, "test")
@@ -127,7 +128,9 @@ def test_same_archive_reuses_document_while_search_windows_remain_independent(tm
     application = controller(tmp_path)
 
     first_document = application.open_document(archive)
+    assert first_document.path is not None
     second_document = application.open_document(archive / ".." / archive.name)
+    assert second_document.path is not None
     first = application.new_search_window(first_document)
     second = application.new_search_window(second_document)
     first.query = "alpha"
@@ -181,6 +184,7 @@ def test_preference_write_failure_does_not_block_opening_an_archive(tmp_path: Pa
     )
 
     document = application.open_document(archive)
+    assert document.path is not None
 
     assert document.display_path == archive
     assert application.preferences.last_archive == archive
@@ -291,7 +295,9 @@ def test_one_ingest_is_shared_per_document_and_requires_a_writer_lease(tmp_path:
     second = make_archive(tmp_path / "second")
     application = controller(tmp_path)
     first_document = application.open_document(first)
+    assert first_document.path is not None
     second_document = application.open_document(second)
+    assert second_document.path is not None
     first_window = application.new_search_window(first_document)
     second_window = application.new_search_window(first_document)
     other_window = application.new_search_window(second_document)
@@ -325,7 +331,8 @@ def test_one_ingest_is_shared_per_document_and_requires_a_writer_lease(tmp_path:
     assert set(refreshed) == {first_window.window_id, second_window.window_id}
     assert first_document.generation == 1
     assert second_document.ingest_job == second_job
-    application.finish_ingest(second_document.descriptor.document_id, "second-ingest", published=False)
+    assert application.finish_ingest(second_document.descriptor.document_id, "second-ingest", published=False) == ()
+    assert second_document.generation == 0
 
 
 def test_child_windows_and_ingest_keep_a_document_alive(tmp_path: Path) -> None:
@@ -333,6 +340,7 @@ def test_child_windows_and_ingest_keep_a_document_alive(tmp_path: Path) -> None:
     archive = make_archive(tmp_path / "archive")
     application = controller(tmp_path)
     document = application.open_document(archive)
+    assert document.path is not None
     window = application.new_search_window(document)
     application.attach_child_window(document.descriptor.document_id, "ingest-history")
 
@@ -343,6 +351,7 @@ def test_child_windows_and_ingest_keep_a_document_alive(tmp_path: Path) -> None:
         application.document(document.descriptor.document_id)
 
     document = application.open_document(archive)
+    assert document.path is not None
     window = application.new_search_window(document)
     job = IngestJob(operation_id="active-ingest", owner_window_id=window.window_id)
     lease = WriterLease.acquire(
@@ -372,3 +381,80 @@ def test_recent_archives_are_bounded_and_preserve_display_paths(tmp_path: Path) 
         archives[-3], archives[-1], archives[-2], *reversed(archives[2:-3])
     ]
     assert len(application.preferences.recent_archives) == 10
+
+
+@pytest.mark.parametrize("name", ["archive.sqlite3", "search.sqlite3"])
+@pytest.mark.parametrize("alias", ["symlink", "hardlink"])
+def test_database_aliases_are_rejected_without_mutation(tmp_path: Path, name: str, alias: str) -> None:
+    """Requirement: aliased databases cannot bypass another archive's writer lease."""
+    archive = make_archive(tmp_path / "archive")
+    outside = make_archive(tmp_path / "outside") / name
+    before = outside.read_bytes()
+    target = archive / name
+    target.unlink()
+    if alias == "symlink":
+        target.symlink_to(outside)
+    else:
+        target.hardlink_to(outside)
+    with pytest.raises(InvalidArchiveError, match="regular file with one link"):
+        controller(tmp_path).open_document(archive)
+    assert outside.read_bytes() == before
+
+
+def test_case_alias_shares_document_on_case_insensitive_filesystem(tmp_path: Path) -> None:
+    """Requirement: directory identity survives alternate case on macOS volumes."""
+    archive = make_archive(tmp_path / "CaseArchive")
+    alias = tmp_path / "casearchive"
+    if not alias.exists():
+        pytest.skip("requires a case-insensitive filesystem")
+    application = controller(tmp_path)
+    assert application.open_document(archive) is application.open_document(alias)
+
+
+def test_failed_discovery_does_not_claim_publication(tmp_path: Path) -> None:
+    """Requirement: pre-publication failure must not trigger a document refresh."""
+    from mailarchiver.__main__ import IngestOutcome, IngestRequest, run_ingest
+
+    archive = make_archive(tmp_path / "archive")
+    outcome = IngestOutcome()
+    request = IngestRequest(archive=archive, owner_names_file=tmp_path / "owners.txt", roots=["unsupported://fixture"])
+    with pytest.raises(ValueError, match="no source plug-in recognized"):
+        run_ingest(request, outcome=outcome, terminal=False)
+    assert not outcome.published
+
+
+def test_quit_keeps_active_import_document_alive(tmp_path: Path) -> None:
+    """Requirement: native Quit must retain the UI while an import owns its lease."""
+    from mailarchiver.gui_app import PyWebViewApplication
+
+    application = controller(tmp_path)
+    document = application.open_document(make_archive(tmp_path / "archive"))
+    assert document.path is not None
+    window = application.new_search_window(document)
+    host = PyWebViewApplication(application)
+    assert document.path is not None
+    lease = WriterLease.acquire(document.path, document.descriptor.identity, "test", "quit-test", "test")
+    application.begin_ingest(document.descriptor.document_id, IngestJob(operation_id="quit-test", owner_window_id=window.window_id), lease)
+    try:
+        assert not host.prepare_quit()
+        assert lease.acquired
+        assert application.active_document is document
+    finally:
+        application.finish_ingest(document.descriptor.document_id, "quit-test", published=False)
+    assert host.prepare_quit()
+
+
+def test_child_window_keeps_document_routing_without_search_windows(tmp_path: Path) -> None:
+    """Requirement: an Ingests window continues routing actions after searches close."""
+    from mailarchiver.gui_app import PyWebViewApplication
+
+    application = controller(tmp_path)
+    document = application.open_document(make_archive(tmp_path / "archive"))
+    assert document.path is not None
+    session = application.new_search_window(document)
+    application.attach_child_window(document.descriptor.document_id, "ingests-fixture")
+    host = PyWebViewApplication(application)
+    host._native_child_ids["ingests-fixture"] = document.descriptor.document_id
+    application.close_window(session.window_id)
+    assert host.document_for_native_window("ingests-fixture") is document
+    assert host.document_for_native_window("unknown") is None

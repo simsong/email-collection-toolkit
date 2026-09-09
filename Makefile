@@ -1,8 +1,9 @@
-.PHONY: auth-detect-live benchmark-name-resolution check data-quality-audit data-quality-babyl-audit data-quality-summary extract-pdf-mail fixture-bagit fixture-e2e gui gui-smoke website-build-check website-check release-tag-check
+.PHONY: auth-detect-live benchmark-name-resolution check compare-apple-mail data-quality-audit data-quality-babyl-audit data-quality-summary extract-pdf-mail fixture-bagit fixture-e2e gui gui-smoke website-build-check website-check release-tag-check
 .PHONY: install-linux install-mac install-test-browser install-tika ocr-analyze ocr-experiment ocr-inventory ocr-profile ocr-run pylint run search summary-smoke test test-bagit test-data-quality
-.PHONY: test-application test-auth test-e2e test-encoding test-gui test-headers test-mailsearch test-native-gui test-native-html-find test-pdf-mail test-plugins test-progress test-provenance test-refresh-index test-tika test-website validation-aws-start validation-aws-start-all
-.PHONY: validation-fetch validation-list validation-prepare validation-run validation-run-all validation-sam-build validation-sam-deploy validation-sam-validate validation-test verify
+.PHONY: test-application test-e2e test-encoding test-gui test-headers test-mailsearch test-native-gui test-native-html-find test-pdf-mail test-plugins test-progress test-provenance test-refresh-index test-tika test-website validation-aws-start validation-aws-start-all
 
+.PHONY: test-apple-mail-compare test-auth
+.PHONY: validation-fetch validation-list validation-prepare validation-run validation-run-all validation-sam-build validation-sam-deploy validation-sam-validate validation-test verify
 
 TIKA_VERSION ?= 4.0.0
 TIKA_DIR ?= $(CURDIR)/.tools/tika/$(TIKA_VERSION)
@@ -23,11 +24,32 @@ OCR_ENGINES ?= native,ocrmypdf,tesseract
 OCR_INVENTORY_ARGS ?=
 OCR_RUN_ARGS ?=
 
-check: ruff syntax-check test test-e2e website-check
+.PHONY: lint ruff types ty pyright
+# Recursive recipes preserve stage ordering even with make -j.
+check:
+	$(MAKE) lint
+	$(MAKE) types
+	$(MAKE) test
+	$(MAKE) test-e2e
+	$(MAKE) website-check
 
-.PHONY: ruff
+lint:
+	$(MAKE) ruff
+	$(MAKE) pylint
+
 ruff:
-	uv run --locked ruff check .
+	git ls-files -z --cached --others --exclude-standard -- '*.py' '*.pyi' | \
+		xargs -0 uv run --locked ruff check --config pyproject.toml
+
+types:
+	$(MAKE) ty
+	$(MAKE) pyright
+
+ty:
+	uv run --locked ty check --error-on-warning
+
+pyright:
+	uv run --locked pyright --warnings
 
 .PHONY: syntax-check
 syntax-check:
@@ -59,6 +81,9 @@ auth-detect-live:
 	uv run mailarchiver-auth --detect-only simsong@basistech.com
 	uv run mailarchiver-auth --detect-only sgarfinkel@fas.harvard.edu
 
+compare-apple-mail:
+	uv run mailarchiver-compare-apple-mail --apple-mail "$(HOME)/Library/Mail" --archive "$(HOME)/mail-archive" $(ARGS)
+
 data-quality-audit:
 	@test -n "$(ARCHIVE)" || { echo 'usage: make data-quality-audit ARCHIVE=/path/to/mailbag EARLY_SOURCE=/path/to/source'; exit 2; }
 	@test -n "$(EARLY_SOURCE)" || { echo 'usage: make data-quality-audit ARCHIVE=/path/to/mailbag EARLY_SOURCE=/path/to/source'; exit 2; }
@@ -89,7 +114,7 @@ extract-pdf-mail:
 	uv run extract-pdf-mail $(ARGS)
 
 pylint:
-	uv run pylint src tests e2e_tests scripts
+	uv run --locked pylint src tests e2e_tests scripts
 
 run:
 	uv run mailarchiver $(ARGS)
@@ -140,6 +165,9 @@ update-corpus-expectations:
 
 test-application:
 	uv run pytest -q tests/test_application.py tests/test_writer_lock.py tests/test_loopback.py
+
+test-apple-mail-compare:
+	uv run pytest -q tests/test_apple_mail_compare.py
 
 test-auth:
 	uv run pytest -q tests/test_auth.py
@@ -290,3 +318,7 @@ ocr-run:
 	uv run python scripts/ocr_experiment.py run --output "$(OCR_OUTPUT)" --engines "$(OCR_ENGINES)" --workers "$(OCR_WORKERS)" $(OCR_RUN_ARGS)
 
 ocr-experiment: ocr-inventory ocr-run
+
+.PHONY: test-writer-lock
+test-writer-lock:
+	uv run pytest -q tests/test_writer_lock.py

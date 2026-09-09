@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from http.client import HTTPConnection
 from http.cookiejar import CookieJar
 from pathlib import Path
 from urllib.error import HTTPError
@@ -54,4 +55,31 @@ def test_authenticated_server_rejects_foreign_origin_and_traversal(tmp_path: Pat
             opener.open(f"{server.origin}/%2e%2e/outside.txt", timeout=2)
         assert traversal.value.code == 404
     finally:
+        server.close()
+
+
+def test_bootstrap_and_head_response_lengths(tmp_path: Path) -> None:
+    """Requirement: redirects are empty; HEAD describes GET without a response body."""
+    payload = b"authenticated asset"
+    (tmp_path / "index.html").write_bytes(payload)
+    server = LoopbackAssetServer(tmp_path)
+    connection = HTTPConnection(server.authority, timeout=2)
+    try:
+        bootstrap = server.url("index.html").removeprefix(server.origin)
+        connection.request("GET", bootstrap)
+        response = connection.getresponse()
+        assert response.status == 303
+        assert response.getheader("Content-Length") == "0"
+        cookie = response.getheader("Set-Cookie")
+        assert cookie is not None
+        assert response.read() == b""
+        headers = {"Cookie": cookie.split(";", 1)[0]}
+        for method in ("HEAD", "GET"):
+            connection.request(method, "/index.html", headers=headers)
+            response = connection.getresponse()
+            assert response.status == 200
+            assert response.getheader("Content-Length") == str(len(payload))
+            assert response.read() == (b"" if method == "HEAD" else payload)
+    finally:
+        connection.close()
         server.close()

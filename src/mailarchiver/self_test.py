@@ -87,6 +87,7 @@ def exercise_gui(archive: Path, directory: Path, report: SelfTestReport) -> None
     install_macos_document_events(application)
     application.create_about_window()
     api = application.open_document(archive)
+    assert api.document is not None
     application.open_ingest_window(api.document)
     failures: list[str] = []
 

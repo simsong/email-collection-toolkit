@@ -7,12 +7,13 @@ import json
 import os
 import socket
 import stat
-from datetime import datetime, timezone
+from collections.abc import Iterator
+from contextlib import contextmanager
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import BinaryIO
+from typing import BinaryIO, Self
 
 from pydantic import BaseModel, ConfigDict, PrivateAttr
-
 
 LOCK_RELATIVE_PATH = Path("status") / "archive-write.lock"
 
@@ -52,14 +53,22 @@ class WriterLease(BaseModel):
         operation: str,
         operation_id: str,
         application_version: str,
-    ) -> "WriterLease":
-        status = archive / LOCK_RELATIVE_PATH.parent
-        status.mkdir(parents=True, exist_ok=True)
+        *,
+        create: bool = False,
+    ) -> WriterLease:
+        if os.name == "nt":
+            raise OSError("Windows archive writing is not supported; planned for v1.1.0")
         lock_path = archive / LOCK_RELATIVE_PATH
-        flags = os.O_RDWR | os.O_CREAT
-        if hasattr(os, "O_NOFOLLOW"):
-            flags |= os.O_NOFOLLOW
-        descriptor = os.open(lock_path, flags, 0o600)
+        with _archive_directory(archive, create) as archive_fd:
+            try:
+                os.mkdir("status", mode=0o700, dir_fd=archive_fd)
+            except FileExistsError:
+                pass
+            status_fd = os.open("status", os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=archive_fd)
+            try:
+                descriptor = _open_regular("archive-write.lock", status_fd)
+            finally:
+                os.close(status_fd)
         handle = os.fdopen(descriptor, "r+b", buffering=0)
         try:
             if not stat.S_ISREG(os.fstat(descriptor).st_mode):
@@ -78,7 +87,7 @@ class WriterLease(BaseModel):
                 operation_id=operation_id,
                 process_id=os.getpid(),
                 hostname=socket.gethostname(),
-                started_at=datetime.now(timezone.utc),
+                started_at=datetime.now(UTC),
                 application_version=application_version,
                 archive_identity=archive_identity,
             )
@@ -106,7 +115,7 @@ class WriterLease(BaseModel):
             handle.close()
             self.acquired = False
 
-    def __enter__(self) -> "WriterLease":
+    def __enter__(self) -> Self:
         return self
 
     def __exit__(self, *_args: object) -> None:
@@ -132,31 +141,54 @@ def _is_contention(error: BaseException) -> bool:
     )
 
 
-if os.name == "nt":
+def _open_regular(name: str, directory: int) -> int:
+    descriptor = os.open(name, os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW | os.O_NONBLOCK, 0o600, dir_fd=directory)
+    metadata = os.fstat(descriptor)
+    if not stat.S_ISREG(metadata.st_mode) or metadata.st_nlink != 1:
+        os.close(descriptor)
+        raise ValueError("archive lock must be a regular file with one link")
+    return descriptor
 
-    def _acquire_nonblocking(handle: BinaryIO) -> None:
-        import msvcrt  # pylint: disable=import-error,import-outside-toplevel
 
-        handle.seek(0, os.SEEK_END)
-        if handle.tell() == 0:
-            handle.write(b"\0")
-        handle.seek(0)
-        msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
+@contextmanager
+def _archive_directory(archive: Path, create: bool) -> Iterator[int]:
+    """Serialize target creation under a parent lock, then pin the archive directory."""
+    parent_fd = None
+    guard = None
+    try:
+        if create:
+            archive.parent.mkdir(parents=True, exist_ok=True)
+            parent_fd = os.open(archive.parent, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+            guard = os.fdopen(_open_regular(".mailarchiver-create.lock", parent_fd), "r+b", buffering=0)
+            try:
+                _acquire_nonblocking(guard)
+            except OSError as error:
+                if _is_contention(error):
+                    raise ArchiveBusyError("another archive creator is active in this directory") from error
+                raise
+            try:
+                os.mkdir(archive.name, mode=0o700, dir_fd=parent_fd)
+            except FileExistsError:
+                pass
+        descriptor = os.open(archive, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+        try:
+            yield descriptor
+        finally:
+            os.close(descriptor)
+    finally:
+        if guard is not None:
+            guard.close()
+        if parent_fd is not None:
+            os.close(parent_fd)
 
-    def _release(handle: BinaryIO) -> None:
-        import msvcrt  # pylint: disable=import-error,import-outside-toplevel
 
-        handle.seek(0)
-        msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
+def _acquire_nonblocking(handle: BinaryIO) -> None:
+    import fcntl  # pylint: disable=import-outside-toplevel
 
-else:
+    fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
 
-    def _acquire_nonblocking(handle: BinaryIO) -> None:
-        import fcntl  # pylint: disable=import-outside-toplevel
 
-        fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+def _release(handle: BinaryIO) -> None:
+    import fcntl  # pylint: disable=import-outside-toplevel
 
-    def _release(handle: BinaryIO) -> None:
-        import fcntl  # pylint: disable=import-outside-toplevel
-
-        fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+    fcntl.flock(handle.fileno(), fcntl.LOCK_UN)

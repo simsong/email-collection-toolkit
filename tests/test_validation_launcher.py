@@ -9,7 +9,6 @@ from pathlib import Path
 
 import pytest
 
-
 LAUNCHER_PATH = Path(__file__).parents[1] / "validation" / "aws" / "launcher" / "app.py"
 SPEC = importlib.util.spec_from_file_location("validation_launcher", LAUNCHER_PATH)
 assert SPEC is not None and SPEC.loader is not None

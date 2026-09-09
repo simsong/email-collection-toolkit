@@ -25,18 +25,18 @@ class LoopbackAssetServer:
         owner = self
 
         class Handler(BaseHTTPRequestHandler):
-            def do_GET(self) -> None:  # noqa: N802
+            def do_GET(self) -> None:
                 owner._get(self)
 
-            def do_HEAD(self) -> None:  # noqa: N802
+            def do_HEAD(self) -> None:
                 owner._get(self, head=True)
 
-            def log_message(self, _format: str, *_args: object) -> None:
+            def log_message(self, format: str, *args: object) -> None:
                 return
 
         self._server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
         self._server.daemon_threads = True
-        host, port = self._server.server_address
+        host, port = self._server.server_address[:2]
         self.origin = f"http://{host}:{port}"
         self.authority = f"{host}:{port}"
         self._thread = Thread(
@@ -86,6 +86,7 @@ class LoopbackAssetServer:
                 "Set-Cookie",
                 f"{self._cookie_name}={self._session}; HttpOnly; SameSite=Strict; Path=/",
             )
+            request.send_header("Content-Length", "0")
             request.send_header("Location", target)
             request.send_header("Cache-Control", "no-store")
             request.end_headers()
@@ -99,14 +100,15 @@ class LoopbackAssetServer:
             asset.relative_to(self.asset_root)
             if not asset.is_file():
                 raise FileNotFoundError(asset)
-            content = asset.read_bytes()
+            content = b"" if head else asset.read_bytes()
+            content_length = asset.stat().st_size if head else len(content)
         except (OSError, ValueError):
             self._error(request, HTTPStatus.NOT_FOUND)
             return
         content_type = mimetypes.guess_type(asset.name)[0] or "application/octet-stream"
         request.send_response(HTTPStatus.OK)
         request.send_header("Content-Type", content_type)
-        request.send_header("Content-Length", str(len(content)))
+        request.send_header("Content-Length", str(content_length))
         request.send_header("Cache-Control", "no-store")
         request.send_header("Referrer-Policy", "no-referrer")
         request.send_header("X-Content-Type-Options", "nosniff")

@@ -211,21 +211,21 @@ def test_ingest_and_provenance_queries_use_targeted_indexes(tmp_path: Path) -> N
                 "sqlite_autoindex_source_volumes_1",
             ),
             (
-                "SELECT source_file_pk, byte_length FROM source_files "
-                "WHERE source_volume_pk = ? AND source_path = ?",
+                ("SELECT source_file_pk, byte_length FROM source_files "
+                "WHERE source_volume_pk = ? AND source_path = ?"),
                 (1, "mail/inbox.mbox"),
                 "sqlite_autoindex_source_files_1",
             ),
             (
-                "SELECT integrity_check_pk FROM source_integrity_checks "
+                ("SELECT integrity_check_pk FROM source_integrity_checks "
                 "WHERE source_file_pk = ? AND control_id = ? AND completed_at IS NOT NULL "
-                "ORDER BY integrity_check_pk DESC LIMIT 1",
+                "ORDER BY integrity_check_pk DESC LIMIT 1"),
                 (1, "local-file-sha256-v1"),
                 "source_integrity_latest",
             ),
             (
-                "SELECT messages.date_utc FROM observations JOIN messages USING (message_pk) "
-                "WHERE source_file_pk = ? AND source_offset < ? ORDER BY source_offset DESC LIMIT 1",
+                ("SELECT messages.date_utc FROM observations JOIN messages USING (message_pk) "
+                "WHERE source_file_pk = ? AND source_offset < ? ORDER BY source_offset DESC LIMIT 1"),
                 (1, 100),
                 "observations_source_file_offset",
             ),
@@ -240,21 +240,21 @@ def test_ingest_and_provenance_queries_use_targeted_indexes(tmp_path: Path) -> N
                 "sqlite_autoindex_messages_1",
             ),
             (
-                "SELECT observations.disposition FROM observations JOIN source_files USING (source_file_pk) "
-                "WHERE run_pk = ? ORDER BY observation_pk",
+                ("SELECT observations.disposition FROM observations JOIN source_files USING (source_file_pk) "
+                "WHERE run_pk = ? ORDER BY observation_pk"),
                 (1,),
                 "observations_run_observation",
             ),
             (
-                "SELECT source_files.source_path FROM observations JOIN source_files USING (source_file_pk) "
-                "WHERE observations.message_pk = ? ORDER BY observations.observation_pk",
+                ("SELECT source_files.source_path FROM observations JOIN source_files USING (source_file_pk) "
+                "WHERE observations.message_pk = ? ORDER BY observations.observation_pk"),
                 (1,),
                 "observations_message_pk",
             ),
             (
-                "SELECT messages.sha256, locations.byte_offset FROM messages "
+                ("SELECT messages.sha256, locations.byte_offset FROM messages "
                 "JOIN locations USING (message_pk) JOIN mbox_generations USING (generation_pk) "
-                "WHERE mbox_generations.filename = ? ORDER BY locations.byte_offset",
+                "WHERE mbox_generations.filename = ? ORDER BY locations.byte_offset"),
                 ("2024-Archive1.mbox",),
                 "locations_generation_offset",
             ),
@@ -264,8 +264,8 @@ def test_ingest_and_provenance_queries_use_targeted_indexes(tmp_path: Path) -> N
                 "sqlite_autoindex_mbox_generations_1",
             ),
             (
-                "SELECT messages.sha256, locations.byte_offset FROM messages "
-                "LEFT JOIN locations USING (message_pk) WHERE messages.message_pk = ?",
+                ("SELECT messages.sha256, locations.byte_offset FROM messages "
+                "LEFT JOIN locations USING (message_pk) WHERE messages.message_pk = ?"),
                 (1,),
                 "SEARCH messages USING INTEGER PRIMARY KEY",
             ),
