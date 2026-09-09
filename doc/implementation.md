@@ -543,6 +543,36 @@ it applies `to:`/`from:`/`subject:` catalog filters, UTC calendar-day
 `message_pk` header lines and reads a numbered message directly from its
 catalogued MBOX byte location, validating its SHA-256 before output.
 
+
+GUI `SearchPage.error` carries query-parser feedback; the bridge does not save
+invalid queries as window state, and the UI displays the error in result status.
+`parse_query` produces `SearchTerms`; `_search_statement` and `_count_statement`
+compile those terms into the typed `SearchStatement(sql, parameters)` used for
+execution. `_candidate_source` shares filter-before-sort index selection between
+pages and counts. Existing V1 indexes suffice; no archive rebuild is required.
+
+| Primitive | Candidate access path |
+| --- | --- |
+| `from:` | Scan matching distinct addresses, then `messages_sender_address_pk` searches. |
+| `to:`, `cc:`, `bcc:` | Address/role searches through `recipients_address_pk`, then message primary keys. |
+| `any:` | Materialize matching addresses once; union indexed sender and recipient message IDs. |
+| `date:`, `before:`, `after:` | `messages_date_message` range searches, including subject/sender sorts. |
+| Words, phrases, attachment-inclusive terms | FTS MATCH, then `messages_sha256`; body-only counts use metadata's unique FTS-row-ID index. |
+| Mailbox/volume scope | Source hierarchy/volume indexes, then `observations_source_file_offset` and message primary keys. |
+| `subject:` | Scan the covering subject expression index, then look up matching message primary keys. |
+| Unfiltered bounded listing | Date/subject order indexes, or ordered addresses and indexed sender-message lookups. |
+
+`make test-mailsearch` includes a parameterized `EXPLAIN QUERY PLAN` regression
+using the production parser and both SQL builders. It checks SEARCH operations
+through the relevant filtering indexes, FTS MATCH constraints, absence of
+per-message correlated subqueries, and result correctness under every sort field
+and direction, plus exact/bounded counts. A shared fixture has 20,000 unrelated
+messages, recipients, and source files; SQLite instruction budgets catch repeated
+indexed probes that a superficial index-name assertion would miss. Subject
+substring searches have a separate linear-work budget because an ordinary
+B-tree cannot seek a leading-wildcard pattern. Tests check plan properties rather
+than snapshotting SQLite's entire version-dependent explanation.
+
 SQL filenames follow the Flyway convention `V<version>__<description>.sql`;
 only the naming convention is used. No Flyway runtime, Java, or JDBC is required
 for schema management. Python loads the packaged SQL with `importlib.resources`

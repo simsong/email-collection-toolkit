@@ -529,8 +529,8 @@
     document.getElementById("search").value = '"';
     document.getElementById("search-form").dispatchEvent(new Event("submit", {bubbles: true, cancelable: true}));
     await waitFor(
-      () => !document.getElementById("error").hidden && document.getElementById("error").textContent.includes("unclosed quote"),
-      "search errors are shown to the user",
+      () => document.getElementById("result-status").textContent === "search has an unclosed quote",
+      "search syntax errors are shown inline",
     );
 
     await search('"message viewer"', 1, false);

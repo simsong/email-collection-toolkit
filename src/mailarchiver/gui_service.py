@@ -64,6 +64,7 @@ SAFE_OPEN_SUFFIXES = {
 
 
 class SearchPage(BaseModel):
+    error: str | None = None
     results: list[MessageHeader]
     offset: int
     has_more: bool
@@ -188,7 +189,10 @@ def search_page(
     if offset < 0 or limit < 0:
         raise ValueError("search offset and limit must be nonnegative")
     selections = [MailboxSelection.from_token(token) for token in mailbox_selections or []]
-    terms = parse_query(query)
+    try:
+        terms = parse_query(query)
+    except ValueError as error:
+        return SearchPage(results=[], offset=offset, has_more=False, error=str(error))
     fetch_limit = limit + 1 if limit else 0
     page = search_header_page(
         archive, terms, fetch_limit, offset, SortField(sort_by),
