@@ -71,8 +71,8 @@ The local-source importer already:
 - discovers complete `.emlx` files recursively;
 - uses each file's leading byte count to isolate the RFC 5322 message;
 - excludes Apple trailing plist metadata from the canonical message bytes;
-- rejects `.partial.emlx` because detached payloads cannot be reconstructed
-  byte-for-byte;
+- reports and skips `.partial.emlx` during directory import, and rejects direct
+  selection, because detached payloads cannot be reconstructed byte-for-byte;
 - ignores Mail databases, plist files, attachment directories, and
   `.emlxpart` fragments as independent messages; and
 - derives logical mailbox names from the containing `.mbox` package hierarchy
@@ -107,14 +107,17 @@ The September 6, 2026 comparison on this computer found:
 
 | Classification | Count |
 | --- | ---: |
-| Complete Apple Mail records compared | 102,192 |
+| Complete Apple Mail records compared | 102,193 |
 | Exact raw-byte matches | 12,426 |
 | h3 matches with different raw bytes | 20,046 |
-| Complete cache records with no archive h3 match | 69,720 |
+| Complete cache records with no archive h3 match | 69,721 |
 | Canonical archive messages represented by a cache h3 | 43,066 |
 | Canonical archive messages with no cache h3 | 1,157,725 |
 
 Of the 20,046 semantic-only pairs, 19,537 differed only in header formatting.
+The provider-stratified run found five populated categories: Gmail, Microsoft
+Exchange/EWS, other IMAP, POP, and local mail; no account was unknown. Its
+complete EMLX counts were 93,531, 7,273, 1,084, 101, and 204 respectively.
 The aggregate report found 508 occurrences each of Apple-only `Received`,
 `Return-Path`, and `X-Mailer`, and 508 occurrences of archive-only
 `X-Universally-Unique-Identifier`. One pair lacked `X-GM-THRID` and
@@ -122,7 +125,8 @@ The aggregate report found 508 occurrences each of Apple-only `Received`,
 value. Some h3 values identify more than one canonical archive record, so the
 tool reports ambiguous matches and chooses the candidate with the smallest
 header delta only for aggregate header analysis. The Envelope Index WAL
-changed during the scan, so these remain point-in-time results.
+changed during the scan, and one new complete Gmail record appeared between
+the initial and provider-stratified runs, so these remain point-in-time results.
 
 ## Rerunning ingest and duplicate identity
 
@@ -168,8 +172,8 @@ Known consumer domains need no DNS lookup; transient DNS and token-refresh
 transport failures are disclosed as errors rather than negative detection or
 fresh consent. Credentials are stored only after the profile matches.
 
-A whole Apple Mail cache containing `.partial.emlx` files cannot currently be
-ingested: discovery rejects those files and stops the run. Only a separately
-staged copy containing complete supported records is an available local-file
-bridge. Do not modify the source cache to prepare that copy; the comparator is
-read-only and does not imply whole-cache ingest support.
+Directory import reports and skips `.partial.emlx` records while retaining
+complete supported records. Direct selection of a partial record is rejected.
+This is not a complete mailbox acquisition: detached attachment bytes are not
+reconstructed. Do not modify the source cache; export mail through Apple Mail
+when a complete MBOX source is required.

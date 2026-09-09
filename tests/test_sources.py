@@ -498,15 +498,26 @@ def test_unterminated_empty_rmail_babyl_container_is_rejected(tmp_path: Path) ->
         list(plugin.messages(container, None))
 
 
-def test_partial_apple_mail_message_is_rejected(tmp_path: Path) -> None:
+@pytest.mark.parametrize("empty", [False, True])
+def test_partial_apple_mail_message_is_rejected(tmp_path: Path, empty: bool) -> None:
     """Requirement: detached Apple Mail attachment bytes must not be silently omitted."""
     path = tmp_path / "V10" / "account" / "Inbox.mbox" / "Data" / "Messages" / "7.partial.emlx"
     path.parent.mkdir(parents=True)
     raw = b"Message-ID: <partial@example>\nDate: Thu, 1 Feb 2024 12:00:00 +0000\n\nbody without attachment\n"
-    path.write_bytes(str(len(raw)).encode() + b"\n" + raw)
+    content = b"" if empty else str(len(raw)).encode() + b"\n" + raw
+    path.write_bytes(content)
 
     with pytest.raises(IncompleteAppleMailMessageError, match="omits detached attachment bytes"):
-        list(source_files(tmp_path))
+        list(source_files(path))
+
+    plugin = load_plugins().source("file-folder").implementation
+    discovered = list(plugin.discover(SourceSpec(locator=str(path.parent))))
+    assert len(discovered) == 1
+    skipped = discovered[0]
+    assert isinstance(skipped, SkippedInput)
+    assert skipped.reason_code == "incomplete-apple-mail-message"
+    assert skipped.source.display_name == str(path.resolve())
+    assert path.read_bytes() == content
 
 
 def test_missing_source_is_not_silently_empty(tmp_path: Path) -> None:

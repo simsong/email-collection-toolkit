@@ -259,10 +259,18 @@
     const locationsBounds = document.getElementById("provenance-section").getBoundingClientRect();
     assert(wellBounds.bottom - locationsBounds.bottom < 45,
       "locations anchor to the bottom of spare message-pane height");
-    messageContent.style.minHeight = "";
     document.body.classList.add("standalone");
     const standalonePane = document.getElementById("message-pane");
+    // Guarantee overflow independently of platform fonts and asynchronous iframe sizing.
+    messageContent.style.minHeight = `${standalonePane.clientHeight + 600}px`;
     assert(getComputedStyle(standalonePane).overflowY === "auto" && standalonePane.scrollHeight > standalonePane.clientHeight, "standalone message window scrolls to its complete message and locations");
+    standalonePane.scrollTop = standalonePane.scrollHeight;
+    const scrolledLocations = document.getElementById("provenance-section").getBoundingClientRect();
+    const paneBounds = standalonePane.getBoundingClientRect();
+    assert(standalonePane.scrollTop > 0 && scrolledLocations.top >= paneBounds.top
+      && scrolledLocations.bottom <= paneBounds.bottom, "standalone scrolling reaches source locations");
+    standalonePane.scrollTop = 0;
+    messageContent.style.minHeight = "";
     document.body.classList.remove("standalone");
     assert(document.querySelectorAll("#attachment-list .attachment").length === 2, "attachment list displayed");
     assert(!document.getElementById("remote-content").hidden, "remote HTML is initially blocked");

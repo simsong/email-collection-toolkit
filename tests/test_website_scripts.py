@@ -3,10 +3,14 @@
 from pathlib import Path
 
 import pytest
+from yaml import safe_load
 
 from scripts.check_website import validate_png
 
 ZOLA_SHA256 = "54d1a347781b2f32330914fcc02def81c7e3ddb6111b36d1cc89c06557aed1de"
+WORKFLOW_ON = "on"
+RELEASE = "release"
+TYPES = "types"
 
 
 def test_missing_png_reports_a_clear_failure(tmp_path: Path) -> None:
@@ -24,3 +28,38 @@ def test_pages_workflow_pins_and_checks_the_zola_archive() -> None:
 
     assert f"ZOLA_SHA256: {ZOLA_SHA256}" in text
     assert "sha256sum --check" in text
+    configuration = safe_load(text)
+    # PyYAML's YAML 1.1 resolver treats an unquoted "on" key as boolean True.
+    triggers = configuration.get(WORKFLOW_ON, configuration.get(True))
+    assert triggers[RELEASE][TYPES] == ["published"]
+
+
+def test_ci_builds_distributions_and_site_and_retains_browser_traces() -> None:
+    """Requirement: pull requests validate release/site boundaries and retain browser failures."""
+    workflow = Path(__file__).parents[1] / ".github/workflows/continuous-integration.yml"
+    text = workflow.read_text(encoding="utf-8")
+
+    assert "run: make distribution-check" in text
+    assert "run: make website-build-check" in text
+    assert "name: Upload Playwright failure traces" in text
+    assert "path: test-results" in text
+
+
+def test_release_workflow_validates_built_distributions() -> None:
+    """Requirement: a tag cannot create a draft release without artifact smoke validation."""
+    workflow = Path(__file__).parents[1] / ".github/workflows/release.yml"
+    text = workflow.read_text(encoding="utf-8")
+
+    assert "run: make distribution-check" in text
+    gates = (
+        "name: Verify tag signature",
+        "name: Verify annotated tag and project version",
+        "name: Install dependencies",
+        "name: Validate distributions",
+        "name: Build source distribution",
+        "name: Create draft release",
+    )
+    # Test execution order, not merely the presence of a signature-check step.
+    assert [text.index(gate) for gate in gates] == sorted(text.index(gate) for gate in gates)
+    makefile = (workflow.parents[2] / "Makefile").read_text(encoding="utf-8")
+    assert "uv run --no-project --python '>=3.12' python scripts/release_tag.py" in makefile

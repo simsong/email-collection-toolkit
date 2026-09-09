@@ -346,10 +346,10 @@ def test_gui_highlight_configuration_is_packaged_and_rejects_css_injection(tmp_p
     assert application_configuration().gui.search_highlight_background == "#fff59d"
     invalid = tmp_path / "configuration.yaml"
     invalid.write_text(
-        "version: 1\ngui:\n  search_highlight_background: 'yellow; } body { display: none'\n",
+        "version: 1\nmode: replace\ngui:\n  search_highlight_background: 'yellow; } body { display: none'\n",
         encoding="utf-8",
     )
-    with pytest.raises(ValidationError):
+    with pytest.raises(ValidationError, match="gui.search_highlight_background"):
         load_configuration(invalid)
 
 
@@ -405,7 +405,7 @@ def test_gui_application_metadata_names_the_product() -> None:
     metadata = application_metadata()
 
     assert metadata.name == "Mail Archiver"
-    assert metadata.version == "0.0.0"
+    assert metadata.version == "0.1.0.dev1"
     assert metadata.copyright == "Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved."
 
 
@@ -837,11 +837,24 @@ def test_gui_concurrent_drag_exports_have_distinct_temporary_paths(tmp_path: Pat
     assert destination.read_bytes() == MULTIPART_MESSAGE
 
 
-def test_gui_flags_executable_attachment_types() -> None:
-    """Requirement: opening executable-looking attachments requires explicit confirmation."""
-    assert is_risky("installer.dmg", "application/octet-stream")
-    assert is_risky("script", "application/x-sh")
-    assert not is_risky("report.pdf", "application/pdf")
+@pytest.mark.parametrize(("filename", "content_type", "risky"), [
+    ("installer.dmg", "application/octet-stream", True),
+    ("archive.tar", "application/x-tar", True),
+    ("archive.gz", "application/gzip", True),
+    ("archive.7z", "application/x-7z-compressed", True),
+    ("archive.rar", "application/vnd.rar", True),
+    ("document.docm", "application/vnd.ms-word.document.macroenabled.12", True),
+    ("results.csv", "text/csv", True),
+    ("script", "application/x-sh", True),
+    ("picture.png", "application/octet-stream", True),
+    ("document.pdf.exe", "application/pdf", True),
+    ("report.pdf", "application/pdf", False),
+    ("picture.PNG", "image/png", False),
+    ("notes.txt", "text/plain", False),
+])
+def test_gui_attachment_confirmation(filename: str, content_type: str, risky: bool) -> None:
+    """Requirement: only a matching inert MIME/suffix pair opens without confirmation."""
+    assert is_risky(filename, content_type) is risky
 
 
 def test_gui_external_links_require_a_safe_explicit_destination(tmp_path: Path) -> None:
