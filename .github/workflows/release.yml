@@ -31,14 +31,6 @@ jobs:
           python-version: "3.12"
       - name: Set up uv
         uses: astral-sh/setup-uv@v10.0.1
-      - name: Install dependencies
-        run: uv sync --locked --all-groups
-      - name: Validate distributions
-        run: make distribution-check
-      - name: Verify annotated tag and project version
-        env:
-          RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
-        run: uv run python scripts/release_tag.py --tag "$RELEASE_TAG" --require-annotated
       - name: Verify tag signature
         env:
           GH_TOKEN: ${{ github.token }}
@@ -46,6 +38,14 @@ jobs:
         run: |
           tag_object="$(git rev-parse "refs/tags/$RELEASE_TAG")"
           test "$(gh api "repos/$GITHUB_REPOSITORY/git/tags/$tag_object" --jq '.verification.verified')" = true
+      - name: Verify annotated tag and project version
+        env:
+          RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
+        run: make release-tag-check GITHUB_REF_NAME="$RELEASE_TAG" ARGS=--require-annotated
+      - name: Install dependencies
+        run: uv sync --locked --all-groups
+      - name: Validate distributions
+        run: make distribution-check
       # make ruff uses uv run --locked, which syncs the default dev group
       # (including Ruff) even when the runner has no project virtualenv yet.
       - name: Require clean Ruff checks

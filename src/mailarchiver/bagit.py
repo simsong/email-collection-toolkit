@@ -13,6 +13,7 @@ import uuid
 from datetime import UTC, datetime
 from email import policy
 from email.parser import BytesParser
+from importlib.metadata import version
 from pathlib import Path
 
 from pydantic import BaseModel
@@ -37,7 +38,6 @@ MAILBAG_HEADERS = (
     "Attachments",
 )
 MAILBAG_ROW_LIMIT = 100_000
-MAILARCHIVER_VERSION = "0.0.0"
 
 
 class MailbagRow(BaseModel):
@@ -289,7 +289,7 @@ def _write_bag_info(archive: Path, byte_count: int, file_count: int, packaged_at
             f"Bagging-Date: {packaged_at.date().isoformat()}",
             f"External-Identifier: {identifier}",
             "Mailbag-Agent: mailarchiver",
-            f"Mailbag-Agent-Version: {MAILARCHIVER_VERSION}",
+            f"Mailbag-Agent-Version: {version('mailarchiver')}",
             f"Payload-Oxum: {byte_count}.{file_count}",
             "MBOX-Format-Details: mboxrd",
             "MBOX-Agent: Python mailbox",

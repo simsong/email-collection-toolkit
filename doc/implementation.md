@@ -65,6 +65,11 @@ hashes, `bag-info.txt`, and the tag manifest last. Successful completion,
 controlled interruption, and publication recovery all use this path. A
 validator never treats an in-progress mismatch as valid.
 
+`bag-info.txt` gets `Mailbag-Agent-Version` from installed package metadata,
+the same version source used by the application. PyInstaller includes that
+metadata with `--copy-metadata mailarchiver`; historical fixture bags retain
+their original writer-version declarations.
+
 `archive.sqlite3` and `search.sqlite3` remain outside the tag manifest. This is
 intentional: SQLite journal state is operational rather than portable BagIt
 fixity, and the search database is disposable. The tag manifest instead covers
@@ -1742,6 +1747,13 @@ requires it and fails clearly.
    retrieval API.
 
 ## Developer validation gates
+
+Release assembly checks the GitHub tag signature, then runs the standard-library
+tag/version validator through `make release-tag-check` with `uv --no-project`.
+Only afterward does it install project dependencies and smoke built artifacts.
+The website header and navigation wrap without positional hiding rules.
+`make test-website-navigation` checks the actual header and CSS at mobile,
+tablet, and desktop widths, including reordered links, in headless Chromium.
 
 The shared pr-to-ready source generates the repository skill and Copilot
 instructions. Copilot review requests use `gh pr edit <number> --add-reviewer '@copilot'`

@@ -33,6 +33,13 @@ Before final handoff, complete the copyright decision, current-head CI and
 Copilot review, and resolve any valid findings. Do not call this ledger or a
 backup commit completed publication.
 
+PR #95's first review found three integration inconsistencies: release artifact
+execution preceded tag validation, BagIt writer metadata retained an obsolete
+version, and mobile navigation hid links by position. The follow-up moves the
+release gates before project installation, reads installed writer metadata, and
+keeps navigation visible with wrapping. Regression checks exercise checkpoint
+output, release step order, and actual browser layout with reordered links.
+
 After human merge, fetch/prune and prove each source tip is represented in
 current main before removing its exact clean worktree and local branch.
 Two checkouts contain ignored private research evidence (Gmail h3 review and

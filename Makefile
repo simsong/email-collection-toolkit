@@ -169,7 +169,7 @@ website-build-check: website-check
 
 release-tag-check:
 	@test -n "$(GITHUB_REF_NAME)" || { echo 'usage: make release-tag-check GITHUB_REF_NAME=v1.2.3'; exit 2; }
-	uv run python scripts/release_tag.py --tag "$(GITHUB_REF_NAME)"
+	uv run --no-project --python '>=3.12' python scripts/release_tag.py --tag "$(GITHUB_REF_NAME)" $(ARGS)
 
 test:
 	uv run pytest -q
@@ -239,6 +239,10 @@ test-tika:
 
 test-website:
 	uv run pytest -q tests/test_website_scripts.py
+
+.PHONY: test-website-navigation
+test-website-navigation:
+	uv run pytest -q --browser chromium e2e_tests/test_website_navigation.py
 
 test-plugins:
 	uv run pytest -q tests/test_plugin_loader.py tests/test_source_integrity.py tests/test_archive_integrity.py

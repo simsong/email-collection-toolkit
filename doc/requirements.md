@@ -132,6 +132,10 @@ The archive lives on the encrypted laptop filesystem.  BorgBackup and
 Backblaze provide independent backup; archive-internal encryption is not a
 requirement.
 
+Each new BagIt checkpoint records the installed application version as
+`Mailbag-Agent-Version`. Existing historical bags are not rewritten merely
+because a new software version is installed.
+
 Read-only data-quality audit tools may create derived MBOX, CSV, and JSON
 evidence from a source tree and canonical archive. Those outputs contain
 private message content and metadata, must default to an ignored temporary
@@ -919,6 +923,12 @@ changes separately from software release notes. Website and documentation
 must describe BagIt/Mailbag as native archive storage, not a separate export.
 The Pages build pins its Zola release and verifies the downloaded archive
 against a source-controlled SHA-256 digest before execution.
+
+All primary navigation links remain visible at narrow widths and after
+reordering; the header wraps instead of hiding positional links.
+Release assembly verifies the annotated tag's signature and package version
+before installing project dependencies, building artifacts, or executing their
+entry points. Tag/version validation must not install the project itself.
 
 ## Remote account authorization
 

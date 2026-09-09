@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+* Use installed package metadata for BagIt writer versions, verify release tags
+  before project installation/artifact execution, and keep all mobile navigation
+  links visible regardless of their order.
+
 * Use `gh` with the authorized review-request-only identity for Copilot requests
   instead of controlling the browser.
 

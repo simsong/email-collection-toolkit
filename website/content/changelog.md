@@ -3,6 +3,11 @@ title = "Website changelog"
 description = "Changes to the Mail Archiver website, separate from application releases."
 +++
 
+## 2026-09-08
+
+- Keep all navigation links visible on narrow screens, including Gmail setup
+  and Importing. Links wrap instead of being hidden according to their position.
+
 ## 2026-09-07
 
 - Corrected the home page, curation workflow, and use cases to describe BagIt 1.0
