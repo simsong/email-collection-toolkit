@@ -459,7 +459,7 @@ message-body and optional attachment FTS row IDs. Updating or removing indexed
 content must resolve SHA-256 through that ordinary index and address FTS rows
 by row ID; it must never scan an FTS table by its unindexed SHA-256 column.
 The canonical catalog separately indexes message SHA-256 for FTS-to-message
-lookups. Bounded date-ordered listings must use the date/message index to
+lookups. Unfiltered bounded date-ordered listings must use the date/message index to
 select the requested page before recipient aggregation. Year-scoped reports
 must express their bounds as indexed `date_utc` ranges rather than applying a
 function to every stored date.
@@ -668,6 +668,21 @@ retains the CLI meaning of a subject selector plus a free-text term. A nonempty
 query follows the complete-archive count and automatic result-loading contract
 above. A newer request must supersede an in-progress background search, and the
 status must show its accumulated result count while it runs.
+
+GUI query syntax errors (empty selector values, invalid dates, and unclosed
+quotes) must appear as inline search feedback without a Python bridge exception.
+Search pages and counts must choose filtering indexes before ordering indexes:
+address selectors resolve matching distinct addresses before looking up messages;
+date selectors use indexed UTC ranges under every sort order; body/attachment
+terms use FTS MATCH and catalog hash lookups; mailbox selections start with
+indexed source paths/volumes and observations. Preserve role, AND semantics,
+complete results, and stable ordering. Literal subject substrings may scan the
+subject expression index, but must fetch full message rows only for matches.
+Regression tests must compile typed queries through the production parser and
+SQL builders, bind their unchanged parameters to `EXPLAIN QUERY PLAN`, and
+check filtering searches rather than accepting any mention of an index. Execute
+the same statements to verify results and bound work on sparse large fixtures.
+
 After three characters and a 120-millisecond debounce, the GUI suggests at most
 20 matching addresses and 20 matching subjects with deduplicated message
 counts. Stale responses are discarded. Addresses rank by message count, then

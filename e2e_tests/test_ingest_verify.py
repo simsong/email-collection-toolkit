@@ -260,6 +260,10 @@ def test_message_splitter_resizes_panes_not_columns(
         page.set_viewport_size({"width": 1400, "height": 900})
         page.goto((GUI_DIRECTORY / "index.html").as_uri())
         expect(page.locator("#result-status")).to_have_text("Enter a search.")
+        # Invalid selectors are inline feedback; correcting the query still searches.
+        page.locator("#search").fill("from:")
+        page.locator("#search").press("Enter")
+        expect(page.locator("#result-status")).to_have_text("from: requires a value")
         page.locator("#search").fill("message")
         page.locator("#search").press("Enter")
         page.locator(".result").first.click()

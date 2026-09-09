@@ -782,6 +782,8 @@ class GuiApi:
             self._archive(), query, offset, limit, sort_by, direction,
             search_attachments, mailbox_selections,
         )
+        if page.error is not None:
+            return page.model_dump(mode="json")
         if self.search_window is not None:
             self.search_window.query = query
             if sort_by not in ("date", "subject", "sender") or direction not in ("ascending", "descending"):

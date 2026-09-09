@@ -380,16 +380,17 @@ def test_gui_count_and_search_cover_the_complete_archive_time_span(tmp_path: Pat
     assert not results.has_more
 
 
-def test_gui_unlimited_remainder_continues_the_same_sorted_result_set(tmp_path: Path) -> None:
+@pytest.mark.parametrize("query", ["sender", "To:recipient", "To:recipient sender"])
+def test_gui_unlimited_remainder_continues_the_same_sorted_result_set(tmp_path: Path, query: str) -> None:
     """Requirement: a background continuation starts after the immediate result prefix without duplicates."""
     archive = make_gui_archive(tmp_path)
 
-    summary = search_count(archive, "sender", immediate_limit=1)
+    summary = search_count(archive, query, immediate_limit=1)
     first = search_page(
-        archive, "sender", limit=1, sort_by="subject", direction="ascending",
+        archive, query, limit=1, sort_by="subject", direction="ascending",
     )
     remainder = search_page(
-        archive, "sender", offset=1, limit=0, sort_by="subject", direction="ascending"
+        archive, query, offset=1, limit=0, sort_by="subject", direction="ascending"
     )
 
     assert summary.total is None
@@ -446,6 +447,7 @@ def test_gui_api_records_independent_search_window_state(tmp_path: Path) -> None
     try:
         page = api.search("report", sort_by="subject", direction="ascending")
         api.message(page["results"][0]["message_pk"])
+        assert api.search("from:")["error"] == "from: requires a value"
     finally:
         api.close()
 
@@ -960,4 +962,28 @@ def test_original_mailbox_count_and_search_queries_use_provenance_indexes(tmp_pa
 
     assert any("source_files_hierarchy_volume" in detail for *_prefix, detail in count_plan)
     assert any("observations_source_file_offset" in detail for *_prefix, detail in count_plan)
-    assert any("observations_message_pk" in detail for *_prefix, detail in search_plan)
+    assert any("SEARCH source_files" in detail and "source_files_hierarchy_volume" in detail
+               for *_prefix, detail in search_plan)
+    assert any("SEARCH observations" in detail and "observations_source_file_offset" in detail
+               for *_prefix, detail in search_plan)
+    assert not any("CORRELATED" in detail for *_prefix, detail in search_plan)
+
+
+@pytest.mark.parametrize("query, error", [
+    ("from:", "from: requires a value"),
+    ("To:", "to: requires a value"),
+    ('subject:"unfinished', "search has an unclosed quote"),
+    ("date:yesterday", "date: requires a YYYY-MM-DD date"),
+])
+def test_gui_search_syntax_errors_are_results(tmp_path: Path, query: str, error: str) -> None:
+    """Requirement: invalid GUI queries return feedback without a bridge exception."""
+    archive = make_gui_archive(tmp_path)
+    api = GuiApi(archive)
+    try:
+        result = api.search(query)
+        assert result["error"] == error
+        assert result["results"] == []
+        assert result["has_more"] is False
+        assert api.search("report")["results"]
+    finally:
+        api.close()

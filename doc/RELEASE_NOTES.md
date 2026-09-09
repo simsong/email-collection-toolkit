@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- Audit all query selectors with production-SQL EXPLAIN and execution-budget tests.
+  Fix Any-address searches, sender counts, date filters under alternate sorts,
+  attachment-inclusive counts, mailbox filtering, and subject candidate scans
+  to use their filtering indexes before result ordering.
+
+- Show invalid search syntax inline instead of raising a pywebview exception.
+- Use the existing recipient address index for To/Cc/Bcc substring searches,
+  avoiding per-message recipient probes and forced full-catalog sort scans.
+
 * Use `gh` with the authorized review-request-only identity for Copilot requests
   instead of controlling the browser.
 

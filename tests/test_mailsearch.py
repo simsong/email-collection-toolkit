@@ -10,6 +10,11 @@ import sys
 from os import environ
 from pathlib import Path
 
+import pytest
+from pydantic import BaseModel, Field
+
+from mailarchiver.mailbox_tree import MailboxSelection
+
 from mailarchiver.bagit import initialize_bag
 from mailarchiver.catalog import address_pk, create_catalog, create_search
 from mailarchiver.layout import mbox_directory
@@ -19,9 +24,11 @@ from mailarchiver.mailsearch import (
     SearchTerms,
     SortDirection,
     SortField,
+    _count_statement,
     _recent_text_statement,
     _search_statement,
     format_header,
+    parse_query,
     render_message,
     search_header_page,
     search_headers,
@@ -474,3 +481,125 @@ def test_mail_archive_dir_defaults_and_archive_option_overrides(tmp_path: Path) 
         env={**environ, "MAIL_ARCHIVE_DIR": str(tmp_path / "missing")},
     )
     assert override.returncode == 0, override.stderr
+
+
+@pytest.fixture(scope="module")
+def sparse_search_archive(tmp_path_factory: pytest.TempPathFactory) -> Path:
+    """One older match among 20,000 unrelated messages, recipients and source files."""
+    archive, _ = make_archive(tmp_path_factory.mktemp("search-plans"))
+    catalog = create_catalog(archive / "archive.sqlite3")
+    try:
+        sender = address_pk(catalog, "unrelated@example.net")
+        catalog.executemany(
+            "INSERT INTO messages(message_id_normalized, sha256, sender_address_pk, subject, "
+            "date_utc, date_source, category) VALUES (?, ?, ?, '', '2025-01-01T00:00:00+00:00', 'date', 'Archive')",
+            ((str(number), hashlib.sha256(str(number).encode()).hexdigest(), sender)
+             for number in range(20_000)),
+        )
+        catalog.execute(
+            "INSERT INTO recipients SELECT message_pk, ?, 'to' FROM messages WHERE message_pk > 1",
+            (sender,),
+        )
+        catalog.executemany(
+            "INSERT INTO source_volumes(identity_json, metadata_json, first_observed_at, last_observed_at) "
+            "VALUES (?, '{}', '', '')", (("target",), ("noise",)),
+        )
+        catalog.execute(
+            "INSERT INTO source_files(source_volume_pk, source_path, hierarchy_path, path_kind, source_kind) "
+            "SELECT CASE WHEN message_pk = 1 THEN 1 ELSE 2 END, CAST(message_pk AS TEXT), "
+            "CASE WHEN message_pk = 1 THEN 'mail/one' ELSE 'noise/' || message_pk END, 'file', 'mbox' FROM messages"
+        )
+        catalog.execute("INSERT INTO ingest_runs(started_at) VALUES ('2026-01-01')")
+        catalog.execute(
+            "INSERT INTO observations(run_pk, message_pk, source_file_pk, disposition, detail) "
+            "SELECT 1, message_pk, message_pk, 'archived', '' FROM messages"
+        )
+        catalog.commit()
+    finally:
+        catalog.close()
+    return archive
+
+
+class SearchPlanCase(BaseModel):
+    """Expected access paths and results, independent of SQLite's full plan text."""
+
+    query: str = ""
+    attachments: bool = False
+    selections: list[MailboxSelection] = Field(default_factory=list)
+    matches: int = 1
+    indexes: tuple[str, ...]
+    subject_scan: bool = False
+
+
+@pytest.mark.parametrize("case", [
+    SearchPlanCase(query="any:sender", indexes=("messages_sender_address_pk", "recipients_address_pk")),
+    SearchPlanCase(query="any:copy", indexes=("messages_sender_address_pk", "recipients_address_pk")),
+    SearchPlanCase(query="from:sender", indexes=("messages_sender_address_pk",)),
+    SearchPlanCase(query="from:missing", matches=0, indexes=("messages_sender_address_pk",)),
+    *(SearchPlanCase(query=f"{role}:{value}", indexes=("recipients_address_pk",))
+      for role, value in (("to", "recipient"), ("cc", "copy"), ("bcc", "blind"))),
+    SearchPlanCase(query="date:2024-01-03", indexes=("messages_date_message",)),
+    SearchPlanCase(query="before:2025-01-01", indexes=("messages_date_message",)),
+    SearchPlanCase(query="after:2025-01-01", matches=0, indexes=("messages_date_message",)),
+    SearchPlanCase(query="agenda", indexes=("messages_sha256",)),
+    SearchPlanCase(query='"meeting agenda"', indexes=("messages_sha256",)),
+    SearchPlanCase(query="meeting agenda", indexes=("messages_sha256",)),
+    SearchPlanCase(query="agenda", attachments=True, indexes=("messages_sha256",)),
+    SearchPlanCase(query="missing", attachments=True, matches=0, indexes=("messages_sha256",)),
+    SearchPlanCase(query="from:sender to:recipient before:2025-01-01 agenda",
+                   indexes=("messages_sha256", "recipients_address_pk")),
+    SearchPlanCase(query="subject:planning", indexes=(), subject_scan=True),
+    SearchPlanCase(query="subject:missing", matches=0, indexes=(), subject_scan=True),
+    SearchPlanCase(selections=[MailboxSelection(path="mail")],
+                   indexes=("source_files_hierarchy_volume", "observations_source_file_offset")),
+    SearchPlanCase(selections=[MailboxSelection(volume_identity="target")],
+                   indexes=("source_files_volume_hierarchy", "observations_source_file_offset")),
+    SearchPlanCase(selections=[MailboxSelection(path="mail", volume_identity="target")],
+                   indexes=("source_files_volume_hierarchy", "observations_source_file_offset")),
+], ids=lambda case: case.query + ("+attachments" if case.attachments else "") or str(case.selections))
+@pytest.mark.parametrize("sort_by", list(SortField))
+def test_search_primitives_use_filter_indexes(sparse_search_archive: Path, case: SearchPlanCase, sort_by: SortField) -> None:
+    """Requirement: pages/counts filter through indexes before sorting, across all primitives.
+
+    EXPLAIN distinguishes SEARCH from a misleading full SCAN USING INDEX.
+    Instruction budgets also catch cheap indexed probes repeated for every message.
+    Literal subject substrings necessarily scan the covering subject index.
+    """
+    archive = sparse_search_archive
+    with sqlite3.connect(f"file:{archive / 'archive.sqlite3'}?mode=ro", uri=True) as catalog:
+        catalog.execute("ATTACH DATABASE ? AS search", (f"file:{archive / 'search.sqlite3'}?mode=ro",))
+        terms = parse_query(case.query)
+        statements = [
+            _search_statement(terms, 10, sort_by=sort_by, direction=direction,
+                              search_attachments=case.attachments, mailbox_selections=case.selections)
+            for direction in SortDirection
+        ]
+        statements.extend(_count_statement(terms, case.attachments, case.selections, maximum)
+                          for maximum in (None, 2))
+        for number, statement in enumerate(statements):
+            plan = [row[3] for row in catalog.execute("EXPLAIN QUERY PLAN " + statement.sql, statement.parameters)]
+            assert not any(step.startswith("SCAN m ") or "CORRELATED" in step for step in plan), plan
+            for index in case.indexes:
+                assert any(step.startswith("SEARCH ") and index in step for step in plan), plan
+            if terms.text:
+                assert any("VIRTUAL TABLE INDEX" in step and ":M" in step for step in plan), plan
+                if case.attachments:
+                    assert any("attachment_fts VIRTUAL TABLE INDEX" in step and ":M" in step for step in plan), plan
+            if case.subject_scan:
+                assert any("SCAN subject_match" in step and "messages_subject_message" in step for step in plan), plan
+            steps = 0
+
+            def budget() -> int:
+                nonlocal steps
+                steps += 100
+                return int(steps > (130_000 if case.subject_scan else 5_000))
+
+            catalog.set_progress_handler(budget, 100)
+            try:
+                rows = catalog.execute(statement.sql, statement.parameters).fetchall()
+            finally:
+                catalog.set_progress_handler(None, 0)
+            if number < 2:
+                assert [row[0] for row in rows] == ([1] if case.matches else [])
+            else:
+                assert rows == [(case.matches,)]
