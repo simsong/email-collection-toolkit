@@ -43,6 +43,12 @@ The second review's body identified an additional contact-filter diagnostic:
 domain exclusions were labelled as local-part failures. Separate reasons now
 identify the matched component; exclusions and local-part precedence are
 unchanged. The four regression cases and the reconciliation tests pass.
+The third review identified non-portable Contacts URI construction; it now uses
+the same `Path.as_uri()` conversion as the catalog validators. Read-only
+special-path and missing-catalog regressions cover the connection behavior.
+CI also exposed a standalone-scroll test that cleared its forced overflow before
+checking for a scrollbar. The test now retains explicit tall content and checks
+that scrolling actually brings source locations into view.
 
 After human merge, fetch/prune and prove each source tip is represented in
 current main before removing its exact clean worktree and local branch.

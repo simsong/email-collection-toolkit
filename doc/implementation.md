@@ -554,6 +554,9 @@ addresses. Optional repeatable `--owner-address` values are exact overrides.
 The command defaults to meaningful Contacts and exposes the all-header
 projection only with `--all`; table, TSV, and JSON output share one typed row
 model.
+Contacts opens the catalog with `Path.resolve().as_uri()` and SQLite `mode=ro`,
+matching the schema validators. This preserves Windows drive-letter URI syntax
+and encodes path characters without allowing database creation or writes.
 Before rendering, it applies the strict versioned `contact_filters.yaml`
 policy. It classifies malformed Unicode/control values and forbidden local-part
 characters as bogus, configured provider/list patterns as mailing lists,
@@ -825,6 +828,9 @@ result list and message pane. Independent
 message windows load the same static application with a message-number parameter;
 their message pane fills the window and scrolls independently so source-location
 evidence remains reachable.
+The headless regression explicitly makes the message taller than its viewport,
+then scrolls to and checks the visibility of source locations; it does not rely
+on font-dependent fixture height or iframe load timing to create overflow.
 The main window polls the latest shared `IngestStatus` once per second and
 renders it in a bottom status line. The separate `ingests.html` application
 polls all typed status files and presents run history beside aggregate and

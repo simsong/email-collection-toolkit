@@ -9,7 +9,10 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+
 from mailarchiver.catalog import address_pk, create_catalog
+from mailarchiver.contacts import _connection
 
 
 def _message(
@@ -99,3 +102,27 @@ def test_contacts_reports_unmatched_owner_alias_without_a_traceback(tmp_path: Pa
     assert result.returncode == 2
     assert "owner aliases did not match a Sent sender address" in result.stderr
     assert "Traceback" not in result.stderr
+
+
+def test_contacts_special_path_is_read_only(tmp_path: Path) -> None:
+    """Requirement: URI-sensitive archive names open the correct catalog without write access."""
+    archive = _archive(tmp_path).rename(tmp_path / "mail #100% café")
+    catalog = archive / "archive.sqlite3"
+    original = catalog.read_bytes()
+    result = _contacts("--archive", str(archive), "human-contacts", "--all", "--format", "tsv")
+    assert result.returncode == 0, result.stderr
+    assert "alice@example.org" in result.stdout
+    database = _connection(archive)
+    try:
+        with pytest.raises(sqlite3.OperationalError, match="readonly"):
+            database.execute("DELETE FROM messages")
+    finally:
+        database.close()
+    assert catalog.read_bytes() == original
+
+
+def test_contacts_missing_catalog_is_not_created(tmp_path: Path) -> None:
+    """Requirement: read-only Contacts never creates an absent source database."""
+    result = _contacts("--archive", str(tmp_path), "human-contacts", "--all")
+    assert result.returncode != 0
+    assert not (tmp_path / "archive.sqlite3").exists()

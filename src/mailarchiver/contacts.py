@@ -6,7 +6,6 @@ import json
 import re
 import sqlite3
 from pathlib import Path
-from urllib.parse import quote
 
 from pydantic import BaseModel, Field
 from tabulate import tabulate
@@ -39,7 +38,7 @@ def load_owner_addresses(path: Path) -> tuple[str, ...]:
 
 def _connection(archive: Path) -> sqlite3.Connection:
     path = (archive / "archive.sqlite3").resolve()
-    return sqlite3.connect(f"file:{quote(str(path))}?mode=ro", uri=True)
+    return sqlite3.connect(f"{path.as_uri()}?mode=ro", uri=True)
 
 
 def _owners(database: sqlite3.Connection, addresses: tuple[str, ...], aliases: tuple[str, ...]) -> tuple[int, ...]:

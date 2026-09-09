@@ -445,8 +445,10 @@ The existing owner-token file remains the ingest classifier until archive setup
 collects exact owner addresses and **File → Properties** can revise them;
 meaningful-contact semantics use those exact addresses, never a name fragment.
 The read-only `human-contacts` command shall provide this initial address-level
-projection in table, TSV, and JSON forms before the Contacts window exists. It
-shall accept a reusable owner-alias file whose values are separated by newlines,
+projection in table, TSV, and JSON forms before the Contacts window exists.
+It opens the catalog read-only using a platform-correct file URI, including archive
+paths with spaces, Unicode, and URI-sensitive characters; it never creates a
+missing catalog. It shall accept a reusable owner-alias file whose values are separated by newlines,
 commas, or semicolons; blank lines and comment lines are ignored. Aliases resolve
 only to catalogued Sent sender addresses, and those resulting exact addresses
 drive the meaningful-contact predicate.

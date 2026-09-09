@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+* Use platform-correct read-only catalog URIs for Contacts. The standalone
+  message scrolling regression now guarantees overflow and verifies actual
+  scrolling to source locations, independent of platform font metrics.
+
 * Distinguish bogus-domain contact-filter diagnostics from bogus local parts
   without changing which addresses are excluded.
 
