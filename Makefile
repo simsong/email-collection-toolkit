@@ -361,3 +361,7 @@ website-screenshots:
 .PHONY: website-gmail-illustrations
 website-gmail-illustrations:
 	uv run --group dev python -m scripts.gmail_setup_illustrations
+
+.PHONY: test-envelopes
+test-envelopes:
+	uv run pytest -q tests/test_envelopes.py tests/test_sources.py tests/test_publication.py tests/test_standalone_verify.py

@@ -59,6 +59,34 @@ Apple Silicon host measured 2.74 GB/s for SHA-256 on 16 KiB blocks, versus
 1.61 GB/s for SHA-512 and 0.98 GB/s for SHA3-256.  Do not require BLAKE3: it
 would add a dependency and is less portable for long-term verification.
 
+## MBOX envelope preservation
+
+`SourceMessage.mbox_envelope` and `MailObject.mbox_envelope` carry one complete
+source delimiter as bytes, separately from `raw`. The MBOX adapter reads the
+physical line at the source offset to retain CRLF as well as LF. The plugin
+boundary rejects multi-line framing. Recognized XXX wrappers retain their nested
+envelope. Publication prepends the envelope to the raw bytes passed to
+`mailbox.mbox.add`; raw hashes and duplicate identity remain unchanged. Leading
+Babyl/EML envelopes already in `raw` remain adopted when no separate envelope
+exists. No message is reserialized.
+
+When framing is absent, `synthetic_envelope` chooses the maximum valid UTC
+Date/Received/Resent-Date/Delivery-Date timestamp, using the existing plausibility
+policy, including `--earliest-year` (default 1900). This is separate from the trimmed Received
+median used for year routing. Missing header dates use the resolved message date
+from source/prior/path metadata; direct low-level calls without that context use
+1970-01-01 UTC. English weekday/month names are locale-independent. These
+fallbacks are estimates, not recovered delivery evidence. Original envelopes
+are preserved even when their date is malformed or disagrees with the headers.
+
+`make test-envelopes` checks actual plugin/ingest/reimport publication, physical
+LF/CRLF delimiter preservation, original SHA-256 and independent bag verification,
+header date ordering/time zones, body exclusion, deterministic missing-date
+fallbacks, and recovery of quoting, missing final newlines and leading envelopes.
+This fixes future publication only. Existing archives require a separately
+approved source-backed rebuild or repair that regenerates location offsets,
+integrity tags and manifests. Ordinary duplicate-skipping reimport is not repair.
+
 ## Native Mailbag storage
 
 [Mailbag 1.0](https://archives.albany.edu/mailbag/spec/) is the native archive

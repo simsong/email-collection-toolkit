@@ -52,6 +52,19 @@ directory, and a `data/mbox/` payload directory.
 
 * Mail is stored only under `data/mbox/` in standard MBOX files, using
   byte-preserving mboxrd quoting. Do not retain a per-message EML corpus.
+* Preserve every available original `From ` record delimiter, including sender,
+  timestamp, whitespace, and line ending. Carry MBOX framing separately from
+  RFC message bytes so message hashes and deduplication stay unchanged. For
+  duplicate RFC messages, the first published observation supplies the envelope.
+  The supported `From XXX` wrapper uses the nested message's delimiter.
+  Only synthesize a delimiter when none exists: use the latest valid timestamp
+  across Date, Received timestamp suffixes, Resent-Date, and Delivery-Date,
+  normalized to UTC, independently of the routing-date median. Invalid or
+  implausible timestamps do not participate. Without a valid header timestamp,
+  use the existing resolved source/prior/path date; a low-level writer without
+  that context uses the fixed Unix epoch, never the current time. Synthesis uses
+  the parsed sender when representable as one ASCII token, otherwise
+  MAILER-DAEMON. Never rewrite a present envelope to conform to these rules.
 * Normal mail is partitioned by resolved message year and category:
   `{YEAR}-Sent1.mbox` and `{YEAR}-Archive1.mbox`.
 * A file rolls over before it reaches 3.75 GiB.  Later parts are named

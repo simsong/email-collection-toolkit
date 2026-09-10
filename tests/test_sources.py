@@ -384,6 +384,7 @@ def test_mbox_parser_excludes_mbcp_metadata_and_unwraps_xxx_records(tmp_path: Pa
     assert messages[0].exclusion_reason == "Eudora MBCP metadata stub"
     assert messages[1].exclusion_reason is None
     assert messages[1].raw == nested
+    assert messages[1].mbox_envelope == b"From actual@example.net Thu Feb  1 12:00:00 2024\n"
 
 
 def test_file_parser_registry_accepts_a_real_extension(tmp_path: Path) -> None:

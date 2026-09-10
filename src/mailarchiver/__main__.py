@@ -1525,7 +1525,11 @@ def _run_ingest(request: IngestRequest, writer_lease: WriterLease, outcome: Inge
                 box = mailbox.mbox(destination, create=True)
                 boxes[destination] = box
             journal_publication(archive, publication)
-            location = add_message(box, destination, raw)
+            location = add_message(
+                box, destination, raw, envelope=candidate.source.mbox_envelope,
+                fallback_date=datetime.fromisoformat(parsed.date_utc), sender=parsed.sender,
+                earliest_year=request.earliest_year,
+            )
             generation = catalog.execute(
                 "INSERT INTO mbox_generations(filename, sha256, message_count, byte_count) VALUES (?, '', 0, 0) "
                 "ON CONFLICT(filename) DO UPDATE SET filename = excluded.filename RETURNING generation_pk",
