@@ -961,6 +961,7 @@ rainbow arcs. Its title, subtitle, description, and tagline are selectable
 HTML text over text-free artwork. The tagline reads "Email has a history. Keep it".
 At narrow widths and browser zoom, the text reflows below the artwork and
 remains available to assistive technology and when images are unavailable.
+The banner's HTML dimensions match its displayed aspect ratio.
 Banner sizing does not require container-query-unit support. The three desktop
 tagline lines have no extra blank lines, and the mobile sentence retains
 copyable spaces between words.

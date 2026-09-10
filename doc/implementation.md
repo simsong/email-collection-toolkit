@@ -939,7 +939,9 @@ home-page template uses a light rainbow design with capability and story cards
 and equal individual and archivist columns. The cover displays the text-free
 `images/cover-artwork.png` derived from the approved banner. CSS fits the
 central artwork into the original wide banner proportions, excluding the
-image generator's blank top and bottom margins. Its title, subtitle,
+image generator's blank top and bottom margins. The image's HTML dimensions
+match the displayed 1312:287 ratio rather than the source file's dimensions.
+Its title, subtitle,
 description, and "Email has a history. Keep it" tagline are semantic HTML
 positioned over the artwork on desktop and in normal flow below it at widths
 of 1000 pixels or less. The decorative image has empty alternative text;
