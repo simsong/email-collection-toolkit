@@ -1928,12 +1928,14 @@ when a complete MBOX source is required.
 The application, installer, documentation, and website use Email Collection
 Toolkit. Repository and Pages URLs use the renamed project. The platform
 settings helper chooses the current application directory, then an existing
-legacy directory, without moving or rewriting settings; Linux configuration,
+legacy directory (checking directory type, not mere path existence), without
+moving or rewriting settings; Linux configuration,
 package imports, CLI names, and archive-format identifiers retain compatibility.
 
 `make website-screenshots` ingests purpose-made messages using the normal
 archive service, then binds real Python services to the shipped HTML in
-Chromium. It captures search and completed import history with no private mail.
+Chromium. Media targets explicitly select the dev dependency group, and search
+capture waits for the rendered result-card count. It captures search and completed import history with no private mail.
 `make website-gmail-illustrations` renders explicitly labeled setup diagrams
 with placeholder account details. The homepage includes the unmodified
 Wikimedia Commons hands/laptop SVG with visible CC BY-SA 4.0 attribution.

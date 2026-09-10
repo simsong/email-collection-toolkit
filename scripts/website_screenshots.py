@@ -7,7 +7,7 @@ from email.message import EmailMessage
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
-from playwright.sync_api import Page, sync_playwright
+from playwright.sync_api import Page, expect, sync_playwright
 
 from mailarchiver.__main__ import IngestRequest, run_ingest
 from mailarchiver.gui_app import GuiApi, IngestWindowApi
@@ -84,7 +84,7 @@ def main() -> None:
                     page.goto((ROOT / "gui/index.html").as_uri())
                     page.locator("#search").fill("exhibition")
                     page.locator("#search-form").evaluate("form => form.requestSubmit()")
-                    page.wait_for_function("state.results.length === 8")
+                    expect(page.locator("#result-list .result")).to_have_count(8)
                     page.locator("#result-list .result").first.click()
                     page.locator("#message-content").wait_for(state="visible")
                     page.wait_for_function("state.resultPreviewPending.size === 0")

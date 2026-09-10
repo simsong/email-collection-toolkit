@@ -473,6 +473,10 @@ def test_renamed_application_preserves_existing_settings(tmp_path: Path) -> None
     preferences.write_bytes(b'{"recent_archives": []}')
     assert application_data_directory(tmp_path) == legacy
     assert preferences.read_bytes() == b'{"recent_archives": []}'
+    current.write_text("unrelated file", encoding="utf-8")
+    assert application_data_directory(tmp_path) == legacy
+    assert current.read_text(encoding="utf-8") == "unrelated file"
+    current.unlink()
     current.mkdir()
     assert application_data_directory(tmp_path) == current
     assert preferences.exists()

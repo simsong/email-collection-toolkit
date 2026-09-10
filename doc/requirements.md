@@ -1452,7 +1452,8 @@ when a complete MBOX source is required.
 All public product text uses Email Collection Toolkit, and repository/Pages
 links use `simsong/email-collection-toolkit`. Existing macOS/Windows preferences
 and OAuth directories remain readable under their prior directory name; new
-installations use the current product name. No source mailbox or canonical
+installations use the current product name. A file at the new directory path
+must not hide an existing legacy settings directory. No source mailbox or canonical
 archive is renamed. Python package and CLI identifiers remain compatible.
 
 The homepage links Collect to Importing, Search to Searching, and preservation

@@ -351,8 +351,8 @@ website-icons:
 
 .PHONY: website-screenshots
 website-screenshots:
-	uv run python -m scripts.website_screenshots
+	uv run --group dev python -m scripts.website_screenshots
 
 .PHONY: website-gmail-illustrations
 website-gmail-illustrations:
-	uv run python -m scripts.gmail_setup_illustrations
+	uv run --group dev python -m scripts.gmail_setup_illustrations
