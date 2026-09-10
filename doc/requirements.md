@@ -940,7 +940,8 @@ release notes, GitHub releases, the current stable `v1.2.3`-shaped tag and
 current beta `v1.2.3-beta1`-shaped tag when present, and project discussions.
 The site uses the Email Collection Toolkit identity and shared stacked-envelope
 SVG and derived PNG icons. Site validation rejects malformed Zola TOML, unreadable configuration, and
-invalid UTF-8 with a path-qualified diagnostic instead of a traceback.
+invalid UTF-8 with a path-qualified diagnostic instead of a traceback, before
+checking for other missing website files.
 Decorative homepage icons are hidden from assistive technology.
 Its home page gives equal prominence to individuals consolidating personal
 exports and archivists curating donor collections. A separate use-cases page

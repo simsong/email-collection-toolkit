@@ -1,5 +1,7 @@
 """Verify project-website validation and workflow integrity controls."""
 
+import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -78,7 +80,8 @@ def test_zola_config_rejects_accidental_template(tmp_path: Path) -> None:
 @pytest.mark.parametrize("failure", ["invalid-utf8", "missing", "directory"])
 def test_zola_config_reports_read_failures(tmp_path: Path, failure: str) -> None:
     """Requirement: unreadable or non-UTF-8 configuration fails without a traceback."""
-    config = tmp_path / "config.toml"
+    (tmp_path / "website").mkdir()
+    config = tmp_path / "website/config.toml"
     if failure == "invalid-utf8":
         config.write_bytes(b'title = "\xff"')
     elif failure == "directory":
@@ -87,3 +90,10 @@ def test_zola_config_reports_read_failures(tmp_path: Path, failure: str) -> None
         validate_config(config)
     assert str(config) in str(caught.value)
     assert caught.value.__suppress_context__
+    result = subprocess.run(
+        [sys.executable, str(Path(__file__).parents[1] / "scripts/check_website.py"),
+         "--root", str(tmp_path)], capture_output=True, text=True, check=False,
+    )
+    assert result.returncode != 0
+    assert result.stderr.startswith(f"invalid Zola configuration {config}:")
+    assert "Traceback" not in result.stderr

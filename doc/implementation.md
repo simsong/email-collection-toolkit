@@ -910,7 +910,7 @@ exact stable and beta tags into Zola data, then deploys a Pages artifact. The
 home-page template uses a light rainbow design with capability and story cards
 and equal individual and archivist columns. The Zola configuration retains the
 existing project URLs under the Email Collection Toolkit title. The checker
-parses its TOML before checking assets and reports file-read, UTF-8 decoding,
+parses its TOML before the generic required-file check and reports file-read, UTF-8 decoding,
 and TOML syntax failures without a traceback; `make website-icons` regenerates PNGs
 from the shared SVG using Chromium, closing the browser even on rendering or
 write failure. Navigation wraps at every width; long

@@ -93,8 +93,9 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--root", type=Path, default=Path(__file__).parents[1])
     root = parser.parse_args().root
+    validate_config(root / "website/config.toml")
     required = [
-        root / "website/config.toml", root / "website/content/_index.md",
+        root / "website/content/_index.md",
         root / "website/content/use-cases.md",
         root / "website/content/about.md", root / "website/content/changelog.md",
         root / "website/content/privacy.md", root / "website/content/rights.md",
@@ -114,7 +115,6 @@ def main() -> int:
     missing = [str(path) for path in required if not path.is_file()]
     if missing:
         raise SystemExit("missing website files: " + ", ".join(missing))
-    validate_config(root / "website/config.toml")
     for path in (
         root / ".github/workflows/continuous-integration.yml",
         root / ".github/workflows/pages.yml",

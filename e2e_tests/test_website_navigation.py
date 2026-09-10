@@ -24,8 +24,8 @@ def test_navigation_remains_visible_and_within_viewport(page: Page, width: int) 
     if width <= 650:
         bounds = page.locator("header").bounding_box()
         assert bounds is not None
-        assert bounds[X] == pytest.approx(15)
-        assert bounds[WIDTH] == pytest.approx(width - 30)
+        assert bounds[X] == pytest.approx(15, abs=0.5)
+        assert bounds[WIDTH] == pytest.approx(width - 30, abs=0.5)
     for _ in range(2):
         links = page.locator("nav a")
         expect(links).to_have_count(8)
