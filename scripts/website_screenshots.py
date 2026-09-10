@@ -87,7 +87,8 @@ def main() -> None:
                     expect(page.locator("#result-list .result")).to_have_count(8)
                     page.locator("#result-list .result").first.click()
                     page.locator("#message-content").wait_for(state="visible")
-                    page.wait_for_function("state.resultPreviewPending.size === 0")
+                    for preview in page.get_by_label("Message preview", exact=True).all():
+                        expect(preview).to_contain_text("Hello Sam")
                     assert page.locator("#error").is_hidden(), page.locator("#error").inner_text()
                     page.screenshot(path=str(OUTPUT / "search-interface.png"))
                     page.close()
