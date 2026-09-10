@@ -4,9 +4,16 @@
 {% set releases = load_data(path="data/releases.toml") %}
 <main>
   <section class="hero-wrap" aria-labelledby="cover-title">
-    <img class="cover-art" src="{{ get_url(path='images/promised-cover.png') }}" width="1312" height="287" fetchpriority="high" alt="Mail Collection Toolkit cover banner with rainbow envelopes and diverging rainbow streaks.">
+    <div class="cover-banner">
+      <img class="cover-art" src="{{ get_url(path='images/cover-artwork.png') }}" width="1312" height="287" fetchpriority="high" alt="">
+      <div class="cover-copy">
+        <h1 id="cover-title">Mail Collection Toolkit</h1>
+        <p class="cover-subtitle">Collect. Preserve. Search. Understand.</p>
+        <p class="cover-description">A modern, open source toolkit for making email a lasting part of the historical record.</p>
+      </div>
+      <p class="cover-tagline"><span>Email</span> <span>has a history.</span> <span>Keep it</span></p>
+    </div>
     <div class="hero shell">
-      <h1 id="cover-title" class="cover-title">Collect. Preserve. Search. Understand.</h1>
       <p class="lede">Collect, preserve, search, and understand email across old computers, backup drives, and exported accounts — while keeping the archive local and verifiable.</p>
       <div class="actions">
         <a class="button primary" href="{{ get_url(path='use-cases/') }}">Explore the toolkit</a>

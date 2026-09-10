@@ -936,15 +936,24 @@ Python application and its About/Dock identity use a stable project asset. The
 SHA-256 verifies the pinned Zola archive before extraction, resolves the newest
 exact stable and beta tags into Zola data, then deploys a Pages artifact. The
 home-page template uses a light rainbow design with capability and story cards
-and equal individual and archivist columns. The cover displays the unchanged
-user-supplied `images/promised-cover.png` (1312 × 287), including its original
-"Mail Collection Toolkit" lettering. Its responsive image keeps both diverging
-streaks visible; introductory text and action links sit below the artwork.
-A text alternative and a mobile heading keep the introduction accessible.
+and equal individual and archivist columns. The cover displays the text-free
+`images/cover-artwork.png` derived from the approved banner. CSS fits the
+central artwork into the original wide banner proportions, excluding the
+image generator's blank top and bottom margins. The image's HTML dimensions
+match the displayed 1312:287 ratio rather than the source file's dimensions.
+Its title, subtitle,
+description, and "Email has a history. Keep it" tagline are semantic HTML
+positioned over the artwork on desktop and in normal flow below it at widths
+of 1000 pixels or less. The decorative image has empty alternative text;
+the visible heading and paragraphs provide the accessible content. Banner text
+uses capped viewport-relative sizes without container-query units. Literal
+spaces between tagline spans are retained for selection and mobile flow;
+Chromium checks verify exactly three desktop lines without whitespace gaps.
 The story card stacks its text above the user-supplied `images/hands-typing.jpg`
 (799 × 372). The photograph scales proportionally without cropping and has a
 caption linking to Image Catalog on Flickr and its stated CC0 dedication.
-`make website-preview` runs a temporary Zola preview on loopback port 1111
+`make website-preview` reuses its disposable `.tmp/website-preview` output
+with Zola `--force` and runs a temporary preview on loopback port 1111
 (overridable with `WEBSITE_PREVIEW_PORT`) without publishing. The Zola configuration retains the
 existing project URLs under the Email Collection Toolkit title. The checker
 parses its TOML before the generic required-file check and reports file-read, UTF-8 decoding,
