@@ -50,3 +50,44 @@ def test_documentation_code_scrolls_within_mobile_page(page: Page) -> None:
     page.add_style_tag(content=(ROOT / "website/static/styles.css").read_text(encoding="utf-8"))
     assert page.evaluate("document.documentElement.scrollWidth <= innerWidth + 1")
     assert page.locator("pre").evaluate("(block) => block.scrollWidth > block.clientWidth")
+
+
+@pytest.mark.parametrize("width", [390, 655, 1312])
+def test_cover_text_remains_accessible_without_artwork(page: Page, width: int) -> None:
+    """Requirement: banner copy is real text and reflows even when artwork cannot load.
+
+    655px represents the effective viewport of a 1310px window at 200% zoom.
+    """
+    template = ROOT / "website/themes/envelope-rainbow/templates/index.html"
+    cover = BeautifulSoup(template.read_text(encoding="utf-8"), "html.parser").find(
+        "section", class_="hero-wrap"
+    )
+    assert cover is not None
+    artwork = cover.find("img")
+    assert artwork is not None
+    artwork["src"] = "data:,"
+    page.set_viewport_size({WIDTH: width, HEIGHT: 900})
+    page.set_content(str(cover))
+    page.add_style_tag(content=(ROOT / "website/static/styles.css").read_text(encoding="utf-8"))
+    expect(page.get_by_role("heading", level=1, name="Mail Collection Toolkit")).to_be_visible()
+    expect(page.get_by_text("Collect. Preserve. Search. Understand.", exact=True)).to_be_visible()
+    expect(page.get_by_text(
+        "A modern, open source toolkit for making email a lasting part of the historical record.",
+        exact=True,
+    )).to_be_visible()
+    expect(page.locator(".cover-tagline")).to_have_text("Email has a history. Keep it")
+    assert page.evaluate("document.documentElement.scrollWidth <= innerWidth + 1")
+    assert page.locator(".cover-description").evaluate(
+        "element => parseFloat(getComputedStyle(element).fontSize) >= 16"
+    )
+    selected_text = page.locator(".cover-banner").evaluate("""element => {
+        const range = document.createRange();
+        range.selectNodeContents(element);
+        const selection = window.getSelection();
+        selection.removeAllRanges();
+        selection.addRange(range);
+        return selection.toString();
+    }""")
+    assert "Mail Collection Toolkit" in selected_text
+    assert "has a history." in selected_text
+    assert "Keep it" in selected_text

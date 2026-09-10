@@ -936,11 +936,14 @@ Python application and its About/Dock identity use a stable project asset. The
 SHA-256 verifies the pinned Zola archive before extraction, resolves the newest
 exact stable and beta tags into Zola data, then deploys a Pages artifact. The
 home-page template uses a light rainbow design with capability and story cards
-and equal individual and archivist columns. The cover displays the unchanged
-user-supplied `images/promised-cover.png` (1312 × 287), including its original
-"Mail Collection Toolkit" lettering. Its responsive image keeps both diverging
-streaks visible; introductory text and action links sit below the artwork.
-A text alternative and a mobile heading keep the introduction accessible.
+and equal individual and archivist columns. The cover displays the text-free
+`images/cover-artwork.png` derived from the approved banner. CSS fits the
+central artwork into the original wide banner proportions, excluding the
+image generator's blank top and bottom margins. Its title, subtitle,
+description, and "Email has a history. Keep it" tagline are semantic HTML
+positioned over the artwork on desktop and in normal flow below it at widths
+of 1000 pixels or less. The decorative image has empty alternative text;
+the visible heading and paragraphs provide the accessible content.
 The story card stacks its text above the user-supplied `images/hands-typing.jpg`
 (799 × 372). The photograph scales proportionally without cropping and has a
 caption linking to Image Catalog on Flickr and its stated CC0 dedication.

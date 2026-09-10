@@ -5,6 +5,9 @@ description = "Changes to the Email Collection Toolkit website, separate from ap
 
 ## 2026-09-10
 
+- Make all banner lettering selectable HTML over text-free artwork, reflow it
+  on small screens, and change the tagline to "Email has a history. Keep it".
+
 - Replace the keyboard clipart with the supplied horizontal photograph, flow it
   below the story text, and credit Image Catalog on Flickr with its CC0 link.
 
