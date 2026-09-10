@@ -1461,9 +1461,9 @@ presence separately from readiness, which remains an ingest preflight check.
 `make test-packaging` exercises missing-scanner failure, explicit opt-out,
 durable evidence, source immutability, and isolated headless diagnostics.
 
-## Compiled Rust/Dioxus desktop direction
+## Compiled desktop UI trials
 
-[DIOXUS.md](DIOXUS.md) records the preferred replacement UI: Rust/Dioxus Desktop
+[DIOXUS.md](DIOXUS.md) records the planned UI trials: Dioxus Desktop and Tauri
 using the system webview, with ingest/search/preservation still in Python.
 The planned typed local Python worker and Rust frontend are not implemented.
 Current `PyWebViewApplication`, `WindowBridge`, HTML/JavaScript, and PyInstaller
@@ -1471,8 +1471,8 @@ sections describe the existing application. They remain the migration baseline,
 not evidence of Dioxus support. Windows full ingest takes priority over Linux
 packaging and still requires backend locking and scanner portability fixes.
 
-Tauri remains a possible alternative; either approach retains the Python
-archive engine.
+Plan comparable trial implementations in Dioxus and Tauri before choosing a
+framework. Either approach retains the Python archive engine.
 
 ## Windows development setup
 
@@ -1480,7 +1480,7 @@ archive engine.
 including automatic and explicit manual ARM64/x64 uv installation:
 MSYS2 supplies Git/Make/shell utilities while uv selects native Windows x64
 CPython 3.12, including under Windows ARM emulation. Rust/MSVC and Dioxus tooling
-prepare for the preferred compiled UI. The guide reuses existing Makefile
+prepare for the Dioxus trial. The guide reuses existing Makefile
 targets and identifies required Windows work. The scanner's unconditional
 `fcntl` import can prevent GUI startup, the writer rejects Windows, and native
 GUI integration and executable/installer targets remain incomplete. This

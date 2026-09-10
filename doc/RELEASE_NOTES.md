@@ -2,11 +2,11 @@
 
 ## Unreleased
 
-* Prefer Rust/Dioxus Desktop with system-webview rendering for the compiled UI;
+* Plan comparable Dioxus Desktop and Tauri trials before choosing the compiled UI;
   retain ingest, search, and archive preservation in Python. Prioritize Windows
   full ingest and defer Linux/snap delivery. This records the migration decision;
   the Dioxus frontend, worker protocol, and Windows installer are not implemented.
-  Tauri remains a possible alternative with the same Python archive engine.
+  The framework decision remains pending trial results.
 
 * Add a clean-Windows development setup guide covering ARM64/x64 uv installation,
   x64 Python on ARM VMs, and the remaining full-ingest and packaging work.

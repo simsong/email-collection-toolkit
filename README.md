@@ -19,14 +19,14 @@ architecture limits, and Developer ID renewal/signing instructions.
 
 ## Windows development
 
-The preferred compiled desktop UI uses **Rust/Dioxus Desktop with the system
-webview**, while ingest, search, and archive preservation remain in Python.
+The compiled desktop UI candidates are **Dioxus Desktop and Tauri**, using Rust
+and the system webview, while ingest, search, and archive preservation remain in Python.
 Windows with full ingest is the next platform priority. This migration is
 planned; the current application remains pywebview. See
 [the desktop architecture decision](doc/DIOXUS.md).
 
-Tauri remains a possible alternative; either approach retains the Python
-archive engine.
+Plan comparable trial implementations in Dioxus and Tauri before choosing a
+framework. Either approach retains the Python archive engine.
 
 See [Windows setup](doc/WINDOWS.md) for clean-install VM directions and the
 remaining work required for full Windows ingest. This is a development setup
@@ -403,7 +403,7 @@ SHA-256; it does not alter canonical message bytes.
 ### Graphical search desktop architecture
 
 The current graphical search tool uses pywebview with WKWebView on macOS.
-The preferred compiled replacement is Rust/Dioxus Desktop, retaining Python
+The compiled replacement candidates are Dioxus Desktop and Tauri, retaining Python
 archive services and system-webview rendering; see [DIOXUS.md](doc/DIOXUS.md).
 The current controller supports multiple archive documents and multiple
 independent search windows on one archive. Packaged GUI assets come from an
@@ -454,7 +454,7 @@ pywebview also supports Windows and Linux, but this application is not yet
 portable: attachment opening currently calls the macOS `open` command, Finder
 drag-out is macOS-specific, and only the Cocoa/WKWebView bridge has been tested.
 The Python writer and scanner also require Windows portability work. Full
-Windows support will be validated with the preferred Dioxus UI and packaged
+Windows support will be validated with the chosen UI framework and packaged
 Python backend; existing browser tests do not establish native Windows support.
 
 ## Test

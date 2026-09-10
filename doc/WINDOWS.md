@@ -1,13 +1,13 @@
 # Windows development setup
 
 This guide prepares a clean Windows 11 system to develop and test Email
-Collection Toolkit's preferred **Rust/Dioxus Desktop UI with a Python backend**,
+Collection Toolkit's planned **compiled Rust desktop experience with a Python backend**,
 including the planned full ingest workflow. See [DIOXUS.md](DIOXUS.md). Use Windows
 directly inside the VMware VM. WSL runs Linux and cannot validate Windows
 filesystem locking, WebView2, Explorer integration, or Windows packaging.
 
-Tauri remains a possible alternative; either approach retains the Python
-archive engine.
+Plan comparable trial implementations in Dioxus and Tauri before choosing a
+framework. Either approach retains the Python archive engine.
 
 **Status:** these directions have been checked against the repository and vendor
 documentation, but have not yet been executed on a clean Windows VM. They set
@@ -170,12 +170,12 @@ If it is missing, use Microsoft's
 to install it; the bootstrapper selects the device architecture. Merely having
 the Edge browser is not the runtime check. See
 [Microsoft's distribution guidance](https://learn.microsoft.com/en-us/microsoft-edge/webview2/concepts/distribution).
-The preferred Dioxus Desktop renderer uses WebView2 on Windows. The current
+The Dioxus Desktop system-webview renderer uses WebView2 on Windows. The current
 Python/pywebview baseline also uses WebView2 and Python.NET; the project sync
 below installs those Python dependencies while the migration is pending.
 
-The following frontend tooling follows the preferred Dioxus path. Tauri-specific
-setup will be documented if that alternative is adopted.
+The following frontend tooling prepares the Dioxus trial. Tauri-specific setup
+will be documented when its trial is introduced; the framework choice is pending.
 
 ### Rust, MSVC, and the Dioxus CLI
 
@@ -229,7 +229,7 @@ An editor such as Visual Studio Code is useful but optional. Select
 `.venv\Scripts\python.exe` as its Python interpreter after the next step.
 
 You do **not** initially need Docker, WSL, Java, or a separate Node.js
-installation. Rust/MSVC are required for the selected UI. PyInstaller and Python test/lint tools are project
+installation. Rust/MSVC are required for the compiled UI trials. PyInstaller and Python test/lint tools are project
 dependencies. The Python Pyright wrapper can provision Node automatically, and
 Python Playwright supplies its driver. If a dependency unexpectedly requires a
 compiler, record the package, Python architecture, and error; first check that
@@ -306,7 +306,7 @@ make gui
 ```
 
 These are **future acceptance steps, not currently passing Windows commands**.
-`make gui` still launches pywebview, not Dioxus. Add separate Dioxus build,
+`make gui` still launches pywebview, not Dioxus. Add separate candidate-framework build,
 launch, and native acceptance targets when the Rust frontend exists; the
 commands above cannot certify that migration.
 `make check` repeats lint/type/unit/Chromium checks and adds the website source
@@ -347,8 +347,8 @@ prerequisite; it is not proof that ClamAV routing passed.
 | Archive writer | Replace the Windows rejection with a native exclusive writer lease, safe directory/file handling, and reparse-point checks. Test independent competing processes, termination, reacquisition, and interrupted publication on NTFS. |
 | Preservation | Exercise byte preservation, mboxrd quoting, malformed MIME, invalid encodings, missing dates, duplicate Message-ID with different content, autosave exclusion, rollover, recovery, and source idempotence. A platform port must not hide existing requirement gaps. |
 | Scanner | Implement Windows discovery, startup serialization, transport, readiness, timeouts, and cleanup. Exercise real EICAR routing, scanner errors, and explicit unscanned import without dropping source messages. |
-| Desktop | Implement the Rust/Dioxus UI and typed local Python worker contract, clipboard, attachment/link opening, dialogs, shortcuts, printing, drag/export, and import-aware close/quit. Exercise native WebView2 and high-DPI scaling. |
-| Packaging | Add Windows build and packaged-app test targets to the Makefile. Bundle the compiled Rust/Dioxus UI, Python worker, dependencies, and assets; handle WebView2, installer/uninstaller, and signing. No Windows EXE/MSI target exists yet; `make dmg` still builds macOS pywebview. |
+| Desktop | Trial Dioxus and Tauri, choose the UI framework, and implement the typed local Python worker contract, clipboard, attachment/link opening, dialogs, shortcuts, printing, drag/export, and import-aware close/quit. Exercise native WebView2 and high-DPI scaling. |
+| Packaging | Add Windows build and packaged-app test targets to the Makefile. Bundle the chosen compiled UI, Python worker, dependencies, and assets; handle WebView2, installer/uninstaller, and signing. No Windows EXE/MSI target exists yet; `make dmg` still builds macOS pywebview. |
 | Release | Run common checks on Windows x64 CI and native UI/ingest tests in this VM, using the same commit as macOS. Test the resulting installer in a clean VM without Git, uv, Python, or MSYS2. Confirm the prospective user's CPU architecture and input formats. |
 
 The initial Windows deliverable must create an archive, ingest supported source
