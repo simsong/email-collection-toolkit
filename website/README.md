@@ -17,5 +17,6 @@ provides the author biography and links to the author and project on GitHub.
 Zola `0.23.4` is pinned in the workflow. To preview locally, install that
 version and run `make website-preview`. The temporary preview is served only on
 `127.0.0.1:1111`; override the port with `WEBSITE_PREVIEW_PORT=...`. Stop it with
-Control-C. Generated files stay in `.tmp/website-preview`. This does not publish
+Control-C. Generated files stay in `.tmp/website-preview`; Zola reuses this
+disposable directory when restarting or rebuilding the preview. This does not publish
 the site.

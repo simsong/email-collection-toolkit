@@ -52,7 +52,7 @@ def test_documentation_code_scrolls_within_mobile_page(page: Page) -> None:
     assert page.locator("pre").evaluate("(block) => block.scrollWidth > block.clientWidth")
 
 
-@pytest.mark.parametrize("width", [390, 655, 1312])
+@pytest.mark.parametrize("width", [390, 655, 1001, 1312, 1920])
 def test_cover_text_remains_accessible_without_artwork(page: Page, width: int) -> None:
     """Requirement: banner copy is real text and reflows even when artwork cannot load.
 
@@ -76,6 +76,15 @@ def test_cover_text_remains_accessible_without_artwork(page: Page, width: int) -
         exact=True,
     )).to_be_visible()
     expect(page.locator(".cover-tagline")).to_have_text("Email has a history. Keep it")
+    tagline = page.locator(".cover-tagline")
+    if width > 1000:
+        # Whitespace between block spans must not introduce anonymous blank lines.
+        height = tagline.evaluate("element => element.getBoundingClientRect().height")
+        line_height = tagline.evaluate("element => parseFloat(getComputedStyle(element).lineHeight)")
+        assert height == pytest.approx(3 * line_height, abs=1)
+    else:
+        # Literal spaces must remain copyable text when the spans flow inline.
+        assert tagline.inner_text() == "Email has a history. Keep it"
     assert page.evaluate("document.documentElement.scrollWidth <= innerWidth + 1")
     assert page.locator(".cover-description").evaluate(
         "element => parseFloat(getComputedStyle(element).fontSize) >= 16"

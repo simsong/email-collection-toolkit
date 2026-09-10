@@ -167,7 +167,7 @@ website-check:
 .PHONY: website-preview
 WEBSITE_PREVIEW_PORT ?= 1111
 website-preview:
-	zola --root website serve --interface 127.0.0.1 --port $(WEBSITE_PREVIEW_PORT) --output-dir "$(CURDIR)/.tmp/website-preview"
+	zola --root website serve --interface 127.0.0.1 --port $(WEBSITE_PREVIEW_PORT) --output-dir "$(CURDIR)/.tmp/website-preview" --force
 
 website-build-check: website-check
 	zola --root website build --output-dir "$(CURDIR)/.tmp/website-check" --force

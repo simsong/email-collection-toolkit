@@ -961,6 +961,9 @@ rainbow arcs. Its title, subtitle, description, and tagline are selectable
 HTML text over text-free artwork. The tagline reads "Email has a history. Keep it".
 At narrow widths and browser zoom, the text reflows below the artwork and
 remains available to assistive technology and when images are unavailable.
+Banner sizing does not require container-query-unit support. The three desktop
+tagline lines have no extra blank lines, and the mobile sentence retains
+copyable spaces between words.
 Provide text alternatives and readable introductory text and actions on mobile.
 The horizontal keyboard photograph flows below the home-page story text at
 all widths, preserves the complete image, and includes a linked Flickr credit.
