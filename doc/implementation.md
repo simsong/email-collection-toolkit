@@ -908,7 +908,16 @@ Python application and its About/Dock identity use a stable project asset. The
 SHA-256 verifies the pinned Zola archive before extraction, resolves the newest
 exact stable and beta tags into Zola data, then deploys a Pages artifact. The
 home-page template uses a light rainbow design with capability and story cards
-and equal individual and archivist columns. The Zola configuration retains the
+and equal individual and archivist columns. The cover displays the unchanged
+user-supplied `images/promised-cover.png` (1312 × 287), including its original
+"Mail Collection Toolkit" lettering. Its responsive image keeps both diverging
+streaks visible; introductory text and action links sit below the artwork.
+A text alternative and a mobile heading keep the introduction accessible.
+The story card stacks its text above the user-supplied `images/hands-typing.jpg`
+(799 × 372). The photograph scales proportionally without cropping and has a
+caption linking to Image Catalog on Flickr and its stated CC0 dedication.
+`make website-preview` runs a temporary Zola preview on loopback port 1111
+(overridable with `WEBSITE_PREVIEW_PORT`) without publishing. The Zola configuration retains the
 existing project URLs under the Email Collection Toolkit title. The checker
 parses its TOML before the generic required-file check and reports file-read, UTF-8 decoding,
 and TOML syntax failures without a traceback; `make website-icons` regenerates PNGs

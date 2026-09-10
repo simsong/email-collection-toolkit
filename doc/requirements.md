@@ -943,6 +943,12 @@ SVG and derived PNG icons. Site validation rejects malformed Zola TOML, unreadab
 invalid UTF-8 with a path-qualified diagnostic instead of a traceback, before
 checking for other missing website files.
 Decorative homepage icons are hidden from assistive technology.
+The home-page cover preserves the user-approved banner with joined, diverging
+rainbow streaks. Display the complete image at its original aspect ratio,
+without cropping or replacing the streaks with repeating rainbow arcs.
+Provide text alternatives and readable introductory text and actions on mobile.
+The horizontal keyboard photograph flows below the home-page story text at
+all widths, preserves the complete image, and includes a linked Flickr credit.
 Its home page gives equal prominence to individuals consolidating personal
 exports and archivists curating donor collections. A separate use-cases page
 describes both workflows, including an institutional digital-estate scenario,
