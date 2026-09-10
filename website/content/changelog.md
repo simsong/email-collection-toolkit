@@ -1,6 +1,6 @@
 +++
 title = "Website changelog"
-description = "Changes to the Mail Archiver website, separate from application releases."
+description = "Changes to the Email Collection Toolkit website, separate from application releases."
 +++
 
 ## 2026-09-09
