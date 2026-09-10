@@ -4,7 +4,7 @@
 
 ### Recommended today: Google Takeout
 
-Google Takeout creates a read-only snapshot without granting Mail Archiver
+Google Takeout creates a read-only snapshot without granting Email Collection Toolkit
 access to a Google account. It is the supported Gmail acquisition path today.
 
 1. Open [Google Takeout](https://takeout.google.com/).
@@ -18,7 +18,7 @@ access to a Google account. It is the supported Gmail acquisition path today.
    ready; generation can take from minutes to days.
 6. Download every archive part before its link expires, then extract all parts
    beneath one source directory. Keep the downloaded ZIP files until the
-   Mail Archiver import has been verified.
+   Email Collection Toolkit import has been verified.
 7. Import the extracted directory. The current command-line interface is:
 
    ```console
@@ -29,7 +29,7 @@ access to a Google account. It is the supported Gmail acquisition path today.
 
 Takeout does not delete or modify Gmail. The export contains message content,
 headers, attachments, and Gmail labels. Google writes labels into the
-`X-Gmail-Labels` message header; Mail Archiver preserves the source message
+`X-Gmail-Labels` message header; Email Collection Toolkit preserves the source message
 bytes, although it does not yet expose those labels as structured search
 fields.
 
@@ -37,7 +37,7 @@ Takeout is a snapshot, not an incremental synchronization service. Google does
 not currently offer mail export by date range. Large or repeated exports can
 therefore be expensive in time and disk space. Google can schedule an export
 every two months for one year, but each result still has to be downloaded and
-imported. Reimporting overlapping MBOX content is safe because Mail Archiver
+imported. Reimporting overlapping MBOX content is safe because Email Collection Toolkit
 records source observations and deduplicates only messages with the same
 normalized Message-ID and raw-message SHA-256.
 
@@ -93,7 +93,7 @@ verification succeeds.
 ### Shared Gmail API client
 
 A distributed OAuth build uses one Google Cloud project and one Desktop client
-registered by the Mail Archiver maintainer. End users do not create projects,
+registered by the Email Collection Toolkit maintainer. End users do not create projects,
 obtain client IDs, or register their copies of the program. The installed-app
 client ID and nominal client secret are public client configuration, not a
 confidential credential; each user's refresh token remains private in that
@@ -117,7 +117,7 @@ is for release maintainers only.
 `gmail.readonly` is a restricted scope. A public application that does not
 qualify for an exception must complete Google's restricted-scope review. Google
 says an independent security assessment is required when an application can
-access restricted data from or through a third-party server. Mail Archiver's
+access restricted data from or through a third-party server. Email Collection Toolkit's
 intended architecture is entirely local: neither messages nor tokens pass
 through developer-operated infrastructure. That makes an assessment exemption
 likely, but Google makes the determination during verification.

@@ -1,4 +1,4 @@
-"""Compare complete Apple Mail EMLX records with a Mail Archiver archive read-only."""
+"""Compare complete Apple Mail EMLX records with an Email Collection Toolkit archive read-only."""
 
 from __future__ import annotations
 

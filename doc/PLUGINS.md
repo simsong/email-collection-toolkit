@@ -1,11 +1,11 @@
 # Plug-ins
 
-Mail Archiver currently implements only the two ingest plug-in architectures
+Email Collection Toolkit currently implements only the two ingest plug-in architectures
 described below. They are deliberately separate from the planned geography data
 and visualization extension points; an installed ingest plug-in cannot register
 a graphical menu or render a visualization.
 
-Mail Archiver has two independent generator plug-in layers:
+Email Collection Toolkit has two independent generator plug-in layers:
 
 1. a **source plug-in** enumerates mail containers and streams mail objects from
    a source system; and
@@ -375,5 +375,5 @@ and file-parser plug-ins. The initial API is intentionally limited:
 It will not initially offer arbitrary user-interface extensions, credentials,
 source-mail mutation, or unrestricted archive writes. The API version,
 manifest shape, database capability boundary, canvas lifecycle, and export
-contract remain to be designed in [issue #81](https://github.com/simsong/mail-archiver/issues/81).
+contract remain to be designed in [issue #81](https://github.com/simsong/email-collection-toolkit/issues/81).
 Until then, no visualization plug-in directory or manifest is supported.

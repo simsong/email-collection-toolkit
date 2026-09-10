@@ -90,7 +90,7 @@ def background_image(destination: Path) -> None:
                 ((24, y), (width - 48, size * 2)), attributes,
             )
 
-        text("Mail Archiver", 324, 30, True)
+        text("Email Collection Toolkit", 324, 30, True)
         arrow = AppKit.NSBezierPath.bezierPath()
         for index, point in enumerate(((296, 224), (394, 224), (394, 205),
                                        (430, 230), (394, 255), (394, 236), (296, 236))):
@@ -101,8 +101,8 @@ def background_image(destination: Path) -> None:
         arrow.closePath()
         AppKit.NSColor.colorWithSRGBRed_green_blue_alpha_(0.22, 0.49, 0.75, 1).setFill()
         arrow.fill()
-        text("Drag Mail Archiver to Applications to install", 70, 21)
-        text("Then eject this disk and open Mail Archiver from Applications.", 30, 14)
+        text("Drag Email Collection Toolkit to Applications to install", 70, 21)
+        text("Then eject this disk and open Email Collection Toolkit from Applications.", 30, 14)
     finally:
         AppKit.NSGraphicsContext.restoreGraphicsState()
     destination.write_bytes(bytes(bitmap.TIFFRepresentation()))
@@ -119,7 +119,7 @@ def create_image(app: Path, icon: Path, destination: Path, work: Path) -> None:
         icon_locations={app.name: APP_POSITION, APPLICATIONS: FOLDER_POSITION},
         background=str(background), icon=str(icon),
     )
-    build_dmg(str(destination), "Mail Archiver", settings=settings.model_dump())
+    build_dmg(str(destination), "Email Collection Toolkit", settings=settings.model_dump())
 
 
 def verify_background(path: Path) -> None:

@@ -179,7 +179,7 @@ pywebview's Cocoa backend also creates these native defaults:
 * View: Enter Full Screen.
 
 Before Cocoa creates those menus, the application sets its process and bundle
-identity to **Mail Archiver**, including version and copyright metadata and a
+identity to **Email Collection Toolkit**, including version and copyright metadata and a
 mail-archive system icon. Consequently the application menu and standard About
 panel no longer identify the host Python interpreter.
 

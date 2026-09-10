@@ -3,16 +3,36 @@ title = "Importing"
 description = "Configure local and IMAP sources, then choose a fast refresh or complete source rebuild."
 +++
 
-Mail Archiver is designed to keep an ordered list of acquisition sources in
-each archive. The configured-source interface and live IMAP adapter described
-on this page are planned work. The current release imports explicit local paths
-from the command line; Google Takeout MBOX and complete Apple Mail `.emlx`
-records can be used today.
+Email Collection Toolkit imports supported local email files and folders into
+an archive without changing the sources. Google Takeout MBOX, Maildir, EML,
+Babyl, and complete Apple Mail `.emlx` files can be used today.
+
+## Import with the application
+
+Open or create an archive, then choose **File → Import…**. Select local files
+or folders, enter the archive owner's names when prompted, and review the
+source and destination before confirming. A directory includes supported mail
+files in its subdirectories.
+
+The **Ingests** window shows retained runs, source paths, message counts,
+progress, worker activity, and failures. Open it from **Window → Ingests** or
+click the status line; **Import Directory…** starts another import into that
+window's archive. If antivirus scanning is unavailable, the application warns
+you and requires an explicit choice to import without scanning.
+
+![The import history window showing a completed synthetic collection import](../images/importing-interface.png)
+
+*The working import-history interface after importing synthetic messages.*
+
+## Planned configured sources
+
+The saved-source interface and live IMAP adapter described below are planned
+work. They are separate from the local-file import interface available today.
 
 ## Sources belong to an archive
 
 The planned top-level `archive.yaml` file gives every source a permanent ID.
-That lets Mail Archiver associate later observations and checkpoints with the
+That lets Email Collection Toolkit associate later observations and checkpoints with the
 same source.
 
 | Source | Contents |
@@ -73,5 +93,5 @@ canonical mail.
 Import/Rebuild is not `refresh-index`. The latter reads messages already in the
 archive and replaces only the disposable search index.
 
-See the [user manual](https://github.com/simsong/mail-archiver/blob/main/doc/USER_MANUAL.md)
+See the [user manual](https://github.com/simsong/email-collection-toolkit/blob/main/doc/USER_MANUAL.md)
 for the currently available explicit-path commands.

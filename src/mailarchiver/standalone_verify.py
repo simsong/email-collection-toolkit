@@ -1,9 +1,8 @@
 #!/usr/bin/env python3
-"""Verify the integrity of a Mail Archiver archive.
+"""Verify the integrity of an Email Collection Toolkit archive.
 
 HOW TO RUN
-  Requires Python 3.10 or later, using only its standard library. No Mail
-  Archiver installation or additional Python packages are needed.
+  Requires Python 3.10 or later, using only its standard library. No Email Collection Toolkit installation or additional Python packages are needed.
 
   The commands below use the installed archive copy, verify_mail_archive.py.
   In a source checkout this file is src/mailarchiver/standalone_verify.py;

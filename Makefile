@@ -78,11 +78,11 @@ dmg: ruff syntax-check
 	uv run --group packaging python scripts/build_macos.py $(ARGS)
 
 test-dmg:
-	@test -n "$(DMG)" || { echo 'usage: make test-dmg DMG=/path/to/Mail-Archiver.dmg'; exit 2; }
+	@test -n "$(DMG)" || { echo 'usage: make test-dmg DMG=/path/to/Email-Collection-Toolkit.dmg'; exit 2; }
 	uv run --group packaging python scripts/build_macos.py --test-dmg "$(DMG)"
 
 preview-dmg: ruff
-	@test -n "$(DMG)" || { echo 'usage: make preview-dmg DMG=/path/to/Mail-Archiver.dmg'; exit 2; }
+	@test -n "$(DMG)" || { echo 'usage: make preview-dmg DMG=/path/to/Email-Collection-Toolkit.dmg'; exit 2; }
 	uv run --group packaging python scripts/build_macos.py --preview-dmg "$(DMG)"
 
 self-test:
@@ -348,3 +348,11 @@ test-writer-lock:
 .PHONY: website-icons
 website-icons:
 	uv run python -m scripts.render_website_icons
+
+.PHONY: website-screenshots
+website-screenshots:
+	uv run --group dev python -m scripts.website_screenshots
+
+.PHONY: website-gmail-illustrations
+website-gmail-illustrations:
+	uv run --group dev python -m scripts.gmail_setup_illustrations

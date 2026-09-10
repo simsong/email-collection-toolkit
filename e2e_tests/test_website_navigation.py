@@ -28,13 +28,13 @@ def test_navigation_remains_visible_and_within_viewport(page: Page, width: int) 
         assert bounds[WIDTH] == pytest.approx(width - 30, abs=0.5)
     for _ in range(2):
         links = page.locator("nav a")
-        expect(links).to_have_count(8)
+        expect(links).to_have_count(9)
         for link in links.all():
             expect(link).to_be_visible()
             bounds = link.bounding_box()
             assert bounds is not None
             assert 0 <= bounds[X] and bounds[X] + bounds[WIDTH] <= width
-        expect(page.get_by_role("link", name="Gmail setup")).to_be_visible()
+        expect(page.get_by_role("link", name="Gmail", exact=True)).to_be_visible()
         # Exercise the regression after a real DOM reordering, not an index-string check.
         page.locator("nav").evaluate("(nav) => nav.prepend(nav.lastElementChild)")
 

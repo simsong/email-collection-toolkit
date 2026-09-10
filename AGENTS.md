@@ -157,3 +157,11 @@ and verify the linked worktree has no modified or untracked files. Only then
 remove its linked worktree and delete its local branch. Preserve dirty,
 unmerged, or uncertain worktrees. A superseded PR closed during consolidation
 is not proof that its branch has reached main.
+
+## Website screenshots
+
+When the importing window changes, regenerate `website/static/images/importing-interface.png`
+with `make website-screenshots` and visually inspect the Importing page in the
+same PR. Changes to the search interface likewise require regeneration of
+`search-interface.png` and inspection of both the homepage and Searching page.
+Use only the purpose-made synthetic collection; never publish private mail.

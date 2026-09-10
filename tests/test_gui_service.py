@@ -402,10 +402,10 @@ def test_gui_unlimited_remainder_continues_the_same_sorted_result_set(tmp_path: 
 
 
 def test_gui_application_metadata_names_the_product() -> None:
-    """Requirement: native menus and the About panel identify Mail Archiver, not Python."""
+    """Requirement: native menus and the About panel identify Email Collection Toolkit, not Python."""
     metadata = application_metadata()
 
-    assert metadata.name == "Mail Archiver"
+    assert metadata.name == "Email Collection Toolkit"
     assert metadata.version == "0.1.0.dev1"
     assert metadata.copyright == "Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved."
 

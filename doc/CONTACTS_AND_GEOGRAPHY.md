@@ -72,8 +72,8 @@ The installation-level reference database is shared by all archives:
 
 | Platform | Directory |
 |---|---|
-| macOS | `~/Library/Application Support/Mail Archiver/geography/` |
-| Windows | `%LOCALAPPDATA%\\Mail Archiver\\geography\\` |
+| macOS | `~/Library/Application Support/Email Collection Toolkit/geography/` |
+| Windows | `%LOCALAPPDATA%\\Email Collection Toolkit\\geography\\` |
 | Linux | `$XDG_DATA_HOME/mailarchiver/geography/`, or `~/.local/share/mailarchiver/geography/` |
 
 The planned `make geography-data` target will refresh this data. The future **Tools → Update Geo

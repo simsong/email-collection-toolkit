@@ -24,6 +24,10 @@ REQUIRED_TEXT = (
     "/discussions/56",
     "gmail-authorization/",
     "importing/",
+    "searching/",
+    "https://www.epaddproject.org/",
+    "https://www.rfc-editor.org/rfc/rfc8493",
+    "https://creativecommons.org/licenses/by-sa/4.0/",
     "advanced/",
     "h3 semantic-message v1",
     "Apple Mail as a temporary provider adapter",
@@ -55,7 +59,7 @@ FORBIDDEN_TEXT = (
     "Built for personal memory and archival stewardship",
     "Search the decades you already saved",
     "Preserve the messages. Understand the collection",
-    "Mail Archiver exports a BagIt",
+    "Email Collection Toolkit exports a BagIt",
     "Export a BagIt",
     "The export uses MBOX, BagIt",
 )
@@ -106,6 +110,11 @@ def main() -> int:
         root / "website/themes/envelope-rainbow/templates/section.html",
         root / "website/content/gmail-authorization.md",
         root / "website/content/importing.md",
+        root / "website/content/searching.md",
+        root / "website/static/images/search-interface.png",
+        root / "website/static/images/importing-interface.png",
+        root / "website/static/images/hands-typing.svg",
+        root / "website/static/images/ATTRIBUTION.md",
         root / "website/content/advanced.md",
         root / "website/content/oauth-client-registration.md",
         root / "website/static/icons/rainbow-post.svg", root / "gui/icons/rainbow-post.svg",
@@ -150,7 +159,7 @@ def main() -> int:
         path = auth_image_directory / name
         width, height = png_size(path)
         if width != 1800 or height < 1200:
-            raise SystemExit(f"unexpected Gmail authorization screenshot size: {path}")
+            raise SystemExit(f"unexpected Gmail authorization illustration size: {path}")
     print("website assets and required links are valid")
     return 0
 

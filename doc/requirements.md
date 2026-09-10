@@ -677,7 +677,7 @@ On macOS, one source picker accepts files and directories together with an
 the destination archive and its message shows the full destination path.
 Selecting an entire directory, including the currently displayed directory,
 uses recursive discovery. Cancel dismisses the picker without starting ingest.
-Final confirmation shows the Mail Archiver icon and destination heading/path.
+Final confirmation shows the Email Collection Toolkit icon and destination heading/path.
 Both scanned and explicitly unscanned import confirmations use a 560-point-wide,
 selectable message area so archive and source paths need less wrapping, while
 retaining their existing buttons and keyboard defaults.
@@ -922,7 +922,7 @@ All archive commands use `MAIL_ARCHIVE_DIR` as their default archive directory.
 `--archive DIRECTORY` overrides that environment variable. If neither is set,
 the command fails before reading or writing an archive.
 
-The Python GUI identifies itself as **Mail Archiver** and uses the
+The Python GUI identifies itself as **Email Collection Toolkit** and uses the
 source-controlled rainbow-envelope icon in its native application identity.
 The required continuous-integration gate exercises the archive lifecycle and
 complete HTML interface in headless Chromium with disposable fixtures. Native
@@ -935,7 +935,7 @@ watchdogs. The first failure remains the primary report error even when
 shutdown records additional failure phases. A required native-application gate
 would instead need a logged-in Mac and XCUITest/XCUIAutomation.
 The project also publishes a Zola-generated GitHub Pages site at
-`https://simsong.github.io/mail-archiver/`. The site links to the README,
+`https://simsong.github.io/email-collection-toolkit/`. The site links to the README,
 release notes, GitHub releases, the current stable `v1.2.3`-shaped tag and
 current beta `v1.2.3-beta1`-shaped tag when present, and project discussions.
 The site uses the Email Collection Toolkit identity and shared stacked-envelope
@@ -993,7 +993,7 @@ against the command-line account before retaining the token. The refresh token
 is stored under that account in the operating-system credential store, never in
 the archive, client configuration, terminal output, logs, fixtures, or reports.
 A release provides one public Google Desktop-client configuration registered by
-the Mail Archiver maintainer. End users do not create Cloud projects, configure
+the Email Collection Toolkit maintainer. End users do not create Cloud projects, configure
 consent, obtain client IDs, or supply client files. A build without that
 configuration fails with a distributor-facing error; it must not route an end
 user into registration. Account-specific `--client-secrets` remains a developer
@@ -1446,3 +1446,21 @@ silence them.
 This is not a complete mailbox acquisition: detached attachment bytes are not
 reconstructed. Do not modify the source cache; export mail through Apple Mail
 when a complete MBOX source is required.
+
+## Toolkit identity and website illustrations
+
+All public product text uses Email Collection Toolkit, and repository/Pages
+links use `simsong/email-collection-toolkit`. Existing macOS/Windows preferences
+and OAuth directories remain readable under their prior directory name; new
+installations use the current product name. A file, empty directory, or directory containing only incidental metadata at the new path
+must not hide an existing legacy settings directory. No source mailbox or canonical
+archive is renamed. Python package and CLI identifiers remain compatible.
+
+The homepage links Collect to Importing, Search to Searching, and preservation
+formats to their specifications, with an ePADD project link. Searching documents
+the implemented query forms and viewer controls, with planned features labeled.
+Homepage and Searching share a real synthetic-data search capture; Importing
+shows the real import-history interface. Interface changes require screenshot
+regeneration through the Makefile. External clipart has visible author, source,
+and license attribution. Gmail setup diagrams are labeled as illustrations,
+not screenshots of a live third-party account.

@@ -29,10 +29,10 @@ universal2. Intel builds require a matching Intel Python and dependencies and
 their own validation. Compatibility with older macOS releases must be tested
 on those releases; success on the build Mac is not a compatibility matrix.
 
-Output: `dist/Mail-Archiver-VERSION-ARCH.dmg`. The volume contains
-`Mail Archiver.app` on the left and a shortcut to `/Applications` on the right.
+Output: `dist/Email-Collection-Toolkit-VERSION-ARCH.dmg`. The volume contains
+`Email Collection Toolkit.app` on the left and a shortcut to `/Applications` on the right.
 A pale-blue background shows the app title, a right-pointing arrow, and
-**Drag Mail Archiver to Applications to install**. The 720-by-480-point Finder
+**Drag Email Collection Toolkit to Applications to install**. The 720-by-480-point Finder
 window uses large icons and no toolbar/sidebar; there is no separate instruction
 file to open. Its 720-by-420-point background leaves room for Finder's window
 chrome so the footer stays visible. A build-only `dmgbuild` dependency saves this layout, and the
@@ -57,7 +57,7 @@ preferences; they do not open or import into the user's last archive.
 make self-test
 make self-test-gui
 make test-packaging
-make test-dmg DMG="/absolute/path/to/Mail-Archiver-0.0.0-arm64.dmg"
+make test-dmg DMG="/absolute/path/to/Email-Collection-Toolkit-0.0.0-arm64.dmg"
 ```
 
 The first target displays no windows. The second shows and closes the real
@@ -72,9 +72,9 @@ The shipped executable also accepts `--self-test`, `--self-test-gui`, and
 archive CLI with `--cli`, without a separately installed Python:
 
 ```sh
-"/Applications/Mail Archiver.app/Contents/MacOS/Mail Archiver" --self-test
-"/Applications/Mail Archiver.app/Contents/MacOS/Mail Archiver" --self-test-gui
-"/Applications/Mail Archiver.app/Contents/MacOS/Mail Archiver" --cli --help
+"/Applications/Email Collection Toolkit.app/Contents/MacOS/Email Collection Toolkit" --self-test
+"/Applications/Email Collection Toolkit.app/Contents/MacOS/Email Collection Toolkit" --self-test-gui
+"/Applications/Email Collection Toolkit.app/Contents/MacOS/Email Collection Toolkit" --cli --help
 ```
 
 ## Optional antivirus

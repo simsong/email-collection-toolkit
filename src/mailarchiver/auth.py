@@ -29,6 +29,8 @@ from keyring.errors import KeyringError
 from oauthlib.oauth2 import OAuth2Error
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from .identity import application_data_directory
+
 
 GMAIL_READONLY_SCOPE = "https://www.googleapis.com/auth/gmail.readonly"
 GMAIL_PROFILE_URL = "https://gmail.googleapis.com/gmail/v1/users/me/profile"
@@ -267,10 +269,10 @@ def unavailable_provider_message(provider: MailProvider) -> str | None:
 def user_config_directory() -> Path:
     """Return a platform-local configuration directory without touching an archive."""
     if sys.platform == "darwin":
-        return Path.home() / "Library" / "Application Support" / "Mail Archiver"
+        return application_data_directory(Path.home() / "Library" / "Application Support")
     if os.name == "nt":
         base = Path(os.environ.get("APPDATA", Path.home() / "AppData" / "Roaming"))
-        return base / "Mail Archiver"
+        return application_data_directory(base)
     base = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config"))
     return base / "mailarchiver"
 
@@ -373,7 +375,7 @@ def gcloud_plan(account: MailboxAddress, project_id: str) -> GcloudPlan:
             "create",
             project_id,
             "--name",
-            "Mail Archiver personal Gmail",
+            "Email Collection Toolkit personal Gmail",
             "--account",
             account.address,
         ),
@@ -396,7 +398,7 @@ def console_steps(account: MailboxAddress, project_id: str) -> tuple[ConsoleStep
         ConsoleStep(
             url=f"https://console.cloud.google.com/auth/branding?project={project}",
             instruction=(
-                "Click Get started if necessary. Use app name 'Mail Archiver personal', "
+                "Click Get started if necessary. Use app name 'Email Collection Toolkit personal', "
                 "select your own address for support and contact email, choose External for "
                 "personal Gmail, accept Google's user-data policy, and create the configuration."
             ),
@@ -416,7 +418,7 @@ def console_steps(account: MailboxAddress, project_id: str) -> tuple[ConsoleStep
         ConsoleStep(
             url=f"https://console.cloud.google.com/auth/clients?project={project}",
             instruction=(
-                "Create a client named 'Mail Archiver' with application type Desktop app, "
+                "Create a client named 'Email Collection Toolkit' with application type Desktop app, "
                 "then download its JSON file."
             ),
         ),
@@ -445,7 +447,7 @@ def _create_project_with_gcloud(gcloud: str, account: MailboxAddress) -> str:
 
 def _create_project_in_browser() -> str:
     _open_console("https://console.cloud.google.com/projectcreate")
-    _wait_for_enter("Create a project named 'Mail Archiver personal Gmail'.")
+    _wait_for_enter("Create a project named 'Email Collection Toolkit personal Gmail'.")
     return _project_id(input("Paste the new project ID: "))
 
 
@@ -562,7 +564,7 @@ def authorize_gmail(account: MailboxAddress, secrets_path: Path) -> GmailProfile
             host="127.0.0.1",
             port=0,
             authorization_prompt_message="Authorize Gmail in your browser: {url}",
-            success_message="Mail Archiver authorization completed. You may close this window.",
+            success_message="Email Collection Toolkit authorization completed. You may close this window.",
             timeout_seconds=300,
             login_hint=account.address,
             prompt="consent",

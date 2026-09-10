@@ -16,5 +16,5 @@ weight = 20
 - [The International Internet Preservation Consortium](https://netpreserve.org/)
   is an international organization for web preservation.
 
-These links are starting points for further reading. Mail Archiver does not
+These links are starting points for further reading. Email Collection Toolkit does not
 represent or speak for any of these organizations.

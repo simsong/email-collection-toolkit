@@ -3,14 +3,13 @@ title = "Advanced"
 description = "Identity, repeatable ingest, Apple Mail cache recovery, comparison, and integrity details."
 +++
 
-Mail Archiver preserves source evidence while making repeated acquisition safe.
+Email Collection Toolkit preserves source evidence while making repeated acquisition safe.
 These details matter when the same mail appears in provider exports, backups,
 and working mail-client caches.
 
 ## Apple Mail as a temporary provider adapter
 
-Until direct Gmail, Microsoft 365, and IMAP adapters are implemented, Mail
-Archiver can read complete Apple Mail `.emlx` records from `~/Library/Mail`.
+Until direct Gmail, Microsoft 365, and IMAP adapters are implemented, Email Collection Toolkit can read complete Apple Mail `.emlx` records from `~/Library/Mail`.
 This works for any account Apple Mail has synchronized, including Gmail,
 Exchange Online, Outlook.com, and ordinary IMAP.
 
@@ -31,7 +30,7 @@ the Apple Mail cache has one canonical copy while every source observation is
 retained.
 
 This exact rule is intentionally conservative. If a mail client adds, removes,
-or refolds a header, the raw bytes differ and Mail Archiver preserves that
+or refolds a header, the raw bytes differ and Email Collection Toolkit preserves that
 variant instead of silently discarding evidence.
 
 ## Raw and semantic message hashes
@@ -49,7 +48,7 @@ not header-only: the complete body is included. Selected fields include
 `Message-ID`, `Subject`, `MIME-Version`, `Content-Type`,
 `Content-Transfer-Encoding`, and `Content-Disposition`. Mutable fields such as
 `Status`, `X-Status`, `Received`, and `Return-Path` are excluded. The exact
-byte algorithm is in the [integrity controls](https://github.com/simsong/mail-archiver/blob/main/doc/INTEGRITY_CONTROLS.md).
+byte algorithm is in the [integrity controls](https://github.com/simsong/email-collection-toolkit/blob/main/doc/INTEGRITY_CONTROLS.md).
 
 h3 is used for reconciliation and forensic lookup. It does not authorize the
 importer to merge or delete raw variants.
@@ -90,6 +89,6 @@ The canonical archive uses standard MBOX plus BagIt and Mailbag metadata.
 derived and rebuildable. Run `make verify ARCHIVE=/path/to/archive` after
 ingest or transfer; verification is read-only.
 
-The [user manual](https://github.com/simsong/mail-archiver/blob/main/doc/USER_MANUAL.md)
-and [Apple Mail cache report](https://github.com/simsong/mail-archiver/blob/main/doc/APPLE_MAIL_CACHE.md)
+The [user manual](https://github.com/simsong/email-collection-toolkit/blob/main/doc/USER_MANUAL.md)
+and [Apple Mail cache report](https://github.com/simsong/email-collection-toolkit/blob/main/doc/APPLE_MAIL_CACHE.md)
 provide the complete operational guidance.

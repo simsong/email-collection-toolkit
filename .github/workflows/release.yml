@@ -63,6 +63,6 @@ jobs:
             --repo "$GITHUB_REPOSITORY" \
             --target "$(git rev-parse "$RELEASE_TAG^{commit}")" \
             --draft \
-            --title "Mail Archiver $RELEASE_TAG" \
+            --title "Email Collection Toolkit $RELEASE_TAG" \
             --generate-notes \
             dist/*
