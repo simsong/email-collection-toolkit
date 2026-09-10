@@ -1,10 +1,13 @@
 # Windows development setup
 
 This guide prepares a clean Windows 11 system to develop and test Email
-Collection Toolkit's selected **Rust/Dioxus Desktop UI with a Python backend**,
+Collection Toolkit's preferred **Rust/Dioxus Desktop UI with a Python backend**,
 including the planned full ingest workflow. See [DIOXUS.md](DIOXUS.md). Use Windows
 directly inside the VMware VM. WSL runs Linux and cannot validate Windows
 filesystem locking, WebView2, Explorer integration, or Windows packaging.
+
+Tauri remains a possible alternative; either approach retains the Python
+archive engine.
 
 **Status:** these directions have been checked against the repository and vendor
 documentation, but have not yet been executed on a clean Windows VM. They set
@@ -167,9 +170,12 @@ If it is missing, use Microsoft's
 to install it; the bootstrapper selects the device architecture. Merely having
 the Edge browser is not the runtime check. See
 [Microsoft's distribution guidance](https://learn.microsoft.com/en-us/microsoft-edge/webview2/concepts/distribution).
-The selected Dioxus Desktop renderer uses WebView2 on Windows. The current
+The preferred Dioxus Desktop renderer uses WebView2 on Windows. The current
 Python/pywebview baseline also uses WebView2 and Python.NET; the project sync
 below installs those Python dependencies while the migration is pending.
+
+The following frontend tooling follows the preferred Dioxus path. Tauri-specific
+setup will be documented if that alternative is adopted.
 
 ### Rust, MSVC, and the Dioxus CLI
 

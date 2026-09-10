@@ -1,12 +1,12 @@
-# Compiled desktop UI: Rust and Dioxus
+# Compiled desktop UI: Dioxus preferred, Tauri alternative
 
-Decision: 2026-09-10. The compiled desktop experience will use **Rust with
+Decision: 2026-09-10. The preferred compiled desktop experience uses **Rust with
 Dioxus Desktop's system-webview renderer**. Only the UI moves to Rust. Ingest,
 MIME processing, search, SQLite, scanner orchestration, archive locking, and
-canonical MBOX/SHA-256 preservation remain in Python. Slint and Tauri are not
-the selected UI framework.
+canonical MBOX/SHA-256 preservation remain in Python. **Tauri remains a possible
+alternative** for the compiled desktop experience.
 
-## Selected direction and current status
+## Preferred direction and current status
 
 The current application is Python/pywebview with HTML/CSS/JavaScript and
 macOS-specific integration. `make gui` and `make dmg` still run/build that
@@ -23,6 +23,23 @@ reused; HTML/JavaScript does not become Rust automatically. Tabulator may remain
 behind a JavaScript adapter during migration, with one owner for its DOM subtree.
 [Dioxus desktop documentation](https://dioxuslabs.com/learn/0.7/guides/platforms/desktop/),
 [JavaScript integration](https://dioxuslabs.com/learn/0.7/essentials/ui/escape/).
+
+## Tauri alternative
+
+Keep Tauri available if a prototype demonstrates a better fit for existing
+HTML/CSS/JavaScript reuse, desktop integration, or Python-worker packaging.
+Tauri provides a compiled Rust host around a web frontend and supports bundled
+external binaries. It would let us retain more JavaScript UI logic; adopting
+that approach would revise the Rust UI scope while keeping the Python engine.
+See [Tauri architecture](https://tauri.app/concept/architecture/) and
+[external binaries](https://tauri.app/develop/sidecar/).
+
+Compare a representative search-and-ingest window on macOS and Windows before
+changing the preferred framework. Assess message isolation, progress and
+cancellation, native integration, testing, and installed-app packaging. Both
+options must satisfy the same Python boundary and acceptance requirements below.
+The implementation sequence describes the preferred Dioxus path; Tauri-specific
+tooling and tests would be documented if adopted. Neither frontend exists yet.
 
 ## Python boundary
 
@@ -86,6 +103,6 @@ Pin Rust/Dioxus versions and dependencies when introducing the frontend.
    packaging, and installed-app acceptance. Retain Python validation. Release
    only after full-ingest and clean-install tests pass for the declared matrix.
 
-This is the selected direction, not a report that migration is complete. See
+This is the preferred direction, not a report that migration is complete. See
 [requirements](requirements.md), [implementation](implementation.md), and
 [end-to-end testing](END_TO_END_TESTING.md).

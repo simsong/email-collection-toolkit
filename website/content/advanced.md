@@ -9,13 +9,16 @@ and working mail-client caches.
 
 ## Planned compiled desktop experience
 
-The compiled desktop UI will use Rust/Dioxus Desktop with the system webview.
+The preferred compiled desktop UI uses Rust/Dioxus Desktop with the system webview.
 Ingest, search, and canonical archive preservation remain in Python. Windows
 with full ingest is the next platform priority; Linux/snap delivery is deferred.
 The current application remains Python/pywebview, and this decision is not a
 Windows release announcement. See the
 [architecture decision](https://github.com/simsong/email-collection-toolkit/blob/main/doc/DIOXUS.md)
 for migration and validation requirements.
+
+Tauri remains a possible alternative; either approach retains the Python
+archive engine.
 
 ## Apple Mail as a temporary provider adapter
 

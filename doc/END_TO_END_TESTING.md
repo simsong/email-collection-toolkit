@@ -13,7 +13,7 @@ make test-e2e
 
 ## Dioxus migration boundary
 
-The selected compiled UI is [Rust/Dioxus Desktop](DIOXUS.md), retaining the
+The preferred compiled UI is [Rust/Dioxus Desktop](DIOXUS.md), retaining the
 Python ingest engine. The suite and pywebview bridge descriptions below cover
 the current implementation. Migration must reuse preservation fixtures and
 logical assertions, adapt the frontend driver, test the typed worker protocol,
@@ -21,6 +21,9 @@ and add native Dioxus tests on macOS and Windows. A Chromium pass or skipped
 Cocoa test is not Windows/Dioxus validation. Packaged acceptance must cover full
 ingest, cancellation/recovery, isolated HTML, and clean installation without
 developer runtimes. These migration tests are not implemented yet.
+
+Tauri remains a possible alternative; either approach retains the Python
+archive engine.
 
 ## Synthetic name-resolution benchmark
 

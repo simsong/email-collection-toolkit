@@ -598,14 +598,17 @@ An indexing failure is recorded as a metadata defect and does not reject mail;
 
 ## Desktop application documents and windows
 
-The compiled desktop experience will use Rust/Dioxus Desktop with the system
+The preferred compiled desktop experience uses Rust/Dioxus Desktop with the system
 webview (WKWebView on macOS, WebView2 on Windows). Only the UI moves to Rust;
 ingest, search, scanner orchestration, archive locking, and preservation remain
 in Python. Windows with full ingest is the next platform priority; Linux/snap
-delivery is deferred. [DIOXUS.md](DIOXUS.md) defines the selected migration,
+delivery is deferred. [DIOXUS.md](DIOXUS.md) defines the preferred migration,
 typed local worker boundary, packaging, and native acceptance requirements.
 The worker protocol and Dioxus frontend remain unimplemented. End users must
 receive the compiled UI and bundled Python dependencies together.
+
+Tauri remains a possible alternative; either approach retains the Python
+archive engine.
 
 The current pywebview application uses HTML/CSS/JavaScript and its native Python
 bridge. The following asset-server rules describe that implementation and its

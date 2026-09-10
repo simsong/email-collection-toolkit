@@ -93,7 +93,7 @@ archive on your Apple Silicon Mac. Windows support is planned for v1.1.0.
 ## Deferred from the proposed v1.0.0 scope
 
 Windows GUI/installer and Windows antivirus integration target v1.1.0. The
-selected compiled UI is [Rust/Dioxus Desktop](DIOXUS.md), retaining Python ingest
+preferred compiled UI is [Rust/Dioxus Desktop](DIOXUS.md), retaining Python ingest
 and preservation. This migration is planned and is not part of the current
 pywebview alpha implementation. Windows delivery requires full ingest; Linux/snap
 delivery is deferred. Proposed
@@ -104,6 +104,9 @@ interoperability, alternative canonical layouts, and primary-message-only search
 The user confirmed deferral of Contacts/geography, AI finding aids, OCR/PDF
 import, Gmail API, Microsoft Graph, and primary-message-only search. The other
 deferrals remain recommendations.
+
+Tauri remains a possible alternative; either approach retains the Python
+archive engine.
 
 See [the scope and issue review](V1_0_0_SCOPE.md) for open-issue dispositions,
 integration status, unresolved release decisions, and validation requirements.
