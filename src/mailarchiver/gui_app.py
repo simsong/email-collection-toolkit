@@ -28,6 +28,7 @@ import webview
 from pydantic import BaseModel, Field
 from webview.menu import Menu, MenuAction, MenuSeparator
 
+from .identity import APPLICATION_NAME
 from .__main__ import IngestInterrupted, IngestOutcome, IngestRequest, run_ingest
 from .application import (
     ApplicationController,
@@ -79,7 +80,6 @@ from .writer_lock import ArchiveBusyError, WriterLease
 GUI_DIRECTORY = (Path(getattr(sys, "_MEIPASS")) if getattr(sys, "frozen", False) else Path(__file__).parents[2]) / "gui"
 E2E_DRIVER = Path(__file__).parents[2] / "e2e_tests" / "gui_driver.js"
 DEFAULT_PAGE_SIZE = 100
-APPLICATION_NAME = "Email Collection Toolkit"
 APPLICATION_ICON = GUI_DIRECTORY / "icons" / "rainbow-post-192.png"
 EXTERNAL_LINK_SCHEMES = frozenset({"http", "https", "mailto"})
 INTERNET_CHECK_URL = "https://www.example.com/"

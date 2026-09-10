@@ -479,6 +479,11 @@ def test_renamed_application_preserves_existing_settings(tmp_path: Path) -> None
     current.unlink()
     current.mkdir()
     assert application_data_directory(tmp_path) == legacy
+    (current / ".DS_Store").write_bytes(b"incidental metadata")
+    assert application_data_directory(tmp_path) == legacy
+    (current / "auth").mkdir()
+    assert application_data_directory(tmp_path) == current
+    (current / "auth").rmdir()
     (current / "preferences.json").write_text("{}", encoding="utf-8")
     assert application_data_directory(tmp_path) == current
     assert preferences.exists()

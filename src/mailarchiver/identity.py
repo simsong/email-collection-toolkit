@@ -11,6 +11,7 @@ def application_data_directory(root: Path) -> Path:
     """Use the current directory, falling back to existing pre-rename settings."""
     current = root / APPLICATION_NAME
     legacy = root / LEGACY_DIRECTORY_NAME
-    if legacy.is_dir() and (not current.is_dir() or not any(current.iterdir())):
+    has_settings = (current / "preferences.json").is_file() or (current / "auth").is_dir()
+    if legacy.is_dir() and not has_settings:
         return legacy
     return current
