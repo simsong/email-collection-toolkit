@@ -1832,6 +1832,8 @@ Release assembly checks the GitHub tag signature, then runs the standard-library
 tag/version validator through `make release-tag-check` with `uv --no-project`.
 Only afterward does it install project dependencies and smoke built artifacts.
 The website header and navigation wrap without positional hiding rules.
+Browser geometry checks allow pixel rounding; GUI selection assertions locate
+the live virtual-table row by message ID after asynchronous preview redraws.
 `make test-website-navigation` checks the actual header and CSS at mobile,
 tablet, and desktop widths, including reordered links, in headless Chromium.
 

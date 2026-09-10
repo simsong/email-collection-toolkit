@@ -48,5 +48,5 @@ def test_documentation_code_scrolls_within_mobile_page(page: Page) -> None:
         '</code></pre></div></main>'
     )
     page.add_style_tag(content=(ROOT / "website/static/styles.css").read_text(encoding="utf-8"))
-    assert page.evaluate("document.documentElement.scrollWidth === innerWidth")
+    assert page.evaluate("document.documentElement.scrollWidth <= innerWidth + 1")
     assert page.locator("pre").evaluate("(block) => block.scrollWidth > block.clientWidth")
