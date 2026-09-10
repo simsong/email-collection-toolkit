@@ -1,5 +1,5 @@
 base_url = "https://simsong.github.io/mail-archiver/"
-title = "Mail Archiver"
+title = "Email Collection Toolkit"
 description = "Local software for ingesting, preserving, searching, and reporting on email archives."
 compile_sass = false
 minify_html = true

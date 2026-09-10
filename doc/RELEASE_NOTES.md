@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+* Introduce the Email Collection Toolkit website identity and stacked-envelope
+  application icons; preserve Gmail setup and Advanced navigation, responsive
+  access, and equal personal and archival use cases. Validate Zola TOML before
+  builds and report read/decode failures without a traceback.
+
 - Audit all query selectors with production-SQL EXPLAIN and execution-budget tests.
   Fix Any-address searches, sender counts, date filters under alternate sorts,
   attachment-inclusive counts, mailbox filtering, and subject candidate scans

@@ -907,8 +907,15 @@ Python application and its About/Dock identity use a stable project asset. The
 `envelope-rainbow` theme. GitHub Pages builds it from `main`; the workflow
 SHA-256 verifies the pinned Zola archive before extraction, resolves the newest
 exact stable and beta tags into Zola data, then deploys a Pages artifact. The
-home-page template presents equal individual and archivist columns, while the
-`use-cases.md` content page supplies the detailed personal-archive and donor
+home-page template uses a light rainbow design with capability and story cards
+and equal individual and archivist columns. The Zola configuration retains the
+existing project URLs under the Email Collection Toolkit title. The checker
+parses its TOML before the generic required-file check and reports file-read, UTF-8 decoding,
+and TOML syntax failures without a traceback; `make website-icons` regenerates PNGs
+from the shared SVG using Chromium, closing the browser even on rendering or
+write failure. Navigation wraps at every width; long
+documentation code blocks scroll within the page. The `use-cases.md` content
+page supplies the detailed personal-archive and donor
 digital-estate narratives. It describes BagIt/Mailbag as native archive storage and standard
 MBOX as the ePADD handoff, with planned direct-provider, first-class package
 import, and automated interoperability work labeled explicitly.
@@ -1825,6 +1832,8 @@ Release assembly checks the GitHub tag signature, then runs the standard-library
 tag/version validator through `make release-tag-check` with `uv --no-project`.
 Only afterward does it install project dependencies and smoke built artifacts.
 The website header and navigation wrap without positional hiding rules.
+Browser geometry checks allow pixel rounding; GUI selection assertions locate
+the live virtual-table row by message ID after asynchronous preview redraws.
 `make test-website-navigation` checks the actual header and CSS at mobile,
 tablet, and desktop widths, including reordered links, in headless Chromium.
 

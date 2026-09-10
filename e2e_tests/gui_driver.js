@@ -227,10 +227,13 @@
 
     await search("subject:Bulk", 203, false);
     const firstBulk = rows()[0];
-    firstBulk.click();
-    await waitFor(() => isSelected(firstBulk) && state.selected === Number(firstBulk.dataset.messagePk),
-      "result click selects a message");
     const firstPk = firstBulk.dataset.messagePk;
+    firstBulk.click();
+    // Preview updates can replace the card while message selection is in flight.
+    await waitFor(() => {
+      const liveRow = rows().find(row => row.dataset.messagePk === firstPk);
+      return liveRow && isSelected(liveRow) && state.selected === Number(firstPk);
+    }, "result click selects a message");
     document.getElementById("result-list").dispatchEvent(new KeyboardEvent("keydown", {key: "ArrowDown", bubbles: true}));
     await waitFor(
       () => document.querySelector(".tabulator-selected .result")?.dataset.messagePk !== firstPk,
