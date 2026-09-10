@@ -4,7 +4,17 @@
 
 * Introduce the Email Collection Toolkit website identity and stacked-envelope
   application icons; preserve Gmail setup and Advanced navigation, responsive
-  access, and equal personal and archival use cases. Validate Zola TOML before builds and report read/decode failures without a traceback.
+  access, and equal personal and archival use cases. Validate Zola TOML before
+  builds and report read/decode failures without a traceback.
+
+- Audit all query selectors with production-SQL EXPLAIN and execution-budget tests.
+  Fix Any-address searches, sender counts, date filters under alternate sorts,
+  attachment-inclusive counts, mailbox filtering, and subject candidate scans
+  to use their filtering indexes before result ordering.
+
+- Show invalid search syntax inline instead of raising a pywebview exception.
+- Use the existing recipient address index for To/Cc/Bcc substring searches,
+  avoiding per-message recipient probes and forced full-catalog sort scans.
 
 * Inspect Apple Mail provider metadata using private database/WAL copies, avoiding
   source shared-memory writes. Abort on scanner helper execution errors before

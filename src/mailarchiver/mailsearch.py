@@ -126,24 +126,37 @@ def _search_predicate(
     for address in terms.any_address:
         pattern = contains(address)
         clauses.append(
-            "(lower(sender.address) LIKE ? ESCAPE '\\' OR EXISTS (SELECT 1 FROM recipients r "
-            "JOIN email_addresses a ON a.address_pk = r.address_pk WHERE r.message_pk = m.message_pk "
-            "AND lower(a.address) LIKE ? ESCAPE '\\'))"
+            "m.message_pk IN (WITH matching AS MATERIALIZED ("
+            "SELECT address_pk FROM email_addresses WHERE lower(address) LIKE ? ESCAPE '\\') "
+            "SELECT sent.message_pk FROM matching "
+            "CROSS JOIN messages sent INDEXED BY messages_sender_address_pk "
+            "ON sent.sender_address_pk = matching.address_pk UNION "
+            "SELECT r.message_pk FROM matching "
+            "CROSS JOIN recipients r INDEXED BY recipients_address_pk "
+            "ON r.address_pk = matching.address_pk)"
         )
-        parameters.extend((pattern, pattern))
+        parameters.append(pattern)
     for role, addresses in (("to", terms.to), ("cc", terms.cc), ("bcc", terms.bcc)):
         for address in addresses:
             clauses.append(
-                "EXISTS (SELECT 1 FROM recipients r INDEXED BY recipients_message_role_address "
-                "JOIN email_addresses a ON a.address_pk = r.address_pk "
-                "WHERE r.message_pk = m.message_pk AND r.role = ? AND lower(a.address) LIKE ? ESCAPE '\\')"
+                "m.message_pk IN (SELECT r.message_pk FROM email_addresses a "
+                "CROSS JOIN recipients r INDEXED BY recipients_address_pk "
+                "ON r.address_pk = a.address_pk "
+                "WHERE lower(a.address) LIKE ? ESCAPE '\\' AND r.role = ?)"
             )
-            parameters.extend((role, contains(address)))
+            parameters.extend((contains(address), role))
     for address in terms.from_:
-        clauses.append("lower(sender.address) LIKE ? ESCAPE '\\'")
+        clauses.append(
+            "m.sender_address_pk IN (SELECT address_pk FROM email_addresses "
+            "WHERE lower(address) LIKE ? ESCAPE '\\')"
+        )
         parameters.append(contains(address))
     for subject in terms.subject:
-        clauses.append("lower(m.subject) LIKE ? ESCAPE '\\'")
+        clauses.append(
+            "m.message_pk IN (SELECT subject_match.message_pk "
+            "FROM messages subject_match INDEXED BY messages_subject_message "
+            "WHERE lower(subject_match.subject) LIKE ? ESCAPE '\\')"
+        )
         parameters.append(contains(subject))
     for selected_date in terms.date:
         clauses.append("m.date_utc >= ? AND m.date_utc < ?")
@@ -170,22 +183,55 @@ def _search_predicate(
         alternatives = []
         for selection in mailbox_selections:
             selected = []
+            index = "source_files_hierarchy_volume"
             if selection.volume_identity is not None:
-                selected.append("source_volumes.identity_json = ?")
+                selected.append(
+                    "source_files.source_volume_pk IN (SELECT source_volume_pk FROM source_volumes "
+                    "WHERE identity_json = ?)"
+                )
                 parameters.append(selection.volume_identity)
+                index = "source_files_volume_hierarchy"
             if selection.path:
                 selected.append(
                     "(source_files.hierarchy_path = ? OR "
                     "(source_files.hierarchy_path >= ? AND source_files.hierarchy_path < ?))"
                 )
                 parameters.extend((selection.path, selection.path + "/", selection.path + "0"))
-            alternatives.append("(" + (" AND ".join(selected) if selected else "1") + ")")
-        clauses.append(
-            "EXISTS (SELECT 1 FROM observations INDEXED BY observations_message_pk "
-            "JOIN source_files USING (source_file_pk) JOIN source_volumes USING (source_volume_pk) "
-            "WHERE observations.message_pk = m.message_pk AND (" + " OR ".join(alternatives) + "))"
-        )
+            alternatives.append(
+                f"SELECT observations.message_pk FROM source_files INDEXED BY {index} "
+                "CROSS JOIN observations INDEXED BY observations_source_file_offset USING (source_file_pk) "
+                "WHERE " + (" AND ".join(selected) if selected else "1")
+            )
+        clauses.append("m.message_pk IN (" + " UNION ".join(alternatives) + ")")
     return SearchStatement(sql=" AND ".join(clauses), parameters=parameters)
+
+
+def _candidate_source(
+    terms: SearchTerms,
+    mailbox_selections: list[MailboxSelection] | None,
+    sort_by: SortField | None = None,
+) -> str:
+    """Choose filtering indexes before sort indexes for both pages and counts."""
+    if terms.text:
+        source = "messages m INDEXED BY messages_sha256 "
+    elif terms.any_address or terms.to or terms.cc or terms.bcc or terms.subject or mailbox_selections:
+        # Membership queries supply rowids; category/sort scans defeat sparse filters.
+        source = "messages m NOT INDEXED "
+    elif terms.from_:
+        source = "messages m INDEXED BY messages_sender_address_pk "
+    elif terms.date or terms.before or terms.after or sort_by is SortField.DATE:
+        source = "messages m INDEXED BY messages_date_message "
+    elif sort_by is SortField.SUBJECT:
+        source = "messages m INDEXED BY messages_subject_message "
+    elif sort_by is SortField.SENDER:
+        return (
+            "email_addresses sender INDEXED BY email_addresses_lower_address "
+            "CROSS JOIN messages m INDEXED BY messages_sender_address_pk "
+            "ON m.sender_address_pk = sender.address_pk "
+        )
+    else:
+        source = "messages m "
+    return source + "JOIN email_addresses sender ON sender.address_pk = m.sender_address_pk "
 
 
 def _search_statement(
@@ -221,33 +267,7 @@ def _search_statement(
         parameters.extend((limit, offset))
     elif offset:
         parameters.append(offset)
-    candidate_source = (
-        "messages m INDEXED BY messages_sha256 "
-        "JOIN email_addresses sender ON sender.address_pk = m.sender_address_pk "
-    )
-    if not terms.text:
-        if sort_by is SortField.DATE:
-            candidate_source = (
-                "messages m INDEXED BY messages_date_message "
-                "JOIN email_addresses sender ON sender.address_pk = m.sender_address_pk "
-            )
-        elif sort_by is SortField.SUBJECT:
-            candidate_source = (
-                "messages m INDEXED BY messages_subject_message "
-                "JOIN email_addresses sender ON sender.address_pk = m.sender_address_pk "
-            )
-        else:
-            candidate_source = (
-                "email_addresses sender INDEXED BY email_addresses_lower_address "
-                "CROSS JOIN messages m INDEXED BY messages_sender_address_pk "
-                "ON m.sender_address_pk = sender.address_pk "
-            )
-        if terms.from_:
-            candidate_source = (
-                "email_addresses sender INDEXED BY email_addresses_lower_address "
-                "CROSS JOIN messages m INDEXED BY messages_sender_address_pk "
-                "ON m.sender_address_pk = sender.address_pk "
-            )
+    candidate_source = _candidate_source(terms, mailbox_selections, candidate_sort)
     sql = (
         "WITH candidates AS MATERIALIZED ("
         "SELECT m.message_pk, m.sha256, sender.address AS sender, m.subject, m.date_utc "
@@ -281,12 +301,13 @@ def _count_statement(
         source = (
             "search.message_fts matched "
             "JOIN search.message_metadata metadata ON metadata.message_fts_rowid = matched.rowid "
-            "JOIN messages m INDEXED BY messages_sha256 ON m.sha256 = metadata.sha256"
+            "JOIN messages m INDEXED BY messages_sha256 ON m.sha256 = metadata.sha256 "
+            "JOIN email_addresses sender ON sender.address_pk = m.sender_address_pk "
         )
         where = f"matched.content MATCH ? AND {predicate.sql}"
         parameters = [fts_query(terms.text), *predicate.parameters]
     else:
-        source = "messages m"
+        source = _candidate_source(terms, mailbox_selections)
         where = predicate.sql
         parameters = predicate.parameters.copy()
     limit = " LIMIT ?" if maximum is not None else ""
@@ -296,7 +317,6 @@ def _count_statement(
         sql=(
             "SELECT count(*) FROM (SELECT 1 "
             f"FROM {source} "
-            "JOIN email_addresses sender ON sender.address_pk = m.sender_address_pk "
             f"WHERE {where}{limit})"
         ),
         parameters=parameters,

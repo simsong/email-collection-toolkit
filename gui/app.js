@@ -959,6 +959,10 @@ async function runCompleteSearch(context) {
   ));
   if (request !== state.searchRequest) return;
   if (!first) { updateResultStatus(); return; }
+  if (first.error) {
+    elements["result-status"].textContent = first.error;
+    return;
+  }
   state.highlightTerms = first.highlight_terms;
   appendResults(first.results, request);
   state.offset = first.results.length;

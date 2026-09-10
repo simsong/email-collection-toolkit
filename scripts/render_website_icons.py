@@ -14,16 +14,18 @@ def main() -> None:
     source = (ROOT / "gui/icons/rainbow-post.svg").read_text(encoding="utf-8")
     with sync_playwright() as playwright:
         browser = playwright.chromium.launch()
-        page = browser.new_page()
-        for size in SIZES:
-            page.set_content(
-                f'<style>body {{ margin: 0; }} svg {{ width: {size}px; '
-                f'height: {size}px; display: block; }}</style>{source}'
-            )
-            png = page.locator("svg").screenshot(omit_background=True)
-            for directory in ("gui/icons", "website/static/icons"):
-                (ROOT / directory / f"rainbow-post-{size}.png").write_bytes(png)
-        browser.close()
+        try:
+            page = browser.new_page()
+            for size in SIZES:
+                page.set_content(
+                    f'<style>body {{ margin: 0; }} svg {{ width: {size}px; '
+                    f'height: {size}px; display: block; }}</style>{source}'
+                )
+                png = page.locator("svg").screenshot(omit_background=True)
+                for directory in ("gui/icons", "website/static/icons"):
+                    (ROOT / directory / f"rainbow-post-{size}.png").write_bytes(png)
+        finally:
+            browser.close()
 
 
 if __name__ == "__main__":
