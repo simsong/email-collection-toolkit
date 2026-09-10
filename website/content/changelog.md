@@ -5,6 +5,13 @@ description = "Changes to the Email Collection Toolkit website, separate from ap
 
 ## 2026-09-10
 
+- Replace the keyboard clipart with the supplied horizontal photograph, flow it
+  below the story text, and credit Image Catalog on Flickr with its CC0 link.
+
+- Restore the approved cover artwork with joined, diverging rainbow streaks,
+  replacing the repeating rainbow arcs. Preserve the complete supplied banner
+  and place readable introductory text and links below it.
+
 - Complete the Email Collection Toolkit name and repository-link update.
 - Add Searching, link the homepage capabilities and preservation standards,
   and show real search/import interfaces using synthetic mail.

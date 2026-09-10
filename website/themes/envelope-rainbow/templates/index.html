@@ -3,21 +3,17 @@
 {% block content %}
 {% set releases = load_data(path="data/releases.toml") %}
 <main>
-  <div class="hero-wrap">
-    <div class="rainbow-flow" aria-hidden="true"></div>
-    <section class="hero shell">
-      <div class="hero-copy">
-        <p class="eyebrow">Email Collection Toolkit</p>
-        <h1>Email has a history. Keep it.</h1>
-        <p class="lede">Collect, preserve, search, and understand email across old computers, backup drives, and exported accounts — while keeping the archive local and verifiable.</p>
-        <div class="actions">
-          <a class="button primary" href="{{ get_url(path='use-cases/') }}">Explore the toolkit</a>
-          <a class="button secondary" href="{{ config.extra.readme }}">Read the README</a>
-        </div>
+  <section class="hero-wrap" aria-labelledby="cover-title">
+    <img class="cover-art" src="{{ get_url(path='images/promised-cover.png') }}" width="1312" height="287" fetchpriority="high" alt="Mail Collection Toolkit. Collect. Preserve. Search. Understand. A modern, open source toolkit for making email a lasting part of the historical record. Your email has a history. Keep it. Stacked rainbow envelopes beside two joined rainbow streaks that diverge.">
+    <div class="hero shell">
+      <h1 id="cover-title" class="cover-title">Collect. Preserve. Search. Understand.</h1>
+      <p class="lede">Collect, preserve, search, and understand email across old computers, backup drives, and exported accounts — while keeping the archive local and verifiable.</p>
+      <div class="actions">
+        <a class="button primary" href="{{ get_url(path='use-cases/') }}">Explore the toolkit</a>
+        <a class="button secondary" href="{{ config.extra.readme }}">Read the README</a>
       </div>
-      <div class="hero-message">Email has history.<br>Keep it.</div>
-    </section>
-  </div>
+    </div>
+  </section>
 
   <section class="capabilities shell" aria-label="Core capabilities">
     <article><span class="cap-icon" aria-hidden="true">⇩</span><h2><a href="{{ get_url(path='importing/') }}">Collect</a></h2><p>Bring together mail from exports, old computers, and backup media.</p></article>
@@ -26,7 +22,7 @@
     <article><span class="cap-icon" aria-hidden="true">▤</span><h2>Understand</h2><p>Use reports and finding-aid data to understand the collection as a whole.</p></article>
   </section>
 
-  <section class="story-grid shell">
+  <section class="story-grid shell" id="story">
     <article class="story-card">
       <div class="story-copy">
         <p class="eyebrow">A record of communication</p>
@@ -35,8 +31,8 @@
         <a class="text-link" href="{{ get_url(path='use-cases/') }}">See how collections are used <span aria-hidden="true">→</span></a>
       </div>
       <figure class="typing-art">
-        <img src="{{ get_url(path='images/hands-typing.svg') }}" alt="Clipart of two hands typing on a laptop keyboard" width="512" height="288">
-        <figcaption>Illustration: <a href="https://commons.wikimedia.org/wiki/File:Hands_typing_on_white_laptop_scene.svg">VideoPlasty, adapted by Alexis Jazz</a>, <a href="https://creativecommons.org/licenses/by-sa/4.0/">CC BY-SA 4.0</a>. Used unchanged.</figcaption>
+        <img src="{{ get_url(path='images/hands-typing.jpg') }}" alt="Hands typing on a laptop keyboard beside a window" width="799" height="372" loading="lazy">
+        <figcaption>Photo: <a href="https://www.flickr.com/photos/image-catalog/21713977623">Image Catalog on Flickr</a> · <a href="https://creativecommons.org/publicdomain/zero/1.0/">Public domain (CC0)</a>.</figcaption>
       </figure>
     </article>
 

@@ -164,6 +164,11 @@ check-archive-open:
 website-check:
 	uv run python scripts/check_website.py
 
+.PHONY: website-preview
+WEBSITE_PREVIEW_PORT ?= 1111
+website-preview:
+	zola --root website serve --interface 127.0.0.1 --port $(WEBSITE_PREVIEW_PORT) --output-dir "$(CURDIR)/.tmp/website-preview"
+
 website-build-check: website-check
 	zola --root website build --output-dir "$(CURDIR)/.tmp/website-check" --force
 
