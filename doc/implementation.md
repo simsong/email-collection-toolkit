@@ -1927,8 +1927,8 @@ when a complete MBOX source is required.
 
 The application, installer, documentation, and website use Email Collection
 Toolkit. Repository and Pages URLs use the renamed project. The platform
-settings helper chooses the current application directory, then an existing
-legacy directory (checking directory type, not mere path existence), without
+settings helper chooses the populated current application directory, then an
+existing legacy directory, without
 moving or rewriting settings; Linux configuration,
 package imports, CLI names, and archive-format identifiers retain compatibility.
 

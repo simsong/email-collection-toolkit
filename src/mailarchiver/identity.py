@@ -11,4 +11,6 @@ def application_data_directory(root: Path) -> Path:
     """Use the current directory, falling back to existing pre-rename settings."""
     current = root / APPLICATION_NAME
     legacy = root / LEGACY_DIRECTORY_NAME
-    return legacy if not current.is_dir() and legacy.is_dir() else current
+    if legacy.is_dir() and (not current.is_dir() or not any(current.iterdir())):
+        return legacy
+    return current

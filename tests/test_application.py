@@ -478,5 +478,7 @@ def test_renamed_application_preserves_existing_settings(tmp_path: Path) -> None
     assert current.read_text(encoding="utf-8") == "unrelated file"
     current.unlink()
     current.mkdir()
+    assert application_data_directory(tmp_path) == legacy
+    (current / "preferences.json").write_text("{}", encoding="utf-8")
     assert application_data_directory(tmp_path) == current
     assert preferences.exists()
