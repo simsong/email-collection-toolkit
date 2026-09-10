@@ -1,10 +1,15 @@
 # Mail archive GUI prototype
 
+The compiled replacement UI will use **Rust/Dioxus Desktop**, with Python
+retaining ingest, search, and archive preservation. See
+[the migration decision](../doc/DIOXUS.md). This directory documents the current
+pywebview implementation; no Dioxus frontend or worker bridge exists yet.
+
 This pywebview prototype searches existing mailarchiver archives. Its
 platform-neutral application controller owns multiple archive documents and
 multiple independent search windows; native host adapters use WKWebView on
-macOS and are designed for WebView2 on Windows. It can initialize a selected
-new archive and run the existing typed ingest service against explicitly
+macOS. Windows delivery will use the selected Dioxus UI. The current application
+can initialize a selected new archive and run the typed ingest service against explicitly
 selected local sources. Canonical writes remain inside the ingest engine and
 are guarded by the shared OS writer lease.
 On macOS, the native Dock and About identity use the checked-in 192-pixel PNG

@@ -3,6 +3,13 @@
 Review date: 2026-09-07. This is release planning, not implementation or release
 certification. No version tag or release binary has been published by this task.
 
+Architecture update, 2026-09-10: [Rust/Dioxus Desktop](DIOXUS.md) is selected for
+the compiled UI, retaining the Python archive engine. Windows full ingest is
+the next platform priority; Linux/snap delivery is deferred. This supersedes
+the earlier pywebview Windows direction, without claiming migration completion
+or changing the historical release inventory below. Linked issue titles are
+historical labels; this documentation update does not edit those issues.
+
 ## Evidence and coverage
 
 - GitHub inventory: all 50 open issues and three open PRs at the review snapshot.
@@ -124,7 +131,7 @@ overlapping issues need scoped acceptance criteria; no issue is closed here.
 | [#41 GUI: distinguish message-file and attachment double-click behavior](https://github.com/simsong/email-collection-toolkit/issues/41) | v1.0.0 supporting; reconcile existing work | Confirm acceptance against final release; open issue status alone does not establish implementation. |
 | [#42 GUI: drag single messages as named mid-####.eml files](https://github.com/simsong/email-collection-toolkit/issues/42) | v1.0.0 supporting; reconcile existing work | Confirm acceptance against final release; open issue status alone does not establish implementation. |
 | [#43 GUI: select visible messages and export a ZIP](https://github.com/simsong/email-collection-toolkit/issues/43) | v1.0.0 supporting; reconcile existing work | Confirm acceptance against final release; open issue status alone does not establish implementation. |
-| [#49 Decide the future of the UI](https://github.com/simsong/email-collection-toolkit/issues/49) | v1.0.0 supporting; reconcile existing work | Architecture umbrella; use #78 decision, defer Rust rewrite/Windows. |
+| [#49 Decide the future of the UI](https://github.com/simsong/email-collection-toolkit/issues/49) | v1.0.0 supporting; reconcile existing work | Preserve #78 document model; compiled UI now selects Rust/Dioxus with Python ingest. Migration remains outside the existing alpha implementation. |
 | [#50 IMAP Source](https://github.com/simsong/email-collection-toolkit/issues/50) | v1.0.0 core | Reserved stub; add latest saved-source Refresh/Rebuild decisions. |
 | [#51 Adopt rainbow-post icon and create the initial GitHub Pages site.](https://github.com/simsong/email-collection-toolkit/issues/51) | v1.0.0 supporting; reconcile existing work | Existing icon/site; verify alpha links and current feature claims. |
 | [#62 Store ClamAV-positive messages as encrypted per-message EML files in a quarantine ZIP](https://github.com/simsong/email-collection-toolkit/issues/62) | Proposed later / scope decision | Decide encrypted quarantine ZIP vs current infected MBOX. |
@@ -134,7 +141,7 @@ overlapping issues need scoped acceptance criteria; no issue is closed here.
 | [#70 Enforce one archive writer across GUI windows, CLI processes, and application instances](https://github.com/simsong/email-collection-toolkit/issues/70) | v1.0.0 supporting; reconcile existing work | Verify every new archive writer, including redaction. |
 | [#71 Add pluggable antivirus providers for external ClamAV and Windows AMSI](https://github.com/simsong/email-collection-toolkit/issues/71) | v1.0.0 supporting; reconcile existing work | Mac ClamAV now; Windows AMSI/provider work later. |
 | [#72 Add shared PyInstaller resource packaging and desktop release infrastructure](https://github.com/simsong/email-collection-toolkit/issues/72) | v1.0.0 supporting; reconcile existing work | Shared packaging used by Mac; Windows validation later. |
-| [#73 Make the pywebview GUI fully functional on Windows](https://github.com/simsong/email-collection-toolkit/issues/73) | v1.1.0 Windows | Outside the initial alpha scope; see issue for detailed acceptance criteria. |
+| [#73 Make the pywebview GUI fully functional on Windows](https://github.com/simsong/email-collection-toolkit/issues/73) | v1.1.0 Windows | Historical title; use Dioxus for the compiled UI and retain applicable full-ingest/native acceptance criteria. |
 | [#74 Build, sign, notarize, and publish a self-contained macOS app and DMG](https://github.com/simsong/email-collection-toolkit/issues/74) | v1.0.0 core | Local DMG exists; public signed/notarized release unverified. |
 | [#75 Build and Authenticode-sign a self-contained Windows installer](https://github.com/simsong/email-collection-toolkit/issues/75) | v1.1.0 Windows | Outside the initial alpha scope; see issue for detailed acceptance criteria. |
 | [#76 Define and register the cross-platform Email Collection Toolkit document type](https://github.com/simsong/email-collection-toolkit/issues/76) | v1.0.0 supporting; reconcile existing work | Mac package registration now; Windows association later. |
