@@ -99,6 +99,7 @@ class SourceMessage(BaseModel):
     bytes_done: int
     bytes_total: int
     exclusion_reason: str | None = None
+    mbox_envelope: bytes | None = None
 
 
 class SourceFile(BaseModel):
@@ -304,15 +305,15 @@ class MboxFileParser(FileParser):
                 start, end = message_offsets(box, key)
                 if start < start_offset:
                     continue
-                envelope_record = box.get_bytes(key, from_=True)
-                envelope, _, _ = envelope_record.partition(b"\n")
+                with box.get_file(key, from_=True) as original:
+                    envelope = original.readline()
                 envelope_sender = _mbox_envelope_sender(envelope.rstrip(b"\r"))
                 raw = box.get_bytes(key, from_=False)
                 if mmdf_framed:
                     raw = _without_mmdf_delimiter(raw)
                 exclusion = _mbcp_exclusion(envelope_sender, raw)
                 if envelope_sender == XXX_ENVELOPE_SENDER:
-                    raw = _unwrap_xxx_record(raw)
+                    raw, envelope = _unwrap_xxx_record(raw, envelope)
                 yield SourceMessage(
                     path=source.path,
                     raw=raw,
@@ -320,6 +321,7 @@ class MboxFileParser(FileParser):
                     bytes_done=end,
                     bytes_total=source.byte_length,
                     exclusion_reason=exclusion,
+                    mbox_envelope=envelope,
                 )
         finally:
             box.close()
@@ -464,6 +466,7 @@ class LocalSourcePlugin(SourcePlugin):
                 yield MailObject(
                     work_id=container.work_id,
                     raw=message.raw,
+                    mbox_envelope=message.mbox_envelope,
                     source=container.source,
                     cursor=str(message.source_offset),
                     completed_bytes=message.bytes_done,
@@ -660,18 +663,18 @@ def _mbcp_exclusion(envelope_sender: bytes, raw: bytes) -> str | None:
     return None
 
 
-def _unwrap_xxx_record(raw: bytes) -> bytes:
+def _unwrap_xxx_record(raw: bytes, envelope: bytes) -> tuple[bytes, bytes]:
     separator = HEADER_SEPARATOR.search(raw)
     if separator is None:
-        return raw
+        return raw, envelope
     wrapper = BytesParser(policy=policy.compat32).parsebytes(raw[: separator.end()])
     if not {name.casefold() for name in wrapper} <= XXX_WRAPPER_HEADERS:
-        return raw
+        return raw, envelope
     nested = MBOXRD_QUOTED_FROM.sub(b"", raw[separator.end():])
-    envelope, newline, message = nested.partition(b"\n")
-    if not newline or _mbox_envelope_sender(envelope.rstrip(b"\r")) == b"":
-        return raw
-    return message
+    nested_envelope, newline, message = nested.partition(b"\n")
+    if not newline or _mbox_envelope_sender(nested_envelope.rstrip(b"\r")) == b"":
+        return raw, envelope
+    return message, nested_envelope + newline
 
 
 def _source_paths(source: Path, hierarchy: str = "file-folder") -> Iterator[Path]:

@@ -11,14 +11,14 @@ import os
 import shutil
 import sqlite3
 from collections.abc import Callable, Iterator
-from datetime import datetime
+from datetime import UTC, datetime
 from enum import Enum
 from pathlib import Path
 
 from pydantic import BaseModel
 
 from .layout import integrity_path, mbox_directory, mbox_path
-from .message import ParsedMessage
+from .message import ParsedMessage, parse_date, raw_header_values
 from .search import delete_indexed_message
 from .standalone_verify import IntegrityMessage, write_integrity_file
 
@@ -125,12 +125,40 @@ def mailbox_name(parsed: ParsedMessage, category: str) -> str:
     return f"{datetime.fromisoformat(parsed.date_utc).year}-{category}1.mbox"
 
 
-def add_message(box: mailbox.mbox, path: Path, raw: bytes) -> MboxLocation:
+def synthetic_envelope(
+    raw: bytes, fallback_date: datetime | None = None, sender: str = "MAILER-DAEMON",
+    earliest_year: int = 1900,
+) -> bytes:
+    """Use the latest valid header timestamp, independently of year routing."""
+    dates: list[datetime] = []
+    for field in ("Date", "Received", "Resent-Date", "Delivery-Date"):
+        for value in raw_header_values(raw, field):
+            text = value.decode("ascii", "replace")
+            candidate = parse_date(text.rsplit(";", 1)[-1] if field == "Received" else text, earliest_year)
+            if candidate is not None:
+                dates.append(candidate)
+    date = max(dates) if dates else fallback_date or datetime(1970, 1, 1, tzinfo=UTC)
+    date = date.astimezone(UTC)
+    # Fixed English names keep Unix envelopes independent of process locale.
+    weekday = ("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")[date.weekday()]
+    month = ("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")[date.month - 1]
+    safe_sender = sender if sender and sender.isascii() and not any(c.isspace() for c in sender) else "MAILER-DAEMON"
+    return f"From {safe_sender} {weekday} {month} {date.day:2d} {date:%H:%M:%S %Y}\n".encode("ascii")
+
+
+def add_message(
+    box: mailbox.mbox, path: Path, raw: bytes, *, envelope: bytes | None = None,
+    fallback_date: datetime | None = None, sender: str = "MAILER-DAEMON",
+    earliest_year: int = 1900,
+) -> MboxLocation:
     prior_size = path.stat().st_size if path.exists() else 0
     if shutil.disk_usage(path.parent).free < len(raw) + 1024 * 1024:
         raise DiskFullError(f"insufficient free space before writing {path}")
     try:
-        key = box.add(raw)
+        framed = envelope + raw if envelope is not None else raw
+        if envelope is None and not raw.startswith(b"From "):
+            framed = synthetic_envelope(raw, fallback_date, sender, earliest_year) + raw
+        key = box.add(framed)
         box.flush()
         with path.open("rb") as persisted:
             os.fsync(persisted.fileno())

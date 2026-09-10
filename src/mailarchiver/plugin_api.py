@@ -120,11 +120,22 @@ class MailObject(FrozenModel):
     source: SourceReference
     cursor: str = Field(min_length=1)
     source_date_utc: datetime | None = None
+    mbox_envelope: bytes | None = None
     completed_messages: int | None = Field(default=None, ge=0)
     total_messages: int | None = Field(default=None, ge=0)
     completed_bytes: int | None = Field(default=None, ge=0)
     total_bytes: int | None = Field(default=None, ge=0)
     exclusion_reason: str | None = None
+
+    @field_validator("mbox_envelope")
+    @classmethod
+    def validate_mbox_envelope(cls, value: bytes | None) -> bytes | None:
+        if value is not None and (
+            not value.startswith(b"From ") or not value.endswith(b"\n")
+            or b"\n" in value[:-1] or b"\r" in value.rstrip(b"\r\n")
+        ):
+            raise ValueError("mbox_envelope must be one complete From line")
+        return value
 
     @field_validator("source_date_utc")
     @classmethod
