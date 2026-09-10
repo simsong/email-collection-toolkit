@@ -61,7 +61,7 @@ Open **Windows PowerShell** from Start, as your normal user. The same
 command supports both architectures:
 
 ```powershell
-powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
+powershell -ExecutionPolicy Bypass -c "irm https://astral.sh/uv/install.ps1 | iex"
 ```
 
 The installer detects the Windows architecture and selects a build. Check its
