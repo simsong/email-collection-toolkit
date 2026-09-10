@@ -1,5 +1,5 @@
 name = "envelope-rainbow"
 description = "A light Email Collection Toolkit theme built around rainbow curves and stacked envelopes."
 license = "MIT"
-homepage = "https://github.com/simsong/mail-archiver"
+homepage = "https://github.com/simsong/email-collection-toolkit"
 min_version = "0.20.0"

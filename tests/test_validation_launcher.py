@@ -42,7 +42,7 @@ def test_worker_script_runs_pipeline_uploads_evidence_and_always_shuts_down() ->
         parsed,
         "validation-bucket",
         "mailarchiver-validation",
-        "https://github.com/simsong/mail-archiver.git",
+        "https://github.com/simsong/email-collection-toolkit.git",
         "codex/validation-datasets",
     )
 

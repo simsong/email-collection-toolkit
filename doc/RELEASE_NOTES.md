@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+* Complete the Email Collection Toolkit display-name and repository-link rename,
+  preserving access to existing preferences and OAuth configuration. Add the
+  Searching guide, refreshed website navigation, real interface screenshots,
+  and credited Wikimedia keyboard clipart.
+
 * Introduce the Email Collection Toolkit website identity and stacked-envelope
   application icons; preserve Gmail setup and Advanced navigation, responsive
   access, and equal personal and archival use cases. Validate Zola TOML before

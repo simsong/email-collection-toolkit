@@ -448,8 +448,8 @@ function applyStatus(status) {
   state.highlightBackground = status.configuration.search_highlight_background;
   document.documentElement.style.setProperty("--search-highlight-background", state.highlightBackground);
   document.title = status.ready
-    ? `Mail Archiver — ${status.archive} (${status.message_count.toLocaleString()} messages)`
-    : status.untitled ? "Untitled — Mail Archiver" : "Mail Archiver";
+    ? `Email Collection Toolkit — ${status.archive} (${status.message_count.toLocaleString()} messages)`
+    : status.untitled ? "Untitled — Email Collection Toolkit" : "Email Collection Toolkit";
   elements.search.disabled = !status.ready;
   elements["result-status"].textContent = status.ready ? "Enter a search." : "Use File → New or Open to begin.";
   const notice = status.notices?.at(-1);

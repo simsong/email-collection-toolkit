@@ -1,7 +1,7 @@
-# Mail Archiver User Manual
+# Email Collection Toolkit User Manual
 
 This manual explains how an archivist creates and searches a mail archive.
-Mail Archiver reads source mail without changing it. It stores deduplicated
+Email Collection Toolkit reads source mail without changing it. It stores deduplicated
 messages in standard MBOX files, records where every message was found, and
 creates integrity information that can be checked independently.
 
@@ -12,12 +12,12 @@ This is the archive the application uses, not a separate export; no conversion
 step is needed to obtain a BagIt/Mailbag archive. SQLite catalogs and search
 indexes are derived data.
 
-On macOS, open the supplied DMG and drag **Mail Archiver.app** to its
+On macOS, open the supplied DMG and drag **Email Collection Toolkit.app** to its
 **Applications** shortcut. Eject the disk and open the installed app.
 Python is included. Development builds are ad-hoc signed, not notarized;
 see [installation and signing notes](MACOS_DISTRIBUTION.md).
 
-Mail Archiver currently reads:
+Email Collection Toolkit currently reads:
 
 * MBOX files;
 * Emacs RMAIL Babyl files, including extensionless files;
@@ -26,7 +26,7 @@ Mail Archiver currently reads:
 * complete Apple Mail `.emlx` files.
 
 Babyl files are recognized from their `BABYL OPTIONS:` header, not their
-filename. Both LF and CRLF RMAIL files are supported. Mail Archiver reads their
+filename. Both LF and CRLF RMAIL files are supported. Email Collection Toolkit reads their
 original-header blocks and bodies without changing the source files. When an
 old record has no original-header block, its visible headers are used instead.
 RMAIL labels and redundant visible headers remain only in the source Babyl
@@ -41,7 +41,7 @@ modes yet.
 
 ## Before you begin
 
-Ask the person who installed Mail Archiver to confirm that:
+Ask the person who installed Email Collection Toolkit to confirm that:
 
 1. `uv` and ClamAV are installed;
 2. ClamAV has a current signature database; and
@@ -49,7 +49,7 @@ Ask the person who installed Mail Archiver to confirm that:
 
 Choose two locations:
 
-* **Source mail** is the existing mail that you want to archive. Mail Archiver
+* **Source mail** is the existing mail that you want to archive. Email Collection Toolkit
   does not change these files.
 * **Archive directory** is where the new archive will be written. It should
   have enough free space for the mail, its indexes, and working files.
@@ -124,8 +124,7 @@ disposable search database.
 
 ## Import Gmail
 
-Use Google Takeout for Gmail today. It creates MBOX files without granting Mail
-Archiver access to the account. Download every Takeout ZIP part, extract them
+Use Google Takeout for Gmail today. It creates MBOX files without granting Email Collection Toolkit access to the account. Download every Takeout ZIP part, extract them
 beneath one directory, and ingest that directory as the local source. See
 [GMAIL.md](GMAIL.md) for the complete end-user procedure and the separate
 developer discussion of Gmail API, OAuth, IMAP, verification, and security
@@ -144,12 +143,11 @@ completeness claim matters.
 ## Import Microsoft 365
 
 Microsoft has no platform-neutral Takeout equivalent. Outlook can export PST
-on Windows or OLM from legacy Outlook for Mac, but Mail Archiver does not yet
+on Windows or OLM from legacy Outlook for Mac, but Email Collection Toolkit does not yet
 ingest those formats and its Microsoft authorization adapter is only a stub.
-There is currently no complete Microsoft 365 export workflow supported by Mail
-Archiver. See [M365.md](M365.md) for the end-user status and developer design.
+There is currently no complete Microsoft 365 export workflow supported by Email Collection Toolkit. See [M365.md](M365.md) for the end-user status and developer design.
 
-Apple Mail can export selected mailboxes as MBOX, and Mail Archiver can read
+Apple Mail can export selected mailboxes as MBOX, and Email Collection Toolkit can read
 complete messages from an Apple Mail cache. A cache can be incomplete, however;
 see [APPLE_MAIL_CACHE.md](APPLE_MAIL_CACHE.md) before treating it as an
 acquisition source.
@@ -178,7 +176,7 @@ identity are not written again.
 
 ## Identify the archive owner
 
-Mail Archiver separates sent and received messages. It needs a short text file
+Email Collection Toolkit separates sent and received messages. It needs a short text file
 containing names or address fragments that identify the archive owner. Put one
 lowercase value on each line. Blank lines and lines beginning with `#` are
 ignored.
@@ -199,7 +197,7 @@ parsed `From:` address contains one of these values, without regard to case.
 The following is the currently implemented explicit-path interface. It does
 not yet read the planned `archive.yaml` source registry.
 
-From the Mail Archiver checkout, run:
+From the Email Collection Toolkit checkout, run:
 
 ```console
 make run ARGS='--archive "/path/to/mail-archive" ingest --owner-names-file owner-names.txt --clamav "/path/to/source-mail"'
@@ -220,7 +218,7 @@ make run ARGS='ingest --owner-names-file owner-names.txt --clamav "/path/to/sour
 
 ### What happens during ingest
 
-Mail Archiver:
+Email Collection Toolkit:
 
 1. loads the frozen plug-in registries, captures and deduplicates recognized
    source containers, totals their available sizes, and prints every
@@ -245,7 +243,7 @@ Exact empty Eudora MBCP metadata stubs are likewise recorded but not copied.
 Legacy `From XXX` status wrappers are unwrapped and their nested email is
 archived with the wrapper's source location retained.
 
-Mail Archiver compares a valid `Date:` with a trimmed median of all valid
+Email Collection Toolkit compares a valid `Date:` with a trimmed median of all valid
 `Received:` dates after normalizing them to UTC. If they differ by more than
 two days, the median controls catalog date and year routing. The original
 header and message bytes remain unchanged. The graphical viewer identifies
@@ -268,7 +266,7 @@ changing the database schema.
 
 ### Stop and continue safely
 
-Press Control-C once for a controlled stop. Mail Archiver closes its files,
+Press Control-C once for a controlled stop. Email Collection Toolkit closes its files,
 commits completed messages, writes an archive checkpoint, and prints a summary.
 
 It is safe to run the same ingest command again. The current CLI verifies an
@@ -352,7 +350,7 @@ Mailbag structure, whole-file hashes, and the recorded hash for every message.
 Investigate any reported failure before continuing to use or copy the archive.
 
 The archive also contains `verify_mail_archive.py`. It can be copied with the
-archive and run on a computer that does not have Mail Archiver installed:
+archive and run on a computer that does not have Email Collection Toolkit installed:
 
 ```console
 python3 /path/to/mail-archive/verify_mail_archive.py
@@ -460,7 +458,7 @@ an HTML message uses the browser's native text selection. Use the ⧉ control in
 the message toolbar to copy the visible text. For HTML, the copied text also
 includes the displayed subject and message headers.
 
-Mail Archiver searches an archival collection; it is not an inbox or mail
+Email Collection Toolkit searches an archival collection; it is not an inbox or mail
 program. A search therefore covers the collection's complete time span. Recent
 messages receive no preference beyond an explicitly selected date sort, and an
 archivist never has to ask the application to check older years.
@@ -530,8 +528,7 @@ reachable. The pull-down menu above the message
 lists its displayable plain-text and HTML MIME parts and always offers **Raw
 Source**, which shows the complete RFC 5322 message. Command-1 through Command-9
 select the part with that numeric MIME part ID; Command-0 and Command-Shift-U
-select **Raw Source**. If a message supplies more than one HTML part, Mail
-Archiver initially displays the most substantial decoded one; every part
+select **Raw Source**. If a message supplies more than one HTML part, Email Collection Toolkit initially displays the most substantial decoded one; every part
 remains available from the menu.
 
 Some early Netscape messages use `<x-html>...</x-html>` around an HTML body even
@@ -710,7 +707,7 @@ they take precedence over the generic malformed-address checks.
 The packaged default is `src/mailarchiver/contact_filters.yaml`. To
 preserve archive-specific decisions, copy that complete file to
 `/path/to/mail-archive/contact_filters.yaml` and edit the copy. The
-archive copy takes precedence whenever it exists; without one, Mail Archiver
+archive copy takes precedence whenever it exists; without one, Email Collection Toolkit
 uses the packaged default. Set `mode: replace` for a complete, valid versioned
 replacement policy. Set `mode: extend` to add rule lists to the packaged
 policy; duplicates are removed and the packaged scalar threshold remains in
@@ -736,8 +733,8 @@ affiliation is not treated as a home location.
 The application will ship with a seed US geography database. `make
 geography-data` and **Tools → Update Geo Database** will refresh the shared,
 per-user reference data. It lives outside individual archives: on macOS in
-`~/Library/Application Support/Mail Archiver/geography/`; on Windows in
-`%LOCALAPPDATA%\\Mail Archiver\\geography\\`; and on Linux in
+`~/Library/Application Support/Email Collection Toolkit/geography/`; on Windows in
+`%LOCALAPPDATA%\\Email Collection Toolkit\\geography\\`; and on Linux in
 `$XDG_DATA_HOME/mailarchiver/geography/` (or
 `~/.local/share/mailarchiver/geography/`). A future explicit command will let
 you copy a geography snapshot into an archive or choose that snapshot instead
@@ -753,7 +750,7 @@ in the operating-system keychain or configured secrets provider. Import
 checkpoints and observations remain in `archive.sqlite3`; successful imports
 do not rewrite checkpoint state into the YAML file.
 
-Mail Archiver's current application-level configuration is the versioned YAML
+Email Collection Toolkit's current application-level configuration is the versioned YAML
 file `src/mailarchiver/configuration.yaml` in the source checkout. It currently
 controls the search-highlight background used by the graphical message viewer:
 
@@ -766,7 +763,7 @@ gui:
 The color must be a six-digit hexadecimal CSS color beginning with `#`. The
 initial value, `#fff59d`, is yellow. Stop and restart the graphical interface
 after changing the file; configuration is validated and loaded once when the
-application starts. Mail Archiver rejects unknown settings, unsupported
+application starts. Email Collection Toolkit rejects unknown settings, unsupported
 versions, and invalid color values instead of passing them to the viewer.
 
 This YAML file contains packaged application display policy. It does not

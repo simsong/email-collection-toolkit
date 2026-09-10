@@ -5,15 +5,14 @@ description = "Import a Gmail snapshot using Google Takeout and MBOX."
 
 ## END USER
 
-Use [Google Takeout](https://takeout.google.com/) today. This does not grant Mail
-Archiver access to Gmail and does not require an OAuth client.
+Use [Google Takeout](https://takeout.google.com/) today. This does not grant Email Collection Toolkit access to Gmail and does not require an OAuth client.
 
 1. Choose **Deselect all**, then select **Mail**.
 2. Retain all mail data for the strongest completeness evidence.
 3. Choose a one-time ZIP export and **Create export**.
 4. Download every part when Google emails you, then extract the files beneath
    one directory.
-5. Import the extracted directory into Mail Archiver.
+5. Import the extracted directory into Email Collection Toolkit.
 
 Google exports message content, headers, attachments, and labels. Takeout is a
 snapshot rather than an incremental service, and large exports may be divided
@@ -28,7 +27,7 @@ deduplication, and semantic-message reconciliation.
 
 ## DEVELOPER
 
-The canonical [Gmail design and operations document](https://github.com/simsong/mail-archiver/blob/main/doc/GMAIL.md)
+The canonical [Gmail design and operations document](https://github.com/simsong/email-collection-toolkit/blob/main/doc/GMAIL.md)
 covers Takeout ingestion, the future Gmail API adapter, shared Desktop OAuth
 clients, Testing versus production, personal-use exceptions, restricted-scope
 verification, annual assessments when server-side data handling makes one

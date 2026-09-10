@@ -1,4 +1,4 @@
-# Mail Archiver website
+# Email Collection Toolkit website
 
 This is a Zola site using the local `envelope-rainbow` theme. The checked-in
 site is built by `.github/workflows/pages.yml` and deployed with GitHub Pages

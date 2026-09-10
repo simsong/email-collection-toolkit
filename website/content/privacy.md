@@ -1,29 +1,29 @@
 +++
 title = "Privacy policy"
-description = "How Mail Archiver's planned Gmail and Microsoft 365 OAuth clients will access and handle account data."
+description = "How Email Collection Toolkit's planned Gmail and Microsoft 365 OAuth clients will access and handle account data."
 +++
 
 **Effective date: September 5, 2026**
 
-Mail Archiver is local software for individuals and archivists. The Gmail and
+Email Collection Toolkit is local software for individuals and archivists. The Gmail and
 Microsoft 365 connections described here are under development and are not
 available in current releases. This policy describes how those connections
 will handle account data when they are made available.
 
 ## Who is responsible
 
-The Mail Archiver open-source project and Simson Garfinkel provide the OAuth
+The Email Collection Toolkit open-source project and Simson Garfinkel provide the OAuth
 clients. Questions or requests concerning this policy may be directed through
 [Simson Garfinkel's contact page](https://simson.net/page/Contact_Simson).
 
 ## Authorization and account access
 
-Mail Archiver accesses a cloud account only after the account holder or an
+Email Collection Toolkit accesses a cloud account only after the account holder or an
 authorized representative completes the provider's OAuth consent process. It
 does not request or store the account password. The consent screen identifies
 the requested permissions, and the user may decline or revoke access.
 
-Mail Archiver will request only permissions needed for read-only archival
+Email Collection Toolkit will request only permissions needed for read-only archival
 acquisition:
 
 - For Gmail, this may include the account identifier and email address;
@@ -38,7 +38,7 @@ acquisition:
   incremental acquisition can continue without asking the user to sign in for
   every request.
 
-Mail Archiver will not request permission to send mail, delete mail, alter
+Email Collection Toolkit will not request permission to send mail, delete mail, alter
 messages or folders, change labels, or mark messages read. It will not mutate
 the source account.
 
@@ -54,11 +54,11 @@ by the user:
 - generate collection reports and material supporting finding aids; and
 - export user-directed preservation or access packages.
 
-Mail Archiver does not use cloud-account data for advertising, marketing,
+Email Collection Toolkit does not use cloud-account data for advertising, marketing,
 surveillance, sale, generalized artificial-intelligence model training, or
 profiling unrelated to the user's archive.
 
-Mail Archiver's use of information received from Google Workspace APIs will
+Email Collection Toolkit's use of information received from Google Workspace APIs will
 adhere to the [Google API Services User Data Policy](https://developers.google.com/terms/api-services-user-data-policy),
 including the Limited Use requirements.
 
@@ -67,7 +67,7 @@ including the Limited Use requirements.
 Messages, attachments, source records, search indexes, reports, and exported
 packages are stored on the user's computer or in a storage location the user
 selects. Except for authorization and API requests sent directly to Google or
-Microsoft, Mail Archiver does not transmit OAuth-acquired content to a server
+Microsoft, Email Collection Toolkit does not transmit OAuth-acquired content to a server
 operated by the project or by Simson Garfinkel.
 
 OAuth credentials and tokens will be stored locally using the operating
@@ -76,7 +76,7 @@ its manifests, collection reports, test data, or ordinary logs. Access to
 cloud accounts will remain disabled until this storage method is implemented
 and documented.
 
-Mail Archiver does not share OAuth-acquired account data with the developer or
+Email Collection Toolkit does not share OAuth-acquired account data with the developer or
 unrelated third parties. A user may explicitly export or transfer selected
 content to another system, such as ePADD or an institutional digital
 repository. That user-directed transfer is governed by the receiving system's
@@ -84,7 +84,7 @@ terms and privacy practices.
 
 ## Retention, deletion, and revocation
 
-Mail Archiver creates a long-lived local archive, so acquired messages and
+Email Collection Toolkit creates a long-lived local archive, so acquired messages and
 derived data remain in the user-selected storage location until the user or
 the responsible institution deletes them under its own retention policy.
 Revoking OAuth access prevents future provider access but does not silently
@@ -106,7 +106,7 @@ and credentials before sending diagnostics.
 ## Security
 
 Provider authorization and account traffic use the providers' documented
-OAuth and HTTPS interfaces. Mail Archiver requests read-only access and keeps
+OAuth and HTTPS interfaces. Email Collection Toolkit requests read-only access and keeps
 the archived messages local. Users and institutions remain responsible for
 securing their computers, archive storage, backups, and exported packages.
 

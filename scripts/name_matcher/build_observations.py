@@ -224,7 +224,7 @@ def build_database(archive: Path, output_path: Path, *, workers: int, limit: int
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--archive", type=Path, required=True, help="read-only Mail Archiver root")
+    parser.add_argument("--archive", type=Path, required=True, help="read-only Email Collection Toolkit root")
     parser.add_argument("--output", type=Path, required=True, help="new private SQLite evidence database")
     parser.add_argument("--workers", type=int, default=max(1, min(4, os.cpu_count() or 1)))
     parser.add_argument("--limit", type=int, help="optional global message limit for a bounded experiment")

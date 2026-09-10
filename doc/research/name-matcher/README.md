@@ -4,7 +4,7 @@ This directory is the research notebook and reproducible prototype for resolving
 email addresses, observed human names, aliases, and temporal account ownership
 into reviewable person identities. The work has two equal deliverables:
 
-1. maintainable, source-preserving software for Mail Archiver; and
+1. maintainable, source-preserving software for Email Collection Toolkit; and
 2. an academic-quality study of identity resolution in longitudinal email.
 
 No matcher has been selected. Rule-based linkage, probabilistic record linkage,

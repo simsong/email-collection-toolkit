@@ -1,5 +1,5 @@
 +++
-title = "Mail Archiver for curation"
+title = "Email Collection Toolkit for curation"
 description = "Functions and file formats for processing an email collection."
 sort_by = "weight"
 
@@ -34,7 +34,7 @@ description = "Verify the archive's SHA-256 hashes or transfer its MBOX files to
 
 ## What the program does
 
-Mail Archiver reads supported email files into a local archive. It stores the
+Email Collection Toolkit reads supported email files into a local archive. It stores the
 original message data in MBOX files, records the source of each message, and
 identifies duplicate messages. It builds a local search index for the archive.
 
@@ -42,7 +42,7 @@ The viewer lets library staff search messages and preview messages and
 attachments. Reports provide message counts by year, sender, and recipient.
 These reports can provide data for a finding aid.
 
-Mail Archiver uses BagIt 1.0, conforming to Mailbag 1.0, as the native storage
+Email Collection Toolkit uses BagIt 1.0, conforming to Mailbag 1.0, as the native storage
 format for each email archive, not as a separate export format. The archive
 contains MBOX files, Mailbag metadata, source records, and SHA-256
 hashes. Its MBOX files can be transferred to ePADD for additional appraisal,

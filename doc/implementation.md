@@ -101,7 +101,7 @@ and sandboxed because rendering message HTML can contact remote resources.
 
 ## Deduplication and semantic reconciliation
 
-Mail Archiver separates exact storage identity from semantic reconciliation.
+Email Collection Toolkit separates exact storage identity from semantic reconciliation.
 The admission-time deduplication key is the tuple of normalized `Message-ID`
 and `h2`, where `h2` is SHA-256 over the source adapter's recovered RFC 5322
 bytes. When `Message-ID` is absent, the raw digest supplies the stable fallback
@@ -269,7 +269,7 @@ not an acceptable default installation experience.
 ## Current package shape
 
 ```text
-mail-archiver/
+email-collection-toolkit/
   pyproject.toml
   src/mailarchiver/
     __main__.py         CLI, ingest framework, worker/status coordinator
@@ -640,8 +640,8 @@ only affiliated evidence. A Contact remains an address even when future
 authoritative-name work associates several Contacts with one Person.
 
 The geography reference database is an installation-level SQLite database,
-stored under `~/Library/Application Support/Mail Archiver/geography/` on macOS,
-`%LOCALAPPDATA%\\Mail Archiver\\geography\\` on Windows, and
+stored under `~/Library/Application Support/Email Collection Toolkit/geography/` on macOS,
+`%LOCALAPPDATA%\\Email Collection Toolkit\\geography\\` on Windows, and
 `$XDG_DATA_HOME/mailarchiver/geography/` (or
 `~/.local/share/mailarchiver/geography/`) on Linux. The planned `make geography-data` and
 Tools-menu updater will share a downloader that validates a versioned
@@ -1922,3 +1922,20 @@ complete supported records. Direct selection of a partial record is rejected.
 This is not a complete mailbox acquisition: detached attachment bytes are not
 reconstructed. Do not modify the source cache; export mail through Apple Mail
 when a complete MBOX source is required.
+
+## Toolkit branding and website media
+
+The application, installer, documentation, and website use Email Collection
+Toolkit. Repository and Pages URLs use the renamed project. The platform
+settings helper chooses the current application directory, then an existing
+legacy directory, without moving or rewriting settings; Linux configuration,
+package imports, CLI names, and archive-format identifiers retain compatibility.
+
+`make website-screenshots` ingests purpose-made messages using the normal
+archive service, then binds real Python services to the shipped HTML in
+Chromium. It captures search and completed import history with no private mail.
+`make website-gmail-illustrations` renders explicitly labeled setup diagrams
+with placeholder account details. The homepage includes the unmodified
+Wikimedia Commons hands/laptop SVG with visible CC BY-SA 4.0 attribution.
+`searching.md` covers query syntax, suggestions, background results, attachment
+limits, source filters, saved sets, and message viewing.

@@ -2,7 +2,7 @@
 
 ## Conclusion
 
-Mail Archiver can import complete `.emlx` messages found below an Apple Mail
+Email Collection Toolkit can import complete `.emlx` messages found below an Apple Mail
 store, but a live `~/Library/Mail` directory cannot be assumed to contain a
 complete copy of every server message or attachment. It is suitable as a
 best-effort offline source and may be the easiest route for mail already fully
@@ -49,7 +49,7 @@ Google-style `[Gmail]` paths contained 191,816 records: 93,531 complete and
 complete and 97,960 partial. Comparing the opaque account-directory and numeric
 record identifiers found no partial record with a complete cached counterpart
 elsewhere. The local cache would therefore omit just over half of the observed
-Google-style records if Mail Archiver accepted only byte-complete input, as it
+Google-style records if Email Collection Toolkit accepted only byte-complete input, as it
 must.
 
 During that initial audit, no message header, body, subject, address, or

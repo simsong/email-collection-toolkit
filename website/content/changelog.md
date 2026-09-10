@@ -3,6 +3,14 @@ title = "Website changelog"
 description = "Changes to the Email Collection Toolkit website, separate from application releases."
 +++
 
+## 2026-09-10
+
+- Complete the Email Collection Toolkit name and repository-link update.
+- Add Searching, link the homepage capabilities and preservation standards,
+  and show real search/import interfaces using synthetic mail.
+- Replace the keyboard artwork with credited Wikimedia Commons clipart and
+  old-brand Gmail captures with explicitly labeled setup illustrations.
+
 ## 2026-09-09
 
 - Introduce the Email Collection Toolkit website identity and stacked-envelope

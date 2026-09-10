@@ -25,7 +25,7 @@ from packaging.utils import canonicalize_name
 from dmg_layout import create_image, verify_layout
 
 ROOT = Path(__file__).resolve().parents[1]
-APP_NAME = "Mail Archiver"
+APP_NAME = "Email Collection Toolkit"
 IDENTIFIER = "net.simson.mailarchiver"
 PLIST_DOCUMENT_TYPES = "CFBundleDocumentTypes"
 PLIST_EXPORTED_TYPES = "UTExportedTypeDeclarations"
@@ -254,7 +254,7 @@ def build(signing_identity: str) -> Path:
         run(*command, cwd=ROOT, env=environment)
         app = bundle_output / f"{APP_NAME}.app"
         configure_bundle(app, signing_identity)
-        dmg = output / f"Mail-Archiver-{version('mailarchiver')}-{platform.machine()}.dmg"
+        dmg = output / f"Email-Collection-Toolkit-{version('mailarchiver')}-{platform.machine()}.dmg"
         candidate = work / "candidate.dmg"
         create_image(app, app_icon, candidate, work)
         # Keep a previous artifact until both mounted tests have passed.

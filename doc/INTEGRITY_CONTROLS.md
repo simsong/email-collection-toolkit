@@ -247,7 +247,7 @@ explicitly derived: they do not enter `data/mbox/`, canonical electronic-message
 counts, or ordinary message deduplication. Exact matches remain linked to their
 PDF and page provenance even when the derived result is suppressed from the
 default search listing. This extension is tracked by
-[GitHub issue #18](https://github.com/simsong/mail-archiver/issues/18) and is
+[GitHub issue #18](https://github.com/simsong/email-collection-toolkit/issues/18) and is
 not part of the implemented native layout above.
 
 ## BagIt declaration and manifests

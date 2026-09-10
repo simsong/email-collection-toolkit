@@ -1,23 +1,22 @@
 +++
 title = "Register the distributed Gmail client"
-description = "The one-time Google OAuth setup performed by a Mail Archiver release maintainer."
+description = "The one-time Google OAuth setup performed by an Email Collection Toolkit release maintainer."
 +++
 
 This procedure supports the experimental future Gmail API adapter. Google
 Takeout is the supported end-user path today; see [Archive Gmail](../gmail-authorization/).
 
-> **Maintainers only. End users do not perform these steps.** A Mail Archiver
+> **Maintainers only. End users do not perform these steps.** An Email Collection Toolkit
 > release carries one Desktop client registered by the project maintainer.
 
-> **Use your own Gmail or Google Workspace address everywhere.** The screenshots
-> were captured using another maintainer account only as an example. Do not copy
-> the address visible in them.
+> **Use your own Gmail or Google Workspace address everywhere.** The diagrams
+> below are schematic setup illustrations, not Google Console screenshots.
+> Example fields use the current project name and a placeholder email address.
 
 The Cloud project and Desktop client are registered once. They do **not** expire
 after seven days. In Testing, each test user's authorization expires after seven
 days; that user authorizes again without the maintainer recreating the project
-or client. The screenshots were captured in September 2026, and Google may
-change the labels or arrangement.
+or client. Google may change the labels, arrangement, or requirements.
 
 ## Start the one-time registration
 
@@ -37,7 +36,7 @@ pages. It never asks for your Google password.
 
 ![Google Auth Platform Branding page with the Get started button](../images/gmail-authorization/01-get-started.png)
 
-2. Enter `Mail Archiver personal` as the app name. For **User support email**,
+2. Enter `Email Collection Toolkit personal` as the app name. For **User support email**,
    select **your own Google address**, then select **Next**.
 
 ![App Information with the app name and support-email selector](../images/gmail-authorization/02-app-information.png)
@@ -70,7 +69,7 @@ pages. It never asks for your Google password.
 
 8. Open **Audience**. Under **Test users**, select **Add users** and add the
    maintainers and early users who will test the distributed client. Use their
-   addresses, not the one in the screenshot.
+   addresses, not a placeholder from the illustration.
 
 ![Audience page showing the Add users button](../images/gmail-authorization/08-add-test-user.png)
 
@@ -100,11 +99,11 @@ Return to the terminal after each page:
 1. On **Data Access**, add exactly
    `https://www.googleapis.com/auth/gmail.readonly`.
 2. On **Clients**, create an OAuth client with application type **Desktop app**.
-3. Download its JSON file and return to the terminal. Mail Archiver finds the
+3. Download its JSON file and return to the terminal. Email Collection Toolkit finds the
    matching download, validates it, and prints where it saved the client.
 4. For a release build, place that file at
    `src/mailarchiver/gmail_client.json`. It is a public Desktop-app client
-   configuration and is packaged with Mail Archiver. A development environment
+   configuration and is packaged with Email Collection Toolkit. A development environment
    may instead set `MAILARCHIVER_GMAIL_CLIENT_JSON` to its path.
 5. Complete the Google consent page for the maintainer's account to test it.
 

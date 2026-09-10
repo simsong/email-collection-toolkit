@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Validate a Mail Archiver release tag against pyproject metadata."""
+"""Validate an Email Collection Toolkit release tag against pyproject metadata."""
 
 from __future__ import annotations
 

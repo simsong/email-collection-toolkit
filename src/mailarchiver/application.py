@@ -16,6 +16,8 @@ from uuid import uuid4
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from .identity import application_data_directory
+
 from .bagit import initialize_bag
 from .catalog import create_catalog, create_search, validate_catalog, validate_search
 from .writer_lock import ArchiveBusyError, WriterLease
@@ -124,10 +126,10 @@ def application_preferences_path() -> Path:
     """Return a packaged-app-safe per-user preference path on each platform."""
     if sys.platform == "darwin":
         root = Path.home() / "Library" / "Application Support"
-        application = "Mail Archiver"
+        return application_data_directory(root) / "preferences.json"
     elif os.name == "nt":
         root = Path(os.environ.get("APPDATA", Path.home() / "AppData" / "Roaming"))
-        application = "Mail Archiver"
+        return application_data_directory(root) / "preferences.json"
     else:
         root = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config"))
         application = "mailarchiver"

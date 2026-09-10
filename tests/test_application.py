@@ -458,3 +458,21 @@ def test_child_window_keeps_document_routing_without_search_windows(tmp_path: Pa
     application.close_window(session.window_id)
     assert host.document_for_native_window("ingests-fixture") is document
     assert host.document_for_native_window("unknown") is None
+
+
+def test_renamed_application_preserves_existing_settings(tmp_path: Path) -> None:
+    """Requirement: the product rename must not strand preferences or OAuth files."""
+    from mailarchiver.identity import APPLICATION_NAME, LEGACY_DIRECTORY_NAME, application_data_directory
+
+    current = tmp_path / APPLICATION_NAME
+    legacy = tmp_path / LEGACY_DIRECTORY_NAME
+    assert application_data_directory(tmp_path) == current
+    assert not current.exists()
+    legacy.mkdir()
+    preferences = legacy / "preferences.json"
+    preferences.write_bytes(b'{"recent_archives": []}')
+    assert application_data_directory(tmp_path) == legacy
+    assert preferences.read_bytes() == b'{"recent_archives": []}'
+    current.mkdir()
+    assert application_data_directory(tmp_path) == current
+    assert preferences.exists()

@@ -79,7 +79,7 @@ from .writer_lock import ArchiveBusyError, WriterLease
 GUI_DIRECTORY = (Path(getattr(sys, "_MEIPASS")) if getattr(sys, "frozen", False) else Path(__file__).parents[2]) / "gui"
 E2E_DRIVER = Path(__file__).parents[2] / "e2e_tests" / "gui_driver.js"
 DEFAULT_PAGE_SIZE = 100
-APPLICATION_NAME = "Mail Archiver"
+APPLICATION_NAME = "Email Collection Toolkit"
 APPLICATION_ICON = GUI_DIRECTORY / "icons" / "rainbow-post-192.png"
 EXTERNAL_LINK_SCHEMES = frozenset({"http", "https", "mailto"})
 INTERNET_CHECK_URL = "https://www.example.com/"
@@ -352,7 +352,7 @@ def application_icon_path() -> Path:
 
 IMPORT_CONFIRMATION_WIDTH = 560
 QUIT_IMPORT_MESSAGE = (
-    "Quitting will stop all active imports. To restart an import, reopen Mail Archiver "
+    "Quitting will stop all active imports. To restart an import, reopen Email Collection Toolkit "
     "and use File → Import to select the same source again. Messages already archived "
     "will not be imported twice.\n\n"
     "The application will quit after the current work has stopped and the archive has been checkpointed."
@@ -719,7 +719,7 @@ class GuiApi:
             api = IngestWindowApi(self.archive)
             selected = "" if status_id is None else f"?status={status_id}"
             window = webview.create_window(
-                "Mail Archiver — Ingests",
+                "Email Collection Toolkit — Ingests",
                 str(GUI_DIRECTORY / f"ingests.html{selected}"),
                 js_api=WindowBridge(api, ("history", "can_import_directory", "import_directory", "antivirus", "install_antivirus")),
                 width=1050,
@@ -1012,7 +1012,7 @@ class GuiApi:
                 filename=destination.name, url=destination.as_uri(), content_type="message/rfc822"
             ).model_dump()
         digest = hashlib.sha256(",".join(map(str, sorted(unique))).encode()).hexdigest()[:12]
-        destination = self.temporary_directory / f"messages-{digest}" / f"Mail Archiver Messages ({len(unique)}).zip"
+        destination = self.temporary_directory / f"messages-{digest}" / f"Email Collection Toolkit Messages ({len(unique)}).zip"
         write_messages_zip(archive, unique, destination)
         return DragExport(
             filename=destination.name, url=destination.as_uri(), content_type="application/zip"
@@ -1327,7 +1327,7 @@ class PyWebViewApplication:
             webview.FileDialog.SAVE,
             directory=str(Path.home()),
             save_filename="Untitled.mailarchive",
-            file_types=("Mail Archiver archive (*.mailarchive)",),
+            file_types=("Email Collection Toolkit archive (*.mailarchive)",),
         )
         if not selected:
             return None

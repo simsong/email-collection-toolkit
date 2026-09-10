@@ -1,17 +1,17 @@
-# Mail Archiver v1.0.0 alpha — draft release notes
+# Email Collection Toolkit v1.0.0 alpha — draft release notes
 
 Status: unreleased scope draft, 2026-09-07. The first alpha tag and minimum macOS version are pending.
 Apple Silicon only; early alphas may omit unfinished v1.0.0 milestone features.
 These notes describe the proposed v1.0.0 destination, not a tested release artifact.
 Remove or explicitly defer unfinished features before publishing release notes.
 
-Mail Archiver brings local and remote email together into a searchable personal
+Email Collection Toolkit brings local and remote email together into a searchable personal
 archive on your Apple Silicon Mac. Windows support is planned for v1.1.0.
 
 ## Installation and updates
 
 - Install a self-contained Mac application by opening its DMG and dragging
-  Mail Archiver into Applications. No Python or developer tools are required
+  Email Collection Toolkit into Applications. No Python or developer tools are required
   for the supported desktop workflow.
 - Planned: check GitHub for new releases, indicate an available version, and
   automatically download the appropriate update. Whether installation remains

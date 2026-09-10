@@ -1,4 +1,4 @@
-# Mail Archiver icon
+# Email Collection Toolkit icon
 
 `rainbow-post.svg` is the source icon for the Python application and the
 website. Regenerate the checked-in PNG sizes with:

@@ -1,5 +1,5 @@
 name: Release
-description: Plan, validate, and publish a versioned Mail Archiver release.
+description: Plan, validate, and publish a versioned Email Collection Toolkit release.
 title: "release: "
 labels: [release]
 body:

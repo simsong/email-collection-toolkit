@@ -227,7 +227,7 @@ survive reindexing, and its incremental IMAP/Gmail OAuth implementation. Its
 MCP-first architecture, custom federation packaging, and database-centered
 preservation model are not good fits for this project's goals.
 
-#### [Mail Archiver](https://github.com/s1t5/mail-archiver) / [mail-archiver.org](https://www.mail-archiver.org/)
+#### [s1t5’s email archiving project](https://github.com/s1t5/mail-archiver) / [mail-archiver.org](https://www.mail-archiver.org/)
 
 This is an active GPL self-hosted operational mail archive, not Windows-only
 software. It is written in Microsoft's open-source, cross-platform ASP.NET Core
@@ -253,7 +253,7 @@ are different.
 Open Archiver is an active open-source self-hosted archiving/eDiscovery system
 for Google Workspace, Microsoft 365, and IMAP. It emphasizes continuous account
 synchronization, permanent searchable storage, full-text/attachment search,
-security, and vendor independence. Like Mail Archiver, it is server-oriented
+security, and vendor independence. Like Email Collection Toolkit, it is server-oriented
 and requires deployment/administration work that is inappropriate for the
 extreme-usability desktop goal.
 
@@ -384,7 +384,7 @@ The most useful comparison set is therefore:
 * **Aid4Mail / Emailchemy / forensic tools** for difficult-source acquisition;
 * **Mailbag/mailbagit / Archivematica / Preservica** for preservation
   interoperability; and
-* **Mail Archiver / Open Archiver / Piler** for operational mailbox retention.
+* **Email Collection Toolkit / Open Archiver / Piler** for operational mailbox retention.
 
 ## Section 3 - Abandoned or dormant projects
 
