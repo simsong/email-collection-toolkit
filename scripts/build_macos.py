@@ -156,6 +156,23 @@ def load_rpaths(commands: str) -> tuple[str, ...]:
     return tuple(paths)
 
 
+def load_dependencies(commands: str) -> tuple[str, ...]:
+    """Read actual dylib load commands; LC_ID_DYLIB describes the binary itself."""
+    paths = []
+    dependency = False
+    for line in commands.splitlines():
+        value = line.strip()
+        if value.startswith("cmd "):
+            dependency = value in {
+                "cmd LC_LOAD_DYLIB", "cmd LC_LOAD_WEAK_DYLIB", "cmd LC_REEXPORT_DYLIB",
+                "cmd LC_LAZY_LOAD_DYLIB", "cmd LC_LOAD_UPWARD_DYLIB",
+            }
+        elif dependency and value.startswith("name "):
+            paths.append(value[5:].rsplit(" (offset ", 1)[0])
+            dependency = False
+    return tuple(paths)
+
+
 def bundle_loader_path(app: Path, binary: Path, value: str) -> Path:
     """Expand loader paths and reject build-machine or escaping search paths."""
     if value == "@loader_path" or value.startswith("@loader_path/"):
@@ -191,9 +208,8 @@ def verify_dependencies(app: Path) -> None:
         commands = run("/usr/bin/otool", "-l", path, capture_output=True, text=True).stdout
         rpaths.update(bundle_loader_path(app, path, value) for value in load_rpaths(commands))
     for path in checked:
-        linked = run("/usr/bin/otool", "-L", path, capture_output=True, text=True).stdout
-        for line in linked.splitlines()[1:]:
-            dependency = line.strip().split(" (", 1)[0]
+        commands = run("/usr/bin/otool", "-l", path, capture_output=True, text=True).stdout
+        for dependency in load_dependencies(commands):
             if dependency.startswith(("/usr/lib/", "/System/Library/")):
                 continue
             if dependency.startswith("@rpath/"):

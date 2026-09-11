@@ -10,7 +10,8 @@ from tempfile import TemporaryDirectory
 from playwright.sync_api import Page, expect, sync_playwright
 
 from mailarchiver.__main__ import IngestRequest, run_ingest
-from mailarchiver.gui_app import GuiApi, IngestWindowApi
+from mailarchiver.gui_app import GuiApi, IngestWindowApi, OwnerRulesPrompt
+from mailarchiver.owner_rules import OwnerRules
 
 ROOT = Path(__file__).parents[1]
 OUTPUT = ROOT / "website/static/images"
@@ -97,6 +98,14 @@ def main() -> None:
                     page.goto((ROOT / "gui/ingests.html").as_uri())
                     page.locator(".state-badge").filter(has_text="completed").wait_for()
                     page.screenshot(path=str(OUTPUT / "importing-interface.png"))
+                    page.close()
+                    page = browser.new_page(viewport={WIDTH: 760, HEIGHT: 740}, device_scale_factor=1)
+                    bridge(page, OwnerRulesPrompt(OwnerRules(include=["sam", "sam.rivera@example.org"], exclude=["sam@shared.example.org"])), ("status", "update", "cancel"))
+                    page.goto((ROOT / "gui/options.html").as_uri() + "?import=1")
+                    expect(page.locator("#owner-include")).to_have_value("sam\nsam.rivera@example.org")
+                    expect(page.locator("#owner-exclude")).to_have_value("sam@shared.example.org")
+                    expect(page.locator("#save")).to_be_enabled()
+                    page.screenshot(path=str(OUTPUT / "owner-rules-interface.png"))
                 finally:
                     browser.close()
         finally:

@@ -13,6 +13,8 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict
 from yaml import YAMLError, safe_dump, safe_load
 
+from .owner_rules import OwnerRules
+
 ARCHIVE_CONFIG_FILENAME = "config.yaml"
 
 
@@ -20,8 +22,9 @@ class ArchiveConfig(BaseModel):
     """Settings that describe how the application should open an archive."""
 
     model_config = ConfigDict(extra="forbid", validate_assignment=True)
-    version: Literal[1] = 1
+    version: Literal[1, 2] = 2
     last_import_directory: Path | None = None
+    owner: OwnerRules | None = None
 
 
 def config_path(archive: Path) -> Path:
@@ -43,6 +46,7 @@ def load_archive_config(archive: Path) -> ArchiveConfig:
 def save_archive_config(archive: Path, config: ArchiveConfig) -> None:
     """Atomically write readable YAML beside the archive's operational state."""
     archive.mkdir(parents=True, exist_ok=True)
+    config.version = 2
     path = config_path(archive)
     descriptor, temporary = tempfile.mkstemp(prefix=".config-", dir=archive)
     try:
@@ -59,14 +63,10 @@ def remember_import_directory(archive: Path, selected: list[Path]) -> Path | Non
         return None
     first = selected[0]
     candidate = first if first.is_dir() else first.parent
-    try:
-        config = load_archive_config(archive)
-    except ValueError:
-        # This is discardable navigation state; a malformed file must not
-        # prevent an otherwise valid import from completing.
-        config = ArchiveConfig()
-    config.last_import_directory = candidate.absolute()
-    save_archive_config(archive, config)
+    config = load_archive_config(archive)
+    if config.last_import_directory != candidate.absolute():
+        config.last_import_directory = candidate.absolute()
+        save_archive_config(archive, config)
     return config.last_import_directory
 
 

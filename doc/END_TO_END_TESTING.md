@@ -245,3 +245,9 @@ headless browser interface pass. A browser-only pass is not proof that the
 macOS application shell works; `make test-native-gui` supplies separate local
 smoke evidence. Required native evidence must come from
 XCUITest/XCUIAutomation in a logged-in macOS session.
+
+Owner-rule regression checks use `make test-owner-rules` for exact/glob matching,
+exclusion precedence, YAML defaults, real fixture routing, raw-byte hashes, and
+repeat-import verification. `make test-native-application` also exercises both
+native owner fields with defaults, Continue/Cancel, and the persistent options
+editor in a real Cocoa/WebKit process. These tests use disposable fixture archives.

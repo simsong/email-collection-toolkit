@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+* Fix source GUI startup treating the `mailsearch-gui` launcher and option
+  values as archive paths. Preserve explicit archive selection and Finder opens;
+  validate the actual launcher with the GUI self-test.
+
+* Correct the macOS dependency audit to distinguish library install names from
+  actual dependencies, avoiding a false failure for bundled pydantic-core.
+
+* Fix false Sent classification from implicit owner-name substring matching.
+  Every import now reviews owner include/exclude fields, with exclusions taking
+  precedence and bare names matching only the exact mailbox name. Save defaults
+  in archive `config.yaml` and regenerate `owner-names-detected.txt` separately.
+  Existing archives need a fresh rebuild to correct historical classifications.
 * Plan comparable Dioxus Desktop and Tauri trials before choosing the compiled UI;
   retain ingest, search, and archive preservation in Python. Prioritize Windows
   full ingest and defer Linux/snap delivery. This records the migration decision;
@@ -28,6 +40,11 @@
   application icons; preserve Gmail setup and Advanced navigation, responsive
   access, and equal personal and archival use cases. Validate Zola TOML before
   builds and report read/decode failures without a traceback.
+- Add an experimental read-only ePADD address-book exporter in
+  `dev/addressbook-exporter.py`, with explicit owner addresses, separate
+  address-level contacts, private output, and exclusion/hash reporting.
+  It avoids address-shaped display-name aliases; live ePADD repair remains
+  unvalidated.
 
 - Audit all query selectors with production-SQL EXPLAIN and execution-budget tests.
   Fix Any-address searches, sender counts, date filters under alternate sorts,
