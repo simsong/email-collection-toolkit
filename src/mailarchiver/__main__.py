@@ -33,13 +33,13 @@ from tabulate import tabulate
 from .archive_integrity import MailbagArchiveIntegrityControls
 from .archive_path import add_archive_argument, require_archive
 from .contacts import contacts, load_owner_addresses, print_contacts
-from .document_options import DocumentOptions
+from .document_options import DocumentOptions, read_owner_names
+from .owner_rules import OwnerRules
 from .catalog import (
     UnsupportedSearchSchemaError,
     address_pk,
     create_catalog,
     create_search,
-    owner_tokens,
 )
 from .ingest_status import (
     STATUS_REFRESH_SECONDS,
@@ -139,7 +139,8 @@ class IngestRequest(BaseModel):
     """Typed ingest service request shared by command-line and GUI callers."""
 
     archive: Path
-    owner_names_file: Path
+    owner_names_file: Path | None = None
+    owner_rules: OwnerRules | None = None
     roots: list[str] = Field(min_length=1)
     earliest_year: int = Field(default=1900, ge=1)
     workers: int = Field(default_factory=lambda: min(os.cpu_count() or 1, 8), ge=1)
@@ -1004,7 +1005,7 @@ def ingest(args: argparse.Namespace) -> None:
     run_ingest(
         IngestRequest(
             archive=Path(args.archive),
-            owner_names_file=Path(args.owner_names_file),
+            owner_names_file=Path(args.owner_names_file) if args.owner_names_file else None,
             roots=list(args.roots),
             earliest_year=args.earliest_year,
             workers=args.workers,
@@ -1045,6 +1046,12 @@ def run_ingest(
 
 
 def _run_ingest(request: IngestRequest, writer_lease: WriterLease, outcome: IngestOutcome, terminal: bool, stop_event: threading.Event | None = None) -> None:
+    options = DocumentOptions(request.archive)
+    owners = request.owner_rules if request.owner_rules is not None else options.defaults()
+    if request.owner_names_file is not None:
+        owners = OwnerRules(include=read_owner_names(request.owner_names_file), exclude=owners.exclude)
+    if not owners.include:
+        raise ValueError("Set owner include rules in config.yaml or supply --owner-names-file before importing.")
     plugins = load_plugins(request.plugin_dir)
     source_specs = [SourceSpec(locator=root) for root in request.roots]
     selected_sources: list[tuple[SourceSpec, LoadedPlugin]] = []
@@ -1110,8 +1117,8 @@ def _run_ingest(request: IngestRequest, writer_lease: WriterLease, outcome: Inge
         outcome.published = True
         checkpoint_archive()
         print(f"recovered: pending message publication {recovery.value}", file=sys.stderr)
-    owners = owner_tokens(request.owner_names_file)
-    DocumentOptions(archive).record_import(owners, writer_lease)
+    options.save(owners, writer_lease)
+    options.record_import(owners, writer_lease)
     started_at = datetime.now(UTC)
     run_pk = catalog.execute(
         "INSERT INTO ingest_runs(started_at) VALUES (?)", (started_at.isoformat(),)
@@ -1488,7 +1495,7 @@ def _run_ingest(request: IngestRequest, writer_lease: WriterLease, outcome: Inge
 
     def archive_scanned(candidate: PendingScan, infected: bool) -> int:
         raw, parsed = candidate.source.raw, candidate.parsed
-        category = "INFECTED" if infected else ("Sent" if any(token in parsed.sender.lower() for token in owners) else "Archive")
+        category = "INFECTED" if infected else ("Sent" if owners.matches(parsed.sender) else "Archive")
         destination = mbox_path(archive, mailbox_name(parsed, category))
         file_existed = destination.exists()
         publication = PendingPublication(
@@ -1912,6 +1919,7 @@ def _run_ingest(request: IngestRequest, writer_lease: WriterLease, outcome: Inge
             try:
                 checkpoint_archive()
                 catalog.commit()
+                options.write_detected(catalog, owners, writer_lease)
             except Exception as error:
                 logging.getLogger(__name__).debug("Best-effort operation failed", exc_info=True)
                 integrity_error = error
@@ -2221,7 +2229,7 @@ def main() -> int:
     add_archive_argument(parser, "canonical archive directory")
     commands = parser.add_subparsers(dest="command", required=True)
     ingest_parser = commands.add_parser("ingest")
-    ingest_parser.add_argument("--owner-names-file", required=True)
+    ingest_parser.add_argument("--owner-names-file", help="Legacy include-rule file; otherwise use archive config.yaml")
     ingest_parser.add_argument(
         "--earliest-year",
         type=positive_integer,

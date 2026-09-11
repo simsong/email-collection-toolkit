@@ -11,6 +11,20 @@ Run it only through the Makefile:
 make test-e2e
 ```
 
+## Compiled UI trial and migration boundary
+
+The compiled UI candidates are [Dioxus Desktop and Tauri](DIOXUS.md), retaining the
+Python ingest engine. The suite and pywebview bridge descriptions below cover
+the current implementation. Migration must reuse preservation fixtures and
+logical assertions, adapt the frontend driver, test the typed worker protocol,
+and add native tests for each trial on macOS and Windows. A Chromium pass or skipped
+Cocoa test is not validation of either Windows frontend. Packaged acceptance must cover full
+ingest, cancellation/recovery, isolated HTML, and clean installation without
+developer runtimes. These migration tests are not implemented yet.
+
+Plan comparable trial implementations in Dioxus and Tauri before choosing a
+framework. Either approach retains the Python archive engine.
+
 ## Synthetic name-resolution benchmark
 
 The privacy-safe benchmark under `benchmarks/name_resolution/` captures the
@@ -231,6 +245,12 @@ headless browser interface pass. A browser-only pass is not proof that the
 macOS application shell works; `make test-native-gui` supplies separate local
 smoke evidence. Required native evidence must come from
 XCUITest/XCUIAutomation in a logged-in macOS session.
+
+Owner-rule regression checks use `make test-owner-rules` for exact/glob matching,
+exclusion precedence, YAML defaults, real fixture routing, raw-byte hashes, and
+repeat-import verification. `make test-native-application` also exercises both
+native owner fields with defaults, Continue/Cancel, and the persistent options
+editor in a real Cocoa/WebKit process. These tests use disposable fixture archives.
 
 ### Finder file export regression
 

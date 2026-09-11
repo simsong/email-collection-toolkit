@@ -17,6 +17,21 @@ runs headless and visible native self-tests before publishing the local artifact
 See [macOS distribution](doc/MACOS_DISTRIBUTION.md) for installation, test commands,
 architecture limits, and Developer ID renewal/signing instructions.
 
+## Windows development
+
+The compiled desktop UI candidates are **Dioxus Desktop and Tauri**, using Rust
+and the system webview, while ingest, search, and archive preservation remain in Python.
+Windows with full ingest is the next platform priority. This migration is
+planned; the current application remains pywebview. See
+[the desktop architecture decision](doc/DIOXUS.md).
+
+Plan comparable trial implementations in Dioxus and Tauri before choosing a
+framework. Either approach retains the Python archive engine.
+
+See [Windows setup](doc/WINDOWS.md) for clean-install VM directions and the
+remaining work required for full Windows ingest. This is a development setup
+guide, not a supported Windows application release.
+
 ## Goals
 
 `mailarchiver` is preservation infrastructure for personal and research email
@@ -387,9 +402,10 @@ SHA-256; it does not alter canonical message bytes.
 
 ### Graphical search desktop architecture
 
-The graphical search tool uses pywebview with the system WKWebView on macOS;
-the same Python controller and HTML/CSS/JavaScript are designed for WebView2 on
-Windows. The controller supports multiple archive documents and multiple
+The current graphical search tool uses pywebview with WKWebView on macOS.
+The compiled replacement candidates are Dioxus Desktop and Tauri, retaining Python
+archive services and system-webview rendering; see [DIOXUS.md](doc/DIOXUS.md).
+The current controller supports multiple archive documents and multiple
 independent search windows on one archive. Packaged GUI assets come from an
 application-owned, nonce-authenticated server bound to an ephemeral
 `127.0.0.1` port; it exposes no HTTP service API, and JavaScript calls Python
@@ -437,8 +453,9 @@ See [`doc/USER_MANUAL.md`](doc/USER_MANUAL.md#filter-by-original-mailbox).
 pywebview also supports Windows and Linux, but this application is not yet
 portable: attachment opening currently calls the macOS `open` command, Finder
 drag-out is macOS-specific, and only the Cocoa/WKWebView bridge has been tested.
-The search and SQLite service layer is portable; the desktop integration needs
-small platform adapters and testing before Windows is supported.
+The Python writer and scanner also require Windows portability work. Full
+Windows support will be validated with the chosen UI framework and packaged
+Python backend; existing browser tests do not establish native Windows support.
 
 ## Test
 

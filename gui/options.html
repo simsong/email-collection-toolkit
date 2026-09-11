@@ -5,28 +5,25 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-eval'; style-src 'self'; object-src 'none'; connect-src 'self'">
-  <title>Document Options</title>
+  <title>Owner emails</title>
   <link rel="stylesheet" href="options.css">
 </head>
 <body>
   <main>
-    <h1>Owner names</h1>
-    <p>Names and email addresses used to identify this archive’s sent mail.</p>
-    <select id="owners" multiple size="10" aria-label="Owner names"></select>
-    <div class="actions">
-      <button id="add" aria-label="Add owner names" disabled>+</button>
-      <button id="remove" aria-label="Delete selected owner names" disabled>−</button>
-    </div>
-    <form id="add-form" hidden>
-      <label for="new-names">Add names or email addresses</label>
-      <input id="new-names" placeholder="alice; bob@example.org, carol" autocomplete="off">
-      <p>Separate entries with commas, semicolons, or spaces.</p>
-      <button type="submit">Add</button>
-      <button type="button" id="cancel-add">Cancel</button>
+    <h1>Owner emails</h1>
+    <p>Identify the addresses whose messages belong in Sent. Enter one rule per line, or separate rules with commas.</p>
+    <form id="owner-form">
+      <label for="owner-include">Owner emails (include)</label>
+      <textarea id="owner-include" rows="5" spellcheck="false" autocapitalize="off" placeholder="slg&#10;*simson*&#10;alice@example.org"></textarea>
+      <label for="owner-exclude">Exclude (applied after include)</label>
+      <textarea id="owner-exclude" rows="3" spellcheck="false" autocapitalize="off" placeholder="*david*"></textarea>
+      <p>Rules ignore case. <code>slg</code> means <code>slg@*</code> and does not match <code>3slg</code>. Use <code>*</code>, <code>?</code>, or <code>[abc]</code> for wildcards; a domain is matched only when the rule contains <code>@</code>. Exclusions always win.</p>
+      <div class="actions"><button id="save" type="submit" disabled>Save</button><button id="cancel" type="button" hidden>Cancel</button></div>
     </form>
-    <p id="changed" role="status" hidden>Owner names have changed since the last import started. Existing messages will not be moved between Sent and Archive mailboxes.</p>
-    <p id="unknown" hidden>Owner names used by earlier imports were not recorded.</p>
-    <p>Changes are saved automatically and affect future imports only. Owner names are not stored in the search index; reindexing will not change existing messages’ classification.</p>
+    <p id="changed" role="status" hidden>Rules have changed since the last import started. Existing messages keep their Sent or Archive classification.</p>
+    <p id="unknown" hidden>Rules used by earlier imports were not recorded.</p>
+    <p id="persistence">Saved rules become the defaults shown before every import. Changes affect future imports; reindexing does not reclassify existing messages.</p>
+    <p id="saved" role="status" hidden>Saved.</p>
     <p id="error" role="alert" hidden></p>
   </main>
   <script src="options.js"></script>

@@ -7,12 +7,14 @@ import os
 from importlib import import_module
 from pathlib import Path
 from threading import Event
+from time import monotonic, sleep
 
 import webview
 
 from mailarchiver.application import ApplicationController, ApplicationPreferencesStore, IngestJob
-from mailarchiver.gui_app import GUI_DIRECTORY, PyWebViewApplication, configure_macos_application, install_macos_document_events, macos_import_picker, macos_owner_names
+from mailarchiver.gui_app import GUI_DIRECTORY, PyWebViewApplication, configure_macos_application, install_macos_document_events, macos_import_picker, macos_owner_rules
 from mailarchiver.loopback import LoopbackAssetServer
+from mailarchiver.owner_rules import OwnerRules
 from mailarchiver.document_options import DocumentOptions
 from mailarchiver.writer_lock import WriterLease
 
@@ -76,6 +78,7 @@ def main() -> None:
             status = evaluate_async(about, "window.pywebview.api.status()")
             assert status["metadata"]["version"], status
             assert status["disk_free_bytes"] > 0, status
+            assert not [notice for notice in status["notices"] if notice["severity"] == "error"], status
             assert about.evaluate_js("Object.keys(window.pywebview.api)") == ["status"]
             application.add_notice("warning", "Native About regression check")
             evaluate_async(about, "refresh().then(() => true)")
@@ -124,7 +127,15 @@ def main() -> None:
 
             AppHelper.callLater(0.3, inspect_reopened)
             assert reopened.wait(5), "About menu reopening check timed out"
-            api = application.open_document(archive)
+            # Disabling command-line reinterpretation must retain genuine Finder opens.
+            native = NSApplication.sharedApplication()
+            AppHelper.callAfter(native.delegate().application_openFiles_, native, [str(archive)])
+            deadline = monotonic() + 10
+            api = application.active_api()
+            while api is None and monotonic() < deadline:
+                sleep(0.01)
+                api = application.active_api()
+            assert api is not None, "Finder document-open event did not open the archive"
             document = api.document
             assert document is not None and document.path is not None and document.display_path is not None
             assert api.search_window is not None
@@ -206,7 +217,7 @@ def main() -> None:
                     app = NSApplication.sharedApplication()
                     modal = app.modalWindow()
                     try:
-                        assert modal is not None and "Owner names for" in modal.title()
+                        assert modal is not None and "Owner emails for" in modal.title()
                         views = [modal.contentView()]
                         editors = []
                         while views:
@@ -214,8 +225,16 @@ def main() -> None:
                             views.extend(view.subviews())
                             if isinstance(view, NSTextView) and view.isEditable():
                                 editors.append(view)
-                        assert len(editors) == 1, "Expected one multiline owner editor"
-                        editors[0].setString_(" José Example \n jose@example.org \n")
+                        assert len(editors) == 2, "Expected include and exclude editors"
+                        for editor in editors:
+                            if editor.identifier() == "owner-include":
+                                assert editor.string() == "slg"
+                                editor.setString_("*Simson*\nslg")
+                            elif editor.identifier() == "owner-exclude":
+                                assert editor.string() == "*david*"
+                                editor.setString_("*David*")
+                            else:
+                                raise AssertionError("Unexpected owner editor")
                     except Exception as error:  # pylint: disable=broad-exception-caught
                         failures.append(str(error))
                     finally:
@@ -226,26 +245,28 @@ def main() -> None:
                     NSRunLoop.mainRunLoop().addTimer_forMode_(timer, NSModalPanelRunLoopMode)
 
                 AppHelper.callAfter(schedule_owner_entry)
-                entered = macos_owner_names(document.display_path)
-                assert entered == ("jose@example.org\nJosé Example\n" if accept else None)
+                entered = macos_owner_rules(document.display_path, OwnerRules(include=["slg"], exclude=["*david*"]))
+                assert entered == (OwnerRules(include=["*simson*", "slg"], exclude=["*david*"]) if accept else None)
                 assert not (document.path / "owner-names.txt").exists(), "Entry alone must not save"
             assert application.open_document_options(api.document)
             options = next(window for window in webview.windows if " — Document Options — " in window.title)
             assert options.events.loaded.wait(10), "Options bridge failed to load"
             evaluate_async(options, "refreshOptions().then(() => true)")
-            options.evaluate_js("document.getElementById('add').click()")
-            assert not options.evaluate_js("document.getElementById('add-form').hidden")
-            evaluate_async(options, "updateOptions('Zed;alice@example.org, Bob zed', []).then(() => true)")
-            assert options.evaluate_js("Array.from(document.getElementById('owners').options, o => o.value)") == ["alice@example.org", "Bob", "Zed"]
+            options.evaluate_js("document.getElementById('owner-include').value = '*Simson*, SLG'; document.getElementById('owner-exclude').value = '*David*'")
+            evaluate_async(options, "saveOptions().then(() => true)")
+            assert options.evaluate_js("document.getElementById('owner-include').value") == "*simson*\nslg"
+            assert options.evaluate_js("document.getElementById('owner-exclude').value") == "*david*"
             store = DocumentOptions(document.path)
             owner_lease = WriterLease.acquire(document.path, document.descriptor.identity, "test", "options", "test")
             try:
-                store.record_import(store.state().names, owner_lease)
+                store.record_import(store.defaults(), owner_lease)
             finally:
                 owner_lease.release()
-            evaluate_async(options, "updateOptions('', ['Bob', 'Zed']).then(() => true)")
+            options.evaluate_js("document.getElementById('owner-include').value = 'slg'")
+            evaluate_async(options, "saveOptions().then(() => true)")
             assert not options.evaluate_js("document.getElementById('changed').hidden")
-            assert store.state().names == ["alice@example.org"]
+            assert store.state().include == ["slg"]
+            assert store.state().exclude == ["*david*"]
             options.destroy()
             assert options.events.closed.wait(5)
             assert application.open_document_options(api.document)
@@ -264,7 +285,7 @@ def main() -> None:
             controller.begin_ingest(document_id, IngestJob(operation_id="button-test", owner_window_id=api.search_window.window_id), lease)
             try:
                 evaluate_async(options, "refreshOptions().then(() => true)")
-                assert options.evaluate_js("document.getElementById('add').disabled")
+                assert options.evaluate_js("document.getElementById('save').disabled")
                 evaluate_async(ingest, "refreshHistory().then(() => true)")
                 assert ingest.evaluate_js("document.getElementById('import-directory').disabled")
                 assert not evaluate_async(ingest, "window.pywebview.api.import_directory()")

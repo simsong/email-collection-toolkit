@@ -1,29 +1,29 @@
 /* Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved. */
 "use strict";
 const byId = id => document.getElementById(id);
+const importing = new URLSearchParams(window.location.search).has("import");
 let current = null;
 let saving = false;
+let dirty = false;
 let initialized = false;
 
-function render(state) {
-  const selected = new Set(Array.from(byId("owners").selectedOptions, option => option.value));
-  current = state;
-  byId("owners").replaceChildren(...state.names.map(name => {
-    const option = document.createElement("option");
-    option.value = name;
-    option.textContent = name;
-    option.selected = selected.has(name);
-    return option;
-  }));
-  byId("changed").hidden = !state.changed_since_import;
-  byId("unknown").hidden = state.import_names_known;
+function render(state, replace = false) {
+  if (!dirty || replace) {
+    current = state;
+    byId("owner-include").value = state.include.join("\n");
+    byId("owner-exclude").value = state.exclude.join("\n");
+  } else {
+    current.editable = state.editable;
+  }
+  byId("changed").hidden = importing || !state.changed_since_import;
+  byId("unknown").hidden = importing || state.import_rules_known;
   controls();
 }
 
 function controls() {
-  byId("add").disabled = saving || !current?.editable;
-  byId("remove").disabled = saving || !current?.editable || !byId("owners").selectedOptions.length;
-  byId("add-form").querySelector("button[type=submit]").disabled = saving || !current?.editable;
+  for (const id of ["save", "owner-include", "owner-exclude"]) {
+    byId(id).disabled = saving || !current?.editable;
+  }
 }
 
 async function refreshOptions() {
@@ -37,33 +37,33 @@ function showError(error) {
   byId("error").hidden = false;
 }
 
-async function updateOptions(additions, removed) {
+async function saveOptions() {
   if (saving || !current) return;
   saving = true;
   controls();
   byId("error").hidden = true;
   try {
-    render(await window.pywebview.api.update(additions, removed, current.revision));
-    byId("add-form").hidden = true;
-    byId("new-names").value = "";
+    const state = await window.pywebview.api.update(byId("owner-include").value, byId("owner-exclude").value, current.revision);
+    dirty = false;
+    render(state, true);
+    byId("saved").hidden = importing;
   } catch (error) { showError(error); }
-  finally { saving = false; await refreshOptions(); }
+  finally { saving = false; controls(); }
 }
 
 function initialize() {
   if (initialized || !window.pywebview?.api?.status) return;
   initialized = true;
-  byId("owners").addEventListener("change", controls);
-  byId("add").addEventListener("click", () => {
-    byId("add-form").hidden = false;
-    byId("new-names").focus();
-  });
-  byId("cancel-add").addEventListener("click", () => { byId("add-form").hidden = true; });
-  byId("remove").addEventListener("click", () => updateOptions("", Array.from(byId("owners").selectedOptions, option => option.value)));
-  byId("add-form").addEventListener("submit", event => {
-    event.preventDefault();
-    if (byId("new-names").value.trim()) updateOptions(byId("new-names").value, []);
-  });
+  if (importing) {
+    byId("save").textContent = "Continue";
+    byId("cancel").hidden = false;
+    byId("persistence").textContent = "These rules will be saved as defaults when you confirm the import.";
+  }
+  for (const id of ["owner-include", "owner-exclude"]) {
+    byId(id).addEventListener("input", () => { dirty = true; byId("saved").hidden = true; });
+  }
+  byId("cancel").addEventListener("click", () => window.pywebview.api.cancel());
+  byId("owner-form").addEventListener("submit", event => { event.preventDefault(); saveOptions(); });
   refreshOptions();
 }
 window.addEventListener("pywebviewready", initialize);
