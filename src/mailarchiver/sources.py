@@ -692,7 +692,7 @@ def _unwrap_xxx_record(raw: bytes, envelope: bytes) -> tuple[bytes, bytes]:
         return raw, envelope
     nested = MBOXRD_QUOTED_FROM.sub(b"", nested)
     nested_envelope, newline, message = nested.partition(b"\n")
-    if not newline or _mbox_envelope_sender(nested_envelope.rstrip(b"\r")) == b"":
+    if not newline or MBOX_ENVELOPE.fullmatch(nested_envelope.rstrip(b"\r")) is None:
         return raw, envelope
     return message, nested_envelope + newline
 
