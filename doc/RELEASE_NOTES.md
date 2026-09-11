@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+* Plan comparable Dioxus Desktop and Tauri trials before choosing the compiled UI;
+  retain ingest, search, and archive preservation in Python. Prioritize Windows
+  full ingest and defer Linux/snap delivery. This records the migration decision;
+  the Dioxus frontend, worker protocol, and Windows installer are not implemented.
+  The framework decision remains pending trial results.
+
+* Add a clean-Windows development setup guide covering ARM64/x64 uv installation,
+  x64 Python on ARM VMs, and the remaining full-ingest and packaging work.
+  The procedure has not yet been executed in a clean Windows VM; this is not
+  a Windows support announcement.
+
 * Preserve original MBOX `From ` delimiters through import. When absent,
   synthesize a delimiter from the latest valid header timestamp instead of
   import time, with deterministic documented fallbacks. Existing archives are

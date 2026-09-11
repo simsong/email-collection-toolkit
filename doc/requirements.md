@@ -598,9 +598,22 @@ An indexing failure is recorded as a metadata defect and does not reject mail;
 
 ## Desktop application documents and windows
 
-The first macOS and Windows applications retain the Python implementation and
-share the pywebview HTML, CSS, and JavaScript. They use WKWebView on macOS and
-WebView2 on Windows. An application-owned HTTP server binds only to
+The compiled desktop experience will evaluate Dioxus Desktop and Tauri with the
+system webview (WKWebView on macOS, WebView2 on Windows). Rust work is limited to the desktop/UI layer;
+ingest, search, scanner orchestration, archive locking, and preservation remain
+in Python. Windows with full ingest is the next platform priority; Linux/snap
+delivery is deferred. [DIOXUS.md](DIOXUS.md) defines the trial plan and migration,
+typed local worker boundary, packaging, and native acceptance requirements.
+The worker protocol and both candidate frontends remain unimplemented. End users must
+receive the compiled UI and bundled Python dependencies together.
+
+Plan comparable trial implementations in Dioxus and Tauri before choosing a
+framework. Either approach retains the Python archive engine.
+
+The current pywebview application uses HTML/CSS/JavaScript and its native Python
+bridge. The following asset-server rules describe that implementation and its
+security baseline; they do not prescribe the unimplemented worker transport.
+An application-owned HTTP server binds only to
 `127.0.0.1` on an ephemeral port and serves only packaged GUI assets. Each
 window starts with an unlogged, one-use cryptographic nonce that establishes a
 session-only `HttpOnly`, `SameSite=Strict` cookie and redirects to a clean URL;
@@ -1302,6 +1315,17 @@ and retain the current explicit-path CLI instructions.
   legacy charset recovery without changing canonical mail. `review` queries the
   committed source-observation log by run, source, and disposition. Derived
   catalog fields and canonical locations are created correctly during ingest.
+
+## Windows development environment
+
+[WINDOWS.md](WINDOWS.md) documents native Windows setup with x64 CPython managed
+by uv, MSYS2 build utilities, Rust/MSVC/Dioxus tooling, WebView2, and existing
+Makefile checks. It covers ARM64 and x64 uv installation separately from the
+application Python target. Setup must distinguish installed tools from validated
+application support. Windows delivery
+requires full ingest, preservation, recovery, and native desktop validation;
+WSL/Linux results do not establish Windows compatibility. Windows writer and
+scanner portability remain implementation work, not shipped features.
 
 ## macOS desktop delivery
 

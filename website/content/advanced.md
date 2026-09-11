@@ -7,6 +7,19 @@ Email Collection Toolkit preserves source evidence while making repeated acquisi
 These details matter when the same mail appears in provider exports, backups,
 and working mail-client caches.
 
+## Planned compiled desktop experience
+
+The compiled desktop UI will evaluate Dioxus Desktop and Tauri with the system webview.
+Ingest, search, and canonical archive preservation remain in Python. Windows
+with full ingest is the next platform priority; Linux/snap delivery is deferred.
+The current application remains Python/pywebview, and this decision is not a
+Windows release announcement. See the
+[architecture decision](https://github.com/simsong/email-collection-toolkit/blob/main/doc/DIOXUS.md)
+for migration and validation requirements.
+
+Plan comparable trial implementations in Dioxus and Tauri before choosing a
+framework. Either approach retains the Python archive engine.
+
 ## Apple Mail as a temporary provider adapter
 
 Until direct Gmail, Microsoft 365, and IMAP adapters are implemented, Email Collection Toolkit can read complete Apple Mail `.emlx` records from `~/Library/Mail`.
