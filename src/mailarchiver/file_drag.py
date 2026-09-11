@@ -1,0 +1,95 @@
+"""Promote explicit export tokens to native file drags at the Cocoa boundary."""
+
+from importlib import import_module
+from pathlib import Path
+from typing import Any
+from uuid import uuid4
+
+from pydantic import BaseModel, Field
+
+
+class FileDrags(BaseModel):
+    """Only files exported by this process can become native drag items."""
+
+    paths: dict[str, Path] = Field(default_factory=dict)
+
+    def register(self, path: Path) -> str:
+        token = f"mailarchiver-export:{uuid4()}"
+        self.paths[token] = path
+        return token
+
+    def discard(self, tokens: set[str]) -> None:
+        for token in tokens:
+            self.paths.pop(token, None)
+
+    def resolve(self, token: str | None) -> Path | None:
+        path = self.paths.get(token) if token else None
+        return path if path is not None and path.is_file() else None
+
+
+FILE_DRAGS = FileDrags()
+
+
+def file_url(writer: Any) -> Any:
+    """Read a registered token, never interpret dragged text as a filesystem path."""
+    appkit = import_module("AppKit")
+    read = getattr(writer, "stringForType_", None)
+    path = FILE_DRAGS.resolve(read(appkit.NSPasteboardTypeString) if read else None)
+    return appkit.NSURL.fileURLWithPath_(str(path)) if path is not None else None
+
+
+def replace_file_pasteboard(pasteboard: Any) -> bool:
+    """Remove all WebKit link representations before writing the actual file URL."""
+    url = file_url(pasteboard)
+    if url is None:
+        return False
+    pasteboard.clearContents()
+    if not pasteboard.writeObjects_([url]):
+        raise RuntimeError("could not write the exported file to the drag pasteboard")
+    return True
+
+
+def native_drag_items(items: Any) -> Any:
+    """Modern WebKit creates its session from writers, clearing the old pasteboard."""
+    appkit = import_module("AppKit")
+    result = []
+    for item in items:
+        url = file_url(item.item())
+        if url is None:
+            result.append(item)
+            continue
+        replacement = appkit.NSDraggingItem.alloc().initWithPasteboardWriter_(url)
+        frame = item.draggingFrame()
+        icon = appkit.NSWorkspace.sharedWorkspace().iconForFile_(url.path())
+        replacement.setDraggingFrame_contents_(frame, icon)
+        result.append(replacement)
+    return result
+
+
+def install_file_drag() -> None:
+    """Keep WebKit's gesture and copy mask, replacing only registered export data."""
+    cocoa = import_module("webview.platforms.cocoa")
+    objc = import_module("objc")
+    host = cocoa.BrowserView.WebKitHost
+    if "dragImage_at_offset_event_pasteboard_source_slideBack_" in host.__dict__:
+        return
+
+    # Add methods to the existing class: pywebview's own methods name that class
+    # in super() calls, so replacing BrowserView.WebKitHost with a subclass recurses.
+    def dragImage_at_offset_event_pasteboard_source_slideBack_(
+        self, image, point, offset, event, pasteboard, source, slide_back
+    ):
+        replace_file_pasteboard(pasteboard)
+        return objc.super(host, self).dragImage_at_offset_event_pasteboard_source_slideBack_(
+            image, point, offset, event, pasteboard, source, slide_back
+        )
+
+    def beginDraggingSessionWithItems_event_source_(self, items, event, source):
+        return objc.super(host, self).beginDraggingSessionWithItems_event_source_(
+            native_drag_items(items), event, source
+        )
+
+    objc.classAddMethods(host, [
+        dragImage_at_offset_event_pasteboard_source_slideBack_,
+        beginDraggingSessionWithItems_event_source_,
+    ])

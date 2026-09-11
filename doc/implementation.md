@@ -1145,8 +1145,15 @@ Indexing parses each message once for FTS body text and attachment metadata;
 The tables are derived and are replaced together with FTS by `refresh-index`.
 
 `.eml` export writes the bytes returned by hash-verified direct retrieval.
-Finder dragging uses a temporary `.eml` file URL and the Cocoa webview's native
-file/link drag support. Only the message-file icon well is draggable; the
+Finder dragging uses an `NSURL` file pasteboard writer. JavaScript carries only
+an opaque registered export token with a copy-only operation mask; the Cocoa
+adapter replaces that token before the native drag starts. The legacy
+`dragImage:...` path clears WebKit link flavors and writes the file object; the
+modern `beginDraggingSessionWithItems:...` path replaces the item writer before
+AppKit builds its pasteboard. Unregistered text and link drags are unchanged.
+Closing the owning viewer revokes its tokens. `make test-file-drag` checks exact
+export bytes, token revocation, and both native pasteboard representations.
+Only the message-file icon well is draggable; the
 header region remains normal selectable text. The browser never preloads an
 `.eml` file on hover or selection: a drag-start event begins asynchronous
 preparation, and a subsequent drag transfers the ready file. Each write uses a

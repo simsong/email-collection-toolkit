@@ -2017,9 +2017,9 @@ function installDrag(element, messagePks) {
       return;
     }
     event.dataTransfer.effectAllowed = "copy";
-    event.dataTransfer.setData("text/uri-list", info.url);
-    event.dataTransfer.setData("DownloadURL", `${info.content_type}:${info.filename}:${info.url}`);
-    event.dataTransfer.setData("text/plain", info.url);
+    // Cocoa replaces this opaque token with an NSURL file writer before the
+    // native session starts. WebKit URL/DownloadURL data creates .fileloc links.
+    event.dataTransfer.setData("text/plain", info.token);
   });
 }
 

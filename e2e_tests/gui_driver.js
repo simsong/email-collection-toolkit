@@ -15,6 +15,11 @@
     }
     throw new Error(`Timed out: ${label}; painted=${document.querySelectorAll("#result-list .result").length}; retained=${state.results.length}; status=${document.getElementById("result-status")?.textContent}`);
   };
+  const assertFileTransfer = transfer => {
+    assert(transfer.effectAllowed === "copy" && Object.keys(transfer.values).length === 1 &&
+      transfer.values["text/plain"]?.startsWith("mailarchiver-export:"),
+    "file drags carry only a registered native export token and permit copying only");
+  };
   const rows = () => [...document.querySelectorAll("#result-list .result")];
   const subjects = () => rows().map(row => row.querySelector(".result-subject").textContent);
   const isSelected = row => row.closest(".tabulator-row")?.classList.contains("tabulator-selected");
@@ -189,17 +194,19 @@
     const zipDrag = new Event("dragstart", {bubbles: true, cancelable: true});
     Object.defineProperty(zipDrag, "dataTransfer", {value: zipTransfer});
     document.getElementById("message-file-well").dispatchEvent(zipDrag);
-    if (!zipTransfer.values.DownloadURL) {
+    if (!zipTransfer.values["text/plain"]) {
       await waitFor(() => state.dragExports.has([...state.resultSelection].sort((a, b) => a - b).join(",")),
         "first multi-message drag prepares a ZIP");
       const preparedZipTransfer = {values: {}, effectAllowed: "", setData(type, value) { this.values[type] = value; }};
       const preparedZipDrag = new Event("dragstart", {bubbles: true, cancelable: true});
       Object.defineProperty(preparedZipDrag, "dataTransfer", {value: preparedZipTransfer});
       document.getElementById("message-file-well").dispatchEvent(preparedZipDrag);
-      assert(preparedZipTransfer.values.DownloadURL?.startsWith("application/zip:"),
-        "multi-message drag publishes a ZIP download");
+      assertFileTransfer(preparedZipTransfer);
+      assert(preparedZipTransfer.values["text/plain"]?.startsWith("mailarchiver-export:"),
+        "multi-message drag publishes a native ZIP export token");
     } else {
-      assert(zipTransfer.values.DownloadURL.startsWith("application/zip:"), "multi-message drag publishes a ZIP download");
+      assertFileTransfer(zipTransfer);
+      assert(zipTransfer.values["text/plain"].startsWith("mailarchiver-export:"), "multi-message drag publishes a native ZIP export token");
     }
     await sleep(0);
     rows()[0].click();
@@ -453,15 +460,17 @@
     const drag = new Event("dragstart", {bubbles: true, cancelable: true});
     Object.defineProperty(drag, "dataTransfer", {value: transfer});
     document.getElementById("message-file-well").dispatchEvent(drag);
-    if (!transfer.values.DownloadURL) {
+    if (!transfer.values["text/plain"]) {
       await waitFor(() => messageFileName.textContent !== beforeHover, "first drag prepares the message file");
       const preparedTransfer = {values: {}, effectAllowed: "", setData(type, value) { this.values[type] = value; }};
       const preparedDrag = new Event("dragstart", {bubbles: true, cancelable: true});
       Object.defineProperty(preparedDrag, "dataTransfer", {value: preparedTransfer});
       document.getElementById("message-file-well").dispatchEvent(preparedDrag);
-      assert(preparedTransfer.values.DownloadURL?.startsWith("message/rfc822:"), "prepared drag publishes an RFC 822 download");
+      assertFileTransfer(preparedTransfer);
+      assert(preparedTransfer.values["text/plain"]?.startsWith("mailarchiver-export:"), "prepared drag publishes a native message export token");
     } else {
-      assert(transfer.values.DownloadURL.startsWith("message/rfc822:"), "explicit drag publishes an RFC 822 download");
+      assertFileTransfer(transfer);
+      assert(transfer.values["text/plain"].startsWith("mailarchiver-export:"), "explicit drag publishes a native message export token");
     }
 
     await search("", 0, false);

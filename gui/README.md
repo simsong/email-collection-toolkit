@@ -47,8 +47,8 @@ message and MIME-part views, separate message windows, sanitized HTML with
 remote content blocked by default, inline image and PDF previews, attachment
 open/save actions, printing, exact `.eml` export, and experimental Finder
 drag-out from the dedicated message-file well. Browsing and hovering never
-creates a temporary `.eml`; the first drag prepares it and the next transfers
-the ready file.
+creates a temporary `.eml`; the first drag prepares it and the next copies the
+actual file using a native file pasteboard writer, without URL shortcut flavors.
 
 The interface is for archivists rather than inbox processing. Nonempty queries
 count and search the complete collection, regardless of message age. It shows

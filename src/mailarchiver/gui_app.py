@@ -28,6 +28,7 @@ import webview
 from pydantic import BaseModel, Field
 from webview.menu import Menu, MenuAction, MenuSeparator
 
+from .file_drag import FILE_DRAGS, install_file_drag
 from .identity import APPLICATION_NAME
 from .__main__ import IngestInterrupted, IngestOutcome, IngestRequest, run_ingest
 from .application import (
@@ -141,8 +142,7 @@ class GuiIngestOverview(BaseModel):
 
 class DragExport(BaseModel):
     filename: str
-    url: str
-    content_type: str
+    token: str
 
 
 class OpenResult(BaseModel):
@@ -632,6 +632,7 @@ class GuiApi:
         self.search_window = search_window
         self.archive = document.path if document is not None else archive
         self.window: Any = None
+        self._drag_tokens: set[str] = set()
         self._temporary = tempfile.TemporaryDirectory(prefix="mailarchive-gui-") if temporary_directory is None else None
         if self._temporary is not None:
             self.temporary_directory: Path = Path(self._temporary.name)
@@ -1008,15 +1009,13 @@ class GuiApi:
             view = describe_message(archive, unique[0])
             destination = self.temporary_directory / export_filename(view)
             write_message(archive, unique[0], destination)
-            return DragExport(
-                filename=destination.name, url=destination.as_uri(), content_type="message/rfc822"
-            ).model_dump()
-        digest = hashlib.sha256(",".join(map(str, sorted(unique))).encode()).hexdigest()[:12]
-        destination = self.temporary_directory / f"messages-{digest}" / f"Email Collection Toolkit Messages ({len(unique)}).zip"
-        write_messages_zip(archive, unique, destination)
-        return DragExport(
-            filename=destination.name, url=destination.as_uri(), content_type="application/zip"
-        ).model_dump()
+        else:
+            digest = hashlib.sha256(",".join(map(str, sorted(unique))).encode()).hexdigest()[:12]
+            destination = self.temporary_directory / f"messages-{digest}" / f"Email Collection Toolkit Messages ({len(unique)}).zip"
+            write_messages_zip(archive, unique, destination)
+        token = FILE_DRAGS.register(destination)
+        self._drag_tokens.add(token)
+        return DragExport(filename=destination.name, token=token).model_dump()
 
     def open_attachment(self, message_pk: int, part_id: int, confirmed: bool = False) -> dict[str, Any]:
         descriptor = attachment_descriptor(self._archive(), message_pk, part_id)
@@ -1076,6 +1075,8 @@ class GuiApi:
                 child.window.destroy()
             child.close()
         self.children.clear()
+        FILE_DRAGS.discard(self._drag_tokens)
+        self._drag_tokens.clear()
         if self._temporary:
             self._temporary.cleanup()
 
@@ -2040,6 +2041,8 @@ def install_macos_document_events(application: PyWebViewApplication) -> None:
     if sys.platform != "darwin":
         return
     from webview.platforms.cocoa import BrowserView  # pylint: disable=import-outside-toplevel
+
+    install_file_drag()
 
     class MailArchiverDelegate(BrowserView.AppDelegate):
         def applicationShouldTerminate_(self, app):

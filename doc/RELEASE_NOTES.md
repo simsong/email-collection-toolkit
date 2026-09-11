@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+* Fix message-icon drags to Finder/Desktop to copy actual `.eml` files (or a
+  ZIP for multiple messages), instead of creating `.fileloc` URL shortcuts.
+
 * Preserve original MBOX `From ` delimiters through import. When absent,
   synthesize a delimiter from the latest valid header timestamp instead of
   import time, with deterministic documented fallbacks. Existing archives are

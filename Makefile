@@ -365,3 +365,7 @@ website-gmail-illustrations:
 .PHONY: test-envelopes
 test-envelopes:
 	uv run pytest -q tests/test_envelopes.py tests/test_sources.py tests/test_publication.py tests/test_standalone_verify.py
+
+.PHONY: test-file-drag
+test-file-drag:
+	uv run --locked pytest -q tests/test_file_drag.py

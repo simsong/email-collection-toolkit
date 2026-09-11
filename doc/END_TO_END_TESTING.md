@@ -231,3 +231,15 @@ headless browser interface pass. A browser-only pass is not proof that the
 macOS application shell works; `make test-native-gui` supplies separate local
 smoke evidence. Required native evidence must come from
 XCUITest/XCUIAutomation in a logged-in macOS session.
+
+### Finder file export regression
+
+`make test-file-drag` verifies exact message export bytes, export-token lifetime,
+and rejection of arbitrary pathname/URL text. On macOS it also exercises both
+WebKit adapter paths with real Cocoa pasteboards and dragging-item writers,
+requiring `public.file-url` and rejecting link and plain-text flavors. These
+checks do not simulate a Finder drop. The browser acceptance driver separately
+checks that explicit drags allow copying only and carry an opaque export token.
+A desktop acceptance check must drag the prepared message icon onto Finder or
+the Desktop and compare the resulting `.eml` bytes with the verified export;
+repeat for a multi-selection ZIP and confirm no `.fileloc` is created.
