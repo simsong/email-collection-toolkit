@@ -10,9 +10,23 @@ Babyl, and complete Apple Mail `.emlx` files can be used today.
 ## Import with the application
 
 Open or create an archive, then choose **File → Import…**. Select local files
-or folders, enter the archive owner's names when prompted, and review the
-source and destination before confirming. A directory includes supported mail
+or folders, review **Owner emails (include)** and **Exclude (applied after include)**,
+then confirm the source and destination. A directory includes supported mail
 files in its subdirectories.
+
+Every import shows both rule fields, using the archive's saved defaults. Enter
+one rule per line or separate rules with commas. `sam` matches `sam@any-domain`
+but not `3sam`; use `*` or `?` to broaden a match. Domains are matched only when
+the rule includes `@`. Exclusions always win.
+
+The app saves confirmed rules in `config.yaml` and writes matching sender
+addresses separately to `owner-names-detected.txt`. Editing rules affects future
+imports; correcting old Sent/Archive classifications requires a fresh archive.
+
+![Owner include and exclude fields with synthetic examples](../images/owner-rules-interface.png)
+
+*The owner-rule editor, shown here with synthetic examples. macOS uses a native
+dialog with the same two fields.*
 
 The **Ingests** window shows retained runs, source paths, message counts,
 progress, worker activity, and failures. Open it from **Window → Ingests** or

@@ -37,7 +37,7 @@ from .plugin_api import (
 )
 from .source_volume import SourceVolume, local_mount_path, local_source_volume
 from .ingest_diagnostics import add_message_context
-from .mbox_framing import MBOX_ENVELOPE, MboxNormalization, normalize_mbox_framing
+from .mbox_framing import MBOX_ENVELOPE, QUOTED_ENVELOPE, MboxNormalization, normalize_mbox_framing
 
 SourceKind = str
 BABYL_OPTIONS = b"babyl options:"
@@ -683,12 +683,12 @@ def _unwrap_xxx_record(raw: bytes, envelope: bytes) -> tuple[bytes, bytes]:
     if separator is None:
         return raw, envelope
     wrapper = BytesParser(policy=policy.compat32).parsebytes(raw[: separator.end()])
-    if wrapper.defects or not {name.casefold() for name in wrapper} <= XXX_WRAPPER_HEADERS:
+    if not wrapper.keys() or wrapper.defects or not {name.casefold() for name in wrapper} <= XXX_WRAPPER_HEADERS:
         return raw, envelope
     nested = raw[separator.end():]
     # Only an explicitly quoted delimiter at this boundary establishes a wrapper.
     # Never search past the nested message's headers into quoted body text.
-    if not nested.startswith(b">From "):
+    if QUOTED_ENVELOPE.match(nested) is None:
         return raw, envelope
     nested = MBOXRD_QUOTED_FROM.sub(b"", nested)
     nested_envelope, newline, message = nested.partition(b"\n")

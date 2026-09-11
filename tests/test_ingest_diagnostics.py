@@ -9,6 +9,7 @@ import pytest
 from pydantic import ValidationError
 
 from mailarchiver.__main__ import IngestRequest, run_ingest
+from mailarchiver.ingest_diagnostics import format_failure
 from mailarchiver.ingest_status import read_ingest_history
 from tests.test_plugin_loader import write_plugin
 
@@ -36,10 +37,13 @@ def create_plugin():
 '''
 
 
-def test_validation_failure_retains_validator_line_and_current_message(tmp_path: Path) -> None:
+@pytest.mark.parametrize("envelope_suffix", [b"", b"x" * 100_000 + b"ENVELOPE-PRIVATE-TAIL"], ids=["short", "large"])
+def test_validation_failure_retains_validator_line_and_current_message(tmp_path: Path, envelope_suffix: bytes) -> None:
     """Real parser validation after successful publication persists the failing, not prior, message."""
     plugins = tmp_path / "plugins"
-    write_plugin(plugins, "file", "diagnostic", PARSER)
+    invalid_envelope = b"\tFrom bad Thu Apr 15 00:00:00 2004\n"
+    parser = PARSER.replace(repr(invalid_envelope).replace("'", '"'), repr(invalid_envelope + envelope_suffix))
+    write_plugin(plugins, "file", "diagnostic", parser)
     source = tmp_path / "mail.diagnostic"
     raw = (b"Message-ID: <first@example.test>\nFrom: author@example.test\n"
            b"Date: Thu, 15 Apr 2004 00:00:00 +0000\n\nbody\n" + b"x" * 5000 + b"PRIVATE-TAIL")
@@ -47,7 +51,7 @@ def test_validation_failure_retains_validator_line_and_current_message(tmp_path:
     owners = tmp_path / "owners.txt"
     owners.write_text("owner@example.test\n", encoding="utf-8")
     archive = tmp_path / "archive"
-    with pytest.raises(ValidationError):
+    with pytest.raises(ValidationError) as failure:
         run_ingest(IngestRequest(
             archive=archive, roots=[str(source)], owner_names_file=owners,
             scan_policy="not-scanned", plugin_dir=[plugins], workers=2,
@@ -61,6 +65,8 @@ def test_validation_failure_retains_validator_line_and_current_message(tmp_path:
     assert "<second@example.test>" in detail
     assert hashlib.sha256(raw.replace(b"first", b"second")).hexdigest() in detail
     assert "PRIVATE-TAIL" not in detail
+    assert "input_value" not in detail
+    assert len(detail) < 20_000
     assert "4096/" in detail
     assert "\\tFrom bad" in detail
     assert re.search(r'plugin_api.py", line \d+, in validate_mbox_envelope', detail)
@@ -70,6 +76,13 @@ def test_validation_failure_retains_validator_line_and_current_message(tmp_path:
     assert not history.errors
     assert history.statuses[0].failure_detail == detail
     assert source.read_bytes() == raw
+    with pytest.raises(RuntimeError) as chained:
+        raise RuntimeError("validation failed in worker") from failure.value
+    rendered = format_failure(chained.value)
+    assert "Caused by:" in rendered
+    assert "Validator origin for ('mbox_envelope',)" in rendered
+    assert "input_value" not in rendered
+    assert "PRIVATE-TAIL" not in rendered
 
 
 def test_iterator_failure_does_not_blame_previously_yielded_message(tmp_path: Path) -> None:

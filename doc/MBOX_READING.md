@@ -69,7 +69,7 @@ quoting are outside this rule. [RFC 4155](https://www.rfc-editor.org/rfc/rfc4155
 describes the variation among MBOX implementations and quoting conventions.
 
 The older, explicit status-header `From XXX` wrapper remains a distinct format:
-only a valid status-only outer header block followed by a quoted delimiter at
+only a nonempty, valid status-only outer header block followed by a quoted delimiter at
 its body boundary can be unwrapped. Malformed headers cannot cause that parser
 to skip the real message headers and reinterpret an indented body line.
 

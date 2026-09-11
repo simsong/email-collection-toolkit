@@ -5,6 +5,17 @@
 .PHONY: test-apple-mail-compare test-auth
 .PHONY: validation-fetch validation-list validation-prepare validation-run validation-run-all validation-sam-build validation-sam-deploy validation-sam-validate validation-test verify
 
+.PHONY: addressbook-export test-addressbook-export
+
+addressbook-export:
+	uv run --locked python dev/addressbook-exporter.py $(ARGS)
+
+test-addressbook-export: ruff
+	uv run --locked pylint dev/addressbook-exporter.py tests/test_addressbook_exporter.py
+	uv run --locked ty check dev/addressbook-exporter.py tests/test_addressbook_exporter.py --error-on-warning
+	uv run --locked pyright dev/addressbook-exporter.py tests/test_addressbook_exporter.py --warnings
+	uv run --locked pytest -q tests/test_addressbook_exporter.py
+
 TIKA_VERSION ?= 4.0.0
 .PHONY: sync-dependencies test-reconciliation distribution-check name-matcher-observations h3-ambiguous-review
 
@@ -89,7 +100,7 @@ self-test:
 	uv run python scripts/desktop_entry.py --self-test $(ARGS)
 
 self-test-gui:
-	uv run python scripts/desktop_entry.py --self-test-gui $(ARGS)
+	uv run mailsearch-gui --self-test-gui $(ARGS)
 
 test-packaging:
 	uv run pytest -q tests/test_packaging.py
@@ -365,3 +376,7 @@ website-gmail-illustrations:
 .PHONY: test-envelopes
 test-envelopes:
 	uv run pytest -q tests/test_envelopes.py tests/test_sources.py tests/test_publication.py tests/test_standalone_verify.py tests/test_ingest_diagnostics.py tests/test_mbox_framing.py
+
+.PHONY: test-owner-rules
+test-owner-rules: ruff
+	uv run pytest -q tests/test_owner_rules.py tests/test_gui_service.py tests/test_application.py

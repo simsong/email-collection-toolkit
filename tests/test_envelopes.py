@@ -86,6 +86,17 @@ def test_xxx_status_record_does_not_unwrap_unquoted_or_indented_body(prefix: byt
     assert _unwrap_xxx_record(raw, envelope) == (raw, envelope)
 
 
+@pytest.mark.parametrize("raw", [
+    b"Status: O\n\n>From prose about email\nKeep this body.\n",
+    b"Status: O\n\n>From sender Thu Apr 15 00:20:49 2004\rbroken\nKeep this body.\n",
+    b"\n\n>From sender Thu Apr 15 00:20:49 2004\nKeep this body.\n",
+])
+def test_xxx_wrapper_requires_status_headers_and_complete_delimiter(raw: bytes) -> None:
+    """Requirement: ambiguous body text must not lose bytes through legacy unwrapping."""
+    envelope = b"From XXX Thu Apr 15 04:21:10 2004\n"
+    assert _unwrap_xxx_record(raw, envelope) == (raw, envelope)
+
+
 @pytest.mark.parametrize("newline", [b"\n", b"\r\n"])
 def test_mbox_envelope_survives_plugin_ingest_and_verification(tmp_path: Path, newline: bytes) -> None:
     """Keep envelope sender/date/line ending, RFC hash, duplicate identity and source bytes."""

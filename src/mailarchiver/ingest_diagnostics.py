@@ -13,6 +13,8 @@ ENVELOPE_PREVIEW_BYTES = 512
 VALIDATION_CONTEXT = "ctx"
 VALIDATION_ERROR = "error"
 VALIDATION_LOCATION = "loc"
+VALIDATION_MESSAGE = "msg"
+VALIDATION_TYPE = "type"
 
 
 def add_message_context(
@@ -36,23 +38,37 @@ def add_message_context(
         )
 
 
+def _exception_summary(error: BaseException) -> str:
+    if isinstance(error, ValidationError):
+        issues = error.errors(include_input=False, include_context=False, include_url=False)
+        return f"ValidationError: {error.title}\n" + "\n".join(
+            f"{issue[VALIDATION_LOCATION]!r}: {issue[VALIDATION_MESSAGE]} [{issue[VALIDATION_TYPE]}]"
+            for issue in issues
+        )
+    return f"{type(error).__name__}: {error}"
+
+
 def format_failure(error: BaseException) -> str:
-    """Retain worker frames, exception notes/chains, and Pydantic validator origins."""
-    detail = f"{type(error).__name__}: {error}\n\n" + "".join(traceback.format_exception(error))
-    pending = [error]
+    """Retain exception chains and validator frames without Pydantic's input_value dump."""
+    detail = _exception_summary(error) + "\n\n"
+    pending = [("", error)]
     seen: set[int] = set()
     while pending:
-        current = pending.pop()
+        label, current = pending.pop()
         if id(current) in seen:
             continue
         seen.add(id(current))
+        detail += label + "Traceback (most recent call last):\n"
+        detail += "".join(traceback.format_tb(current.__traceback__))
+        detail += _exception_summary(current) + "\n"
+        detail += "".join(note + "\n" for note in getattr(current, "__notes__", ()))
         if isinstance(current, ValidationError):
             for issue in current.errors(include_input=False, include_url=False):
                 cause = issue.get(VALIDATION_CONTEXT, {}).get(VALIDATION_ERROR)
                 if isinstance(cause, BaseException):
-                    detail += f"\nValidator origin for {issue[VALIDATION_LOCATION]!r}:\n"
-                    detail += "".join(traceback.format_exception(cause))
+                    pending.append((f"\nValidator origin for {issue[VALIDATION_LOCATION]!r}:\n", cause))
         cause = current.__cause__ or (None if current.__suppress_context__ else current.__context__)
         if cause is not None:
-            pending.append(cause)
+            label = "Caused by" if current.__cause__ is not None else "During handling of"
+            pending.append((f"\n{label}:\n", cause))
     return detail
