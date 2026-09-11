@@ -254,8 +254,9 @@ editor in a real Cocoa/WebKit process. These tests use disposable fixture archiv
 
 ### Finder file export regression
 
-`make test-file-drag` verifies exact message export bytes, export-token lifetime,
-and rejection of arbitrary pathname/URL text. On macOS it also exercises both
+`make test-file-drag` verifies exact message export bytes, export-token lifetime
+including concurrent close/preparation, isolation from same-name attachments and
+later exports, and rejection of arbitrary pathname/URL text. On macOS it also exercises both
 WebKit adapter paths with real Cocoa pasteboards and dragging-item writers,
 requiring `public.file-url` and rejecting link and plain-text flavors. A
 controlled `NSView` superclass records both injected entry points through real

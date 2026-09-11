@@ -1,6 +1,8 @@
 """Requirements: Finder receives exact exported files, never URL shortcut data."""
 
 import sys
+from concurrent.futures import ThreadPoolExecutor
+from threading import Barrier
 from importlib import import_module
 from pathlib import Path
 from typing import Any
@@ -11,6 +13,7 @@ from pydantic import BaseModel, Field
 
 from mailarchiver.file_drag import FILE_DRAGS, FileDrags, install_file_drag, native_drag_items, replace_file_pasteboard
 from mailarchiver.gui_app import GuiApi
+from mailarchiver.gui_service import describe_message, write_attachment
 from tests.test_gui_service import SIMPLE_MESSAGE, make_gui_archive
 
 
@@ -25,6 +28,8 @@ def test_export_tokens_preserve_eml_bytes_and_expire_on_close(tmp_path: Path) ->
     assert "url" not in result
     api.close()
     assert FILE_DRAGS.resolve(result["token"]) is None
+    with pytest.raises(ValueError, match="viewer is closed"):
+        api.prepare_drag([1])
 
 
 def test_file_drags_reject_paths_and_missing_exports(tmp_path: Path) -> None:
@@ -166,3 +171,52 @@ def test_installed_native_selectors_convert_files_and_forward_arguments(tmp_path
     finally:
         FILE_DRAGS.discard({token})
         pasteboard.releaseGlobally()
+
+
+def test_drag_export_cannot_be_overwritten_by_attachment_or_later_drag(tmp_path: Path) -> None:
+    """A same-name opened attachment cannot replace verified bytes behind a token."""
+    archive = make_gui_archive(tmp_path)
+    api = GuiApi(archive, temporary_directory=tmp_path / "exports")
+    try:
+        first = api.prepare_drag([1])
+        path = FILE_DRAGS.resolve(first["token"])
+        attachment = describe_message(archive, 2).attachments[0]
+        # open_attachment writes an attachment's safe basename in this shared root.
+        write_attachment(archive, 2, attachment.part_id, api.temporary_directory / first["filename"])
+        second = api.prepare_drag([1])
+        assert path is not None and path.read_bytes() == SIMPLE_MESSAGE
+        assert path != FILE_DRAGS.resolve(second["token"])
+        assert (api.temporary_directory / first["filename"]).read_bytes() != SIMPLE_MESSAGE
+    finally:
+        api.close()
+
+
+def test_concurrent_close_and_export_cannot_leave_live_tokens(tmp_path: Path) -> None:
+    """Closing during bridge export either revokes its token or rejects preparation."""
+    archive = make_gui_archive(tmp_path)
+    initial = set(FILE_DRAGS.paths)
+    for attempt in range(8):
+        api = GuiApi(archive, temporary_directory=tmp_path / f"exports-{attempt}")
+        barrier = Barrier(2, timeout=5)
+
+        def prepare() -> str | None:
+            barrier.wait()
+            try:
+                return api.prepare_drag([1])["token"]
+            except ValueError as error:
+                assert str(error) == "message viewer is closed"
+                return None
+
+        def close() -> None:
+            barrier.wait()
+            api.close()
+
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            prepared = executor.submit(prepare)
+            closed = executor.submit(close)
+            token = prepared.result(timeout=10)
+            closed.result(timeout=10)
+        assert FILE_DRAGS.resolve(token) is None
+        with pytest.raises(ValueError, match="viewer is closed"):
+            api.prepare_drag([1])
+    assert set(FILE_DRAGS.paths) == initial

@@ -4,7 +4,6 @@ from __future__ import annotations
 
 
 import argparse
-import hashlib
 import json
 import logging
 import os
@@ -129,6 +128,7 @@ class GuiStatus(BaseModel):
     untitled: bool = False
     generation: int = 0
     opened_in_new_window: bool = False
+    file_drag_supported: bool = sys.platform == "darwin"
     configuration: GuiConfiguration
     notices: list[ApplicationNotice] = Field(default_factory=list)
 
@@ -671,6 +671,8 @@ class GuiApi:
         self.archive = document.path if document is not None else archive
         self.window: Any = None
         self._drag_tokens: set[str] = set()
+        self._drag_lock = Lock()
+        self._drag_closed = False
         self._temporary = tempfile.TemporaryDirectory(prefix="mailarchive-gui-") if temporary_directory is None else None
         if self._temporary is not None:
             self.temporary_directory: Path = Path(self._temporary.name)
@@ -1039,21 +1041,24 @@ class GuiApi:
 
     def prepare_drag(self, message_pks: list[int]) -> dict[str, str]:
         """Prepare one explicit Finder drag without proactively exporting mail."""
-        unique = list(dict.fromkeys(message_pks))
-        if not unique:
-            raise ValueError("select at least one message to drag")
-        archive = self._archive()
-        if len(unique) == 1:
-            view = describe_message(archive, unique[0])
-            destination = self.temporary_directory / export_filename(view)
-            write_message(archive, unique[0], destination)
-        else:
-            digest = hashlib.sha256(",".join(map(str, sorted(unique))).encode()).hexdigest()[:12]
-            destination = self.temporary_directory / f"messages-{digest}" / f"Email Collection Toolkit Messages ({len(unique)}).zip"
-            write_messages_zip(archive, unique, destination)
-        token = FILE_DRAGS.register(destination)
-        self._drag_tokens.add(token)
-        return DragExport(filename=destination.name, token=token).model_dump()
+        with self._drag_lock:
+            if self._drag_closed:
+                raise ValueError("message viewer is closed")
+            unique = list(dict.fromkeys(message_pks))
+            if not unique:
+                raise ValueError("select at least one message to drag")
+            archive = self._archive()
+            directory = self.temporary_directory / "drags" / uuid4().hex
+            if len(unique) == 1:
+                view = describe_message(archive, unique[0])
+                destination = directory / export_filename(view)
+                write_message(archive, unique[0], destination)
+            else:
+                destination = directory / f"Email Collection Toolkit Messages ({len(unique)}).zip"
+                write_messages_zip(archive, unique, destination)
+            token = FILE_DRAGS.register(destination)
+            self._drag_tokens.add(token)
+            return DragExport(filename=destination.name, token=token).model_dump()
 
     def open_attachment(self, message_pk: int, part_id: int, confirmed: bool = False) -> dict[str, Any]:
         descriptor = attachment_descriptor(self._archive(), message_pk, part_id)
@@ -1113,10 +1118,12 @@ class GuiApi:
                 child.window.destroy()
             child.close()
         self.children.clear()
-        FILE_DRAGS.discard(self._drag_tokens)
-        self._drag_tokens.clear()
-        if self._temporary:
-            self._temporary.cleanup()
+        with self._drag_lock:
+            self._drag_closed = True
+            FILE_DRAGS.discard(self._drag_tokens)
+            self._drag_tokens.clear()
+            if self._temporary:
+                self._temporary.cleanup()
 
     def _archive(self) -> Path:
         if self.archive is None or not _is_archive(self.archive):

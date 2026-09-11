@@ -20,6 +20,14 @@
       transfer.values["text/plain"]?.startsWith("mailarchiver-export:"),
     "file drags carry only a registered native export token and permit copying only");
   };
+  const assertDisabledFileDrag = () => {
+    const well = document.getElementById("message-file-well");
+    const transfer = new DataTransfer();
+    const event = new DragEvent("dragstart", {bubbles: true, cancelable: true, dataTransfer: transfer});
+    well.dispatchEvent(event);
+    assert(well.hidden && !well.draggable && event.defaultPrevented && transfer.types.length === 0,
+      "unsupported backends hide and reject file dragging without exporting token text");
+  };
   const rows = () => [...document.querySelectorAll("#result-list .result")];
   const subjects = () => rows().map(row => row.querySelector(".result-subject").textContent);
   const isSelected = row => row.closest(".tabulator-row")?.classList.contains("tabulator-selected");
@@ -190,23 +198,27 @@
     assert(!selectionSummary.hidden && selectionSummary.textContent.includes("3 messages selected.") &&
       document.getElementById("message-file-well").parentElement === selectionSummary,
     "multiple selected rows replace the stale message with a selected-message summary and ZIP drag icon");
-    const zipTransfer = {values: {}, effectAllowed: "", setData(type, value) { this.values[type] = value; }};
-    const zipDrag = new Event("dragstart", {bubbles: true, cancelable: true});
-    Object.defineProperty(zipDrag, "dataTransfer", {value: zipTransfer});
-    document.getElementById("message-file-well").dispatchEvent(zipDrag);
-    if (!zipTransfer.values["text/plain"]) {
-      await waitFor(() => state.dragExports.has([...state.resultSelection].sort((a, b) => a - b).join(",")),
-        "first multi-message drag prepares a ZIP");
-      const preparedZipTransfer = {values: {}, effectAllowed: "", setData(type, value) { this.values[type] = value; }};
-      const preparedZipDrag = new Event("dragstart", {bubbles: true, cancelable: true});
-      Object.defineProperty(preparedZipDrag, "dataTransfer", {value: preparedZipTransfer});
-      document.getElementById("message-file-well").dispatchEvent(preparedZipDrag);
-      assertFileTransfer(preparedZipTransfer);
-      assert(preparedZipTransfer.values["text/plain"]?.startsWith("mailarchiver-export:"),
-        "multi-message drag publishes a native ZIP export token");
+    if (state.fileDragSupported) {
+      const zipTransfer = {values: {}, effectAllowed: "", setData(type, value) { this.values[type] = value; }};
+      const zipDrag = new Event("dragstart", {bubbles: true, cancelable: true});
+      Object.defineProperty(zipDrag, "dataTransfer", {value: zipTransfer});
+      document.getElementById("message-file-well").dispatchEvent(zipDrag);
+      if (!zipTransfer.values["text/plain"]) {
+        await waitFor(() => state.dragExports.has([...state.resultSelection].sort((a, b) => a - b).join(",")),
+          "first multi-message drag prepares a ZIP");
+        const preparedZipTransfer = {values: {}, effectAllowed: "", setData(type, value) { this.values[type] = value; }};
+        const preparedZipDrag = new Event("dragstart", {bubbles: true, cancelable: true});
+        Object.defineProperty(preparedZipDrag, "dataTransfer", {value: preparedZipTransfer});
+        document.getElementById("message-file-well").dispatchEvent(preparedZipDrag);
+        assertFileTransfer(preparedZipTransfer);
+        assert(preparedZipTransfer.values["text/plain"]?.startsWith("mailarchiver-export:"),
+          "multi-message drag publishes a native ZIP export token");
+      } else {
+        assertFileTransfer(zipTransfer);
+        assert(zipTransfer.values["text/plain"].startsWith("mailarchiver-export:"), "multi-message drag publishes a native ZIP export token");
+      }
     } else {
-      assertFileTransfer(zipTransfer);
-      assert(zipTransfer.values["text/plain"].startsWith("mailarchiver-export:"), "multi-message drag publishes a native ZIP export token");
+      assertDisabledFileDrag();
     }
     await sleep(0);
     rows()[0].click();
@@ -456,21 +468,25 @@
     document.getElementById("message-file-well").dispatchEvent(new PointerEvent("pointerenter", {bubbles: true}));
     await new Promise(resolve => setTimeout(resolve, 100));
     assert(messageFileName.textContent === beforeHover, "hovering does not prepare a message file");
-    const transfer = {values: {}, effectAllowed: "", setData(type, value) { this.values[type] = value; }};
-    const drag = new Event("dragstart", {bubbles: true, cancelable: true});
-    Object.defineProperty(drag, "dataTransfer", {value: transfer});
-    document.getElementById("message-file-well").dispatchEvent(drag);
-    if (!transfer.values["text/plain"]) {
-      await waitFor(() => messageFileName.textContent !== beforeHover, "first drag prepares the message file");
-      const preparedTransfer = {values: {}, effectAllowed: "", setData(type, value) { this.values[type] = value; }};
-      const preparedDrag = new Event("dragstart", {bubbles: true, cancelable: true});
-      Object.defineProperty(preparedDrag, "dataTransfer", {value: preparedTransfer});
-      document.getElementById("message-file-well").dispatchEvent(preparedDrag);
-      assertFileTransfer(preparedTransfer);
-      assert(preparedTransfer.values["text/plain"]?.startsWith("mailarchiver-export:"), "prepared drag publishes a native message export token");
+    if (state.fileDragSupported) {
+      const transfer = {values: {}, effectAllowed: "", setData(type, value) { this.values[type] = value; }};
+      const drag = new Event("dragstart", {bubbles: true, cancelable: true});
+      Object.defineProperty(drag, "dataTransfer", {value: transfer});
+      document.getElementById("message-file-well").dispatchEvent(drag);
+      if (!transfer.values["text/plain"]) {
+        await waitFor(() => messageFileName.textContent !== beforeHover, "first drag prepares the message file");
+        const preparedTransfer = {values: {}, effectAllowed: "", setData(type, value) { this.values[type] = value; }};
+        const preparedDrag = new Event("dragstart", {bubbles: true, cancelable: true});
+        Object.defineProperty(preparedDrag, "dataTransfer", {value: preparedTransfer});
+        document.getElementById("message-file-well").dispatchEvent(preparedDrag);
+        assertFileTransfer(preparedTransfer);
+        assert(preparedTransfer.values["text/plain"]?.startsWith("mailarchiver-export:"), "prepared drag publishes a native message export token");
+      } else {
+        assertFileTransfer(transfer);
+        assert(transfer.values["text/plain"].startsWith("mailarchiver-export:"), "explicit drag publishes a native message export token");
+      }
     } else {
-      assertFileTransfer(transfer);
-      assert(transfer.values["text/plain"].startsWith("mailarchiver-export:"), "explicit drag publishes a native message export token");
+      assertDisabledFileDrag();
     }
 
     await search("", 0, false);

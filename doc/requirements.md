@@ -961,8 +961,11 @@ over a result. Because the pywebview bridge is asynchronous, the first drag
 prepares the disposable file and the next drag copies the actual `.eml` file to
 Finder or the Desktop. Multiple messages transfer as an actual ZIP file. Neither
 operation may create a `.fileloc`/`.webloc` shortcut or expose link/text URL drag
-representations. Message headers remain selectable text. Printing prints the displayed headers and selected MIME part through the system print
-panel. Temporary message and attachment exports are removed when the GUI exits.
+representations. Each drag export is isolated from attachment exports and later
+drags; closing the viewer serializes with preparation and revokes every token.
+Backends without the macOS file-drag adapter hide and reject this drag control.
+Message headers remain selectable text. Printing prints the displayed headers
+and selected MIME part through the system print panel. Temporary message and attachment exports are removed when the GUI exits.
 
 `summarize` is an optional macOS command that reads nonempty UTF-8 text from
 standard input and prints only a one-sentence Apple Intelligence summary of at

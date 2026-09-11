@@ -35,6 +35,7 @@ const state = {
   remoteContentAuthorizedMessage: null,
   remoteContentAuthorizedPart: null,
   view: null,
+  fileDragSupported: false,
   dragExports: new Map(),
   dragPreparing: new Set(),
   previewUrl: null,
@@ -445,6 +446,9 @@ function resetArchiveView() {
 }
 
 function applyStatus(status) {
+  state.fileDragSupported = Boolean(status.file_drag_supported);
+  elements["message-file-well"].hidden = !state.fileDragSupported;
+  elements["message-file-well"].draggable = state.fileDragSupported;
   state.highlightBackground = status.configuration.search_highlight_background;
   document.documentElement.style.setProperty("--search-highlight-background", state.highlightBackground);
   document.title = status.ready
@@ -1972,7 +1976,9 @@ function showMultipleMessageSelection() {
   const title = document.createElement("h1");
   title.textContent = `${count} messages selected.`;
   const detail = document.createElement("p");
-  detail.textContent = "Drag the file icon to Finder to export the selected messages as a ZIP archive.";
+  detail.textContent = state.fileDragSupported
+    ? "Drag the file icon to Finder to export the selected messages as a ZIP archive."
+    : "Select a single message to use Save Message.";
   elements["message-selection-summary"].replaceChildren(title, detail, elements["message-file-well"]);
   elements["message-selection-summary"].hidden = false;
   elements["message-content"].hidden = false;
@@ -2008,6 +2014,7 @@ function updateMessageFileWell() {
 
 function installDrag(element, messagePks) {
   element.addEventListener("dragstart", async event => {
+    if (!state.fileDragSupported) { event.preventDefault(); return; }
     const messages = messagePks();
     const key = dragExportKey(messages);
     const info = state.dragExports.get(key);

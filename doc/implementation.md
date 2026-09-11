@@ -1183,7 +1183,10 @@ adapter replaces that token before the native drag starts. The legacy
 `dragImage:...` path clears WebKit link flavors and writes the file object; the
 modern `beginDraggingSessionWithItems:...` path replaces the item writer before
 AppKit builds its pasteboard. Unregistered text and link drags are unchanged.
-Closing the owning viewer revokes its tokens. `make test-file-drag` checks exact
+Every preparation writes into a fresh `drags/<uuid>/` subdirectory, isolating it
+from attachment basenames and later exports. Preparation and close share a lock;
+close revokes its tokens and rejects later preparation before cleaning exports.
+The status bridge disables the drag control on non-macOS backends. `make test-file-drag` checks exact
 export bytes, token revocation, both native pasteboard representations, and
 injected selector/superclass dispatch on a controlled AppKit host.
 Only the message-file icon well is draggable; the
