@@ -10,6 +10,8 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from .mbox_framing import MboxNormalization
+
 API_VERSION = 1
 PluginType = Literal["source", "file"]
 EvidenceKind = Literal[
@@ -121,6 +123,7 @@ class MailObject(FrozenModel):
     cursor: str = Field(min_length=1)
     source_date_utc: datetime | None = None
     mbox_envelope: bytes | None = None
+    mbox_normalization: MboxNormalization | None = None
     completed_messages: int | None = Field(default=None, ge=0)
     total_messages: int | None = Field(default=None, ge=0)
     completed_bytes: int | None = Field(default=None, ge=0)

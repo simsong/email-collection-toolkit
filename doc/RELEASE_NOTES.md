@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+* Normalize an immediate quoted MBOX delimiter into a literal `X-From:` header.
+  Promote a meaningful inner envelope when the outer sender is `XXX` or
+  `???@???`; retain the displaced outer value as `X-From:`. Preserve body
+  quoting and record original source-payload hashes/framing as provenance. Fix
+  `From XXX` wrapper detection misreading indented forwarded body text as a
+  delimiter. The normalized archive is readable by ordinary RFC/MIME readers.
+  Import failures now retain source-code tracebacks, validator origins, source
+  references/cursors, message hashes, and bounded input previews in local run
+  history. Existing archives are not rewritten.
+
 * Preserve original MBOX `From ` delimiters through import. When absent,
   synthesize a delimiter from the latest valid header timestamp instead of
   import time, with deterministic documented fallbacks. Existing archives are

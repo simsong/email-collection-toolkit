@@ -364,4 +364,4 @@ website-gmail-illustrations:
 
 .PHONY: test-envelopes
 test-envelopes:
-	uv run pytest -q tests/test_envelopes.py tests/test_sources.py tests/test_publication.py tests/test_standalone_verify.py
+	uv run pytest -q tests/test_envelopes.py tests/test_sources.py tests/test_publication.py tests/test_standalone_verify.py tests/test_ingest_diagnostics.py tests/test_mbox_framing.py

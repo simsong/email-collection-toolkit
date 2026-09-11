@@ -1,0 +1,115 @@
+"""Requirements: retain failure lines, exact message identity and read-only source provenance."""
+
+import hashlib
+import re
+import sqlite3
+from pathlib import Path
+
+import pytest
+from pydantic import ValidationError
+
+from mailarchiver.__main__ import IngestRequest, run_ingest
+from mailarchiver.ingest_status import read_ingest_history
+from tests.test_plugin_loader import write_plugin
+
+
+PARSER = '''
+from mailarchiver.sources import FileParser, SourceMessage
+
+class DiagnosticParser(FileParser):
+    kind = "diagnostic"
+
+    def recognizes(self, path):
+        return path.suffix == ".diagnostic"
+
+    def messages(self, source, start_offset=0):
+        raw = source.path.read_bytes()
+        yield SourceMessage(path=source.path, raw=raw, source_offset=17,
+                            bytes_done=len(raw), bytes_total=len(raw),
+                            mbox_envelope=b"From first Thu Apr 15 00:00:00 2004\\n")
+        yield SourceMessage(path=source.path, raw=raw.replace(b"first", b"second"), source_offset=123,
+                            bytes_done=len(raw), bytes_total=len(raw),
+                            mbox_envelope=b"\\tFrom bad Thu Apr 15 00:00:00 2004\\n")
+
+def create_plugin():
+    return DiagnosticParser()
+'''
+
+
+def test_validation_failure_retains_validator_line_and_current_message(tmp_path: Path) -> None:
+    """Real parser validation after successful publication persists the failing, not prior, message."""
+    plugins = tmp_path / "plugins"
+    write_plugin(plugins, "file", "diagnostic", PARSER)
+    source = tmp_path / "mail.diagnostic"
+    raw = (b"Message-ID: <first@example.test>\nFrom: author@example.test\n"
+           b"Date: Thu, 15 Apr 2004 00:00:00 +0000\n\nbody\n" + b"x" * 5000 + b"PRIVATE-TAIL")
+    source.write_bytes(raw)
+    owners = tmp_path / "owners.txt"
+    owners.write_text("owner@example.test\n", encoding="utf-8")
+    archive = tmp_path / "archive"
+    with pytest.raises(ValidationError):
+        run_ingest(IngestRequest(
+            archive=archive, roots=[str(source)], owner_names_file=owners,
+            scan_policy="not-scanned", plugin_dir=[plugins], workers=2,
+        ), terminal=False)
+    with sqlite3.connect(archive / "archive.sqlite3") as catalog:
+        state, detail = catalog.execute("SELECT result, detail FROM ingest_runs").fetchone()
+        assert state == "failed"
+        assert catalog.execute("SELECT message_id_normalized FROM messages").fetchall() == [("first@example.test",)]
+    assert "Source cursor (byte offset for local MBOX): '123'" in detail
+    assert str(source) in detail
+    assert "<second@example.test>" in detail
+    assert hashlib.sha256(raw.replace(b"first", b"second")).hexdigest() in detail
+    assert "PRIVATE-TAIL" not in detail
+    assert "4096/" in detail
+    assert "\\tFrom bad" in detail
+    assert re.search(r'plugin_api.py", line \d+, in validate_mbox_envelope', detail)
+    assert re.search(r'sources.py", line \d+, in messages', detail)
+    assert "Validator origin for ('mbox_envelope',)" in detail
+    history = read_ingest_history(archive)
+    assert not history.errors
+    assert history.statuses[0].failure_detail == detail
+    assert source.read_bytes() == raw
+
+
+def test_iterator_failure_does_not_blame_previously_yielded_message(tmp_path: Path) -> None:
+    """A generator failing between messages reports its source and actual raising frame."""
+    plugins = tmp_path / "plugins"
+    write_plugin(plugins, "file", "diagnostic", PARSER[:PARSER.index('        yield SourceMessage(path=source.path, raw=raw.replace')]
+                 + '        raise ValueError("iterator stopped")\n\ndef create_plugin():\n    return DiagnosticParser()\n')
+    source = tmp_path / "mail.diagnostic"
+    source.write_bytes(b"Message-ID: <first@example.test>\nDate: Thu, 15 Apr 2004 00:00:00 +0000\n\nbody\n")
+    owners = tmp_path / "owners.txt"
+    owners.write_text("owner@example.test\n", encoding="utf-8")
+    archive = tmp_path / "archive"
+    with pytest.raises(ValueError, match="iterator stopped"):
+        run_ingest(IngestRequest(
+            archive=archive, roots=[str(source)], owner_names_file=owners,
+            scan_policy="not-scanned", plugin_dir=[plugins],
+        ), terminal=False)
+    detail = read_ingest_history(archive).statuses[0].failure_detail
+    assert detail is not None
+    assert str(source) in detail
+    assert re.search(r'plugin.py", line \d+, in messages', detail)
+    assert "Message SHA-256:" not in detail
+
+
+def test_message_processing_failure_retains_raw_identity_and_traceback(tmp_path: Path) -> None:
+    """A real date-resolution failure carries message evidence through a chained exception."""
+    source = tmp_path / "undated.eml"
+    raw = b"Message-ID: <undated@example.test>\nFrom: author@example.test\n\nbody\n"
+    source.write_bytes(raw)
+    owners = tmp_path / "owners.txt"
+    owners.write_text("owner@example.test\n", encoding="utf-8")
+    archive = tmp_path / "archive"
+    with pytest.raises(RuntimeError, match="failed to parse"):
+        run_ingest(IngestRequest(
+            archive=archive, roots=[str(source)], owner_names_file=owners, scan_policy="not-scanned",
+        ), terminal=False)
+    detail = read_ingest_history(archive).statuses[0].failure_detail
+    assert detail is not None
+    assert hashlib.sha256(raw).hexdigest() in detail
+    assert "<undated@example.test>" in detail
+    assert re.search(r'message.py", line \d+, in ', detail)
+    assert "no date or year path fallback" in detail
+    assert source.read_bytes() == raw

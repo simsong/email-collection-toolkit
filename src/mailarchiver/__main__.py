@@ -34,6 +34,7 @@ from .archive_integrity import MailbagArchiveIntegrityControls
 from .archive_path import add_archive_argument, require_archive
 from .contacts import contacts, load_owner_addresses, print_contacts
 from .document_options import DocumentOptions
+from .ingest_diagnostics import add_message_context, format_failure
 from .catalog import (
     UnsupportedSearchSchemaError,
     address_pk,
@@ -1128,7 +1129,7 @@ def _run_ingest(request: IngestRequest, writer_lease: WriterLease, outcome: Inge
             "UPDATE ingest_runs SET completed_at = ?, result = 'failed', detail = ? WHERE run_pk = ?",
             (
                 datetime.now(UTC).isoformat(),
-                f"{type(error).__name__}: {error}",
+                format_failure(error),
                 run_pk,
             ),
         )
@@ -1278,6 +1279,8 @@ def _run_ingest(request: IngestRequest, writer_lease: WriterLease, outcome: Inge
         return source_file_pk
 
     def observe(source: MailObject, disposition: str, detail: str, sha256: str, message_pk: int | None = None) -> int:
+        if source.mbox_normalization is not None:
+            detail += "\nMBOX normalization: " + source.mbox_normalization.model_dump_json()
         source_file_pk = source_file_pks[
             (source.source.plugin_kind, source.source.source_id, source.work_id)
         ]
@@ -1583,6 +1586,7 @@ def _run_ingest(request: IngestRequest, writer_lease: WriterLease, outcome: Inge
         source_file = local_source_file(work)
         display_path = work.container.source.display_name
         byte_length = work.container.estimated_bytes or 0
+        source: MailObject | None = None
         try:
             if stop.is_set():
                 return
@@ -1622,7 +1626,13 @@ def _run_ingest(request: IngestRequest, writer_lease: WriterLease, outcome: Inge
                 if row is not None:
                     prior_date = datetime.fromisoformat(row[0])
 
-            for item in source_plugin.messages(work.container, decision.resume_cursor):
+            items = iter(source_plugin.messages(work.container, decision.resume_cursor))
+            while True:
+                source = None
+                try:
+                    item = next(items)
+                except StopIteration:
+                    break
                 if stop.is_set():
                     return
                 if isinstance(item, ProgressEvent):
@@ -1740,7 +1750,13 @@ def _run_ingest(request: IngestRequest, writer_lease: WriterLease, outcome: Inge
             if stop.is_set():
                 return
             checkpoint(work, source_file_pk, integrity_check_pk, integrity_result.evidence)
-        except BaseException:
+        except BaseException as error:
+            if source is not None:
+                add_message_context(
+                    error, source.source, source.cursor, source.raw, source.mbox_envelope, source.mbox_normalization,
+                )
+            else:
+                error.add_note(f"Source container: {work.container.source.model_dump_json()}")
             stop.set()
             raise
         finally:
@@ -1885,12 +1901,12 @@ def _run_ingest(request: IngestRequest, writer_lease: WriterLease, outcome: Inge
         raise
     except DiskFullError as error:
         disk_full = True
-        failure_detail = f"{type(error).__name__}: {error}"
+        failure_detail = format_failure(error)
         catalog.rollback()
         search.rollback()
         raise
     except BaseException as error:
-        failure_detail = f"{type(error).__name__}: {error}"
+        failure_detail = format_failure(error)
         catalog.rollback()
         search.rollback()
         raise
@@ -1916,7 +1932,7 @@ def _run_ingest(request: IngestRequest, writer_lease: WriterLease, outcome: Inge
                 logging.getLogger(__name__).debug("Best-effort operation failed", exc_info=True)
                 integrity_error = error
                 if failure_detail is None:
-                    failure_detail = f"{type(error).__name__}: {error}"
+                    failure_detail = format_failure(error)
                 else:
                     print(f"integrity refresh also failed: {error}", file=sys.stderr)
         if integrity_error is not None:
