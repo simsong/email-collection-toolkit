@@ -66,11 +66,11 @@ def native_drag_items(items: Any) -> Any:
     return result
 
 
-def install_file_drag() -> None:
+def install_file_drag(host: type | None = None) -> None:
     """Keep WebKit's gesture and copy mask, replacing only registered export data."""
-    cocoa = import_module("webview.platforms.cocoa")
+    if host is None:
+        host = import_module("webview.platforms.cocoa").BrowserView.WebKitHost
     objc = import_module("objc")
-    host = cocoa.BrowserView.WebKitHost
     if "dragImage_at_offset_event_pasteboard_source_slideBack_" in host.__dict__:
         return
 

@@ -257,7 +257,10 @@ editor in a real Cocoa/WebKit process. These tests use disposable fixture archiv
 `make test-file-drag` verifies exact message export bytes, export-token lifetime,
 and rejection of arbitrary pathname/URL text. On macOS it also exercises both
 WebKit adapter paths with real Cocoa pasteboards and dragging-item writers,
-requiring `public.file-url` and rejecting link and plain-text flavors. These
+requiring `public.file-url` and rejecting link and plain-text flavors. A
+controlled `NSView` superclass records both injected entry points through real
+Objective-C dispatch, including struct/BOOL arguments and repeated installation.
+Only the final interactive AppKit drag session is replaced in that test. These
 checks do not simulate a Finder drop. The browser acceptance driver separately
 checks that explicit drags allow copying only and carry an opaque export token.
 A desktop acceptance check must drag the prepared message icon onto Finder or

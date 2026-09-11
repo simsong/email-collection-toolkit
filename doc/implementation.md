@@ -1184,7 +1184,8 @@ adapter replaces that token before the native drag starts. The legacy
 modern `beginDraggingSessionWithItems:...` path replaces the item writer before
 AppKit builds its pasteboard. Unregistered text and link drags are unchanged.
 Closing the owning viewer revokes its tokens. `make test-file-drag` checks exact
-export bytes, token revocation, and both native pasteboard representations.
+export bytes, token revocation, both native pasteboard representations, and
+injected selector/superclass dispatch on a controlled AppKit host.
 Only the message-file icon well is draggable; the
 header region remains normal selectable text. The browser never preloads an
 `.eml` file on hover or selection: a drag-start event begins asynchronous
