@@ -11,9 +11,9 @@ framework. Either approach retains the Python archive engine.
 This pywebview prototype searches existing mailarchiver archives. Its
 platform-neutral application controller owns multiple archive documents and
 multiple independent search windows; native host adapters use WKWebView on
-macOS. Windows delivery will use the framework chosen after the trials. The current application
-can initialize a selected new archive and run the typed ingest service against explicitly
-selected local sources. Canonical writes remain inside the ingest engine and
+macOS. Windows delivery will use the framework chosen after the trials. The
+current application can initialize a selected new archive and run the typed
+ingest service against explicitly selected local sources. Canonical writes remain inside the ingest engine and
 are guarded by the shared OS writer lease.
 On macOS, the native Dock and About identity use the checked-in 192-pixel PNG
 derived from the shared `icons/rainbow-post.svg` project icon.
