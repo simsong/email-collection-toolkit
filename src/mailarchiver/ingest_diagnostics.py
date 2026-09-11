@@ -15,6 +15,23 @@ VALIDATION_ERROR = "error"
 VALIDATION_LOCATION = "loc"
 
 
+def _validation_summary(error: ValidationError) -> str:
+    """Return deterministic validation text without embedding raw input values."""
+    issues = error.errors(include_input=False, include_url=False)
+    return f"{len(issues)} validation error(s) for {error.title}\n" + "\n".join(
+        f"{issue[VALIDATION_LOCATION]}\n  {issue['msg']}" for issue in issues
+    )
+
+
+def _format_exception(error: BaseException) -> str:
+    """Format tracebacks while omitting unbounded ValidationError input values."""
+    if not isinstance(error, ValidationError):
+        return "".join(traceback.format_exception(error, chain=False))
+    return "".join(traceback.format_tb(error.__traceback__)) + (
+        f"{type(error).__name__}: {_validation_summary(error)}\n"
+    )
+
+
 def add_message_context(
     error: BaseException, source: SourceReference, cursor: str, raw: bytes, envelope: bytes | None,
     normalization: MboxNormalization | None = None,
@@ -38,7 +55,8 @@ def add_message_context(
 
 def format_failure(error: BaseException) -> str:
     """Retain worker frames, exception notes/chains, and Pydantic validator origins."""
-    detail = f"{type(error).__name__}: {error}\n\n" + "".join(traceback.format_exception(error))
+    summary = _validation_summary(error) if isinstance(error, ValidationError) else str(error)
+    detail = f"{type(error).__name__}: {summary}\n\n" + _format_exception(error)
     pending = [error]
     seen: set[int] = set()
     while pending:
@@ -46,6 +64,8 @@ def format_failure(error: BaseException) -> str:
         if id(current) in seen:
             continue
         seen.add(id(current))
+        if current is not error:
+            detail += "\n" + _format_exception(current)
         if isinstance(current, ValidationError):
             for issue in current.errors(include_input=False, include_url=False):
                 cause = issue.get(VALIDATION_CONTEXT, {}).get(VALIDATION_ERROR)

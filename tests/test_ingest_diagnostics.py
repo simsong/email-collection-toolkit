@@ -16,6 +16,8 @@ from tests.test_plugin_loader import write_plugin
 PARSER = '''
 from mailarchiver.sources import FileParser, SourceMessage
 
+BAD_ENVELOPE = b"\\tFrom bad " + b"x" * 5000 + b"ENVELOPE-TAIL\\n"
+
 class DiagnosticParser(FileParser):
     kind = "diagnostic"
 
@@ -29,7 +31,7 @@ class DiagnosticParser(FileParser):
                             mbox_envelope=b"From first Thu Apr 15 00:00:00 2004\\n")
         yield SourceMessage(path=source.path, raw=raw.replace(b"first", b"second"), source_offset=123,
                             bytes_done=len(raw), bytes_total=len(raw),
-                            mbox_envelope=b"\\tFrom bad Thu Apr 15 00:00:00 2004\\n")
+                            mbox_envelope=BAD_ENVELOPE)
 
 def create_plugin():
     return DiagnosticParser()
@@ -61,6 +63,7 @@ def test_validation_failure_retains_validator_line_and_current_message(tmp_path:
     assert "<second@example.test>" in detail
     assert hashlib.sha256(raw.replace(b"first", b"second")).hexdigest() in detail
     assert "PRIVATE-TAIL" not in detail
+    assert "ENVELOPE-TAIL" not in detail
     assert "4096/" in detail
     assert "\\tFrom bad" in detail
     assert re.search(r'plugin_api.py", line \d+, in validate_mbox_envelope', detail)
