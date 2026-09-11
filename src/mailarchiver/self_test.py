@@ -47,6 +47,14 @@ def exercise_core(directory: Path, report: SelfTestReport) -> Path:
     request = IngestRequest(archive=archive, owner_names_file=owners, roots=[str(source)],
                             workers=1, scan_policy="not-scanned")
     run_ingest(request)
+    from .archive_config import load_archive_config  # pylint: disable=import-outside-toplevel
+    from .owner_rules import OwnerRules  # pylint: disable=import-outside-toplevel
+
+    if load_archive_config(archive).owner != OwnerRules(include=["owner@example.invalid"]):
+        raise AssertionError("packaged owner YAML did not preserve import rules")
+    if (archive / "owner-names-detected.txt").read_text(encoding="utf-8") != "owner@example.invalid\n":
+        raise AssertionError("packaged owner detection did not preserve matching sender")
+    report.checks.append("owner YAML defaults and detected sender export")
     report.checks.append("ingest without ClamAV")
     errors = verify_archive(archive)
     if errors:
@@ -66,6 +74,7 @@ def exercise_core(directory: Path, report: SelfTestReport) -> Path:
         raise AssertionError("unscanned history was not retained")
     report.checks.extend(["FTS search and byte-exact retrieval", "durable not-scanned evidence"])
     before = hashlib.sha256((archive / "data/mbox/2026-Sent1.mbox").read_bytes()).hexdigest()
+    request.owner_names_file = None
     run_ingest(request)
     after = hashlib.sha256((archive / "data/mbox/2026-Sent1.mbox").read_bytes()).hexdigest()
     if before != after or verify_archive(archive):
@@ -121,6 +130,10 @@ def exercise_gui(archive: Path, directory: Path, report: SelfTestReport) -> None
             status = AboutStatus.model_validate(evaluate(about, "window.pywebview.api.status()"))
             if not status.metadata.version or status.disk_free_bytes <= 0:
                 raise AssertionError("About bridge did not fill system details")
+            startup_errors = [notice.message for notice in status.notices if notice.severity == "error"]
+            if startup_errors:
+                raise AssertionError(f"Unexpected startup errors: {startup_errors}")
+            report.checks.append("startup has no spurious document-open errors")
             report.checks.extend(["visible About, search, and Ingests windows", "native search bridge", "missing-ClamAV banner and history warning"])
             # Exercise the real source picker and its banner without selecting any user data.
             appkit = import_module("AppKit")

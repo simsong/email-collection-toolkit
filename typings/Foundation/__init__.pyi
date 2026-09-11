@@ -1,5 +1,10 @@
 """Minimal Cocoa Foundation selectors used by mailarchiver."""
-from typing import Callable, Self
+from typing import Callable, Mapping, Self
+
+class NSUserDefaults:
+    @classmethod
+    def standardUserDefaults(cls) -> Self: ...
+    def registerDefaults_(self, values: Mapping[str, object]) -> None: ...
 
 class NSURL:
     @classmethod

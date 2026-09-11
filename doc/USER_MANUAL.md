@@ -176,21 +176,40 @@ identity are not written again.
 
 ## Identify the archive owner
 
-Email Collection Toolkit separates sent and received messages. It needs a short text file
-containing names or address fragments that identify the archive owner. Put one
-lowercase value on each line. Blank lines and lines beginning with `#` are
-ignored.
+Email Collection Toolkit uses include/exclude rules to separate Sent and
+Archive mail. Every GUI import shows **Owner emails (include)** and **Exclude
+(applied after include)**. Enter rules on separate lines or separated by commas.
+Rules ignore case and match the whole mailbox name before `@` by default:
 
-For example:
+| Rule | Matches | Does not match |
+| --- | --- | --- |
+| `slg` | `slg@example.org` | `3slg@example.org`, `slg+tag@example.org` |
+| `*simson*` | `simsong@example.org` | `other@simson.net` |
+| `*@simson.net` | `other@simson.net` | `other@example.org` |
+| `slg@example.org` | That full address | `slg@other.org` |
 
-```text
-# Names and address fragments used by the archive owner
-jane.example
-jexample
+`*` matches any sequence, `?` one character, and `[abc]` one listed character.
+Exclusions use the same syntax and always win: include `*simson*` and exclude
+`*david*` excludes `david_simson@example.org`. A bare `slg` also matches the legacy
+sender `slg` without a domain. Display names are not owner rules.
+
+After confirmation, the archive's `config.yaml` stores the defaults:
+
+```yaml
+version: 2
+owner:
+  include:
+    - slg
+    - '*simson*'
+  exclude:
+    - '*david*'
 ```
 
-Review this file before ingest. A message is classified as sent when its
-parsed `From:` address contains one of these values, without regard to case.
+Quote wildcard rules when editing YAML manually. The GUI writes YAML for you.
+The CLI uses these settings automatically, or accepts `--owner-names-file`
+with one include rule per line (configured exclusions still apply). Blank lines
+and `#` comments are ignored. Legacy files now use these exact/glob semantics,
+not substring matching. Review rules before starting a fresh archive.
 
 ## Create or add to an archive
 
@@ -384,27 +403,25 @@ for that window's archive, opening the same source picker directly.
 In the picker, select files or directories and click **Import**. You can also
 navigate into a directory and import it; directories include supported mail
 files and subdirectories. No separate Files/Folders choice is needed.
-The app combines `owner-names.txt` from each selected source directory with
-the destination archive's owner list. If that list is empty, enter your names
-and email addresses in the owner editor, one per line, and click **Continue**.
-After you confirm **Import**, the merged list is saved in the destination
-archive's `owner-names.txt` for future imports. Source files are unchanged;
-canceling does not save names. The app has no built-in default owner list.
+Every import displays both owner fields, prefilled from the archive's YAML.
+Before YAML owner settings exist, `owner-names.txt` in the archive and selected
+source roots can seed the fields. There is no built-in personal owner list.
+After **Continue**, review the destination, sources, and rules, then confirm
+**Import**. Canceling either dialog does not save rules. Source files are
+unchanged. Future imports show the saved rules again; lists are rewritten only
+when changed.
 
-Use **File → Document Options…** to edit this archive's owner names. The sorted
-list scrolls and supports multiple selections. **+** opens an entry field;
-commas, semicolons, or whitespace separate entries. **−** deletes selected names.
-Edits save automatically, and importing blocks edits to the same document.
-The panel warns if the list differs from that used by the last import (older
-imports may not have recorded their names). Changes affect future imports only:
-existing messages are not moved between Sent and Archive mailboxes. There is
-no Reindex button here because owner names are not stored in the search index,
-and reindexing would not change existing classifications.
+**File → Document Options…** edits the same two fields with **Save**. Importing
+blocks edits. The panel warns when rules differ from the last recorded import.
+Changes affect future imports only; rebuilding the search index does not move
+existing messages between Sent and Archive. To repair old misclassification,
+build a fresh archive from your original sources with reviewed rules.
 
-For each archive, the app remembers the last source-picker directory in the
-human-editable `config.yaml` beside the archive. Future imports start there when
-the directory still exists; otherwise the picker starts beside the archive.
-Malformed or missing navigation config is ignored.
+`owner-names-detected.txt` is regenerated after import with the sorted matching
+sender addresses, after exclusions. Review this file to check the effect of your
+rules. It is never copied into the YAML. Keep `config.yaml` when preparing a
+rebuild: it also remembers your last source-picker directory. Invalid YAML
+produces an error rather than silently replacing your owner rules.
 For a saved document, the window title shows the archive path and total number
 of deduplicated, searchable messages.
 Cancel dismisses the startup dialog without opening a search window. About and
@@ -687,7 +704,7 @@ make run ARGS='--archive "/path/to/mail-archive" human-contacts --owner-address-
 
 It reports each likely human direct correspondent's email address, first appearance, last
 appearance, and all-header message count. The owner-address file accepts the
-same identifying address fragments as `owner-names.txt`, separated by newlines,
+older identifying address fragments, separated by newlines,
 commas, or semicolons; blank lines and `#` comments are ignored. It resolves
 those aliases only to catalogued **Sent** sender addresses, then uses the
 resulting exact addresses for meaningful-contact tests. Repeat `--owner-address`
@@ -720,7 +737,7 @@ with first appearance, last appearance, and message count. Its checked-by-
 default **Meaningful** option will show direct correspondents: people you sent
 to in To or Bcc, and people who sent to an owner address directly in To. Cc
 traffic and messages sent only through a mailing list will not qualify.
-The current `owner-names.txt` continues to classify sent mail. A future archive
+The current `config.yaml` include/exclude rules classify sent mail. A future archive
 creation dialog and **File → Properties** will maintain the exact owner
 addresses used by Contacts.
 
@@ -770,7 +787,7 @@ This YAML file contains packaged application display policy. It does not
 replace:
 
 * the planned per-archive `archive.yaml` source registry;
-* `owner-names.txt`, which identifies the archive owner for Sent routing;
+* archive `config.yaml`, which stores owner include/exclude rules and navigation;
 * `MAIL_ARCHIVE_DIR` or `--archive`, which selects an archive;
 * the installed ClamAV configuration; or
 * saved original-mailbox filter sets, which remain per-user preferences.

@@ -42,6 +42,24 @@ directories, MBOX, EML, Maildir, Apple Mail, Gmail exports, and live read-only
 IMAP accounts. It must be safe to rerun an ingest operation on the same source
 without duplicating or rescanning messages already archived.
 
+## Experimental ePADD address-book export
+
+`make addressbook-export` reads only sender/recipient addresses referenced by
+messages in the selected archive catalog and writes a private text derivative
+outside the archive. The first contact contains explicitly selected exact owner
+addresses or, with `--owners-from-sent`, distinct sender addresses from catalog
+messages classified Sent. Recipients are never treated as owners merely because
+they received Sent mail. Historical Sent classification can itself contain false
+positives; it is not independently verified owner identity. All other addresses
+remain separate, with no inferred display-name aliases. Single-entry contacts
+preserve identifiers without `@` using the ePADD 11.1.3 reader's fallback; Sent
+identifiers without `@` remain separate and are reported because they cannot be
+represented as owner email aliases in this format. Unsafe contact lines are
+excluded and individually reported; case normalization, totals, and SHA-256
+evidence are recorded. Output must not replace existing files or mutate the
+source. This is a whole-address-book replacement experiment, not a reviewed
+People authority or validated live repair.
+
 ## Canonical archive layout
 
 All deliverables reside in one archive directory. That directory is a native
@@ -72,9 +90,14 @@ directory, and a `data/mbox/` payload directory.
 * Messages detected as infected are instead placed in `INFECTED1.mbox`, with
   the same numeric rollover rule if needed.  They are never discarded or
   altered.
-* A message's category is **Sent** if the parsed `From:` address contains,
-  case-insensitively, one of names in owner-names.txt; otherwise it is **Archive**.  The aliases are
-  configurable, and the matched address is retained.
+* A noninfected message is **Sent** when its parsed `From:` address matches
+  an owner include rule and no exclude rule; otherwise it is **Archive**.
+  Rules are case-insensitive whole-mailbox globs (`*`, `?`, `[abc]`). A bare
+  `slg` is equivalent to `slg@*`: it matches `slg@example.org` and the legacy
+  sender `slg`, but not `3slg` or `slg+tag`. Only a rule containing `@` matches
+  a domain. `*simson*` with exclude `*david*` excludes `david_simson@example.org`
+  and never matches an unrelated mailbox just because its domain is `simson.net`.
+  Neither display names nor implicit substring expansion identify owners.
 * Normalize the valid RFC 5322 `Date:` and every valid timestamp suffix in a
   `Received:` header to UTC. Sort the Received dates, discard one minimum and
   one maximum when at least three exist, and compute the median (the midpoint
@@ -469,8 +492,8 @@ To or outgoing Bcc recipient of owner-sent mail, or an incoming sender where an
 exact configured owner address occurs in `To`. Cc recipients are not
 meaningful; multiple To recipients are. A mailing-list message counts only
 when that direct-owner-in-To condition is met.
-The existing owner-token file remains the ingest classifier until archive setup
-collects exact owner addresses and **File → Properties** can revise them;
+The include/exclude owner rules classify ingest; a separate reviewed exact
+owner-address set for contact reconciliation remains planned;
 meaningful-contact semantics use those exact addresses, never a name fragment.
 The read-only `human-contacts` command shall provide this initial address-level
 projection in table, TSV, and JSON forms before the Contacts window exists.
@@ -641,6 +664,10 @@ must not silently retarget an existing search window.
 
 Startup opens explicit document paths first, otherwise the last valid archive,
 otherwise a macOS dialog offers **Open Existing**, **Create New**, and **Cancel**.
+When launched through `mailsearch-gui`, macOS must not reinterpret the Python
+launcher or command-line option values as documents. Explicit `--archive`
+handling and genuine Finder document-open events remain supported. Configure
+this behavior for the running process without writing system or user defaults.
 A missing or invalid last archive is removed from recent state and reported,
 never recreated. Cancel dismisses the dialog without creating a search window;
 About and File New/Open remain available. New asks for a permanent destination
@@ -694,43 +721,42 @@ Final confirmation shows the Email Collection Toolkit icon and destination headi
 Both scanned and explicitly unscanned import confirmations use a 560-point-wide,
 selectable message area so archive and source paths need less wrapping, while
 retaining their existing buttons and keyboard defaults.
-Import merges `owner-names.txt` from the top level of every selected source
-directory into the destination archive's `owner-names.txt`. Source files remain
-unchanged, and neither the application checkout nor launch directory supplies
-default names. Existing multiword file entries remain single entries; merges
-deduplicate case-insensitively and sort the display. If the combined list is empty, a macOS
-multiline editor asks for the owner's names and email addresses, one per line;
-there is no owner-names file picker. At least one nonblank, noncomment entry is
-required to continue from that editor. Invalid settings are reported.
-Merged names are saved atomically as UTF-8 in the archive's `owner-names.txt`
-only after final confirmation and acquisition of the writer lease. The merge
-rereads current document names under the lock to preserve concurrent edits.
-Canceling either dialog starts no ingest and saves no names.
-This is operational, unmanifested configuration; it does not change source
-mail or the existing case-insensitive Sent-classification matching rules.
-The packaged local-source ignore rules exclude a source directory's
-`owner-names.txt` from mail discovery and the unrecognized-file count.
+Every import shows two multiline fields: **Owner emails (include)** and
+**Exclude (applied after include)**. Newlines or commas separate rules; blank
+and comment lines are ignored. At least one include rule is required to import.
+The fields default to the archive's saved `config.yaml` owner lists. Until YAML
+owner settings exist, legacy `owner-names.txt` in the archive and the top level
+of selected source directories may seed the fields using the new exact/glob
+semantics. No checkout or launch-directory defaults are used. A saved empty
+list is intentional and must not resurrect legacy defaults. Invalid settings
+are reported without overwriting them.
+After final confirmation and acquisition of the writer lease, changed lists
+are atomically saved in archive `config.yaml` as `owner.include` and
+`owner.exclude`. Canceling either dialog saves no rules and starts no ingest.
+A stale dialog must not overwrite settings changed since it opened. Source
+files remain untouched. The packaged source rules continue to ignore a source
+root's legacy `owner-names.txt`.
 
-Each archive may contain a human-editable `config.yaml` with version `1` and
-the last source-picker directory. After a successful import, the application
-records the first selected directory, or the containing directory of the first
-selected file. The next File Import or Ingests import starts there when it still
-exists; missing or malformed navigation state is ignored and falls back beside
-the archive. This YAML is discardable operational state and is excluded from
-the BagIt tag manifests.
+The version-2 archive `config.yaml` stores owner rules and the last source-picker
+directory; version-1 navigation-only files remain readable. Successful imports
+remember the source directory while preserving owner lists. Unchanged settings
+are not rewritten. Missing configuration starts with defaults; malformed YAML
+blocks editing/import with an error, since it may contain owner policy.
+This file is operational and excluded from preservation tag manifests, but
+should be retained when preparing a rebuild.
 
-**File → Document Options…** opens one options window per saved archive, also
-listed in Window. It contains a scrollable, sorted, multi-select owner-name
-list with **+** and **−** actions. Add accepts comma-, semicolon-, or
-whitespace-separated entries; Delete removes all selected entries. Changes
-save immediately under the writer lease; ingest blocks edits and stale edits
-must not overwrite newer settings. The document's other windows share this
-list. Ingest records the names actually used in `status/owner-names-used.txt`.
-Options flags a differing list after that import starts, including after
-reopening, and identifies older imports whose names were not recorded.
-The panel explains that changes affect future imports only: messages are not
-moved between Sent and Archive mailboxes. Owner names are not stored in FTS,
-so reindexing cannot reclassify messages and no owner-name Reindex action is offered.
+**File → Document Options…** opens one window per saved archive with the same
+two rule fields and a **Save** button. Saving obtains the writer lease and
+checks the content revision. Import blocks edits; background status refreshes
+must preserve unsaved input. Ingest records its rules in
+`status/owner-rules-used.yaml`. Options compares this snapshot with current
+rules and identifies older imports whose rules were not recorded.
+After a completed or orderly interrupted import, atomically regenerate
+`owner-names-detected.txt` as sorted, unique matching archived sender addresses,
+including senders from prior imports and applying exclusions. Detected addresses
+are derived evidence, never expanded into YAML or reused as implicit owner rules.
+Existing Sent/Archive classifications remain unchanged by rule edits or
+reindexing; correcting historical misclassification requires a fresh rebuild.
 
 Only a saved document holding the matching cross-process writer lease may
 start ingest. The process-local document registry prevents duplicate UI jobs
@@ -1358,8 +1384,8 @@ interruption tests are required before shipping migration support.
 
 The first release is a local command-line normalizer and verifier. Packaged
 configuration holds archive and scanner policy; each archive's `config.yaml`
-holds discardable navigation state, and `owner-names.txt` remains a separate,
-one-name-per-line classification input. A local
+holds navigation state and explicit include/exclude owner rules. Legacy
+`owner-names.txt` can seed those rules before the first confirmed import. A local
 special-purpose search and message-viewing interface is a consumer of
 the two SQLite databases, not a reason to depend on Thunderbird or FoxTrot.
 No source mailbox is modified by this program.
@@ -1489,3 +1515,8 @@ shows the real import-history interface. Interface changes require screenshot
 regeneration through the Makefile. External clipart has visible author, source,
 and license attribution. Gmail setup diagrams are labeled as illustrations,
 not screenshots of a live third-party account.
+
+The macOS bundle dependency audit shall distinguish a Mach-O library's own
+`LC_ID_DYLIB` from actual dylib load commands. Its own install name need not
+resolve as another bundled file; actual non-system dependencies must resolve
+inside the app. A compiled-library regression shall exercise both cases.

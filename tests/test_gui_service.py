@@ -49,10 +49,11 @@ from mailarchiver.gui_service import (
 from mailarchiver.gui_app import (
     archive_destination,
     dialog_paths,
-    owner_names_text,
+    owner_rules_text,
     DocumentOptionsApi,
 )
-from mailarchiver.document_options import DocumentOptions, read_owner_names, source_owner_names, split_owner_names
+from mailarchiver.document_options import DocumentOptions, read_owner_names, source_owner_names
+from mailarchiver.owner_rules import OwnerRules
 from mailarchiver.archive_config import (
     ArchiveConfig, config_path, import_directory, load_archive_config,
     remember_import_directory, save_archive_config,
@@ -73,39 +74,43 @@ from mailarchiver.search import index_message
 from mailarchiver.standalone_verify import semantic_bytes
 
 
-def test_owner_names_merge_sources_and_retain_document_edits(tmp_path: Path) -> None:
-    """GUI import unions source aliases into the document, never mutating sources."""
+def test_owner_rules_defaults_and_document_edits(tmp_path: Path) -> None:
+    """Owner rules requirement: YAML replaces legacy defaults without changing sources."""
     archive = tmp_path / "archive"
     archive.mkdir()
     source = tmp_path / "source"
     source.mkdir()
     names = source / "owner-names.txt"
-    original = "  José Example  \r\n\n jose@example.org \n# ignored\n"
+    original = "  José  \r\n\n jose@example.org \n# ignored\n"
     names.write_bytes(original.encode())
-    (tmp_path / "owner-names.txt").write_text("Must not use launch directory\n", encoding="utf-8")
     assert source_owner_names([source / "message.eml"]) == []
-    additions = source_owner_names([source, source])
-    assert additions == ["jose@example.org", "José Example"]
+    assert source_owner_names([source, source]) == ["jose@example.org", "josé"]
     store = DocumentOptions(archive)
+    assert store.defaults([source]).include == ["jose@example.org", "josé"]
     lease = WriterLease.acquire(archive, "fixture", "test", "test", "test")
     try:
-        state = store.save(["Existing Owner"], lease)
-        merged = store.merge(additions, lease)
-        assert merged.names == ["Existing Owner", "jose@example.org", "José Example"]
-        assert store.merge(additions, lease).names == merged.names
-        store.record_import(merged.names, lease)
+        rules = OwnerRules(include=["*simson*", "slg"], exclude=["*david*"])
+        state = store.save(rules, lease)
+        assert store.defaults([source]) == rules
+        original_config = config_path(archive).stat().st_mtime_ns
+        store.save(rules, lease)
+        assert config_path(archive).stat().st_mtime_ns == original_config
+        store.record_import(rules, lease)
         assert not store.state().changed_since_import
-        with pytest.raises(ValueError, match="another window"):
-            store.save([], lease, state.revision)
-        changed = store.save(["New Owner"], lease, store.state().revision)
+        changed = store.save(OwnerRules(include=["slg"]), lease, state.revision)
         assert changed.changed_since_import
+        with pytest.raises(ValueError, match="another window"):
+            store.save(rules, lease, state.revision)
         assert DocumentOptions(archive).state().changed_since_import
-        store.record_import(changed.names, lease)
+        store.record_import(store.defaults(), lease)
         assert not store.state().changed_since_import
+        # An intentionally empty saved list must not resurrect source defaults.
+        store.save(OwnerRules(), lease)
+        assert store.defaults([source]) == OwnerRules()
     finally:
         lease.release()
     with pytest.raises(ValueError, match="active writer lease"):
-        store.save([], lease)
+        store.save(OwnerRules(), lease)
     assert names.read_bytes() == original.encode()
 
 
@@ -121,10 +126,21 @@ def test_archive_config_remembers_last_import_directory(tmp_path: Path) -> None:
     assert remember_import_directory(archive, [source]) == source.absolute()
     assert load_archive_config(archive).last_import_directory == source.absolute()
     assert import_directory(archive) == source
-    assert config_path(archive).read_text(encoding="utf-8").startswith("version: 1\n")
+    assert config_path(archive).read_text(encoding="utf-8").startswith("version: 2\n")
     save_archive_config(archive, ArchiveConfig(last_import_directory=message))
     assert import_directory(archive) == archive.parent
-    config_path(archive).write_text("last_import_directory: [broken\n", encoding="utf-8")
+    config_path(archive).write_text("version: 1\n", encoding="utf-8")
+    rules = OwnerRules(include=["slg"], exclude=["*david*"])
+    config = load_archive_config(archive)
+    config.owner = rules
+    save_archive_config(archive, config)
+    remember_import_directory(archive, [source])
+    assert load_archive_config(archive).owner == rules
+    broken = "last_import_directory: [broken\n"
+    config_path(archive).write_text(broken, encoding="utf-8")
+    with pytest.raises(ValueError, match="invalid archive configuration"):
+        remember_import_directory(archive, [source])
+    assert config_path(archive).read_text(encoding="utf-8") == broken
     with pytest.raises(ValueError, match="invalid archive configuration"):
         load_archive_config(archive)
 
@@ -138,28 +154,30 @@ def test_document_owner_controls_are_bound_and_locked(tmp_path: Path) -> None:
     assert other.path is not None
     api = DocumentOptionsApi(document)
     state = api.status()
-    updated = api.update("Zed;alice@example.org, Bob   zed", [], state["revision"])
-    assert updated["names"] == ["alice@example.org", "Bob", "Zed"]
-    assert split_owner_names("A;B, C\tD\nE") == ["A", "B", "C", "D", "E"]
+    updated = api.update("*Simson*, SLG\nslg", "*David*", state["revision"])
+    assert updated["include"] == ["*simson*", "slg"]
+    assert updated["exclude"] == ["*david*"]
     lease = WriterLease.acquire(document.path, document.descriptor.identity, "ingest", "test", "test")
     try:
         with pytest.raises(ArchiveBusyError):
-            api.update("Wrong", [], updated["revision"])
+            api.update("wrong", "", updated["revision"])
     finally:
         lease.release()
-    deleted = api.update("", ["Bob", "Zed"], updated["revision"])
-    assert deleted["names"] == ["alice@example.org"]
+    deleted = api.update("slg", "", updated["revision"])
+    assert deleted["include"] == ["slg"]
+    assert deleted["exclude"] == []
     with pytest.raises(ValueError, match="another window"):
-        api.update("Wrong", [], updated["revision"])
+        api.update("wrong", "", updated["revision"])
     assert read_owner_names(other.path / "owner-names.txt") == []
-    assert api.update("", ["alice@example.org"], deleted["revision"])["names"] == []
+    assert not config_path(other.path).exists()
+    assert api.update("", "", deleted["revision"])["include"] == []
 
 
 @pytest.mark.parametrize("value", ["", " \n\t", "# only comments", "Name\x00"])
 def test_owner_names_reject_invalid_entry_without_writes(tmp_path: Path, value: str) -> None:
     """The owner editor must not save empty or invalid aliases."""
     with pytest.raises(ValueError):
-        owner_names_text(value)
+        owner_rules_text(value, "")
     assert not (tmp_path / "owner-names.txt").exists()
 
 

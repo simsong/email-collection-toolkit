@@ -51,7 +51,7 @@ def test_gui_stop_checkpoints_partial_import_and_reimport_has_no_duplicates(tmp_
     with source.open("rb") as stream:
         source_digest = hashlib.file_digest(stream, "sha256").hexdigest()
     owners = tmp_path / "owners.txt"
-    owners.write_text("owner@example.test\n", encoding="utf-8")
+    owners.write_text("sender@example.test\n", encoding="utf-8")
     archive = tmp_path / "archive"
     request = IngestRequest(archive=archive, roots=[str(source)], owner_names_file=owners, scan_policy="not-scanned")
     stop = Event()
@@ -87,6 +87,7 @@ def test_gui_stop_checkpoints_partial_import_and_reimport_has_no_duplicates(tmp_
     with sqlite3.connect(archive / "archive.sqlite3") as catalog:
         partial = catalog.execute("SELECT COUNT(*) FROM messages").fetchone()[0]
     assert 0 < partial < len(digests)
+    assert (archive / "owner-names-detected.txt").read_text(encoding="utf-8") == "sender@example.test\n"
     run_ingest(request)
     with sqlite3.connect(archive / "archive.sqlite3") as catalog:
         rows = catalog.execute("SELECT sha256 FROM messages").fetchall()
@@ -417,6 +418,7 @@ def test_failed_discovery_does_not_claim_publication(tmp_path: Path) -> None:
 
     archive = make_archive(tmp_path / "archive")
     outcome = IngestOutcome()
+    (tmp_path / "owners.txt").write_text("owner\n", encoding="utf-8")
     request = IngestRequest(archive=archive, owner_names_file=tmp_path / "owners.txt", roots=["unsupported://fixture"])
     with pytest.raises(ValueError, match="no source plug-in recognized"):
         run_ingest(request, outcome=outcome, terminal=False)
