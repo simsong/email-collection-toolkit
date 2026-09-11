@@ -1,5 +1,13 @@
 # Email Collection Toolkit User Manual
 
+This manual describes the current application. The planned compiled desktop
+experience will evaluate [Dioxus and Tauri](DIOXUS.md) with the existing Python
+archive engine; Windows delivery must include full ingest. This decision does
+not introduce an available Windows release or change the current macOS installer.
+
+Plan comparable trial implementations in Dioxus and Tauri before choosing a
+framework. Either approach retains the Python archive engine.
+
 This manual explains how an archivist creates and searches a mail archive.
 Email Collection Toolkit reads source mail without changing it. It stores deduplicated
 messages in standard MBOX files, records where every message was found, and
