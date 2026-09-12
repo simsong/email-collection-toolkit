@@ -5,16 +5,16 @@
 from __future__ import annotations
 
 import hashlib
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
 
 from mailarchiver.archive_integrity import (
-    ArchiveIntegrityError,
-    MailbagArchiveIntegrityControls,
     PAYLOAD_MANIFEST_CONTROL,
     TAG_MANIFEST_CONTROL,
+    ArchiveIntegrityError,
+    MailbagArchiveIntegrityControls,
 )
 from mailarchiver.catalog import create_catalog
 from mailarchiver.plugin_api import ArchiveReference, IntegrityEvidence, ProgressEvent
@@ -27,7 +27,7 @@ def test_mailbag_controls_publish_and_independently_verify_a_checkpoint(tmp_path
     initialized = list(controls.initialize(archive))
     catalog = create_catalog(tmp_path / "archive.sqlite3")
     try:
-        published = list(controls.checkpoint(archive, catalog, datetime(2026, 8, 28, tzinfo=timezone.utc)))
+        published = list(controls.checkpoint(archive, catalog, datetime(2026, 8, 28, tzinfo=UTC)))
     finally:
         catalog.close()
 

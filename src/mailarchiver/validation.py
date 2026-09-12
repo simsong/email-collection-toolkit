@@ -21,13 +21,13 @@ import urllib.parse
 import urllib.request
 import uuid
 import zipfile
-from datetime import datetime, timezone
+from collections.abc import Iterator
+from datetime import UTC, datetime
 from pathlib import Path, PurePosixPath
-from typing import Iterator, Literal
+from typing import Literal
 
 import py7zr
 from pydantic import BaseModel, ConfigDict, Field, model_validator
-
 
 CONFIG_SCHEMA_VERSION = 1
 USER_AGENT = "mailarchiver-validation/0.1"
@@ -52,7 +52,7 @@ class SourceConfig(StrictModel):
     ref: str = "HEAD"
 
     @model_validator(mode="after")
-    def validate_kind_fields(self) -> "SourceConfig":
+    def validate_kind_fields(self) -> SourceConfig:
         if self.kind == "http" and not self.filename:
             self.filename = PurePosixPath(urllib.parse.urlparse(self.url).path).name
         if self.kind == "git" and self.archive != "none":
@@ -91,7 +91,7 @@ class DatasetConfig(StrictModel):
     aws: AwsDatasetConfig = Field(default_factory=AwsDatasetConfig)
 
     @model_validator(mode="after")
-    def validate_dataset(self) -> "DatasetConfig":
+    def validate_dataset(self) -> DatasetConfig:
         if self.schema_version != CONFIG_SCHEMA_VERSION:
             raise ValueError(f"unsupported dataset schema version: {self.schema_version}")
         if not re.fullmatch(r"[a-z0-9][a-z0-9-]*", self.id):
@@ -166,7 +166,7 @@ class DataLayout(StrictModel):
 
 
 def utc_now() -> str:
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.now(UTC).isoformat()
 
 
 def sha256_file(path: Path) -> str:
@@ -619,7 +619,7 @@ def aws_start(dataset: DatasetConfig, layout: DataLayout, stack: str) -> LaunchR
     function_name = aws_output(stack, "LauncherFunctionName")
     request = LaunchRequest(
         dataset_id=dataset.id,
-        run_id=datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ") + "-" + uuid.uuid4().hex[:8],
+        run_id=datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ") + "-" + uuid.uuid4().hex[:8],
         instance_type=dataset.aws.instance_type,
         volume_size_gib=dataset.aws.volume_size_gib,
     )

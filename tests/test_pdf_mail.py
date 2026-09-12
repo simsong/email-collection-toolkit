@@ -12,7 +12,6 @@ import pytest
 
 from mailarchiver.pdf_mail import extract_pdf_mail, write_pdf_mbox
 
-
 DATA = Path(__file__).parent / "data"
 PDF = DATA / "sipbadmin.pdf"
 GROUND_TRUTH = DATA / "sipbadmin.mbox"
@@ -76,14 +75,14 @@ def test_sipbadmin_pdf_extracts_reviewed_message_structure(tmp_path: Path) -> No
     generated = mailbox.mbox(output, factory=None, create=False)
     try:
         assert len(generated) == 4
-        assert [generated[index]["X-Mailarchiver-Source-Page-Start"] for index in range(4)] == ["2", "3", "4", "5"]
-        assert [generated[index]["X-Mailarchiver-Handwritten-Annotations"] for index in range(4)] == [
+        assert [generated[index]["X-Mailarchiver-Source-Page-Start"] for index in generated.iterkeys()] == ["2", "3", "4", "5"]
+        assert [generated[index]["X-Mailarchiver-Handwritten-Annotations"] for index in generated.iterkeys()] == [
             "yes",
             "no",
             "no",
             "no",
         ]
-        assert all(generated[index]["X-Mailarchiver-Transcription-Status"] == "machine-unreviewed" for index in range(4))
+        assert all(generated[index]["X-Mailarchiver-Transcription-Status"] == "machine-unreviewed" for index in generated.iterkeys())
     finally:
         generated.close()
     assert hashlib.sha256(PDF.read_bytes()).hexdigest() == before

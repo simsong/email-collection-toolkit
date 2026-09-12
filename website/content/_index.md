@@ -1,11 +1,11 @@
 +++
-title = "Mail Archiver"
-description = "A durable, searchable home for personal email."
+title = "Email Collection Toolkit"
+description = "Local software for ingesting, preserving, searching, and reporting on email archives."
 +++
-
 <!-- Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved. -->
 
-Mail Archiver preserves original RFC 5322 bytes in inspectable MBOX files,
-records their provenance, and builds a local search index that can be rebuilt.
-It is preservation infrastructure for personal and research collections—not a
-mail client, a hosted service, or a compliance appliance.
+
+Email Collection Toolkit reads supported email files, stores the original message data in
+MBOX files, records the source of each message, and builds a local search
+index. It is intended for individuals organizing exported email and for
+archivists processing donor email collections.

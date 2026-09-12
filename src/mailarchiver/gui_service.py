@@ -21,6 +21,7 @@ from bs4 import BeautifulSoup
 from pydantic import BaseModel, Field
 
 from .encoding import decode_text
+from .mailbox_tree import MailboxSelection
 from .mailsearch import (
     MessageHeader,
     SearchTerms,
@@ -31,7 +32,6 @@ from .mailsearch import (
     search_header_page,
     search_result_count,
 )
-from .mailbox_tree import MailboxSelection
 from .message import decoded_message_header
 from .plugin_api import SourceContainerMetadata
 from .search import SEARCH_CATEGORIES, decoded_part, is_attachment
@@ -52,27 +52,21 @@ PROVIDER_LABELS = {
     "o365": "Microsoft 365",
 }
 BLOCKED_ELEMENTS = {"base", "button", "embed", "form", "frame", "frameset", "iframe", "input", "link", "meta", "object", "script"}
-RISKY_SUFFIXES = {
-    ".app",
-    ".applescript",
-    ".bat",
-    ".bin",
-    ".command",
-    ".dmg",
-    ".exe",
-    ".iso",
-    ".jar",
-    ".js",
-    ".pkg",
-    ".ps1",
-    ".scpt",
-    ".sh",
-    ".vbs",
-    ".zip",
+SAFE_OPEN_SUFFIXES = {
+    "application/pdf": {".pdf"},
+    "image/bmp": {".bmp"},
+    "image/gif": {".gif"},
+    "image/heic": {".heic"},
+    "image/jpeg": {".jpeg", ".jpg"},
+    "image/png": {".png"},
+    "image/tiff": {".tif", ".tiff"},
+    "image/webp": {".webp"},
+    "text/plain": {".log", ".md", ".txt"},
 }
 
 
 class SearchPage(BaseModel):
+    error: str | None = None
     results: list[MessageHeader]
     offset: int
     has_more: bool
@@ -197,7 +191,10 @@ def search_page(
     if offset < 0 or limit < 0:
         raise ValueError("search offset and limit must be nonnegative")
     selections = [MailboxSelection.from_token(token) for token in mailbox_selections or []]
-    terms = parse_query(query)
+    try:
+        terms = parse_query(query)
+    except ValueError as error:
+        return SearchPage(results=[], offset=offset, has_more=False, error=str(error))
     fetch_limit = limit + 1 if limit else 0
     page = search_header_page(
         archive, terms, fetch_limit, offset, SortField(sort_by),
@@ -333,7 +330,7 @@ def describe_message(archive: Path, message_pk: int) -> MessageView:
     raw, message = parsed_message(archive, message_pk)
     header_names: list[str] = []
     headers = []
-    for name, _ in message.items():
+    for name in message:
         occurrence = sum(previous.casefold() == name.casefold() for previous in header_names)
         header_names.append(name)
         headers.append(HeaderField(name=name, value=decoded_message_header(raw, message, name, occurrence)))
@@ -613,13 +610,9 @@ def safe_filename(filename: str | None, part_id: int, content_type: str) -> str:
 
 
 def is_risky(filename: str, content_type: str) -> bool:
-    return Path(filename).suffix.casefold() in RISKY_SUFFIXES or content_type in {
-        "application/java-archive",
-        "application/vnd.apple.installer+xml",
-        "application/x-executable",
-        "application/x-mach-binary",
-        "application/x-sh",
-    }
+    """Require confirmation unless both MIME type and suffix identify inert content."""
+    suffix = Path(filename).suffix.casefold()
+    return suffix not in SAFE_OPEN_SUFFIXES.get(content_type.casefold(), set())
 
 
 def safe_html(value: str, message: Message, allow_remote: bool) -> tuple[str, bool]:

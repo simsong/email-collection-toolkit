@@ -12,7 +12,6 @@ from charset_normalizer import from_bytes
 from ftfy import fix_encoding
 from pydantic import BaseModel
 
-
 DETECTION_SAMPLE_BYTES: Final = 512 * 1024
 DETECTION_RESULTS: Final = 8
 FALLBACK_ENCODINGS: Final = (

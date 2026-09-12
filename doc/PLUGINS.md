@@ -1,8 +1,13 @@
 <!-- Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved. -->
 
-# Ingest plug-ins
+# Plug-ins
 
-Mail Archiver has two independent generator plug-in layers:
+Email Collection Toolkit currently implements only the two ingest plug-in architectures
+described below. They are deliberately separate from the planned geography data
+and visualization extension points; an installed ingest plug-in cannot register
+a graphical menu or render a visualization.
+
+Email Collection Toolkit has two independent generator plug-in layers:
 
 1. a **source plug-in** enumerates mail containers and streams mail objects from
    a source system; and
@@ -347,3 +352,30 @@ Source integrity attempts and their ordered typed evidence are append-only per
 run. `source_files.sha256`, `checked_at`, and `completed_run` remain local
 display/cache fields; skip and resume decisions use only the most recent
 completed typed integrity check.
+
+## Planned geography data providers
+
+Geography refresh is a data-installation pipeline, not an ingest plug-in. It
+will download versioned bulk reference datasets, validate their manifests, and
+atomically replace the per-user geography database. Its sources include US ZCTA
+geography and university main-campus/domain data. It does not submit contact
+data to a public lookup service. An optional archive snapshot is an explicit
+copy/read choice and remains under archive migration control. The data-provider
+interface has not yet been defined; it must not be represented as API v1.
+
+## Planned visualization plug-ins
+
+Visualization plug-ins are a third, future architecture, separate from source
+and file-parser plug-ins. The initial API is intentionally limited:
+
+* a plug-in may register one or more host menu entries;
+* the host supplies controlled, read-only access to the selected archive
+  database;
+* the host supplies a visualization canvas or window; and
+* a visualization may export HTML or PDF.
+
+It will not initially offer arbitrary user-interface extensions, credentials,
+source-mail mutation, or unrestricted archive writes. The API version,
+manifest shape, database capability boundary, canvas lifecycle, and export
+contract remain to be designed in [issue #81](https://github.com/simsong/email-collection-toolkit/issues/81).
+Until then, no visualization plug-in directory or manifest is supported.

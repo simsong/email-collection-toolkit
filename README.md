@@ -11,6 +11,29 @@ always be discarded and rebuilt.
 
 _NOTE --- THIS PROGRAM IS UNDER ACTIVE DEVELOPMENT. DO NOT USE OPERATIONALLY UNTIL VERSION 1.0 SHIPS_
 
+## macOS application
+
+For the macOS drag-to-Applications build, run `make dmg`. Python and GUI
+dependencies are bundled; ClamAV is optional. The target mounts its DMG and
+runs headless and visible native self-tests before publishing the local artifact.
+See [macOS distribution](doc/MACOS_DISTRIBUTION.md) for installation, test commands,
+architecture limits, and Developer ID renewal/signing instructions.
+
+## Windows development
+
+The compiled desktop UI candidates are **Dioxus Desktop and Tauri**, using Rust
+and the system webview, while ingest, search, and archive preservation remain in Python.
+Windows with full ingest is the next platform priority. This migration is
+planned; the current application remains pywebview. See
+[the desktop architecture decision](doc/DIOXUS.md).
+
+Plan comparable trial implementations in Dioxus and Tauri before choosing a
+framework. Either approach retains the Python archive engine.
+
+See [Windows setup](doc/WINDOWS.md) for clean-install VM directions and the
+remaining work required for full Windows ingest. This is a development setup
+guide, not a supported Windows application release.
+
 ## Goals
 
 `mailarchiver` is preservation infrastructure for personal and research email
@@ -61,10 +84,10 @@ current and planned source formats, PST/OST fixture sources, open-source parser
 options, and the selected import backend.
 See [release notes](doc/RELEASE_NOTES.md) for changes not yet included in a
 release.
-Visit the [Mail Archiver project site](https://simsong.github.io/mail-archiver/)
+Visit the [Email Collection Toolkit project site](https://simsong.github.io/email-collection-toolkit/)
 for release links, digital email curation resources, and project discussions.
-Announcements are posted in [Discussion #55](https://github.com/simsong/mail-archiver/discussions/55);
-please direct feature requests to [Discussion #56](https://github.com/simsong/mail-archiver/discussions/56).
+Announcements are posted in [Discussion #55](https://github.com/simsong/email-collection-toolkit/discussions/55);
+please direct feature requests to [Discussion #56](https://github.com/simsong/email-collection-toolkit/discussions/56).
 The [data-quality audit](doc/DATA_QUALITY_AUDIT.md) documents the read-only
 diagnostic scripts used to investigate implausible dates, missing senders, and
 previously unsupported Babyl sources. Its generated mail and metadata evidence
@@ -89,7 +112,7 @@ Install [uv](https://docs.astral.sh/uv/) and ClamAV, configure the ClamAV
 daemon and signatures, then prepare this project:
 
 ```console
-cd mail-archiver
+cd email-collection-toolkit
 uv sync
 ```
 
@@ -146,7 +169,11 @@ than exposed as UUID, `Data`, `Messages`, and individual filename nodes.
 
 ### `--clamav`
 
-`--clamav` is currently required on every ingest.  It scans each new
+Every CLI ingest requires either `--clamav` or `--no-scan`. The latter is an
+explicit antivirus opt-out and records each new message as not scanned; it
+does not certify mail as clean. A scanner failure never selects it automatically.
+
+Choose `--clamav` to scan each new
 message through the locally configured `clamd` socket before the message is
 written to a normal MBOX. Before starting any mailfile workers, the main
 ingest thread verifies that ClamAV is ready. If no healthy daemon is listening,
@@ -209,6 +236,23 @@ standard input are reserved stubs, not supported ingest modes yet. Repeatable
 `--plugin-dir DIRECTORY` options load an explicit external plug-in root; Python
 code there executes, so only name directories you trust. See
 [doc/PLUGINS.md](doc/PLUGINS.md).
+
+Google Takeout MBOX is the supported Gmail acquisition path today; see
+[doc/GMAIL.md](doc/GMAIL.md). Microsoft 365 currently has no supported end-user
+acquisition path; its Outlook export and future Graph design are documented in
+[doc/M365.md](doc/M365.md). Apple Mail cache limitations are documented in
+[doc/APPLE_MAIL_CACHE.md](doc/APPLE_MAIL_CACHE.md).
+Until provider adapters are implemented, complete Apple Mail `.emlx` records
+can serve as a best-effort local bridge for synchronized Gmail, Microsoft 365,
+and IMAP accounts. Rerunning ingest adds newly completed messages; byte-identical
+cross-source messages remain one canonical record with multiple observations.
+Use `make compare-apple-mail` to reconcile the default Apple Mail cache with
+`~/mail-archive` by raw and semantic message hashes without changing either.
+
+`uv run mailarchiver-auth ACCOUNT` is a developer preview for the planned live
+Gmail adapter. It detects Google Workspace and Microsoft 365 from public
+provider records, but it does not ingest mail and Microsoft 365 authorization
+remains unavailable.
 
 The archive directory is a native BagIt/Mailbag package containing:
 
@@ -358,10 +402,17 @@ all headers, `--html` shows decoded HTML, and `--mime` shows its original MIME
 source. Printing uses its catalogued MBOX location and verifies its recorded
 SHA-256; it does not alter canonical message bytes.
 
-### Graphical search on macOS
+### Graphical search desktop architecture
 
-The initial graphical search tool runs on macOS using pywebview and the system
-WKWebView. It has one search field with the same selectors and quoting rules as
+The current graphical search tool uses pywebview with WKWebView on macOS.
+The compiled replacement candidates are Dioxus Desktop and Tauri, retaining Python
+archive services and system-webview rendering; see [DIOXUS.md](doc/DIOXUS.md).
+The current controller supports multiple archive documents and multiple
+independent search windows on one archive. Packaged GUI assets come from an
+application-owned, nonce-authenticated server bound to an ephemeral
+`127.0.0.1` port; it exposes no HTTP service API, and JavaScript calls Python
+through pywebview's native bridge.
+It has one search field with the same selectors and quoting rules as
 `mailsearch`, sortable results, message and MIME-part viewing, `.eml` export
 and drag-out, printing, and attachment viewing. Typing three characters offers
 ranked address and subject completions. Selected addresses become removable
@@ -378,8 +429,16 @@ make gui ARGS="--archive /path/to/mail-archive"
 
 The bottom status line shows the current ingest, or the latest completed run.
 Click it to open the separate ingest-history and worker-detail window. The same
-window is available from **Windows → Ingest**; choosing it again brings the
+window is available from **Window → Ingests**; choosing it again brings the
 existing window to the front.
+
+The About window is present throughout the run and shows the installed version,
+free disk space, Internet reachability, startup warnings, and ingest activity.
+Use **File → New** to select and initialize a new or empty `.mailarchive`
+destination, **File → Import…** to choose local mail sources and an owner-names
+file, and **Window** to bring any application window forward. Import uses a
+cross-process writer lock; its owning search window cannot close until the run
+finishes, while other search windows remain usable.
 
 Select **Search attachments** to include the separate text-attachment index in
 ordinary full-text searches. Build the attachment index with `uv run
@@ -396,8 +455,9 @@ See [`doc/USER_MANUAL.md`](doc/USER_MANUAL.md#filter-by-original-mailbox).
 pywebview also supports Windows and Linux, but this application is not yet
 portable: attachment opening currently calls the macOS `open` command, Finder
 drag-out is macOS-specific, and only the Cocoa/WKWebView bridge has been tested.
-The search and SQLite service layer is portable; the desktop integration needs
-small platform adapters and testing before Windows is supported.
+The Python writer and scanner also require Windows portability work. Full
+Windows support will be validated with the chosen UI framework and packaged
+Python backend; existing browser tests do not establish native Windows support.
 
 ## Test
 
@@ -423,7 +483,9 @@ make check
 ```
 
 Install the pinned headless Chromium once with `make install-test-browser`.
-`make check` then runs both suites without showing a window. On macOS,
+`make check` runs Ruff and Pylint, then ty and Pyright, then both test suites
+and website validation without showing a window. Use `make lint` and `make types`
+for the static checks alone. On macOS,
 `make test-native-gui` additionally exercises the hidden Cocoa/WKWebView bridge.
 This native target is an explicit local development check and does not run in
 CI/CD, which retains the complete headless Chromium GUI test.

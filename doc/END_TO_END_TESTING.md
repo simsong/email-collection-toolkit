@@ -13,6 +13,20 @@ Run it only through the Makefile:
 make test-e2e
 ```
 
+## Compiled UI trial and migration boundary
+
+The compiled UI candidates are [Dioxus Desktop and Tauri](DIOXUS.md), retaining the
+Python ingest engine. The suite and pywebview bridge descriptions below cover
+the current implementation. Migration must reuse preservation fixtures and
+logical assertions, adapt the frontend driver, test the typed worker protocol,
+and add native tests for each trial on macOS and Windows. A Chromium pass or skipped
+Cocoa test is not validation of either Windows frontend. Packaged acceptance must cover full
+ingest, cancellation/recovery, isolated HTML, and clean installation without
+developer runtimes. These migration tests are not implemented yet.
+
+Plan comparable trial implementations in Dioxus and Tauri before choosing a
+framework. Either approach retains the Python archive engine.
+
 ## Synthetic name-resolution benchmark
 
 The privacy-safe benchmark under `benchmarks/name_resolution/` captures the
@@ -40,6 +54,26 @@ test uses the committed, non-sensitive corpus under `e2e_tests/data/source`.
 fixture change.
 
 ## Archive lifecycle
+
+### Complete local test directory
+
+`make test-corpus-import` runs a single complete import of `tests/data/`, with
+the configured on-demand ClamAV scanner, a ten-minute subprocess deadline,
+byte verification, installed archive verification, and a second idempotent
+import. It is also part of ordinary pytest (`make test` / `make check`).
+The reviewed `tests/expected-corpus.json` lists source fingerprints and retained
+subjects/raw SHA-256 hashes. Failures list both found-but-unexpected and
+expected-but-missing emails, including their subjects and hashes.
+
+After an intentional fixture change, run `make update-corpus-expectations`
+(pytest's explicit `--update-corpus-expectations` option), then review the JSON
+diff. The updater requires a successful import, verification, and reimport;
+never accept its output merely to make a failing test green. Git-ignored local
+mailboxes have a separate `.tmp/expected-corpus-private.json` expectation file
+to keep private subjects out of Git. CI tests its complete tracked directory;
+local runs also test the additional files present locally.
+
+### Synthetic lifecycle and browser acceptance
 
 The platform-independent part of the suite performs a real CLI ingest with the
 configured on-demand ClamAV daemon. It checks all of these boundaries together:
@@ -96,7 +130,8 @@ Playwright exercises the complete HTML interface:
 * the main ingest-status line and its window action; and
 * the separate ingest-history page, final statistics, and worker rows.
 
-The test retains a Playwright trace on failure.
+The test retains a Playwright trace on failure. Hosted Linux CI uploads the
+result directory for seven days when the test job fails.
 
 ### Native macOS smoke test
 
@@ -145,42 +180,54 @@ required release gate. Appium's Mac2 driver can expose XCUITest through
 WebDriver, but adds infrastructure without increasing coverage for this
 application. Swift Testing is for Swift logic and does not automate the UI.
 
-## macOS menu bar
+## Native application menus
 
-Mailarchiver passes a custom **Windows** menu to `webview.start`, with an
-**Ingest** action that delegates to the same singleton-window owner as the
-main HTML status line. pywebview's Cocoa backend also creates these native
-defaults:
+Mailarchiver passes custom **File** and **Window** menus to `webview.start`.
+File supplies **New**, **Open…**, launch-time **Open Recent**,
+**Import…**, and **Close** actions. Window supplies **New Search Window**, **Ingests** and
+the current About, search, and Ingests window inventory. Every callback
+resolves the active logical search window when invoked; opening an archive
+creates a new document window rather than retargeting an existing one.
+pywebview's Cocoa backend also creates these native defaults:
 
 * the application menu: About, Services, Hide, Hide Others, Show All, and Quit;
 * Edit: Cut, Copy, Paste, and Select All; and
 * View: Enter Full Screen.
 
 Before Cocoa creates those menus, the application sets its process and bundle
-identity to **Mail Archiver**, including version and copyright metadata and a
+identity to **Email Collection Toolkit**, including version and copyright metadata and a
 mail-archive system icon. Consequently the application menu and standard About
 panel no longer identify the host Python interpreter.
 
-There is currently no native File, Search, or Help menu. Choose Archive,
-Save Message, Print, mailbox filtering, and filter-set management are HTML
-toolbar controls. Command-1 through Command-9 select a displayable MIME part;
-Command-0 and Command-Shift-U select raw RFC 5322 source. Those shortcuts are
-global JavaScript `keydown` handlers and do not appear as native menu items.
+There is currently no native Search or Help menu. Save Message, Print, mailbox
+filtering, and filter-set management remain HTML toolbar controls. Command-1
+through Command-9 select a displayable MIME part; Command-0 and Command-Shift-U
+select raw RFC 5322 source. Those shortcuts are global JavaScript `keydown`
+handlers and do not appear as native menu items.
 
-The current cross-platform `MenuAction` interface invokes Python but does not
-expose keyboard equivalents or dynamic enabled state. A conventional File or
-Message menu with standard macOS shortcuts would therefore need a small AppKit
-adapter (or a more complete native application shell) that delegates to the
-existing application actions. The HTML controls remain available so browser
-acceptance tests exercise the same underlying operations.
+The cross-platform `MenuAction` interface invokes Python but does not expose
+keyboard equivalents or dynamic enabled state. A small AppKit adapter rebuilds
+the active macOS menu when window or ingest state changes and disables **Close**
+for About and for the search window that owns Import. The controller also
+refuses that menu action and native close event. It sets Command-N/O/W and orders
+the native menus as Application, File, Edit, View, Window. The opt-in
+`make test-native-application` runs production About and search bridges, checks
+About's version, disk space, warning rendering and recovery, opens an extensionless
+fixture archive, and inspects native menu order and the Open shortcut. This catches
+CSP and JSON serialization failures that the browser's injected bridge cannot.
+The HTML controls remain available so browser acceptance tests exercise the
+same underlying operations.
 
 Playwright can test the HTML controls and dispatch the Command-key events, but
 it cannot inspect or select Cocoa menu items. The native smoke test establishes
 that pywebview created a working application shell; it does not assert the
-contents of the inherited menu. If mailarchiver adds application-specific
-native menu commands, their callbacks should delegate to the same tested
-application actions, and XCUITest should verify their titles, enabled states,
-keyboard equivalents, and dispatch.
+contents of the inherited menu. Lifecycle pytest covers document identity,
+read-only rejection of invalid saved databases, destination-safe New,
+active-window routing, independent search state, real subprocess writer
+contention and release, nonce-authenticated loopback assets, and shared ingest
+state. XCUITest and a corresponding Windows native harness still need
+to verify menu titles, enabled states, keyboard equivalents, activation,
+file-open events, and dispatch in packaged applications under issues 72 and 76.
 
 ## Coverage boundaries
 
@@ -191,6 +238,7 @@ keyboard equivalents, and dispatch.
 | Complete HTML interaction | No | Yes | Smoke | Optional |
 | Chromium rendering | No | Yes | No | No |
 | Cocoa bridge injection and shutdown | No | No | Yes | Yes |
+| Document identity, startup, and active-window routing | Yes | No | No | Yes |
 | Independent Ingests-window content and action routing | No | Yes | No | Yes |
 | Native menu inspection, dialogs, Finder drag | No | No | No | Yes |
 
@@ -199,3 +247,32 @@ headless browser interface pass. A browser-only pass is not proof that the
 macOS application shell works; `make test-native-gui` supplies separate local
 smoke evidence. Required native evidence must come from
 XCUITest/XCUIAutomation in a logged-in macOS session.
+
+Owner-rule regression checks use `make test-owner-rules` for exact/glob matching,
+exclusion precedence, YAML defaults, real fixture routing, raw-byte hashes, and
+repeat-import verification. `make test-native-application` also exercises both
+native owner fields with defaults, Continue/Cancel, and the persistent options
+editor in a real Cocoa/WebKit process. These tests use disposable fixture archives.
+
+### Finder file export regression
+
+`make test-file-drag` verifies exact message export bytes, export-token lifetime
+including concurrent close/preparation, isolation from same-name attachments and
+later exports, and rejection of arbitrary pathname/URL text. On macOS it also exercises both
+WebKit adapter paths with real Cocoa pasteboards and dragging-item writers,
+requiring exactly one explicitly written item type, `public.file-url`, and
+rejecting link and plain-text flavors. Cocoa-generated compatibility aliases
+on the aggregate pasteboard are permitted. A
+controlled `NSView` superclass records both injected entry points through real
+Objective-C dispatch, including struct/BOOL arguments and repeated installation.
+Only the final interactive AppKit drag session is replaced in that test. These
+checks do not simulate a Finder drop. The browser acceptance driver separately
+checks that result rows and the icon well share the same prepared export token
+for single messages and modifier-selected multiple messages, with copy-only
+transfers and stale transfer data cleared. A desktop acceptance check must drag
+from both sources onto Finder or the Desktop and compare the resulting `.eml`
+bytes with the verified export; repeat for a multi-selection ZIP and confirm no
+`.fileloc` is created.
+
+Browser selection checks locate the current result card by message primary key
+after preview delivery reformats it; they do not retain detached card elements.

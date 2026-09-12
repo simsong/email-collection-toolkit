@@ -16,10 +16,6 @@ const state = {
   resultPreviewTimer: null,
   resultSelection: new Set(),
   resultTable: null,
-  resultRangeAnchor: null,
-  resultRangeSelection: [],
-  resultRangeActive: false,
-  suppressResultClick: false,
   highlightTerms: [],
   messageFindQuery: "",
   messageFindTargets: [],
@@ -37,6 +33,7 @@ const state = {
   remoteContentAuthorizedMessage: null,
   remoteContentAuthorizedPart: null,
   view: null,
+  fileDragSupported: false,
   dragExports: new Map(),
   dragPreparing: new Set(),
   previewUrl: null,
@@ -74,7 +71,17 @@ window.addEventListener("resize", () => {
   const frame = elements["body-view"]?.querySelector(".html-frame");
   if (frame) window.setTimeout(() => refreshHtmlFrameLayout(frame), 0);
 });
+window.addEventListener("focus", () => { void window.pywebview?.api?.activate?.(); });
 window.addEventListener("pywebviewready", initialize);
+window.mailArchiverNotice = message => showError(message);
+window.archiveDidChange = async () => {
+  const status = await call(() => window.pywebview.api.status());
+  if (!status) return;
+  state.mailboxTree = [];
+  applyStatus(status);
+  await refreshIngestOverview();
+  if (state.query.trim() || (state.showTree && state.mailboxSelections.size)) await runSearch();
+};
 window.setTimeout(() => {
   if (window.pywebview?.api?.status) initialize();
   else if (!initialized) showBridgeFailure();
@@ -88,7 +95,7 @@ async function initialize() {
     await runNativeSmoke();
     return;
   }
-  for (const id of ["choose-archive", "search-form", "search", "search-filters", "search-suggestions", "search-help-template", "archive-label", "result-status", "results-pane", "result-list",
+  for (const id of ["search-form", "search", "search-filters", "search-suggestions", "search-help-template", "result-status", "results-pane", "result-list",
     "result-help",
     "sort-by", "sort-direction", "search-attachments", "show-original-folders", "mailbox-browser", "mailbox-tree", "show-source-volumes", "filter-set", "manage-filter-sets",
     "save-filter-dialog", "save-filter-form", "filter-set-name", "cancel-save-filter", "manage-filter-dialog", "filter-set-list", "close-filter-manager",
@@ -96,12 +103,9 @@ async function initialize() {
     "copy-message-text", "save-message", "print-message", "body-view", "attachment-section", "attachment-list", "attachment-preview", "provenance-section", "message-locations", "ingest-status-line", "link-dialog", "link-destination", "link-ignore", "link-copy", "link-open", "error"]) {
     elements[id] = byId(id);
   }
-  initializeResultTable();
+  await initializeResultTable();
+  initializeMessageSplitter();
   renderSearchHelp();
-  elements["choose-archive"].addEventListener("click", async () => {
-    await chooseArchive();
-    elements["choose-archive"].dataset.completed = String(Number(elements["choose-archive"].dataset.completed || 0) + 1);
-  });
   elements["search-form"].addEventListener("submit", event => {
     event.preventDefault();
     if (state.suggestionIndex >= 0) acceptSuggestion(state.suggestionIndex);
@@ -126,7 +130,6 @@ async function initialize() {
   elements["result-list"].addEventListener("mousedown", () => { state.commandAContext = "results"; });
   elements["result-list"].addEventListener("focusin", () => { state.commandAContext = "results"; });
   elements["result-list"].addEventListener("selectstart", event => event.preventDefault());
-  document.addEventListener("mouseup", finishResultRange);
   elements["message-pane"].addEventListener("mousedown", () => { state.commandAContext = "message"; });
   elements["part-select"].addEventListener("change", () => void selectMessagePart(Number(elements["part-select"].value), false));
   elements["message-find"].addEventListener("submit", event => { event.preventDefault(); void moveMessageFind(1); });
@@ -147,6 +150,7 @@ async function initialize() {
   if (parameters.get("standalone") === "1") document.body.classList.add("standalone");
   const status = await call(() => window.pywebview.api.status());
   if (!status) return;
+  await call(() => window.pywebview.api.activate());
   state.highlightTerms = parameters.getAll("highlight");
   await loadFilterSets();
   applyStatus(status);
@@ -401,7 +405,7 @@ function showBridgeFailure() {
 
 async function chooseArchive() {
   const status = await call(() => window.pywebview.api.choose_archive());
-  if (status) {
+  if (status && !status.opened_in_new_window) {
     resetArchiveView();
     applyStatus(status);
     await refreshIngestOverview();
@@ -439,14 +443,18 @@ function resetArchiveView() {
 }
 
 function applyStatus(status) {
+  state.fileDragSupported = Boolean(status.file_drag_supported);
+  elements["message-file-well"].hidden = !state.fileDragSupported;
+  elements["message-file-well"].draggable = state.fileDragSupported;
   state.highlightBackground = status.configuration.search_highlight_background;
   document.documentElement.style.setProperty("--search-highlight-background", state.highlightBackground);
-  elements["archive-label"].textContent = status.archive || "No archive selected";
   document.title = status.ready
-    ? `Mail Archiver — ${status.archive} (${status.message_count.toLocaleString()} messages)`
-    : "Mail Archiver";
+    ? `Email Collection Toolkit — ${status.archive} (${status.message_count.toLocaleString()} messages)`
+    : status.untitled ? "Untitled — Email Collection Toolkit" : "Email Collection Toolkit";
   elements.search.disabled = !status.ready;
-  elements["result-status"].textContent = status.ready ? "Enter a search." : "Choose an archive to begin.";
+  elements["result-status"].textContent = status.ready ? "Enter a search." : "Use File → New or Open to begin.";
+  const notice = status.notices?.at(-1);
+  if (notice && notice.severity !== "information") showError(notice.message);
   if (status.ready) elements.search.focus();
 }
 
@@ -952,6 +960,10 @@ async function runCompleteSearch(context) {
   ));
   if (request !== state.searchRequest) return;
   if (!first) { updateResultStatus(); return; }
+  if (first.error) {
+    elements["result-status"].textContent = first.error;
+    return;
+  }
   state.highlightTerms = first.highlight_terms;
   appendResults(first.results, request);
   state.offset = first.results.length;
@@ -994,10 +1006,6 @@ function clearResultViewport() {
   if (state.resultPreviewTimer !== null) window.clearTimeout(state.resultPreviewTimer);
   state.resultPreviewTimer = null;
   state.resultSelection.clear();
-  state.resultRangeAnchor = null;
-  state.resultRangeSelection = [];
-  state.resultRangeActive = false;
-  state.suppressResultClick = false;
   state.resultTable?.clearData();
 }
 
@@ -1032,13 +1040,12 @@ function initializeResultTable() {
       field: "subject",
       formatter: resultCardFormatter,
       headerSort: false,
+      resizable: false,
       widthGrow: 1,
     }],
   });
   state.resultTable.on("rowClick", selectResultRow);
   state.resultTable.on("rowDblClick", openResultWindow);
-  state.resultTable.on("rowMouseDown", beginResultRange);
-  state.resultTable.on("rowMouseEnter", extendResultRange);
   state.resultTable.on("rowSelectionChanged", selected => {
     state.resultSelection = new Set(selected.map(result => result.message_pk));
     updateMessageFileWell();
@@ -1047,6 +1054,74 @@ function initializeResultTable() {
       void selectMessage(selected[0].message_pk);
     }
   });
+  return new Promise(resolve => state.resultTable.on("tableBuilt", resolve));
+}
+
+function initializeMessageSplitter() {
+  const workspace = document.querySelector(".workspace");
+  const splitter = byId("message-splitter");
+  const results = elements["results-pane"];
+  const tree = elements["mailbox-browser"];
+  let fraction = 0.38;
+  let dragOffset = null;
+  const bounds = () => {
+    const available = Math.max(0, workspace.clientWidth - tree.getBoundingClientRect().width - splitter.offsetWidth);
+    return {available, minimum: Math.min(300, available / 2), maximum: Math.max(available / 2, available - 320)};
+  };
+  const resize = (requested = null) => {
+    if (document.body.classList.contains("standalone")) return;
+    const {available, minimum, maximum} = bounds();
+    const width = Math.max(minimum, Math.min(maximum, requested ?? available * fraction));
+    if (requested !== null && available) fraction = width / available;
+    workspace.style.setProperty("--results-width", `${width}px`);
+    splitter.setAttribute("aria-valuemin", Math.round(minimum));
+    splitter.setAttribute("aria-valuemax", Math.round(maximum));
+    splitter.setAttribute("aria-valuenow", Math.round(width));
+    splitter.setAttribute("aria-valuetext", `${Math.round(width)} pixels`);
+  };
+  splitter.addEventListener("pointerdown", event => {
+    if (event.button !== 0 || !event.isPrimary) return;
+    event.preventDefault();
+    dragOffset = event.clientX - results.getBoundingClientRect().right;
+    splitter.setPointerCapture(event.pointerId);
+    splitter.focus();
+    document.body.classList.add("resizing-panes");
+  });
+  splitter.addEventListener("pointermove", event => {
+    if (dragOffset !== null) resize(event.clientX - results.getBoundingClientRect().left - dragOffset);
+  });
+  const stop = () => {
+    dragOffset = null;
+    document.body.classList.remove("resizing-panes");
+  };
+  splitter.addEventListener("lostpointercapture", stop);
+  splitter.addEventListener("pointercancel", stop);
+  splitter.addEventListener("pointerup", stop);
+  splitter.addEventListener("keydown", event => {
+    const {minimum, maximum} = bounds();
+    const width = results.getBoundingClientRect().width;
+    const step = event.shiftKey ? 50 : 10;
+    let requested;
+    switch (event.key) {
+      case "ArrowLeft": requested = width - step; break;
+      case "ArrowRight": requested = width + step; break;
+      case "Home": requested = minimum; break;
+      case "End": requested = maximum; break;
+      default: return;
+    }
+    event.preventDefault();
+    resize(requested);
+  });
+  const observer = new ResizeObserver(() => resize());
+  observer.observe(workspace);
+  observer.observe(tree);
+  // Tabulator observes its own container; only the HTML preview needs remeasurement.
+  const previewObserver = new ResizeObserver(() => {
+    const frame = elements["body-view"].querySelector(".html-frame");
+    if (frame) refreshHtmlFrameLayout(frame);
+  });
+  previewObserver.observe(elements["message-pane"]);
+  resize();
 }
 
 function resultCardFormatter(cell) {
@@ -1056,6 +1131,9 @@ function resultCardFormatter(cell) {
   card.className = "result";
   card.id = `message-result-${result.message_pk}`;
   card.dataset.messagePk = result.message_pk;
+  card.draggable = state.fileDragSupported;
+  installDrag(card, () => state.resultSelection.has(result.message_pk)
+    ? selectedDragMessagePks() : [result.message_pk]);
   card.dataset.dateUtc = result.date_utc;
   const subjectLine = document.createElement("div");
   subjectLine.className = "result-subject-line";
@@ -1113,53 +1191,19 @@ function toggleSortDirection() {
   runSearch(false);
 }
 
-function beginResultRange(event, row) {
-  if (event.button !== 0) return;
-  state.resultRangeAnchor = row.getData().message_pk;
-  state.resultRangeSelection = [];
-  state.resultRangeActive = false;
-}
-
-function extendResultRange(event, row) {
-  if (state.resultRangeAnchor === null || event.buttons !== 1) return;
-  const messagePk = row.getData().message_pk;
-  if (messagePk === state.resultRangeAnchor) return;
-  const first = state.results.findIndex(result => result.message_pk === state.resultRangeAnchor);
-  const last = state.results.findIndex(result => result.message_pk === messagePk);
-  if (first < 0 || last < 0) return;
-  state.resultRangeActive = true;
-  state.resultRangeSelection = state.results.slice(Math.min(first, last), Math.max(first, last) + 1)
-    .map(result => result.message_pk);
-  state.resultTable?.deselectRow();
-  state.resultTable?.selectRow(state.resultRangeSelection);
-}
-
-function finishResultRange() {
-  if (state.resultRangeAnchor === null) return;
-  if (state.resultRangeActive) {
-    state.suppressResultClick = true;
-    requestAnimationFrame(() => { state.suppressResultClick = false; });
-  }
-  state.resultRangeAnchor = null;
-  state.resultRangeActive = false;
-}
-
 function selectResultRow(event, row) {
-  if (state.suppressResultClick) {
-    state.resultTable?.deselectRow();
-    state.resultTable?.selectRow(state.resultRangeSelection);
-    state.suppressResultClick = false;
-    return;
-  }
+  const request = state.searchRequest;
+  const messagePk = row.getData().message_pk;
   window.setTimeout(() => {
+    if (request !== state.searchRequest || state.resultTable?.getRow(messagePk) !== row) return;
     let selected = state.resultTable?.getSelectedRows() || [];
     if (!event.shiftKey && !event.metaKey && !event.ctrlKey && selected.length !== 1) {
       state.resultTable?.deselectRow();
       state.resultTable?.selectRow(row);
       selected = state.resultTable?.getSelectedRows() || [];
     }
-    if (selected.length !== 1 || selected[0] !== row || state.selectionRequest === row.getData().message_pk) return;
-    void selectMessage(row.getData().message_pk);
+    if (selected.length !== 1 || selected[0] !== row || state.selectionRequest === messagePk) return;
+    void selectMessage(messagePk);
   }, 0);
 }
 
@@ -1858,7 +1902,7 @@ async function previewAttachment(attachment) {
 
 async function openAttachment(attachment) {
   let result = await call(() => window.pywebview.api.open_attachment(state.selected, attachment.part_id, false));
-  if (result?.requires_confirmation && confirm(`${attachment.filename} may contain executable content. Open it anyway?`)) {
+  if (result?.requires_confirmation && confirm(`${attachment.filename} may contain active or unrecognized content. Open it anyway?`)) {
     result = await call(() => window.pywebview.api.open_attachment(state.selected, attachment.part_id, true));
   }
 }
@@ -1893,7 +1937,9 @@ function showMultipleMessageSelection() {
   const title = document.createElement("h1");
   title.textContent = `${count} messages selected.`;
   const detail = document.createElement("p");
-  detail.textContent = "Drag the file icon to Finder to export the selected messages as a ZIP archive.";
+  detail.textContent = state.fileDragSupported
+    ? "Drag the selected messages or the file icon to Finder to export a ZIP archive."
+    : "Select a single message to use Save Message.";
   elements["message-selection-summary"].replaceChildren(title, detail, elements["message-file-well"]);
   elements["message-selection-summary"].hidden = false;
   elements["message-content"].hidden = false;
@@ -1929,7 +1975,9 @@ function updateMessageFileWell() {
 
 function installDrag(element, messagePks) {
   element.addEventListener("dragstart", async event => {
+    if (!state.fileDragSupported) { event.preventDefault(); return; }
     const messages = messagePks();
+    if (!messages.length) { event.preventDefault(); return; }
     const key = dragExportKey(messages);
     const info = state.dragExports.get(key);
     if (!info) {
@@ -1937,10 +1985,11 @@ function installDrag(element, messagePks) {
       await prepareDrag(messages);
       return;
     }
+    event.dataTransfer.clearData();
     event.dataTransfer.effectAllowed = "copy";
-    event.dataTransfer.setData("text/uri-list", info.url);
-    event.dataTransfer.setData("DownloadURL", `${info.content_type}:${info.filename}:${info.url}`);
-    event.dataTransfer.setData("text/plain", info.url);
+    // Both result rows and the icon well use this path. Cocoa replaces the
+    // token with one public.file-url item (the modern filenames equivalent).
+    event.dataTransfer.setData("text/plain", info.token);
   });
 }
 

@@ -4,6 +4,8 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
+
 import hashlib
 import importlib
 import importlib.util
@@ -16,7 +18,14 @@ from types import ModuleType
 
 from pydantic import BaseModel, ConfigDict, ValidationError
 
-from .plugin_api import LoadedPlugin, PluginCapabilities, PluginContext, PluginManifest, PluginRegistry, PluginType
+from .plugin_api import (
+    LoadedPlugin,
+    PluginCapabilities,
+    PluginContext,
+    PluginManifest,
+    PluginRegistry,
+    PluginType,
+)
 
 
 class PluginDiscoveryError(RuntimeError):
@@ -67,7 +76,8 @@ def _validated_candidates(roots: list[tuple[Path, bool]]) -> tuple[_Candidate, .
         if not root.is_dir():
             errors.append(f"plug-in directory does not exist: {root}")
             continue
-        for plugin_type, category in (("source", "sources"), ("file", "files")):
+        categories: tuple[tuple[PluginType, str], ...] = (("source", "sources"), ("file", "files"))
+        for plugin_type, category in categories:
             category_path = root / category
             if not category_path.exists():
                 continue
@@ -193,7 +203,7 @@ def _load(candidate: _Candidate, context: PluginContext | None = None) -> Loaded
     )
 
 
-def _instantiate(entrypoint: object, context: PluginContext | None) -> object:
+def _instantiate(entrypoint: Callable[..., object], context: PluginContext | None) -> object:
     signature = inspect.signature(entrypoint)
     positional = [
         parameter
@@ -201,8 +211,8 @@ def _instantiate(entrypoint: object, context: PluginContext | None) -> object:
         if parameter.kind in {parameter.POSITIONAL_ONLY, parameter.POSITIONAL_OR_KEYWORD}
     ]
     if context is not None and positional:
-        return entrypoint(context)  # type: ignore[operator]
-    return entrypoint()  # type: ignore[operator]
+        return entrypoint(context)
+    return entrypoint()
 
 
 def _load_external_module(directory: Path, module_name: str) -> ModuleType:
@@ -250,7 +260,8 @@ def _validate_implementation(manifest: PluginManifest, implementation: object) -
         controls = getattr(implementation, "integrity_controls", None)
         if controls is None or not all(callable(getattr(controls, name, None)) for name in ("plan", "complete")):
             missing.append("integrity_controls.plan/complete")
-        if not isinstance(getattr(controls, "control_id", None), str) or not controls.control_id.strip():
+        control_id = getattr(controls, "control_id", None)
+        if not isinstance(control_id, str) or not control_id.strip():
             missing.append("integrity_controls.control_id")
     if missing:
         raise TypeError("entrypoint implementation lacks or has invalid " + ", ".join(missing))

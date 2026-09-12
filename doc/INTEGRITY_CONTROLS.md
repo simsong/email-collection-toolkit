@@ -53,14 +53,16 @@ classification, indexing, and reporting never change those bytes.
 
 * **Extraction:** recognize the `From ` record framing by content and use
   `mailbox.mbox.get_bytes(..., from_=False)`. The source record separator is
-  container framing and is not normally part of `MailObject.raw`. The bytes
+  container framing and is not normally part of `MailObject.raw`. Retain its
+  complete physical bytes separately in `MailObject.mbox_envelope` and reuse it
+  during publication; do not replace its date with import time. The bytes
   returned by the standard-library MBOX reader, including its stored `>From `
   representation, become the message bytes.
 * **Container-only records:** an exact empty Eudora MBCP status record is
   observed as `source-metadata-excluded` and is not a canonical message. A
   narrowly recognized `From XXX` status wrapper is removed, one quoting level
   is removed from its nested MBOX envelope, and the nested RFC 5322 bytes become
-  `MailObject.raw`; the outer source offset remains provenance.
+  `MailObject.raw`; retain the nested envelope separately, while the outer source offset remains provenance.
 * **Problems and adopted solutions:** mboxrd cannot distinguish storage-added
   quoting from an original literal `>From ` line, so recovery enumerates the
   bounded interpretations and uses `h2` to select one. Unescaped body lines
@@ -142,12 +144,15 @@ canonical record. A ClamAV-positive message keeps identical `MailObject.raw`
 bytes and is routed to a numbered `INFECTED` MBOX. Deduplication changes only
 whether another canonical copy is written.
 
-For every retained message, `mailbox.mbox.add(raw_bytes)` performs the common
-storage transformation: it writes or adopts an outer `From ` separator,
-mboxrd-quotes payload lines beginning `From `, and supplies a final LF when the
-source lacks one. If `raw_bytes` begins with `From `, the writer adopts that
-first source line as the separator instead of generating one. The catalogued
-location covers the complete stored record.
+For every retained message, publication supplies a preserved outer `From `
+separator, or synthesizes one only when none exists using the latest valid
+header timestamp and the documented missing-date fallback (see requirements).
+It passes the framed bytes to `mailbox.mbox.add()` without changing
+`MailObject.raw` or its `h2` identity. The standard writer quotes payload lines
+beginning `From ` and supplies a final LF when the source lacks one. If the
+source bytes themselves begin with `From ` and no separate envelope exists,
+that first source line remains the separator. The catalogued location covers
+the complete stored record.
 
 Recovery reverses the storage representation by streaming candidates in this
 order:
@@ -249,7 +254,7 @@ explicitly derived: they do not enter `data/mbox/`, canonical electronic-message
 counts, or ordinary message deduplication. Exact matches remain linked to their
 PDF and page provenance even when the derived result is suppressed from the
 default search listing. This extension is tracked by
-[GitHub issue #18](https://github.com/simsong/mail-archiver/issues/18) and is
+[GitHub issue #18](https://github.com/simsong/email-collection-toolkit/issues/18) and is
 not part of the implemented native layout above.
 
 ## BagIt declaration and manifests

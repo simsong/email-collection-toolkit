@@ -4,43 +4,44 @@
 
 from __future__ import annotations
 
+from mailarchiver.mbox import message_offsets
+
 import argparse
 import hashlib
 import mailbox
 import shutil
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 from mailarchiver.bagit import write_bag_checkpoint
 from mailarchiver.catalog import address_pk, create_catalog
 from mailarchiver.layout import mbox_directory
 
-
 MESSAGES = (
     (
         "one@example.test",
-        b"Message-ID: <one@example.test>\nFrom: Alice <alice@example.test>\n"
+        (b"Message-ID: <one@example.test>\nFrom: Alice <alice@example.test>\n"
         b"To: archive@example.test\nDelivered-To: archive@example.test\n"
         b"Subject: First fixture message\nDate: Mon, 01 Jan 2024 10:00:00 +0000\n\n"
-        b"The first preserved body.\n",
+        b"The first preserved body.\n"),
     ),
     (
         "two@example.test",
-        b"Message-ID: <two@example.test>\nFrom: Bob <bob@example.test>\n"
+        (b"Message-ID: <two@example.test>\nFrom: Bob <bob@example.test>\n"
         b"To: archive@example.test\nSubject: Mutable status fixture\n"
         b"Date: Tue, 02 Jan 2024 11:00:00 +0000\nStatus: RO\n\n"
-        b"Status is excluded only from the semantic digest.\n",
+        b"Status is excluded only from the semantic digest.\n"),
     ),
     (
         "three@example.test",
-        b"Message-ID: <three@example.test>\nFrom: Carol <carol@example.test>\n"
+        (b"Message-ID: <three@example.test>\nFrom: Carol <carol@example.test>\n"
         b"To: archive@example.test\nSubject: Attachment fixture\n"
         b"Date: Wed, 03 Jan 2024 12:00:00 +0000\n"
         b"MIME-Version: 1.0\nContent-Type: multipart/mixed; boundary=fixture\n\n"
         b"--fixture\nContent-Type: text/plain; charset=utf-8\n\nThe third preserved body.\n"
         b"--fixture\nContent-Type: text/plain; name=note.txt\n"
         b"Content-Disposition: attachment; filename=note.txt\n\nAttached text.\n"
-        b"--fixture--\n",
+        b"--fixture--\n"),
     ),
 )
 
@@ -79,7 +80,7 @@ def generate(output: Path) -> None:
                     "'date', 'Archive')",
                     (message_id, hashlib.sha256(raw).hexdigest(), sender_pk),
                 ).lastrowid
-                start, stop = box._lookup(key)
+                start, stop = message_offsets(box, key)
                 catalog.execute(
                     "INSERT INTO locations(message_pk, generation_pk, byte_offset, byte_length) VALUES (?, ?, ?, ?)",
                     (message_pk, generation_pk, start, stop - start),
@@ -90,7 +91,7 @@ def generate(output: Path) -> None:
         (output / "bag-info.txt").write_text(
             "External-Identifier: mailarchiver-three-message-test-fixture\n", encoding="utf-8"
         )
-        write_bag_checkpoint(output, catalog, datetime(2026, 8, 22, 12, 0, tzinfo=timezone.utc))
+        write_bag_checkpoint(output, catalog, datetime(2026, 8, 22, 12, 0, tzinfo=UTC))
         catalog.commit()
     finally:
         catalog.close()

@@ -10,10 +10,9 @@ import re
 import sys
 from pathlib import Path
 
-
 STABLE = re.compile(r"^v(\d+)\.(\d+)\.(\d+)$")
 BETA = re.compile(r"^v(\d+)\.(\d+)\.(\d+)-beta(\d+)$")
-REPOSITORY = "https://github.com/simsong/mail-archiver"
+REPOSITORY = "https://github.com/simsong/email-collection-toolkit"
 
 
 def choose(tags: list[str], pattern: re.Pattern[str]) -> str | None:

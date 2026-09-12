@@ -1,5 +1,6 @@
 # Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved.
 
+mode: replace
 version: 1
 gui:
   search_highlight_background: "#fff59d"

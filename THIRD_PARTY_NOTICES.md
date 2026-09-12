@@ -2,7 +2,7 @@
 
 # Third-party and separately licensed material
 
-Mail Archiver retains the notices and license terms of material that is not
+Email Collection Toolkit retains the notices and license terms of material that is not
 covered by the repository's `COPYRIGHT` notice. A packaged application must
 include this file, `COPYRIGHT`, and the complete license texts collected from
 the exact runtime environment used to build that application.
@@ -18,6 +18,11 @@ the exact runtime environment used to build that application.
 The Tabulator directory is vendored and must remain byte-for-byte identical to
 the reviewed upstream files. Minified files are never rewritten to add project
 headers.
+
+The upstream website illustration and photograph retain their separate terms
+and attribution in `website/static/images/ATTRIBUTION.md`; their source bytes
+are excluded from project notice insertion. Shared generated workflow files
+are also retained without rewriting their notices.
 
 ## Python runtime dependencies
 

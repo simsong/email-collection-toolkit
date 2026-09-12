@@ -1,7 +1,51 @@
 #!/usr/bin/env python3
 # Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved.
 
-"""Independently generate and verify Mailbag and message fixity using only stdlib."""
+"""Verify the integrity of an Email Collection Toolkit archive.
+
+HOW TO RUN
+  Requires Python 3.10 or later, using only its standard library. No Email Collection Toolkit installation or additional Python packages are needed.
+
+  The commands below use the installed archive copy, verify_mail_archive.py.
+  In a source checkout this file is src/mailarchiver/standalone_verify.py;
+  invoke that path with an explicit archive directory instead.
+
+  From the directory containing the installed script:
+    macOS / Linux:  python3 verify_mail_archive.py
+    Windows:        py -3 verify_mail_archive.py
+
+  To check another archive, supply its directory (quote paths with spaces):
+    python3 verify_mail_archive.py "/path/to/archive"
+    py -3 verify_mail_archive.py "C:\\path\\to\\archive"
+
+  For these instructions at the command line:
+    python3 verify_mail_archive.py --help
+
+  Without a directory argument, this checks the archive containing this
+  script, even when launched from a different working directory. Wait until
+  imports and other archive writes have stopped before running verification.
+
+WHAT IT CHECKS
+  Checks the BagIt directory declaration, payload and tag SHA-256 manifests,
+  Mailbag metadata and message counts, and the per-mailbox integrity records.
+  Recomputes whole-MBOX, original-message, and semantic-message digests and
+  compares them with the recorded values. Large archives can take a long time:
+  verification reads all archived mail, including quarantined messages.
+
+RESULTS
+  Prints progress for verified mailboxes and "Archive integrity verified."
+  when all checks pass (exit status 0). Reports integrity errors and returns
+  exit status 1 when checks fail; invalid command-line usage returns status 2.
+  An interrupted or failed run is not a successful verification.
+
+  This is read-only: it does not repair, rewrite, or delete archive files.
+  It does not consult or validate SQLite databases, rebuild search indexes,
+  or scan for viruses. Matching hashes establish consistency with the stored
+  integrity records; they do not prove authenticity or completeness against
+  the original mail sources. Keep independent backups and integrity records.
+
+Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved.
+"""
 
 from __future__ import annotations
 
@@ -14,11 +58,10 @@ import mailbox
 import os
 import re
 import sys
+from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import datetime
-from pathlib import Path
-from pathlib import PurePosixPath
-from typing import Iterable
+from pathlib import Path, PurePosixPath
 
 BUFFER_SIZE = 1024 * 1024
 FORMAT_ID = "tag:simson.net,2026:mailarchiver/integrity"
@@ -108,7 +151,7 @@ class HashStandard:
 
 def _json_bytes(value: object) -> bytes:
     encoded = json.dumps(value, ensure_ascii=True, separators=(",", ":"), sort_keys=True)
-    return f"{encoded}\n".encode("utf-8")
+    return f"{encoded}\n".encode()
 
 
 def _normalize_line_endings(raw: bytes) -> bytes:
@@ -260,7 +303,7 @@ def _load_json(line: bytes) -> dict[str, object]:
 
     value = json.loads(line, object_pairs_hook=object_hook)
     if not isinstance(value, dict):
-        raise ValueError("control record must be a JSON object")
+        raise TypeError("control record must be a JSON object")
     if _json_bytes(value) != line:
         raise ValueError("control record is not deterministically encoded")
     return value
@@ -277,7 +320,7 @@ def _parse_standard(record: dict[str, object], prior: list[HashStandard]) -> Has
         raise ValueError("hash codes must be consecutive h1, h2, ...")
     if algorithm not in ALGORITHMS:
         raise ValueError(f"unsupported digest algorithm for {code}: {algorithm}")
-    if standard not in {"mbox", "raw", "semantic"} or version != 1 or scope not in {"mbox", "message"}:
+    if standard not in {"mbox", "raw", "semantic"} or not isinstance(version, int) or isinstance(version, bool) or version != 1 or scope not in {"mbox", "message"}:
         raise ValueError(f"unsupported hash standard for {code}")
     if scope != ("mbox" if standard == "mbox" else "message"):
         raise ValueError(f"invalid scope for {code}")
@@ -300,7 +343,7 @@ def _parse_standard(record: dict[str, object], prior: list[HashStandard]) -> Has
 
 def _parse_token(token: object, standards: list[HashStandard]) -> tuple[HashStandard, str]:
     if not isinstance(token, str):
-        raise ValueError("hash token must be a string")
+        raise TypeError("hash token must be a string")
     code, separator, digest = token.partition(":")
     standard = next((item for item in standards if item.code == code), None)
     if not separator or standard is None or not HEX_PATTERN.fullmatch(digest):
@@ -310,7 +353,7 @@ def _parse_token(token: object, standards: list[HashStandard]) -> tuple[HashStan
     return standard, digest
 
 
-def _stored_candidates(box: mailbox.mbox, key: object) -> Iterable[bytes]:
+def _stored_candidates(box: mailbox.mbox, key: str) -> Iterable[bytes]:
     """Independently try envelope, mboxrd, and writer-added-LF alternatives."""
     record = box.get_bytes(key, from_=True)
     envelope, separator, raw = record.partition(b"\n")
@@ -446,7 +489,7 @@ def verify_mbox(path: Path, integrity: Path) -> list[str]:
                 box.close()
             if rows != mbox_record.get(MESSAGES):
                 errors.append(f"{path.name}: message count mismatch")
-    except (OSError, UnicodeError, ValueError, json.JSONDecodeError, mailbox.Error) as error:
+    except (OSError, UnicodeError, TypeError, ValueError, json.JSONDecodeError, mailbox.Error) as error:
         return [f"{integrity.name}: {error}"]
     if not errors:
         print(f"OK {path.name}: {rows} messages")
@@ -504,7 +547,7 @@ def _verify_bagit_manifest(path: Path, archive: Path, payload: bool) -> tuple[li
             actual = _digest_file(target, ("sha256",))["sha256"]
             if actual.lower() != fields[0].lower():
                 errors.append(f"{path.name}: SHA-256 mismatch for {logical}: expected {fields[0]}, found {actual}")
-    except (OSError, UnicodeError, ValueError) as error:
+    except (OSError, UnicodeError, TypeError, ValueError) as error:
         return [f"{path.name}: {error}"], declared
     return errors, declared
 
@@ -537,7 +580,7 @@ def _bag_info(archive: Path, payloads: list[Path]) -> list[str]:
         expected_oxum = f"{sum(item.stat().st_size for item in payloads)}.{len(payloads)}"
         if fields.get("Payload-Oxum") != expected_oxum:
             raise ValueError(f"Payload-Oxum mismatch: expected {expected_oxum}")
-    except (OSError, UnicodeError, ValueError) as error:
+    except (OSError, UnicodeError, TypeError, ValueError) as error:
         return [f"bag-info.txt: {error}"]
     return []
 
@@ -615,7 +658,7 @@ def _verify_mailbag_csv(
             raise ValueError(f"Mailbag CSV has {rows} messages; expected {expected_messages}")
         if references != expected_mailboxes:
             raise ValueError("Mailbag CSV message counts do not match their MBOX containers")
-    except (OSError, UnicodeError, ValueError, csv.Error) as error:
+    except (OSError, UnicodeError, TypeError, ValueError, csv.Error) as error:
         return [str(error)], paths
     return [], paths
 
@@ -735,9 +778,12 @@ def install_archive_verifier(archive: Path) -> Path:
 
 def main() -> int:
     parser = argparse.ArgumentParser(
-        description="Validate BagIt, Mailbag, whole-MBOX, raw-message, and semantic-message hashes."
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-    parser.add_argument("archive", nargs="?", type=Path, default=Path(__file__).resolve().parent)
+    parser.add_argument(
+        "archive", nargs="?", type=Path, default=Path(__file__).resolve().parent,
+        help="archive directory (default: the directory containing this script)",
+    )
     archive = parser.parse_args().archive
     if not archive.is_dir():
         parser.error(f"not a directory: {archive}")

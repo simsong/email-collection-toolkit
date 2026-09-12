@@ -2,7 +2,7 @@
 
 [project]
 name = "mailarchiver"
-version = "0.0.0"
+version = "0.1.0.dev1"
 description = "Personal MBOX archive normalizer"
 requires-python = ">=3.12"
 license-files = [
@@ -15,16 +15,23 @@ license-files = [
 dependencies = [
     "beautifulsoup4>=4.15.0",
     "charset-normalizer>=3.4.0",
+    "dnspython>=2.8.0",
     "ftfy>=6.3.0",
+    "google-auth-oauthlib>=1.4.1",
+    "keyring>=25.6.0",
     "py7zr>=1.0.0",
     "pydantic>=2.13.4",
     "pywebview>=6.2",
     "pyyaml>=6.0.2",
+    "requests>=2.32.0",
     "tabulate>=0.9.0",
 ]
 
 [project.scripts]
 mailarchiver = "mailarchiver.__main__:main"
+mailarchiver-auth = "mailarchiver.auth:main"
+mailarchiver-compare-apple-mail = "mailarchiver.apple_mail_compare:main"
+mailarchiver-h3-review = "mailarchiver.h3_review:main"
 mailsearch = "mailarchiver.mailsearch:main"
 mailsearch-gui = "mailarchiver.gui_app:main"
 summarize = "mailarchiver.aisummarize:main"
@@ -43,6 +50,7 @@ where = ["src"]
 mailarchiver = [
     "*.yaml",
     "*.swift",
+    "gmail_client.json",
     "sql/*.sql",
     "plugins/sources/*/plugin.toml",
     "plugins/files/*/plugin.toml",
@@ -51,9 +59,21 @@ mailarchiver = [
 [dependency-groups]
 dev = [
     "packaging>=24.0",
+
+    "boto3>=1.43.89",
     "pylint>=3.3",
+    "pyright>=1.1.411",
     "pytest>=8.0",
     "pytest-playwright>=0.9.0",
+    "ruff>=0.16.6",
+    "ty>=0.0.79",
+    "types-pyyaml>=6.0.12.20260906",
+    "types-requests>=2.33.0.20260906",
+    "types-tabulate>=0.10.0.20260508",
+]
+packaging = [
+    "dmgbuild>=1.6.7 ; sys_platform == 'darwin'",
+    "pyinstaller>=6.22,<7",
 ]
 
 [tool.pytest.ini_options]
@@ -63,3 +83,19 @@ pythonpath = ["."]
 
 [tool.pylint."messages control"]
 disable = ["C", "R", "W", "no-member"]
+
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F"]
+
+[tool.ty.src]
+include = ["src", "scripts", "tests", "e2e_tests", "validation/aws"]
+
+[tool.ty.environment]
+extra-paths = ["typings", "scripts"]
+
+[tool.pyright]
+stubPath = "typings"
+extraPaths = ["scripts"]
+include = ["src", "scripts", "tests", "e2e_tests", "validation/aws"]
+pythonVersion = "3.12"
+typeCheckingMode = "standard"

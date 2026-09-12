@@ -2,6 +2,45 @@
 
 # Mail archive normalizer implementation
 
+## Recovered tool safety and validation
+
+ClamAV health probes have a five-second deadline and message scans a five-minute
+deadline. Probe timeout means unavailable; a helper execution error raises
+`ClamScannerStartupError` before socket removal or daemon launch and releases
+the startup lock. Scan timeout fails import and removes temporary plaintext. Typed unscannable/scanner-error
+outcomes remain planned.
+
+`make h3-ambiguous-review ARGS='--apple-mail SOURCE --archive ARCHIVE --output REVIEW'`
+writes hash-verified ambiguous classes to a new private directory outside both
+source stores. Refresh validates manifest paths and hashes; it does not import
+or deduplicate. Its writable SQLite comparison index enables URI handling and
+attaches the canonical catalog with `mode=ro`. Annotation reads one message
+variant at a time.
+Publication uses exclusive directory creation instead of replacing the destination.
+Staged children move into that reserved directory with the top-level manifest
+last; caught move failures roll completed moves back to staging. A process crash
+can leave an incomplete reserved directory without a manifest; publication is
+not a crash-atomic directory swap. Other publishers never reuse that directory.
+
+`make name-matcher-observations ARCHIVE=... OUTPUT=... ARGS='--limit 100'`
+builds a private SQLite derivative outside the canonical archive, using verified
+MBOX locations and a read-only catalog. Extraction errors are recorded. The
+prototype makes no provider requests and selects no production matcher.
+Deferred result correlation rejects duplicate request IDs before reading results,
+including independently constructed identical requests with deterministic IDs.
+Evidence publication requires a filesystem supporting hard links and owner-only
+permissions. The completed database is linked exclusively from same-filesystem
+temporary storage; plain rename is not a safe no-overwrite fallback on Unix.
+The summary is fully written and closed in staging before either publication
+link is created. If the second link fails, the first is removed so ordinary
+publication errors do not strand an output. This is rollback on caught errors,
+not a crash-atomic transaction across two directory entries.
+
+`make test-reconciliation` exercises these recovered boundaries.
+`make distribution-check` builds and installs wheel and sdist, checks packaged
+resources, and invokes console entry points without a GUI. This smoke does not
+validate installed GUI resources; separate DMG tests exercise the desktop bundle.
+
 ## Technology decision
 
 Implement the normalizer in Python 3.12+.  It needs reliable streaming I/O,
@@ -21,6 +60,34 @@ Use SHA-256 as the canonical hash.  A local OpenSSL 3.6.3 benchmark on this
 Apple Silicon host measured 2.74 GB/s for SHA-256 on 16 KiB blocks, versus
 1.61 GB/s for SHA-512 and 0.98 GB/s for SHA3-256.  Do not require BLAKE3: it
 would add a dependency and is less portable for long-term verification.
+
+## MBOX envelope preservation
+
+`SourceMessage.mbox_envelope` and `MailObject.mbox_envelope` carry one complete
+source delimiter as bytes, separately from `raw`. The MBOX adapter reads the
+physical line at the source offset to retain CRLF as well as LF. The plugin
+boundary rejects multi-line framing. Recognized XXX wrappers retain their nested
+envelope. Publication prepends the envelope to the raw bytes passed to
+`mailbox.mbox.add`; raw hashes and duplicate identity remain unchanged. Leading
+Babyl/EML envelopes already in `raw` remain adopted when no separate envelope
+exists. No message is reserialized.
+
+When framing is absent, `synthetic_envelope` chooses the maximum valid UTC
+Date/Received/Resent-Date/Delivery-Date timestamp, using the existing plausibility
+policy, including `--earliest-year` (default 1900). This is separate from the trimmed Received
+median used for year routing. Missing header dates use the resolved message date
+from source/prior/path metadata; direct low-level calls without that context use
+1970-01-01 UTC. English weekday/month names are locale-independent. These
+fallbacks are estimates, not recovered delivery evidence. Original envelopes
+are preserved even when their date is malformed or disagrees with the headers.
+
+`make test-envelopes` checks actual plugin/ingest/reimport publication, physical
+LF/CRLF delimiter preservation, original SHA-256 and independent bag verification,
+header date ordering/time zones, body exclusion, deterministic missing-date
+fallbacks, and recovery of quoting, missing final newlines and leading envelopes.
+This fixes future publication only. Existing archives require a separately
+approved source-backed rebuild or repair that regenerates location offsets,
+integrity tags and manifests. Ordinary duplicate-skipping reimport is not repair.
 
 ## Native Mailbag storage
 
@@ -46,6 +113,11 @@ hashes, `bag-info.txt`, and the tag manifest last. Successful completion,
 controlled interruption, and publication recovery all use this path. A
 validator never treats an in-progress mismatch as valid.
 
+`bag-info.txt` gets `Mailbag-Agent-Version` from installed package metadata,
+the same version source used by the application. PyInstaller includes that
+metadata with `--copy-metadata mailarchiver`; historical fixture bags retain
+their original writer-version declarations.
+
 `archive.sqlite3` and `search.sqlite3` remain outside the tag manifest. This is
 intentional: SQLite journal state is operational rather than portable BagIt
 fixity, and the search database is disposable. The tag manifest instead covers
@@ -56,6 +128,161 @@ future derivative packaging when it can operate without moving or
 reserializing canonical files. It is not the ingestion engine. Restricted or
 redacted releases are separate bags; PDF and WARC derivatives remain opt-in
 and sandboxed because rendering message HTML can contact remote resources.
+
+## Deduplication and semantic reconciliation
+
+Email Collection Toolkit separates exact storage identity from semantic reconciliation.
+The admission-time deduplication key is the tuple of normalized `Message-ID`
+and `h2`, where `h2` is SHA-256 over the source adapter's recovered RFC 5322
+bytes. When `Message-ID` is absent, the raw digest supplies the stable fallback
+identifier. This conservative rule makes repeated ingest idempotent and stores
+a byte-identical message found in multiple backups or caches only once, while
+retaining every source observation. It does not collapse messages merely
+because they reuse a `Message-ID`, nor does it discard a source variant whose
+raw bytes differ.
+
+The `h3` semantic-message version 1 digest provides the second identity layer.
+Its byte stream begins with a versioned domain separator, followed by selected
+headers under RFC 6376 DKIM-relaxed canonicalization, one CRLF, and the complete
+MIME body under DKIM-simple body canonicalization. Repeated selected headers
+are processed from the physical bottom upward in this fixed order:
+
+```text
+From, Sender, Reply-To, To, Cc, Bcc, Delivered-To, Date, Message-ID,
+Subject, MIME-Version, Content-Type, Content-Transfer-Encoding,
+Content-Disposition
+```
+
+`Delivered-To` distinguishes deliveries. Mutable client and transport fields,
+including `Status`, `X-Status`, `Received`, `Return-Path`,
+`Authentication-Results`, `DKIM-Signature`, and other unselected headers, do
+not affect `h3`. The entire encoded MIME body—including attachment encodings
+and nested MIME headers—does affect it. Thus “normalized header hash” is useful
+shorthand but technically incomplete: `h3` is a domain-separated,
+canonicalized whole-message digest. `h2` remains the authority for exact byte
+identity; `h3` identifies a relationship for investigation and never by itself
+authorizes a merge or deletion.
+
+### Apple Mail cache experiment
+
+On September 6, 2026, the read-only `make compare-apple-mail` experiment
+compared every complete `.emlx` record then present under `~/Library/Mail`
+with 1,200,791 canonical records in `~/mail-archive`. For each EMLX file, the
+program excluded Apple's decimal prefix and trailing plist, calculated `h2`
+and `h3` over the declared RFC 5322 payload, tested the indexed raw hash first,
+and then queried recorded observation `h3` values. For semantic-only pairs, it
+retrieved the hash-verified canonical MBOX bytes and compared DKIM-relaxed
+header-name/value multisets. Only aggregate header names and counts were
+reported; message content, addresses, subjects, and header values were not
+emitted.
+
+The Apple store contained multiple mail services. Classification used only
+local structural evidence: an IMAP account with a `[Gmail].mbox` or
+`[Google Mail].mbox` hierarchy was classified as Gmail; Apple's `ews` scheme
+was classified as Microsoft Exchange; remaining `imap`, `pop`, and `local`
+schemes were retained as separate categories. No account address or opaque
+Apple account identifier was included. This method establishes client adapter
+type, not the legal or organizational identity of a provider; in particular,
+an EWS row is not proof that every record came from the Microsoft 365 cloud.
+
+| Apple Mail service | Complete EMLX | Partial excluded | Exact `h2` match | `h3`-only match | No archive `h3` | Archive records represented | Ambiguous `h3` | Formatting-only pair |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| Gmail | 93,531 | 98,285 | 10,825 | 20,015 | 62,691 | 41,438 | 11,468 | 19,506 |
+| Microsoft Exchange (EWS) | 7,273 | 1,154 | 1,601 | 31 | 5,641 | 1,628 | 0 | 31 |
+| Other IMAP | 1,084 | 224 | 0 | 0 | 1,084 | 0 | 0 | 0 |
+| Local | 204 | 0 | 0 | 0 | 204 | 0 | 0 | 0 |
+| POP | 101 | 0 | 0 | 0 | 101 | 0 | 0 | 0 |
+| **Total** | **102,193** | **99,663** | **12,426** | **20,046** | **69,721** | **43,066** | **11,468** | **19,537** |
+
+An exact raw match was found for 12.16% of complete cache records. `h3`
+identified another 19.62%, increasing the observed overlap to 31.78%; 68.22%
+of complete cache records had no semantic match in the canonical archive.
+Because one cache digest can match more than one canonical record, “archive
+records represented” is a distinct count and must not be added to the cache
+classifications. The 11,468 ambiguous cases were all in the Gmail category and
+were reported rather than resolved heuristically.
+
+Of the 20,046 semantic-only pairs, 19,537 (97.46%) differed only in header
+formatting after DKIM-relaxed comparison. The remaining aggregate differences
+were confined to Gmail-classified cache records: Apple-only `Received`,
+`Return-Path`, and `X-Mailer` each appeared 508 times;
+`X-Universally-Unique-Identifier` was absent from Apple Mail 508 times; and one
+Apple copy lacked `X-GM-THRID` and `X-Gmail-Labels`. No selected header had a
+changed normalized value. These observations empirically demonstrate that
+raw-byte identity alone understates cross-client overlap, while also showing
+why semantic equality should not erase the distinct source representations.
+
+The store remained live during measurement. Its Envelope Index WAL changed,
+and one additional complete Gmail EMLX appeared between the aggregate run and
+the provider-stratified run. The table is therefore a point-in-time experiment,
+not a transactionally consistent provider census or a completeness claim.
+Known `.partial.emlx` records were excluded because they can omit detached
+attachment bytes. The result supports `h3` as a reconciliation instrument but
+does not measure false-positive identity against an independently labeled
+ground-truth corpus.
+
+### Diagnostic ambiguous-class review set
+
+To support qualitative review of the ambiguity mechanism, a separate export
+selected 20 distinct h3 classes by descending canonical-archive variant count,
+then descending Apple-cache occurrence count, with h3 as the deterministic
+tie-breaker. This is a purposive diagnostic selection of high-multiplicity
+classes, not a random or representative sample. For each class, the exporter
+copied every matching complete Apple EMLX payload and every hash-verified
+canonical archive representation into separate subdirectories and wrote h2/h3
+manifests without modifying either source store.
+
+The resulting private review set contains 20 Gmail classes, 100 EML files, and
+568,056 bytes. Every selected class has two Apple-cache occurrences sharing one
+raw h2 and three canonical archive records with three distinct h2 values. Four
+classes contain one raw representation shared exactly across the cache and
+archive; the other 16 overlap only through h3. This structure makes the term
+“ambiguous” concrete: one semantic identifier denotes three distinct raw
+representations in four classes and four distinct raw representations in the
+other 16. Every class has five source/canonical files because the cache
+contains the same raw representation twice.
+
+The augmented manifests assign each distinct raw digest a stable per-case h2
+group and flag a group when both stores contain it. They also verify separately
+that all occurrences of `Date` and `Subject`, after the same DKIM-relaxed
+canonicalization used by h3, agree within each class. All 20 classes have the
+same present normalized `Date` and the same present normalized `Subject`.
+This does not imply byte-identical raw header lines: field-name case, folding,
+and whitespace may differ. None of the 100 exported messages contains an
+`X-Apple-Auto-Saved` header.
+
+| Case | H2 relationship | Distinct h2 | h3 | Date component | Subject component | Autosave files |
+| ---: | --- | ---: | --- | --- | --- | ---: |
+| 01 | no cache/archive h2 match | 4 | same | same, present | same, present | 0 |
+| 02 | no cache/archive h2 match | 4 | same | same, present | same, present | 0 |
+| 03 | no cache/archive h2 match | 4 | same | same, present | same, present | 0 |
+| 04 | no cache/archive h2 match | 4 | same | same, present | same, present | 0 |
+| 05 | no cache/archive h2 match | 4 | same | same, present | same, present | 0 |
+| 06 | one h2 shared across stores | 3 | same | same, present | same, present | 0 |
+| 07 | one h2 shared across stores | 3 | same | same, present | same, present | 0 |
+| 08 | no cache/archive h2 match | 4 | same | same, present | same, present | 0 |
+| 09 | no cache/archive h2 match | 4 | same | same, present | same, present | 0 |
+| 10 | no cache/archive h2 match | 4 | same | same, present | same, present | 0 |
+| 11 | no cache/archive h2 match | 4 | same | same, present | same, present | 0 |
+| 12 | no cache/archive h2 match | 4 | same | same, present | same, present | 0 |
+| 13 | no cache/archive h2 match | 4 | same | same, present | same, present | 0 |
+| 14 | no cache/archive h2 match | 4 | same | same, present | same, present | 0 |
+| 15 | one h2 shared across stores | 3 | same | same, present | same, present | 0 |
+| 16 | no cache/archive h2 match | 4 | same | same, present | same, present | 0 |
+| 17 | no cache/archive h2 match | 4 | same | same, present | same, present | 0 |
+| 18 | no cache/archive h2 match | 4 | same | same, present | same, present | 0 |
+| 19 | no cache/archive h2 match | 4 | same | same, present | same, present | 0 |
+| 20 | one h2 shared across stores | 3 | same | same, present | same, present | 0 |
+
+The review material is stored under the project-local, gitignored
+`.tmp/h3-ambiguous-review/` directory with owner-only permissions. Each case
+contains `apple-cache/`, `canonical-archive/`, and `manifest.json`; the root
+contains a warning, a compact h2/header/autosave table, CSV summary, and
+complete manifest. A refresh mode re-hashes every private EML before updating
+these derived reports and does not reread either source store. Raw
+messages are private research evidence and must not be committed or
+distributed. The checked-in exporter and synthetic test are reproducibility
+infrastructure; the private corpus is not part of the software distribution.
 
 The [on-disk format inventory](ON_DISK_MAIL_FORMATS.md) is the authoritative
 PST/OST research and selection record. The selected first backend is libpff
@@ -71,8 +298,30 @@ not an acceptable default installation experience.
 
 ## Current package shape
 
+`dev/addressbook-exporter.py` implements the experimental ePADD 11.1.3 text
+handoff through `make addressbook-export ARGS='--archive ... --output ...
+--owners-from-sent'`; alternatively repeat `--owner` for exact aliases. Sent mode
+uses the persisted sender classification, never recipient membership or new
+display-name matching. Legacy owner addresses without `@` stay in singleton
+blocks and are reported explicitly. It opens a journal-free
+catalog with SQLite read-only/immutable mode, streams referenced addresses into
+a temporary SQLite set, lowercases/deduplicates them, and emits the owner first,
+then one address per contact. It adds no correspondent display names. UTF-8
+output requires an ePADD JVM using UTF-8; legacy local/UUCP addresses use singleton
+blocks. Blank, non-printing, delimiter-prefixed, HTML-entity-bearing, and overly long entries are
+reported rather than emitted. The source catalog SHA-256 must remain unchanged.
+Non-`@` identifiers requiring HTML escaping are also reported because ePADD's
+fallback double-escapes them at contact boundaries.
+Files are published without replacement at mode 0600, outside the source archive;
+`OUTPUT.report.json` records exclusions, owner choices, counts, and hashes.
+`make test-addressbook-export` checks real SQLite fixtures, source immutability,
+owner grouping, parser hazards, and refusal paths after lint/type analysis.
+The export does not retain ePADD curation, mailing-list flags, or inferred names;
+upload into a copy before treating it as a repair. Older archive owner-token
+files may reflect former substring semantics and are not an exact owner-address authority.
+
 ```text
-mail-archiver/
+email-collection-toolkit/
   pyproject.toml
   src/mailarchiver/
     __main__.py         CLI, ingest framework, worker/status coordinator
@@ -142,7 +391,7 @@ relations, and viewer page navigation remain the next integration layer.
 ## Current acceptance implementation
 
 The first implementation supports recursive local MBOX, Emacs RMAIL Babyl,
-`.eml`, Maildir, and `.emlx` ingest, owner-token Sent classification, exact
+`.eml`, Maildir, and `.emlx` ingest, owner-rule Sent classification, exact
 `(Message-ID, SHA-256)` deduplication, autosave and source-metadata exclusion,
 `Date:`/`Received:`/source/previous-message/path-year date resolution, a
 temporary on-demand `clamd`,
@@ -152,7 +401,8 @@ per-run observation review, and year/correspondent reports.  The top-level
 `MAIL_ARCHIVE_DIR` selects the archive for every command by default; the
 `--archive` option overrides it. `ingest` takes one
 or more source roots as positional arguments and `--owner-names-file` selects
-the reusable owner-token list.  Ingest currently requires `--clamav`: it starts
+a legacy include-rule list; otherwise archive `config.yaml` supplies owner rules. Ingest requires `--clamav` or explicit `--no-scan`.
+With `--clamav`, it starts
 a foreground daemon only when no healthy configured socket is available, then
 removes the daemon's stale socket on exit; it never enables persistent or
 on-access scanning. Workers enqueue typed phase/path/offset updates; the main
@@ -206,12 +456,14 @@ or retain file contents. Snapshot ordering interleaves concurrency keys, and
 the framework enforces each plug-in's per-key limit. Each pool task owns one container through source-integrity planning,
 streaming parse and scan, and checkpoint. A never-seen local file is
 ingested before its complete fingerprint is calculated; that fingerprint is
-still required before its checkpoint is committed. ClamAV readiness is an ingest
-precondition, so no worker reads or parses mail until the daemon is healthy.
+still required before its checkpoint is committed. ClamAV readiness is a scanned-ingest
+precondition; explicit `--no-scan` bypasses it and records that choice.
 Modern Apple Mail package traversal recognizes complete
 `Data/.../Messages/*.emlx` payloads and ignores MailData, plist, and detached
 attachment files. It reports missing paths and macOS Full Disk Access failures
-instead of treating them as empty input. `.partial.emlx` is rejected because
+instead of treating them as empty input. Directory discovery reports and skips
+`.partial.emlx`, including zero-byte records excluded from the generic empty-file
+shortcut; direct selection is rejected because
 the cached RFC 5322 representation omits detached attachment bytes; use Apple
 Mail's mailbox export to obtain a complete MBOX source. Physical `.emlx` paths
 remain source identities and integrity boundaries. Their catalog hierarchy
@@ -220,6 +472,41 @@ therefore omits Apple's internal UUID, `Data`, bucket, `Messages`, and message
 filename components while retaining the account path. A `[Gmail].mbox` chain
 also stores a typed cache relationship to the Gmail source kind and retains
 the Apple account UUID as a non-authoritative account hint.
+This same EMLX path is the interim local-file bridge for Gmail, Microsoft 365,
+and ordinary IMAP accounts synchronized by Apple Mail; it makes no provider
+completeness claim. Reingest uses the ordinary source controls and message
+identity, so newly completed EMLX records can be added without duplicating an
+unchanged canonical message.
+
+`apple_mail_compare.py` performs read-only cache/archive reconciliation. It
+walks only complete nonsymlink `.emlx` files, extracts their declared RFC 5322
+payloads, and stores relative paths plus raw and semantic SHA-256 values in a
+temporary SQLite database. It attaches `archive.sqlite3` by a read-only URI and
+uses indexed `messages.sha256` and `observations.semantic_sha256` lookups to
+classify exact, semantic-only, cache-only, archive-only, and ambiguous matches.
+Apple mailbox URL schemes and Gmail special-folder structure produce
+privacy-preserving Gmail, Exchange/EWS, other IMAP, POP, local, and unknown
+aggregates without exposing account identifiers.
+For semantic-only pairs it retrieves hash-verified canonical MBOX bytes and
+compares DKIM-relaxed header multisets. Its report contains only header names
+and aggregate counts, never values or content. It snapshots the active Apple
+Envelope Index WAL metadata before and after the scan to flag a live cache
+change. Provider metadata is queried only from a private byte copy of the
+Envelope Index plus existing WAL/rollback journal, never by opening the source
+with SQLite. Source shared-memory files are not copied; SQLite reconstructs them
+privately. File identity, size, modification and change times must remain stable
+across copying, otherwise the operation asks the user to quit Mail and retry.
+This is a checked quiet-copy interval, not a live SQLite transaction snapshot.
+`make compare-apple-mail` supplies the standard paths and
+`make test-apple-mail-compare` exercises exact, semantic, formatting-only,
+header-added, cache-only, archive-only, and partial-record behavior.
+`h3_review.py` uses the same disposable index to select high-multiplicity h3
+classes deterministically and exports all matching cache occurrences and
+hash-verified canonical variants. It refuses to overwrite its destination,
+writes owner-only private EML and manifest files, and is invoked by
+`make h3-ambiguous-review`. Its synthetic acceptance test verifies complete
+variant export, exact bytes, service classification, manifests, and overwrite
+refusal.
 Emacs RMAIL files are detected by their case-insensitive `BABYL OPTIONS:`
 header because they commonly have no extension. The reader accepts LF and CRLF
 container line endings, streams records without modifying the source, combines
@@ -308,14 +595,119 @@ it applies `to:`/`from:`/`subject:` catalog filters, UTC calendar-day
 `message_pk` header lines and reads a numbered message directly from its
 catalogued MBOX byte location, validating its SHA-256 before output.
 
+
+GUI `SearchPage.error` carries query-parser feedback; the bridge does not save
+invalid queries as window state, and the UI displays the error in result status.
+`parse_query` produces `SearchTerms`; `_search_statement` and `_count_statement`
+compile those terms into the typed `SearchStatement(sql, parameters)` used for
+execution. `_candidate_source` shares filter-before-sort index selection between
+pages and counts. Existing V1 indexes suffice; no archive rebuild is required.
+
+| Primitive | Candidate access path |
+| --- | --- |
+| `from:` | Scan matching distinct addresses, then `messages_sender_address_pk` searches. |
+| `to:`, `cc:`, `bcc:` | Address/role searches through `recipients_address_pk`, then message primary keys. |
+| `any:` | Materialize matching addresses once; union indexed sender and recipient message IDs. |
+| `date:`, `before:`, `after:` | `messages_date_message` range searches, including subject/sender sorts. |
+| Words, phrases, attachment-inclusive terms | FTS MATCH, then `messages_sha256`; body-only counts use metadata's unique FTS-row-ID index. |
+| Mailbox/volume scope | Source hierarchy/volume indexes, then `observations_source_file_offset` and message primary keys. |
+| `subject:` | Scan the covering subject expression index, then look up matching message primary keys. |
+| Unfiltered bounded listing | Date/subject order indexes, or ordered addresses and indexed sender-message lookups. |
+
+`make test-mailsearch` includes a parameterized `EXPLAIN QUERY PLAN` regression
+using the production parser and both SQL builders. It checks SEARCH operations
+through the relevant filtering indexes, FTS MATCH constraints, absence of
+per-message correlated subqueries, and result correctness under every sort field
+and direction, plus exact/bounded counts. A shared fixture has 20,000 unrelated
+messages, recipients, and source files; SQLite instruction budgets catch repeated
+indexed probes that a superficial index-name assertion would miss. Subject
+substring searches have a separate linear-work budget because an ordinary
+B-tree cannot seek a leading-wildcard pattern. Tests check plan properties rather
+than snapshotting SQLite's entire version-dependent explanation.
+
+SQL filenames follow the Flyway convention `V<version>__<description>.sql`;
+only the naming convention is used. No Flyway runtime, Java, or JDBC is required
+for schema management. Python loads the packaged SQL with `importlib.resources`
+and executes it through the standard-library `sqlite3` module.
+
 The authoritative current catalog schema is packaged as `sql/V1__archive.sql`.
 It is initialized only for an empty database; unversioned databases and schema
 versions other than V1 are rejected rather than migrated. Because an earlier
 development schema also used the V1 label, startup validates the required
 tables, columns, and named indexes before accepting an existing database. This
-deliberately supports database replacement while there are no users.
+is validation of the current layout, not an upgrade mechanism. Application-run,
+developer-written catalog migrations with checksummed history, consistent backups,
+writer-lease protection, and transactional history updates remain planned;
+the existing `schema_info` version check does not implement those safeguards.
 `locations` and
 `mbox_generations` are written as part of each message publication.
+
+### Planned Contacts and geography
+
+Contacts are a derived address-level projection over the catalog. Extraction
+will stream each message's `From`, `To`, `Cc`, and `Bcc` headers once and write
+one deduplicated address appearance per message. It will separately derive the
+default **Meaningful** relation: outgoing direct To/Bcc recipients and incoming
+From addresses only when an exact configured owner address is in To. This
+preserves all-header statistics while avoiding Cc and indirect mailing-list
+traffic in meaningful-contact results.
+The include/exclude owner rules route Sent mail. Archive creation and
+File → Properties will later maintain a separate exact owner-address set for
+the direct-owner predicate; fragment matching is not adequate for that use.
+`mailarchiver human-contacts` is the initial read-only consumer. Its
+`--owner-address-file` accepts the existing owner aliases with newline, comma,
+or semicolon separators; it resolves them only to catalogued Sent sender
+addresses. Optional repeatable `--owner-address` values are exact overrides.
+The command defaults to meaningful Contacts and exposes the all-header
+projection only with `--all`; table, TSV, and JSON output share one typed row
+model.
+Contacts opens the catalog with `Path.resolve().as_uri()` and SQLite `mode=ro`,
+matching the schema validators. This preserves Windows drive-letter URI syntax
+and encodes path characters without allowing database creation or writes.
+Before rendering, it applies the strict versioned `contact_filters.yaml`
+policy. It classifies malformed Unicode/control values and forbidden local-part
+characters as bogus, configured provider/list patterns as mailing lists,
+configured automated patterns as service identities, and only then includes
+the remaining addresses. The policy deliberately keeps ordinary SMTPUTF8
+addresses possible; it does not use non-ASCII alone as a rejection rule.
+Bogus local-part and domain patterns report `invalid-local-part` and
+`invalid-domain` respectively, with local-part rules evaluated first. Empty
+domains are also rejected as `invalid-domain` after the local-part checks.
+The policy resolver first checks `<archive>/contact_filters.yaml`; when
+that file is absent it uses `src/mailarchiver/contact_filters.yaml` from
+the installed package. A `mode: replace` archive policy is a complete strict
+Pydantic replacement. A `mode: extend` policy may provide rule lists only; it
+is unioned with the packaged lists in order, removing duplicates, while
+packaged scalar values remain authoritative. The effective policy is therefore
+complete and reproducible without field-by-field scalar merging.
+Each pattern uses a Pydantic `AfterValidator` to compile with the same
+case-insensitive flags used by classification. Regex and YAML errors become
+path-qualified `ValueError` diagnostics handled by the Contacts CLI; invalid
+rules cannot remain hidden behind earlier matches or an empty catalog.
+
+Location evidence will retain a typed source, extraction method, observation
+time, confidence, and `located` or `affiliated` relation. Signature extraction
+may add located evidence; downloaded university domain/main-campus data adds
+only affiliated evidence. A Contact remains an address even when future
+authoritative-name work associates several Contacts with one Person.
+
+The geography reference database is an installation-level SQLite database,
+stored under `~/Library/Application Support/Email Collection Toolkit/geography/` on macOS,
+`%LOCALAPPDATA%\\Email Collection Toolkit\\geography\\` on Windows, and
+`$XDG_DATA_HOME/mailarchiver/geography/` (or
+`~/.local/share/mailarchiver/geography/`) on Linux. The planned `make geography-data` and
+Tools-menu updater will share a downloader that validates a versioned
+bulk-data manifest and atomically installs the replacement. The planned package will ship
+a US ZCTA seed. It contains representative coordinates and display geography;
+the ZCTA lookup treats `02139` as an exact ZCTA, not ZIP3.
+
+Future archive schema migration will use a dedicated
+versioned Python-managed SQL migration history (Flyway filenames only). Search keeps its
+independent disposable rebuild path. Geography data has its own database
+version, while an optional geography snapshot copied into an archive uses the
+archive migration stream. The snapshot is only copied or selected for reading
+by an explicit user action. See
+[CONTACTS_AND_GEOGRAPHY.md](CONTACTS_AND_GEOGRAPHY.md) for the complete design.
 
 Header parsing decodes and unfolds RFC 2047 Subject values before catalog and
 FTS insertion. `mailsearch` displays that catalog value directly. The verified
@@ -395,6 +787,146 @@ bytes with the message's declared body charset before RFC 2047 processing, so
 catalog, search, Raw Source display, and MIME-part displays use the same
 source-preserving recovery path.
 
+`mailarchiver.application` is the platform-neutral desktop lifecycle layer.
+`ApplicationController` owns the canonical archive-document registry, logical
+search windows, preferences, recent documents, startup selection, active-window
+routing, and host entry points for operating-system open/reopen events.
+`ArchiveDocument` owns shared per-archive ingest and child-window state and
+retains the typed `WriterLease` for an active import. `WriterLease` uses
+nonblocking `flock` on supported POSIX systems against
+`status/archive-write.lock`. Its UTF-8 JSON is diagnostic only; the open OS lock
+is authoritative and is released automatically if a process dies. CLI ingest,
+GUI import, and search-index replacement enter through the same lock contract.
+`SearchWindow` is a typed record for the independent query, sort, selection,
+mailbox-filter, and geometry state that the JavaScript UI maintains. Preferences
+are written explicitly as UTF-8 and atomically replaced in the platform
+application-data directory; their randomly generated temporary filename has no
+user-derived component. They are treated as optional, discardable state.
+
+`PyWebViewApplication` adapts that model to native pywebview windows without
+putting platform imports in the controller. Its File menu asks for a new or
+empty destination and initializes it before creating a blank window, opens an
+archive in a new search window, runs Import, and closes the active window unless that window owns the
+running Import. Window close events enforce the same rule. The Window menu
+routes to the active archive's shared Ingests child window and enumerates every
+About, search, and Ingests window. **Window → New Search Window** creates another
+view of the active archive; the macOS adapter disables it without an active
+saved archive search window and refreshes on native focus changes.
+A narrow macOS adapter refreshes pywebview's
+process menu when window or ingest state changes and disables the Close item
+when the controller would refuse it. `handle_open_documents` and
+`reopen` are stable host entry points for the extension/activation work in
+issue 76. Windows shell work and frozen application/installers remain owned by
+issues 73, 72, 74, and 75 respectively.
+
+The CLI and GUI construct the same Pydantic `IngestRequest` and call
+`run_ingest()`. The GUI acquires and publishes the per-document writer lease,
+runs the service on a non-daemon worker thread, leaves readers usable, polls the
+existing typed status files in every attached search window and the persistent
+About window, and invalidates view caches after the run. Startup and import
+errors are retained as typed notices instead of being available only on stderr.
+Before creating NSApplication, `configure_macos_application` registers the
+process-local `NSTreatUnknownArgumentsAsOpen` default with string value `NO`.
+This prevents Cocoa from reopening the source launcher and option values as
+documents; argparse and the Finder delegate retain their existing roles.
+`make self-test-gui` launches the actual `mailsearch-gui` entry point using the
+same isolated diagnostics as the packaged app and rejects unexpected startup
+errors. The native application probe also checks startup notices and opens its
+fixture through the document-open delegate.
+The Ingests bridge exposes **Import Directory…** for its bound document. It
+reuses that document's search window (or opens one to own the job) and runs the
+normal confirmed import workflow.
+The UI polls import availability and prevents repeated clicks while dialogs are open.
+Import's final confirmation uses an application-owned macOS NSAlert with the
+bundled icon, destination heading/path, and explicit Import/Cancel actions.
+The shared alert helper marshals presentation onto the Cocoa main thread and
+also supplies the startup chooser's app icon.
+An application-owned NSOpenPanel labels source selection **Import**, displays
+the destination, and enables both file and directory selection, including
+multiple selections. Both import entry points open this panel directly without
+a source-type question; directories use recursive discovery.
+`owner_rules.OwnerRules` validates and normalizes typed include/exclude lists.
+Each glob matches the entire mailbox component; `@` explicitly introduces a
+separate domain glob. Includes are evaluated first, then exclusions override.
+Case is ignored; no display-name, substring, or automatic plus-address expansion
+occurs. A bare exact rule also matches the same legacy sender without `@`.
+`_run_ingest` resolves rules before creating the catalog and uses this matcher
+for Sent routing after the infected-message check. CLI `--owner-names-file`
+optionally supplies include rules while retaining configured exclusions;
+without it the archive YAML supplies both lists.
+
+`DocumentOptions` loads `config.yaml` defaults, falling back to legacy archive
+and selected-source-root owner files only when no YAML owner settings exist.
+Every import presents native include/exclude text areas on macOS and an
+`options.html` prompt on the portable host. Both accept newline/comma-separated
+rules, validate before continuing, and save nothing on Cancel. Final confirmation
+passes typed rules to `start_import`, which obtains WriterLease, checks the
+revision captured before the dialog, and saves changed lists atomically.
+Sources and legacy owner files are never rewritten.
+
+The document-bound `DocumentOptionsApi` uses the same lists in an options child
+window. Save checks the lease and revision; status polling disables edits during
+ingest without clobbering unsaved text. The import snapshot is
+`status/owner-rules-used.yaml`, allowing change warnings across restarts.
+After workers stop and canonical checkpoint publication completes, a streaming catalog
+query regenerates `owner-names-detected.txt` from all matching archived senders,
+including previous imports, with excludes applied. Addresses are sorted and
+unique; unsafe line delimiters are omitted. The file is derived evidence, not
+configuration. Neither this file nor owner configuration is in preservation
+manifests. Tests in `test_owner_rules.py` exercise real fixture import, stored
+categories, raw hashes, saved defaults, exclusion precedence, idempotence and
+standalone archive verification; GUI service and native application tests cover
+both fields, cancellation, revision conflicts and persistence.
+
+`archive_config.py` writes version 2 YAML containing `owner.include`,
+`owner.exclude`, and `last_import_directory`, while reading version 1 as well.
+Unchanged lists are not rewritten. Successful import updates navigation only
+when needed and preserves the rules. Malformed configuration raises an error
+instead of discarding potentially important owner settings. The source picker
+uses the saved directory if it exists, otherwise the archive parent.
+Existing message categories remain unchanged by settings edits or FTS rebuilds.
+
+When startup produces a placeholder, the shell discards it without creating a
+native search window. A `webview.start` callback presents a three-button NSAlert
+on the Cocoa main thread: Open Existing, Create New, or Cancel. About anchors
+subsequent dialogs and retains File New/Open after cancellation. Native dialog
+paths normalize SAVE strings and OPEN/FOLDER sequences before indexing; New
+validates the destination inside its error handler. Cocoa File menu items carry
+explicit Command-N/O/W shortcuts. Archive opening uses the File menu rather than
+a toolbar button.
+The search toolbar omits the archive path; the native title bar identifies it.
+The Cocoa adapter reorders File, Edit, View, Window after the application menu.
+It resolves Cocoa focus on the main thread and still builds menus from the
+logical active document or About when a background app has no native key window.
+Closing About hides its retained native window instead of recreating it, keeping
+the event loop alive even when no document is open. The hidden window is omitted
+from the Window menu. The application menu's About command restores it; Dock
+activation does not. Quit permits its actual destruction. The native lifecycle
+probe exercises dismissal, background updates, and explicit menu reopening.
+`WindowBridge` restricts pywebview introspection to explicit callable names,
+excluding public controller and window object graphs. About allows the same
+dynamic bridge generation as the other pages, retries bridge readiness, polls
+status each second, and clears stale errors after successful refresh.
+Archive Open validates schema metadata without `PRAGMA quick_check`, which
+previously scanned multi-gigabyte databases before opening any window. Existing
+extensionless directories remain accepted. `make check-archive-open ARCHIVE=...`
+performs this read-only compatibility check without launching windows or saving
+preferences. This check does not certify every database page against corruption.
+
+`make test-native-application` runs the production About and search bridges with
+a disposable extensionless archive, checks rendered notices and native menu order
+and Open shortcut, and closes the application. It runs only on a logged-in Mac.
+
+`LoopbackAssetServer` owns GUI delivery. Bootstrap redirects send
+`Content-Length: 0`; HEAD obtains the asset length from filesystem metadata
+without reading its contents, while GET sends the asset bytes. It binds `127.0.0.1:0`, issues a
+different one-use bootstrap ticket for every new window, sets a random
+session-cookie name and value, redirects away from the ticket, and serves only
+resolved files below `gui/`. Direct unauthenticated requests, ticket replay,
+foreign `Origin`, an incorrect `Host`, and traversal fail closed. It emits no
+request log and no CORS allowance. WKWebView/WebView2 service calls continue to
+use pywebview's native JavaScript bridge; there is currently no HTTP API.
+
 The `gui/` prototype uses pywebview's Cocoa/WKWebView backend on macOS.  Its
 Python API delegates query parsing, SQLite reads, and direct MBOX retrieval to
 the same typed functions used by `mailsearch`. A nonempty query directly asks
@@ -418,11 +950,14 @@ result list and message pane. Independent
 message windows load the same static application with a message-number parameter;
 their message pane fills the window and scrolls independently so source-location
 evidence remains reachable.
+The headless regression explicitly makes the message taller than its viewport,
+then scrolls to and checks the visibility of source locations; it does not rely
+on font-dependent fixture height or iframe load timing to create overflow.
 The main window polls the latest shared `IngestStatus` once per second and
 renders it in a bottom status line. The separate `ingests.html` application
 polls all typed status files and presents run history beside aggregate and
 per-worker detail. Both the status-line action and the native
-**Windows → Ingest** menu route through a singleton window owner: an existing
+**Window → Ingests** menu route through a per-document singleton window owner: an existing
 window is restored and ordered to the front, while a closed one is recreated
 with its own normal close box. A running file whose heartbeat is older than
 five seconds is displayed as stale without rewriting its retained JSON.
@@ -434,7 +969,52 @@ Python application and its About/Dock identity use a stable project asset. The
 `envelope-rainbow` theme. GitHub Pages builds it from `main`; the workflow
 SHA-256 verifies the pinned Zola archive before extraction, resolves the newest
 exact stable and beta tags into Zola data, then deploys a Pages artifact. The
-release workflow follows the repository's draft-release
+home-page template uses a light rainbow design with capability and story cards
+and equal individual and archivist columns. The cover displays the text-free
+`images/cover-artwork.png` derived from the approved banner. CSS fits the
+central artwork into the original wide banner proportions, excluding the
+image generator's blank top and bottom margins. The image's HTML dimensions
+match the displayed 1312:287 ratio rather than the source file's dimensions.
+Its title, subtitle,
+description, and "Email has a history. Keep it" tagline are semantic HTML
+positioned over the artwork on desktop and in normal flow below it at widths
+of 1000 pixels or less. The decorative image has empty alternative text;
+the visible heading and paragraphs provide the accessible content. Banner text
+uses capped viewport-relative sizes without container-query units. Literal
+spaces between tagline spans are retained for selection and mobile flow;
+Chromium checks verify exactly three desktop lines without whitespace gaps.
+The story card stacks its text above the user-supplied `images/hands-typing.jpg`
+(799 × 372). The photograph scales proportionally without cropping and has a
+caption linking to Image Catalog on Flickr and its stated CC0 dedication.
+`make website-preview` reuses its disposable `.tmp/website-preview` output
+with Zola `--force` and runs a temporary preview on loopback port 1111
+(overridable with `WEBSITE_PREVIEW_PORT`) without publishing. The Zola configuration retains the
+existing project URLs under the Email Collection Toolkit title. The checker
+parses its TOML before the generic required-file check and reports file-read, UTF-8 decoding,
+and TOML syntax failures without a traceback; `make website-icons` regenerates PNGs
+from the shared SVG using Chromium, closing the browser even on rendering or
+write failure. Navigation wraps at every width; long
+documentation code blocks scroll within the page. The `use-cases.md` content
+page supplies the detailed personal-archive and donor
+digital-estate narratives. It describes BagIt/Mailbag as native archive storage and standard
+MBOX as the ePADD handoff, with planned direct-provider, first-class package
+import, and automated interoperability work labeled explicitly.
+The base template links every page to `privacy.md` and `rights.md`. The privacy
+page describes planned Gmail and Microsoft 365 OAuth data access, local
+storage, read-only use, revocation, and provider-policy commitments without
+presenting the reserved adapters as implemented. The rights page records the
+current GPL distribution, copyright, and possible non-GPL availability.
+The reusable `section.html` template renders section content and child-page
+cards through the site theme. The curation section adds a responsive five-part
+summary of local file discovery, read-only ingest, archive creation, search and
+reporting, verification, and sharing. Public copy describes implemented and
+planned functions in language intended for archivists.
+The primary navigation links to `about.md`, which describes Simson Garfinkel
+and links to his personal website, GitHub profile, and project repository.
+About links to `changelog.md`, a dated record of website changes distinct from
+application release notes. The 2026-09-07 entry records the storage-format
+wording correction and the new About/changelog pages.
+The release workflow follows the repository's draft-release
 pattern: it requires a version-matching signed annotated tag, builds a source
 distribution, writes `SHA256SUMS`, and creates a draft GitHub Release.
 
@@ -442,6 +1022,14 @@ Result ordering is a server-side SQL whitelist over date, case-folded subject,
 or case-folded sender with a stable message-number tie break. The Tabulator
 result table owns focus, rendering, and row components, while the application
 maps Up/Down to selection and message display.
+The sole Tabulator column has `resizable: false`. A focusable vertical separator
+uses pointer capture and keyboard controls to adjust a CSS grid track. Its
+per-window fraction is clamped to 300-pixel list and 320-pixel preview minima
+(half the available width when smaller). Resize observers account for the
+folder tree and window dimensions and remeasure HTML previews; Tabulator's own
+container observer refits its column without replacing data or selection.
+The separator is hidden in standalone and print layouts. Headless browser tests
+drag the real divider and check widths, overflow, selection, and keyboard limits.
 The older bounded-recent optimization remains internal to the command-line
 client, whose automatic exact fallback preserves its one-call behavior. The
 GUI always invokes the complete SHA-256/FTS query because an archivist may be
@@ -457,15 +1045,13 @@ application remains offline-capable. Tabulator's virtual DOM paints only its
 viewport and buffer while retaining the complete result data. Its formatter
 queues preview IDs only when it paints a row through the Python bridge. A
 single-worker executor reads the indexed 18-word previews, and JavaScript polls
-the typed result batch until it can update visible rows. Its `rowMouseDown` and
-`rowMouseEnter` events provide row components for the small range adapter;
-the result-table boundary cancels native `selectstart` and its row subtree has
-explicit WebKit and standard `user-select: none` rules, so drag selection never
-also selects card text. There is no custom scroll/viewport or pointer-coordinate code. A single
-selected row displays its message. A multi-row selection clears its stale
-single-message view, displays the selected-message count with the same file well,
-and an explicit drag from that well prepares a ZIP only when the drag begins.
-A gesture ending on its original row remains a click. Global macOS Command-key handlers
+the typed result batch until it can update visible rows. The result-table boundary
+cancels native `selectstart`, and rows use `user-select: none` so file drags do
+not select card text. Tabulator handles modifier-click selection and virtual
+scrolling without custom pointer-range code. A single selected row displays its
+message. Multiple selected rows replace the message with a count and the same
+file well. An explicit drag from either source prepares the selected export;
+clicking a row remains a normal message click. Global macOS Command-key handlers
 select numeric MIME part IDs or raw source. Command-F opens an in-message
 finder from the first current search-highlight term and selects its input;
 Command-G opens the finder at its first match when it is closed, while
@@ -590,9 +1176,31 @@ Indexing parses each message once for FTS body text and attachment metadata;
 The tables are derived and are replaced together with FTS by `refresh-index`.
 
 `.eml` export writes the bytes returned by hash-verified direct retrieval.
-Finder dragging uses a temporary `.eml` file URL and the Cocoa webview's native
-file/link drag support. Only the message-file icon well is draggable; the
-header region remains normal selectable text. The browser never preloads an
+Finder dragging uses an `NSPasteboardItem` with exactly one explicitly supplied
+type, `public.file-url`, containing the exported path as a file URI. Cocoa may
+add compatibility aliases, including `NSFilenamesPboardType`; the application
+does not add URL-link or text types to the native writer. JavaScript carries only
+an opaque registered export token with a copy-only operation mask; the Cocoa
+adapter replaces that token before the native drag starts. Cocoa process setup
+installs it before either normal document or native smoke windows are created.
+The legacy
+`dragImage:...` path clears WebKit link flavors and writes the file object; the
+modern `beginDraggingSessionWithItems:...` path replaces the item writer before
+AppKit builds its pasteboard. Unregistered text and link drags are unchanged.
+Every preparation writes into a fresh `drags/<uuid>/` subdirectory, isolating it
+from attachment basenames and later exports. Preparation and close share a lock;
+close revokes its tokens and rejects later preparation before cleaning exports.
+The status bridge disables the drag control on non-macOS backends. Startup
+awaits Tabulator `tableBuilt` before clearing the initial result viewport. Queued
+row-click callbacks verify the search generation and current row before selecting.
+The browser acceptance test rejects unhandled page errors and verifies export bytes.
+`make test-file-drag` checks exact
+export bytes, token revocation, both native pasteboard representations, and
+injected selector/superclass dispatch on a controlled AppKit host.
+Result cards and the message-file icon well both call `installDrag`; selected
+rows use the complete selection and an unselected row uses only its own message.
+Modifier clicks select multiple rows; pointer drags export files. Message headers
+remain normal selectable text. The browser never preloads an
 `.eml` file on hover or selection: a drag-start event begins asynchronous
 preparation, and a subsequent drag transfers the ready file. Each write uses a
 unique same-directory temporary pathname before atomic replacement.
@@ -633,6 +1241,8 @@ then streams the JSON declarations, complete-MBOX `h1` hashes,
 recovered-message `h2` hashes, and semantic-message `h3` hashes. It returns
 nonzero on missing, orphaned, malformed, unsupported, unsafe, unlisted, or
 mismatched files. It neither imports the package nor reads SQLite.
+Its module docstring doubles as formatted `--help`, carrying standalone run
+instructions and verification limits into the installed archive copy.
 
 `write_bag_checkpoint()` streams catalog locations in MBOX byte order through
 `write_integrity_files()` and
@@ -699,7 +1309,9 @@ a checkpoint. The legacy file SHA/check/run columns remain a local display
 cache, not the authority for source decisions. Each observation directly stores raw (`h2`) and semantic
 (`h3`) SHA-256 values for fast forensic lookup. The deduplication lookup is indexed on `(message_id_normalized, sha256)`;
 `messages.sha256` has a separate index for the missing-Message-ID exception and
-FTS result lookup.  Do not make
+FTS result lookup. Thus repeated ingestion and byte-identical cross-source
+copies are idempotent, while Apple- or transport-rewritten records with only an
+`h3` match remain distinct canonical evidence. Do not make
 Message-ID unique.  `email_addresses.address`, `messages.sender_address_pk`,
 and `recipients.address_pk` are indexed. Recipient role preserves To, Cc, or
 Bcc; ordering within a header is not preserved. The catalog also indexes
@@ -839,9 +1451,10 @@ An ingest run executes these steps:
    is validated and retained. Index disposable search content afterward only
    for normal Sent and Archive mail.
 
-Deduplication is deliberately before ClamAV: a known archived message has
-already been scanned and classified.  `--rescan` explicitly revisits stored
-messages when virus definitions or policy changes.
+Deduplication is deliberately before ClamAV. A known archived message is not
+scanned again, including one previously imported without scanning. A future
+rescan operation must explicitly revisit those stored messages; no rescan
+command is currently implemented.
 
 ## MBOX mechanics and sorting
 
@@ -894,6 +1507,99 @@ mailbox.
 
 ## Antivirus and text extraction
 
+`IngestRequest.scan_policy` is `clamav` by default. Explicit `not-scanned`
+requests skip scanner construction and persist an `antivirus` metadata defect
+in the existing catalog transaction for each new message. Run status includes
+the policy (older files default to `unknown`), without changing the catalog
+schema or canonical bytes. Failed required scanning still stops import.
+The native source picker and Ingests page show a missing-configuration banner;
+the final native confirmation defaults to Cancel and gates the opt-out.
+Import confirmations use a 560-point-wide selectable AppKit accessory label,
+keeping archive/source/owner paths readable without changing default or Cancel
+actions. `make test-packaging` checks real alert layout and both button sets
+without showing a modal dialog.
+The download action opens only ClamAV's official page. About reports configuration
+presence separately from readiness, which remains an ingest preflight check.
+`make test-packaging` exercises missing-scanner failure, explicit opt-out,
+durable evidence, source immutability, and isolated headless diagnostics.
+
+## Compiled desktop UI trials
+
+[DIOXUS.md](DIOXUS.md) records the planned UI trials: Dioxus Desktop and Tauri
+using the system webview, with ingest/search/preservation still in Python.
+The planned typed local Python worker and Rust frontend are not implemented.
+Current `PyWebViewApplication`, `WindowBridge`, HTML/JavaScript, and PyInstaller
+sections describe the existing application. They remain the migration baseline,
+not evidence of Dioxus support. Windows full ingest takes priority over Linux
+packaging and still requires backend locking and scanner portability fixes.
+
+Plan comparable trial implementations in Dioxus and Tauri before choosing a
+framework. Either approach retains the Python archive engine.
+
+## Windows development setup
+
+[WINDOWS.md](WINDOWS.md) describes an unexecuted clean-Windows setup procedure,
+including automatic and explicit manual ARM64/x64 uv installation:
+MSYS2 supplies Git/Make/shell utilities while uv selects native Windows x64
+CPython 3.12, including under Windows ARM emulation. Rust/MSVC and Dioxus tooling
+prepare for the Dioxus trial. The guide reuses existing Makefile
+targets and identifies required Windows work. The scanner's unconditional
+`fcntl` import can prevent GUI startup, the writer rejects Windows, and native
+GUI integration and executable/installer targets remain incomplete. This
+documentation adds no Windows runtime or packaging support.
+
+## macOS packaging
+
+`make ruff` passes a NUL-delimited list from `git ls-files --cached --others
+--exclude-standard` to `uv run --locked ruff check --config pyproject.toml`. It is a required prerequisite
+of `make check` and `make dmg`, and CI and source-release builds also run it.
+Ruff retains its default error rules (`E4`, `E7`, `E9`, `F`), including unused
+imports/variables and assigned lambdas; no per-file suppressions are
+introduced. Pylint remains a complementary check.
+
+`make syntax-check` uses standard-library `compileall` on `src`, `scripts`,
+`tests`, and `e2e_tests`. It is a prerequisite of `make check` and `make dmg`;
+the regression with a stray filename before the build script's opening
+docstring fails this check before packaging starts.
+
+`scripts/build_macos.py`, invoked by `make dmg`, uses project-local PyInstaller
+dependencies, creates the app icon from the existing PNG, collects runtime
+resources and dependency notices, declares `.mailarchive` document registration,
+and signs the resulting bundle ad-hoc unless a signing identity was supplied.
+`scripts/desktop_entry.py` dispatches normal GUI launch, `--cli`, `--self-test`,
+and `--self-test-gui`. Frozen GUI resources use PyInstaller's bundle root;
+the verifier's actual `.py` source is explicitly bundled for archive installation.
+The Cocoa document delegate extends rather than replaces pywebview's quit guards.
+
+`scripts/dmg_layout.py` uses build-only `dmgbuild` to write the Finder `.DS_Store`
+and background into the image without changing global Finder preferences.
+AppKit draws a 2x-resolution TIFF at a logical 720-by-420-point size. The two
+scales are linked by the bitmap's logical size; no additional drawing transform
+is applied. `make test-packaging` renders the background and checks its logical
+and pixel dimensions, ink bounds, and presence of title, arrow, and instructions.
+The same pixel check runs before image creation and against the mounted image,
+catching the double-scaling regression that metadata-only checks missed. The
+real icons are 128 points, positioned app-left and Applications-right; the
+background contains the title, arrow, and install/eject instructions.
+Finder's outer window is 720 by 480 points, reserving 60 points for window
+chrome so the background footer is not cropped if Finder shows its status bar.
+The mounted build test decodes `.DS_Store` to verify layout metadata and
+requires exactly the app and Applications as visible root items.
+`make preview-dmg DMG=...` opens the mounted image in Finder for visual review
+and ejects it when Return is pressed. This preview does not install the app.
+
+`self_test.py` uses temporary source and archive fixtures plus isolated application
+preferences. It verifies ingest, original bytes, FTS search, fixity, idempotence,
+and not-scanned evidence. The visible mode exercises production window bridges
+and cancels the real source picker after inspecting its warning banner.
+The DMG build stages the app, Applications symlink, and instructions, mounts
+the compressed candidate read-only, verifies its seal, runs both frozen tests
+with a system-only PATH, and detaches in `finally`. It publishes the candidate
+and JSON reports only on success. See [MACOS_DISTRIBUTION.md](MACOS_DISTRIBUTION.md)
+for commands, limitations, and Apple's renewal/notarization steps.
+
+### Existing scanner configuration
+
 Homebrew installed these commands:
 
 ```text
@@ -931,6 +1637,117 @@ omitted from FTS entirely.
 
 ## Planned remote sources
 
+### Archive source registry and import actions
+
+The planned top-level `archive.yaml` is an operational per-archive file, not a
+payload file or portable fixity assertion. A strict Pydantic configuration
+model will use a `kind` discriminator over `FileSource`, `LocalFolderSource`,
+and `ImapSource`; reject unknown keys, duplicate IDs, invalid ports, relative
+ambiguity, and secrets embedded as values; and preserve source order for the
+user interface. Source checkpoints and observations remain in
+`archive.sqlite3`, rather than being rewritten into YAML after each import.
+
+```yaml
+version: 1
+sources:
+  - id: takeout-2026
+    kind: file
+    path: /Users/your.name/Downloads/takeout-mail.mbox
+  - id: historical-mail
+    kind: local-folder
+    path: /Volumes/Archive/Old Mail
+  - id: personal-imap
+    kind: imap
+    server: imap.example.org
+    port: 993
+    username: your.name@example.org
+    tls: implicit
+    authentication: password
+    credential_ref: keyring://mail-archiver/personal-imap
+    folders: all
+```
+
+`credential_ref` is an identifier, never the password or token. Password
+authentication prompts through a no-echo UI when the keychain item is absent;
+OAuth profiles instead start system-browser authorization and retain their
+tokens through the same secrets boundary. Noninteractive missing credentials
+fail closed.
+
+The planned **Import/Refresh** action enumerates every enabled source. For
+`file` and every known file found beneath `local-folder`, it compares the
+current nanosecond modification time with the last completed checkpoint. An
+unchanged value skips opening and hashing that file; directory traversal still
+discovers new paths. This deliberately misses a content change that preserves
+mtime. IMAP Refresh uses `UIDVALIDITY`, UID, `UIDNEXT`, and `HIGHESTMODSEQ`
+where supported and advances a checkpoint only after durable canonical
+publication.
+
+**Import/Rebuild** uses the same source registry and publication pipeline, but
+bypasses the local mtime shortcut and hashes every local source file. It can
+stop after a matching complete digest or reprocess changed content. IMAP
+Rebuild performs a complete selected-folder/UID reconciliation; a changed
+`UIDVALIDITY` is disclosed and handled through that same path. Neither action
+deletes canonical mail or defeats message-level deduplication. This terminology
+is distinct from `refresh-index`, which reads canonical MBOX and replaces only
+derived search data.
+
+The implemented `mailarchiver-auth` console entry point is separate from the
+reserved remote-source adapters. It parses and normalizes one account using a
+strict Pydantic model, recognizes well-known consumer domains, and otherwise
+performs bounded DNS MX and `autodiscover.<domain>` CNAME queries. Only Google
+mail hosts and Microsoft `mail.protection.outlook.com` or Autodiscover targets
+are affirmative evidence; gateways such as Proofpoint remain inconclusive by
+themselves. `--gmail` bypasses DNS with recorded override evidence, while
+`--detect-only` makes no external changes beyond public DNS lookup. Microsoft
+365 detection currently stops with `Microsoft Office not yet implemented.`
+
+For Gmail, `existing_client_secrets` first accepts an account-specific developer
+override and otherwise reads the release-wide `gmail_client.json` beside the
+package module. `MAILARCHIVER_GMAIL_CLIENT_JSON` supplies a development or
+packaging override. Pydantic rejects Web-client or malformed JSON as well as
+non-Google client IDs, OAuth endpoints, and redirects. A release without either
+client fails without opening Cloud registration. Refresh tokens are serialized
+only into the platform keyring service `mailarchiver.gmail.oauth`; they are not
+written to an archive or fallback token file. An existing token is refreshed
+when possible. Otherwise `google-auth-oauthlib` opens an installed-app loopback
+flow with PKCE, a five minute timeout, a login hint for the requested account,
+and only `gmail.readonly`. A typed `users.getProfile` response must match the
+requested address before the token is retained.
+
+The maintainer-only `--register-client` command generates an account-neutral
+project ID. With `gcloud`, it authenticates the named account and creates the project without
+activating that account or altering the default project, and enables
+`gmail.googleapis.com`; all mutations follow a terminal confirmation. The
+unsupported Google Auth Platform operations are explicit user handoffs to
+project-qualified Branding, Audience, Scope, and Client pages. The final
+Desktop-client download is discovered only in the standard Downloads directory
+after that handoff or is selected by path. There is no browser DOM automation
+or credential scraping. The validated download is atomically installed with
+user-only modes and its path is printed so the maintainer can package it as
+`src/mailarchiver/gmail_client.json`. `--client-secrets` instead installs an
+account-specific developer override.
+
+`doc/GMAIL.md` is the canonical provider document: its END USER section makes
+Takeout MBOX the current path, while its DEVELOPER section records the API,
+OAuth, verification, security-assessment, and IMAP decisions. The user manual
+and Zola `gmail-authorization` page lead with Takeout rather than an
+unimplemented live adapter. The separate `OAUTH_CLIENT_REGISTRATION.md` and
+Zola `oauth-client-registration` maintainer pages retain the experimental
+one-time numbered registration workflow. Nine 1800-pixel-wide screenshots live
+under
+`website/static/images/gmail-authorization`; the Markdown guide references that
+single asset set rather than duplicating it. The website checker requires both
+pages, the navigation link, a generic maintainer address, and all nine PNG
+assets.
+
+`doc/M365.md` likewise separates the unsupported end-user boundary from the
+developer design. It records Outlook PST and legacy-Mac OLM as the nearest
+offline export paths, generic OAuth IMAP as the first planned live source,
+Graph delegated `Mail.Read` as a later provider-specific path, and Entra
+public-client and publisher-verification constraints.
+`doc/APPLE_MAIL_CACHE.md` records the best-effort cache boundary and the
+read-only preflight required before completeness claims.
+
 Gmail, IMAP, O365, Microsoft Exchange, and NUL-delimited standard input have
 manifest-loaded reserved source plug-ins. They recognize only their explicit
 source forms and raise a clear unavailable error. The generic provider pipeline
@@ -939,19 +1756,20 @@ evidence, per-account concurrency keys, and raw RFC 5322 messages. The reserved
 adapters remain unavailable until each implements actual account/stream access
 with substantive provider-local acceptance coverage.
 
-Gmail will use least-privilege OAuth where the required raw-message read scope is
-available, paginates message IDs, fetches raw bytes and labels, and records
-Gmail ID/thread ID/labels as provenance.  Incremental Gmail sync stores the
-last successfully committed history checkpoint, with a complete-list fallback
-when history has expired.
+The later Gmail API adapter will use least-privilege OAuth where the required
+raw-message read scope is available, paginate message IDs, fetch raw bytes and
+labels, and record Gmail ID/thread ID/labels as provenance. Incremental Gmail
+API sync stores the last successfully committed history checkpoint, with a
+complete-list fallback when history has expired.
 
 IMAP will use TLS and read-only SELECT/EXAMINE where supported. It will enumerate
 folders and UIDs, fetches RFC 5322 bytes without setting `\\Seen`, and stores
 UIDVALIDITY plus UID so server reset/reuse is detectable.
 
 The `--days N` option uses `newer_than:Nd` on `messages.list`; `--after`
-accepts an epoch for timezone-precise collection.  Google Takeout is an MBOX directory input.  The program does not automate
-personal Takeout creation or download.
+accepts an epoch for timezone-precise collection. Google Takeout is an MBOX
+directory input. The program does not automate personal Takeout creation or
+download and does not yet extract Takeout ZIP parts.
 
 ## Public corpus validation pipeline
 
@@ -1033,8 +1851,10 @@ explicit project-owned, comment-safe policy without rewriting anything.
 `make copyright-check` runs it as part of `make check`. The exclusions protect
 canonical mail and test fixtures, binary/data files, the generated release
 index, the vendored Tabulator tree, and the separately MIT-licensed website
-theme. New eligible files therefore fail CI until they receive the native
-comment form of the project notice.
+theme. Upstream CC-BY-SA artwork and generated shared-workflow wrappers are
+also excluded; Python stubs and JavaScript modules receive native comments.
+`make test-copyright` exercises these ownership boundaries. New eligible files
+therefore fail CI until they receive the native comment form of the project notice.
 
 `scripts/check_runtime_licenses.py` starts with the installed `mailarchiver`
 distribution and follows evaluated PEP 508 runtime requirements, rather than
@@ -1045,14 +1865,50 @@ closure; and can copy exact license files plus a JSON inventory into a binary
 staging directory. `make runtime-license-check` is a CI and release gate.
 `make runtime-license-bundle LICENSE_OUTPUT=PATH` is the packaging interface;
 it creates a complete notices directory containing the project and third-party
-notices, typed inventory, and collected license files. Future macOS and Windows
-builders must place that directory in the installed application. The audit runs
+notices, typed inventory, and collected license files. The current macOS builder
+retains its existing notice collector; wiring the audited bundle into frozen
+macOS and Windows builds remains pending. The audit runs
 independently on each target platform because pywebview's closure is
 platform-specific.
 
 The native About metadata uses the same copyright notice. PEP 639
 `license-files` metadata places the repository notices and complete licenses
 for stored Tabulator and website-theme code in source distributions.
+
+The Cocoa termination delegate confirms an active-import quit and returns
+`NSTerminateLater`, keeping the event loop alive while `IngestJob.stop` requests
+cooperative cancellation. The shared service checks this event during discovery,
+scanner startup, and worker status refresh; ordinary worker failures remain
+distinct from cancellation. It follows the existing interrupted-run checkpoint
+and lease-release path. A completion event allows Cocoa termination only after
+the GUI worker finishes. No automatic resume is promised: File → Import safely
+retries the same source. `make test-application` tests partial publication,
+interrupted status, verification, duplicate-free restart, and multi-document stop.
+
+`make test-corpus-import` runs the single full-directory regression in
+`tests/test_corpus_import.py`, also included in `make test`. It imports the
+actual `tests/data` directory with `--clamav`, compares subjects/raw SHA-256
+and per-source accounting against `tests/expected-corpus.json`, independently
+checks canonical locations and the installed verifier, then reimports and
+checks unchanged-source skipping. Each subprocess has a 600-second deadline
+and a retained pytest-temporary log. The test fingerprints all input files
+before/after; it never changes sources.
+The configured on-demand ClamAV installation is required, just as for the other
+scanner integration tests. Expectations include infected mail without fixing
+its signature-dependent destination; new signatures cannot excuse lost bytes.
+`make update-corpus-expectations` passes `--update-corpus-expectations` to
+pytest and regenerates the expected JSON only after those integrity checks.
+Review the generated diff: updating a golden file is not proof of correctness.
+Git-ignored local additions are recorded separately in
+`.tmp/expected-corpus-private.json`; neither their mail nor their subjects belong
+in the public fixture manifest. CI uses the same test on its tracked directory.
+New or missing files, wrong per-source message membership, and changed exclusion
+counts also fail even when the overall canonical message set is unchanged.
+
+The reported September 7 apparent loop was a completed 208-second import:
+`email-korean-bad-encoding.eml` locally contained 6,884 MBOX records (82 MiB),
+despite its suffix. Content-based MBOX recognition takes precedence over `.eml`;
+the worker legitimately stays on that path while advancing through messages.
 
 [`END_TO_END_TESTING.md`](END_TO_END_TESTING.md) defines the archive-lifecycle,
 browser-acceptance, native-WKWebView, and optional XCUITest layers, including
@@ -1075,8 +1931,9 @@ CLI ingest with the real configured on-demand `clamd`, includes a source message
 without a final newline, requires checkpoint publication, and invokes the
 installed standard-library-only verifier under isolated Python.
 
-`make test` runs the ordinary test tree, while `make check` runs it followed by
-the separate end-to-end suite. The tracked source corpus has enough messages to
+`make test` runs the ordinary test tree. `make check` first requires clean lint
+and type analysis, then runs that tree, the separate end-to-end suite, and website
+validation. The tracked source corpus has enough messages to
 exercise complete scoped searches and rich MIME behavior.
 `make test-e2e` drives
 the complete interface in headless Chromium while binding every bridge method
@@ -1110,6 +1967,136 @@ requires it and fails clearly.
 2. Implement recursive local ingest, exact dedupe, autosave exclusion,
    integrity files, sorting, recovery, and ClamAV routing.
 3. Add `review`, `refresh-index`, FTS5 rebuilding, and conservative body/HTML extraction.
-4. Add IMAP and Gmail importers with resumable checkpoints.
-5. Build the local search/view interface on the stable database and MBOX
+4. Add the generic IMAP importer with resumable provider checkpoints, Gmail
+   and Microsoft OAuth profiles, and archive-configured Refresh/Rebuild.
+5. Add provider-specific Gmail API and Microsoft Graph importers when their
+   richer metadata justifies the separate transports.
+6. Build the local search/view interface on the stable database and MBOX
    retrieval API.
+
+## Developer validation gates
+
+Scanner deadline and helper-execution regressions use real POSIX subprocesses
+and explicitly skip Windows before importing the `fcntl`-based scanner. They do not establish Windows
+scanner support. Pages release-trigger checks parse YAML rather than relying on
+indentation, accepting PyYAML's YAML 1.1 interpretation of an unquoted `on` key.
+
+Release assembly checks the GitHub tag signature, then runs the standard-library
+tag/version validator through `make release-tag-check` with `uv --no-project`.
+Only afterward does it install project dependencies and smoke built artifacts.
+The website header and navigation wrap without positional hiding rules.
+Browser geometry checks allow pixel rounding; GUI selection assertions locate
+the live virtual-table row by message ID after asynchronous preview redraws.
+`make test-website-navigation` checks the actual header and CSS at mobile,
+tablet, and desktop widths, including reordered links, in headless Chromium.
+
+The shared pr-to-ready source generates the repository skill and Copilot
+instructions. Copilot review requests use `gh pr edit <number> --add-reviewer '@copilot'`
+as `simsong`, followed by restoration of `simsong-codex` for all other writes.
+Review-request timeline or reviewer evidence verifies the request; no browser
+control is used. Before handoff it inventories task checkouts, reconciles intended
+uncommitted changes and unpublished commits into the delivery branch, and records
+the resulting commit or evidence of inclusion/supersession for each checkout.
+Preservation elsewhere is not a completed integration. Its ten-minute heartbeat
+changes from review monitoring to post-merge cleanup after handoff. Cleanup
+fetches/prunes, verifies GitHub merge state and current-main inclusion,
+checks tracked/untracked/ignored files, and
+removes only safe task-owned worktrees and represented local branches. It stops
+on completion or a reported preservation decision. Repository Claude entries
+are generated regular wrapper files, not directory symlinks.
+
+`make check` runs Ruff and Pylint (`make lint`), then ty and Pyright
+(`make types`), then pytest, Chromium end-to-end tests, and website validation.
+The stages run sequentially even with parallel make and stop on failure.
+Both type checkers cover source, scripts, tests, end-to-end tests, and the AWS
+launcher. Project development dependencies and type stubs are locked with uv;
+static analysis must produce no errors or warnings. Focused `make ruff`,
+`make pylint`, `make ty`, `make pyright`, and `make test` targets remain available.
+
+### Desktop review follow-up
+
+The portability audit reads each Mach-O LC_RPATH command, expands loader and
+executable-relative paths, rejects search paths outside the bundle, and requires
+non-system dependencies to resolve to bundled files. Missing antivirus uses a
+platform-neutral confirmation on non-macOS hosts. Source-picker navigation is
+saved only after successful ingest while the writer lease is retained; a failed
+import leaves the previous directory unchanged.
+
+### Writer and desktop review boundary
+
+Current archive writing is supported on POSIX. Windows writing fails before
+creating an archive or lock metadata; the secure no-reparse-point implementation
+and native Windows subprocess validation are deferred to v1.1.0. The former
+untested msvcrt branch is removed; no Windows locking guarantee is claimed.
+POSIX acquisition pins the archive/status directories and opens lock files
+relative to directory descriptors without following links. Lock files must be
+regular, single-link files. New targets are created under a parent-directory
+creation lock before acquiring the archive lease; creation diagnostics may leave
+`.mailarchiver-create.lock` in the parent. Its presence alone does not lock anything.
+GUI creation rechecks destination emptiness under the lease. File New proceeds
+into Import, About reports the active archive volume, and publication refreshes
+mailbox-only queries as well as text queries.
+
+### PR review validation follow-up
+
+Archive documents identify directories by filesystem device/inode and reject
+symbolic or hard-linked database entries before opening. GUI ingest records
+publication evidence even when a later step fails; only published changes
+advance the shared generation. Progress can write status files without a
+terminal stream, including windowed builds with no stderr. Ingest child windows
+route document actions to an attached search window. Informational notices stay
+in About instead of appearing as errors. Closing an import owner offers waiting
+or keeping the window open. Native macOS Quit offers Cancel or Stop Import and Quit while an import is
+active. Confirmed quit signals all imports, retains their leases and windows
+until checkpoint completion, and then exits. Shutdown joins tracked workers
+before releasing resources. Makefile Ruff checks select this checkout's configuration explicitly. Git
+selects tracked and non-ignored new `.py` and `.pyi` files, so linked worktrees
+are checked without descending into ignored generated directories.
+
+An Ingests child window retains document routing after all search windows close.
+New Search and Ingests use that document directly; Import creates a new search
+owner when needed.
+
+Integrity hash-standard versions must be JSON integers. The standalone verifier
+rejects boolean, floating-point, and string alternatives without coercion.
+
+## Current acquisition boundaries
+
+No release Desktop OAuth client is bundled yet. The shared-client end-user
+flow remains deferred until a maintainer supplies and validates that public
+configuration in release artifacts. Current authorization requires a developer
+client override. Installing that override validates and writes the same bytes.
+Known consumer domains need no DNS lookup; transient DNS and token-refresh
+transport failures are disclosed as errors rather than negative detection or
+fresh consent. Credentials are stored only after the profile matches.
+
+Directory import reports and skips `.partial.emlx` records while retaining
+complete supported records. Direct selection of a partial record is rejected.
+This is not a complete mailbox acquisition: detached attachment bytes are not
+reconstructed. Do not modify the source cache; export mail through Apple Mail
+when a complete MBOX source is required.
+
+## Toolkit branding and website media
+
+The application, installer, documentation, and website use Email Collection
+Toolkit. Repository and Pages URLs use the renamed project. The platform
+settings helper chooses the current application directory containing preferences.json or auth/, then an
+existing legacy directory, without
+moving or rewriting settings; Linux configuration,
+package imports, CLI names, and archive-format identifiers retain compatibility.
+
+`make website-screenshots` ingests purpose-made messages using the normal
+archive service, then binds real Python services to the shipped HTML in
+Chromium. Media targets explicitly select the dev dependency group, and search
+capture waits for the rendered result-card count. It captures search and completed import history with no private mail.
+`make website-gmail-illustrations` renders explicitly labeled setup diagrams
+with placeholder account details. The homepage includes the unmodified
+Wikimedia Commons hands/laptop SVG with visible CC BY-SA 4.0 attribution.
+`searching.md` covers query syntax, suggestions, background results, attachment
+limits, source filters, saved sets, and message viewing.
+
+The macOS dependency audit reads actual dylib load commands from `otool -l`,
+excluding `LC_ID_DYLIB`. A real compiled-library test verifies that an install
+name alone is accepted while an executable's unresolved load of that same name
+is rejected. This avoids rejecting the packaged pydantic-core library's own
+identifier while retaining dependency checks.

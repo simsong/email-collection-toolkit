@@ -4,6 +4,8 @@
 
 from __future__ import annotations
 
+from mailarchiver.mbox import message_offsets
+
 import hashlib
 import mailbox
 import os
@@ -36,7 +38,6 @@ from .plugin_api import (
     SourceSpec,
 )
 from .source_volume import SourceVolume, local_mount_path, local_source_volume
-
 
 SourceKind = str
 BABYL_OPTIONS = b"babyl options:"
@@ -81,6 +82,7 @@ class LocalSourceRules(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     version: Literal[1]
+    mode: Literal["replace", "extend"]
     ignore: IgnoreRules
     file_probe: FileProbeRules
     mbox: MboxRules
@@ -99,6 +101,7 @@ class SourceMessage(BaseModel):
     bytes_done: int
     bytes_total: int
     exclusion_reason: str | None = None
+    mbox_envelope: bytes | None = None
 
 
 class SourceFile(BaseModel):
@@ -301,18 +304,18 @@ class MboxFileParser(FileParser):
         box = mailbox.mbox(source.path, factory=None, create=False)
         try:
             for key in box.iterkeys():
-                start, end = box._toc[key]
+                start, end = message_offsets(box, key)
                 if start < start_offset:
                     continue
-                envelope_record = box.get_bytes(key, from_=True)
-                envelope, _, _ = envelope_record.partition(b"\n")
+                with box.get_file(key, from_=True) as original:
+                    envelope = original.readline()
                 envelope_sender = _mbox_envelope_sender(envelope.rstrip(b"\r"))
                 raw = box.get_bytes(key, from_=False)
                 if mmdf_framed:
                     raw = _without_mmdf_delimiter(raw)
                 exclusion = _mbcp_exclusion(envelope_sender, raw)
                 if envelope_sender == XXX_ENVELOPE_SENDER:
-                    raw = _unwrap_xxx_record(raw)
+                    raw, envelope = _unwrap_xxx_record(raw, envelope)
                 yield SourceMessage(
                     path=source.path,
                     raw=raw,
@@ -320,6 +323,7 @@ class MboxFileParser(FileParser):
                     bytes_done=end,
                     bytes_total=source.byte_length,
                     exclusion_reason=exclusion,
+                    mbox_envelope=envelope,
                 )
         finally:
             box.close()
@@ -375,6 +379,7 @@ class LocalSourcePlugin(SourcePlugin):
 
     def discover(self, source: SourceSpec) -> Iterator[MailContainer | ProgressEvent | SkippedInput]:
         root = Path(source.locator)
+        root_path = root.resolve()
         for candidate in FileFolderHierarchyParser().paths(root):
             path = candidate.resolve()
             stat = path.stat()
@@ -391,9 +396,22 @@ class LocalSourcePlugin(SourcePlugin):
                     detail="not a regular file",
                 )
                 continue
-            if stat.st_size == 0 or _is_silent_metadata(path):
+            if (stat.st_size == 0 and not path.name.lower().endswith(".partial.emlx")) or _is_silent_metadata(path, root_path):
                 continue
-            parser = self._recognize_file(path, stat.st_size)
+            try:
+                parser = self._recognize_file(path, stat.st_size)
+            except IncompleteAppleMailMessageError as error:
+                if not root.is_dir():
+                    raise
+                yield SkippedInput(
+                    source=SourceReference(
+                        plugin_kind=self.kind, source_id=str(root.resolve()), hierarchy=(),
+                        native_id=str(path), display_name=str(path),
+                    ),
+                    reason_code="incomplete-apple-mail-message",
+                    detail=str(error),
+                )
+                continue
             if parser is None:
                 yield SkippedInput(
                     source=SourceReference(
@@ -434,7 +452,7 @@ class LocalSourcePlugin(SourcePlugin):
             )
 
     def messages(
-        self, container: MailContainer, checkpoint: str | None
+        self, container: MailContainer, resume_cursor: str | None
     ) -> Iterator[MailObject | ProgressEvent]:
         source = self.source_file(container)
         parser = next(
@@ -445,11 +463,12 @@ class LocalSourcePlugin(SourcePlugin):
             raise ValueError(f"file parser plug-in is not registered: {container.parser_kind}")
         implementation = parser.implementation
         if isinstance(implementation, FileParser):
-            start_offset = 0 if checkpoint is None else int(checkpoint)
+            start_offset = 0 if resume_cursor is None else int(resume_cursor)
             for message in implementation.messages(source, start_offset):
                 yield MailObject(
                     work_id=container.work_id,
                     raw=message.raw,
+                    mbox_envelope=message.mbox_envelope,
                     source=container.source,
                     cursor=str(message.source_offset),
                     completed_bytes=message.bytes_done,
@@ -457,7 +476,7 @@ class LocalSourcePlugin(SourcePlugin):
                     exclusion_reason=message.exclusion_reason,
                 )
             return
-        yield from implementation.messages(container, checkpoint)
+        yield from implementation.messages(container, resume_cursor)
 
     @staticmethod
     def source_file(container: MailContainer) -> SourceFile:
@@ -490,14 +509,19 @@ class LocalSourcePlugin(SourcePlugin):
         return None if not matches else matches[0]
 
 
-def _is_silent_metadata(path: Path) -> bool:
+def _is_silent_metadata(path: Path, source_root: Path | None = None) -> bool:
     rules = local_source_rules().ignore
-    candidate = path.as_posix()
+    candidates = [path.as_posix()]
+    if source_root is not None:
+        try:
+            candidates.append(path.relative_to(source_root).as_posix())
+        except ValueError:
+            pass
     patterns = rules.globs
     if not rules.case_sensitive:
-        candidate = candidate.casefold()
+        candidates = [candidate.casefold() for candidate in candidates]
         patterns = tuple(pattern.casefold() for pattern in patterns)
-    return any(fnmatchcase(candidate, pattern) for pattern in patterns)
+    return any(fnmatchcase(candidate, pattern) for candidate in candidates for pattern in patterns)
 
 
 def _without_mmdf_delimiter(raw: bytes) -> bytes:
@@ -634,25 +658,25 @@ def _mbcp_exclusion(envelope_sender: bytes, raw: bytes) -> str | None:
     if envelope_sender != MBCP_ENVELOPE_SENDER:
         return None
     message = BytesParser(policy=policy.compat32).parsebytes(raw)
-    names = {name.casefold() for name in message.keys()}
+    names = {name.casefold() for name in message}
     payload = message.get_payload()
     if {"x-uid", "x-mbcp-flags"} <= names <= MBCP_HEADERS and str(payload).strip() == "":
         return "Eudora MBCP metadata stub"
     return None
 
 
-def _unwrap_xxx_record(raw: bytes) -> bytes:
+def _unwrap_xxx_record(raw: bytes, envelope: bytes) -> tuple[bytes, bytes]:
     separator = HEADER_SEPARATOR.search(raw)
     if separator is None:
-        return raw
+        return raw, envelope
     wrapper = BytesParser(policy=policy.compat32).parsebytes(raw[: separator.end()])
-    if not set(name.casefold() for name in wrapper.keys()) <= XXX_WRAPPER_HEADERS:
-        return raw
+    if not {name.casefold() for name in wrapper} <= XXX_WRAPPER_HEADERS:
+        return raw, envelope
     nested = MBOXRD_QUOTED_FROM.sub(b"", raw[separator.end():])
-    envelope, newline, message = nested.partition(b"\n")
-    if not newline or _mbox_envelope_sender(envelope.rstrip(b"\r")) == b"":
-        return raw
-    return message
+    nested_envelope, newline, message = nested.partition(b"\n")
+    if not newline or _mbox_envelope_sender(nested_envelope.rstrip(b"\r")) == b"":
+        return raw, envelope
+    return message, nested_envelope + newline
 
 
 def _source_paths(source: Path, hierarchy: str = "file-folder") -> Iterator[Path]:
@@ -677,8 +701,11 @@ def source_inventory(
     """Count recognized source files and bytes without hashing or retaining them."""
     inventory = SourceInventory()
     for root in roots:
+        root_path = root.resolve()
         for path in _source_paths(root, hierarchy):
             path = path.resolve()
+            if _is_silent_metadata(path, root_path):
+                continue
             if _source_kind(path) is None:
                 inventory.skipped_file_count += 1
                 if skipped is not None:
@@ -728,7 +755,7 @@ def _without_container_newline(body: bytearray) -> bytes:
     """Remove the one line ending Babyl adds before its record separator."""
     if body.endswith(b"\r\n"):
         return bytes(body[:-2])
-    if body.endswith(b"\n") or body.endswith(b"\r"):
+    if body.endswith((b"\n", b"\r")):
         return bytes(body[:-1])
     return bytes(body)
 

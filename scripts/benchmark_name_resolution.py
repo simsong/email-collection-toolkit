@@ -5,12 +5,11 @@
 from __future__ import annotations
 
 import json
-from pathlib import Path
 import sys
+from pathlib import Path
 
-from pydantic import BaseModel, Field
 import yaml
-
+from pydantic import BaseModel, Field
 
 CORPUS = Path(__file__).parents[1] / "benchmarks" / "name_resolution" / "organization_aliases_synthetic.yaml"
 
@@ -28,7 +27,7 @@ def load_cases(path: Path = CORPUS) -> list[BenchmarkCase]:
     """Load the YAML boundary into strict typed benchmark cases."""
     document = yaml.safe_load(path.read_text(encoding="utf-8"))
     if not isinstance(document, list):
-        raise ValueError("name-resolution benchmark must be a YAML list")
+        raise TypeError("name-resolution benchmark must be a YAML list")
     return [BenchmarkCase.model_validate(item) for item in document]
 
 

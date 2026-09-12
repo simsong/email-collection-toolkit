@@ -4,6 +4,135 @@
 
 ## Unreleased
 
+* Reconcile the copyright/license draft with current validation and release
+  workflows. Preserve external artwork and generated workflow bytes, cover
+  current project source files, and retain the ordered lint/type/test gates.
+
+* Use one file-drag path for message-list rows and the message-file icon,
+  explicitly writing only `public.file-url` to copy `.eml` files (or a ZIP for
+  multiple selected messages) to Finder/Desktop. Modifier-click selects several
+  rows; dragging exports them instead of extending a selection range.
+  Isolate prepared files from attachment exports, revoke tokens safely on close,
+  wait for the result table to finish building before startup clears it, and
+  discard queued clicks from a replaced result set.
+
+* Fix source GUI startup treating the `mailsearch-gui` launcher and option
+  values as archive paths. Preserve explicit archive selection and Finder opens;
+  validate the actual launcher with the GUI self-test.
+
+* Correct the macOS dependency audit to distinguish library install names from
+  actual dependencies, avoiding a false failure for bundled pydantic-core.
+
+* Fix false Sent classification from implicit owner-name substring matching.
+  Every import now reviews owner include/exclude fields, with exclusions taking
+  precedence and bare names matching only the exact mailbox name. Save defaults
+  in archive `config.yaml` and regenerate `owner-names-detected.txt` separately.
+  Existing archives need a fresh rebuild to correct historical classifications.
+* Plan comparable Dioxus Desktop and Tauri trials before choosing the compiled UI;
+  retain ingest, search, and archive preservation in Python. Prioritize Windows
+  full ingest and defer Linux/snap delivery. This records the migration decision;
+  the Dioxus frontend, worker protocol, and Windows installer are not implemented.
+  The framework decision remains pending trial results.
+
+* Add a clean-Windows development setup guide covering ARM64/x64 uv installation,
+  x64 Python on ARM VMs, and the remaining full-ingest and packaging work.
+  The procedure has not yet been executed in a clean Windows VM; this is not
+  a Windows support announcement.
+
+* Preserve original MBOX `From ` delimiters through import. When absent,
+  synthesize a delimiter from the latest valid header timestamp instead of
+  import time, with deterministic documented fallbacks. Existing archives are
+  not automatically repaired.
+
+
+* Complete the Email Collection Toolkit display-name and repository-link rename,
+  preserving access to existing preferences and OAuth configuration. Add the
+  Searching guide, refreshed website navigation, real interface screenshots,
+  and credited Wikimedia keyboard clipart.
+
+* Introduce the Email Collection Toolkit website identity and stacked-envelope
+  application icons; preserve Gmail setup and Advanced navigation, responsive
+  access, and equal personal and archival use cases. Validate Zola TOML before
+  builds and report read/decode failures without a traceback.
+- Add an experimental read-only ePADD address-book exporter in
+  `dev/addressbook-exporter.py`, with explicit owner addresses, separate
+  address-level contacts, private output, and exclusion/hash reporting.
+  It avoids address-shaped display-name aliases; live ePADD repair remains
+  unvalidated.
+
+- Audit all query selectors with production-SQL EXPLAIN and execution-budget tests.
+  Fix Any-address searches, sender counts, date filters under alternate sorts,
+  attachment-inclusive counts, mailbox filtering, and subject candidate scans
+  to use their filtering indexes before result ordering.
+
+- Show invalid search syntax inline instead of raising a pywebview exception.
+- Use the existing recipient address index for To/Cc/Bcc substring searches,
+  avoiding per-message recipient probes and forced full-catalog sort scans.
+
+* Inspect Apple Mail provider metadata using private database/WAL copies, avoiding
+  source shared-memory writes. Abort on scanner helper execution errors before
+  removing a daemon socket or launching a replacement.
+
+* Reject empty-domain contacts and report zero-byte partial EMLX files instead
+  of silently skipping them; direct selection of partial records still fails.
+
+* Reject duplicate deferred AI request IDs and reserve h3 review destinations
+  exclusively so a late-created empty directory is not overwritten.
+
+* Explicitly attach h3 review catalogs read-only, stage name-evidence summaries
+  before publication, and roll back database publication if the summary link
+  fails. Restore the CSS-injection regression's intended validation path.
+
+* Treat missing, non-executable, and invalid-format ClamAV health-check helpers
+  as unavailable instead of allowing OS execution errors to escape the probe.
+
+* Validate all contact-filter regexes at policy load time and report YAML or
+  regex typos as path-qualified CLI errors, without tracebacks or archive writes.
+
+* Use platform-correct read-only catalog URIs for Contacts. The standalone
+  message scrolling regression now guarantees overflow and verifies actual
+  scrolling to source locations, independent of platform font metrics.
+
+* Distinguish bogus-domain contact-filter diagnostics from bogus local parts
+  without changing which addresses are excluded.
+
+* Use installed package metadata for BagIt writer versions, verify release tags
+  before project installation/artifact execution, and keep all mobile navigation
+  links visible regardless of their order.
+
+* Use `gh` with the authorized review-request-only identity for Copilot requests
+  instead of controlling the browser.
+
+* Resolve committed cleanup-conflict markers and restore generated skill
+  wrappers. Require pr-to-ready to integrate stranded task work before handoff
+  and perform verified post-merge checkout cleanup. Retain dirty, unmerged,
+  and private evidence-bearing worktrees until their disposition is settled.
+
+* Limit Ruff discovery to tracked and non-ignored new Python files, avoiding
+  generated directories while supporting project-local linked worktrees.
+
+* Clarify installed verifier usage and make GUI asset HEAD/redirect response
+  lengths explicit without reading asset bodies for HEAD.
+
+- Standardize the agent PR workflow as `pr-to-ready`, retain
+  `codex-to-complete` and `codex-to-ready` aliases, and add shared
+  Codex, Claude, and Copilot implementer/reviewer instructions.
+
+
+* Add the desktop document controller, archive writer leases, document options,
+  coordinated import/quit handling, and macOS application packaging.
+* Add the Gmail authorization developer preview and read-only Apple Mail cache
+  comparison. Direct Gmail and Microsoft 365 ingestion remain unavailable.
+
+* Tighten plug-in method contracts, native-window failure handling, and integrity
+  version validation while adding complete ty and Pyright coverage.
+
+* Require Ruff and Pylint, followed by ty and Pyright, before tests in
+  `make check`, with locked development dependencies and ordered stages.
+
+* Document the browser-driven pr-to-ready workflow, ten-minute review
+  checks, signed Codex identity, and explicit human handoff for review loops.
+
 * Make `refresh-index` observable and safe to interrupt: it now reports
   message-weighted verification/indexing progress bars with ETA, announces its
   Ctrl-C safety before work begins, and discards an incomplete replacement
@@ -94,3 +223,18 @@
   `source-metadata-excluded` observation, and unwrap narrowly recognized
   `From XXX` status containers so the nested RFC 5322 message supplies its
   actual sender and metadata.
+
+### Checkout reconciliation — 2026-09-08
+
+Recovered work from historical development checkouts:
+
+- Read-only human-contact reports and archive-local filtering policies.
+- Provider-stratified Apple Mail comparison and private, hash-verified h3 review exports.
+- Experimental name/signature evidence extraction, kept separate from production matching.
+- Bounded ClamAV subprocesses and confirmation for active, unknown, or mismatched attachments.
+- Directory imports report partial EMLX records and continue with complete records.
+- Wheel/sdist installation checks, website-build CI, and retained browser failure traces.
+
+Contacts/geography GUI, live IMAP sources, and Refresh/Rebuild are documented
+plans, not newly implemented features. No source mailbox or real archive is
+changed by reconciliation or its fixture tests.

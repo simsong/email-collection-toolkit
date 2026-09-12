@@ -1,0 +1,31 @@
+<!doctype html>
+<!-- Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved. -->
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-eval'; style-src 'self'; object-src 'none'; connect-src 'self'">
+  <title>Owner emails</title>
+  <link rel="stylesheet" href="options.css">
+</head>
+<body>
+  <main>
+    <h1>Owner emails</h1>
+    <p>Identify the addresses whose messages belong in Sent. Enter one rule per line, or separate rules with commas.</p>
+    <form id="owner-form">
+      <label for="owner-include">Owner emails (include)</label>
+      <textarea id="owner-include" rows="5" spellcheck="false" autocapitalize="off" placeholder="slg&#10;*simson*&#10;alice@example.org"></textarea>
+      <label for="owner-exclude">Exclude (applied after include)</label>
+      <textarea id="owner-exclude" rows="3" spellcheck="false" autocapitalize="off" placeholder="*david*"></textarea>
+      <p>Rules ignore case. <code>slg</code> means <code>slg@*</code> and does not match <code>3slg</code>. Use <code>*</code>, <code>?</code>, or <code>[abc]</code> for wildcards; a domain is matched only when the rule contains <code>@</code>. Exclusions always win.</p>
+      <div class="actions"><button id="save" type="submit" disabled>Save</button><button id="cancel" type="button" hidden>Cancel</button></div>
+    </form>
+    <p id="changed" role="status" hidden>Rules have changed since the last import started. Existing messages keep their Sent or Archive classification.</p>
+    <p id="unknown" hidden>Rules used by earlier imports were not recorded.</p>
+    <p id="persistence">Saved rules become the defaults shown before every import. Changes affect future imports; reindexing does not reclassify existing messages.</p>
+    <p id="saved" role="status" hidden>Saved.</p>
+    <p id="error" role="alert" hidden></p>
+  </main>
+  <script src="options.js"></script>
+</body>
+</html>

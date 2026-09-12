@@ -8,7 +8,6 @@ import argparse
 import os
 from pathlib import Path
 
-
 MAIL_ARCHIVE_DIR = "MAIL_ARCHIVE_DIR"
 
 

@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 import hashlib
+import logging
 import re
 import sqlite3
 import warnings
@@ -50,6 +51,8 @@ class PreparedSearchMessage(BaseModel):
 
 def decoded_part(part: Message) -> str:
     payload = part.get_payload(decode=True) or b""
+    if not isinstance(payload, bytes):
+        return ""
     return decode_text(payload, part.get_content_charset()).value
 
 
@@ -96,7 +99,7 @@ def parsed_message_text(
     if index_attachments:
         attachments = [decoded_part(part) for part in parts if is_attachment(part) and part.get_content_maintype() == "text"]
         body = "\n".join([body, *attachments])
-    return "\n".join((headers, body))
+    return f"{headers}\n{body}"
 
 
 def attachment_text(message: Message) -> str:
@@ -260,6 +263,7 @@ def index_message_safely(
         index_message(search, raw, index_attachments, date_utc=date_utc)
         search.commit()
     except Exception as error:
+        logging.getLogger(__name__).debug("Best-effort operation failed", exc_info=True)
         search.rollback()
         catalog.execute(
             "INSERT OR IGNORE INTO metadata_defects(message_pk, field, detail) VALUES (?, 'search-index', ?)",

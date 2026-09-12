@@ -8,7 +8,7 @@ import json
 import os
 import plistlib
 import subprocess
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from shutil import which
 from typing import Any
@@ -51,7 +51,7 @@ def local_source_volume(path: Path) -> SourceVolume:
         "volume_label": _text(diskutil.get(KEY_VOLUME_NAME)),
         "volume_uuid": volume_uuid,
         "filesystem_type": _text(diskutil.get(KEY_FILESYSTEM_TYPE)),
-        "observed_at": datetime.now(timezone.utc).isoformat(),
+        "observed_at": datetime.now(UTC).isoformat(),
         "os": diskutil,
     }
     return SourceVolume(

@@ -11,7 +11,6 @@ from pathlib import Path
 
 import pytest
 
-
 LAUNCHER_PATH = Path(__file__).parents[1] / "validation" / "aws" / "launcher" / "app.py"
 SPEC = importlib.util.spec_from_file_location("validation_launcher", LAUNCHER_PATH)
 assert SPEC is not None and SPEC.loader is not None
@@ -45,7 +44,7 @@ def test_worker_script_runs_pipeline_uploads_evidence_and_always_shuts_down() ->
         parsed,
         "validation-bucket",
         "mailarchiver-validation",
-        "https://github.com/simsong/mail-archiver.git",
+        "https://github.com/simsong/email-collection-toolkit.git",
         "codex/validation-datasets",
     )
 

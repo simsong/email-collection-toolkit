@@ -176,7 +176,7 @@ def write_bundle(result: LicenseInventory, output: Path) -> None:
         package_dir = output / canonicalize_name(record.name)
         package_dir.mkdir(exist_ok=True)
         for index, filename in enumerate(record.license_files, start=1):
-            source = Path(item.locate_file(filename))
+            source = Path(str(item.locate_file(filename)))
             target = package_dir / f"{index:02d}-{source.name}"
             shutil.copyfile(source, target)
     proxy_dir = output / "proxy-tools"

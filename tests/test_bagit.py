@@ -7,15 +7,30 @@ from __future__ import annotations
 import csv
 import subprocess
 import sys
+from importlib.metadata import version
 from pathlib import Path
 from shutil import copytree
 
-from mailarchiver.bagit import refresh_tag_manifest
+from mailarchiver import standalone_verify
+from mailarchiver.bagit import initialize_bag, refresh_tag_manifest, write_bag_checkpoint
+from mailarchiver.catalog import create_catalog
 from mailarchiver.standalone_verify import verify_archive
-import mailarchiver.standalone_verify as standalone_verify
-
 
 FIXTURE = Path(__file__).parent / "data" / "three-message-mailbag"
+
+
+def test_new_bag_records_the_installed_application_version(tmp_path: Path) -> None:
+    """Requirement: checkpoint provenance uses the same version as the installed application."""
+    archive = tmp_path / "new.mailarchive"
+    initialize_bag(archive)
+    catalog = create_catalog(archive / "archive.sqlite3")
+    try:
+        write_bag_checkpoint(archive, catalog)
+    finally:
+        catalog.close()
+    metadata = (archive / "bag-info.txt").read_text(encoding="utf-8").splitlines()
+    assert f"Mailbag-Agent-Version: {version('mailarchiver')}" in metadata
+    assert verify_archive(archive) == []
 
 
 def test_checked_in_three_message_mailbag_validates_without_sqlite() -> None:

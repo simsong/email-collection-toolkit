@@ -1,0 +1,51 @@
+# Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved.
+
+# Sources: Google Groups Help (https://support.google.com/groups/answer/2464926)
+# and CataList, LISTSERV's public list catalog (https://www.lsoft.com/catalist.html).
+# No maintained universal mailing-list-domain database was found; keep additions
+# narrow, documented, and reviewable. Allow rules take precedence: =@ex.com was
+# an archive-owner address, and vm.vonage.com carries personal voicemail.
+mode: replace
+version: 1
+max_human_local_part_length: 48
+allow_address_patterns:
+  - '^=@ex\.com$'
+  - '@vm\.vonage\.com$'
+mailing_list:
+  domain_patterns:
+    - '(^|\.)googlegroups\.com$'
+    - '(^|\.)yahoogroups\.com$'
+    - '(^|\.)groups\.io$'
+    - '(^|\.)lists\.(apache|mysql|gnu)\.org$'
+    - '(^|\.)lists\.sourceforge\.net$'
+    - '(^|\.)listserv(\.|$)'
+    - '(^|\.)lists\.'
+    - '(^|\.)mailman\.'
+    - '^groups\.(google|yahoo)\.com$'
+  local_part_patterns:
+    - '(^|[-_.+])(listserv|mailman|majordomo)([-_.+]|$)'
+    - '(^|[-_.+])(request|subscribe|unsubscribe|join|leave|bounces?)([-_.+]|$)'
+    - '[-_.+](owner|admin)([-_.+]|$)'
+    - '^(listadmin|listsrv|lyris|sympa|postman)$'
+service:
+  domain_patterns:
+    - '(^|\.)alerts?\.'
+    - '(^|\.)newsletters?\.'
+    - '(^|\.)reply\.'
+    - '^ws\.apache\.org$'
+    - '^facebookmail\.com$'
+    - '^campaigns\.privacyassociation\.org$'
+  local_part_patterns:
+    - '(^|[-_.+])(no[-_.]?reply|do[-_.]?not[-_.]?reply|donotreply|noreply)([-_.+]|$)'
+    - '(^|[-_.+])(mailer-daemon|postmaster|bounce|bounces|auto[-_.]?reply)([-_.+]|$)'
+    - '^(alerts?|enews|newsletter|notifications?)$'
+    - '^zones_\d+\+'
+    - '^xmlrpc[-_.]'
+    - '^lj_notify$'
+    - '^(auto|ship)[-_.]confirm$'
+    - '^(root|staff|support|admin|office|sales|marketing|systems|webmaster|service|help|info|team|director)$'
+    - '^(alerts?|notification|notifications|update|updates|daily|news|newsletter|enews)([-_.+]|$)'
+bogus_local_part_patterns:
+  - '(^$|^\*$|^-$|^=$|[\x00-\x1f\x7f "/])'
+bogus_domain_patterns:
+  - '(^[.-]|[.-]$|\.\.|[\x00-\x1f\x7f "/])'

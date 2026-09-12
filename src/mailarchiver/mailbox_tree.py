@@ -16,7 +16,6 @@ from typing import Literal
 
 from pydantic import BaseModel, Field, field_validator
 
-
 FILTER_SET_VERSION = 1
 RESERVED_FILTER_NAMES = {"none", "save..."}
 
@@ -41,7 +40,7 @@ class MailboxSelection(BaseModel):
         return encoded.rstrip("=")
 
     @classmethod
-    def from_token(cls, token: str) -> "MailboxSelection":
+    def from_token(cls, token: str) -> MailboxSelection:
         padding = "=" * (-len(token) % 4)
         try:
             return cls.model_validate_json(base64.urlsafe_b64decode(token + padding))
@@ -55,7 +54,7 @@ class MailboxTreeNode(BaseModel):
     label: str
     count: int
     kind: Literal["volume", "folder", "mailbox"]
-    children: list["MailboxTreeNode"] = Field(default_factory=list)
+    children: list[MailboxTreeNode] = Field(default_factory=list)
 
 
 class SourceTreeFile(BaseModel):
@@ -147,7 +146,9 @@ class FilterSetStore:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         temporary: str | None = None
         try:
-            with tempfile.NamedTemporaryFile("w", dir=self.path.parent, prefix=".filter-sets-", delete=False) as output:
+            with tempfile.NamedTemporaryFile(
+                "w", encoding="utf-8", dir=self.path.parent, prefix=".filter-sets-", delete=False
+            ) as output:
                 temporary = output.name
                 output.write(preferences.model_dump_json(indent=2) + "\n")
                 output.flush()
@@ -212,9 +213,7 @@ def _nodes(
         path_parts = (*prefix, label)
         path = PurePosixPath(*path_parts).as_posix()
         direct_file = next((row for row in branch_rows if len(row.parts) == len(path_parts)), None)
-        if direct_file is not None:
-            kind, children = "mailbox", []
-        elif _collapsible_single_message_folder(branch_rows, path_parts):
+        if direct_file is not None or _collapsible_single_message_folder(branch_rows, path_parts):
             kind, children = "mailbox", []
         else:
             kind = "folder"

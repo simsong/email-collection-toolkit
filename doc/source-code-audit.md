@@ -6,10 +6,11 @@ Date: 2026-08-25
 
 ## Scope
 
-This audit covers all 30 tracked Python files in `src/mailarchiver/` and
-`tests/`, the GUI JavaScript/HTML/CSS, the bundled Swift helper, and the
-Makefile in the main checkout. It excludes `.tmp/`, virtual environments, and
-generated archives. The review examined source immutability, MBOX recovery,
+At the audited 2026-08-25 revision, this snapshot covered the then-current 30
+tracked Python files in `src/mailarchiver/` and `tests/`, the GUI
+JavaScript/HTML/CSS, the bundled Swift helper, and the Makefile. It excludes
+`.tmp/`, virtual environments, and generated archives. The review examined
+source immutability, MBOX recovery,
 SQLite transactions and query plans, ClamAV lifecycle, resource cleanup,
 MIME/export handling, asynchronous UI state, CLI validation, failure
 atomicity, tests, and module-level documentation.
@@ -61,10 +62,11 @@ atomicity, tests, and module-level documentation.
    Binary Tika extraction remains installer-only.
 4. **Planned source adapters.** Gmail, live IMAP, Outlook PST/OST, Eudora, and
    offline IMAP cache adapters are design requirements, not current source.
-5. **Native UI/helper coverage.** JavaScript-to-Python bridge smoke testing is
-   manual/macOS-only beyond the existing service tests, and the Swift
-   Foundation Models helper requires eligible Apple hardware for an end-to-end
-   run.
+5. **Native UI/helper coverage at this revision.** JavaScript-to-Python bridge
+   smoke testing was manual/macOS-only beyond the existing service tests, and
+   the Swift Foundation Models helper required eligible Apple hardware for an
+   end-to-end run. See the [current repository audit](developer/ANALYSIS.md) for
+   later hosted-smoke status.
 
 The remaining items are architectural features rather than safe local cleanup;
 they should receive focused designs and acceptance fixtures before changes to

@@ -1,5 +1,11 @@
 <!-- Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved. -->
 
+<!-- BEGIN GENERATED pr-to-ready -->
+## pr-to-ready
+
+For `pr-to-ready`, `codex-to-complete`, or `codex-to-ready`, read and follow [the shared workflow](.agents/skills/pr-to-ready/SKILL.md). Apply the repository-specific rules below.
+<!-- END GENERATED pr-to-ready -->
+
 # AI contributor instructions
 
 ## Scope and source safety
@@ -53,6 +59,13 @@ the stated requirement and report any remaining gap.
 
 ## Tests and validation
 
+At the completion of every Codex turn in this repository, including discussion
+and documentation-only turns, run `make ruff` against the current final source.
+Ruff must pass with zero diagnostics; if it fails or cannot run, report that
+explicitly rather than claiming a clean handoff. Do not suppress rules or ignore
+failures to make a build pass. `make check` and `make dmg` must retain Ruff as a required
+prerequisite; Ruff complements rather than replaces tests and Pylint.
+
 Write only substantive tests that test a requirement or a demonstrated
 regression. No coverage-only tests and no mocks unless unavoidable.
 
@@ -86,8 +99,71 @@ verify that the PR head matches the pushed commit. Never leave work only on a
 GitHub non-`main` branch, including when a previously merged branch name is
 reused.
 
-Do not commit, push, open or modify pull requests, approve, merge, close
-issues, or change remote services unless the user explicitly requests it.
-When authorized, Codex GitHub activity uses `@simsong-codex`; signed commits use
-`Codex AI Assistant <simsong+codex@acm.org>` and the configured Codex GPG key.
-Verify identity and signature after committing.
+## Authorization and identity
+
+A request to perform **pr-to-ready** (including **codex-to-complete** or
+**codex-to-ready**)
+authorizes the commits, pushes, draft PR creation, review requests, review-thread
+replies, fixes, and final human-review request described below. Continue through
+these steps without repeatedly requesting permission. Otherwise, do not commit,
+push, or modify PRs without a user request. Do not approve or merge a
+PR, close an issue or superseded PR, or change remote services without explicit
+user authorization for that action.
+
+All Codex GitHub writes and browser actions use `@simsong-codex`, except
+that `@simsong` is authorized solely for requesting Copilot reviews when needed.
+Verify the CLI identity, SSH push identity, and browser login separately. Before committing, configure and verify author and committer as
+`Codex AI Assistant <simsong+codex@acm.org>` and verify the signing key belongs to
+that identity. Sign every Codex commit. Verify the result before pushing with
+`git log -1 --format='%G? %GS %an <%ae> %cn <%ce>'`. To correct identity on an
+existing commit, use `git commit --amend --reset-author -S`.
+
+## pr-to-ready project requirements
+
+Follow the shared workflow with these mail-archiver requirements:
+
+- Request and re-request Copilot review through `gh pr edit <number>
+  --add-reviewer '@copilot'`, authenticated as `simsong`. This personal-account
+  exception covers only Copilot review requests; restore `simsong-codex`
+  afterward, including on failure, for all other GitHub writes. Verify the
+  request through reviewer or timeline evidence, not command success alone.
+  Do not control the browser or post an `@copilot` comment to request review.
+  Unavailable authentication or a failed request is a reported blocker; keep
+  the PR draft.
+- Check current-head review, threads, and CI every ten minutes. Continue the
+  cycle through review fixes and re-review, using a quiet task heartbeat when
+  continuation across turns is needed and available; stop it on completion.
+- A documented review loop permits human handoff only when the same
+  substantive finding returns in two successive review rounds after an
+  evidence-backed fix or explanation, with no new actionable information.
+  Record threads, commits, evidence, and disagreement. Required CI and local
+  validation must still pass; missing reviews and valid unfixed defects remain
+  blockers. Mark ready, request review from and assign `simsong`, explicitly
+  stating that Copilot is not clear and identifying the disputed findings.
+  Never represent this exceptional handoff as a successful Copilot review.
+
+## Validation and cleanup
+
+Use Makefile targets for Ruff and Pylint linting, then ty and Pyright type
+analysis, then pytest. Keep these stages ordered in the aggregate check target,
+even under parallel make. Treat all diagnostics as failures; fix the underlying
+logic or precise types rather than broadly excluding files, disabling checks,
+or adding blanket ignores. Add focused third-party stubs only where needed.
+Update requirements, implementation documentation, and release notes when the
+corresponding behavior or developer workflow changes. Report skipped tests and
+external prerequisites separately from passing validation.
+
+After a branch is merged into `origin/main`, fetch and prune, prove its work is
+represented in the current main (ancestry, or explicit squash/rebase evidence),
+and verify the linked worktree has no modified or untracked files. Only then
+remove its linked worktree and delete its local branch. Preserve dirty,
+unmerged, or uncertain worktrees. A superseded PR closed during consolidation
+is not proof that its branch has reached main.
+
+## Website screenshots
+
+When the importing window changes, regenerate `website/static/images/importing-interface.png`
+with `make website-screenshots` and visually inspect the Importing page in the
+same PR. Changes to the search interface likewise require regeneration of
+`search-interface.png` and inspection of both the homepage and Searching page.
+Use only the purpose-made synthetic collection; never publish private mail.

@@ -1,5 +1,6 @@
 # Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved.
 
+mode: replace
 quoted_body_date:
   - >-
     ^[ \t>]*On\s+(?:[A-Za-z]+,\s+)?([A-Za-z]+\s+\d{1,2},\s+\d{4},\s+at\s+\d{1,2}:\d{2}(?::\d{2})?\s+(?:AM|PM))

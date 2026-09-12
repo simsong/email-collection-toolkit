@@ -5,7 +5,7 @@
 from __future__ import annotations
 
 import os
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Literal
 from uuid import uuid4
@@ -53,8 +53,8 @@ class IngestWorkerStatus(BaseModel):
 class IngestStatus(BaseModel):
     """Complete current or final state of one ingest process."""
 
-    format_id: Literal[STATUS_FORMAT] = STATUS_FORMAT
-    format_version: Literal[STATUS_VERSION] = STATUS_VERSION
+    format_id: Literal["tag:simson.net,2026:mailarchiver/ingest-status"] = STATUS_FORMAT
+    format_version: Literal[1] = STATUS_VERSION
     status_id: str = Field(pattern=r"^ingest-[A-Za-z0-9.-]+$")
     archive: str
     run_pk: int
@@ -86,19 +86,20 @@ class IngestStatus(BaseModel):
     counts: IngestCounts
     years: list[YearProgress]
     failure_detail: str | None = None
+    scan_policy: Literal["clamav", "not-scanned", "unknown"] = "unknown"
 
     @field_validator("started_at", "updated_at", "completed_at")
     @classmethod
     def require_aware_timestamp(cls, value: datetime | None) -> datetime | None:
         if value is not None and value.utcoffset() is None:
             raise ValueError("ingest status timestamps must include a timezone")
-        return None if value is None else value.astimezone(timezone.utc)
+        return None if value is None else value.astimezone(UTC)
 
     def effective(self, now: datetime | None = None) -> IngestStatus:
         """Classify an abandoned running snapshot without changing its file."""
         if self.state != "running":
             return self
-        checked_at = now or datetime.now(timezone.utc)
+        checked_at = now or datetime.now(UTC)
         if (checked_at - self.updated_at).total_seconds() <= STALE_AFTER_SECONDS:
             return self
         return self.model_copy(update={"state": "stale", "phase": "status heartbeat lost"})
@@ -119,7 +120,7 @@ def status_directory(archive: Path) -> Path:
 
 
 def new_status_id(started_at: datetime, run_pk: int, process_id: int) -> str:
-    timestamp = started_at.astimezone(timezone.utc).strftime("%Y%m%dT%H%M%S.%fZ")
+    timestamp = started_at.astimezone(UTC).strftime("%Y%m%dT%H%M%S.%fZ")
     return f"{STATUS_PREFIX}{timestamp}-run-{run_pk}-pid-{process_id}-{uuid4().hex[:8]}"
 
 

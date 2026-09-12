@@ -7,7 +7,6 @@ from __future__ import annotations
 import base64
 from pathlib import Path
 
-
 EICAR_PIECES = (
     b"X5O!P%@",
     b"AP[4\\PZX54(P^)",

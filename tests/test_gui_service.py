@@ -5,7 +5,6 @@
 from __future__ import annotations
 
 import base64
-from concurrent.futures import ThreadPoolExecutor
 import hashlib
 import json
 import mailbox
@@ -13,14 +12,25 @@ import sqlite3
 import sys
 import time
 import zipfile
+from webview.menu import MenuAction
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import pytest
 from pydantic import ValidationError
 
+from mailarchiver.application import ApplicationController, ApplicationPreferencesStore
 from mailarchiver.bagit import initialize_bag
 from mailarchiver.catalog import address_pk, create_catalog, create_search
 from mailarchiver.configuration import application_configuration, load_configuration
+from mailarchiver.gui_app import (
+    GuiApi,
+    PyWebViewApplication,
+    application_icon_path,
+    application_menu,
+    application_metadata,
+    external_link_destination,
+)
 from mailarchiver.gui_service import (
     LEGACY_X_HTML_PART_ID,
     RAW_PART_ID,
@@ -30,28 +40,180 @@ from mailarchiver.gui_service import (
     is_risky,
     message_previews,
     render_part,
-    searchable_message_count,
     search_count,
     search_page,
     search_suggestions,
+    searchable_message_count,
     write_attachment,
     write_message,
     write_messages_zip,
 )
 from mailarchiver.gui_app import (
-    GuiApi,
-    application_icon_path,
-    application_menu,
-    application_metadata,
-    external_link_destination,
+    archive_destination,
+    dialog_paths,
+    owner_rules_text,
+    DocumentOptionsApi,
 )
+from mailarchiver.document_options import DocumentOptions, read_owner_names, source_owner_names
+from mailarchiver.owner_rules import OwnerRules
+from mailarchiver.archive_config import (
+    ArchiveConfig, config_path, import_directory, load_archive_config,
+    remember_import_directory, save_archive_config,
+)
+from mailarchiver.writer_lock import ArchiveBusyError, WriterLease
 from mailarchiver.mailsearch import RECENT_FTS_SCAN_LIMIT, _search_statement, parse_query
 from mailarchiver.layout import mbox_directory
-from mailarchiver.mailbox_tree import FilterSet, FilterSetStore, MailboxSelection, MailboxTreeNode, mailbox_tree
-from mailarchiver.plugin_api import SourceContainerMetadata, SourceRelationship
+from mailarchiver.mailbox_tree import (
+    FilterSet,
+    FilterSetStore,
+    MailboxSelection,
+    MailboxTreeNode,
+    mailbox_tree,
+)
 from mailarchiver.mbox import add_message
+from mailarchiver.plugin_api import SourceContainerMetadata, SourceRelationship
 from mailarchiver.search import index_message
 from mailarchiver.standalone_verify import semantic_bytes
+
+
+def test_owner_rules_defaults_and_document_edits(tmp_path: Path) -> None:
+    """Owner rules requirement: YAML replaces legacy defaults without changing sources."""
+    archive = tmp_path / "archive"
+    archive.mkdir()
+    source = tmp_path / "source"
+    source.mkdir()
+    names = source / "owner-names.txt"
+    original = "  José  \r\n\n jose@example.org \n# ignored\n"
+    names.write_bytes(original.encode())
+    assert source_owner_names([source / "message.eml"]) == []
+    assert source_owner_names([source, source]) == ["jose@example.org", "josé"]
+    store = DocumentOptions(archive)
+    assert store.defaults([source]).include == ["jose@example.org", "josé"]
+    lease = WriterLease.acquire(archive, "fixture", "test", "test", "test")
+    try:
+        rules = OwnerRules(include=["*simson*", "slg"], exclude=["*david*"])
+        state = store.save(rules, lease)
+        assert store.defaults([source]) == rules
+        original_config = config_path(archive).stat().st_mtime_ns
+        store.save(rules, lease)
+        assert config_path(archive).stat().st_mtime_ns == original_config
+        store.record_import(rules, lease)
+        assert not store.state().changed_since_import
+        changed = store.save(OwnerRules(include=["slg"]), lease, state.revision)
+        assert changed.changed_since_import
+        with pytest.raises(ValueError, match="another window"):
+            store.save(rules, lease, state.revision)
+        assert DocumentOptions(archive).state().changed_since_import
+        store.record_import(store.defaults(), lease)
+        assert not store.state().changed_since_import
+        # An intentionally empty saved list must not resurrect source defaults.
+        store.save(OwnerRules(), lease)
+        assert store.defaults([source]) == OwnerRules()
+    finally:
+        lease.release()
+    with pytest.raises(ValueError, match="active writer lease"):
+        store.save(OwnerRules(), lease)
+    assert names.read_bytes() == original.encode()
+
+
+def test_archive_config_remembers_last_import_directory(tmp_path: Path) -> None:
+    """The next import starts at the prior source directory, not the home directory."""
+    archive = tmp_path / "archive"
+    archive.mkdir()
+    source = tmp_path / "mail" / "nested"
+    source.mkdir(parents=True)
+    message = source / "mail.eml"
+    message.write_text("From: test@example.org\n\nbody\n", encoding="utf-8")
+    assert import_directory(archive) == archive.parent
+    assert remember_import_directory(archive, [source]) == source.absolute()
+    assert load_archive_config(archive).last_import_directory == source.absolute()
+    assert import_directory(archive) == source
+    assert config_path(archive).read_text(encoding="utf-8").startswith("version: 2\n")
+    save_archive_config(archive, ArchiveConfig(last_import_directory=message))
+    assert import_directory(archive) == archive.parent
+    config_path(archive).write_text("version: 1\n", encoding="utf-8")
+    rules = OwnerRules(include=["slg"], exclude=["*david*"])
+    config = load_archive_config(archive)
+    config.owner = rules
+    save_archive_config(archive, config)
+    remember_import_directory(archive, [source])
+    assert load_archive_config(archive).owner == rules
+    broken = "last_import_directory: [broken\n"
+    config_path(archive).write_text(broken, encoding="utf-8")
+    with pytest.raises(ValueError, match="invalid archive configuration"):
+        remember_import_directory(archive, [source])
+    assert config_path(archive).read_text(encoding="utf-8") == broken
+    with pytest.raises(ValueError, match="invalid archive configuration"):
+        load_archive_config(archive)
+
+
+def test_document_owner_controls_are_bound_and_locked(tmp_path: Path) -> None:
+    """Options split, sort, deduplicate and delete only in their bound document."""
+    controller = ApplicationController(ApplicationPreferencesStore(tmp_path / "preferences.json"))
+    document = controller.create_document(tmp_path / "one.mailarchive")
+    assert document.path is not None
+    other = controller.create_document(tmp_path / "two.mailarchive")
+    assert other.path is not None
+    api = DocumentOptionsApi(document)
+    state = api.status()
+    updated = api.update("*Simson*, SLG\nslg", "*David*", state["revision"])
+    assert updated["include"] == ["*simson*", "slg"]
+    assert updated["exclude"] == ["*david*"]
+    lease = WriterLease.acquire(document.path, document.descriptor.identity, "ingest", "test", "test")
+    try:
+        with pytest.raises(ArchiveBusyError):
+            api.update("wrong", "", updated["revision"])
+    finally:
+        lease.release()
+    deleted = api.update("slg", "", updated["revision"])
+    assert deleted["include"] == ["slg"]
+    assert deleted["exclude"] == []
+    with pytest.raises(ValueError, match="another window"):
+        api.update("wrong", "", updated["revision"])
+    assert read_owner_names(other.path / "owner-names.txt") == []
+    assert not config_path(other.path).exists()
+    assert api.update("", "", deleted["revision"])["include"] == []
+
+
+@pytest.mark.parametrize("value", ["", " \n\t", "# only comments", "Name\x00"])
+def test_owner_names_reject_invalid_entry_without_writes(tmp_path: Path, value: str) -> None:
+    """The owner editor must not save empty or invalid aliases."""
+    with pytest.raises(ValueError):
+        owner_rules_text(value, "")
+    assert not (tmp_path / "owner-names.txt").exists()
+
+
+def test_invalid_owner_names_are_not_silently_replaced(tmp_path: Path) -> None:
+    """Existing invalid settings produce errors, not guessed aliases or replacement."""
+    archive = tmp_path / "archive"
+    archive.mkdir()
+    path = archive / "owner-names.txt"
+    for content in (b"bad\x00name", b"\xff"):
+        path.write_bytes(content)
+        with pytest.raises(ValueError):
+            DocumentOptions(archive).state()
+        assert path.read_bytes() == content
+
+@pytest.mark.parametrize("as_sequence", [False, True])
+def test_native_save_default_archive_path(tmp_path: Path, as_sequence: bool) -> None:
+    """New must accept native SAVE strings and sequences without truncating paths."""
+    selected = str(tmp_path / "Untitled")
+    destination = archive_destination((selected,) if as_sequence else selected)
+    controller = ApplicationController(ApplicationPreferencesStore(tmp_path / "preferences.json"))
+    document = controller.create_document(destination)
+    assert document.path is not None
+    assert document.path == tmp_path / "Untitled.mailarchive"
+    assert (document.path / "archive.sqlite3").is_file()
+    assert (document.path / "search.sqlite3").is_file()
+
+
+def test_native_dialog_paths_preserve_unicode_and_reject_root() -> None:
+    """Native paths remain intact; invalid root destinations fail before archive writes."""
+    selected = "/Users/example/資料/Untitled.mailarchive"
+    assert dialog_paths(selected) == (Path(selected),)
+    assert archive_destination([selected]) == Path(selected)
+    with pytest.raises(ValueError, match="filesystem root"):
+        archive_destination("/")
 
 
 SIMPLE_MESSAGE = (
@@ -131,6 +293,7 @@ def make_gui_archive(
                 "VALUES (?, ?, ?, ?, ?, 'date', 'Archive')",
                 (message_id, hashlib.sha256(raw).hexdigest(), sender, subject, timestamp),
             )
+            assert cursor.lastrowid is not None
             message_pks.append(int(cursor.lastrowid))
             catalog.execute(
                 "INSERT INTO recipients(message_pk, address_pk, role) VALUES (?, ?, 'to')",
@@ -203,10 +366,10 @@ def test_gui_highlight_configuration_is_packaged_and_rejects_css_injection(tmp_p
     assert application_configuration().gui.search_highlight_background == "#fff59d"
     invalid = tmp_path / "configuration.yaml"
     invalid.write_text(
-        "version: 1\ngui:\n  search_highlight_background: 'yellow; } body { display: none'\n",
+        "version: 1\nmode: replace\ngui:\n  search_highlight_background: 'yellow; } body { display: none'\n",
         encoding="utf-8",
     )
-    with pytest.raises(ValidationError):
+    with pytest.raises(ValidationError, match="gui.search_highlight_background"):
         load_configuration(invalid)
 
 
@@ -237,16 +400,17 @@ def test_gui_count_and_search_cover_the_complete_archive_time_span(tmp_path: Pat
     assert not results.has_more
 
 
-def test_gui_unlimited_remainder_continues_the_same_sorted_result_set(tmp_path: Path) -> None:
+@pytest.mark.parametrize("query", ["sender", "To:recipient", "To:recipient sender"])
+def test_gui_unlimited_remainder_continues_the_same_sorted_result_set(tmp_path: Path, query: str) -> None:
     """Requirement: a background continuation starts after the immediate result prefix without duplicates."""
     archive = make_gui_archive(tmp_path)
 
-    summary = search_count(archive, "sender", immediate_limit=1)
+    summary = search_count(archive, query, immediate_limit=1)
     first = search_page(
-        archive, "sender", limit=1, sort_by="subject", direction="ascending",
+        archive, query, limit=1, sort_by="subject", direction="ascending",
     )
     remainder = search_page(
-        archive, "sender", offset=1, limit=0, sort_by="subject", direction="ascending"
+        archive, query, offset=1, limit=0, sort_by="subject", direction="ascending"
     )
 
     assert summary.total is None
@@ -258,11 +422,11 @@ def test_gui_unlimited_remainder_continues_the_same_sorted_result_set(tmp_path: 
 
 
 def test_gui_application_metadata_names_the_product() -> None:
-    """Requirement: native menus and the About panel identify Mail Archiver, not Python."""
+    """Requirement: native menus and the About panel identify Email Collection Toolkit, not Python."""
     metadata = application_metadata()
 
-    assert metadata.name == "Mail Archiver"
-    assert metadata.version == "0.0.0"
+    assert metadata.name == "Email Collection Toolkit"
+    assert metadata.version == "0.1.0.dev1"
     assert metadata.copyright == "Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved."
 
 
@@ -274,16 +438,43 @@ def test_gui_application_uses_the_source_controlled_rainbow_icon() -> None:
     assert icon.is_file()
 
 
-def test_gui_windows_menu_opens_the_ingest_browser(tmp_path: Path) -> None:
-    """Requirement: the native Windows menu exposes the independent ingest browser."""
-    api = GuiApi(None, e2e_directory=tmp_path)
+def test_native_menus_route_through_the_application_controller(tmp_path: Path) -> None:
+    """Requirement: native menu callbacks resolve active state instead of capturing one GuiApi."""
+    controller = ApplicationController(ApplicationPreferencesStore(tmp_path / "preferences.json"))
+    application = PyWebViewApplication(controller)
+
+    menus = application_menu(application)
+
+    assert [menu.title for menu in menus] == ["File", "Window"]
+    assert all(isinstance(item, MenuAction) for menu in menus for item in menu.items)
+    assert [item.title for item in menus[0].items if isinstance(item, MenuAction)] == [
+        "New", "Open…", "Import…", "Document Options…", "Close",
+    ]
+    assert [item.title for item in menus[1].items if isinstance(item, MenuAction)] == ["New Search Window", "Ingests"]
+    for action in menus[1].items:
+        assert isinstance(action, MenuAction)
+        assert not action.function()
+
+
+def test_gui_api_records_independent_search_window_state(tmp_path: Path) -> None:
+    """Requirement: each GUI bridge records search and selection state on its search window."""
+    archive = make_gui_archive(tmp_path)
+    controller = ApplicationController(ApplicationPreferencesStore(tmp_path / "preferences.json"))
+    document = controller.open_document(archive)
+    assert document.path is not None
+    session = controller.new_search_window(document)
+    api = GuiApi(archive, document=document, search_window=session)
     try:
-        menus = application_menu(api)
-        assert [menu.title for menu in menus] == ["Windows"]
-        assert [item.title for item in menus[0].items] == ["Ingest"]
-        assert menus[0].items[0].function()
+        page = api.search("report", sort_by="subject", direction="ascending")
+        api.message(page["results"][0]["message_pk"])
+        assert api.search("from:")["error"] == "from: requires a value"
     finally:
         api.close()
+
+    assert session.query == "report"
+    assert session.sort_by == "subject"
+    assert session.sort_direction == "ascending"
+    assert session.selected_message == 1
 
 
 def test_gui_copy_source_path_reports_missing_macos_bridge(
@@ -341,8 +532,8 @@ def test_gui_suggestions_use_trigram_substrings_and_deduplicated_message_counts(
         sender = address_pk(catalog, "beth@example.org")
         for number, subject in enumerate(("Flight for ELISABETH", "Ordinary subject"), 1):
             raw = "".join((
-                f"Message-ID: <suggestion-{number}@example>\n"
-                "From: Beth Rosenberg <beth@example.org>\n",
+                (f"Message-ID: <suggestion-{number}@example>\n"
+                "From: Beth Rosenberg <beth@example.org>\n"),
                 "Cc: Beth Rosenberg <beth@example.org>\n" if number == 1 else "",
                 f"Subject: {subject}\n\nbody\n",
             )).encode()
@@ -526,7 +717,9 @@ def test_gui_displays_archive_and_source_locations(tmp_path: Path) -> None:
     assert view.source_locations[0].origin == "Local source"
     assert not view.source_locations[0].preferred
     assert view.source_locations[0].copy_path == "/Volumes/Fixture/mail/simple.eml"
-    assert describe_message(archive, 2).archive_path.startswith("data/mbox/2024-Archive1.mbox?offset=")
+    archive_path = describe_message(archive, 2).archive_path
+    assert archive_path is not None
+    assert archive_path.startswith("data/mbox/2024-Archive1.mbox?offset=")
 
     database = sqlite3.connect(archive / "archive.sqlite3")
     try:
@@ -666,11 +859,24 @@ def test_gui_concurrent_drag_exports_have_distinct_temporary_paths(tmp_path: Pat
     assert destination.read_bytes() == MULTIPART_MESSAGE
 
 
-def test_gui_flags_executable_attachment_types() -> None:
-    """Requirement: opening executable-looking attachments requires explicit confirmation."""
-    assert is_risky("installer.dmg", "application/octet-stream")
-    assert is_risky("script", "application/x-sh")
-    assert not is_risky("report.pdf", "application/pdf")
+@pytest.mark.parametrize(("filename", "content_type", "risky"), [
+    ("installer.dmg", "application/octet-stream", True),
+    ("archive.tar", "application/x-tar", True),
+    ("archive.gz", "application/gzip", True),
+    ("archive.7z", "application/x-7z-compressed", True),
+    ("archive.rar", "application/vnd.rar", True),
+    ("document.docm", "application/vnd.ms-word.document.macroenabled.12", True),
+    ("results.csv", "text/csv", True),
+    ("script", "application/x-sh", True),
+    ("picture.png", "application/octet-stream", True),
+    ("document.pdf.exe", "application/pdf", True),
+    ("report.pdf", "application/pdf", False),
+    ("picture.PNG", "image/png", False),
+    ("notes.txt", "text/plain", False),
+])
+def test_gui_attachment_confirmation(filename: str, content_type: str, risky: bool) -> None:
+    """Requirement: only a matching inert MIME/suffix pair opens without confirmation."""
+    assert is_risky(filename, content_type) is risky
 
 
 def test_gui_external_links_require_a_safe_explicit_destination(tmp_path: Path) -> None:
@@ -789,4 +995,28 @@ def test_original_mailbox_count_and_search_queries_use_provenance_indexes(tmp_pa
 
     assert any("source_files_hierarchy_volume" in detail for *_prefix, detail in count_plan)
     assert any("observations_source_file_offset" in detail for *_prefix, detail in count_plan)
-    assert any("observations_message_pk" in detail for *_prefix, detail in search_plan)
+    assert any("SEARCH source_files" in detail and "source_files_hierarchy_volume" in detail
+               for *_prefix, detail in search_plan)
+    assert any("SEARCH observations" in detail and "observations_source_file_offset" in detail
+               for *_prefix, detail in search_plan)
+    assert not any("CORRELATED" in detail for *_prefix, detail in search_plan)
+
+
+@pytest.mark.parametrize("query, error", [
+    ("from:", "from: requires a value"),
+    ("To:", "to: requires a value"),
+    ('subject:"unfinished', "search has an unclosed quote"),
+    ("date:yesterday", "date: requires a YYYY-MM-DD date"),
+])
+def test_gui_search_syntax_errors_are_results(tmp_path: Path, query: str, error: str) -> None:
+    """Requirement: invalid GUI queries return feedback without a bridge exception."""
+    archive = make_gui_archive(tmp_path)
+    api = GuiApi(archive)
+    try:
+        result = api.search(query)
+        assert result["error"] == error
+        assert result["results"] == []
+        assert result["has_more"] is False
+        assert api.search("report")["results"]
+    finally:
+        api.close()

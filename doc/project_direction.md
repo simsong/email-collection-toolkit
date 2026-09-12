@@ -539,7 +539,8 @@ The project is succeeding when:
 * search works across decades without becoming canonical state;
 * a redacted release contains no known leakage and links cryptographically to
   its source transformations;
-* a Mailbag export validates independently and opens in other tools;
+* the native BagIt/Mailbag archive validates independently and its MBOX files
+  open in other tools;
 * ePADD can consume a selected corpus without a bespoke manual conversion; and
 * a research report or CMIF/network export can be regenerated from its corpus,
   schema, model, and policy versions.

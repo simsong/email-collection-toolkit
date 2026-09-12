@@ -1,12 +1,61 @@
 # Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved.
 
-.PHONY: benchmark-name-resolution build-sdist check copyright-check data-quality-audit data-quality-babyl-audit data-quality-summary extract-pdf-mail fixture-bagit fixture-e2e gui gui-smoke website-build-check website-check release-tag-check
-.PHONY: install-linux install-mac install-test-browser install-tika ocr-analyze ocr-experiment ocr-inventory ocr-profile ocr-run pylint run runtime-license-bundle runtime-license-check search summary-smoke test test-bagit test-data-quality
-.PHONY: test-e2e test-encoding test-gui test-headers test-mailsearch test-native-gui test-native-html-find test-pdf-mail test-plugins test-progress test-provenance test-refresh-index test-tika test-website validation-aws-start validation-aws-start-all
+.PHONY: auth-detect-live benchmark-name-resolution check compare-apple-mail data-quality-audit data-quality-babyl-audit data-quality-summary extract-pdf-mail fixture-bagit fixture-e2e gui gui-smoke website-build-check website-check release-tag-check
+.PHONY: install-linux install-mac install-test-browser install-tika ocr-analyze ocr-experiment ocr-inventory ocr-profile ocr-run pylint run search summary-smoke test test-bagit test-data-quality
+.PHONY: test-application test-e2e test-encoding test-gui test-headers test-mailsearch test-native-gui test-native-html-find test-pdf-mail test-plugins test-progress test-provenance test-refresh-index test-tika test-website validation-aws-start validation-aws-start-all
+
+.PHONY: test-apple-mail-compare test-auth
 .PHONY: validation-fetch validation-list validation-prepare validation-run validation-run-all validation-sam-build validation-sam-deploy validation-sam-validate validation-test verify
 
+.PHONY: addressbook-export test-addressbook-export
+
+addressbook-export:
+	uv run --locked python dev/addressbook-exporter.py $(ARGS)
+
+test-addressbook-export: ruff
+	uv run --locked pylint dev/addressbook-exporter.py tests/test_addressbook_exporter.py
+	uv run --locked ty check dev/addressbook-exporter.py tests/test_addressbook_exporter.py --error-on-warning
+	uv run --locked pyright dev/addressbook-exporter.py tests/test_addressbook_exporter.py --warnings
+	uv run --locked pytest -q tests/test_addressbook_exporter.py
+
+.PHONY: test-copyright build-sdist copyright-check runtime-license-check runtime-license-bundle
+DIST_DIR ?= $(CURDIR)/dist
+
+build-sdist: ruff copyright-check runtime-license-check
+	uv build --sdist --out-dir "$(DIST_DIR)"
+
+test-copyright:
+	uv run --locked pytest -q tests/test_copyright.py
+
+copyright-check:
+	uv run python scripts/check_copyright.py
+
+runtime-license-check:
+	uv run python scripts/check_runtime_licenses.py
+
+runtime-license-bundle:
+	@test -n "$(LICENSE_OUTPUT)" || { echo 'usage: make runtime-license-bundle LICENSE_OUTPUT=/path/to/licenses'; exit 2; }
+	uv run python scripts/check_runtime_licenses.py --output "$(LICENSE_OUTPUT)"
 
 TIKA_VERSION ?= 4.0.0
+.PHONY: sync-dependencies test-reconciliation distribution-check name-matcher-observations h3-ambiguous-review
+
+sync-dependencies:
+	uv sync
+
+test-reconciliation:
+	uv run pytest -q tests/test_contacts.py tests/test_contact_filtering.py tests/test_name_matcher_research.py tests/test_apple_mail_compare.py tests/test_scanner.py
+
+distribution-check:
+	uv run python scripts/check_distribution.py
+
+name-matcher-observations:
+	@test -n "$(ARCHIVE)" -a -n "$(OUTPUT)" || { echo 'usage: make name-matcher-observations ARCHIVE=/path/to/archive OUTPUT=/path/to/evidence.sqlite3'; exit 2; }
+	uv run python -m scripts.name_matcher.build_observations --archive "$(ARCHIVE)" --output "$(OUTPUT)" $(ARGS)
+
+h3-ambiguous-review:
+	uv run mailarchiver-h3-review $(ARGS)
+
 TIKA_DIR ?= $(CURDIR)/.tools/tika/$(TIKA_VERSION)
 TIKA_JAR := $(TIKA_DIR)/tika-app-$(TIKA_VERSION).jar
 TIKA_DOWNLOAD_DIR ?= $(CURDIR)/.tools/tika/downloads
@@ -24,22 +73,68 @@ OCR_WORKERS ?= 4
 OCR_ENGINES ?= native,ocrmypdf,tesseract
 OCR_INVENTORY_ARGS ?=
 OCR_RUN_ARGS ?=
-DIST_DIR ?= $(CURDIR)/dist
 
-build-sdist: copyright-check runtime-license-check
-	uv build --sdist --out-dir "$(DIST_DIR)"
+.PHONY: lint ruff types ty pyright
+# Recursive recipes preserve stage ordering even with make -j.
+check:
+	$(MAKE) lint
+	$(MAKE) types
+	$(MAKE) copyright-check
+	$(MAKE) runtime-license-check
+	$(MAKE) test
+	$(MAKE) test-e2e
+	$(MAKE) website-check
 
-check: copyright-check runtime-license-check test test-e2e website-check
+lint:
+	$(MAKE) ruff
+	$(MAKE) pylint
 
-copyright-check:
-	uv run python scripts/check_copyright.py
+ruff:
+	git ls-files -z --cached --others --exclude-standard -- '*.py' '*.pyi' | \
+		xargs -0 uv run --locked ruff check --config pyproject.toml
 
-runtime-license-check:
-	uv run python scripts/check_runtime_licenses.py
+types:
+	$(MAKE) ty
+	$(MAKE) pyright
 
-runtime-license-bundle:
-	@test -n "$(LICENSE_OUTPUT)" || { echo 'usage: make runtime-license-bundle LICENSE_OUTPUT=/path/to/licenses'; exit 2; }
-	uv run python scripts/check_runtime_licenses.py --output "$(LICENSE_OUTPUT)"
+ty:
+	uv run --locked ty check --error-on-warning
+
+pyright:
+	uv run --locked pyright --warnings
+
+.PHONY: syntax-check
+syntax-check:
+	uv run python -m compileall -q src scripts tests e2e_tests
+
+.PHONY: dmg test-dmg preview-dmg self-test self-test-gui test-packaging
+dmg: ruff syntax-check
+	uv run --group packaging python scripts/build_macos.py $(ARGS)
+
+test-dmg:
+	@test -n "$(DMG)" || { echo 'usage: make test-dmg DMG=/path/to/Email-Collection-Toolkit.dmg'; exit 2; }
+	uv run --group packaging python scripts/build_macos.py --test-dmg "$(DMG)"
+
+preview-dmg: ruff
+	@test -n "$(DMG)" || { echo 'usage: make preview-dmg DMG=/path/to/Email-Collection-Toolkit.dmg'; exit 2; }
+	uv run --group packaging python scripts/build_macos.py --preview-dmg "$(DMG)"
+
+self-test:
+	uv run python scripts/desktop_entry.py --self-test $(ARGS)
+
+self-test-gui:
+	uv run mailsearch-gui --self-test-gui $(ARGS)
+
+test-packaging:
+	uv run pytest -q tests/test_packaging.py
+
+auth-detect-live:
+	uv run mailarchiver-auth --detect-only simsong@gmail.com
+	uv run mailarchiver-auth --detect-only simsong@basistech.com
+	uv run mailarchiver-auth --detect-only sgarfinkel@fas.harvard.edu
+
+compare-apple-mail:
+	uv run mailarchiver-compare-apple-mail --apple-mail "$(HOME)/Library/Mail" --archive "$(HOME)/mail-archive" $(ARGS)
 
 data-quality-audit:
 	@test -n "$(ARCHIVE)" || { echo 'usage: make data-quality-audit ARCHIVE=/path/to/mailbag EARLY_SOURCE=/path/to/source'; exit 2; }
@@ -71,7 +166,7 @@ extract-pdf-mail:
 	uv run extract-pdf-mail $(ARGS)
 
 pylint:
-	uv run pylint src tests e2e_tests scripts
+	uv run --locked pylint src tests e2e_tests scripts
 
 run:
 	uv run mailarchiver $(ARGS)
@@ -91,18 +186,48 @@ gui:
 
 gui-smoke: test-native-gui
 
+.PHONY: test-native-application
+test-native-application:
+	MAILARCHIVER_NATIVE_APPLICATION_E2E=1 uv run pytest -q e2e_tests/test_ingest_verify.py::test_native_application_lifecycle
+
+.PHONY: check-archive-open
+check-archive-open:
+	@test -n "$(ARCHIVE)" || { echo 'usage: make check-archive-open ARCHIVE=/path/to/archive'; exit 2; }
+	uv run python -c 'import sys; from pathlib import Path; from mailarchiver.application import validate_archive; print(validate_archive(Path(sys.argv[1]))[0])' "$(ARCHIVE)"
+
 website-check:
 	uv run python scripts/check_website.py
+
+.PHONY: website-preview
+WEBSITE_PREVIEW_PORT ?= 1111
+website-preview:
+	zola --root website serve --interface 127.0.0.1 --port $(WEBSITE_PREVIEW_PORT) --output-dir "$(CURDIR)/.tmp/website-preview" --force
 
 website-build-check: website-check
 	zola --root website build --output-dir "$(CURDIR)/.tmp/website-check" --force
 
 release-tag-check:
 	@test -n "$(GITHUB_REF_NAME)" || { echo 'usage: make release-tag-check GITHUB_REF_NAME=v1.2.3'; exit 2; }
-	uv run python scripts/release_tag.py --tag "$(GITHUB_REF_NAME)"
+	uv run --no-project --python '>=3.12' python scripts/release_tag.py --tag "$(GITHUB_REF_NAME)" $(ARGS)
 
 test:
 	uv run pytest -q
+
+.PHONY: test-corpus-import update-corpus-expectations
+test-corpus-import:
+	uv run pytest -q tests/test_corpus_import.py
+
+update-corpus-expectations:
+	uv run pytest -q -s tests/test_corpus_import.py --update-corpus-expectations
+
+test-application:
+	uv run pytest -q tests/test_application.py tests/test_writer_lock.py tests/test_loopback.py
+
+test-apple-mail-compare:
+	uv run pytest -q tests/test_apple_mail_compare.py
+
+test-auth:
+	uv run pytest -q tests/test_auth.py
 
 test-e2e:
 	uv run pytest -q --browser chromium --tracing=retain-on-failure e2e_tests
@@ -131,7 +256,7 @@ test-mailsearch:
 	uv run pytest -q tests/test_mailsearch.py
 
 test-name-resolution:
-	uv run pytest -q tests/test_name_resolution_benchmark.py
+	uv run pytest -q tests/test_name_resolution_benchmark.py tests/test_name_matcher_research.py
 
 test-gui:
 	uv run pytest -q tests/test_gui_service.py
@@ -153,6 +278,10 @@ test-tika:
 
 test-website:
 	uv run pytest -q tests/test_website_scripts.py
+
+.PHONY: test-website-navigation
+test-website-navigation:
+	uv run pytest -q --browser chromium e2e_tests/test_website_navigation.py
 
 test-plugins:
 	uv run pytest -q tests/test_plugin_loader.py tests/test_source_integrity.py tests/test_archive_integrity.py
@@ -250,3 +379,31 @@ ocr-run:
 	uv run python scripts/ocr_experiment.py run --output "$(OCR_OUTPUT)" --engines "$(OCR_ENGINES)" --workers "$(OCR_WORKERS)" $(OCR_RUN_ARGS)
 
 ocr-experiment: ocr-inventory ocr-run
+
+.PHONY: test-writer-lock
+test-writer-lock:
+	uv run pytest -q tests/test_writer_lock.py
+
+.PHONY: website-icons
+website-icons:
+	uv run python -m scripts.render_website_icons
+
+.PHONY: website-screenshots
+website-screenshots:
+	uv run --group dev python -m scripts.website_screenshots
+
+.PHONY: website-gmail-illustrations
+website-gmail-illustrations:
+	uv run --group dev python -m scripts.gmail_setup_illustrations
+
+.PHONY: test-envelopes
+test-envelopes:
+	uv run pytest -q tests/test_envelopes.py tests/test_sources.py tests/test_publication.py tests/test_standalone_verify.py
+
+.PHONY: test-file-drag
+test-file-drag:
+	uv run --locked pytest -q tests/test_file_drag.py
+
+.PHONY: test-owner-rules
+test-owner-rules: ruff
+	uv run pytest -q tests/test_owner_rules.py tests/test_gui_service.py tests/test_application.py

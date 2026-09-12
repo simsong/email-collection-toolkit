@@ -21,13 +21,13 @@ from mailarchiver.sources import (
     emlx_bytes,
     local_hierarchy_path,
     mailbox_hierarchy_parsers,
-    register_mailbox_hierarchy_parser,
     register_file_parser,
+    register_mailbox_hierarchy_parser,
     source_files,
     source_inventory,
     source_messages,
-    unregister_mailbox_hierarchy_parser,
     unregister_file_parser,
+    unregister_mailbox_hierarchy_parser,
 )
 
 
@@ -104,6 +104,10 @@ def test_source_inventory_totals_only_recognized_message_files(tmp_path: Path) -
     mbox = source / "mailbox"
     mbox.write_bytes(b"From sender@example Fri Feb  2 00:00:00 2024\nmessage\n")
     (source / "ignored.plist").write_bytes(b"not mail" * 100)
+    (source / "owner-names.txt").write_text("owner@example.org\n", encoding="utf-8")
+    nested = source / "nested"
+    nested.mkdir()
+    (nested / "owner-names.txt").write_text("nested-owner@example.org\n", encoding="utf-8")
     updates: list[tuple[int, int]] = []
     skipped: list[tuple[Path, str]] = []
 
@@ -115,8 +119,11 @@ def test_source_inventory_totals_only_recognized_message_files(tmp_path: Path) -
 
     assert inventory.file_count == 2
     assert inventory.byte_count == eml.stat().st_size + mbox.stat().st_size
-    assert inventory.skipped_file_count == 1
-    assert skipped == [(source / "ignored.plist", "no file parser recognized it")]
+    assert inventory.skipped_file_count == 2
+    assert skipped == [
+        (source / "ignored.plist", "no file parser recognized it"),
+        (nested / "owner-names.txt", "no file parser recognized it"),
+    ]
     assert updates[-1] == (inventory.file_count, inventory.byte_count)
 
 
@@ -379,6 +386,7 @@ def test_mbox_parser_excludes_mbcp_metadata_and_unwraps_xxx_records(tmp_path: Pa
     assert messages[0].exclusion_reason == "Eudora MBCP metadata stub"
     assert messages[1].exclusion_reason is None
     assert messages[1].raw == nested
+    assert messages[1].mbox_envelope == b"From actual@example.net Thu Feb  1 12:00:00 2024\n"
 
 
 def test_file_parser_registry_accepts_a_real_extension(tmp_path: Path) -> None:
@@ -493,15 +501,26 @@ def test_unterminated_empty_rmail_babyl_container_is_rejected(tmp_path: Path) ->
         list(plugin.messages(container, None))
 
 
-def test_partial_apple_mail_message_is_rejected(tmp_path: Path) -> None:
+@pytest.mark.parametrize("empty", [False, True])
+def test_partial_apple_mail_message_is_rejected(tmp_path: Path, empty: bool) -> None:
     """Requirement: detached Apple Mail attachment bytes must not be silently omitted."""
     path = tmp_path / "V10" / "account" / "Inbox.mbox" / "Data" / "Messages" / "7.partial.emlx"
     path.parent.mkdir(parents=True)
     raw = b"Message-ID: <partial@example>\nDate: Thu, 1 Feb 2024 12:00:00 +0000\n\nbody without attachment\n"
-    path.write_bytes(str(len(raw)).encode() + b"\n" + raw)
+    content = b"" if empty else str(len(raw)).encode() + b"\n" + raw
+    path.write_bytes(content)
 
     with pytest.raises(IncompleteAppleMailMessageError, match="omits detached attachment bytes"):
-        list(source_files(tmp_path))
+        list(source_files(path))
+
+    plugin = load_plugins().source("file-folder").implementation
+    discovered = list(plugin.discover(SourceSpec(locator=str(path.parent))))
+    assert len(discovered) == 1
+    skipped = discovered[0]
+    assert isinstance(skipped, SkippedInput)
+    assert skipped.reason_code == "incomplete-apple-mail-message"
+    assert skipped.source.display_name == str(path.resolve())
+    assert path.read_bytes() == content
 
 
 def test_missing_source_is_not_silently_empty(tmp_path: Path) -> None:

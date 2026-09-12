@@ -10,8 +10,14 @@ from pathlib import Path
 
 
 NOTICE = "Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved."
-EXCLUDED_FILES = frozenset({"owner-names.txt", "uv.lock", "website/data/releases.toml"})
+EXCLUDED_FILES = frozenset({
+    "owner-names.txt", "uv.lock", "website/data/releases.toml",
+    "website/static/images/hands-typing.svg",  # Upstream CC-BY-SA artwork; retain original bytes.
+    "CLAUDE.md", ".github/copilot-instructions.md",  # Generated shared workflow wrappers.
+})
 EXCLUDED_PREFIXES = (
+    ".agents/skills/",
+    ".claude/skills/",
     "doc/images/",
     "e2e_tests/data/",
     "gui/vendor/",
@@ -19,7 +25,7 @@ EXCLUDED_PREFIXES = (
     "website/themes/envelope-rainbow/",
 )
 ELIGIBLE_SUFFIXES = frozenset(
-    {".applescript", ".css", ".html", ".js", ".md", ".py", ".sql", ".svg", ".swift", ".toml", ".yaml", ".yml"}
+    {".applescript", ".css", ".html", ".js", ".md", ".mjs", ".py", ".pyi", ".sql", ".svg", ".swift", ".toml", ".yaml", ".yml"}
 )
 ELIGIBLE_NAMES = frozenset({".gitignore", "Makefile", "COPYRIGHT"})
 
@@ -49,11 +55,11 @@ def expected_header(path: Path) -> str:
     """Return the required native text form for an eligible path."""
     if path.name == "COPYRIGHT":
         return NOTICE
-    if path.name in {".gitignore", "Makefile"} or path.suffix.lower() in {".py", ".toml", ".yaml", ".yml"}:
+    if path.name in {".gitignore", "Makefile"} or path.suffix.lower() in {".py", ".pyi", ".toml", ".yaml", ".yml"}:
         return f"# {NOTICE}"
     if path.suffix.lower() == ".swift":
         return f"// {NOTICE}"
-    if path.suffix.lower() in {".css", ".js"}:
+    if path.suffix.lower() in {".css", ".js", ".mjs"}:
         return f"/* {NOTICE} */"
     if path.suffix.lower() in {".html", ".md", ".svg"}:
         return f"<!-- {NOTICE} -->"

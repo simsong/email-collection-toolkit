@@ -6,7 +6,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-
 DATA_DIRECTORY = "data"
 MBOX_DIRECTORY = "mbox"
 INTEGRITY_DIRECTORY = "integrity"

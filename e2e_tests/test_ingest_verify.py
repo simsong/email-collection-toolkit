@@ -7,38 +7,42 @@ from __future__ import annotations
 import hashlib
 import json
 import os
-import signal
 import shutil
+import signal
 import sqlite3
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 import pytest
-from playwright.sync_api import Page
+from playwright.sync_api import Page, expect
 from pydantic import BaseModel
 
+from e2e_tests.eicar_fixture import write_eicar_emlx
+from e2e_tests.generate_corpus import RICH_MESSAGE
+from mailarchiver.application import ApplicationController, ApplicationPreferencesStore
 from mailarchiver.catalog import address_pk, create_catalog, create_search
 from mailarchiver.gui_app import (
     E2E_DRIVER,
     GUI_DIRECTORY,
+    AboutApi,
     GuiApi,
     GuiE2EClientResult,
     IngestWindowApi,
     NativeSmokeApi,
     NativeSmokeController,
     NativeSmokeReport,
+    PyWebViewApplication,
 )
 from mailarchiver.ingest_status import read_ingest_history
 from mailarchiver.search import index_message
-from e2e_tests.eicar_fixture import write_eicar_emlx
-
 
 DATA = Path(__file__).parent / "data"
 NORMAL_MESSAGE_COUNT = 207
 PROCESSED_MESSAGE_COUNT = 210
 GUI_API_METHODS = (
-    "attachment", "choose_archive", "delete_filter_set", "mailbox_tree", "message",
+    "activate", "attachment", "choose_archive", "delete_filter_set", "mailbox_tree", "message",
     "copy_link", "copy_source_path", "copy_visible_text", "ingest_overview", "open_attachment", "open_ingest_window", "open_link", "open_message_window", "part", "prepare_drag", "rename_filter_set",
     "request_previews", "save_attachment", "save_filter_set", "save_message",
     "saved_filter_sets", "search", "search_count", "status", "suggestions", "take_previews",
@@ -49,6 +53,8 @@ NATIVE_SMOKE_MESSAGE = (
     b"The message viewer bridge is ready.\n"
 )
 NATIVE_SMOKE_API_METHODS = ("status", "search", "native_smoke_complete")
+PROBE_ARCHIVE_ENV = "MAILARCHIVER_NATIVE_PROBE_ARCHIVE"
+PROBE_PREFERENCES_ENV = "MAILARCHIVER_NATIVE_PROBE_PREFERENCES"
 
 
 class BuiltArchive(BaseModel):
@@ -207,6 +213,8 @@ def test_search_ui_end_to_end_without_a_window(
     built_archive: BuiltArchive, tmp_path: Path, page: Page
 ) -> None:
     """Drive the shipped UI headlessly while every bridge call reaches the real service."""
+    page_errors: list[str] = []
+    page.on("pageerror", lambda error: page_errors.append(str(error)))
     export_directory = tmp_path / "gui-e2e-exports"
     export_directory.mkdir()
     api = GuiApi(
@@ -232,11 +240,108 @@ def test_search_ui_end_to_end_without_a_window(
         api.close()
 
     assert result.passed, result.error
+    assert not page_errors, page_errors
     assert len(result.checks) >= 30
     exports = {path.name for path in export_directory.iterdir()}
     assert {"saved-tiny.png", "saved-review.command", "filter-sets.json"} <= exports
-    assert any(name.startswith("saved-Rich UI message-") and name.endswith(".eml") for name in exports)
-    assert any(name.startswith("Rich UI message-") and name.endswith(".eml") for name in exports)
+    saved = list(export_directory.glob("saved-Rich UI message-*.eml"))
+    assert len(saved) == 1 and saved[0].read_bytes() == RICH_MESSAGE
+    if sys.platform == "darwin":
+        dragged = list((export_directory / "drags").rglob("Rich UI message-*.eml"))
+        assert len(dragged) == 1 and dragged[0].read_bytes() == RICH_MESSAGE
+    else:
+        assert not (export_directory / "drags").exists()
+
+
+def test_message_splitter_resizes_panes_not_columns(
+    built_archive: BuiltArchive, tmp_path: Path, page: Page,
+) -> None:
+    """Requirement: real pointer/keyboard resizing preserves results and avoids list overflow."""
+    api = GuiApi(built_archive.archive, tmp_path, tmp_path, tmp_path / "filters.json")
+    try:
+        for name in GUI_API_METHODS:
+            page.expose_function(f"mailarchive_{name}", getattr(api, name))
+        page.add_init_script(
+            f"const names = {json.dumps(GUI_API_METHODS)}; window.pywebview = {{api: {{}}}}; "
+            "for (const name of names) window.pywebview.api[name] = "
+            "(...args) => window[`mailarchive_${name}`](...args); "
+            "window.addEventListener('DOMContentLoaded', () => "
+            "window.dispatchEvent(new Event('pywebviewready')));",
+        )
+        page.set_viewport_size({"width": 1400, "height": 900})
+        page.goto((GUI_DIRECTORY / "index.html").as_uri())
+        expect(page.locator("#result-status")).to_have_text("Enter a search.")
+        # Invalid selectors are inline feedback; correcting the query still searches.
+        page.locator("#search").fill("from:")
+        page.locator("#search").press("Enter")
+        expect(page.locator("#result-status")).to_have_text("from: requires a value")
+        page.locator("#search").fill("message")
+        page.locator("#search").press("Enter")
+        page.locator(".result").first.click()
+        page.wait_for_function("state.selected !== null && state.view !== null")
+        selection = page.evaluate("[state.selected, [...state.resultSelection], state.results.length]")
+        splitter = page.get_by_role("separator", name="Message list width")
+        results = page.locator("#results-pane")
+        preview = page.locator("#message-pane")
+
+        def width(selector: str) -> float:
+            return page.locator(selector).evaluate("element => element.getBoundingClientRect().width")
+
+        def assert_fitted() -> None:
+            page.wait_for_function("""() => {
+                const holder = document.querySelector('#result-list .tabulator-tableholder');
+                const cell = document.querySelector('#result-list .tabulator-cell');
+                return holder && cell && holder.scrollWidth <= holder.clientWidth
+                    && Math.abs(cell.getBoundingClientRect().width - holder.clientWidth) <= 2;
+            }""")
+            assert preview.evaluate("element => element.getBoundingClientRect().right <= innerWidth + 1")
+
+        before_list = width("#results-pane")
+        before_preview = width("#message-pane")
+        box = splitter.bounding_box()
+        assert box is not None
+        page.mouse.move(box["x"] + box["width"] / 2, box["y"] + 100)
+        page.mouse.down()
+        page.mouse.move(box["x"] + box["width"] / 2 + 150, box["y"] + 100, steps=12)
+        page.mouse.up()
+        assert abs(width("#results-pane") - before_list - 150) < 2
+        assert abs(width("#message-pane") - before_preview + 150) < 2
+        assert page.evaluate("[state.selected, [...state.resultSelection], state.results.length]") == selection
+        assert_fitted()
+
+        # The old column-edge gesture must no longer resize a Tabulator cell.
+        cell = page.locator("#result-list .tabulator-cell").first.bounding_box()
+        assert cell is not None
+        page.mouse.move(cell["x"] + cell["width"] - 2, cell["y"] + 10)
+        page.mouse.down()
+        page.mouse.move(cell["x"] + cell["width"] - 100, cell["y"] + 10, steps=6)
+        page.mouse.up()
+        assert abs(width("#results-pane") - before_list - 150) < 2
+        assert_fitted()
+
+        splitter.focus()
+        splitter.press("ArrowLeft")
+        assert abs(width("#results-pane") - before_list - 140) < 2
+        splitter.press("Home")
+        assert abs(width("#results-pane") - 300) < 2
+        splitter.press("End")
+        assert abs(width("#message-pane") - 320) < 2
+        assert_fitted()
+        page.locator("#show-original-folders").check()
+        expect(page.locator("#mailbox-browser")).to_be_visible()
+        assert_fitted()
+        page.set_viewport_size({"width": 800, "height": 700})
+        assert_fitted()
+        assert results.evaluate("element => element.getBoundingClientRect().width > 200")
+        page.locator("#show-original-folders").uncheck()
+        assert_fitted()
+        # Standalone message windows must allocate their entire width to the preview.
+        page.goto((GUI_DIRECTORY / "index.html").as_uri() + f"?standalone=1&message={selection[0]}")
+        expect(splitter).to_be_hidden()
+        expect(preview).to_be_visible()
+        assert abs(width("#message-pane") - 800) < 2
+    finally:
+        api.close()
 
 
 def test_ingest_history_ui_end_to_end(built_archive: BuiltArchive, page: Page) -> None:
@@ -257,6 +362,78 @@ def test_ingest_history_ui_end_to_end(built_archive: BuiltArchive, page: Page) -
     assert "Completed" in page.locator(".history-row").inner_text()
     assert page.locator(".worker-table tbody tr").count() == 2
     assert str(PROCESSED_MESSAGE_COUNT) in page.locator(".statistics").inner_text()
+
+
+def test_about_window_displays_version_disk_and_warnings(tmp_path: Path, page: Page) -> None:
+    """Requirement: the persistent About UI surfaces health and application diagnostics."""
+    controller = ApplicationController(ApplicationPreferencesStore(tmp_path / "preferences.json"))
+    application = PyWebViewApplication(controller)
+    first = controller.create_document(tmp_path / "first.mailarchive")
+    first_window = controller.new_search_window(first)
+    second = controller.create_document(tmp_path / "second.mailarchive")
+    controller.new_search_window(second)
+    assert application.about_status().disk_path == str(second.path)
+    controller.activate_window(first_window.window_id)
+    assert application.about_status().disk_path == str(first.path)
+    application.add_notice("warning", "Saved archive was ignored because its database was invalid.")
+    api = AboutApi(application)
+    page.expose_function("mailarchive_about_status", api.status)
+    page.add_init_script(
+        "window.pywebview = {api: {status: (...args) => window.mailarchive_about_status(...args)}}; "
+        "window.addEventListener('DOMContentLoaded', () => "
+        "window.dispatchEvent(new Event('pywebviewready')));"
+    )
+
+    page.goto((GUI_DIRECTORY / "about.html").as_uri())
+
+    page.wait_for_function("document.getElementById('version').textContent.startsWith('Version ')")
+    assert "available on" in page.locator("#disk").inner_text()
+    assert "invalid" in page.locator("#notices").inner_text()
+
+
+def test_gui_import_uses_typed_ingest_service_without_a_subprocess(tmp_path: Path) -> None:
+    """Requirement: GUI Import publishes searchable mail through the shared typed service."""
+    source = tmp_path / "source"
+    source.mkdir()
+    (source / "message.eml").write_bytes(
+        b"Message-ID: <gui-import@example>\n"
+        b"From: owner@example.org\n"
+        b"To: reader@example.net\n"
+        b"Subject: GUI import\n"
+        b"Date: Wed, 03 Jan 2024 10:00:00 +0000\n\n"
+        b"Imported without a command-line subprocess.\n"
+    )
+    owner_names = tmp_path / "owner-names.txt"
+    owner_names.write_text("owner@example.org\n", encoding="utf-8")
+    controller = ApplicationController(ApplicationPreferencesStore(tmp_path / "preferences.json"))
+    document = controller.create_document(tmp_path / "GUI.mailarchive")
+    session = controller.new_search_window(document)
+    application = PyWebViewApplication(controller)
+    api = GuiApi(
+        document.path,
+        temporary_directory=tmp_path / "exports",
+        application=application,
+        document=document,
+        search_window=session,
+    )
+    try:
+        assert application.start_import(api, [source], owner_names)
+        deadline = time.monotonic() + 90
+        while document.ingest_job is not None and time.monotonic() < deadline:
+            time.sleep(0.05)
+        assert document.ingest_job is None
+        assert document.path is not None
+        database = sqlite3.connect(document.path / "archive.sqlite3")
+        try:
+            assert database.execute("SELECT COUNT(*) FROM messages").fetchone() == (1,)
+        finally:
+            database.close()
+        status = application.about_status()
+        assert status.ingests[0].status is not None
+        assert status.ingests[0].status.state == "completed"
+        assert status.notices[-1].message.startswith("Import completed")
+    finally:
+        api.close()
 
 
 def test_native_smoke_page_reports_one_real_search(
@@ -401,6 +578,26 @@ def run_native_smoke(native_smoke_archive: Path, tmp_path: Path, *, html_find: b
 def test_native_search_ui_smoke(native_smoke_archive: Path, tmp_path: Path) -> None:
     """Exercise one bounded real search through a hidden pywebview bridge process."""
     run_native_smoke(native_smoke_archive, tmp_path)
+
+
+@pytest.mark.skipif(
+    sys.platform != "darwin" or os.environ.get("MAILARCHIVER_NATIVE_APPLICATION_E2E") != "1",
+    reason="set MAILARCHIVER_NATIVE_APPLICATION_E2E=1 for production Cocoa lifecycle checks",
+)
+def test_native_application_lifecycle(native_smoke_archive: Path, tmp_path: Path) -> None:
+    """About must populate through its real bridge; extensionless Open and menus must work."""
+    result = subprocess.run(
+        [sys.executable, str(Path(__file__).with_name("native_application_probe.py"))],
+        # Cocoa treats positional filesystem paths as document-open requests.
+        # Pass fixtures out of band so the probe can first test About alone.
+        env=os.environ | {
+            PROBE_ARCHIVE_ENV: str(native_smoke_archive),
+            PROBE_PREFERENCES_ENV: str(tmp_path / "preferences.json"),
+        },
+        capture_output=True, text=True, timeout=40, check=False,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "Production About, document bridge, and menus passed" in result.stdout
 
 
 @pytest.mark.skipif(
