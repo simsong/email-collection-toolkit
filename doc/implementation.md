@@ -64,9 +64,30 @@ would add a dependency and is less portable for long-term verification.
 `SourceMessage.mbox_envelope` and `MailObject.mbox_envelope` carry one complete
 source delimiter as bytes, separately from `raw`. The MBOX adapter reads the
 physical line at the source offset to retain CRLF as well as LF. The plugin
-boundary rejects multi-line framing. Recognized XXX wrappers retain their nested
-envelope. Publication prepends the envelope to the raw bytes passed to
-`mailbox.mbox.add`; raw hashes and duplicate identity remain unchanged. Leading
+boundary, normalization guard and legacy status-wrapper reader share one complete-envelope check, rejecting
+embedded line breaks, repeated CR, incomplete lines and nonliteral From prefixes
+before framing can enter an X-From header. `mbox_framing.normalize_mbox_framing`
+converts one immediate quoted delimiter into a literal `X-From:` header. If the
+outer sender is exactly `XXX` or `???@???` and the inner sender is neither,
+it instead promotes the inner envelope and writes the outer value as `X-From:`.
+All following headers/body bytes are unchanged. MBCP metadata exclusion checks
+use the selected envelope and the original payload after the recognized quoted
+line, ignoring only the generated X-From field; original X-From fields or body
+content still prevent metadata exclusion. Ordinary RFC/MIME readers then
+work without a virtual-header workaround. Canonical SHA-256 and semantic hashes
+describe the normalized message; their algorithms and standards are unchanged.
+`MboxNormalization` crosses the source/plugin boundary and is appended as JSON
+to each observation's detail, retaining original source-payload SHA-256 and both
+framing lines (base64). This evidence plus normalized content reconstructs the
+source adapter's original payload; whole-file source hashes still cover source
+files themselves. Source mailboxes and existing archives are never rewritten.
+The separate legacy XXX status-header wrapper still unwraps its nested envelope,
+but requires nonempty, well-formed status-only headers and a complete quoted
+ctime delimiter; malformed, indented, unquoted or prose candidates are retained. This
+prevents scanning through a real message's headers into its quoted body.
+Publication prepends the physical envelope to the raw bytes passed to
+`mailbox.mbox.add`; outside the explicit normalization above, raw hashes and
+duplicate identity remain unchanged. Leading
 Babyl/EML envelopes already in `raw` remain adopted when no separate envelope
 exists. No message is reserialized.
 
@@ -83,9 +104,41 @@ are preserved even when their date is malformed or disagrees with the headers.
 LF/CRLF delimiter preservation, original SHA-256 and independent bag verification,
 header date ordering/time zones, body exclusion, deterministic missing-date
 fallbacks, and recovery of quoting, missing final newlines and leading envelopes.
+It also exercises immediate double framing with Unix-style and Eudora-style
+placeholder senders, LF/CRLF, normalized hashes, original source hashes, intact
+body quoting, literal X-From display,
+legacy status wrappers, and duplicate-free reimport.
 This fixes future publication only. Existing archives require a separately
 approved source-backed rebuild or repair that regenerates location offsets,
 integrity tags and manifests. Ordinary duplicate-skipping reimport is not repair.
+
+`ingest_diagnostics` adds exception notes at local `MailObject` validation and
+worker processing boundaries, then formats the complete traceback into both
+`ingest_runs.detail` and status JSON `failure_detail`, displayed by Ingests.
+Pydantic field errors retain their underlying validator traceback when available.
+Validation summaries and chained tracebacks omit Pydantic input values, relying
+on the bounded previews for input evidence.
+Notes use a neutral source-cursor label for native plug-in/remote cursors.
+Source identity fields and cursors are each limited to 1,024 characters plus a
+truncation marker. Arbitrary source provenance/hierarchy is not serialized into
+either message or container failure notes.
+Exception summaries are capped at 2,048 characters, individual notes at 32,768,
+and the rendered report at 65,536, plus explicit truncation markers. Parse-error
+wrappers include the message hash; source identities/cursors appear only in
+bounded context notes rather than again in an unbounded exception message.
+They contain the source reference, cursor, SHA-256, byte length, and escaped
+prefixes bounded to 4,096 message bytes and 512 bytes per selected/original/quoted
+envelope; no frame locals
+or full-message copies are collected. Source lookup uses the recorded local
+path and byte offset; remote adapters retain their native reference/cursor.
+Before advancing a generator, the worker clears its current-message context so
+iterator failures cannot blame the previous email. `make test-envelopes` includes
+real plug-in validation after a successful message, generator failures, and
+date-resolution failures, checking durable status/catalog evidence and source
+immutability. The diagnostics remain local and can include private message text.
+
+The normative MBOX transformation and normalized/source hash reconstruction
+contract is in [INTEGRITY_CONTROLS.md](INTEGRITY_CONTROLS.md#verifying-and-reconstructing-normalized-records).
 
 ## Native Mailbag storage
 
@@ -727,8 +780,10 @@ Reports render the remaining empty sender identity as `(missing sender)`.
 Before ordinary message parsing, the MBOX adapter recognizes two narrow legacy
 container records. Exact empty Eudora MBCP metadata stubs are emitted with a
 `source-metadata-excluded` reason so ingest records their source offset and
-hash without publishing them. A `From XXX` envelope with status-only outer
-headers and a quoted nested MBOX envelope is stripped by one mboxrd quoting
+hash without publishing them. An immediate quoted delimiter is normalized to
+literal X-From framing, as described above. A `From XXX` envelope containing a
+well-formed status-only outer header block before a quoted nested envelope
+is stripped by one mboxrd quoting
 level, and the nested RFC 5322 bytes are parsed and published. This fixes the
 wrapper cause of missing senders without treating arbitrary body text as a
 sender.

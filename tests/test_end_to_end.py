@@ -1059,7 +1059,9 @@ def test_parser_failure_records_source_identity_and_failed_run(tmp_path: Path) -
 
     assert result.returncode != 0
     digest = hashlib.sha256(raw).hexdigest()
-    assert f"source offset 0; sha256={digest}" in result.stderr
+    assert str(source) in result.stderr
+    assert "Source cursor: '0'" in result.stderr
+    assert f"Message SHA-256: {digest}; bytes={len(raw)}" in result.stderr
     catalog = sqlite3.connect(archive / "archive.sqlite3")
     try:
         completed_at, run_result, detail = catalog.execute(
@@ -1068,6 +1070,7 @@ def test_parser_failure_records_source_identity_and_failed_run(tmp_path: Path) -
         assert completed_at is not None
         assert run_result == "failed"
         assert detail.startswith("RuntimeError: failed to parse")
+        assert "Source cursor: '0'" in detail and digest in detail
         assert catalog.execute(
             "SELECT action, completed_at FROM source_integrity_checks"
         ).fetchone() == ("read", None)

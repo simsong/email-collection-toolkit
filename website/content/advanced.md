@@ -1,6 +1,6 @@
 +++
 title = "Advanced"
-description = "Identity, repeatable ingest, Apple Mail cache recovery, comparison, and integrity details."
+description = "Identity, repeatable ingest, Apple Mail cache recovery, MBOX envelope repair, failure diagnostics, comparison, and integrity details."
 +++
 
 Email Collection Toolkit preserves source evidence while making repeated acquisition safe.
@@ -46,11 +46,88 @@ This exact rule is intentionally conservative. If a mail client adds, removes,
 or refolds a header, the raw bytes differ and Email Collection Toolkit preserves that
 variant instead of silently discarding evidence.
 
+## Double-processed MBOX envelopes
+
+Some mailbox conversions add a new `From ` delimiter and quote the old one as
+`>From `. Left ahead of the real email headers, that quoted line can prevent
+ordinary mail readers from recognizing the sender, subject, and MIME structure.
+The importer repairs this specific pattern in the archived copy:
+
+- When a `From ` delimiter is immediately followed by a valid `>From ` delimiter,
+  keep the outer envelope and convert the quoted line to a literal `X-From:`
+  header.
+- If the outer sender is exactly `XXX` or `???@???`, and the inner sender is
+  neither placeholder, use the inner envelope instead. Store the displaced outer
+  value in the literal `X-From:` header.
+
+For example, this source framing:
+
+```text
+From XXX Thu Apr 08 23:43:48 2004
+>From sender@example.test Thu Apr  8 19:43:31 2004
+From: sender@example.test
+Subject: Example
+```
+
+becomes this in the archive:
+
+```text
+From sender@example.test Thu Apr  8 19:43:31 2004
+X-From: XXX Thu Apr 08 23:43:48 2004
+From: sender@example.test
+Subject: Example
+```
+
+Only the immediate, unindented, singly quoted line with a sender and complete
+ctime-style timestamp qualifies. The outer delimiter must also be one complete
+`From ` line; malformed outer framing is left unnormalized for validation. An intervening header or blank line, malformed
+delimiter, or additional `>` prevents this repair. Quoted `From ` lines in the
+body remain unchanged. The separate older `From XXX` status wrapper is unwrapped
+only with a nonempty, valid status-only header block and a valid quoted delimiter
+at the start of its body. Exact empty Eudora metadata stubs remain excluded
+when double-framed; original `X-From:` headers or body content prevent that
+metadata exclusion.
+
+The source mailbox is never changed. The archive's message hash covers the
+normalized bytes, including the new `X-From:` header. The private catalog's source
+observation also retains the original payload's SHA-256 and both original framing
+lines, allowing reconstruction of the source record. All remaining headers and
+body bytes are retained. Existing archives are not automatically repaired;
+duplicate-skipping reimport is not a repair procedure.
+
+These rules recognize framing patterns associated with procmail/formail,
+MIMEDefang/Sendmail, and Eudora conversions. They do not identify which program
+created a particular file or guarantee every historical variant. A timestamp
+difference alone does not establish which envelope is correct. See the
+[MBOX reading notes](https://github.com/simsong/email-collection-toolkit/blob/main/doc/MBOX_READING.md)
+for compatibility evidence and limits.
+
+## Diagnosing import failures
+
+Select a failed run in **Ingests** to inspect its failure details. The saved run
+history includes a traceback with source-code filenames and line numbers and,
+when available, the original validator's traceback. Message context includes the
+source identity, cursor (a byte offset for local MBOX), message SHA-256 and size,
+and escaped previews of up to 4,096 message bytes and 512 envelope bytes.
+Normalization context also identifies the original source-payload hash and
+previews both original framing lines (up to 512 bytes each). These details help locate the exact source email without copying the
+whole message into the error report. A failure between messages identifies the
+source without attributing the error to the preceding email.
+
+The same details are retained locally in the archive's `status/ingest-*.json`
+run history and catalog. They may contain private email text; inspect them before
+sharing a failure report. Source identity fields and cursors are limited to
+1,024 characters each, with truncation identified; arbitrary source metadata is
+omitted from these error details. Exception summaries are limited to 2,048
+characters, individual notes to 32,768, and the complete failure report to
+65,536, with truncation indicated.
+
 ## Raw and semantic message hashes
 
 The archive records two per-message SHA-256 identities:
 
-- **h2 raw-message** hashes the recovered original RFC 5322 bytes exactly.
+- **h2 raw-message** hashes the archived RFC 5322 bytes exactly, including any
+  literal `X-From:` normalization described above.
 - **h3 semantic-message v1** applies DKIM-relaxed normalization to an ordered
   set of stable and delivery headers, combines those headers with the complete
   body under DKIM-simple-style canonicalization, and hashes the result.

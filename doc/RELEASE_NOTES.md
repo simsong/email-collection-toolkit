@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+* Normalize an immediate quoted MBOX delimiter into a literal `X-From:` header.
+  Promote a meaningful inner envelope when the outer sender is `XXX` or
+  `???@???`; retain the displaced outer value as `X-From:`. Preserve body
+  quoting and record original source-payload hashes/framing as provenance. Fix
+  `From XXX` wrapper detection misreading indented forwarded body text as a
+  delimiter. The normalized archive is readable by ordinary RFC/MIME readers.
+  Import failures now retain source-code tracebacks, validator origins, source
+  references/cursors, message hashes, and bounded input previews in local run
+  history, including both original framing previews. Bound source identity and
+  cursor previews, exception messages/notes and total failure reports; reject
+  malformed outer lines before header normalization. Double-framed Eudora
+  metadata stubs remain excluded. Existing archives are not rewritten.
 * Require an administrator-configured OpenPGP release signer allowlist before
   running release code with Apple secrets. Restrict automatic PKCS#12 import to
   GitHub-hosted runners and document process-argument visibility. Correct the
