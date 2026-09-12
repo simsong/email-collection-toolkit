@@ -13,6 +13,7 @@ from mailarchiver.message import parse_message, raw_header_values
 from mailarchiver.mbox_framing import normalize_mbox_framing
 from mailarchiver.plugin_api import MailObject, SourceReference
 from mailarchiver.search import prepare_search_message
+from mailarchiver.sources import _unwrap_xxx_record
 
 OUTER = b"From XXX Thu Apr 15 04:21:10 2004\n"
 INNER = b">From sender@example.test Thu Apr 15 00:20:49 2004\n"
@@ -29,6 +30,8 @@ def test_invalid_outer_envelope_cannot_be_promoted_into_a_header(outer: bytes) -
     assert record.raw == raw
     assert record.envelope == outer
     assert record.normalization is None
+    legacy_raw = b"Status: O\n\n" + raw
+    assert _unwrap_xxx_record(legacy_raw, outer) == (legacy_raw, outer)
     source = SourceReference(plugin_kind="fixture", source_id="test", native_id="mailbox", display_name="mailbox")
     with pytest.raises(ValidationError, match="one complete From line"):
         MailObject(work_id="test", raw=record.raw, source=source, cursor="0", mbox_envelope=record.envelope)

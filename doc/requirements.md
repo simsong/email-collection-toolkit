@@ -142,7 +142,8 @@ directory, and a `data/mbox/` payload directory.
   lines are never nested delimiters. Retain the outer source offset as provenance.
 * A framing line copied into an RFC header must start with literal `From ` and
   contain exactly one LF- or CRLF-terminated line. Malformed outer framing is
-  left unnormalized and remains subject to normal import validation.
+  left unnormalized, including in the legacy status-wrapper path, and remains
+  subject to normal import validation.
 * Double processing is recognized when the first payload line, immediately
   after a physical MBOX delimiter, is itself a `>From ` delimiter with a sender
   and ctime-style timestamp. Keep the outer delimiter and convert the quoted

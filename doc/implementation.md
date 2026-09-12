@@ -64,7 +64,7 @@ would add a dependency and is less portable for long-term verification.
 `SourceMessage.mbox_envelope` and `MailObject.mbox_envelope` carry one complete
 source delimiter as bytes, separately from `raw`. The MBOX adapter reads the
 physical line at the source offset to retain CRLF as well as LF. The plugin
-boundary and normalization guard share one complete-envelope check, rejecting
+boundary, normalization guard and legacy status-wrapper reader share one complete-envelope check, rejecting
 embedded line breaks, repeated CR, incomplete lines and nonliteral From prefixes
 before framing can enter an X-From header. `mbox_framing.normalize_mbox_framing`
 converts one immediate quoted delimiter into a literal `X-From:` header. If the

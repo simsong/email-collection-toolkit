@@ -37,7 +37,7 @@ from .plugin_api import (
 )
 from .source_volume import SourceVolume, local_mount_path, local_source_volume
 from .ingest_diagnostics import add_message_context
-from .mbox_framing import MBOX_ENVELOPE, QUOTED_ENVELOPE, MboxNormalization, normalize_mbox_framing
+from .mbox_framing import MBOX_ENVELOPE, QUOTED_ENVELOPE, MboxNormalization, is_complete_envelope, normalize_mbox_framing
 
 SourceKind = str
 BABYL_OPTIONS = b"babyl options:"
@@ -680,7 +680,7 @@ def _mbcp_exclusion(envelope_sender: bytes, raw: bytes) -> str | None:
 def _unwrap_xxx_record(raw: bytes, envelope: bytes) -> tuple[bytes, bytes]:
     # Immediate double framing is normalized separately. Only the older explicit
     # status-header wrapper is unwrapped here.
-    if raw.startswith(b">From "):
+    if not is_complete_envelope(envelope) or raw.startswith(b">From "):
         return raw, envelope
     separator = HEADER_SEPARATOR.search(raw)
     if separator is None:
