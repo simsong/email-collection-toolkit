@@ -2091,6 +2091,7 @@ def configure_macos_application() -> None:
         icon = NSImage.imageWithSystemSymbolName_accessibilityDescription_("archivebox", metadata.name)
     if icon is not None:
         NSApplication.sharedApplication().setApplicationIconImage_(icon)
+    install_file_drag()
 
 
 def install_macos_document_events(application: PyWebViewApplication) -> None:

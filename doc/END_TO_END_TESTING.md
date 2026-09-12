@@ -267,3 +267,6 @@ checks that explicit drags allow copying only and carry an opaque export token.
 A desktop acceptance check must drag the prepared message icon onto Finder or
 the Desktop and compare the resulting `.eml` bytes with the verified export;
 repeat for a multi-selection ZIP and confirm no `.fileloc` is created.
+
+Browser selection checks locate the current result card by message primary key
+after preview delivery reformats it; they do not retain detached card elements.

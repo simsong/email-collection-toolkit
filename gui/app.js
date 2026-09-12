@@ -105,7 +105,7 @@ async function initialize() {
     "copy-message-text", "save-message", "print-message", "body-view", "attachment-section", "attachment-list", "attachment-preview", "provenance-section", "message-locations", "ingest-status-line", "link-dialog", "link-destination", "link-ignore", "link-copy", "link-open", "error"]) {
     elements[id] = byId(id);
   }
-  initializeResultTable();
+  await initializeResultTable();
   initializeMessageSplitter();
   renderSearchHelp();
   elements["search-form"].addEventListener("submit", event => {
@@ -1063,6 +1063,7 @@ function initializeResultTable() {
       void selectMessage(selected[0].message_pk);
     }
   });
+  return new Promise(resolve => state.resultTable.on("tableBuilt", resolve));
 }
 
 function initializeMessageSplitter() {
@@ -1234,15 +1235,18 @@ function selectResultRow(event, row) {
     state.suppressResultClick = false;
     return;
   }
+  const request = state.searchRequest;
+  const messagePk = row.getData().message_pk;
   window.setTimeout(() => {
+    if (request !== state.searchRequest || state.resultTable?.getRow(messagePk) !== row) return;
     let selected = state.resultTable?.getSelectedRows() || [];
     if (!event.shiftKey && !event.metaKey && !event.ctrlKey && selected.length !== 1) {
       state.resultTable?.deselectRow();
       state.resultTable?.selectRow(row);
       selected = state.resultTable?.getSelectedRows() || [];
     }
-    if (selected.length !== 1 || selected[0] !== row || state.selectionRequest === row.getData().message_pk) return;
-    void selectMessage(row.getData().message_pk);
+    if (selected.length !== 1 || selected[0] !== row || state.selectionRequest === messagePk) return;
+    void selectMessage(messagePk);
   }, 0);
 }
 

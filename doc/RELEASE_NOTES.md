@@ -4,6 +4,9 @@
 
 * Fix message-icon drags to Finder/Desktop to copy actual `.eml` files (or a
   ZIP for multiple messages), instead of creating `.fileloc` URL shortcuts.
+  Isolate prepared files from attachment exports, revoke tokens safely on close,
+  wait for the result table to finish building before startup clears it, and
+  discard queued clicks from a replaced result set.
 
 * Fix source GUI startup treating the `mailsearch-gui` launcher and option
   values as archive paths. Preserve explicit archive selection and Finder opens;

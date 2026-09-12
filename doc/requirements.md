@@ -964,6 +964,8 @@ operation may create a `.fileloc`/`.webloc` shortcut or expose link/text URL dra
 representations. Each drag export is isolated from attachment exports and later
 drags; closing the viewer serializes with preparation and revokes every token.
 Backends without the macOS file-drag adapter hide and reject this drag control.
+The result table must finish initializing before startup clears or populates it.
+Queued clicks must not select rows discarded by a subsequent search.
 Message headers remain selectable text. Printing prints the displayed headers
 and selected MIME part through the system print panel. Temporary message and attachment exports are removed when the GUI exits.
 

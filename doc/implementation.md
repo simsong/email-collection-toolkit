@@ -1179,14 +1179,20 @@ The tables are derived and are replaced together with FTS by `refresh-index`.
 `.eml` export writes the bytes returned by hash-verified direct retrieval.
 Finder dragging uses an `NSURL` file pasteboard writer. JavaScript carries only
 an opaque registered export token with a copy-only operation mask; the Cocoa
-adapter replaces that token before the native drag starts. The legacy
+adapter replaces that token before the native drag starts. Cocoa process setup
+installs it before either normal document or native smoke windows are created.
+The legacy
 `dragImage:...` path clears WebKit link flavors and writes the file object; the
 modern `beginDraggingSessionWithItems:...` path replaces the item writer before
 AppKit builds its pasteboard. Unregistered text and link drags are unchanged.
 Every preparation writes into a fresh `drags/<uuid>/` subdirectory, isolating it
 from attachment basenames and later exports. Preparation and close share a lock;
 close revokes its tokens and rejects later preparation before cleaning exports.
-The status bridge disables the drag control on non-macOS backends. `make test-file-drag` checks exact
+The status bridge disables the drag control on non-macOS backends. Startup
+awaits Tabulator `tableBuilt` before clearing the initial result viewport. Queued
+row-click callbacks verify the search generation and current row before selecting.
+The browser acceptance test rejects unhandled page errors and verifies export bytes.
+`make test-file-drag` checks exact
 export bytes, token revocation, both native pasteboard representations, and
 injected selector/superclass dispatch on a controlled AppKit host.
 Only the message-file icon well is draggable; the
