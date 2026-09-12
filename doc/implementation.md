@@ -68,7 +68,10 @@ boundary rejects multi-line framing. `mbox_framing.normalize_mbox_framing`
 converts one immediate quoted delimiter into a literal `X-From:` header. If the
 outer sender is exactly `XXX` or `???@???` and the inner sender is neither,
 it instead promotes the inner envelope and writes the outer value as `X-From:`.
-All following headers/body bytes are unchanged. Ordinary RFC/MIME readers then
+All following headers/body bytes are unchanged. MBCP metadata exclusion checks
+use the selected envelope and the original payload after the recognized quoted
+line, ignoring only the generated X-From field; original X-From fields or body
+content still prevent metadata exclusion. Ordinary RFC/MIME readers then
 work without a virtual-header workaround. Canonical SHA-256 and semantic hashes
 describe the normalized message; their algorithms and standards are unchanged.
 `MboxNormalization` crosses the source/plugin boundary and is appended as JSON
@@ -114,7 +117,8 @@ Pydantic field errors retain their underlying validator traceback when available
 Validation summaries and chained tracebacks omit Pydantic input values, relying
 on the bounded previews for input evidence.
 Notes contain the source reference, cursor, SHA-256, byte length, and escaped
-prefixes bounded to 4,096 message bytes and 512 envelope bytes; no frame locals
+prefixes bounded to 4,096 message bytes and 512 bytes per selected/original/quoted
+envelope; no frame locals
 or full-message copies are collected. Source lookup uses the recorded local
 path and byte offset; remote adapters retain their native reference/cursor.
 Before advancing a generator, the worker clears its current-message context so

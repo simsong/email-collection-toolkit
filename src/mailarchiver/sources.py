@@ -309,12 +309,15 @@ class MboxFileParser(FileParser):
                 raw = box.get_bytes(key, from_=False)
                 if mmdf_framed:
                     raw = _without_mmdf_delimiter(raw)
-                exclusion = _mbcp_exclusion(envelope_sender, raw)
+                exclusion_raw = raw
                 normalized = normalize_mbox_framing(raw, envelope)
                 if normalized.normalization is not None:
+                    # Ignore only framing we converted, not original X-From headers.
+                    exclusion_raw = raw[len(normalized.normalization.quoted_envelope):]
                     raw, envelope = normalized.raw, normalized.envelope
                 elif envelope_sender == XXX_ENVELOPE_SENDER:
                     raw, envelope = _unwrap_xxx_record(raw, envelope)
+                exclusion = _mbcp_exclusion(_mbox_envelope_sender(envelope), exclusion_raw)
                 yield SourceMessage(
                     path=source.path,
                     raw=raw,

@@ -15,7 +15,7 @@ from mailarchiver.mbox import add_message, read_verified_location, synthetic_env
 from mailarchiver.mbox_framing import MboxNormalization
 from mailarchiver.plugin_api import MailContainer, MailObject, SourceSpec
 from mailarchiver.plugin_loader import load_plugins
-from mailarchiver.sources import _unwrap_xxx_record
+from mailarchiver.sources import _unwrap_xxx_record, source_files, source_messages
 from mailarchiver.standalone_verify import verify_archive
 
 
@@ -74,6 +74,34 @@ def test_double_framing_writes_x_from_and_preserves_body(tmp_path: Path, outer_s
     assert ">>From another literal body" in rendered
     run_ingest(request)
     assert destination.read_bytes() == published
+    assert source.read_bytes() == original
+
+
+@pytest.mark.parametrize("outer_sender", [b"XXX", b"mbcp@s.eecs.harvard.edu"])
+@pytest.mark.parametrize("extra", [b"", b"X-From: original header\n", b"\nretained body\n"])
+def test_double_framed_mbcp_stub_excludes_only_metadata(tmp_path: Path, outer_sender: bytes, extra: bytes) -> None:
+    """Requirement: generated framing cannot hide metadata, or erase original headers/body as metadata."""
+    source = tmp_path / "2004" / "source.mbox"
+    source.parent.mkdir()
+    original = (b"From " + outer_sender + b" Thu Apr 15 04:21:10 2004\n"
+                b">From mbcp@s.eecs.harvard.edu Thu Apr 15 00:20:49 2004\n"
+                b"X-UID: 123\nStatus: O\nX-MBCP-Flags: $NotJunk\n" + extra)
+    source.write_bytes(original)
+    record, = source_messages(next(source_files(source)))
+    expected = "Eudora MBCP metadata stub" if not extra else None
+    assert record.exclusion_reason == expected
+    assert record.raw.startswith(b"X-From: ")
+    assert record.raw.partition(b"\n")[2] == original.split(b"\n", 2)[2]
+    archive = tmp_path / "archive"
+    run_ingest(IngestRequest(
+        archive=archive, roots=[str(source)], scan_policy="not-scanned",
+        owner_names_file=Path(__file__).parent / "fixtures" / "owner-names.txt",
+    ), terminal=False)
+    with sqlite3.connect(archive / "archive.sqlite3") as catalog:
+        assert catalog.execute("SELECT count(*) FROM messages").fetchone() == (int(bool(extra)),)
+        disposition, detail = catalog.execute("SELECT disposition, detail FROM observations").fetchone()
+        assert disposition == ("source-metadata-excluded" if not extra else "archived")
+        assert "MBOX normalization:" in detail
     assert source.read_bytes() == original
 
 

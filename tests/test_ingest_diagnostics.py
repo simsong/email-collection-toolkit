@@ -9,7 +9,9 @@ import pytest
 from pydantic import ValidationError
 
 from mailarchiver.__main__ import IngestRequest, run_ingest
-from mailarchiver.ingest_diagnostics import format_failure
+from mailarchiver.ingest_diagnostics import add_message_context, format_failure
+from mailarchiver.mbox_framing import normalize_mbox_framing
+from mailarchiver.plugin_api import SourceReference
 from mailarchiver.ingest_status import read_ingest_history
 from tests.test_plugin_loader import write_plugin
 
@@ -126,3 +128,19 @@ def test_message_processing_failure_retains_raw_identity_and_traceback(tmp_path:
     assert re.search(r'message.py", line \d+, in ', detail)
     assert "no date or year path fallback" in detail
     assert source.read_bytes() == raw
+
+
+def test_normalized_failure_retains_bounded_quoted_envelope() -> None:
+    """Requirement: pre-observation failure context identifies both original framing lines."""
+    outer = b"From real@example.test Thu Apr 15 00:20:49 2004\n"
+    quoted = b">From quoted@example.test Thu Apr 15 00:20:49 2004 " + b"x" * 1000 + b"QUOTED-TAIL\n"
+    record = normalize_mbox_framing(quoted + b"Subject: body\n\nbody\n", outer)
+    source = SourceReference(plugin_kind="file-folder", source_id="fixture", native_id="source.mbox", display_name="source.mbox")
+    error = ValueError("failure before observation")
+    add_message_context(error, source, "123", b"invalid payload", record.envelope, record.normalization)
+    detail = format_failure(error)
+    assert "Quoted envelope prefix: b'>From quoted@example.test" in detail
+    assert "Original envelope prefix: b'From real@example.test" in detail
+    assert "QUOTED-TAIL" not in detail
+    assert record.normalization is not None
+    assert record.normalization.source_raw_sha256 in detail

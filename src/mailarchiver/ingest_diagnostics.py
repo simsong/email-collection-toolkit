@@ -34,7 +34,8 @@ def add_message_context(
     if normalization is not None:
         error.add_note(
             f"MBOX normalization: {normalization.rule}; source payload SHA-256: {normalization.source_raw_sha256}\n"
-            f"Original envelope prefix: {normalization.original_envelope[:ENVELOPE_PREVIEW_BYTES]!r}"
+            f"Original envelope prefix: {normalization.original_envelope[:ENVELOPE_PREVIEW_BYTES]!r}\n"
+            f"Quoted envelope prefix: {normalization.quoted_envelope[:ENVELOPE_PREVIEW_BYTES]!r}"
         )
 
 

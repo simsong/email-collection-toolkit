@@ -133,7 +133,10 @@ directory, and a `data/mbox/` payload directory.
   `mbcp@s.eecs.harvard.edu`, whose only headers are `X-UID`, `Status`, and
   `X-MBCP-Flags` (with both X-headers present), and whose body is empty is
   source metadata, not an email. Record a `source-metadata-excluded`
-  observation and do not publish it. An envelope sender of `XXX` is unwrapped
+  observation and do not publish it. For double framing, apply this check to the
+  selected envelope and original headers/body after the quoted delimiter; ignore
+  only the generated `X-From:` field, never an original header or body text.
+  An envelope sender of `XXX` is unwrapped
   only when the outer record has a nonempty, well-formed status-only header block and
   its body starts with a quoted nested delimiter with complete ctime syntax. Indented or unquoted body
   lines are never nested delimiters. Retain the outer source offset as provenance.
@@ -435,8 +438,8 @@ mailbox destinations. Dedicated EICAR tests also verify infected routing.
   Failure detail retains traceback filenames and source-code line numbers,
   including underlying Pydantic validator exceptions. For an available message,
   include its source reference, cursor (byte offset for local MBOX), SHA-256,
-  length, and an escaped prefix of up to 4,096 input bytes plus up to 512 envelope
-  bytes. Pydantic summaries and chained tracebacks omit input-value dumps so
+  length, and an escaped prefix of up to 4,096 input bytes plus up to 512 bytes
+  per selected/original/quoted envelope. Pydantic summaries and chained tracebacks omit input-value dumps so
   they cannot bypass these preview limits. These local diagnostics may contain
   private mail; they are not public telemetry. A failure between messages identifies the container without
   attributing it to the previously yielded message. Persist the same detail in

@@ -83,7 +83,9 @@ ctime-style timestamp qualifies. An intervening header or blank line, malformed
 delimiter, or additional `>` prevents this repair. Quoted `From ` lines in the
 body remain unchanged. The separate older `From XXX` status wrapper is unwrapped
 only with a nonempty, valid status-only header block and a valid quoted delimiter
-at the start of its body.
+at the start of its body. Exact empty Eudora metadata stubs remain excluded
+when double-framed; original `X-From:` headers or body content prevent that
+metadata exclusion.
 
 The source mailbox is never changed. The archive's message hash covers the
 normalized bytes, including the new `X-From:` header. The private catalog's source
@@ -107,7 +109,7 @@ when available, the original validator's traceback. Message context includes the
 source reference, cursor (a byte offset for local MBOX), message SHA-256 and size,
 and escaped previews of up to 4,096 message bytes and 512 envelope bytes.
 Normalization context also identifies the original source-payload hash and
-framing. These details help locate the exact source email without copying the
+previews both original framing lines (up to 512 bytes each). These details help locate the exact source email without copying the
 whole message into the error report. A failure between messages identifies the
 source without attributing the error to the preceding email.
 

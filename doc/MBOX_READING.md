@@ -45,6 +45,12 @@ envelope values, line endings, remaining headers and body quoting are preserved.
 This rule does not establish which program performed the double processing,
 whether the mailbox was emailed, or which envelope timestamp is more accurate.
 
+Exact empty MBCP metadata stubs remain excluded after normalization: the check
+uses the selected envelope and original headers/body after the quoted delimiter.
+Only the generated X-From is ignored; an existing X-From or nonempty body still
+prevents exclusion. Failure history previews both original framing lines, even
+when validation fails before an observation is stored.
+
 ## Compatibility evidence and limits
 
 * **Procmail/formail:** the [upstream formail manual distributed by Debian](https://manpages.debian.org/trixie/procmail/formail.1.en.html)
