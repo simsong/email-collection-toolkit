@@ -87,6 +87,19 @@ jobs:
           ref: ${{ inputs.tag || github.ref_name }}
           fetch-depth: 0
           persist-credentials: false
+      # The allowlist comes from repository settings, never from the release tag.
+      - name: Verify trusted tag signer
+        env:
+          RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
+          RELEASE_SIGNING_PUBLIC_KEYS: ${{ vars.RELEASE_SIGNING_PUBLIC_KEYS }}
+        run: |
+          test -n "$RELEASE_SIGNING_PUBLIC_KEYS" || { echo 'Configure RELEASE_SIGNING_PUBLIC_KEYS before releasing'; exit 1; }
+          git check-ref-format "refs/tags/$RELEASE_TAG"
+          export GNUPGHOME="$(mktemp -d)"
+          trap 'rm -rf "$GNUPGHOME"' EXIT
+          printf '%s\n' 'no-auto-key-retrieve' 'auto-key-locate clear' > "$GNUPGHOME/gpg.conf"
+          printf '%s\n' "$RELEASE_SIGNING_PUBLIC_KEYS" | gpg --batch --import
+          git -c gpg.format=openpgp -c gpg.program=gpg verify-tag "refs/tags/$RELEASE_TAG"
       - name: Set up Python
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
@@ -112,6 +125,7 @@ jobs:
       - name: Validate signing policy and keychain cleanup
         run: make test-signing
       - name: Build and test DMG
+        if: ${{ runner.environment == 'github-hosted' }}
         env:
           APPLE_CERTIFICATE_P12_BASE64: ${{ secrets.APPLE_CERTIFICATE_P12_BASE64 }}
           APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}

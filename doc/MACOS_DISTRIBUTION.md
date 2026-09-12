@@ -107,13 +107,18 @@ scanned by a later ordinary import; a rescan command remains future work.
 
 ## Signing and Apple account renewal
 
-`make dmg` automatically imports a Developer ID Application identity when both
+On an isolated GitHub-hosted runner, `make dmg` imports a Developer ID Application
+identity when both
 `APPLE_CERTIFICATE_P12_BASE64` and `APPLE_CERTIFICATE_PASSWORD` are available.
 The [certificate management guide](CERTIFICATE_MANAGEMENT.md) explains exporting
 the `.p12` and configuring these GitHub Actions repository secrets. The release
 workflow passes them to the macOS build and includes the resulting DMG and
 checksum in the draft release. The release tag must contain this workflow and
-builder; dispatching an older tag does not retrofit the new builder.
+builder; dispatching an older tag does not retrofit the new builder. Release
+verification also requires the administrator's `RELEASE_SIGNING_PUBLIC_KEYS`
+repository variable. Automatic imports are rejected locally and on self-hosted
+runners because `security` password arguments remain visible to other processes;
+use an existing keychain identity for local signing.
 
 Missing either secret is nonfatal: the build emits an Actions warning, leaves
 the DMG container unsigned, and names it `*_UNSIGNED.dmg`. An explicitly supplied

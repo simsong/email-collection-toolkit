@@ -9,8 +9,10 @@ using a **Developer ID Application** certificate. The build and release workflow
 support optional signing; secrets must still be supplied by a repository admin.
 
 - `make dmg` uses an explicit `--signing-identity` if supplied. Otherwise, it
-  automatically imports the `.p12` when both signing secrets described below
-  are present. It signs the nested app code and the finished DMG.
+  imports the `.p12` when both signing secrets described below are present on
+  a GitHub-hosted runner. Local and self-hosted automatic imports are rejected;
+  local signing uses an existing keychain identity. It signs the nested app code
+  and the finished DMG.
 - When either secret is absent, it emits a GitHub Actions warning and builds
   `Email-Collection-Toolkit-VERSION-ARCH_UNSIGNED.dmg`. The app remains ad-hoc
   signed; the DMG container has no Developer ID signature.
@@ -19,7 +21,9 @@ support optional signing; secrets must still be supplied by a repository admin.
 - `.github/workflows/release.yml` builds and tests the DMG on `macos-15`, then
   includes it alongside the source archive and SHA-256 checksums in a draft
   release. Both jobs use the Mac job's verified release commit; assembly fails
-  if the tag has moved. The release tag must contain this builder/workflow.
+  if the tag has moved. Before executing project code, the Mac job verifies the
+  tag against administrator-configured OpenPGP public keys. The release tag
+  must contain this builder/workflow.
 - Automatic notarization and stapling remain **unimplemented**. A signed DMG
   alone is not evidence of Gatekeeper acceptance.
 
@@ -139,7 +143,7 @@ for its key-type and authentication requirements.
 ## 5. Put the two signing secrets in GitHub
 
 The installed workflow reads **repository Actions secrets** in
-`simsong/mail-archiver`. It does not currently reference a named GitHub
+`simsong/email-collection-toolkit`. It does not currently reference a named GitHub
 Environment, so secrets stored only in an environment will not reach this job.
 
 1. Export the certificate **and matching private key** as `.p12` as described
@@ -170,11 +174,17 @@ Environment, so secrets stored only in an environment will not reach this job.
 
 No identity-name variable or extra keychain-password secret is needed. The
 builder selects the imported identity's fingerprint and generates a temporary
-keychain password. Its keychain commands suppress secret-bearing arguments and
-output. It removes the imported file, restores the prior keychain search list,
-and deletes the temporary keychain on exit. GitHub destroys the hosted runner
-after the job; do not reuse this design on a shared self-hosted runner without
-reviewing isolation and interrupted-job cleanup.
+keychain password. The helper omits command arguments and captured tool output
+from Python exceptions. **Passwords are still passed in `security` process
+arguments and can be read by other processes in the same job.** Automatic import
+therefore requires `GITHUB_ACTIONS=true` and `RUNNER_ENVIRONMENT=github-hosted`;
+the workflow also gates the secret-bearing step on the hosted runner context.
+These guards prevent accidental use on shared runners; they do not isolate
+secrets from malicious code within the job. Use only trusted build code and
+dependencies. The helper removes the imported file, restores the prior keychain
+search list, and deletes the temporary keychain on exit. GitHub destroys the
+hosted runner after the job. For local signing, import and manage the identity
+yourself and supply `--signing-identity`.
 
 GitHub documents the [certificate secret mechanism](https://docs.github.com/en/actions/how-tos/deploy/deploy-to-third-party-platforms/sign-xcode-applications).
 To use environment secrets instead, first modify the Mac job to name that
@@ -183,11 +193,31 @@ current repository-secret setup does not acquire environment approval gates
 merely because an environment with the same secrets exists. See
 [environment configuration](https://docs.github.com/en/actions/how-tos/deploy/configure-and-manage-deployments/manage-environments).
 
+### Configure trusted release tag signers
+
+In **Settings → Secrets and variables → Actions → Variables**, set repository
+variable `RELEASE_SIGNING_PUBLIC_KEYS` to the ASCII-armored **public** OpenPGP
+keys of the maintainers authorized to sign releases. Verify their full
+fingerprints independently before adding them. For example, export a known key
+with `gpg --armor --export FULL_FINGERPRINT`; never export its secret key.
+Concatenate public-key exports to authorize multiple release signers.
+
+The Mac job imports only these keys into a fresh temporary GnuPG home with
+automatic key retrieval disabled, then runs `git verify-tag`. Missing or invalid
+configuration, a lightweight tag, or a tag signed by any other key fails before
+project commands or Apple secrets are used, including for unsigned DMG builds.
+This checks the actual signature, not the tagger's name/email or GitHub's generic
+verified badge. GitHub's signature verification and tag/version checks also run.
+
 Signing credentials are available only to the `Build and test DMG` step in
 this workflow; they are not needed for PR testing. Anyone who can modify and
 execute workflows with repository secrets could extract them. Restrict release
 tag creation and workflow changes, review dependencies, and never expose these
 secrets to untrusted PR code. The macOS job's actions are pinned to commit SHAs.
+The signer gate assumes the workflow itself is trusted: someone able to replace
+and execute that workflow with repository secrets can remove the gate. Repository
+administrators must restrict workflow changes and release tag creation; this PR
+does not configure those remote protections or the public-key variable.
 Do not commit `.p12` exports, put passwords in YAML, or upload keychains as
 artifacts. Repository secret storage is not a substitute for reviewing Apple's
 service-provider conditions in section 1.
@@ -200,8 +230,8 @@ release → Run workflow** with such an existing tag. Follow the repository's
 release authorization rules; this document does not authorize publishing a
 release or creating a tag. Dispatching an older tag uses its older build code.
 
-The existing signature and tag/version checks run before project dependency
-installation or packaging. The macOS job builds with `make dmg`, verifies the
+The trusted-signer, GitHub signature, and tag/version checks run before project
+dependency installation or packaging. The macOS job builds with `make dmg`, verifies the
 mounted app, and runs its frozen headless and GUI tests. Any packaging, signing,
 or mounted-test failure blocks draft-release assembly. The builder uses the
 runner's Python architecture; this is not a universal2 build. Hosted GUI and

@@ -1569,16 +1569,28 @@ or both optional signing secrets are present. `scripts/macos_signing.py` imports
 keychain, selects exactly one valid Developer ID Application identity, and
 restores the original keychain search list and deletes the imported key in
 `finally`. Native keychain errors omit secret-bearing command lines and output.
+Passwords remain visible in `security` process arguments. Automatic import
+requires the GitHub Actions hosted-runner environment; local signing uses an
+explicit existing keychain identity. The workflow gates its secret-bearing step
+on the hosted-runner context as well. These checks prevent accidental shared
+runner use, not hostile code within the same job.
 The builder signs and verifies the completed DMG before publishing the candidate.
 Missing either secret emits `::warning::` and produces `*_UNSIGNED.dmg`; invalid
-configured credentials fail. An explicit `--signing-identity` overrides secrets.
+configured credentials fail. An explicit `--signing-identity` overrides secrets;
+`-` emits a distinct warning identifying that deliberate unsigned override.
 The release workflow builds the DMG on `macos-15`, passes secrets only to
 `make dmg`, and waits for the tested artifact before assembling the source and
 DMG checksums into a draft release. Assembly checks out the Mac job's verified
-commit and checks that the tag still names that commit. There is no automatic
-notarization. `make test-signing` runs ordered focused lint/type checks and
+commit and checks that the tag still names that commit. Before project commands,
+the Mac job imports the administrator's `RELEASE_SIGNING_PUBLIC_KEYS` variable
+into an isolated temporary GnuPG home, disables automatic key retrieval, and
+verifies the tag using only that keyring. Missing/invalid keys and other signers
+fail. Workflow/tag protection remains an administrator prerequisite. There is
+no automatic notarization. `make test-signing` runs ordered focused lint/type checks and
 regressions for credential selection, malformed input, identity ambiguity,
-unsigned naming/warnings, secret-safe errors, and release artifact ordering.
+unsigned naming/warnings, sanitized errors, shared-runner rejection, and release
+artifact ordering. A real Git/GnuPG fixture executes the workflow's signer gate
+against trusted/untrusted signed tags, missing/invalid keys, and lightweight tags.
 Real Developer ID import/signing and hosted GUI execution require a credentialed
 Mac release trial; pure policy tests do not establish those properties.
 `scripts/desktop_entry.py` dispatches normal GUI launch, `--cli`, `--self-test`,

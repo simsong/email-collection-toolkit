@@ -18,6 +18,12 @@ from pydantic import BaseModel, SecretStr
 
 CERTIFICATE_SECRET = "APPLE_CERTIFICATE_P12_BASE64"
 PASSWORD_SECRET = "APPLE_CERTIFICATE_PASSWORD"
+GITHUB_ACTIONS = "GITHUB_ACTIONS"
+RUNNER_ENVIRONMENT = "RUNNER_ENVIRONMENT"
+EXPLICIT_UNSIGNED_WARNING = (
+    "::warning::Developer ID signing disabled by --signing-identity -. "
+    "Producing _UNSIGNED.dmg with an ad-hoc-signed app; this build is not notarized."
+)
 UNSIGNED_WARNING = (
     "::warning::Developer ID signing skipped: both APPLE_CERTIFICATE_P12_BASE64 "
     "and APPLE_CERTIFICATE_PASSWORD are required. Producing _UNSIGNED.dmg "
@@ -30,11 +36,14 @@ class SigningSecrets(BaseModel):
 
     certificate: SecretStr = SecretStr("")
     password: SecretStr = SecretStr("")
+    hosted_runner: bool = False
 
     @classmethod
     def from_environment(cls, environment: Mapping[str, str]) -> SigningSecrets:
         return cls(certificate=SecretStr(environment.get(CERTIFICATE_SECRET, "")),
-                   password=SecretStr(environment.get(PASSWORD_SECRET, "")))
+                   password=SecretStr(environment.get(PASSWORD_SECRET, "")),
+                   hosted_runner=(environment.get(GITHUB_ACTIONS) == "true"
+                                  and environment.get(RUNNER_ENVIRONMENT) == "github-hosted"))
 
     @property
     def available(self) -> bool:
@@ -62,7 +71,7 @@ def developer_identity(output: str) -> str:
 
 
 def security_command(*arguments: str) -> str:
-    """Do not expose password arguments or security's key attributes on failure."""
+    """Omit argv/output from exceptions; argv remains visible to local processes."""
     try:
         result = subprocess.run(["/usr/bin/security", *arguments], check=False,
                                 capture_output=True, text=True, timeout=60)
@@ -79,13 +88,16 @@ def signing_identity(credentials: SigningSecrets, work_root: Path,
     """Restore the user's keychain search list and remove the imported key on exit."""
     if explicit is not None:
         if explicit == "-":
-            print(UNSIGNED_WARNING, flush=True)
+            print(EXPLICIT_UNSIGNED_WARNING, flush=True)
         yield explicit
         return
     if not credentials.available:
         print(UNSIGNED_WARNING, flush=True)
         yield "-"
         return
+    if not credentials.hosted_runner:
+        raise RuntimeError("Automatic PKCS#12 import requires an isolated GitHub-hosted runner; "
+                           "use --signing-identity with an existing local keychain identity")
     certificate_bytes = credentials.decode()
     work_root.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix="signing-", dir=work_root) as temporary:

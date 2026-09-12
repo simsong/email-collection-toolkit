@@ -1387,14 +1387,23 @@ plug-in manifests, and the standalone verifier source travel inside the app.
 ClamAV and experimental command-line tools (Tika/Java, PDF OCR, Apple Intelligence)
 are not prerequisites of the supported local-mail GUI and are not bundled.
 When both `APPLE_CERTIFICATE_P12_BASE64` and `APPLE_CERTIFICATE_PASSWORD`
-are present, the build must import the PKCS#12 identity temporarily, sign the
-app and DMG with Developer ID, verify their seals, and remove the imported key.
+are present on an isolated GitHub-hosted runner, the build must import the
+PKCS#12 identity temporarily, sign the app and DMG with Developer ID, verify
+their seals, and remove the imported key.
 If either secret is absent, continue with an ad-hoc-signed app and unsigned
 DMG, emit a GitHub Actions `::warning::`, and append `_UNSIGNED` before `.dmg`.
 Invalid configured credentials and signing failures must fail rather than
 silently downgrade. Secret values must not appear in error output or artifacts;
 restore the prior keychain search list on completion or failure. Explicit local
 `--signing-identity` remains supported, including `-` to force unsigned output.
+Explicit unsigned output must identify the override rather than report missing
+credentials. Reject automatic PKCS#12 import on local and self-hosted runners:
+`security` password arguments remain visible to other processes in the job.
+Before project commands or Apple secrets are used, verify the release tag's
+OpenPGP signature against only the public keys configured by administrators in
+`RELEASE_SIGNING_PUBLIC_KEYS`, without automatic key retrieval. Missing/invalid
+keys or an unlisted signer must fail. Administrators must protect the workflow
+and release tags separately; a modified workflow could remove this gate.
 Release assembly must include the tested DMG from the same commit as the source
 archive and checksum the final image. Signing is not notarization: neither
 branch is automatically notarized, and no Gatekeeper bypass is performed. The archive extension is declared

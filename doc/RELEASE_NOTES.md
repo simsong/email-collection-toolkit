@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+* Require an administrator-configured OpenPGP release signer allowlist before
+  running release code with Apple secrets. Restrict automatic PKCS#12 import to
+  GitHub-hosted runners and document process-argument visibility. Correct the
+  certificate setup repository and distinguish deliberate unsigned builds from
+  missing credentials. Existing local keychain identities remain supported.
+
 * Build macOS DMGs in the GitHub release workflow. Sign the app and DMG when
   both optional PKCS#12 secrets are configured; otherwise warn in Actions and
   publish an explicitly named `_UNSIGNED.dmg`. Preserve failure on invalid
