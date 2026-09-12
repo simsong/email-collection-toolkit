@@ -1,3 +1,5 @@
+<!-- Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved. -->
+
 # Mail archive normalizer implementation
 
 ## Recovered tool safety and validation
@@ -1932,6 +1934,35 @@ schema, and policy versions so correspondent, thread, entity, attachment, and
 provenance reports can declare how they were produced.
 
 ## Validation and tests
+
+`scripts/check_copyright.py` enumerates Git-tracked files and checks the
+explicit project-owned, comment-safe policy without rewriting anything.
+`make copyright-check` runs it as part of `make check`. The exclusions protect
+canonical mail and test fixtures, binary/data files, the generated release
+index, the vendored Tabulator tree, and the separately MIT-licensed website
+theme. Upstream CC-BY-SA artwork and generated shared-workflow wrappers are
+also excluded; Python stubs and JavaScript modules receive native comments.
+`make test-copyright` exercises these ownership boundaries. New eligible files
+therefore fail CI until they receive the native comment form of the project notice.
+
+`scripts/check_runtime_licenses.py` starts with the installed `mailarchiver`
+distribution and follows evaluated PEP 508 runtime requirements, rather than
+inventorying the development environment wholesale. It records typed package,
+version, license, and complete-license-file paths; rejects missing license
+evidence, GPL/AGPL packages, and development-only packages in the runtime
+closure; and can copy exact license files plus a JSON inventory into a binary
+staging directory. `make runtime-license-check` is a CI and release gate.
+`make runtime-license-bundle LICENSE_OUTPUT=PATH` is the packaging interface;
+it creates a complete notices directory containing the project and third-party
+notices, typed inventory, and collected license files. The current macOS builder
+retains its existing notice collector; wiring the audited bundle into frozen
+macOS and Windows builds remains pending. The audit runs
+independently on each target platform because pywebview's closure is
+platform-specific.
+
+The native About metadata uses the same copyright notice. PEP 639
+`license-files` metadata places the repository notices and complete licenses
+for stored Tabulator and website-theme code in source distributions.
 
 The Cocoa termination delegate confirms an active-import quit and returns
 `NSTerminateLater`, keeping the event loop alive while `IngestJob.stop` requests

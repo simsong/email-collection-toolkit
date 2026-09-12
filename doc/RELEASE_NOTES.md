@@ -1,7 +1,12 @@
+<!-- Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved. -->
+
 # Release notes
 
 ## Unreleased
 
+* Reconcile the copyright/license draft with current validation and release
+  workflows. Preserve external artwork and generated workflow bytes, cover
+  current project source files, and retain the ordered lint/type/test gates.
 * Normalize an immediate quoted MBOX delimiter into a literal `X-From:` header.
   Promote a meaningful inner envelope when the outer sender is `XXX` or
   `???@???`; retain the displaced outer value as `X-From:`. Preserve body
