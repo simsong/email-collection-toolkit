@@ -129,6 +129,17 @@ def test_dependency_audit_rejects_external_rpath(tmp_path: Path) -> None:
         verify_dependencies(app)
     subprocess.run(["cc", str(source), "-Wl,-rpath,@executable_path", "-o", str(binary)], check=True)
     verify_dependencies(app)
+    # A dylib's install name is its own identity, not a dependency on another file.
+    library_source = tmp_path / "library.c"
+    library_source.write_text("int fixture_value(void) { return 0; }\n", encoding="utf-8")
+    library = binary.parent / "library.dylib"
+    subprocess.run(["cc", "-dynamiclib", str(library_source), "-Wl,-install_name,@rpath/identity-only.dylib", "-o", str(library)], check=True)
+    verify_dependencies(app)
+    # Once an executable actually loads that name, it must resolve within the app.
+    source.write_text("extern int fixture_value(void); int main(void) { return fixture_value(); }\n", encoding="utf-8")
+    subprocess.run(["cc", str(source), str(library), "-Wl,-rpath,@executable_path", "-o", str(binary)], check=True)
+    with pytest.raises(RuntimeError, match="unresolved bundled dependency"):
+        verify_dependencies(app)
 
 
 @pytest.mark.parametrize("succeeds", [False, True])

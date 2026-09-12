@@ -4,7 +4,6 @@ from __future__ import annotations
 
 
 import argparse
-import hashlib
 import json
 import logging
 import os
@@ -28,6 +27,7 @@ import webview
 from pydantic import BaseModel, Field
 from webview.menu import Menu, MenuAction, MenuSeparator
 
+from .file_drag import FILE_DRAGS, install_file_drag
 from .identity import APPLICATION_NAME
 from .__main__ import IngestInterrupted, IngestOutcome, IngestRequest, run_ingest
 from .application import (
@@ -39,10 +39,8 @@ from .application import (
 )
 from .scanner import CLAMAV_DOWNLOAD_URL, UNSCANNED_WARNING, ScannerAvailability, scanner_availability
 from .configuration import GuiConfiguration, application_configuration
-from .document_options import (
-    DocumentOptions, OWNER_NAMES_FILENAME, read_owner_names, sorted_owner_names,
-    source_owner_names, split_owner_names,
-)
+from .document_options import DocumentOptions, OwnerRulesState
+from .owner_rules import OwnerRules
 from .archive_config import (
     import_directory as configured_import_directory,
     remember_import_directory,
@@ -87,12 +85,11 @@ INTERNET_CHECK_URL = "https://www.example.com/"
 INTERNET_CHECK_INTERVAL_SECONDS = 30.0
 
 
-def owner_names_text(value: str) -> str:
-    """Normalize one alias per line without changing the existing matching rules."""
-    lines = sorted_owner_names(value.splitlines())
-    if not lines or "\x00" in value:
-        raise ValueError("Enter at least one name or email address, one per line.")
-    return "\n".join(lines) + "\n"
+def owner_rules_text(include: str, exclude: str) -> OwnerRules:
+    rules = OwnerRules.from_text(include, exclude)
+    if not rules.include:
+        raise ValueError("Enter at least one owner mailbox name or email pattern.")
+    return rules
 
 
 def external_link_destination(value: str) -> str:
@@ -132,6 +129,7 @@ class GuiStatus(BaseModel):
     untitled: bool = False
     generation: int = 0
     opened_in_new_window: bool = False
+    file_drag_supported: bool = sys.platform == "darwin"
     configuration: GuiConfiguration
     notices: list[ApplicationNotice] = Field(default_factory=list)
 
@@ -142,8 +140,7 @@ class GuiIngestOverview(BaseModel):
 
 class DragExport(BaseModel):
     filename: str
-    url: str
-    content_type: str
+    token: str
 
 
 class OpenResult(BaseModel):
@@ -456,43 +453,57 @@ def macos_import_picker(
     return result.result()
 
 
-def macos_owner_names(destination: Path) -> str | None:
-    """Collect multiline Sent-classification aliases on the Cocoa main thread."""
+def macos_owner_rules(destination: Path, defaults: OwnerRules) -> OwnerRules | None:
+    """Always review include/exclude rules on the Cocoa main thread before import."""
     if sys.platform != "darwin":
         raise RuntimeError("native dialogs require macOS")
-    from AppKit import NSAlert, NSImage, NSScrollView, NSTextView  # pylint: disable=import-outside-toplevel,no-name-in-module,import-error
+    from AppKit import NSAlert, NSImage, NSScrollView, NSTextView, NSTextField, NSView  # pylint: disable=import-outside-toplevel,no-name-in-module,import-error
     from Foundation import NSThread  # pylint: disable=import-outside-toplevel,no-name-in-module,import-error
     from PyObjCTools import AppHelper  # pylint: disable=import-outside-toplevel,import-error
 
-    result: Future[str | None] = Future()
+    result: Future[OwnerRules | None] = Future()
 
     def present() -> None:
         try:
             alert = NSAlert.alloc().init()
             alert.setIcon_(NSImage.alloc().initWithContentsOfFile_(str(application_icon_path())))
-            title = f"Owner names for {destination.name}"
+            title = f"Owner emails for {destination.name}"
             alert.setMessageText_(title)
             alert.window().setTitle_(title)
             instructions = (
-                "Enter the archive owner's names and email addresses, one per line.\n"
-                "These identify your sent mail.\n\n"
-                f"Saved after import confirmation to: {destination / OWNER_NAMES_FILENAME}"
+                "One rule per line, or separate rules with commas. Exclude rules win.\n"
+                "slg matches slg@any-domain, not 3slg. Use * or ? for wildcards.\n"
+                "A domain is matched only when the rule contains @.\n\n"
+                f"Defaults are saved after confirmation to: {destination / 'config.yaml'}"
             )
             alert.setInformativeText_(instructions)
-            editor = NSTextView.alloc().initWithFrame_(((0, 0), (420, 160)))
-            editor.setRichText_(False)
-            editor.setAutomaticQuoteSubstitutionEnabled_(False)
-            editor.setAutomaticDashSubstitutionEnabled_(False)
-            scroll = NSScrollView.alloc().initWithFrame_(((0, 0), (420, 160)))
-            scroll.setHasVerticalScroller_(True)
-            scroll.setDocumentView_(editor)
-            alert.setAccessoryView_(scroll)
+            accessory = NSView.alloc().initWithFrame_(((0, 0), (560, 290)))
+            editors = []
+            for label, identifier, values, y in (
+                ("Owner emails (include)", "owner-include", defaults.include, 155),
+                ("Exclude (applied after include)", "owner-exclude", defaults.exclude, 10),
+            ):
+                heading = NSTextField.labelWithString_(label)
+                heading.setFrame_(((0, y + 105), (560, 24)))
+                accessory.addSubview_(heading)
+                editor = NSTextView.alloc().initWithFrame_(((0, 0), (550, 100)))
+                editor.setIdentifier_(identifier)
+                editor.setRichText_(False)
+                editor.setAutomaticQuoteSubstitutionEnabled_(False)
+                editor.setAutomaticDashSubstitutionEnabled_(False)
+                editor.setString_("\n".join(values))
+                scroll = NSScrollView.alloc().initWithFrame_(((0, y), (560, 100)))
+                scroll.setHasVerticalScroller_(True)
+                scroll.setDocumentView_(editor)
+                accessory.addSubview_(scroll)
+                editors.append(editor)
+            alert.setAccessoryView_(accessory)
             alert.addButtonWithTitle_("Continue").setKeyEquivalent_("")
             alert.addButtonWithTitle_("Cancel").setKeyEquivalent_("\x1b")
-            alert.window().setInitialFirstResponder_(editor)
+            alert.window().setInitialFirstResponder_(editors[0])
             while alert.runModal() == 1000:
                 try:
-                    result.set_result(owner_names_text(str(editor.string())))
+                    result.set_result(owner_rules_text(str(editors[0].string()), str(editors[1].string())))
                     return
                 except ValueError as error:
                     alert.setInformativeText_(f"{error}\n\n{instructions}")
@@ -576,7 +587,7 @@ class DocumentOptionsApi:
         state.editable = self._document.ingest_job is None
         return state.model_dump(mode="json")
 
-    def update(self, additions: str, removed: list[str], revision: str) -> dict[str, Any]:
+    def update(self, include: str, exclude: str, revision: str) -> dict[str, Any]:
         document = self._document
         store = DocumentOptions(self._archive)
         lease = WriterLease.acquire(
@@ -584,11 +595,38 @@ class DocumentOptionsApi:
             application_metadata().version,
         )
         try:
-            current = store.state()
-            names = [name for name in current.names if name not in removed]
-            return store.save(names + split_owner_names(additions), lease, revision).model_dump(mode="json")
+            return store.save(OwnerRules.from_text(include, exclude), lease, revision).model_dump(mode="json")
         finally:
             lease.release()
+
+
+class OwnerRulesPrompt:
+    """Portable two-field import prompt; confirmation alone does not save configuration."""
+
+    def __init__(self, defaults: OwnerRules) -> None:
+        self.defaults = defaults
+        self.result: Future[OwnerRules | None] = Future()
+        self.window: Any = None
+
+    def status(self) -> dict[str, Any]:
+        return OwnerRulesState(
+            include=self.defaults.include, exclude=self.defaults.exclude,
+            revision="", changed_since_import=False, import_rules_known=False,
+        ).model_dump(mode="json")
+
+    def update(self, include: str, exclude: str, _revision: str) -> dict[str, Any]:
+        rules = owner_rules_text(include, exclude)
+        if not self.result.done():
+            self.result.set_result(rules)
+        self.cancel()
+        return self.status()
+
+    def cancel(self, *_args: object) -> None:
+        if not self.result.done():
+            self.result.set_result(None)
+        window, self.window = self.window, None
+        if window is not None:
+            window.destroy()
 
 
 class WindowBridge:
@@ -635,6 +673,9 @@ class GuiApi:
         self.search_window = search_window
         self.archive = document.path if document is not None else archive
         self.window: Any = None
+        self._drag_tokens: set[str] = set()
+        self._drag_lock = Lock()
+        self._drag_closed = False
         self._temporary = tempfile.TemporaryDirectory(prefix="mailarchive-gui-") if temporary_directory is None else None
         if self._temporary is not None:
             self.temporary_directory: Path = Path(self._temporary.name)
@@ -1003,23 +1044,24 @@ class GuiApi:
 
     def prepare_drag(self, message_pks: list[int]) -> dict[str, str]:
         """Prepare one explicit Finder drag without proactively exporting mail."""
-        unique = list(dict.fromkeys(message_pks))
-        if not unique:
-            raise ValueError("select at least one message to drag")
-        archive = self._archive()
-        if len(unique) == 1:
-            view = describe_message(archive, unique[0])
-            destination = self.temporary_directory / export_filename(view)
-            write_message(archive, unique[0], destination)
-            return DragExport(
-                filename=destination.name, url=destination.as_uri(), content_type="message/rfc822"
-            ).model_dump()
-        digest = hashlib.sha256(",".join(map(str, sorted(unique))).encode()).hexdigest()[:12]
-        destination = self.temporary_directory / f"messages-{digest}" / f"Email Collection Toolkit Messages ({len(unique)}).zip"
-        write_messages_zip(archive, unique, destination)
-        return DragExport(
-            filename=destination.name, url=destination.as_uri(), content_type="application/zip"
-        ).model_dump()
+        with self._drag_lock:
+            if self._drag_closed:
+                raise ValueError("message viewer is closed")
+            unique = list(dict.fromkeys(message_pks))
+            if not unique:
+                raise ValueError("select at least one message to drag")
+            archive = self._archive()
+            directory = self.temporary_directory / "drags" / uuid4().hex
+            if len(unique) == 1:
+                view = describe_message(archive, unique[0])
+                destination = directory / export_filename(view)
+                write_message(archive, unique[0], destination)
+            else:
+                destination = directory / f"Email Collection Toolkit Messages ({len(unique)}).zip"
+                write_messages_zip(archive, unique, destination)
+            token = FILE_DRAGS.register(destination)
+            self._drag_tokens.add(token)
+            return DragExport(filename=destination.name, token=token).model_dump()
 
     def open_attachment(self, message_pk: int, part_id: int, confirmed: bool = False) -> dict[str, Any]:
         descriptor = attachment_descriptor(self._archive(), message_pk, part_id)
@@ -1079,8 +1121,12 @@ class GuiApi:
                 child.window.destroy()
             child.close()
         self.children.clear()
-        if self._temporary:
-            self._temporary.cleanup()
+        with self._drag_lock:
+            self._drag_closed = True
+            FILE_DRAGS.discard(self._drag_tokens)
+            self._drag_tokens.clear()
+            if self._temporary:
+                self._temporary.cleanup()
 
     def _archive(self) -> Path:
         if self.archive is None or not _is_archive(self.archive):
@@ -1536,32 +1582,35 @@ class PyWebViewApplication:
             roots = list(dialog_paths(selected_sources))
         else:
             roots = selected_roots
-        additions = []
-        if sys.platform == "darwin":
-            try:
-                additions = source_owner_names(roots)
-                if not sorted_owner_names(read_owner_names(document.path / OWNER_NAMES_FILENAME) + additions):
-                    names_text = macos_owner_names(destination)
-                    if names_text is None:
-                        return False
-                    additions = names_text.splitlines()
-            except (OSError, ValueError) as error:
-                self.add_notice("error", f"Could not load owner names: {error}")
+        try:
+            store = DocumentOptions(document.path)
+            owner_revision = store.state().revision
+            defaults = store.defaults(roots)
+            if sys.platform == "darwin":
+                owner_rules = macos_owner_rules(destination, defaults)
+            else:
+                prompt = OwnerRulesPrompt(defaults)
+                window = webview.create_window(
+                    f"Owner emails for {destination.name}", self.asset_url("options.html", [("import", "1")]),
+                    js_api=WindowBridge(prompt, ("status", "update", "cancel")), width=660, height=620,
+                )
+                if window is None:
+                    raise RuntimeError("Could not open owner email editor")
+                prompt.window = window
+                window.events.closed += prompt.cancel
+                owner_rules = prompt.result.result()
+            if owner_rules is None:
+                return False
+        except (OSError, ValueError) as error:
+            self.add_notice("error", f"Could not load owner email rules: {error}")
+            if sys.platform == "darwin":
                 macos_alert(title, str(error), ("OK",))
-                return False
-        else:
-            selected_owners = anchor.create_file_dialog(
-                webview.FileDialog.OPEN, directory=str(Path.home()),
-                file_types=("Owner names text file (*.txt)", "All files (*.*)"),
-            )
-            if not selected_owners:
-                return False
-            additions = source_owner_names(roots) + read_owner_names(dialog_paths(selected_owners)[0])
-        owner_names = document.path / OWNER_NAMES_FILENAME
+            return False
         summary = "\n".join(str(root) for root in roots)
         confirmation = (
             f"Destination archive: {destination}\n\nRead-only sources:\n{summary}\n\n"
-            f"Sent-mail owner names: {owner_names}\n\n{antivirus.detail}"
+            f"Owner emails: {', '.join(owner_rules.include)}\n"
+            f"Exclude: {', '.join(owner_rules.exclude) or '(none)'}\n\n{antivirus.detail}"
         )
         if not antivirus.configured:
             choice = (
@@ -1576,17 +1625,18 @@ class PyWebViewApplication:
                 return False
             if choice != 1:
                 return False
-            return self.start_import(api, roots, owner_names, owner_additions=additions, scan_policy="not-scanned")
+            return self.start_import(api, roots, owner_rules=owner_rules, owner_revision=owner_revision, scan_policy="not-scanned")
         confirmed = (
             macos_alert(title, confirmation, ("Import", "Cancel"), body_width=IMPORT_CONFIRMATION_WIDTH) == 0
             if sys.platform == "darwin" else anchor.create_confirmation_dialog(title, confirmation)
         )
         if not confirmed:
             return False
-        return self.start_import(api, roots, owner_names, owner_additions=additions)
+        return self.start_import(api, roots, owner_rules=owner_rules, owner_revision=owner_revision)
 
     def start_import(
-        self, api: GuiApi, roots: list[Path], owner_names: Path, *, owner_additions: list[str] | None = None,
+        self, api: GuiApi, roots: list[Path], owner_names: Path | None = None, *, owner_rules: OwnerRules | None = None,
+        owner_revision: str | None = None,
         scan_policy: Literal["clamav", "not-scanned"] = "clamav",
     ) -> bool:
         """Acquire both ingest layers before launching the shared service."""
@@ -1606,8 +1656,8 @@ class PyWebViewApplication:
                 operation_id,
                 application_metadata().version,
             )
-            if owner_additions is not None:
-                DocumentOptions(document.path).merge(owner_additions, lease)
+            if owner_rules is not None:
+                DocumentOptions(document.path).save(owner_rules, lease, owner_revision)
             job = IngestJob(operation_id=operation_id, owner_window_id=session.window_id)
             with self._lock:
                 if self._quitting:
@@ -1625,6 +1675,7 @@ class PyWebViewApplication:
         request = IngestRequest(
             archive=document.path,
             owner_names_file=owner_names,
+            owner_rules=owner_rules,
             roots=[str(root) for root in roots],
             scan_policy=scan_policy,
         )
@@ -2152,6 +2203,9 @@ def application_menu(application: PyWebViewApplication) -> list[Menu]:
     ]
 
 
+COCOA_OPEN_ARGUMENTS_DEFAULT = "NSTreatUnknownArgumentsAsOpen"
+
+
 def configure_macos_application() -> None:
     """Replace the bare Python process identity before pywebview builds Cocoa menus."""
     if sys.platform != "darwin":
@@ -2163,8 +2217,12 @@ def configure_macos_application() -> None:
     from Foundation import (  # pylint: disable=import-outside-toplevel,no-name-in-module,import-error
         NSBundle,
         NSProcessInfo,
+        NSUserDefaults,
     )
 
+    # Cocoa otherwise opens the Python launcher and option values as documents.
+    # This registration is process-local; Cocoa requires the string "NO" here.
+    NSUserDefaults.standardUserDefaults().registerDefaults_({COCOA_OPEN_ARGUMENTS_DEFAULT: "NO"})
     metadata = application_metadata()
     bundle = NSBundle.mainBundle()
     info = bundle.localizedInfoDictionary() or bundle.infoDictionary()
@@ -2179,6 +2237,7 @@ def configure_macos_application() -> None:
         icon = NSImage.imageWithSystemSymbolName_accessibilityDescription_("archivebox", metadata.name)
     if icon is not None:
         NSApplication.sharedApplication().setApplicationIconImage_(icon)
+    install_file_drag()
 
 
 def install_macos_document_events(application: PyWebViewApplication) -> None:
@@ -2186,6 +2245,8 @@ def install_macos_document_events(application: PyWebViewApplication) -> None:
     if sys.platform != "darwin":
         return
     from webview.platforms.cocoa import BrowserView  # pylint: disable=import-outside-toplevel
+
+    install_file_drag()
 
     class MailArchiverDelegate(BrowserView.AppDelegate):
         def applicationShouldTerminate_(self, app):
@@ -2259,6 +2320,9 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main() -> int:
+    if "--self-test" in sys.argv[1:] or "--self-test-gui" in sys.argv[1:]:
+        from .self_test import main as test_main  # pylint: disable=import-outside-toplevel
+        return test_main()
     args = build_parser().parse_args()
     if args.smoke_test != (args.smoke_report is not None):
         raise SystemExit("--smoke-test and --smoke-report must be used together")

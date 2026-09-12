@@ -14,6 +14,7 @@ import webview
 
 from mailarchiver.application import ApplicationController, ApplicationPreferencesStore
 from mailarchiver.gui_app import GUI_DIRECTORY, PyWebViewApplication, configure_macos_application
+from mailarchiver.document_options import DocumentOptions
 from mailarchiver.ingest_status import read_ingest_history
 from mailarchiver.loopback import LoopbackAssetServer
 from mailarchiver.scanner import scanner_availability
@@ -121,22 +122,52 @@ def main() -> None:
                 assert setup.events.closed.wait(10), "Cancel did not close the application"
                 return
 
+            owners_confirmed = Event()
             confirmed = Event()
+
             def confirm(timer) -> None:
-                timer.invalidate()
                 native = appkit.NSApplication.sharedApplication()
+                modal = native.modalWindow()
+                if modal is None:
+                    return
                 try:
-                    assert native.modalWindow() is not None, "Import confirmation did not appear"
-                    native.stopModalWithCode_(1000 if scanner_availability().configured else 1001)
-                finally:
+                    if "Owner emails for" in modal.title():
+                        assert not owners_confirmed.is_set(), "Owner dialog repeated"
+                        views = [modal.contentView()]
+                        editors = []
+                        while views:
+                            view = views.pop()
+                            views.extend(view.subviews())
+                            if isinstance(view, appkit.NSTextView) and view.isEditable():
+                                editors.append(view)
+                        assert len(editors) == 2
+                        for editor in editors:
+                            if editor.identifier() == "owner-include":
+                                assert editor.string() == "owner@example.org"
+                            elif editor.identifier() == "owner-exclude":
+                                editor.setString_("excluded@example.org")
+                            else:
+                                raise AssertionError("Unexpected owner editor")
+                        owners_confirmed.set()
+                        native.stopModalWithCode_(1000)
+                    else:
+                        assert owners_confirmed.is_set(), "Import skipped owner rule confirmation"
+                        timer.invalidate()
+                        native.stopModalWithCode_(1000 if scanner_availability().configured else 1001)
+                        confirmed.set()
+                except Exception:  # pylint: disable=broad-exception-caught
+                    errors.append(traceback.format_exc())
+                    timer.invalidate()
+                    native.stopModalWithCode_(1001)
                     confirmed.set()
 
             def schedule_confirmation() -> None:
-                timer = foundation.NSTimer.timerWithTimeInterval_repeats_block_(0.5, False, confirm)
+                timer = foundation.NSTimer.timerWithTimeInterval_repeats_block_(0.2, True, confirm)
                 foundation.NSRunLoop.mainRunLoop().addTimer_forMode_(timer, appkit.NSModalPanelRunLoopMode)
             app_helper.callAfter(schedule_confirmation)
             click("start-import")
             assert confirmed.wait(10)
+            assert not errors, errors
             native_setup = setup.native
             assert native_setup is not None and not native_setup.isVisible()
             assert setup.evaluate_js("document.getElementById('source-path').value") == ""
@@ -150,6 +181,9 @@ def main() -> None:
             assert history.statuses[0].state == "completed", history
             with sqlite3.connect(destination / "archive.sqlite3") as catalog:
                 assert catalog.execute("SELECT sha256 FROM messages").fetchall() == [(hashlib.sha256(raw).hexdigest(),)]
+            saved_rules = DocumentOptions(destination).state()
+            assert saved_rules.include == ["owner@example.org"]
+            assert saved_rules.exclude == ["excluded@example.org"]
             assert message.read_bytes() == raw
             saved = controller.preferences.last_archive
             assert saved is not None and saved.samefile(destination)

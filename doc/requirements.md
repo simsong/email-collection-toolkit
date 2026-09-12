@@ -42,6 +42,24 @@ directories, MBOX, EML, Maildir, Apple Mail, Gmail exports, and live read-only
 IMAP accounts. It must be safe to rerun an ingest operation on the same source
 without duplicating or rescanning messages already archived.
 
+## Experimental ePADD address-book export
+
+`make addressbook-export` reads only sender/recipient addresses referenced by
+messages in the selected archive catalog and writes a private text derivative
+outside the archive. The first contact contains explicitly selected exact owner
+addresses or, with `--owners-from-sent`, distinct sender addresses from catalog
+messages classified Sent. Recipients are never treated as owners merely because
+they received Sent mail. Historical Sent classification can itself contain false
+positives; it is not independently verified owner identity. All other addresses
+remain separate, with no inferred display-name aliases. Single-entry contacts
+preserve identifiers without `@` using the ePADD 11.1.3 reader's fallback; Sent
+identifiers without `@` remain separate and are reported because they cannot be
+represented as owner email aliases in this format. Unsafe contact lines are
+excluded and individually reported; case normalization, totals, and SHA-256
+evidence are recorded. Output must not replace existing files or mutate the
+source. This is a whole-address-book replacement experiment, not a reviewed
+People authority or validated live repair.
+
 ## Canonical archive layout
 
 All deliverables reside in one archive directory. That directory is a native
@@ -72,9 +90,14 @@ directory, and a `data/mbox/` payload directory.
 * Messages detected as infected are instead placed in `INFECTED1.mbox`, with
   the same numeric rollover rule if needed.  They are never discarded or
   altered.
-* A message's category is **Sent** if the parsed `From:` address contains,
-  case-insensitively, one of names in owner-names.txt; otherwise it is **Archive**.  The aliases are
-  configurable, and the matched address is retained.
+* A noninfected message is **Sent** when its parsed `From:` address matches
+  an owner include rule and no exclude rule; otherwise it is **Archive**.
+  Rules are case-insensitive whole-mailbox globs (`*`, `?`, `[abc]`). A bare
+  `slg` is equivalent to `slg@*`: it matches `slg@example.org` and the legacy
+  sender `slg`, but not `3slg` or `slg+tag`. Only a rule containing `@` matches
+  a domain. `*simson*` with exclude `*david*` excludes `david_simson@example.org`
+  and never matches an unrelated mailbox just because its domain is `simson.net`.
+  Neither display names nor implicit substring expansion identify owners.
 * Normalize the valid RFC 5322 `Date:` and every valid timestamp suffix in a
   `Received:` header to UTC. Sort the Received dates, discard one minimum and
   one maximum when at least three exist, and compute the median (the midpoint
@@ -469,8 +492,8 @@ To or outgoing Bcc recipient of owner-sent mail, or an incoming sender where an
 exact configured owner address occurs in `To`. Cc recipients are not
 meaningful; multiple To recipients are. A mailing-list message counts only
 when that direct-owner-in-To condition is met.
-The existing owner-token file remains the ingest classifier until archive setup
-collects exact owner addresses and **File → Properties** can revise them;
+The include/exclude owner rules classify ingest; a separate reviewed exact
+owner-address set for contact reconciliation remains planned;
 meaningful-contact semantics use those exact addresses, never a name fragment.
 The read-only `human-contacts` command shall provide this initial address-level
 projection in table, TSV, and JSON forms before the Contacts window exists.
@@ -598,9 +621,22 @@ An indexing failure is recorded as a metadata defect and does not reject mail;
 
 ## Desktop application documents and windows
 
-The first macOS and Windows applications retain the Python implementation and
-share the pywebview HTML, CSS, and JavaScript. They use WKWebView on macOS and
-WebView2 on Windows. An application-owned HTTP server binds only to
+The compiled desktop experience will evaluate Dioxus Desktop and Tauri with the
+system webview (WKWebView on macOS, WebView2 on Windows). Rust work is limited to the desktop/UI layer;
+ingest, search, scanner orchestration, archive locking, and preservation remain
+in Python. Windows with full ingest is the next platform priority; Linux/snap
+delivery is deferred. [DIOXUS.md](DIOXUS.md) defines the trial plan and migration,
+typed local worker boundary, packaging, and native acceptance requirements.
+The worker protocol and both candidate frontends remain unimplemented. End users must
+receive the compiled UI and bundled Python dependencies together.
+
+Plan comparable trial implementations in Dioxus and Tauri before choosing a
+framework. Either approach retains the Python archive engine.
+
+The current pywebview application uses HTML/CSS/JavaScript and its native Python
+bridge. The following asset-server rules describe that implementation and its
+security baseline; they do not prescribe the unimplemented worker transport.
+An application-owned HTTP server binds only to
 `127.0.0.1` on an ephemeral port and serves only packaged GUI assets. Each
 window starts with an unlogged, one-use cryptographic nonce that establishes a
 session-only `HttpOnly`, `SameSite=Strict` cookie and redirects to a clean URL;
@@ -651,13 +687,18 @@ selection alone. Disable Start import until both folders are selected and while
 any setup dialog is pending. Reject equal or nested source/destination folders,
 including symlink, Unicode, and case aliases, before creating or opening a
 destination. Start
-import reuses the selected root without asking for it again, retains owner-name
+import reuses the selected root without asking for it again, retains owner email rule
 setup and antivirus confirmation, and opens the Ingests progress window after
 starting the worker. Cancellation of import settings keeps the setup choices available for retry.
 A **Cancel** button beside Start import (also Escape) quits the application
 without creating an archive, starting import, or changing saved preferences.
 If another window is importing, use the normal Stop Import and Quit confirmation
 and retain its writer lease until checkpoint completion. It is disabled while a setup operation or dialog is pending.
+
+When launched through `mailsearch-gui`, macOS must not reinterpret the Python
+launcher or command-line option values as documents. Explicit `--archive`
+handling and genuine Finder document-open events remain supported. Configure
+this behavior for the running process without writing system or user defaults.
 
 `mailsearch-gui --new` forces this setup for one launch, bypassing both remembered
 and environment-selected archives without clearing preferences or altering old
@@ -718,43 +759,42 @@ Final confirmation shows the Email Collection Toolkit icon and destination headi
 Both scanned and explicitly unscanned import confirmations use a 560-point-wide,
 selectable message area so archive and source paths need less wrapping, while
 retaining their existing buttons and keyboard defaults.
-Import merges `owner-names.txt` from the top level of every selected source
-directory into the destination archive's `owner-names.txt`. Source files remain
-unchanged, and neither the application checkout nor launch directory supplies
-default names. Existing multiword file entries remain single entries; merges
-deduplicate case-insensitively and sort the display. If the combined list is empty, a macOS
-multiline editor asks for the owner's names and email addresses, one per line;
-there is no owner-names file picker. At least one nonblank, noncomment entry is
-required to continue from that editor. Invalid settings are reported.
-Merged names are saved atomically as UTF-8 in the archive's `owner-names.txt`
-only after final confirmation and acquisition of the writer lease. The merge
-rereads current document names under the lock to preserve concurrent edits.
-Canceling either dialog starts no ingest and saves no names.
-This is operational, unmanifested configuration; it does not change source
-mail or the existing case-insensitive Sent-classification matching rules.
-The packaged local-source ignore rules exclude a source directory's
-`owner-names.txt` from mail discovery and the unrecognized-file count.
+Every import shows two multiline fields: **Owner emails (include)** and
+**Exclude (applied after include)**. Newlines or commas separate rules; blank
+and comment lines are ignored. At least one include rule is required to import.
+The fields default to the archive's saved `config.yaml` owner lists. Until YAML
+owner settings exist, legacy `owner-names.txt` in the archive and the top level
+of selected source directories may seed the fields using the new exact/glob
+semantics. No checkout or launch-directory defaults are used. A saved empty
+list is intentional and must not resurrect legacy defaults. Invalid settings
+are reported without overwriting them.
+After final confirmation and acquisition of the writer lease, changed lists
+are atomically saved in archive `config.yaml` as `owner.include` and
+`owner.exclude`. Canceling either dialog saves no rules and starts no ingest.
+A stale dialog must not overwrite settings changed since it opened. Source
+files remain untouched. The packaged source rules continue to ignore a source
+root's legacy `owner-names.txt`.
 
-Each archive may contain a human-editable `config.yaml` with version `1` and
-the last source-picker directory. After a successful import, the application
-records the first selected directory, or the containing directory of the first
-selected file. The next File Import or Ingests import starts there when it still
-exists; missing or malformed navigation state is ignored and falls back beside
-the archive. This YAML is discardable operational state and is excluded from
-the BagIt tag manifests.
+The version-2 archive `config.yaml` stores owner rules and the last source-picker
+directory; version-1 navigation-only files remain readable. Successful imports
+remember the source directory while preserving owner lists. Unchanged settings
+are not rewritten. Missing configuration starts with defaults; malformed YAML
+blocks editing/import with an error, since it may contain owner policy.
+This file is operational and excluded from preservation tag manifests, but
+should be retained when preparing a rebuild.
 
-**File → Document Options…** opens one options window per saved archive, also
-listed in Window. It contains a scrollable, sorted, multi-select owner-name
-list with **+** and **−** actions. Add accepts comma-, semicolon-, or
-whitespace-separated entries; Delete removes all selected entries. Changes
-save immediately under the writer lease; ingest blocks edits and stale edits
-must not overwrite newer settings. The document's other windows share this
-list. Ingest records the names actually used in `status/owner-names-used.txt`.
-Options flags a differing list after that import starts, including after
-reopening, and identifies older imports whose names were not recorded.
-The panel explains that changes affect future imports only: messages are not
-moved between Sent and Archive mailboxes. Owner names are not stored in FTS,
-so reindexing cannot reclassify messages and no owner-name Reindex action is offered.
+**File → Document Options…** opens one window per saved archive with the same
+two rule fields and a **Save** button. Saving obtains the writer lease and
+checks the content revision. Import blocks edits; background status refreshes
+must preserve unsaved input. Ingest records its rules in
+`status/owner-rules-used.yaml`. Options compares this snapshot with current
+rules and identifies older imports whose rules were not recorded.
+After a completed or orderly interrupted import, atomically regenerate
+`owner-names-detected.txt` as sorted, unique matching archived sender addresses,
+including senders from prior imports and applying exclusions. Detected addresses
+are derived evidence, never expanded into YAML or reused as implicit owner rules.
+Existing Sent/Archive classifications remain unchanged by rule edits or
+reindexing; correcting historical misclassification requires a fresh rebuild.
 
 Only a saved document holding the matching cross-process writer lease may
 start ingest. The process-local document registry prevents duplicate UI jobs
@@ -849,15 +889,12 @@ The GUI paints each result page from header metadata first, then requests its
 indexed body previews on a background worker and fills a reserved third line
 without blocking the initial result display. The Tabulator result table retains
 complete result metadata client-side but uses its virtual DOM to paint only
-visible rows; preview work is requested when a row is painted. Its row events
-identify pointer range endpoints without depending on transient DOM positions,
-and disables native text selection within result rows, so ordinary drags select
-message rows rather than message text. A single
-selected row opens its message; a multi-row selection replaces any stale
-single-message display with an explicit selected-message count and an explicit drag from the message-file well
-exports those selected messages as one ZIP whose entries preserve their RFC
-5322 bytes. A pointer gesture that starts and ends on
-the same result row is a normal message click, not a range drag.
+visible rows; preview work is requested when a row is painted. Result rows
+disable native text selection. A single selected row opens its message; modifier
+clicks select multiple rows and replace the message with a selected-message count.
+Dragging a selected row or the message-file icon uses the same export path: one
+message becomes an `.eml`, and multiple messages become a ZIP whose entries
+preserve their RFC 5322 bytes. Dragging an unselected row exports that row alone.
 Message HTML links and recognized `http`, `https`, or `mailto` links in rendered
 plain-text parts are never opened directly. Hovering an allowed destination
 shows its complete destination in the bottom status bar. Clicking it presents
@@ -940,13 +977,22 @@ Command-0 and Command-Shift-U select the raw RFC 5322 source.
 
 Saving a message creates a disposable `.eml` copy containing the exact
 SHA-256-verified RFC 5322 bytes; it never creates or changes canonical archive
-content. Dragging is confined to a separate message-file icon well and creates
-that copy only when a drag starts, never while browsing, selecting, or hovering
+content. Message-list rows and the separate message-file icon well share the
+same drag implementation, which creates that copy only when a drag starts, never
+while browsing, selecting, or hovering
 over a result. Because the pywebview bridge is asynchronous, the first drag
-prepares the disposable file and the next drag transfers it to Finder. Message
-headers remain selectable text. Printing
-prints the displayed headers and selected MIME part through the system print
-panel. Temporary message and attachment exports are removed when the GUI exits.
+prepares the disposable file and the next drag copies the actual `.eml` file to
+Finder or the Desktop. Multiple messages transfer as an actual ZIP file. Neither
+operation may create a `.fileloc`/`.webloc` shortcut or expose link/text URL drag
+representations supplied by the application. The application explicitly writes
+only `public.file-url`, the modern file-path transfer type; macOS may add its own
+compatibility aliases. Each drag export is isolated from attachment exports and later
+drags; closing the viewer serializes with preparation and revokes every token.
+Backends without the macOS file-drag adapter hide and reject this drag control.
+The result table must finish initializing before startup clears or populates it.
+Queued clicks must not select rows discarded by a subsequent search.
+Message headers remain selectable text. Printing prints the displayed headers
+and selected MIME part through the system print panel. Temporary message and attachment exports are removed when the GUI exits.
 
 `summarize` is an optional macOS command that reads nonempty UTF-8 text from
 standard input and prints only a one-sentence Apple Intelligence summary of at
@@ -980,9 +1026,15 @@ SVG and derived PNG icons. Site validation rejects malformed Zola TOML, unreadab
 invalid UTF-8 with a path-qualified diagnostic instead of a traceback, before
 checking for other missing website files.
 Decorative homepage icons are hidden from assistive technology.
-The home-page cover preserves the user-approved banner with joined, diverging
-rainbow streaks. Display the complete image at its original aspect ratio,
-without cropping or replacing the streaks with repeating rainbow arcs.
+The home-page cover uses joined, diverging rainbow streaks, not repeating
+rainbow arcs. Its title, subtitle, description, and tagline are selectable
+HTML text over text-free artwork. The tagline reads "Email has a history. Keep it".
+At narrow widths and browser zoom, the text reflows below the artwork and
+remains available to assistive technology and when images are unavailable.
+The banner's HTML dimensions match its displayed aspect ratio.
+Banner sizing does not require container-query-unit support. The three desktop
+tagline lines have no extra blank lines, and the mobile sentence retains
+copyable spaces between words.
 Provide text alternatives and readable introductory text and actions on mobile.
 The horizontal keyboard photograph flows below the home-page story text at
 all widths, preserves the complete image, and includes a linked Flickr credit.
@@ -1321,6 +1373,17 @@ and retain the current explicit-path CLI instructions.
   committed source-observation log by run, source, and disposition. Derived
   catalog fields and canonical locations are created correctly during ingest.
 
+## Windows development environment
+
+[WINDOWS.md](WINDOWS.md) documents native Windows setup with x64 CPython managed
+by uv, MSYS2 build utilities, Rust/MSVC/Dioxus tooling, WebView2, and existing
+Makefile checks. It covers ARM64 and x64 uv installation separately from the
+application Python target. Setup must distinguish installed tools from validated
+application support. Windows delivery
+requires full ingest, preservation, recovery, and native desktop validation;
+WSL/Linux results do not establish Windows compatibility. Windows writer and
+scanner portability remain implementation work, not shipped features.
+
 ## macOS desktop delivery
 
 Ruff must pass with zero diagnostics before validation or packaging succeeds.
@@ -1376,8 +1439,8 @@ interruption tests are required before shipping migration support.
 
 The first release is a local command-line normalizer and verifier. Packaged
 configuration holds archive and scanner policy; each archive's `config.yaml`
-holds discardable navigation state, and `owner-names.txt` remains a separate,
-one-name-per-line classification input. A local
+holds navigation state and explicit include/exclude owner rules. Legacy
+`owner-names.txt` can seed those rules before the first confirmed import. A local
 special-purpose search and message-viewing interface is a consumer of
 the two SQLite databases, not a reason to depend on Thunderbird or FoxTrot.
 No source mailbox is modified by this program.
@@ -1507,3 +1570,8 @@ shows the real import-history interface. Interface changes require screenshot
 regeneration through the Makefile. External clipart has visible author, source,
 and license attribution. Gmail setup diagrams are labeled as illustrations,
 not screenshots of a live third-party account.
+
+The macOS bundle dependency audit shall distinguish a Mach-O library's own
+`LC_ID_DYLIB` from actual dylib load commands. Its own install name need not
+resolve as another bundled file; actual non-system dependencies must resolve
+inside the app. A compiled-library regression shall exercise both cases.

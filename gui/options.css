@@ -4,13 +4,10 @@ body { margin: 0; background: Canvas; color: CanvasText; }
 main { padding: 24px; max-width: 720px; margin: auto; }
 h1 { font-size: 20px; margin-top: 0; }
 p { line-height: 1.45; }
-button, input, select { font: inherit; }
-#owners { width: 100%; min-height: 180px; overflow: auto; padding: 6px; }
-#owners option { padding: 3px 6px; }
-.actions { display: flex; gap: 6px; margin: 6px 0 16px; }
-.actions button { min-width: 34px; font-size: 18px; }
-form { border: 1px solid GrayText; border-radius: 6px; padding: 12px; }
-label, input { display: block; }
-input { box-sizing: border-box; width: 100%; margin-top: 8px; padding: 6px; }
+button, textarea { font: inherit; }
+label { display: block; font-weight: 600; margin: 14px 0 6px; }
+textarea { box-sizing: border-box; width: 100%; padding: 8px; resize: vertical; }
+.actions { display: flex; gap: 8px; margin: 12px 0; }
+button { padding: 6px 16px; }
 #changed { border-left: 3px solid #d89024; padding-left: 10px; }
 #error { color: #c43b35; }

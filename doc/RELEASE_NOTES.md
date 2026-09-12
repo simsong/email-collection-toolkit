@@ -2,11 +2,45 @@
 
 ## Unreleased
 
+* Reconcile startup setup with the current owner email editor and preserve
+  Finder file dragging, launch-argument handling, and shared import safeguards.
+
 * Add a three-step first-run setup window with repeatable source/archive folder
   selection, Cancel to quit, and Start import opening progress. Reopen setup with `--new` or
   Option held during macOS launch (also Option-click on the running Dock icon).
   Preserve remembered archives, reject overlapping folders, and keep About
   available from the application menu without showing it at startup.
+
+* Use one file-drag path for message-list rows and the message-file icon,
+  explicitly writing only `public.file-url` to copy `.eml` files (or a ZIP for
+  multiple selected messages) to Finder/Desktop. Modifier-click selects several
+  rows; dragging exports them instead of extending a selection range.
+  Isolate prepared files from attachment exports, revoke tokens safely on close,
+  wait for the result table to finish building before startup clears it, and
+  discard queued clicks from a replaced result set.
+
+* Fix source GUI startup treating the `mailsearch-gui` launcher and option
+  values as archive paths. Preserve explicit archive selection and Finder opens;
+  validate the actual launcher with the GUI self-test.
+
+* Correct the macOS dependency audit to distinguish library install names from
+  actual dependencies, avoiding a false failure for bundled pydantic-core.
+
+* Fix false Sent classification from implicit owner-name substring matching.
+  Every import now reviews owner include/exclude fields, with exclusions taking
+  precedence and bare names matching only the exact mailbox name. Save defaults
+  in archive `config.yaml` and regenerate `owner-names-detected.txt` separately.
+  Existing archives need a fresh rebuild to correct historical classifications.
+* Plan comparable Dioxus Desktop and Tauri trials before choosing the compiled UI;
+  retain ingest, search, and archive preservation in Python. Prioritize Windows
+  full ingest and defer Linux/snap delivery. This records the migration decision;
+  the Dioxus frontend, worker protocol, and Windows installer are not implemented.
+  The framework decision remains pending trial results.
+
+* Add a clean-Windows development setup guide covering ARM64/x64 uv installation,
+  x64 Python on ARM VMs, and the remaining full-ingest and packaging work.
+  The procedure has not yet been executed in a clean Windows VM; this is not
+  a Windows support announcement.
 
 * Preserve original MBOX `From ` delimiters through import. When absent,
   synthesize a delimiter from the latest valid header timestamp instead of
@@ -23,6 +57,11 @@
   application icons; preserve Gmail setup and Advanced navigation, responsive
   access, and equal personal and archival use cases. Validate Zola TOML before
   builds and report read/decode failures without a traceback.
+- Add an experimental read-only ePADD address-book exporter in
+  `dev/addressbook-exporter.py`, with explicit owner addresses, separate
+  address-level contacts, private output, and exclusion/hash reporting.
+  It avoids address-shaped display-name aliases; live ePADD repair remains
+  unvalidated.
 
 - Audit all query selectors with production-SQL EXPLAIN and execution-budget tests.
   Fix Any-address searches, sender counts, date filters under alternate sorts,

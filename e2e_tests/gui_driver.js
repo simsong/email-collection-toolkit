@@ -15,14 +15,51 @@
     }
     throw new Error(`Timed out: ${label}; painted=${document.querySelectorAll("#result-list .result").length}; retained=${state.results.length}; status=${document.getElementById("result-status")?.textContent}`);
   };
+  const assertFileTransfer = transfer => {
+    assert(transfer.effectAllowed === "copy" && Object.keys(transfer.values).length === 1 &&
+      transfer.values["text/plain"]?.startsWith("mailarchiver-export:"),
+    "file drags carry only a registered native export token and permit copying only");
+  };
+  const startFileDrag = element => {
+    const transfer = {values: {"text/uri-list": "https://stale.invalid/"}, effectAllowed: "",
+      clearData() { this.values = {}; }, setData(type, value) { this.values[type] = value; }};
+    const event = new Event("dragstart", {bubbles: true, cancelable: true});
+    Object.defineProperty(event, "dataTransfer", {value: transfer});
+    element.dispatchEvent(event);
+    return {event, transfer};
+  };
+  const assertSharedFileDrag = async (row, label) => {
+    const well = document.getElementById("message-file-well");
+    if (!state.fileDragSupported) {
+      for (const element of [row, well]) {
+        const {event} = startFileDrag(element);
+        assert(!element.draggable && event.defaultPrevented,
+          `${label}: unsupported source rejects file dragging`);
+      }
+      assert(well.hidden, "unsupported backends hide the file icon");
+      return;
+    }
+    const key = dragExportKey(selectedDragMessagePks());
+    const initial = startFileDrag(row);
+    if (initial.event.defaultPrevented) {
+      await waitFor(() => state.dragExports.has(key), `${label}: first row drag prepares the file`);
+    }
+    const rowTransfer = startFileDrag(row).transfer;
+    const iconTransfer = startFileDrag(well).transfer;
+    assertFileTransfer(rowTransfer);
+    assertFileTransfer(iconTransfer);
+    assert(row.draggable && well.draggable &&
+      rowTransfer.values["text/plain"] === iconTransfer.values["text/plain"],
+    `${label}: row and icon publish the same prepared export token`);
+  };
   const rows = () => [...document.querySelectorAll("#result-list .result")];
   const subjects = () => rows().map(row => row.querySelector(".result-subject").textContent);
-  const isSelected = row => row.closest(".tabulator-row")?.classList.contains("tabulator-selected");
+  const isSelected = row => row?.closest(".tabulator-row")?.classList.contains("tabulator-selected");
   const tableHolder = () => document.querySelector("#result-list .tabulator-tableholder");
   const currentFrameFind = () => {
     const frame = document.querySelector("#body-view iframe");
     const token = frame?.dataset.messageFindToken;
-    return token && [...frame.contentDocument.querySelectorAll("mark.message-find-current")]
+    return token && frame.contentDocument && [...frame.contentDocument.querySelectorAll("mark.message-find-current")]
       .find(mark => mark.dataset.mailarchiverFindTarget === token);
   };
   const search = async (query, expected, attachments = false) => {
@@ -110,13 +147,15 @@
     document.dispatchEvent(new KeyboardEvent("keydown", {key: "g", metaKey: true, bubbles: true}));
     await waitFor(() => document.querySelector(".message-find-current"), "Command-G selects the next in-message match");
     await search("beth", 2, false);
-    const firstBeth = rows()[0];
-    const secondBeth = rows()[1];
-    firstBeth.click();
-    await waitFor(() => isSelected(firstBeth) && state.selected === Number(firstBeth.dataset.messagePk),
+    const firstBeth = Number(rows()[0].dataset.messagePk);
+    const secondBeth = Number(rows()[1].dataset.messagePk);
+    // Preview delivery reformats cards; locate the live card by its stable ID.
+    const bethRow = messagePk => rows().find(row => Number(row.dataset.messagePk) === messagePk);
+    bethRow(firstBeth).click();
+    await waitFor(() => isSelected(bethRow(firstBeth)) && state.selected === firstBeth,
       "first full-text result selected");
     const realPart = window.pywebview.api.part;
-    let delayedMessage = Number(firstBeth.dataset.messagePk);
+    let delayedMessage = firstBeth;
     window.pywebview.api.part = async (...args) => {
       const response = await realPart(...args);
       if (args[0] === delayedMessage) await sleep(300);
@@ -125,13 +164,13 @@
     document.dispatchEvent(new KeyboardEvent("keydown", {key: "f", metaKey: true, bubbles: true}));
     document.dispatchEvent(new KeyboardEvent("keydown", {key: "g", metaKey: true, bubbles: true}));
     await waitFor(() => messageFind.value === "beth", "find starts from the new full-text archive search");
-    secondBeth.click();
-    await waitFor(() => isSelected(secondBeth) &&
+    bethRow(secondBeth).click();
+    await waitFor(() => isSelected(bethRow(secondBeth)) &&
       document.querySelector(".message-find-current") &&
       document.getElementById("message-find-status").textContent.startsWith("1/"),
     "changing messages during pending find work retains text and restarts at its first match");
     await sleep(350);
-    assert(isSelected(secondBeth) && state.messageFindIndex === 0 &&
+    assert(isSelected(bethRow(secondBeth)) && state.messageFindIndex === 0 &&
       document.getElementById("message-find-status").textContent.startsWith("1/"),
     "stale Command-F and Command-G work cannot advance the newly selected message");
     delayedMessage = null;
@@ -168,44 +207,38 @@
     const textSelection = new Event("selectstart", {bubbles: true, cancelable: true});
     rows()[0].querySelector(".result-subject").dispatchEvent(textSelection);
     assert(textSelection.defaultPrevented,
-      "the result table prevents native text selection so a pointer drag selects rows");
+      "the result table prevents native text selection during file drags");
     rows()[0].click();
     await waitFor(() => state.selected === Number(rows()[0].dataset.messagePk),
       "a pointer gesture ending in its starting row remains a message click");
     assert(!rows()[0].dataset.openedWindow, "a same-row click does not open a separate message window");
     window.getSelection().removeAllRanges();
-    rows()[0].dispatchEvent(new MouseEvent("mousedown", {button: 0, buttons: 1, bubbles: true}));
-    rows()[2].dispatchEvent(new MouseEvent("mouseenter", {buttons: 1, bubbles: true}));
-    document.dispatchEvent(new MouseEvent("mouseup", {button: 0, bubbles: true}));
-    rows()[2].click();
-    await waitFor(() => state.resultSelection.size === 3, "dragging in the Tabulator table selects three rows");
-    assert(state.resultSelection.size === 3 && !window.getSelection().toString(),
-      "dragging in the result list selects message rows rather than text");
+    rows()[1].dispatchEvent(new MouseEvent("click", {metaKey: true, bubbles: true}));
+    rows()[2].dispatchEvent(new MouseEvent("click", {metaKey: true, bubbles: true}));
+    await waitFor(() => state.resultSelection.size === 3, "modifier-click selects three rows for file export");
+    assert(!window.getSelection().toString(), "result selection does not select message text");
     const selectionSummary = document.getElementById("message-selection-summary");
     assert(!selectionSummary.hidden && selectionSummary.textContent.includes("3 messages selected.") &&
       document.getElementById("message-file-well").parentElement === selectionSummary,
     "multiple selected rows replace the stale message with a selected-message summary and ZIP drag icon");
-    const zipTransfer = {values: {}, effectAllowed: "", setData(type, value) { this.values[type] = value; }};
-    const zipDrag = new Event("dragstart", {bubbles: true, cancelable: true});
-    Object.defineProperty(zipDrag, "dataTransfer", {value: zipTransfer});
-    document.getElementById("message-file-well").dispatchEvent(zipDrag);
-    if (!zipTransfer.values.DownloadURL) {
-      await waitFor(() => state.dragExports.has([...state.resultSelection].sort((a, b) => a - b).join(",")),
-        "first multi-message drag prepares a ZIP");
-      const preparedZipTransfer = {values: {}, effectAllowed: "", setData(type, value) { this.values[type] = value; }};
-      const preparedZipDrag = new Event("dragstart", {bubbles: true, cancelable: true});
-      Object.defineProperty(preparedZipDrag, "dataTransfer", {value: preparedZipTransfer});
-      document.getElementById("message-file-well").dispatchEvent(preparedZipDrag);
-      assert(preparedZipTransfer.values.DownloadURL?.startsWith("application/zip:"),
-        "multi-message drag publishes a ZIP download");
-    } else {
-      assert(zipTransfer.values.DownloadURL.startsWith("application/zip:"), "multi-message drag publishes a ZIP download");
+    await assertSharedFileDrag(rows()[0], "multi-message ZIP");
+    if (state.fileDragSupported) {
+      const otherPk = Number(rows()[3].dataset.messagePk);
+      startFileDrag(rows()[3]);
+      await waitFor(() => state.dragExports.has(String(otherPk)),
+        "dragging an unselected row prepares only that message");
+      const other = rows().find(row => Number(row.dataset.messagePk) === otherPk);
+      const {transfer} = startFileDrag(other);
+      assertFileTransfer(transfer);
+      assert(transfer.values["text/plain"] === state.dragExports.get(String(otherPk)).token &&
+        state.resultSelection.size === 3 && !state.resultSelection.has(otherPk),
+      "an unselected row exports its own file without changing the existing selection");
     }
     await sleep(0);
     rows()[0].click();
     await waitFor(() => state.selected === Number(rows()[0].dataset.messagePk) && selectionSummary.hidden &&
       document.getElementById("message-file-well").parentElement.classList.contains("message-summary"),
-      "a completed row drag cannot suppress the next row click");
+      "a completed file drag cannot suppress the next row click");
     rows()[0].dispatchEvent(new MouseEvent("mousedown", {bubbles: true}));
     document.dispatchEvent(new KeyboardEvent("keydown", {key: "a", metaKey: true, bubbles: true}));
     assert(state.resultSelection.size === state.results.length && rows().every(isSelected),
@@ -244,6 +277,11 @@
     const rich = rows()[0];
     rich.click();
     await waitFor(() => document.getElementById("message-subject").textContent === "Rich UI message", "message viewer opens");
+    await waitFor(() => {
+      const frame = document.querySelector("#body-view iframe");
+      return frame?.dataset.highlightCount === "1" && frameDocumentIsReady(frame);
+    },
+      "the preferred HTML body finishes loading before its controls are inspected");
     const dateBanner = document.getElementById("computed-date-banner");
     assert(!dateBanner.hidden, "computed-date warning banner displayed");
     assert(dateBanner.textContent.includes("Tue, 31 Dec 2024 12:00:00 +0000"), "banner identifies original Date header");
@@ -333,7 +371,7 @@
     assert(secondaryHtmlPart, "fixture exposes an independently selectable second HTML part");
     parts.value = secondaryHtmlPart.value;
     parts.dispatchEvent(new Event("change", {bubbles: true}));
-    await waitFor(() => document.querySelector("#body-view iframe")?.contentDocument?.body.textContent.includes("Secondary HTML alternative") &&
+    await waitFor(() => document.querySelector("#body-view iframe")?.contentDocument?.body?.textContent.includes("Secondary HTML alternative") &&
       !document.getElementById("remote-content").hidden,
     "a remote-content choice does not authorize another HTML part");
     assert(!document.querySelector("#body-view iframe").contentDocument
@@ -388,9 +426,10 @@
       "Command-G advances to the next in-message match");
 
     await search("from:curator", 1, false);
-    const curatorMessage = rows()[0];
-    curatorMessage.click();
-    await waitFor(() => isSelected(curatorMessage) && document.querySelector("#body-view iframe")?.contentDocument,
+    const curatorPk = rows()[0].dataset.messagePk;
+    rows()[0].click();
+    await waitFor(() => isSelected(rows().find(row => row.dataset.messagePk === curatorPk)) &&
+      document.querySelector("#body-view iframe")?.contentDocument?.body?.textContent.includes("Curator one"),
       "selector result opens for header-to-body find navigation");
     const curatorBody = document.querySelector("#body-view iframe").contentDocument.body.textContent;
     assert(curatorBody.includes("Curator one"),
@@ -449,20 +488,7 @@
     document.getElementById("message-file-well").dispatchEvent(new PointerEvent("pointerenter", {bubbles: true}));
     await new Promise(resolve => setTimeout(resolve, 100));
     assert(messageFileName.textContent === beforeHover, "hovering does not prepare a message file");
-    const transfer = {values: {}, effectAllowed: "", setData(type, value) { this.values[type] = value; }};
-    const drag = new Event("dragstart", {bubbles: true, cancelable: true});
-    Object.defineProperty(drag, "dataTransfer", {value: transfer});
-    document.getElementById("message-file-well").dispatchEvent(drag);
-    if (!transfer.values.DownloadURL) {
-      await waitFor(() => messageFileName.textContent !== beforeHover, "first drag prepares the message file");
-      const preparedTransfer = {values: {}, effectAllowed: "", setData(type, value) { this.values[type] = value; }};
-      const preparedDrag = new Event("dragstart", {bubbles: true, cancelable: true});
-      Object.defineProperty(preparedDrag, "dataTransfer", {value: preparedTransfer});
-      document.getElementById("message-file-well").dispatchEvent(preparedDrag);
-      assert(preparedTransfer.values.DownloadURL?.startsWith("message/rfc822:"), "prepared drag publishes an RFC 822 download");
-    } else {
-      assert(transfer.values.DownloadURL.startsWith("message/rfc822:"), "explicit drag publishes an RFC 822 download");
-    }
+    await assertSharedFileDrag(rows()[0], "single-message EML");
 
     await search("", 0, false);
     assert(document.querySelector(".search-help"), "empty search restores search-language help");
