@@ -377,6 +377,10 @@ website-gmail-illustrations:
 test-envelopes:
 	uv run pytest -q tests/test_envelopes.py tests/test_sources.py tests/test_publication.py tests/test_standalone_verify.py
 
+.PHONY: test-file-drag
+test-file-drag:
+	uv run --locked pytest -q tests/test_file_drag.py
+
 .PHONY: test-owner-rules
 test-owner-rules: ruff
 	uv run pytest -q tests/test_owner_rules.py tests/test_gui_service.py tests/test_application.py

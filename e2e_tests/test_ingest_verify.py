@@ -18,6 +18,7 @@ from playwright.sync_api import Page, expect
 from pydantic import BaseModel
 
 from e2e_tests.eicar_fixture import write_eicar_emlx
+from e2e_tests.generate_corpus import RICH_MESSAGE
 from mailarchiver.application import ApplicationController, ApplicationPreferencesStore
 from mailarchiver.catalog import address_pk, create_catalog, create_search
 from mailarchiver.gui_app import (
@@ -210,6 +211,8 @@ def test_search_ui_end_to_end_without_a_window(
     built_archive: BuiltArchive, tmp_path: Path, page: Page
 ) -> None:
     """Drive the shipped UI headlessly while every bridge call reaches the real service."""
+    page_errors: list[str] = []
+    page.on("pageerror", lambda error: page_errors.append(str(error)))
     export_directory = tmp_path / "gui-e2e-exports"
     export_directory.mkdir()
     api = GuiApi(
@@ -235,11 +238,17 @@ def test_search_ui_end_to_end_without_a_window(
         api.close()
 
     assert result.passed, result.error
+    assert not page_errors, page_errors
     assert len(result.checks) >= 30
     exports = {path.name for path in export_directory.iterdir()}
     assert {"saved-tiny.png", "saved-review.command", "filter-sets.json"} <= exports
-    assert any(name.startswith("saved-Rich UI message-") and name.endswith(".eml") for name in exports)
-    assert any(name.startswith("Rich UI message-") and name.endswith(".eml") for name in exports)
+    saved = list(export_directory.glob("saved-Rich UI message-*.eml"))
+    assert len(saved) == 1 and saved[0].read_bytes() == RICH_MESSAGE
+    if sys.platform == "darwin":
+        dragged = list((export_directory / "drags").rglob("Rich UI message-*.eml"))
+        assert len(dragged) == 1 and dragged[0].read_bytes() == RICH_MESSAGE
+    else:
+        assert not (export_directory / "drags").exists()
 
 
 def test_message_splitter_resizes_panes_not_columns(
