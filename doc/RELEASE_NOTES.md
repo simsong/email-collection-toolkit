@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+* Build macOS DMGs in the GitHub release workflow. Sign the app and DMG when
+  both optional PKCS#12 secrets are configured; otherwise warn in Actions and
+  publish an explicitly named `_UNSIGNED.dmg`. Preserve failure on invalid
+  configured credentials. Document secret setup and temporary keychain cleanup;
+  signing does not yet include automatic notarization. Correct the native
+  dependency audit to distinguish a library's own install name from an import.
+
 * Preserve original MBOX `From ` delimiters through import. When absent,
   synthesize a delimiter from the latest valid header timestamp instead of
   import time, with deterministic documented fallbacks. Existing archives are

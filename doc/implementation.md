@@ -1487,7 +1487,24 @@ docstring fails this check before packaging starts.
 `scripts/build_macos.py`, invoked by `make dmg`, uses project-local PyInstaller
 dependencies, creates the app icon from the existing PNG, collects runtime
 resources and dependency notices, declares `.mailarchive` document registration,
-and signs the resulting bundle ad-hoc unless a signing identity was supplied.
+and signs the resulting bundle ad-hoc unless a signing identity was supplied
+or both optional signing secrets are present. `scripts/macos_signing.py` imports
+`APPLE_CERTIFICATE_P12_BASE64` using `APPLE_CERTIFICATE_PASSWORD` into a temporary
+keychain, selects exactly one valid Developer ID Application identity, and
+restores the original keychain search list and deletes the imported key in
+`finally`. Native keychain errors omit secret-bearing command lines and output.
+The builder signs and verifies the completed DMG before publishing the candidate.
+Missing either secret emits `::warning::` and produces `*_UNSIGNED.dmg`; invalid
+configured credentials fail. An explicit `--signing-identity` overrides secrets.
+The release workflow builds the DMG on `macos-15`, passes secrets only to
+`make dmg`, and waits for the tested artifact before assembling the source and
+DMG checksums into a draft release. Assembly checks out the Mac job's verified
+commit and checks that the tag still names that commit. There is no automatic
+notarization. `make test-signing` runs ordered focused lint/type checks and
+regressions for credential selection, malformed input, identity ambiguity,
+unsigned naming/warnings, secret-safe errors, and release artifact ordering.
+Real Developer ID import/signing and hosted GUI execution require a credentialed
+Mac release trial; pure policy tests do not establish those properties.
 `scripts/desktop_entry.py` dispatches normal GUI launch, `--cli`, `--self-test`,
 and `--self-test-gui`. Frozen GUI resources use PyInstaller's bundle root;
 the verifier's actual `.py` source is explicitly bundled for archive installation.
@@ -1517,7 +1534,10 @@ and cancels the real source picker after inspecting its warning banner.
 The DMG build stages the app, Applications symlink, and instructions, mounts
 the compressed candidate read-only, verifies its seal, runs both frozen tests
 with a system-only PATH, and detaches in `finally`. It publishes the candidate
-and JSON reports only on success. See [MACOS_DISTRIBUTION.md](MACOS_DISTRIBUTION.md)
+and JSON reports only on success. The Mach-O audit reads library import load
+commands explicitly, excluding `LC_ID_DYLIB`, which `otool -L` also displays.
+A compiled-library regression proves that an alternate self install name
+passes while a real unresolved import still fails. See [MACOS_DISTRIBUTION.md](MACOS_DISTRIBUTION.md)
 for commands, limitations, and Apple's renewal/notarization steps.
 
 ### Existing scanner configuration

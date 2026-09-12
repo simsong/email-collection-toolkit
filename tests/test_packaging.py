@@ -131,6 +131,31 @@ def test_dependency_audit_rejects_external_rpath(tmp_path: Path) -> None:
     verify_dependencies(app)
 
 
+@pytest.mark.skipif(sys.platform != "darwin", reason="Mach-O linkage requires Apple's toolchain")
+def test_dependency_audit_distinguishes_install_id_from_import(tmp_path: Path) -> None:
+    """Desktop delivery: LC_ID_DYLIB is metadata; a real unresolved import must still fail."""
+    scripts = str(ROOT / "scripts")
+    sys.path.insert(0, scripts)
+    try:
+        from build_macos import verify_dependencies
+    finally:
+        sys.path.remove(scripts)
+    app = tmp_path / "Fixture.app"
+    libraries = app / "Contents/Frameworks"
+    libraries.mkdir(parents=True)
+    library = libraries / "fixture.dylib"
+    source = tmp_path / "fixture.c"
+    source.write_text("int fixture(void) { return 1; }\n", encoding="utf-8")
+    subprocess.run(["cc", "-dynamiclib", str(source), "-Wl,-install_name,@rpath/different-name.dylib",
+                    "-o", str(library)], check=True)
+    verify_dependencies(app)
+    consumer = libraries / "consumer.dylib"
+    source.write_text("extern int fixture(void); int consumer(void) { return fixture(); }\n", encoding="utf-8")
+    subprocess.run(["cc", "-dynamiclib", str(source), str(library), "-o", str(consumer)], check=True)
+    with pytest.raises(RuntimeError, match="unresolved bundled dependency.*different-name.dylib"):
+        verify_dependencies(app)
+
+
 @pytest.mark.parametrize("succeeds", [False, True])
 def test_gui_remembers_source_only_after_success(tmp_path: Path, succeeds: bool) -> None:
     """Requirement: failed GUI imports retain picker state and do not publish a generation."""

@@ -1,4 +1,4 @@
-"""Build an ad-hoc-signed self-contained app, create a DMG, and test it mounted.
+"""Build a self-contained app and DMG, optionally Developer ID signed, and test it mounted.
 
 Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved.
 """
@@ -23,6 +23,7 @@ from packaging.requirements import Requirement
 from packaging.utils import canonicalize_name
 
 from dmg_layout import create_image, verify_layout
+from macos_signing import CERTIFICATE_SECRET, PASSWORD_SECRET, SigningSecrets, dmg_filename, sign_image, signing_identity
 
 ROOT = Path(__file__).resolve().parents[1]
 APP_NAME = "Email Collection Toolkit"
@@ -131,7 +132,8 @@ def test_image(dmg: Path) -> None:
         verify_layout(mount, app.name)
         executable = app / "Contents/MacOS" / APP_NAME
         environment = {key: value for key, value in os.environ.items()
-                       if not key.startswith(("PYTHON", "DYLD_", "MAILARCHIVER", "MAIL_ARCHIVE"))}
+                       if key not in (CERTIFICATE_SECRET, PASSWORD_SECRET)
+                       and not key.startswith(("PYTHON", "DYLD_", "MAILARCHIVER", "MAIL_ARCHIVE"))}
         environment["PATH"] = "/usr/bin:/bin:/usr/sbin:/sbin"
         for mode in ("self-test", "self-test-gui"):
             report_path = dmg.with_suffix(f".{mode}.json")
@@ -153,6 +155,22 @@ def load_rpaths(commands: str) -> tuple[str, ...]:
         elif in_rpath and value.startswith("path "):
             paths.append(value[5:].rsplit(" (offset ", 1)[0])
             in_rpath = False
+    return tuple(paths)
+
+
+def load_libraries(commands: str) -> tuple[str, ...]:
+    """Read imported libraries, excluding LC_ID_DYLIB (the binary's own install name)."""
+    imports = {"LC_LOAD_DYLIB", "LC_LOAD_WEAK_DYLIB", "LC_REEXPORT_DYLIB",
+               "LC_LOAD_UPWARD_DYLIB", "LC_LAZY_LOAD_DYLIB"}
+    paths = []
+    in_library = False
+    for line in commands.splitlines():
+        value = line.strip()
+        if value.startswith("cmd "):
+            in_library = value[4:] in imports
+        elif in_library and value.startswith("name "):
+            paths.append(value[5:].rsplit(" (offset ", 1)[0])
+            in_library = False
     return tuple(paths)
 
 
@@ -191,9 +209,8 @@ def verify_dependencies(app: Path) -> None:
         commands = run("/usr/bin/otool", "-l", path, capture_output=True, text=True).stdout
         rpaths.update(bundle_loader_path(app, path, value) for value in load_rpaths(commands))
     for path in checked:
-        linked = run("/usr/bin/otool", "-L", path, capture_output=True, text=True).stdout
-        for line in linked.splitlines()[1:]:
-            dependency = line.strip().split(" (", 1)[0]
+        linked = run("/usr/bin/otool", "-l", path, capture_output=True, text=True).stdout
+        for dependency in load_libraries(linked):
             if dependency.startswith(("/usr/lib/", "/System/Library/")):
                 continue
             if dependency.startswith("@rpath/"):
@@ -250,15 +267,17 @@ def build(signing_identity: str) -> Path:
                    "--add-data", f"{ROOT / 'src/mailarchiver/standalone_verify.py'}:mailarchiver",
                    "--add-data", f"{notices}:Third Party Notices",
                    str(ROOT / "scripts/desktop_entry.py")]
-        environment = {key: value for key, value in os.environ.items() if not key.startswith("PYTHON")}
+        environment = {key: value for key, value in os.environ.items()
+                       if key not in (CERTIFICATE_SECRET, PASSWORD_SECRET) and not key.startswith("PYTHON")}
         run(*command, cwd=ROOT, env=environment)
         app = bundle_output / f"{APP_NAME}.app"
         configure_bundle(app, signing_identity)
-        dmg = output / f"Email-Collection-Toolkit-{version('mailarchiver')}-{platform.machine()}.dmg"
+        dmg = output / dmg_filename(version("mailarchiver"), platform.machine(), signing_identity)
         candidate = work / "candidate.dmg"
         create_image(app, app_icon, candidate, work)
         # Keep a previous artifact until both mounted tests have passed.
         test_image(candidate)
+        sign_image(candidate, signing_identity)
         candidate.replace(dmg)
         for mode in ("self-test", "self-test-gui"):
             candidate.with_suffix(f".{mode}.json").replace(dmg.with_suffix(f".{mode}.json"))
@@ -269,7 +288,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--test-dmg", type=Path, help="mount and retest an existing DMG")
     parser.add_argument("--preview-dmg", type=Path, help="open the mounted installer in Finder until Return is pressed")
-    parser.add_argument("--signing-identity", default="-", help="codesign identity; default ad-hoc")
+    parser.add_argument("--signing-identity", help="existing Keychain identity; otherwise import optional signing secrets; '-' forces unsigned")
     args = parser.parse_args()
     if sys.platform != "darwin":
         parser.error("DMG builds and native tests require macOS")
@@ -280,7 +299,9 @@ def main() -> None:
     elif args.test_dmg:
         test_image(args.test_dmg.resolve(strict=True))
     else:
-        print(f"Built and tested: {build(args.signing_identity)}")
+        credentials = SigningSecrets.from_environment(os.environ)
+        with signing_identity(credentials, ROOT / ".tmp", args.signing_identity) as identity:
+            print(f"Built and tested: {build(identity)}")
 
 
 if __name__ == "__main__":
