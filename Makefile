@@ -103,7 +103,14 @@ self-test-gui:
 	uv run mailsearch-gui --self-test-gui $(ARGS)
 
 test-packaging:
-	uv run pytest -q tests/test_packaging.py
+	uv run pytest -q tests/test_packaging.py tests/test_macos_signing.py
+
+.PHONY: test-signing
+test-signing: ruff
+	PYTHONPATH="$(CURDIR)" uv run --locked pylint scripts/macos_signing.py scripts/build_macos.py tests/test_macos_signing.py
+	uv run --locked ty check scripts/macos_signing.py scripts/build_macos.py tests/test_macos_signing.py --error-on-warning
+	uv run --locked pyright scripts/macos_signing.py scripts/build_macos.py tests/test_macos_signing.py --warnings
+	uv run --locked pytest -q tests/test_macos_signing.py tests/test_website_scripts.py
 
 auth-detect-live:
 	uv run mailarchiver-auth --detect-only simsong@gmail.com
