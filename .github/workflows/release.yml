@@ -16,6 +16,7 @@ permissions:
 jobs:
   assemble:
     name: Assemble draft release
+    needs: macos
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -23,7 +24,7 @@ jobs:
       - name: Checkout release tag
         uses: actions/checkout@v5
         with:
-          ref: ${{ inputs.tag || github.ref_name }}
+          ref: ${{ needs.macos.outputs.commit }}
           fetch-depth: 0
       - name: Set up Python
         uses: actions/setup-python@v7.0.0
@@ -38,6 +39,7 @@ jobs:
         run: |
           tag_object="$(git rev-parse "refs/tags/$RELEASE_TAG")"
           test "$(gh api "repos/$GITHUB_REPOSITORY/git/tags/$tag_object" --jq '.verification.verified')" = true
+          test "$(git rev-parse HEAD)" = "$(git rev-parse "refs/tags/$RELEASE_TAG^{commit}")"
       - name: Verify annotated tag and project version
         env:
           RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
@@ -52,8 +54,13 @@ jobs:
         run: make ruff
       - name: Build source distribution
         run: uv build --sdist --out-dir dist
+      - name: Download tested DMG
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: macos-dmg
+          path: dist
       - name: Write checksums
-        run: (cd dist && sha256sum *.tar.gz > SHA256SUMS)
+        run: (cd dist && sha256sum *.tar.gz *.dmg > SHA256SUMS)
       - name: Create draft release
         env:
           GH_TOKEN: ${{ github.token }}
@@ -66,3 +73,75 @@ jobs:
             --title "Email Collection Toolkit $RELEASE_TAG" \
             --generate-notes \
             dist/*
+
+  macos:
+    name: Build macOS DMG (optional Developer ID signing)
+    runs-on: macos-15
+    timeout-minutes: 45
+    outputs:
+      commit: ${{ steps.release.outputs.commit }}
+    steps:
+      - name: Checkout release tag
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.tag || github.ref_name }}
+          fetch-depth: 0
+          persist-credentials: false
+      # The allowlist comes from repository settings, never from the release tag.
+      - name: Verify trusted tag signer
+        env:
+          RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
+          RELEASE_SIGNING_PUBLIC_KEYS: ${{ vars.RELEASE_SIGNING_PUBLIC_KEYS }}
+        run: |
+          test -n "$RELEASE_SIGNING_PUBLIC_KEYS" || { echo 'Configure RELEASE_SIGNING_PUBLIC_KEYS before releasing'; exit 1; }
+          git check-ref-format "refs/tags/$RELEASE_TAG"
+          export GNUPGHOME="$(mktemp -d)"
+          trap 'rm -rf "$GNUPGHOME"' EXIT
+          printf '%s\n' 'no-auto-key-retrieve' 'auto-key-locate clear' > "$GNUPGHOME/gpg.conf"
+          printf '%s\n' "$RELEASE_SIGNING_PUBLIC_KEYS" | gpg --batch --import
+          git -c gpg.format=openpgp -c gpg.program=gpg verify-tag "refs/tags/$RELEASE_TAG"
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+      - name: Set up uv
+        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+      - name: Verify tag signature
+        id: release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
+        run: |
+          tag_object="$(git rev-parse "refs/tags/$RELEASE_TAG")"
+          test "$(gh api "repos/$GITHUB_REPOSITORY/git/tags/$tag_object" --jq '.verification.verified')" = true
+          test "$(git rev-parse HEAD)" = "$(git rev-parse "refs/tags/$RELEASE_TAG^{commit}")"
+          echo "commit=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+      - name: Verify annotated tag and project version
+        env:
+          RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
+        run: make release-tag-check GITHUB_REF_NAME="$RELEASE_TAG" ARGS=--require-annotated
+      - name: Install dependencies
+        run: uv sync --locked --all-groups
+      - name: Validate signing policy and keychain cleanup
+        # GitHub supplies GITHUB_ACTIONS and RUNNER_ENVIRONMENT to every step:
+        # https://docs.github.com/en/actions/reference/workflows-and-actions/variables#default-environment-variables
+        run: make test-signing
+      - name: Build and test DMG
+        if: ${{ runner.environment == 'github-hosted' }}
+        env:
+          APPLE_CERTIFICATE_P12_BASE64: ${{ secrets.APPLE_CERTIFICATE_P12_BASE64 }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+        run: make dmg
+      - name: Upload tested DMG
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: macos-dmg
+          path: dist/*.dmg
+          if-no-files-found: error
+      - name: Upload packaging evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: macos-packaging-reports
+          path: dist/*.json
+          if-no-files-found: ignore
