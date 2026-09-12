@@ -58,9 +58,11 @@ date/subject/sender sorting, keyboard result navigation, MIME-part shortcuts,
 message and MIME-part views, separate message windows, sanitized HTML with
 remote content blocked by default, inline image and PDF previews, attachment
 open/save actions, printing, exact `.eml` export, and experimental Finder
-drag-out from the dedicated message-file well. Browsing and hovering never
-creates a temporary `.eml`; the first drag prepares it and the next transfers
-the ready file.
+drag-out from result rows and the dedicated message-file well through one shared
+implementation. Modifier-click rows to select several messages before dragging. Browsing and hovering never
+creates a temporary `.eml`; the first drag prepares it and the next copies the
+actual file. The native item explicitly supplies only `public.file-url`; macOS
+may generate compatibility aliases such as `NSFilenamesPboardType`.
 
 The interface is for archivists rather than inbox processing. Nonempty queries
 count and search the complete collection, regardless of message age. It shows

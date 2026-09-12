@@ -769,7 +769,9 @@ The same details are retained locally in the archive's `status/ingest-*.json`
 run history and catalog. They may contain private email text; inspect them before
 sharing a failure report. Source identity fields and cursors are limited to
 1,024 characters each, with truncation identified; arbitrary source metadata is
-omitted from these error details.
+omitted from these error details. Exception summaries are limited to 2,048
+characters, individual notes to 32,768, and the complete failure report to
+65,536, with truncation indicated.
 
 ## Care of the archive
 

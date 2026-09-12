@@ -1677,9 +1677,9 @@ def _run_ingest(request: IngestRequest, writer_lease: WriterLease, outcome: Inge
                     with publication_lock:
                         observe(source, "error", f"{type(error).__name__}: {error}", digest)
                         catalog.commit()
-                    raise RuntimeError(
-                        f"failed to parse {source.source.display_name} at source offset {source.cursor}; sha256={digest}"
-                    ) from error
+                    # Source identity/cursor belong in bounded failure notes, not
+                    # an unbounded duplicate in the exception summary.
+                    raise RuntimeError(f"failed to parse message; sha256={digest}") from error
                 prior_date = datetime.fromisoformat(parsed.date_utc)
                 progress.record(parsed, source)
                 if parsed.autosave:

@@ -11,8 +11,17 @@
   Import failures now retain source-code tracebacks, validator origins, source
   references/cursors, message hashes, and bounded input previews in local run
   history, including both original framing previews. Bound source identity and
-  cursor previews and reject malformed outer lines before header normalization. Double-framed Eudora
+  cursor previews, exception messages/notes and total failure reports; reject
+  malformed outer lines before header normalization. Double-framed Eudora
   metadata stubs remain excluded. Existing archives are not rewritten.
+
+* Use one file-drag path for message-list rows and the message-file icon,
+  explicitly writing only `public.file-url` to copy `.eml` files (or a ZIP for
+  multiple selected messages) to Finder/Desktop. Modifier-click selects several
+  rows; dragging exports them instead of extending a selection range.
+  Isolate prepared files from attachment exports, revoke tokens safely on close,
+  wait for the result table to finish building before startup clears it, and
+  discard queued clicks from a replaced result set.
 
 * Fix source GUI startup treating the `mailsearch-gui` launcher and option
   values as archive paths. Preserve explicit archive selection and Finder opens;
