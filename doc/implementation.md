@@ -137,6 +137,9 @@ real plug-in validation after a successful message, generator failures, and
 date-resolution failures, checking durable status/catalog evidence and source
 immutability. The diagnostics remain local and can include private message text.
 
+The normative MBOX transformation and normalized/source hash reconstruction
+contract is in [INTEGRITY_CONTROLS.md](INTEGRITY_CONTROLS.md#verifying-and-reconstructing-normalized-records).
+
 ## Native Mailbag storage
 
 [Mailbag 1.0](https://archives.albany.edu/mailbag/spec/) is the native archive

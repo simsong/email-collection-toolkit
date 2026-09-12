@@ -77,6 +77,8 @@ directory, and a `data/mbox/` payload directory.
   duplicate RFC messages, the first published observation supplies the envelope.
   For immediate double framing, preserve the selected delimiter and convert
   the other envelope to a literal `X-From:` header under the rule below.
+  Apply the canonical byte/hash and source-reconstruction contract in
+  [INTEGRITY_CONTROLS.md](INTEGRITY_CONTROLS.md#verifying-and-reconstructing-normalized-records).
   The separate supported status-header `From XXX` wrapper uses its nested delimiter.
   Only synthesize a delimiter when none exists: use the latest valid timestamp
   across Date, Received timestamp suffixes, Resent-Date, and Delivery-Date,
