@@ -17,12 +17,12 @@
   };
   const rows = () => [...document.querySelectorAll("#result-list .result")];
   const subjects = () => rows().map(row => row.querySelector(".result-subject").textContent);
-  const isSelected = row => row.closest(".tabulator-row")?.classList.contains("tabulator-selected");
+  const isSelected = row => row?.closest(".tabulator-row")?.classList.contains("tabulator-selected");
   const tableHolder = () => document.querySelector("#result-list .tabulator-tableholder");
   const currentFrameFind = () => {
     const frame = document.querySelector("#body-view iframe");
     const token = frame?.dataset.messageFindToken;
-    return token && [...frame.contentDocument.querySelectorAll("mark.message-find-current")]
+    return token && frame.contentDocument && [...frame.contentDocument.querySelectorAll("mark.message-find-current")]
       .find(mark => mark.dataset.mailarchiverFindTarget === token);
   };
   const search = async (query, expected, attachments = false) => {
@@ -110,13 +110,15 @@
     document.dispatchEvent(new KeyboardEvent("keydown", {key: "g", metaKey: true, bubbles: true}));
     await waitFor(() => document.querySelector(".message-find-current"), "Command-G selects the next in-message match");
     await search("beth", 2, false);
-    const firstBeth = rows()[0];
-    const secondBeth = rows()[1];
-    firstBeth.click();
-    await waitFor(() => isSelected(firstBeth) && state.selected === Number(firstBeth.dataset.messagePk),
+    const firstBeth = Number(rows()[0].dataset.messagePk);
+    const secondBeth = Number(rows()[1].dataset.messagePk);
+    // Preview delivery reformats cards; locate the live card by its stable ID.
+    const bethRow = messagePk => rows().find(row => Number(row.dataset.messagePk) === messagePk);
+    bethRow(firstBeth).click();
+    await waitFor(() => isSelected(bethRow(firstBeth)) && state.selected === firstBeth,
       "first full-text result selected");
     const realPart = window.pywebview.api.part;
-    let delayedMessage = Number(firstBeth.dataset.messagePk);
+    let delayedMessage = firstBeth;
     window.pywebview.api.part = async (...args) => {
       const response = await realPart(...args);
       if (args[0] === delayedMessage) await sleep(300);
@@ -125,13 +127,13 @@
     document.dispatchEvent(new KeyboardEvent("keydown", {key: "f", metaKey: true, bubbles: true}));
     document.dispatchEvent(new KeyboardEvent("keydown", {key: "g", metaKey: true, bubbles: true}));
     await waitFor(() => messageFind.value === "beth", "find starts from the new full-text archive search");
-    secondBeth.click();
-    await waitFor(() => isSelected(secondBeth) &&
+    bethRow(secondBeth).click();
+    await waitFor(() => isSelected(bethRow(secondBeth)) &&
       document.querySelector(".message-find-current") &&
       document.getElementById("message-find-status").textContent.startsWith("1/"),
     "changing messages during pending find work retains text and restarts at its first match");
     await sleep(350);
-    assert(isSelected(secondBeth) && state.messageFindIndex === 0 &&
+    assert(isSelected(bethRow(secondBeth)) && state.messageFindIndex === 0 &&
       document.getElementById("message-find-status").textContent.startsWith("1/"),
     "stale Command-F and Command-G work cannot advance the newly selected message");
     delayedMessage = null;
@@ -244,6 +246,11 @@
     const rich = rows()[0];
     rich.click();
     await waitFor(() => document.getElementById("message-subject").textContent === "Rich UI message", "message viewer opens");
+    await waitFor(() => {
+      const frame = document.querySelector("#body-view iframe");
+      return frame?.dataset.highlightCount === "1" && frameDocumentIsReady(frame);
+    },
+      "the preferred HTML body finishes loading before its controls are inspected");
     const dateBanner = document.getElementById("computed-date-banner");
     assert(!dateBanner.hidden, "computed-date warning banner displayed");
     assert(dateBanner.textContent.includes("Tue, 31 Dec 2024 12:00:00 +0000"), "banner identifies original Date header");
@@ -333,7 +340,7 @@
     assert(secondaryHtmlPart, "fixture exposes an independently selectable second HTML part");
     parts.value = secondaryHtmlPart.value;
     parts.dispatchEvent(new Event("change", {bubbles: true}));
-    await waitFor(() => document.querySelector("#body-view iframe")?.contentDocument?.body.textContent.includes("Secondary HTML alternative") &&
+    await waitFor(() => document.querySelector("#body-view iframe")?.contentDocument?.body?.textContent.includes("Secondary HTML alternative") &&
       !document.getElementById("remote-content").hidden,
     "a remote-content choice does not authorize another HTML part");
     assert(!document.querySelector("#body-view iframe").contentDocument
@@ -388,9 +395,10 @@
       "Command-G advances to the next in-message match");
 
     await search("from:curator", 1, false);
-    const curatorMessage = rows()[0];
-    curatorMessage.click();
-    await waitFor(() => isSelected(curatorMessage) && document.querySelector("#body-view iframe")?.contentDocument,
+    const curatorPk = rows()[0].dataset.messagePk;
+    rows()[0].click();
+    await waitFor(() => isSelected(rows().find(row => row.dataset.messagePk === curatorPk)) &&
+      document.querySelector("#body-view iframe")?.contentDocument?.body?.textContent.includes("Curator one"),
       "selector result opens for header-to-body find navigation");
     const curatorBody = document.querySelector("#body-view iframe").contentDocument.body.textContent;
     assert(curatorBody.includes("Curator one"),

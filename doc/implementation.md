@@ -116,7 +116,8 @@ worker processing boundaries, then formats the complete traceback into both
 Pydantic field errors retain their underlying validator traceback when available.
 Validation summaries and chained tracebacks omit Pydantic input values, relying
 on the bounded previews for input evidence.
-Notes contain the source reference, cursor, SHA-256, byte length, and escaped
+Notes use a neutral source-cursor label for native plug-in/remote cursors.
+They contain the source reference, cursor, SHA-256, byte length, and escaped
 prefixes bounded to 4,096 message bytes and 512 bytes per selected/original/quoted
 envelope; no frame locals
 or full-message copies are collected. Source lookup uses the recorded local

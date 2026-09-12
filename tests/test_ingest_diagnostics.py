@@ -62,7 +62,7 @@ def test_validation_failure_retains_validator_line_and_current_message(tmp_path:
         state, detail = catalog.execute("SELECT result, detail FROM ingest_runs").fetchone()
         assert state == "failed"
         assert catalog.execute("SELECT message_id_normalized FROM messages").fetchall() == [("first@example.test",)]
-    assert "Source cursor (byte offset for local MBOX): '123'" in detail
+    assert "Source cursor: '123'" in detail
     assert str(source) in detail
     assert "<second@example.test>" in detail
     assert hashlib.sha256(raw.replace(b"first", b"second")).hexdigest() in detail
@@ -137,8 +137,10 @@ def test_normalized_failure_retains_bounded_quoted_envelope() -> None:
     record = normalize_mbox_framing(quoted + b"Subject: body\n\nbody\n", outer)
     source = SourceReference(plugin_kind="file-folder", source_id="fixture", native_id="source.mbox", display_name="source.mbox")
     error = ValueError("failure before observation")
-    add_message_context(error, source, "123", b"invalid payload", record.envelope, record.normalization)
+    add_message_context(error, source, "fixture:0", b"invalid payload", record.envelope, record.normalization)
     detail = format_failure(error)
+    assert "Source cursor: 'fixture:0'" in detail
+    assert "byte offset" not in detail
     assert "Quoted envelope prefix: b'>From quoted@example.test" in detail
     assert "Original envelope prefix: b'From real@example.test" in detail
     assert "QUOTED-TAIL" not in detail

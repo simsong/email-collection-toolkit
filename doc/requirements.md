@@ -437,7 +437,8 @@ mailbox destinations. Dedicated EICAR tests also verify infected routing.
 * Every ingest run records its completion time, result, and failure detail.
   Failure detail retains traceback filenames and source-code line numbers,
   including underlying Pydantic validator exceptions. For an available message,
-  include its source reference, cursor (byte offset for local MBOX), SHA-256,
+  include its source reference, neutrally labelled native cursor (byte offset for
+  local MBOX), SHA-256,
   length, and an escaped prefix of up to 4,096 input bytes plus up to 512 bytes
   per selected/original/quoted envelope. Pydantic summaries and chained tracebacks omit input-value dumps so
   they cannot bypass these preview limits. These local diagnostics may contain

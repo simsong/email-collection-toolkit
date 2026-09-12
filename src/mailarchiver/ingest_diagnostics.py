@@ -25,7 +25,7 @@ def add_message_context(
     preview = raw[:MESSAGE_PREVIEW_BYTES]
     error.add_note(
         f"Source: {source.model_dump_json()}\n"
-        f"Source cursor (byte offset for local MBOX): {cursor!r}\n"
+        f"Source cursor: {cursor!r}\n"
         f"Message SHA-256: {hashlib.sha256(raw).hexdigest()}; bytes={len(raw)}\n"
         f"Message prefix ({len(preview)}/{len(raw)} bytes): {preview!r}\n"
         f"MBOX envelope prefix (up to {ENVELOPE_PREVIEW_BYTES} bytes): "
