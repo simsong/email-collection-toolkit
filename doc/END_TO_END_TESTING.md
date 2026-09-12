@@ -252,6 +252,11 @@ repeat-import verification. `make test-native-application` also exercises both
 native owner fields with defaults, Continue/Cancel, and the persistent options
 editor in a real Cocoa/WebKit process. These tests use disposable fixture archives.
 
+The browser driver waits for the selected HTML part and its highlights before
+checking body controls, and resolves result cards by message ID after asynchronous
+preview updates replace their DOM nodes. This preserves the remote-content and
+pending-find assertions while avoiding checks against unfinished or detached UI.
+
 ### Finder file export regression
 
 `make test-file-drag` verifies exact message export bytes, export-token lifetime

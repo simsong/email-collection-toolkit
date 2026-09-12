@@ -72,9 +72,14 @@ directory, and a `data/mbox/` payload directory.
   byte-preserving mboxrd quoting. Do not retain a per-message EML corpus.
 * Preserve every available original `From ` record delimiter, including sender,
   timestamp, whitespace, and line ending. Carry MBOX framing separately from
-  RFC message bytes so message hashes and deduplication stay unchanged. For
+  RFC message bytes so message hashes and deduplication stay unchanged except
+  for the explicit double-framing normalization below. For
   duplicate RFC messages, the first published observation supplies the envelope.
-  The supported `From XXX` wrapper uses the nested message's delimiter.
+  For immediate double framing, preserve the selected delimiter and convert
+  the other envelope to a literal `X-From:` header under the rule below.
+  Apply the canonical byte/hash and source-reconstruction contract in
+  [INTEGRITY_CONTROLS.md](INTEGRITY_CONTROLS.md#verifying-and-reconstructing-normalized-records).
+  The separate supported status-header `From XXX` wrapper uses its nested delimiter.
   Only synthesize a delimiter when none exists: use the latest valid timestamp
   across Date, Received timestamp suffixes, Resent-Date, and Delivery-Date,
   normalized to UTC, independently of the routing-date median. Invalid or
@@ -130,10 +135,33 @@ directory, and a `data/mbox/` payload directory.
   `mbcp@s.eecs.harvard.edu`, whose only headers are `X-UID`, `Status`, and
   `X-MBCP-Flags` (with both X-headers present), and whose body is empty is
   source metadata, not an email. Record a `source-metadata-excluded`
-  observation and do not publish it. An envelope sender of `XXX` is unwrapped
-  only when the outer record contains only status headers and its body starts
-  with a quoted nested MBOX envelope; publish the nested RFC 5322 message while
-  retaining the outer source offset as provenance.
+  observation and do not publish it. For double framing, apply this check to the
+  selected envelope and original headers/body after the quoted delimiter; ignore
+  only the generated `X-From:` field, never an original header or body text.
+  An envelope sender of `XXX` is unwrapped
+  only when the outer record has a nonempty, well-formed status-only header block and
+  its body starts with a quoted nested delimiter with complete ctime syntax. Indented or unquoted body
+  lines are never nested delimiters. Retain the outer source offset as provenance.
+* A framing line copied into an RFC header must start with literal `From ` and
+  contain exactly one LF- or CRLF-terminated line. Malformed outer framing is
+  left unnormalized, including in the legacy status-wrapper path, and remains
+  subject to normal import validation.
+* Double processing is recognized when the first payload line, immediately
+  after a physical MBOX delimiter, is itself a `>From ` delimiter with a sender
+  and ctime-style timestamp. Keep the outer delimiter and convert the quoted
+  line to a literal `X-From: sender timestamp` header. If the outer sender is
+  exactly `XXX` or `???@???` and the inner sender is neither placeholder,
+  instead promote the inner delimiter and convert the displaced outer line to
+  `X-From:`. Real local senders, including `nobody` and `MAILER-DAEMON`, are not
+  automatically bogus. Retain envelope values/line endings and all following
+  message headers and body bytes, including body quoting. This explicitly
+  authorized framing normalization changes canonical message bytes: canonical
+  hashes describe the normalized message, while observation detail records the
+  original source-payload SHA-256, exact framing bytes and rule in a versioned record.
+  Do not recursively remove quotation levels or infer a producer from branding.
+  Do not search later header/body lines, accept indentation, or use timestamp
+  differences to infer wrapping. See [MBOX_READING.md](MBOX_READING.md) for the
+  Procmail/formail, MIMEDefang and Eudora compatibility boundary.
 * Each finished `data/mbox/NAME.mbox` has one
   `integrity/NAME.mbox.integrity` BagIt tag in the versioned hybrid format
   specified by [INTEGRITY_CONTROLS.md](INTEGRITY_CONTROLS.md).
@@ -413,6 +441,20 @@ mailbox destinations. Dedicated EICAR tests also verify infected routing.
   must be rolled back to the prior file size where possible, reported, and
   stopped without silently treating the message as archived.
 * Every ingest run records its completion time, result, and failure detail.
+  Failure detail retains traceback filenames and source-code line numbers,
+  including underlying Pydantic validator exceptions. For an available message,
+  include its source reference, neutrally labelled native cursor (byte offset for
+  local MBOX), SHA-256,
+  length, and an escaped prefix of up to 4,096 input bytes plus up to 512 bytes
+  per selected/original/quoted envelope. Limit each source identity field and
+  cursor to 1,024 characters plus a truncation marker; omit arbitrary source
+  provenance and hierarchy from failure reports. Limit exception summaries to
+  2,048 characters, each exception note to 32,768 characters, and the complete
+  rendered failure to 65,536 characters, plus truncation markers. Pydantic summaries and chained tracebacks omit input-value dumps so
+  they cannot bypass these preview limits. These local diagnostics may contain
+  private mail; they are not public telemetry. A failure between messages identifies the container without
+  attributing it to the previously yielded message. Persist the same detail in
+  the run catalog and Ingests status, without changing source or canonical mail.
   An unexpected parser failure preserves earlier published messages, closes
   resources, refreshes the BagIt/Mailbag checkpoint for committed MBOX changes, and leaves a
   rerunnable error observation containing the source cursor (and numeric offset

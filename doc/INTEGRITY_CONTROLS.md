@@ -51,22 +51,79 @@ classification, indexing, and reporting never change those bytes.
 
 * **Extraction:** recognize the `From ` record framing by content and use
   `mailbox.mbox.get_bytes(..., from_=False)`. The source record separator is
-  container framing and is not normally part of `MailObject.raw`. Retain its
+  container framing and is not normally part of `MailObject.raw`. Normally retain its
   complete physical bytes separately in `MailObject.mbox_envelope` and reuse it
   during publication; do not replace its date with import time. The bytes
   returned by the standard-library MBOX reader, including its stored `>From `
-  representation, become the message bytes.
+  representation, become the message bytes except for the explicit framing
+  transformations below. Apply them before computing `h2`.
+* **Immediate double framing (version 1):** if the first extracted payload
+  line is one qualifying `>From ` envelope, convert the displaced envelope to
+  a literal `X-From:` field. The outer line must be one complete LF/CRLF-ended
+  `From ` line, without embedded CR/LF, and have a sender token. The quoted
+  line must match the exact `QUOTED_ENVELOPE` grammar in
+  [mbox_framing.py](../src/mailarchiver/mbox_framing.py): a single `>`, literal
+  `From `, non-whitespace sender, one space, three-letter English weekday/month, two-character
+  day, `HH:MM:SS`, year 1900–2099, optional space-prefixed suffix, and LF/CRLF.
+  No indentation, intervening field/blank line, extra quote level, or body
+  search qualifies. See [MBOX_READING.md](MBOX_READING.md) for examples and limits.
+  Let `E` be the outer envelope, `Q` the quoted line including its ending,
+  and `B` every remaining extracted byte. When the outer sender is exactly
+  `XXX` or `???@???` and the inner sender is neither placeholder, select
+  `Q[1:]` as the envelope and set `raw = b"X-From: " + E[5:] + B`.
+  Otherwise retain `E` and set `raw = b"X-From: " + Q[6:] + B`.
+  These byte operations retain the displaced line ending, existing X-From
+  fields, and every remaining header/body byte. `h2` is SHA-256 of this
+  normalized `raw`, not SHA-256 of `Q + B`.
 * **Container-only records:** an exact empty Eudora MBCP status record is
-  observed as `source-metadata-excluded` and is not a canonical message. A
-  narrowly recognized `From XXX` status wrapper is removed, one quoting level
-  is removed from its nested MBOX envelope, and the nested RFC 5322 bytes become
-  `MailObject.raw`; retain the nested envelope separately, while the outer source offset remains provenance.
+  observed as `source-metadata-excluded` and is not a canonical message. This
+  requires envelope sender `mbcp@s.eecs.harvard.edu`, both `X-UID` and
+  `X-MBCP-Flags`, no headers other than those two and optional `Status`, and
+  an empty or whitespace-only body. A
+  normalized record is classified using its selected envelope and original
+  bytes after `Q`, ignoring only the generated X-From field; original non-metadata
+  headers or body content still prevent metadata exclusion. Separately, a complete
+  `From XXX` envelope followed by a nonempty valid status-only header block,
+  a blank line, and a qualifying quoted envelope is a legacy wrapper. Remove
+  that wrapper and one mboxrd quoting level from the nested envelope and
+  matching nested body lines. The nested RFC bytes become `MailObject.raw`;
+  retain the nested envelope separately and the outer source offset as provenance.
 * **Problems and adopted solutions:** mboxrd cannot distinguish storage-added
   quoting from an original literal `>From ` line, so recovery enumerates the
   bounded interpretations and uses `h2` to select one. Unescaped body lines
   that resemble record separators can make a legacy dialect structurally
-  ambiguous; unsupported dialects fail rather than silently inventing bytes,
-  pending evidence-based dialect adapters.
+  ambiguous. The standard reader still treats physical `From ` lines as
+  boundaries; not every unsupported legacy dialect can be detected. These
+  framing rules do not resolve arbitrary unescaped body delimiters.
+
+#### Verifying and reconstructing normalized records
+
+Archive verification recovers normalized `raw` from canonical MBOX and checks
+its declared `h2` using the common recovery procedure below. It must not remove
+the generated X-From field or rerun source normalization before checking `h2`.
+The standalone verifier needs no source-observation database for this check.
+
+For each normalized source observation, `observations.detail` appends
+`\nMBOX normalization: ` followed by the typed `MboxNormalization` JSON:
+`format_version` (1), `rule` (`inner-envelope-promoted` or
+`quoted-envelope-to-x-from`), `source_raw_sha256`, `original_envelope`, and
+`quoted_envelope`. The two byte fields use URL-safe Base64. This observation
+evidence is local catalog metadata, outside BagIt tag-manifest fixity; preserve
+it or the original source when source reconstruction is required.
+
+After verifying canonical `raw` against `h2`, decode the observation's `E`
+and `Q` and compute the exact generated X-From prefix using its recorded rule.
+Reject unsupported format versions or rule values.
+Require that prefix at the start of `raw`; remove only that prefix and prepend
+`Q`. The resulting `Q + B` must match `source_raw_sha256`. Retain `E` as the
+original separate envelope. Never remove other X-From fields or unquote the
+body during this reconstruction. A hash/prefix mismatch is an integrity error.
+Different duplicate observations can have different envelopes; the first
+published observation supplies the canonical envelope, so reconstruct using
+each observation's own framing evidence. This recovers the extracted payload,
+not MBOX container padding or a complete original source file; source-file
+fixity remains a separate check. `make test-envelopes` exercises normalization,
+source hashes, canonical `h2` verification, and standalone archive recovery.
 
 ### Emacs RMAIL Babyl
 
@@ -142,7 +199,7 @@ canonical record. A ClamAV-positive message keeps identical `MailObject.raw`
 bytes and is routed to a numbered `INFECTED` MBOX. Deduplication changes only
 whether another canonical copy is written.
 
-For every retained message, publication supplies a preserved outer `From `
+For every retained message, publication supplies a preserved selected `From `
 separator, or synthesizes one only when none exists using the latest valid
 header timestamp and the documented missing-date fallback (see requirements).
 It passes the framed bytes to `mailbox.mbox.add()` without changing
