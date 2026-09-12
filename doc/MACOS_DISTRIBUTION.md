@@ -4,6 +4,14 @@ Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved.
 
 ## Build and test
 
+These instructions build the current Python/pywebview application. The compiled
+replacement candidates are [Dioxus Desktop and Tauri](DIOXUS.md), with the Python archive
+engine bundled alongside it. That migration has not changed `make dmg` or its
+validation; no Dioxus DMG is produced by the current build.
+
+Plan comparable trial implementations in Dioxus and Tauri before choosing a
+framework. Either approach retains the Python archive engine.
+
 On a logged-in Mac with this checkout's development environment and `uv`:
 
 ```sh

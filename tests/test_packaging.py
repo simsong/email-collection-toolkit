@@ -129,30 +129,16 @@ def test_dependency_audit_rejects_external_rpath(tmp_path: Path) -> None:
         verify_dependencies(app)
     subprocess.run(["cc", str(source), "-Wl,-rpath,@executable_path", "-o", str(binary)], check=True)
     verify_dependencies(app)
-
-
-@pytest.mark.skipif(sys.platform != "darwin", reason="Mach-O linkage requires Apple's toolchain")
-def test_dependency_audit_distinguishes_install_id_from_import(tmp_path: Path) -> None:
-    """Desktop delivery: LC_ID_DYLIB is metadata; a real unresolved import must still fail."""
-    scripts = str(ROOT / "scripts")
-    sys.path.insert(0, scripts)
-    try:
-        from build_macos import verify_dependencies
-    finally:
-        sys.path.remove(scripts)
-    app = tmp_path / "Fixture.app"
-    libraries = app / "Contents/Frameworks"
-    libraries.mkdir(parents=True)
-    library = libraries / "fixture.dylib"
-    source = tmp_path / "fixture.c"
-    source.write_text("int fixture(void) { return 1; }\n", encoding="utf-8")
-    subprocess.run(["cc", "-dynamiclib", str(source), "-Wl,-install_name,@rpath/different-name.dylib",
-                    "-o", str(library)], check=True)
+    # A dylib's install name is its own identity, not a dependency on another file.
+    library_source = tmp_path / "library.c"
+    library_source.write_text("int fixture_value(void) { return 0; }\n", encoding="utf-8")
+    library = binary.parent / "library.dylib"
+    subprocess.run(["cc", "-dynamiclib", str(library_source), "-Wl,-install_name,@rpath/identity-only.dylib", "-o", str(library)], check=True)
     verify_dependencies(app)
-    consumer = libraries / "consumer.dylib"
-    source.write_text("extern int fixture(void); int consumer(void) { return fixture(); }\n", encoding="utf-8")
-    subprocess.run(["cc", "-dynamiclib", str(source), str(library), "-o", str(consumer)], check=True)
-    with pytest.raises(RuntimeError, match="unresolved bundled dependency.*different-name.dylib"):
+    # Once an executable actually loads that name, it must resolve within the app.
+    source.write_text("extern int fixture_value(void); int main(void) { return fixture_value(); }\n", encoding="utf-8")
+    subprocess.run(["cc", str(source), str(library), "-Wl,-rpath,@executable_path", "-o", str(binary)], check=True)
+    with pytest.raises(RuntimeError, match="unresolved bundled dependency"):
         verify_dependencies(app)
 
 

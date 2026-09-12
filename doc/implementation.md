@@ -296,6 +296,28 @@ not an acceptable default installation experience.
 
 ## Current package shape
 
+`dev/addressbook-exporter.py` implements the experimental ePADD 11.1.3 text
+handoff through `make addressbook-export ARGS='--archive ... --output ...
+--owners-from-sent'`; alternatively repeat `--owner` for exact aliases. Sent mode
+uses the persisted sender classification, never recipient membership or new
+display-name matching. Legacy owner addresses without `@` stay in singleton
+blocks and are reported explicitly. It opens a journal-free
+catalog with SQLite read-only/immutable mode, streams referenced addresses into
+a temporary SQLite set, lowercases/deduplicates them, and emits the owner first,
+then one address per contact. It adds no correspondent display names. UTF-8
+output requires an ePADD JVM using UTF-8; legacy local/UUCP addresses use singleton
+blocks. Blank, non-printing, delimiter-prefixed, HTML-entity-bearing, and overly long entries are
+reported rather than emitted. The source catalog SHA-256 must remain unchanged.
+Non-`@` identifiers requiring HTML escaping are also reported because ePADD's
+fallback double-escapes them at contact boundaries.
+Files are published without replacement at mode 0600, outside the source archive;
+`OUTPUT.report.json` records exclusions, owner choices, counts, and hashes.
+`make test-addressbook-export` checks real SQLite fixtures, source immutability,
+owner grouping, parser hazards, and refusal paths after lint/type analysis.
+The export does not retain ePADD curation, mailing-list flags, or inferred names;
+upload into a copy before treating it as a repair. Older archive owner-token
+files may reflect former substring semantics and are not an exact owner-address authority.
+
 ```text
 email-collection-toolkit/
   pyproject.toml
@@ -367,7 +389,7 @@ relations, and viewer page navigation remain the next integration layer.
 ## Current acceptance implementation
 
 The first implementation supports recursive local MBOX, Emacs RMAIL Babyl,
-`.eml`, Maildir, and `.emlx` ingest, owner-token Sent classification, exact
+`.eml`, Maildir, and `.emlx` ingest, owner-rule Sent classification, exact
 `(Message-ID, SHA-256)` deduplication, autosave and source-metadata exclusion,
 `Date:`/`Received:`/source/previous-message/path-year date resolution, a
 temporary on-demand `clamd`,
@@ -377,7 +399,7 @@ per-run observation review, and year/correspondent reports.  The top-level
 `MAIL_ARCHIVE_DIR` selects the archive for every command by default; the
 `--archive` option overrides it. `ingest` takes one
 or more source roots as positional arguments and `--owner-names-file` selects
-the reusable owner-token list. Ingest requires `--clamav` or explicit `--no-scan`.
+a legacy include-rule list; otherwise archive `config.yaml` supplies owner rules. Ingest requires `--clamav` or explicit `--no-scan`.
 With `--clamav`, it starts
 a foreground daemon only when no healthy configured socket is available, then
 removes the daemon's stale socket on exit; it never enables persistent or
@@ -627,7 +649,7 @@ default **Meaningful** relation: outgoing direct To/Bcc recipients and incoming
 From addresses only when an exact configured owner address is in To. This
 preserves all-header statistics while avoiding Cc and indirect mailing-list
 traffic in meaningful-contact results.
-The current owner-token file continues to route Sent mail. Archive creation and
+The include/exclude owner rules route Sent mail. Archive creation and
 File → Properties will later maintain a separate exact owner-address set for
 the direct-owner predicate; fragment matching is not adequate for that use.
 `mailarchiver human-contacts` is the initial read-only consumer. Its
@@ -801,6 +823,14 @@ runs the service on a non-daemon worker thread, leaves readers usable, polls the
 existing typed status files in every attached search window and the persistent
 About window, and invalidates view caches after the run. Startup and import
 errors are retained as typed notices instead of being available only on stderr.
+Before creating NSApplication, `configure_macos_application` registers the
+process-local `NSTreatUnknownArgumentsAsOpen` default with string value `NO`.
+This prevents Cocoa from reopening the source launcher and option values as
+documents; argparse and the Finder delegate retain their existing roles.
+`make self-test-gui` launches the actual `mailsearch-gui` entry point using the
+same isolated diagnostics as the packaged app and rejects unexpected startup
+errors. The native application probe also checks startup notices and opens its
+fixture through the document-open delegate.
 The Ingests bridge exposes **Import Directory…** for its bound document. It
 reuses that document's search window (or opens one to own the job) and runs the
 normal confirmed import workflow.
@@ -813,45 +843,47 @@ An application-owned NSOpenPanel labels source selection **Import**, displays
 the destination, and enables both file and directory selection, including
 multiple selections. Both import entry points open this panel directly without
 a source-type question; directories use recursive discovery.
-`document_options` owns the typed document owner-list state and atomic UTF-8
-storage. Import reads `owner-names.txt` only from explicitly selected source
-directories (not recursively), unions those aliases with the document list,
-and prompts with a multiline native editor only if the combined list is empty.
-There is no application/launch-directory fallback. Source lists preserve
-multiword entries, ignore blank/comment lines, deduplicate case-insensitively,
-and sort case-insensitively. After final confirmation, `start_import` rereads
-and merges the document list under WriterLease before invoking the existing
-path-based ingest service. No source settings are written. Windows retains its
-owner-file picker as a fallback until its native setup UI is implemented.
-The packaged local-source rules ignore each selected directory's top-level
-`owner-names.txt`, so this configuration file is not reported or ingested as
-an unrecognized mail source.
+`owner_rules.OwnerRules` validates and normalizes typed include/exclude lists.
+Each glob matches the entire mailbox component; `@` explicitly introduces a
+separate domain glob. Includes are evaluated first, then exclusions override.
+Case is ignored; no display-name, substring, or automatic plus-address expansion
+occurs. A bare exact rule also matches the same legacy sender without `@`.
+`_run_ingest` resolves rules before creating the catalog and uses this matcher
+for Sent routing after the infected-message check. CLI `--owner-names-file`
+optionally supplies include rules while retaining configured exclusions;
+without it the archive YAML supplies both lists.
 
-The document-bound `DocumentOptionsApi` exposes only status and update through
-WindowBridge to `options.html`. One options child window is shared per document
-and registered with the controller and Window menu. Its scrollable multi-select
-list saves Add/Delete actions immediately, splitting Add input on commas,
-semicolons, and whitespace. The service obtains WriterLease and checks a content
-revision before updating; another writer or a stale edit fails visibly.
-The UI polls state and disables edits during this document's GUI ingest.
-CLI and GUI ingest record the aliases actually used at run start in operational
-`status/owner-names-used.txt`. The options panel compares that snapshot with
-the current list, retaining the warning across window/application restarts.
-Earlier runs without a snapshot are explicitly unknown. Neither owner settings
-nor this snapshot is included in preservation manifests. The panel explains
-that edits do not relocate canonical messages or change stored categories;
-FTS has no owner-name list and index rebuilds do not reclassify mail.
-`archive_config.py` stores the last source-picker directory in a strict,
-versioned archive-local `config.yaml`. The value is written atomically only
-after the import succeeds, while it still holds WriterLease; the next picker uses it if it is an
-existing directory and otherwise falls back to the archive's parent. A malformed
-or missing config is discardable navigation state and does not block import.
-The archive catalog schema contains message identities, provenance, ingest
-history, and canonical locations only; no other per-archive user preferences
-were found in SQL. Search query/window geometry and saved filter sets remain
-per-window or per-user UI state outside the archive. Scanner policy remains
-application configuration, while owner aliases remain the archive-local
-`owner-names.txt` because they are the ingest classification input.
+`DocumentOptions` loads `config.yaml` defaults, falling back to legacy archive
+and selected-source-root owner files only when no YAML owner settings exist.
+Every import presents native include/exclude text areas on macOS and an
+`options.html` prompt on the portable host. Both accept newline/comma-separated
+rules, validate before continuing, and save nothing on Cancel. Final confirmation
+passes typed rules to `start_import`, which obtains WriterLease, checks the
+revision captured before the dialog, and saves changed lists atomically.
+Sources and legacy owner files are never rewritten.
+
+The document-bound `DocumentOptionsApi` uses the same lists in an options child
+window. Save checks the lease and revision; status polling disables edits during
+ingest without clobbering unsaved text. The import snapshot is
+`status/owner-rules-used.yaml`, allowing change warnings across restarts.
+After workers stop and canonical checkpoint publication completes, a streaming catalog
+query regenerates `owner-names-detected.txt` from all matching archived senders,
+including previous imports, with excludes applied. Addresses are sorted and
+unique; unsafe line delimiters are omitted. The file is derived evidence, not
+configuration. Neither this file nor owner configuration is in preservation
+manifests. Tests in `test_owner_rules.py` exercise real fixture import, stored
+categories, raw hashes, saved defaults, exclusion precedence, idempotence and
+standalone archive verification; GUI service and native application tests cover
+both fields, cancellation, revision conflicts and persistence.
+
+`archive_config.py` writes version 2 YAML containing `owner.include`,
+`owner.exclude`, and `last_import_directory`, while reading version 1 as well.
+Unchanged lists are not rewritten. Successful import updates navigation only
+when needed and preserves the rules. Malformed configuration raises an error
+instead of discarding potentially important owner settings. The source picker
+uses the saved directory if it exists, otherwise the archive parent.
+Existing message categories remain unchanged by settings edits or FTS rebuilds.
+
 When startup produces a placeholder, the shell discards it without creating a
 native search window. A `webview.start` callback presents a three-button NSAlert
 on the Cocoa main thread: Open Existing, Create New, or Cancel. About anchors
@@ -1011,16 +1043,13 @@ application remains offline-capable. Tabulator's virtual DOM paints only its
 viewport and buffer while retaining the complete result data. Its formatter
 queues preview IDs only when it paints a row through the Python bridge. A
 single-worker executor reads the indexed 18-word previews, and JavaScript polls
-the typed result batch until it can update visible rows. Its `rowMouseDown` and
-`rowMouseEnter` events provide row components for the small range adapter;
-the result-table boundary cancels native `selectstart` and its row subtree has
-explicit WebKit and standard `user-select: none` rules, so drag selection never
-also selects card text. Result virtualization and range selection need no custom
-scroll/viewport or pointer-coordinate code. A single
-selected row displays its message. A multi-row selection clears its stale
-single-message view, displays the selected-message count with the same file well,
-and an explicit drag from that well prepares a ZIP only when the drag begins.
-A gesture ending on its original row remains a click. Global macOS Command-key handlers
+the typed result batch until it can update visible rows. The result-table boundary
+cancels native `selectstart`, and rows use `user-select: none` so file drags do
+not select card text. Tabulator handles modifier-click selection and virtual
+scrolling without custom pointer-range code. A single selected row displays its
+message. Multiple selected rows replace the message with a count and the same
+file well. An explicit drag from either source prepares the selected export;
+clicking a row remains a normal message click. Global macOS Command-key handlers
 select numeric MIME part IDs or raw source. Command-F opens an in-message
 finder from the first current search-highlight term and selects its input;
 Command-G opens the finder at its first match when it is closed, while
@@ -1145,9 +1174,31 @@ Indexing parses each message once for FTS body text and attachment metadata;
 The tables are derived and are replaced together with FTS by `refresh-index`.
 
 `.eml` export writes the bytes returned by hash-verified direct retrieval.
-Finder dragging uses a temporary `.eml` file URL and the Cocoa webview's native
-file/link drag support. Only the message-file icon well is draggable; the
-header region remains normal selectable text. The browser never preloads an
+Finder dragging uses an `NSPasteboardItem` with exactly one explicitly supplied
+type, `public.file-url`, containing the exported path as a file URI. Cocoa may
+add compatibility aliases, including `NSFilenamesPboardType`; the application
+does not add URL-link or text types to the native writer. JavaScript carries only
+an opaque registered export token with a copy-only operation mask; the Cocoa
+adapter replaces that token before the native drag starts. Cocoa process setup
+installs it before either normal document or native smoke windows are created.
+The legacy
+`dragImage:...` path clears WebKit link flavors and writes the file object; the
+modern `beginDraggingSessionWithItems:...` path replaces the item writer before
+AppKit builds its pasteboard. Unregistered text and link drags are unchanged.
+Every preparation writes into a fresh `drags/<uuid>/` subdirectory, isolating it
+from attachment basenames and later exports. Preparation and close share a lock;
+close revokes its tokens and rejects later preparation before cleaning exports.
+The status bridge disables the drag control on non-macOS backends. Startup
+awaits Tabulator `tableBuilt` before clearing the initial result viewport. Queued
+row-click callbacks verify the search generation and current row before selecting.
+The browser acceptance test rejects unhandled page errors and verifies export bytes.
+`make test-file-drag` checks exact
+export bytes, token revocation, both native pasteboard representations, and
+injected selector/superclass dispatch on a controlled AppKit host.
+Result cards and the message-file icon well both call `installDrag`; selected
+rows use the complete selection and an unselected row uses only its own message.
+Modifier clicks select multiple rows; pointer drags export files. Message headers
+remain normal selectable text. The browser never preloads an
 `.eml` file on hover or selection: a drag-start event begins asynchronous
 preparation, and a subsequent drag transfers the ready file. Each write uses a
 unique same-directory temporary pathname before atomic replacement.
@@ -1469,6 +1520,31 @@ The download action opens only ClamAV's official page. About reports configurati
 presence separately from readiness, which remains an ingest preflight check.
 `make test-packaging` exercises missing-scanner failure, explicit opt-out,
 durable evidence, source immutability, and isolated headless diagnostics.
+
+## Compiled desktop UI trials
+
+[DIOXUS.md](DIOXUS.md) records the planned UI trials: Dioxus Desktop and Tauri
+using the system webview, with ingest/search/preservation still in Python.
+The planned typed local Python worker and Rust frontend are not implemented.
+Current `PyWebViewApplication`, `WindowBridge`, HTML/JavaScript, and PyInstaller
+sections describe the existing application. They remain the migration baseline,
+not evidence of Dioxus support. Windows full ingest takes priority over Linux
+packaging and still requires backend locking and scanner portability fixes.
+
+Plan comparable trial implementations in Dioxus and Tauri before choosing a
+framework. Either approach retains the Python archive engine.
+
+## Windows development setup
+
+[WINDOWS.md](WINDOWS.md) describes an unexecuted clean-Windows setup procedure,
+including automatic and explicit manual ARM64/x64 uv installation:
+MSYS2 supplies Git/Make/shell utilities while uv selects native Windows x64
+CPython 3.12, including under Windows ARM emulation. Rust/MSVC and Dioxus tooling
+prepare for the Dioxus trial. The guide reuses existing Makefile
+targets and identifies required Windows work. The scanner's unconditional
+`fcntl` import can prevent GUI startup, the writer rejects Windows, and native
+GUI integration and executable/installer targets remain incomplete. This
+documentation adds no Windows runtime or packaging support.
 
 ## macOS packaging
 
@@ -2007,3 +2083,9 @@ with placeholder account details. The homepage includes the unmodified
 Wikimedia Commons hands/laptop SVG with visible CC BY-SA 4.0 attribution.
 `searching.md` covers query syntax, suggestions, background results, attachment
 limits, source filters, saved sets, and message viewing.
+
+The macOS dependency audit reads actual dylib load commands from `otool -l`,
+excluding `LC_ID_DYLIB`. A real compiled-library test verifies that an install
+name alone is accepted while an executable's unresolved load of that same name
+is rejected. This avoids rejecting the packaged pydantic-core library's own
+identifier while retaining dependency checks.

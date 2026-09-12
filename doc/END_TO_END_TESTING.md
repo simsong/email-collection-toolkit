@@ -11,6 +11,20 @@ Run it only through the Makefile:
 make test-e2e
 ```
 
+## Compiled UI trial and migration boundary
+
+The compiled UI candidates are [Dioxus Desktop and Tauri](DIOXUS.md), retaining the
+Python ingest engine. The suite and pywebview bridge descriptions below cover
+the current implementation. Migration must reuse preservation fixtures and
+logical assertions, adapt the frontend driver, test the typed worker protocol,
+and add native tests for each trial on macOS and Windows. A Chromium pass or skipped
+Cocoa test is not validation of either Windows frontend. Packaged acceptance must cover full
+ingest, cancellation/recovery, isolated HTML, and clean installation without
+developer runtimes. These migration tests are not implemented yet.
+
+Plan comparable trial implementations in Dioxus and Tauri before choosing a
+framework. Either approach retains the Python archive engine.
+
 ## Synthetic name-resolution benchmark
 
 The privacy-safe benchmark under `benchmarks/name_resolution/` captures the
@@ -231,3 +245,32 @@ headless browser interface pass. A browser-only pass is not proof that the
 macOS application shell works; `make test-native-gui` supplies separate local
 smoke evidence. Required native evidence must come from
 XCUITest/XCUIAutomation in a logged-in macOS session.
+
+Owner-rule regression checks use `make test-owner-rules` for exact/glob matching,
+exclusion precedence, YAML defaults, real fixture routing, raw-byte hashes, and
+repeat-import verification. `make test-native-application` also exercises both
+native owner fields with defaults, Continue/Cancel, and the persistent options
+editor in a real Cocoa/WebKit process. These tests use disposable fixture archives.
+
+### Finder file export regression
+
+`make test-file-drag` verifies exact message export bytes, export-token lifetime
+including concurrent close/preparation, isolation from same-name attachments and
+later exports, and rejection of arbitrary pathname/URL text. On macOS it also exercises both
+WebKit adapter paths with real Cocoa pasteboards and dragging-item writers,
+requiring exactly one explicitly written item type, `public.file-url`, and
+rejecting link and plain-text flavors. Cocoa-generated compatibility aliases
+on the aggregate pasteboard are permitted. A
+controlled `NSView` superclass records both injected entry points through real
+Objective-C dispatch, including struct/BOOL arguments and repeated installation.
+Only the final interactive AppKit drag session is replaced in that test. These
+checks do not simulate a Finder drop. The browser acceptance driver separately
+checks that result rows and the icon well share the same prepared export token
+for single messages and modifier-selected multiple messages, with copy-only
+transfers and stale transfer data cleared. A desktop acceptance check must drag
+from both sources onto Finder or the Desktop and compare the resulting `.eml`
+bytes with the verified export; repeat for a multi-selection ZIP and confirm no
+`.fileloc` is created.
+
+Browser selection checks locate the current result card by message primary key
+after preview delivery reformats it; they do not retain detached card elements.
