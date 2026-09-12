@@ -3,6 +3,8 @@ title = "Reports and reading"
 description = "Research and project documents behind Mail Archiver."
 +++
 
+<!-- Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved. -->
+
 The repository keeps these reports as source-controlled working documents:
 
 - [Competitive analysis](https://github.com/simsong/mail-archiver/blob/main/doc/competitive_analysis.md)—preservation, migration, search, and compliance tools.

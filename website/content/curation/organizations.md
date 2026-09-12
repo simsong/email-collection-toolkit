@@ -3,6 +3,8 @@ title = "Organizations and communities"
 description = "Organizations whose guidance helps shape digital email curation."
 +++
 
+<!-- Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved. -->
+
 - [Library of Congress](https://www.loc.gov/preservation/digital/)
   publishes practical digital-preservation guidance and resources.
 - [Digital Preservation Coalition](https://www.dpconline.org/)

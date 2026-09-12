@@ -1,3 +1,5 @@
+# Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved.
+
 name: Assemble draft GitHub release
 
 on:
@@ -35,6 +37,8 @@ jobs:
         env:
           RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
         run: uv run python scripts/release_tag.py --tag "$RELEASE_TAG" --require-annotated
+      - name: Audit runtime licenses
+        run: make runtime-license-check
       - name: Verify tag signature
         env:
           GH_TOKEN: ${{ github.token }}
@@ -43,7 +47,7 @@ jobs:
           tag_object="$(git rev-parse "refs/tags/$RELEASE_TAG")"
           test "$(gh api "repos/$GITHUB_REPOSITORY/git/tags/$tag_object" --jq '.verification.verified')" = true
       - name: Build source distribution
-        run: uv build --sdist --out-dir dist
+        run: make build-sdist DIST_DIR=dist
       - name: Write checksums
         run: (cd dist && sha256sum *.tar.gz > SHA256SUMS)
       - name: Create draft release

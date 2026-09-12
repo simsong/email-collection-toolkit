@@ -1,3 +1,5 @@
+<!-- Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved. -->
+
 # In-Depth Repository Analysis
 ## Documentation Correctness Analysis
 1. **Tika Extraction**: The documentation states that Tika extraction is 'installer-only' and planned for future use, which matches the implementation in `src/mailarchiver/tika.py` and the CLI arguments. However, the documentation should be updated once the extractor is fully integrated to avoid user confusion.

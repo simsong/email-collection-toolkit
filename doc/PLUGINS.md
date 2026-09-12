@@ -1,3 +1,5 @@
+<!-- Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved. -->
+
 # Ingest plug-ins
 
 Mail Archiver has two independent generator plug-in layers:

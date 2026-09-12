@@ -578,6 +578,7 @@ dependencies = [
 
 [package.dev-dependencies]
 dev = [
+    { name = "packaging" },
     { name = "pylint" },
     { name = "pytest" },
     { name = "pytest-playwright" },
@@ -597,6 +598,7 @@ requires-dist = [
 
 [package.metadata.requires-dev]
 dev = [
+    { name = "packaging", specifier = ">=24.0" },
     { name = "pylint", specifier = ">=3.3" },
     { name = "pytest", specifier = ">=8.0" },
     { name = "pytest-playwright", specifier = ">=0.9.0" },

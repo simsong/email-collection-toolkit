@@ -1,3 +1,5 @@
+<!-- Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved. -->
+
 # AI contributor instructions
 
 ## Scope and source safety

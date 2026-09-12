@@ -3,6 +3,8 @@ title = "Discuss Mail Archiver"
 description = "Announcements, questions, and feature requests."
 +++
 
+<!-- Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved. -->
+
 Announcements about the project will be posted in the
 [Mail-archiver Announcements discussion](https://github.com/simsong/mail-archiver/discussions/55).
 

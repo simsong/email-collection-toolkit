@@ -1,3 +1,5 @@
+<!-- Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved. -->
+
 # Competitive analysis: email archiving and analysis tools
 
 Research date: 2026-08-22

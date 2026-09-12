@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved.
+
 """Validate a Mail Archiver release tag against pyproject metadata."""
 
 from __future__ import annotations

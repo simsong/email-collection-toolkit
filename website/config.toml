@@ -1,3 +1,5 @@
+# Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved.
+
 base_url = "https://simsong.github.io/mail-archiver/"
 title = "Mail Archiver"
 description = "Preserve, understand, and search a personal history of email."

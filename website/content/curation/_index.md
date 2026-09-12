@@ -3,6 +3,8 @@ title = "Digital email curation"
 description = "Reports, standards, and organizations that inform Mail Archiver."
 +++
 
+<!-- Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved. -->
+
 Digital email curation combines technical preservation with appraisal,
 privacy, provenance, and responsible access. Mail Archiver is informed by the
 work of libraries, archives, and preservation communities, while keeping the

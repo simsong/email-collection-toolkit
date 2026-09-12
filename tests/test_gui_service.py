@@ -1,3 +1,5 @@
+# Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved.
+
 """Verify GUI services search, sanitize, preview, and export without archive writes."""
 
 from __future__ import annotations
@@ -261,7 +263,7 @@ def test_gui_application_metadata_names_the_product() -> None:
 
     assert metadata.name == "Mail Archiver"
     assert metadata.version == "0.0.0"
-    assert "Mail Archiver" in metadata.copyright
+    assert metadata.copyright == "Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved."
 
 
 def test_gui_application_uses_the_source_controlled_rainbow_icon() -> None:

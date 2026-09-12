@@ -1,3 +1,5 @@
+<!-- Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved. -->
+
 # Mail archive GUI prototype
 
 This macOS-first pywebview prototype searches an existing mailarchiver archive.

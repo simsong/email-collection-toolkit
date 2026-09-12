@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved.
+
 """Independently generate and verify Mailbag and message fixity using only stdlib."""
 
 from __future__ import annotations

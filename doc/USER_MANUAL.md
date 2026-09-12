@@ -1,3 +1,5 @@
+<!-- Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved. -->
+
 # Mail Archiver User Manual
 
 This manual explains how an archivist creates and searches a mail archive.

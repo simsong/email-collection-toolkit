@@ -1,5 +1,7 @@
-.PHONY: benchmark-name-resolution check data-quality-audit data-quality-babyl-audit data-quality-summary extract-pdf-mail fixture-bagit fixture-e2e gui gui-smoke website-build-check website-check release-tag-check
-.PHONY: install-linux install-mac install-test-browser install-tika ocr-analyze ocr-experiment ocr-inventory ocr-profile ocr-run pylint run search summary-smoke test test-bagit test-data-quality
+# Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved.
+
+.PHONY: benchmark-name-resolution build-sdist check copyright-check data-quality-audit data-quality-babyl-audit data-quality-summary extract-pdf-mail fixture-bagit fixture-e2e gui gui-smoke website-build-check website-check release-tag-check
+.PHONY: install-linux install-mac install-test-browser install-tika ocr-analyze ocr-experiment ocr-inventory ocr-profile ocr-run pylint run runtime-license-bundle runtime-license-check search summary-smoke test test-bagit test-data-quality
 .PHONY: test-e2e test-encoding test-gui test-headers test-mailsearch test-native-gui test-native-html-find test-pdf-mail test-plugins test-progress test-provenance test-refresh-index test-tika test-website validation-aws-start validation-aws-start-all
 .PHONY: validation-fetch validation-list validation-prepare validation-run validation-run-all validation-sam-build validation-sam-deploy validation-sam-validate validation-test verify
 
@@ -22,8 +24,22 @@ OCR_WORKERS ?= 4
 OCR_ENGINES ?= native,ocrmypdf,tesseract
 OCR_INVENTORY_ARGS ?=
 OCR_RUN_ARGS ?=
+DIST_DIR ?= $(CURDIR)/dist
 
-check: test test-e2e website-check
+build-sdist: copyright-check runtime-license-check
+	uv build --sdist --out-dir "$(DIST_DIR)"
+
+check: copyright-check runtime-license-check test test-e2e website-check
+
+copyright-check:
+	uv run python scripts/check_copyright.py
+
+runtime-license-check:
+	uv run python scripts/check_runtime_licenses.py
+
+runtime-license-bundle:
+	@test -n "$(LICENSE_OUTPUT)" || { echo 'usage: make runtime-license-bundle LICENSE_OUTPUT=/path/to/licenses'; exit 2; }
+	uv run python scripts/check_runtime_licenses.py --output "$(LICENSE_OUTPUT)"
 
 data-quality-audit:
 	@test -n "$(ARCHIVE)" || { echo 'usage: make data-quality-audit ARCHIVE=/path/to/mailbag EARLY_SOURCE=/path/to/source'; exit 2; }
