@@ -39,7 +39,8 @@ universal2. Intel builds require a matching Intel Python and dependencies and
 their own validation. Compatibility with older macOS releases must be tested
 on those releases; success on the build Mac is not a compatibility matrix.
 
-Output: `dist/Email-Collection-Toolkit-VERSION-ARCH.dmg`. The volume contains
+Output: `dist/Email-Collection-Toolkit-VERSION-ARCH.dmg` with Developer ID
+signing, or `dist/Email-Collection-Toolkit-VERSION-ARCH_UNSIGNED.dmg` otherwise. The volume contains
 `Email Collection Toolkit.app` on the left and a shortcut to `/Applications` on the right.
 A pale-blue background shows the app title, a right-pointing arrow, and
 **Drag Email Collection Toolkit to Applications to install**. The 720-by-480-point Finder
@@ -107,6 +108,27 @@ and never silently opts out. Previously archived messages are not retroactively
 scanned by a later ordinary import; a rescan command remains future work.
 
 ## Signing and Apple account renewal
+
+On an isolated GitHub-hosted runner, `make dmg` imports a Developer ID Application
+identity when both
+`APPLE_CERTIFICATE_P12_BASE64` and `APPLE_CERTIFICATE_PASSWORD` are available.
+The [certificate management guide](CERTIFICATE_MANAGEMENT.md) explains exporting
+the `.p12` and configuring these GitHub Actions repository secrets. The release
+workflow passes them to the macOS build and includes the resulting DMG and
+checksum in the draft release. The release tag must contain this workflow and
+builder; dispatching an older tag does not retrofit the new builder. Release
+verification also requires the administrator's `RELEASE_SIGNING_PUBLIC_KEYS`
+repository variable. Automatic imports are rejected locally and on self-hosted
+runners because `security` password arguments remain visible to other processes;
+use an existing keychain identity for local signing.
+
+Missing either secret is nonfatal: the build emits an Actions warning, leaves
+the DMG container unsigned, and names it `*_UNSIGNED.dmg`. An explicitly supplied
+identity takes precedence; `--signing-identity -` forces the unsigned path.
+Both secrets present but invalid is a build failure, not an unsigned fallback.
+The imported private key is deleted and the keychain search list restored when
+the build exits. Signing still requires a separate notarization step before
+claiming normal downloaded-file Gatekeeper acceptance.
 
 Without a Developer ID, PyInstaller and `codesign` use **ad-hoc signing** (`-`).
 This makes the bundle internally verifiable; it does not establish trusted

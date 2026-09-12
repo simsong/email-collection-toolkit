@@ -7,6 +7,30 @@
 * Reconcile the copyright/license draft with current validation and release
   workflows. Preserve external artwork and generated workflow bytes, cover
   current project source files, and retain the ordered lint/type/test gates.
+* Normalize an immediate quoted MBOX delimiter into a literal `X-From:` header.
+  Promote a meaningful inner envelope when the outer sender is `XXX` or
+  `???@???`; retain the displaced outer value as `X-From:`. Preserve body
+  quoting and record original source-payload hashes/framing as provenance. Fix
+  `From XXX` wrapper detection misreading indented forwarded body text as a
+  delimiter. The normalized archive is readable by ordinary RFC/MIME readers.
+  Import failures now retain source-code tracebacks, validator origins, source
+  references/cursors, message hashes, and bounded input previews in local run
+  history, including both original framing previews. Bound source identity and
+  cursor previews, exception messages/notes and total failure reports; reject
+  malformed outer lines before header normalization. Double-framed Eudora
+  metadata stubs remain excluded. Existing archives are not rewritten.
+* Require an administrator-configured OpenPGP release signer allowlist before
+  running release code with Apple secrets. Restrict automatic PKCS#12 import to
+  GitHub-hosted runners and document process-argument visibility. Correct the
+  certificate setup repository and distinguish deliberate unsigned builds from
+  missing credentials. Existing local keychain identities remain supported.
+
+* Build macOS DMGs in the GitHub release workflow. Sign the app and DMG when
+  both optional PKCS#12 secrets are configured; otherwise warn in Actions and
+  publish an explicitly named `_UNSIGNED.dmg`. Preserve failure on invalid
+  configured credentials. Document secret setup and temporary keychain cleanup;
+  signing does not yet include automatic notarization. Correct the native
+  dependency audit to distinguish a library's own install name from an import.
 
 * Use one file-drag path for message-list rows and the message-file icon,
   explicitly writing only `public.file-url` to copy `.eml` files (or a ZIP for

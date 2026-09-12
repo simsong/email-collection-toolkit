@@ -126,7 +126,14 @@ self-test-gui:
 	uv run mailsearch-gui --self-test-gui $(ARGS)
 
 test-packaging:
-	uv run pytest -q tests/test_packaging.py
+	uv run pytest -q tests/test_packaging.py tests/test_macos_signing.py
+
+.PHONY: test-signing
+test-signing: ruff
+	PYTHONPATH="$(CURDIR)" uv run --locked pylint scripts/macos_signing.py scripts/build_macos.py tests/test_macos_signing.py
+	uv run --locked ty check scripts/macos_signing.py scripts/build_macos.py tests/test_macos_signing.py --error-on-warning
+	uv run --locked pyright scripts/macos_signing.py scripts/build_macos.py tests/test_macos_signing.py --warnings
+	uv run --locked pytest -q tests/test_macos_signing.py tests/test_website_scripts.py
 
 auth-detect-live:
 	uv run mailarchiver-auth --detect-only simsong@gmail.com
@@ -398,7 +405,8 @@ website-gmail-illustrations:
 
 .PHONY: test-envelopes
 test-envelopes:
-	uv run pytest -q tests/test_envelopes.py tests/test_sources.py tests/test_publication.py tests/test_standalone_verify.py
+	uv run pytest -q tests/test_envelopes.py tests/test_sources.py tests/test_publication.py tests/test_standalone_verify.py tests/test_ingest_diagnostics.py tests/test_mbox_framing.py \
+		tests/test_end_to_end.py::test_parser_failure_records_source_identity_and_failed_run
 
 .PHONY: test-file-drag
 test-file-drag:

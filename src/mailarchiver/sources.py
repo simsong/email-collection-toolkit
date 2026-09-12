@@ -38,6 +38,8 @@ from .plugin_api import (
     SourceSpec,
 )
 from .source_volume import SourceVolume, local_mount_path, local_source_volume
+from .ingest_diagnostics import add_message_context
+from .mbox_framing import MBOX_ENVELOPE, QUOTED_ENVELOPE, MboxNormalization, is_complete_envelope, normalize_mbox_framing
 
 SourceKind = str
 BABYL_OPTIONS = b"babyl options:"
@@ -49,11 +51,6 @@ MBCP_HEADERS = {"status", "x-mbcp-flags", "x-uid"}
 XXX_ENVELOPE_SENDER = b"XXX"
 XXX_WRAPPER_HEADERS = {"status", "x-keywords", "x-status"}
 MMDF_DELIMITER = b"\x01\x01\x01\x01"
-MBOX_ENVELOPE = re.compile(
-    br"From \S+ (?:Mon|Tue|Wed|Thu|Fri|Sat|Sun) "
-    br"(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec) "
-    br"[ 0-9][0-9] [0-9][0-9]:[0-9][0-9]:[0-9][0-9] (?:19|20)[0-9][0-9]"
-)
 RFC_HEADER = re.compile(br"^[!-9;-~]+:[ \t]*")
 HEADER_SEPARATOR = re.compile(br"\r?\n\r?\n")
 MBOXRD_QUOTED_FROM = re.compile(br"(?m)^>(?=>*From )")
@@ -102,6 +99,7 @@ class SourceMessage(BaseModel):
     bytes_total: int
     exclusion_reason: str | None = None
     mbox_envelope: bytes | None = None
+    mbox_normalization: MboxNormalization | None = None
 
 
 class SourceFile(BaseModel):
@@ -313,9 +311,15 @@ class MboxFileParser(FileParser):
                 raw = box.get_bytes(key, from_=False)
                 if mmdf_framed:
                     raw = _without_mmdf_delimiter(raw)
-                exclusion = _mbcp_exclusion(envelope_sender, raw)
-                if envelope_sender == XXX_ENVELOPE_SENDER:
+                exclusion_raw = raw
+                normalized = normalize_mbox_framing(raw, envelope)
+                if normalized.normalization is not None:
+                    # Ignore only framing we converted, not original X-From headers.
+                    exclusion_raw = raw[len(normalized.normalization.quoted_envelope):]
+                    raw, envelope = normalized.raw, normalized.envelope
+                elif envelope_sender == XXX_ENVELOPE_SENDER:
                     raw, envelope = _unwrap_xxx_record(raw, envelope)
+                exclusion = _mbcp_exclusion(_mbox_envelope_sender(envelope), exclusion_raw)
                 yield SourceMessage(
                     path=source.path,
                     raw=raw,
@@ -324,6 +328,7 @@ class MboxFileParser(FileParser):
                     bytes_total=source.byte_length,
                     exclusion_reason=exclusion,
                     mbox_envelope=envelope,
+                    mbox_normalization=normalized.normalization,
                 )
         finally:
             box.close()
@@ -465,16 +470,25 @@ class LocalSourcePlugin(SourcePlugin):
         if isinstance(implementation, FileParser):
             start_offset = 0 if resume_cursor is None else int(resume_cursor)
             for message in implementation.messages(source, start_offset):
-                yield MailObject(
-                    work_id=container.work_id,
-                    raw=message.raw,
-                    mbox_envelope=message.mbox_envelope,
-                    source=container.source,
-                    cursor=str(message.source_offset),
-                    completed_bytes=message.bytes_done,
-                    total_bytes=message.bytes_total,
-                    exclusion_reason=message.exclusion_reason,
-                )
+                try:
+                    item = MailObject(
+                        work_id=container.work_id,
+                        raw=message.raw,
+                        mbox_envelope=message.mbox_envelope,
+                        mbox_normalization=message.mbox_normalization,
+                        source=container.source,
+                        cursor=str(message.source_offset),
+                        completed_bytes=message.bytes_done,
+                        total_bytes=message.bytes_total,
+                        exclusion_reason=message.exclusion_reason,
+                    )
+                except Exception as error:
+                    add_message_context(
+                        error, container.source, str(message.source_offset), message.raw, message.mbox_envelope,
+                        message.mbox_normalization,
+                    )
+                    raise
+                yield item
             return
         yield from implementation.messages(container, resume_cursor)
 
@@ -666,13 +680,22 @@ def _mbcp_exclusion(envelope_sender: bytes, raw: bytes) -> str | None:
 
 
 def _unwrap_xxx_record(raw: bytes, envelope: bytes) -> tuple[bytes, bytes]:
+    # Immediate double framing is normalized separately. Only the older explicit
+    # status-header wrapper is unwrapped here.
+    if not is_complete_envelope(envelope) or raw.startswith(b">From "):
+        return raw, envelope
     separator = HEADER_SEPARATOR.search(raw)
     if separator is None:
         return raw, envelope
     wrapper = BytesParser(policy=policy.compat32).parsebytes(raw[: separator.end()])
-    if not {name.casefold() for name in wrapper} <= XXX_WRAPPER_HEADERS:
+    if not wrapper.keys() or wrapper.defects or not {name.casefold() for name in wrapper} <= XXX_WRAPPER_HEADERS:
         return raw, envelope
-    nested = MBOXRD_QUOTED_FROM.sub(b"", raw[separator.end():])
+    nested = raw[separator.end():]
+    # Only an explicitly quoted delimiter at this boundary establishes a wrapper.
+    # Never search past the nested message's headers into quoted body text.
+    if QUOTED_ENVELOPE.match(nested) is None:
+        return raw, envelope
+    nested = MBOXRD_QUOTED_FROM.sub(b"", nested)
     nested_envelope, newline, message = nested.partition(b"\n")
     if not newline or _mbox_envelope_sender(nested_envelope.rstrip(b"\r")) == b"":
         return raw, envelope

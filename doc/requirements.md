@@ -74,9 +74,14 @@ directory, and a `data/mbox/` payload directory.
   byte-preserving mboxrd quoting. Do not retain a per-message EML corpus.
 * Preserve every available original `From ` record delimiter, including sender,
   timestamp, whitespace, and line ending. Carry MBOX framing separately from
-  RFC message bytes so message hashes and deduplication stay unchanged. For
+  RFC message bytes so message hashes and deduplication stay unchanged except
+  for the explicit double-framing normalization below. For
   duplicate RFC messages, the first published observation supplies the envelope.
-  The supported `From XXX` wrapper uses the nested message's delimiter.
+  For immediate double framing, preserve the selected delimiter and convert
+  the other envelope to a literal `X-From:` header under the rule below.
+  Apply the canonical byte/hash and source-reconstruction contract in
+  [INTEGRITY_CONTROLS.md](INTEGRITY_CONTROLS.md#verifying-and-reconstructing-normalized-records).
+  The separate supported status-header `From XXX` wrapper uses its nested delimiter.
   Only synthesize a delimiter when none exists: use the latest valid timestamp
   across Date, Received timestamp suffixes, Resent-Date, and Delivery-Date,
   normalized to UTC, independently of the routing-date median. Invalid or
@@ -132,10 +137,33 @@ directory, and a `data/mbox/` payload directory.
   `mbcp@s.eecs.harvard.edu`, whose only headers are `X-UID`, `Status`, and
   `X-MBCP-Flags` (with both X-headers present), and whose body is empty is
   source metadata, not an email. Record a `source-metadata-excluded`
-  observation and do not publish it. An envelope sender of `XXX` is unwrapped
-  only when the outer record contains only status headers and its body starts
-  with a quoted nested MBOX envelope; publish the nested RFC 5322 message while
-  retaining the outer source offset as provenance.
+  observation and do not publish it. For double framing, apply this check to the
+  selected envelope and original headers/body after the quoted delimiter; ignore
+  only the generated `X-From:` field, never an original header or body text.
+  An envelope sender of `XXX` is unwrapped
+  only when the outer record has a nonempty, well-formed status-only header block and
+  its body starts with a quoted nested delimiter with complete ctime syntax. Indented or unquoted body
+  lines are never nested delimiters. Retain the outer source offset as provenance.
+* A framing line copied into an RFC header must start with literal `From ` and
+  contain exactly one LF- or CRLF-terminated line. Malformed outer framing is
+  left unnormalized, including in the legacy status-wrapper path, and remains
+  subject to normal import validation.
+* Double processing is recognized when the first payload line, immediately
+  after a physical MBOX delimiter, is itself a `>From ` delimiter with a sender
+  and ctime-style timestamp. Keep the outer delimiter and convert the quoted
+  line to a literal `X-From: sender timestamp` header. If the outer sender is
+  exactly `XXX` or `???@???` and the inner sender is neither placeholder,
+  instead promote the inner delimiter and convert the displaced outer line to
+  `X-From:`. Real local senders, including `nobody` and `MAILER-DAEMON`, are not
+  automatically bogus. Retain envelope values/line endings and all following
+  message headers and body bytes, including body quoting. This explicitly
+  authorized framing normalization changes canonical message bytes: canonical
+  hashes describe the normalized message, while observation detail records the
+  original source-payload SHA-256, exact framing bytes and rule in a versioned record.
+  Do not recursively remove quotation levels or infer a producer from branding.
+  Do not search later header/body lines, accept indentation, or use timestamp
+  differences to infer wrapping. See [MBOX_READING.md](MBOX_READING.md) for the
+  Procmail/formail, MIMEDefang and Eudora compatibility boundary.
 * Each finished `data/mbox/NAME.mbox` has one
   `integrity/NAME.mbox.integrity` BagIt tag in the versioned hybrid format
   specified by [INTEGRITY_CONTROLS.md](INTEGRITY_CONTROLS.md).
@@ -415,6 +443,20 @@ mailbox destinations. Dedicated EICAR tests also verify infected routing.
   must be rolled back to the prior file size where possible, reported, and
   stopped without silently treating the message as archived.
 * Every ingest run records its completion time, result, and failure detail.
+  Failure detail retains traceback filenames and source-code line numbers,
+  including underlying Pydantic validator exceptions. For an available message,
+  include its source reference, neutrally labelled native cursor (byte offset for
+  local MBOX), SHA-256,
+  length, and an escaped prefix of up to 4,096 input bytes plus up to 512 bytes
+  per selected/original/quoted envelope. Limit each source identity field and
+  cursor to 1,024 characters plus a truncation marker; omit arbitrary source
+  provenance and hierarchy from failure reports. Limit exception summaries to
+  2,048 characters, each exception note to 32,768 characters, and the complete
+  rendered failure to 65,536 characters, plus truncation markers. Pydantic summaries and chained tracebacks omit input-value dumps so
+  they cannot bypass these preview limits. These local diagnostics may contain
+  private mail; they are not public telemetry. A failure between messages identifies the container without
+  attributing it to the previously yielded message. Persist the same detail in
+  the run catalog and Ingests status, without changing source or canonical mail.
   An unexpected parser failure preserves earlier published messages, closes
   resources, refreshes the BagIt/Mailbag checkpoint for committed MBOX changes, and leaves a
   rerunnable error observation containing the source cursor (and numeric offset
@@ -1388,8 +1430,27 @@ Python, native extension libraries, GUI assets, packaged schemas,
 plug-in manifests, and the standalone verifier source travel inside the app.
 ClamAV and experimental command-line tools (Tika/Java, PDF OCR, Apple Intelligence)
 are not prerequisites of the supported local-mail GUI and are not bundled.
-The initial build is ad-hoc signed, not notarized; no Gatekeeper bypass or
-machine-wide security change is performed. The archive extension is declared
+When both `APPLE_CERTIFICATE_P12_BASE64` and `APPLE_CERTIFICATE_PASSWORD`
+are present on an isolated GitHub-hosted runner, the build must import the
+PKCS#12 identity temporarily, sign the app and DMG with Developer ID, verify
+their seals, and remove the imported key.
+If either secret is absent, continue with an ad-hoc-signed app and unsigned
+DMG, emit a GitHub Actions `::warning::`, and append `_UNSIGNED` before `.dmg`.
+Invalid configured credentials and signing failures must fail rather than
+silently downgrade. Secret values must not appear in error output or artifacts;
+restore the prior keychain search list on completion or failure. Explicit local
+`--signing-identity` remains supported, including `-` to force unsigned output.
+Explicit unsigned output must identify the override rather than report missing
+credentials. Reject automatic PKCS#12 import on local and self-hosted runners:
+`security` password arguments remain visible to other processes in the job.
+Before project commands or Apple secrets are used, verify the release tag's
+OpenPGP signature against only the public keys configured by administrators in
+`RELEASE_SIGNING_PUBLIC_KEYS`, without automatic key retrieval. Missing/invalid
+keys or an unlisted signer must fail. Administrators must protect the workflow
+and release tags separately; a modified workflow could remove this gate.
+Release assembly must include the tested DMG from the same commit as the source
+archive and checksum the final image. Signing is not notarization: neither
+build is automatically notarized, and no Gatekeeper bypass is performed. The archive extension is declared
 in the bundle's document-type metadata.
 
 The build must mount its DMG read-only, verify the bundle seal, run a headless
@@ -1399,6 +1460,9 @@ preferences, never the last real archive. They exercise no-ClamAV ingest,
 source-byte preservation, search, BagIt verification, repeat-import idempotence,
 native bridge startup, and the missing-antivirus banner. A failed check prevents
 replacement of a prior DMG. JSON reports accompany the successful artifact.
+The bundled-library audit must distinguish `LC_ID_DYLIB` metadata from actual
+load commands; a binary's own install name is not an imported dependency.
+Unresolved imported libraries must still fail validation.
 
 ## Scope boundaries
 
