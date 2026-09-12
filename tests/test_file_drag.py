@@ -11,7 +11,7 @@ from urllib.parse import unquote, urlsplit
 import pytest
 from pydantic import BaseModel, Field
 
-from mailarchiver.file_drag import FILE_DRAGS, FileDrags, install_file_drag, native_drag_items, replace_file_pasteboard
+from mailarchiver.file_drag import FILE_DRAGS, FileDrags, file_writer, install_file_drag, native_drag_items, replace_file_pasteboard
 from mailarchiver.gui_app import GuiApi
 from mailarchiver.gui_service import describe_message, write_attachment
 from tests.test_gui_service import SIMPLE_MESSAGE, make_gui_archive
@@ -52,6 +52,7 @@ def test_native_drag_writers_advertise_files_only(tmp_path: Path, suffix: str) -
     appkit = import_module("AppKit")
     path = tmp_path / f"résumé #100% attachment{suffix}"
     path.write_bytes(b"Subject: exact\r\n\r\nunchanged\xff\r\n")
+    assert list(file_writer(path).types()) == [appkit.NSPasteboardTypeFileURL]
     token = FILE_DRAGS.register(path)
     pasteboard = appkit.NSPasteboard.pasteboardWithUniqueName()
     try:
@@ -70,6 +71,7 @@ def test_native_drag_writers_advertise_files_only(tmp_path: Path, suffix: str) -
         item.setDraggingFrame_contents_(((10, 20), (32, 32)), None)
         converted = native_drag_items([item])
         assert converted[0].draggingFrame() == item.draggingFrame()
+        assert list(converted[0].item().types()) == [appkit.NSPasteboardTypeFileURL]
         pasteboard.clearContents()
         assert pasteboard.writeObjects_([converted[0].item()])
         assert Path(unquote(urlsplit(pasteboard.stringForType_(appkit.NSPasteboardTypeFileURL) or "").path)).samefile(path)

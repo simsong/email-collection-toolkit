@@ -30,21 +30,29 @@ class FileDrags(BaseModel):
 FILE_DRAGS = FileDrags()
 
 
-def file_url(writer: Any) -> Any:
+def exported_path(writer: Any) -> Path | None:
     """Read a registered token, never interpret dragged text as a filesystem path."""
     appkit = import_module("AppKit")
     read = getattr(writer, "stringForType_", None)
-    path = FILE_DRAGS.resolve(read(appkit.NSPasteboardTypeString) if read else None)
-    return appkit.NSURL.fileURLWithPath_(str(path)) if path is not None else None
+    return FILE_DRAGS.resolve(read(appkit.NSPasteboardTypeString) if read else None)
+
+
+def file_writer(path: Path) -> Any:
+    """Supply exactly one modern file type; Cocoa owns any compatibility aliases."""
+    appkit = import_module("AppKit")
+    writer = appkit.NSPasteboardItem.alloc().init()
+    if not writer.setString_forType_(path.as_uri(), appkit.NSPasteboardTypeFileURL):
+        raise RuntimeError("could not write the exported file to the drag pasteboard")
+    return writer
 
 
 def replace_file_pasteboard(pasteboard: Any) -> bool:
-    """Remove all WebKit link representations before writing the actual file URL."""
-    url = file_url(pasteboard)
-    if url is None:
+    """Discard WebKit representations and write only the exported file type."""
+    path = exported_path(pasteboard)
+    if path is None:
         return False
     pasteboard.clearContents()
-    if not pasteboard.writeObjects_([url]):
+    if not pasteboard.writeObjects_([file_writer(path)]):
         raise RuntimeError("could not write the exported file to the drag pasteboard")
     return True
 
@@ -54,13 +62,13 @@ def native_drag_items(items: Any) -> Any:
     appkit = import_module("AppKit")
     result = []
     for item in items:
-        url = file_url(item.item())
-        if url is None:
+        path = exported_path(item.item())
+        if path is None:
             result.append(item)
             continue
-        replacement = appkit.NSDraggingItem.alloc().initWithPasteboardWriter_(url)
+        replacement = appkit.NSDraggingItem.alloc().initWithPasteboardWriter_(file_writer(path))
         frame = item.draggingFrame()
-        icon = appkit.NSWorkspace.sharedWorkspace().iconForFile_(url.path())
+        icon = appkit.NSWorkspace.sharedWorkspace().iconForFile_(str(path))
         replacement.setDraggingFrame_contents_(frame, icon)
         result.append(replacement)
     return result

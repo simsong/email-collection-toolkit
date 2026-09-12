@@ -864,15 +864,12 @@ The GUI paints each result page from header metadata first, then requests its
 indexed body previews on a background worker and fills a reserved third line
 without blocking the initial result display. The Tabulator result table retains
 complete result metadata client-side but uses its virtual DOM to paint only
-visible rows; preview work is requested when a row is painted. Its row events
-identify pointer range endpoints without depending on transient DOM positions,
-and disables native text selection within result rows, so ordinary drags select
-message rows rather than message text. A single
-selected row opens its message; a multi-row selection replaces any stale
-single-message display with an explicit selected-message count and an explicit drag from the message-file well
-exports those selected messages as one ZIP whose entries preserve their RFC
-5322 bytes. A pointer gesture that starts and ends on
-the same result row is a normal message click, not a range drag.
+visible rows; preview work is requested when a row is painted. Result rows
+disable native text selection. A single selected row opens its message; modifier
+clicks select multiple rows and replace the message with a selected-message count.
+Dragging a selected row or the message-file icon uses the same export path: one
+message becomes an `.eml`, and multiple messages become a ZIP whose entries
+preserve their RFC 5322 bytes. Dragging an unselected row exports that row alone.
 Message HTML links and recognized `http`, `https`, or `mailto` links in rendered
 plain-text parts are never opened directly. Hovering an allowed destination
 shows its complete destination in the bottom status bar. Clicking it presents
@@ -955,13 +952,16 @@ Command-0 and Command-Shift-U select the raw RFC 5322 source.
 
 Saving a message creates a disposable `.eml` copy containing the exact
 SHA-256-verified RFC 5322 bytes; it never creates or changes canonical archive
-content. Dragging is confined to a separate message-file icon well and creates
-that copy only when a drag starts, never while browsing, selecting, or hovering
+content. Message-list rows and the separate message-file icon well share the
+same drag implementation, which creates that copy only when a drag starts, never
+while browsing, selecting, or hovering
 over a result. Because the pywebview bridge is asynchronous, the first drag
 prepares the disposable file and the next drag copies the actual `.eml` file to
 Finder or the Desktop. Multiple messages transfer as an actual ZIP file. Neither
 operation may create a `.fileloc`/`.webloc` shortcut or expose link/text URL drag
-representations. Each drag export is isolated from attachment exports and later
+representations supplied by the application. The application explicitly writes
+only `public.file-url`, the modern file-path transfer type; macOS may add its own
+compatibility aliases. Each drag export is isolated from attachment exports and later
 drags; closing the viewer serializes with preparation and revokes every token.
 Backends without the macOS file-drag adapter hide and reject this drag control.
 The result table must finish initializing before startup clears or populates it.

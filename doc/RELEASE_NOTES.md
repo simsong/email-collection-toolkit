@@ -2,8 +2,10 @@
 
 ## Unreleased
 
-* Fix message-icon drags to Finder/Desktop to copy actual `.eml` files (or a
-  ZIP for multiple messages), instead of creating `.fileloc` URL shortcuts.
+* Use one file-drag path for message-list rows and the message-file icon,
+  explicitly writing only `public.file-url` to copy `.eml` files (or a ZIP for
+  multiple selected messages) to Finder/Desktop. Modifier-click selects several
+  rows; dragging exports them instead of extending a selection range.
   Isolate prepared files from attachment exports, revoke tokens safely on close,
   wait for the result table to finish building before startup clears it, and
   discard queued clicks from a replaced result set.

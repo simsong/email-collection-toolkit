@@ -1043,16 +1043,13 @@ application remains offline-capable. Tabulator's virtual DOM paints only its
 viewport and buffer while retaining the complete result data. Its formatter
 queues preview IDs only when it paints a row through the Python bridge. A
 single-worker executor reads the indexed 18-word previews, and JavaScript polls
-the typed result batch until it can update visible rows. Its `rowMouseDown` and
-`rowMouseEnter` events provide row components for the small range adapter;
-the result-table boundary cancels native `selectstart` and its row subtree has
-explicit WebKit and standard `user-select: none` rules, so drag selection never
-also selects card text. Result virtualization and range selection need no custom
-scroll/viewport or pointer-coordinate code. A single
-selected row displays its message. A multi-row selection clears its stale
-single-message view, displays the selected-message count with the same file well,
-and an explicit drag from that well prepares a ZIP only when the drag begins.
-A gesture ending on its original row remains a click. Global macOS Command-key handlers
+the typed result batch until it can update visible rows. The result-table boundary
+cancels native `selectstart`, and rows use `user-select: none` so file drags do
+not select card text. Tabulator handles modifier-click selection and virtual
+scrolling without custom pointer-range code. A single selected row displays its
+message. Multiple selected rows replace the message with a count and the same
+file well. An explicit drag from either source prepares the selected export;
+clicking a row remains a normal message click. Global macOS Command-key handlers
 select numeric MIME part IDs or raw source. Command-F opens an in-message
 finder from the first current search-highlight term and selects its input;
 Command-G opens the finder at its first match when it is closed, while
@@ -1177,7 +1174,10 @@ Indexing parses each message once for FTS body text and attachment metadata;
 The tables are derived and are replaced together with FTS by `refresh-index`.
 
 `.eml` export writes the bytes returned by hash-verified direct retrieval.
-Finder dragging uses an `NSURL` file pasteboard writer. JavaScript carries only
+Finder dragging uses an `NSPasteboardItem` with exactly one explicitly supplied
+type, `public.file-url`, containing the exported path as a file URI. Cocoa may
+add compatibility aliases, including `NSFilenamesPboardType`; the application
+does not add URL-link or text types to the native writer. JavaScript carries only
 an opaque registered export token with a copy-only operation mask; the Cocoa
 adapter replaces that token before the native drag starts. Cocoa process setup
 installs it before either normal document or native smoke windows are created.
@@ -1195,8 +1195,10 @@ The browser acceptance test rejects unhandled page errors and verifies export by
 `make test-file-drag` checks exact
 export bytes, token revocation, both native pasteboard representations, and
 injected selector/superclass dispatch on a controlled AppKit host.
-Only the message-file icon well is draggable; the
-header region remains normal selectable text. The browser never preloads an
+Result cards and the message-file icon well both call `installDrag`; selected
+rows use the complete selection and an unselected row uses only its own message.
+Modifier clicks select multiple rows; pointer drags export files. Message headers
+remain normal selectable text. The browser never preloads an
 `.eml` file on hover or selection: a drag-start event begins asynchronous
 preparation, and a subsequent drag transfers the ready file. Each write uses a
 unique same-directory temporary pathname before atomic replacement.

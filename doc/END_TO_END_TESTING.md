@@ -258,15 +258,19 @@ editor in a real Cocoa/WebKit process. These tests use disposable fixture archiv
 including concurrent close/preparation, isolation from same-name attachments and
 later exports, and rejection of arbitrary pathname/URL text. On macOS it also exercises both
 WebKit adapter paths with real Cocoa pasteboards and dragging-item writers,
-requiring `public.file-url` and rejecting link and plain-text flavors. A
+requiring exactly one explicitly written item type, `public.file-url`, and
+rejecting link and plain-text flavors. Cocoa-generated compatibility aliases
+on the aggregate pasteboard are permitted. A
 controlled `NSView` superclass records both injected entry points through real
 Objective-C dispatch, including struct/BOOL arguments and repeated installation.
 Only the final interactive AppKit drag session is replaced in that test. These
 checks do not simulate a Finder drop. The browser acceptance driver separately
-checks that explicit drags allow copying only and carry an opaque export token.
-A desktop acceptance check must drag the prepared message icon onto Finder or
-the Desktop and compare the resulting `.eml` bytes with the verified export;
-repeat for a multi-selection ZIP and confirm no `.fileloc` is created.
+checks that result rows and the icon well share the same prepared export token
+for single messages and modifier-selected multiple messages, with copy-only
+transfers and stale transfer data cleared. A desktop acceptance check must drag
+from both sources onto Finder or the Desktop and compare the resulting `.eml`
+bytes with the verified export; repeat for a multi-selection ZIP and confirm no
+`.fileloc` is created.
 
 Browser selection checks locate the current result card by message primary key
 after preview delivery reformats it; they do not retain detached card elements.

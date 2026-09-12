@@ -14,10 +14,6 @@ const state = {
   resultPreviewTimer: null,
   resultSelection: new Set(),
   resultTable: null,
-  resultRangeAnchor: null,
-  resultRangeSelection: [],
-  resultRangeActive: false,
-  suppressResultClick: false,
   highlightTerms: [],
   messageFindQuery: "",
   messageFindTargets: [],
@@ -132,7 +128,6 @@ async function initialize() {
   elements["result-list"].addEventListener("mousedown", () => { state.commandAContext = "results"; });
   elements["result-list"].addEventListener("focusin", () => { state.commandAContext = "results"; });
   elements["result-list"].addEventListener("selectstart", event => event.preventDefault());
-  document.addEventListener("mouseup", finishResultRange);
   elements["message-pane"].addEventListener("mousedown", () => { state.commandAContext = "message"; });
   elements["part-select"].addEventListener("change", () => void selectMessagePart(Number(elements["part-select"].value), false));
   elements["message-find"].addEventListener("submit", event => { event.preventDefault(); void moveMessageFind(1); });
@@ -1009,10 +1004,6 @@ function clearResultViewport() {
   if (state.resultPreviewTimer !== null) window.clearTimeout(state.resultPreviewTimer);
   state.resultPreviewTimer = null;
   state.resultSelection.clear();
-  state.resultRangeAnchor = null;
-  state.resultRangeSelection = [];
-  state.resultRangeActive = false;
-  state.suppressResultClick = false;
   state.resultTable?.clearData();
 }
 
@@ -1053,8 +1044,6 @@ function initializeResultTable() {
   });
   state.resultTable.on("rowClick", selectResultRow);
   state.resultTable.on("rowDblClick", openResultWindow);
-  state.resultTable.on("rowMouseDown", beginResultRange);
-  state.resultTable.on("rowMouseEnter", extendResultRange);
   state.resultTable.on("rowSelectionChanged", selected => {
     state.resultSelection = new Set(selected.map(result => result.message_pk));
     updateMessageFileWell();
@@ -1140,6 +1129,9 @@ function resultCardFormatter(cell) {
   card.className = "result";
   card.id = `message-result-${result.message_pk}`;
   card.dataset.messagePk = result.message_pk;
+  card.draggable = state.fileDragSupported;
+  installDrag(card, () => state.resultSelection.has(result.message_pk)
+    ? selectedDragMessagePks() : [result.message_pk]);
   card.dataset.dateUtc = result.date_utc;
   const subjectLine = document.createElement("div");
   subjectLine.className = "result-subject-line";
@@ -1197,44 +1189,7 @@ function toggleSortDirection() {
   runSearch(false);
 }
 
-function beginResultRange(event, row) {
-  if (event.button !== 0) return;
-  state.resultRangeAnchor = row.getData().message_pk;
-  state.resultRangeSelection = [];
-  state.resultRangeActive = false;
-}
-
-function extendResultRange(event, row) {
-  if (state.resultRangeAnchor === null || event.buttons !== 1) return;
-  const messagePk = row.getData().message_pk;
-  if (messagePk === state.resultRangeAnchor) return;
-  const first = state.results.findIndex(result => result.message_pk === state.resultRangeAnchor);
-  const last = state.results.findIndex(result => result.message_pk === messagePk);
-  if (first < 0 || last < 0) return;
-  state.resultRangeActive = true;
-  state.resultRangeSelection = state.results.slice(Math.min(first, last), Math.max(first, last) + 1)
-    .map(result => result.message_pk);
-  state.resultTable?.deselectRow();
-  state.resultTable?.selectRow(state.resultRangeSelection);
-}
-
-function finishResultRange() {
-  if (state.resultRangeAnchor === null) return;
-  if (state.resultRangeActive) {
-    state.suppressResultClick = true;
-    requestAnimationFrame(() => { state.suppressResultClick = false; });
-  }
-  state.resultRangeAnchor = null;
-  state.resultRangeActive = false;
-}
-
 function selectResultRow(event, row) {
-  if (state.suppressResultClick) {
-    state.resultTable?.deselectRow();
-    state.resultTable?.selectRow(state.resultRangeSelection);
-    state.suppressResultClick = false;
-    return;
-  }
   const request = state.searchRequest;
   const messagePk = row.getData().message_pk;
   window.setTimeout(() => {
@@ -1981,7 +1936,7 @@ function showMultipleMessageSelection() {
   title.textContent = `${count} messages selected.`;
   const detail = document.createElement("p");
   detail.textContent = state.fileDragSupported
-    ? "Drag the file icon to Finder to export the selected messages as a ZIP archive."
+    ? "Drag the selected messages or the file icon to Finder to export a ZIP archive."
     : "Select a single message to use Save Message.";
   elements["message-selection-summary"].replaceChildren(title, detail, elements["message-file-well"]);
   elements["message-selection-summary"].hidden = false;
@@ -2020,6 +1975,7 @@ function installDrag(element, messagePks) {
   element.addEventListener("dragstart", async event => {
     if (!state.fileDragSupported) { event.preventDefault(); return; }
     const messages = messagePks();
+    if (!messages.length) { event.preventDefault(); return; }
     const key = dragExportKey(messages);
     const info = state.dragExports.get(key);
     if (!info) {
@@ -2027,9 +1983,10 @@ function installDrag(element, messagePks) {
       await prepareDrag(messages);
       return;
     }
+    event.dataTransfer.clearData();
     event.dataTransfer.effectAllowed = "copy";
-    // Cocoa replaces this opaque token with an NSURL file writer before the
-    // native session starts. WebKit URL/DownloadURL data creates .fileloc links.
+    // Both result rows and the icon well use this path. Cocoa replaces the
+    // token with one public.file-url item (the modern filenames equivalent).
     event.dataTransfer.setData("text/plain", info.token);
   });
 }
