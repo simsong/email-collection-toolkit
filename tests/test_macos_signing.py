@@ -44,8 +44,9 @@ def test_incomplete_secrets_warn_and_build_unsigned(tmp_path: Path, capsys, cert
 
 def test_supplied_corrupt_certificate_fails_without_exposing_secrets(tmp_path: Path) -> None:
     """Configured invalid signing data must fail, not silently become an unsigned release."""
-    credentials = SigningSecrets(certificate=SecretStr("PRIVATE-INVALID-CERT!"),
-                                 password=SecretStr("private-password"), hosted_runner=True)
+    credentials = SigningSecrets.from_environment({
+        CERTIFICATE_SECRET: "PRIVATE-INVALID-CERT!", PASSWORD_SECRET: "private-password",
+        GITHUB_ACTIONS: "true", RUNNER_ENVIRONMENT: "github-hosted"})
     assert credentials.available
     with pytest.raises(ValueError, match="not valid Base64") as caught:
         with signing_identity(credentials, tmp_path / "unused"):

@@ -1571,7 +1571,9 @@ restores the original keychain search list and deletes the imported key in
 `finally`. Native keychain errors omit secret-bearing command lines and output.
 Passwords remain visible in `security` process arguments. Automatic import
 requires the GitHub Actions hosted-runner environment; local signing uses an
-explicit existing keychain identity. The workflow gates its secret-bearing step
+explicit existing keychain identity. GitHub supplies `GITHUB_ACTIONS` and
+`RUNNER_ENVIRONMENT` to every step as [default environment variables](https://docs.github.com/en/actions/reference/workflows-and-actions/variables#default-environment-variables);
+neither the build nor the lifecycle test needs a workflow override. The workflow gates its secret-bearing step
 on the hosted-runner context as well. These checks prevent accidental shared
 runner use, not hostile code within the same job.
 The builder signs and verifies the completed DMG before publishing the candidate.

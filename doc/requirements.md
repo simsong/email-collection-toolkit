@@ -1406,7 +1406,7 @@ keys or an unlisted signer must fail. Administrators must protect the workflow
 and release tags separately; a modified workflow could remove this gate.
 Release assembly must include the tested DMG from the same commit as the source
 archive and checksum the final image. Signing is not notarization: neither
-branch is automatically notarized, and no Gatekeeper bypass is performed. The archive extension is declared
+build is automatically notarized, and no Gatekeeper bypass is performed. The archive extension is declared
 in the bundle's document-type metadata.
 
 The build must mount its DMG read-only, verify the bundle seal, run a headless

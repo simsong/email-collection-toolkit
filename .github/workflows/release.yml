@@ -123,6 +123,8 @@ jobs:
       - name: Install dependencies
         run: uv sync --locked --all-groups
       - name: Validate signing policy and keychain cleanup
+        # GitHub supplies GITHUB_ACTIONS and RUNNER_ENVIRONMENT to every step:
+        # https://docs.github.com/en/actions/reference/workflows-and-actions/variables#default-environment-variables
         run: make test-signing
       - name: Build and test DMG
         if: ${{ runner.environment == 'github-hosted' }}
