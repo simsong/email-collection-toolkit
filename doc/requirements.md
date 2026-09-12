@@ -140,6 +140,9 @@ directory, and a `data/mbox/` payload directory.
   only when the outer record has a nonempty, well-formed status-only header block and
   its body starts with a quoted nested delimiter with complete ctime syntax. Indented or unquoted body
   lines are never nested delimiters. Retain the outer source offset as provenance.
+* A framing line copied into an RFC header must start with literal `From ` and
+  contain exactly one LF- or CRLF-terminated line. Malformed outer framing is
+  left unnormalized and remains subject to normal import validation.
 * Double processing is recognized when the first payload line, immediately
   after a physical MBOX delimiter, is itself a `>From ` delimiter with a sender
   and ctime-style timestamp. Keep the outer delimiter and convert the quoted
@@ -440,7 +443,9 @@ mailbox destinations. Dedicated EICAR tests also verify infected routing.
   include its source reference, neutrally labelled native cursor (byte offset for
   local MBOX), SHA-256,
   length, and an escaped prefix of up to 4,096 input bytes plus up to 512 bytes
-  per selected/original/quoted envelope. Pydantic summaries and chained tracebacks omit input-value dumps so
+  per selected/original/quoted envelope. Limit each source identity field and
+  cursor to 1,024 characters plus a truncation marker; omit arbitrary source
+  provenance and hierarchy from failure reports. Pydantic summaries and chained tracebacks omit input-value dumps so
   they cannot bypass these preview limits. These local diagnostics may contain
   private mail; they are not public telemetry. A failure between messages identifies the container without
   attributing it to the previously yielded message. Persist the same detail in

@@ -15,6 +15,12 @@ QUOTED_ENVELOPE = re.compile(br">" + MBOX_ENVELOPE.pattern + br"(?: [^\r\n]+)?\r
 BOGUS_SENDERS = {b"XXX", b"???@???"}
 
 
+def is_complete_envelope(value: bytes) -> bool:
+    """Accept one literal From line ending in LF or CRLF, without embedded line breaks."""
+    content = value.removesuffix(b"\n").removesuffix(b"\r")
+    return value.startswith(b"From ") and value.endswith(b"\n") and b"\n" not in content and b"\r" not in content
+
+
 class MboxNormalization(BaseModel):
     """Original framing and source payload hash, separate from the normalized archive hash."""
 
@@ -37,7 +43,7 @@ def normalize_mbox_framing(raw: bytes, envelope: bytes) -> NormalizedMboxRecord:
     """Convert only an immediate quoted delimiter into a literal X-From field."""
     quoted = QUOTED_ENVELOPE.match(raw)
     outer_fields = envelope.split(maxsplit=2)
-    if quoted is None or len(outer_fields) < 2 or outer_fields[0] != b"From":
+    if quoted is None or not is_complete_envelope(envelope) or len(outer_fields) < 2:
         return NormalizedMboxRecord(raw=raw, envelope=envelope)
     inner = raw[:quoted.end()]
     outer_sender = outer_fields[1]

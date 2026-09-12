@@ -10,7 +10,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-from .mbox_framing import MboxNormalization
+from .mbox_framing import MboxNormalization, is_complete_envelope
 
 API_VERSION = 1
 PluginType = Literal["source", "file"]
@@ -133,10 +133,7 @@ class MailObject(FrozenModel):
     @field_validator("mbox_envelope")
     @classmethod
     def validate_mbox_envelope(cls, value: bytes | None) -> bytes | None:
-        if value is not None and (
-            not value.startswith(b"From ") or not value.endswith(b"\n")
-            or b"\n" in value[:-1] or b"\r" in value.rstrip(b"\r\n")
-        ):
+        if value is not None and not is_complete_envelope(value):
             raise ValueError("mbox_envelope must be one complete From line")
         return value
 

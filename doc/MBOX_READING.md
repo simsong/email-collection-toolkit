@@ -8,7 +8,9 @@ inner sender is neither placeholder, use the inner envelope instead and write
 the displaced outer value as `X-From:`. Other senders, including `foo@bar`,
 `nobody` and `MAILER-DAEMON`, are not classified as bogus merely because they
 look generic. Keep all remaining header and body bytes; never change sources.
-Only one immediate quoted line participates. Blank lines, indentation, ordinary
+The outer delimiter must itself be one complete literal From line with LF or
+CRLF termination; embedded line breaks and malformed prefixes prevent
+normalization. Only one immediate quoted line participates. Blank lines, indentation, ordinary
 RFC headers, invalid delimiter syntax and additional `>` levels do not trigger
 this rule. There is no scan into the body and no global removal of `>`.
 

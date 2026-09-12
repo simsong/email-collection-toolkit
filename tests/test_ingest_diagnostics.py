@@ -146,3 +146,21 @@ def test_normalized_failure_retains_bounded_quoted_envelope() -> None:
     assert "QUOTED-TAIL" not in detail
     assert record.normalization is not None
     assert record.normalization.source_raw_sha256 in detail
+
+
+def test_source_metadata_and_cursor_cannot_bypass_preview_limits() -> None:
+    """Requirement: plugin-provided identity is bounded and arbitrary provenance stays out of errors."""
+    identity = "lookup-prefix-" + "x" * 100_000 + "IDENTITY-TAIL"
+    source = SourceReference(
+        plugin_kind=identity, source_id=identity, native_id=identity, display_name=identity,
+        hierarchy=("HIERARCHY-SECRET",) * 1000, provenance_json="PROVENANCE-SECRET" + "x" * 100_000,
+    )
+    error = ValueError("plugin failed")
+    add_message_context(error, source, "native:" + "x" * 100_000 + "CURSOR-TAIL", b"message", None)
+    detail = format_failure(error)
+    assert "lookup-prefix-" in detail
+    assert "Source cursor: 'native:" in detail
+    assert "characters)" in detail
+    assert hashlib.sha256(b"message").hexdigest() in detail
+    assert all(secret not in detail for secret in ("IDENTITY-TAIL", "CURSOR-TAIL", "PROVENANCE-SECRET", "HIERARCHY-SECRET"))
+    assert len(detail) < 9000

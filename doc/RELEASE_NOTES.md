@@ -10,7 +10,8 @@
   delimiter. The normalized archive is readable by ordinary RFC/MIME readers.
   Import failures now retain source-code tracebacks, validator origins, source
   references/cursors, message hashes, and bounded input previews in local run
-  history, including both original framing previews. Double-framed Eudora
+  history, including both original framing previews. Bound source identity and
+  cursor previews and reject malformed outer lines before header normalization. Double-framed Eudora
   metadata stubs remain excluded. Existing archives are not rewritten.
 
 * Fix source GUI startup treating the `mailsearch-gui` launcher and option

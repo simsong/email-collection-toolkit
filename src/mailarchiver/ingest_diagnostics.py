@@ -3,18 +3,42 @@
 import hashlib
 import traceback
 
-from pydantic import ValidationError
+from pydantic import BaseModel, ValidationError
 
 from .plugin_api import SourceReference
 from .mbox_framing import MboxNormalization
 
 MESSAGE_PREVIEW_BYTES = 4096
 ENVELOPE_PREVIEW_BYTES = 512
+IDENTITY_PREVIEW_CHARACTERS = 1024
 VALIDATION_CONTEXT = "ctx"
 VALIDATION_ERROR = "error"
 VALIDATION_LOCATION = "loc"
 VALIDATION_MESSAGE = "msg"
 VALIDATION_TYPE = "type"
+
+
+class SourceFailureIdentity(BaseModel):
+    """Bounded lookup fields; arbitrary source provenance is not diagnostic input."""
+
+    plugin_kind: str
+    source_id: str
+    native_id: str
+    display_name: str
+
+
+def _identity_preview(value: str) -> str:
+    if len(value) <= IDENTITY_PREVIEW_CHARACTERS:
+        return value
+    return value[:IDENTITY_PREVIEW_CHARACTERS] + f"... ({len(value)} characters)"
+
+
+def format_source_identity(source: SourceReference) -> str:
+    """Avoid serializing potentially unbounded plugin provenance or hierarchy."""
+    return SourceFailureIdentity(
+        plugin_kind=_identity_preview(source.plugin_kind), source_id=_identity_preview(source.source_id),
+        native_id=_identity_preview(source.native_id), display_name=_identity_preview(source.display_name),
+    ).model_dump_json()
 
 
 def add_message_context(
@@ -24,8 +48,8 @@ def add_message_context(
     """Attach exact provenance/hash and an escaped, bounded prefix of the failing input."""
     preview = raw[:MESSAGE_PREVIEW_BYTES]
     error.add_note(
-        f"Source: {source.model_dump_json()}\n"
-        f"Source cursor: {cursor!r}\n"
+        f"Source: {format_source_identity(source)}\n"
+        f"Source cursor: {_identity_preview(cursor)!r}\n"
         f"Message SHA-256: {hashlib.sha256(raw).hexdigest()}; bytes={len(raw)}\n"
         f"Message prefix ({len(preview)}/{len(raw)} bytes): {preview!r}\n"
         f"MBOX envelope prefix (up to {ENVELOPE_PREVIEW_BYTES} bytes): "

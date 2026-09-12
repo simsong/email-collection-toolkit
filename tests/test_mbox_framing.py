@@ -6,14 +6,32 @@ from email.parser import BytesParser
 from pathlib import Path
 
 import pytest
+from pydantic import ValidationError
 
 from mailarchiver.bagit import _mailbag_metadata
 from mailarchiver.message import parse_message, raw_header_values
 from mailarchiver.mbox_framing import normalize_mbox_framing
+from mailarchiver.plugin_api import MailObject, SourceReference
 from mailarchiver.search import prepare_search_message
 
 OUTER = b"From XXX Thu Apr 15 04:21:10 2004\n"
 INNER = b">From sender@example.test Thu Apr 15 00:20:49 2004\n"
+
+
+@pytest.mark.parametrize("outer", [
+    OUTER.replace(b"\n", b"\rjunk\n"), OUTER.replace(b"From ", b"From\t"),
+    OUTER + b"Injected: field\n", OUTER.rstrip(b"\n"), OUTER.replace(b"\n", b"\r\r\n"),
+])
+def test_invalid_outer_envelope_cannot_be_promoted_into_a_header(outer: bytes) -> None:
+    """Requirement: inner promotion cannot bypass framing validation or inject an RFC header."""
+    raw = INNER + b"Subject: intact\n\nbody\n"
+    record = normalize_mbox_framing(raw, outer)
+    assert record.raw == raw
+    assert record.envelope == outer
+    assert record.normalization is None
+    source = SourceReference(plugin_kind="fixture", source_id="test", native_id="mailbox", display_name="mailbox")
+    with pytest.raises(ValidationError, match="one complete From line"):
+        MailObject(work_id="test", raw=record.raw, source=source, cursor="0", mbox_envelope=record.envelope)
 
 
 @pytest.mark.parametrize("prefix", [b"\t", b" ", b">", b"\n", b"Status: O\n", b"Subject: example\n\n"])

@@ -34,7 +34,7 @@ from .archive_integrity import MailbagArchiveIntegrityControls
 from .archive_path import add_archive_argument, require_archive
 from .contacts import contacts, load_owner_addresses, print_contacts
 from .document_options import DocumentOptions, read_owner_names
-from .ingest_diagnostics import add_message_context, format_failure
+from .ingest_diagnostics import add_message_context, format_failure, format_source_identity
 from .owner_rules import OwnerRules
 from .catalog import (
     UnsupportedSearchSchemaError,
@@ -1763,7 +1763,7 @@ def _run_ingest(request: IngestRequest, writer_lease: WriterLease, outcome: Inge
                     error, source.source, source.cursor, source.raw, source.mbox_envelope, source.mbox_normalization,
                 )
             else:
-                error.add_note(f"Source container: {work.container.source.model_dump_json()}")
+                error.add_note(f"Source container: {format_source_identity(work.container.source)}")
             stop.set()
             raise
         finally:

@@ -730,7 +730,8 @@ Subject: Example
 ```
 
 Only the immediate, unindented, singly quoted line with a sender and complete
-ctime-style timestamp qualifies. An intervening header or blank line, malformed
+ctime-style timestamp qualifies. The outer delimiter must also be one complete
+`From ` line; malformed outer framing is left unnormalized for validation. An intervening header or blank line, malformed
 delimiter, or additional `>` prevents this repair. Quoted `From ` lines in the
 body remain unchanged. The separate older `From XXX` status wrapper is unwrapped
 only with a nonempty, valid status-only header block and a valid quoted delimiter
@@ -757,7 +758,7 @@ for compatibility evidence and limits.
 Select a failed run in **Ingests** to inspect its failure details. The saved run
 history includes a traceback with source-code filenames and line numbers and,
 when available, the original validator's traceback. Message context includes the
-source reference, cursor (a byte offset for local MBOX), message SHA-256 and size,
+source identity, cursor (a byte offset for local MBOX), message SHA-256 and size,
 and escaped previews of up to 4,096 message bytes and 512 envelope bytes.
 Normalization context also identifies the original source-payload hash and
 previews both original framing lines (up to 512 bytes each). These details help locate the exact source email without copying the
@@ -766,7 +767,9 @@ source without attributing the error to the preceding email.
 
 The same details are retained locally in the archive's `status/ingest-*.json`
 run history and catalog. They may contain private email text; inspect them before
-sharing a failure report.
+sharing a failure report. Source identity fields and cursors are limited to
+1,024 characters each, with truncation identified; arbitrary source metadata is
+omitted from these error details.
 
 ## Care of the archive
 

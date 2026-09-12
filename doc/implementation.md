@@ -64,7 +64,9 @@ would add a dependency and is less portable for long-term verification.
 `SourceMessage.mbox_envelope` and `MailObject.mbox_envelope` carry one complete
 source delimiter as bytes, separately from `raw`. The MBOX adapter reads the
 physical line at the source offset to retain CRLF as well as LF. The plugin
-boundary rejects multi-line framing. `mbox_framing.normalize_mbox_framing`
+boundary and normalization guard share one complete-envelope check, rejecting
+embedded line breaks, repeated CR, incomplete lines and nonliteral From prefixes
+before framing can enter an X-From header. `mbox_framing.normalize_mbox_framing`
 converts one immediate quoted delimiter into a literal `X-From:` header. If the
 outer sender is exactly `XXX` or `???@???` and the inner sender is neither,
 it instead promotes the inner envelope and writes the outer value as `X-From:`.
@@ -117,6 +119,9 @@ Pydantic field errors retain their underlying validator traceback when available
 Validation summaries and chained tracebacks omit Pydantic input values, relying
 on the bounded previews for input evidence.
 Notes use a neutral source-cursor label for native plug-in/remote cursors.
+Source identity fields and cursors are each limited to 1,024 characters plus a
+truncation marker. Arbitrary source provenance/hierarchy is not serialized into
+either message or container failure notes.
 They contain the source reference, cursor, SHA-256, byte length, and escaped
 prefixes bounded to 4,096 message bytes and 512 bytes per selected/original/quoted
 envelope; no frame locals
