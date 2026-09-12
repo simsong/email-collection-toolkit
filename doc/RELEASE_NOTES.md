@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+* Add a three-step first-run setup window with repeatable source/archive folder
+  selection, Cancel to quit, and Start import opening progress. Reopen setup with `--new` or
+  Option held during macOS launch (also Option-click on the running Dock icon).
+  Preserve remembered archives, reject overlapping folders, and keep About
+  available from the application menu without showing it at startup.
+
 * Preserve original MBOX `From ` delimiters through import. When absent,
   synthesize a delimiter from the latest valid header timestamp instead of
   import time, with deterministic documented fallbacks. Existing archives are

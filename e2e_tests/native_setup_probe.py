@@ -1,0 +1,174 @@
+"""Exercise the real three-step setup, Cocoa panels, and import worker on disposable mail."""
+
+import faulthandler
+import hashlib
+from importlib import import_module
+import os
+from pathlib import Path
+import sqlite3
+from threading import Event
+import time
+import traceback
+
+import webview
+
+from mailarchiver.application import ApplicationController, ApplicationPreferencesStore
+from mailarchiver.gui_app import GUI_DIRECTORY, PyWebViewApplication, configure_macos_application
+from mailarchiver.ingest_status import read_ingest_history
+from mailarchiver.loopback import LoopbackAssetServer
+from mailarchiver.scanner import scanner_availability
+
+from e2e_tests.native_application_probe import evaluate_async
+
+
+def main() -> None:
+    """Drive accepted/cancelled native selections and import through production JS handlers."""
+    faulthandler.dump_traceback_later(90)
+    appkit = import_module("AppKit")
+    foundation = import_module("Foundation")
+    app_helper = import_module("PyObjCTools.AppHelper")
+    fixture = Path(os.environ["MAILARCHIVER_SETUP_FIXTURE"])
+    cancel_only = os.environ.get("MAILARCHIVER_SETUP_ACTION") == "cancel"
+    source = fixture / "Mail source ü"
+    source.mkdir()
+    alternate = fixture / "Other source"
+    alternate.mkdir()
+    destination = fixture / "New archive.mailarchive"
+    destination.mkdir()
+    raw = b"From: owner@example.org\nDate: Thu, 10 Sep 2026 12:00:00 +0000\nSubject: Setup fixture\n\nPreserve me.\n"
+    message = source / "message.eml"
+    message.write_bytes(raw)
+    (source / "owner-names.txt").write_text("owner@example.org\n", encoding="utf-8")
+    controller = ApplicationController(ApplicationPreferencesStore(fixture / "preferences.json"))
+    server = LoopbackAssetServer(GUI_DIRECTORY)
+    configure_macos_application()
+    application = PyWebViewApplication(controller, server)
+    application.create_about_window(hidden=True)
+    application.show_setup()
+    setup = webview.windows[-1]
+    errors: list[str] = []
+
+    def schedule_panel(directory: Path | None, *, destination_picker: bool = False, accept: bool = True) -> None:
+        # Seed only the native browser's initial location with a disposable folder.
+        # Accepted results still pass through NSOpenPanel and the real JS bridge.
+        api = application._setup_api  # pylint: disable=protected-access
+        assert api is not None
+        if directory is not None:
+            if destination_picker:
+                api._destination = directory  # pylint: disable=protected-access
+            else:
+                api._source = directory  # pylint: disable=protected-access
+
+        def inspect(timer) -> None:
+            timer.invalidate()
+            native = appkit.NSApplication.sharedApplication()
+            panel = native.modalWindow()
+            try:
+                assert panel is not None
+                assert panel.canChooseDirectories() and not panel.canChooseFiles()
+                assert not panel.allowsMultipleSelection()
+                assert panel.treatsFilePackagesAsDirectories()
+                assert bool(panel.canCreateDirectories()) == destination_picker
+                if directory is not None:
+                    assert Path(panel.directoryURL().path()).samefile(directory)
+                native.stopModalWithCode_(1 if accept else 0)
+            except Exception as error:  # pylint: disable=broad-exception-caught
+                errors.append(str(error))
+                native.stopModalWithCode_(0)
+
+        def schedule() -> None:
+            timer = foundation.NSTimer.timerWithTimeInterval_repeats_block_(0.3, False, inspect)
+            foundation.NSRunLoop.mainRunLoop().addTimer_forMode_(timer, appkit.NSModalPanelRunLoopMode)
+        app_helper.callAfter(schedule)
+
+    def click(identifier: str) -> None:
+        setup.evaluate_js(f"document.getElementById('{identifier}').click()")
+        evaluate_async(setup, "new Promise(resolve => {const t = setInterval(() => {if (!busy) {clearInterval(t); resolve(true);}}, 25);})")
+
+    def probe() -> None:
+        try:
+            assert setup.events.loaded.wait(10)
+            assert setup.evaluate_js("Object.keys(window.pywebview.api).sort()") == ["cancel", "choose_destination", "choose_source", "start_import"]
+            evaluate_async(setup, "initialize(); Promise.resolve(true)")
+            assert setup.evaluate_js("document.getElementById('start-import').disabled")
+            anchor = webview.windows[0].native
+            assert anchor is not None and not anchor.isVisible()
+            application.show_setup()
+            assert len(webview.windows) == 2, "Repeated setup duplicated the window"
+            for selected in (alternate, source):
+                schedule_panel(selected)
+                click("choose-source")
+                actual = setup.evaluate_js("document.getElementById('source-path').value")
+                assert Path(actual).samefile(selected), (actual, str(selected))
+            schedule_panel(None, accept=False)
+            click("choose-source")
+            assert setup.evaluate_js("document.getElementById('source-path').value") == actual
+            assert not controller.preferences_store.path.exists()
+            schedule_panel(source, destination_picker=True)
+            click("choose-destination")
+            click("start-import")
+            assert "separate" in setup.evaluate_js("document.getElementById('error').textContent")
+            assert not controller.preferences_store.path.exists()
+            schedule_panel(destination, destination_picker=True)
+            click("choose-destination")
+            schedule_panel(None, destination_picker=True, accept=False)
+            click("choose-destination")
+            assert Path(setup.evaluate_js("document.getElementById('destination-path').value")).samefile(destination)
+            assert not list(destination.iterdir()), "Selecting a destination initialized it"
+
+            if cancel_only:
+                setup.evaluate_js("document.getElementById('cancel').click()")
+                assert setup.events.closed.wait(10), "Cancel did not close the application"
+                return
+
+            confirmed = Event()
+            def confirm(timer) -> None:
+                timer.invalidate()
+                native = appkit.NSApplication.sharedApplication()
+                try:
+                    assert native.modalWindow() is not None, "Import confirmation did not appear"
+                    native.stopModalWithCode_(1000 if scanner_availability().configured else 1001)
+                finally:
+                    confirmed.set()
+
+            def schedule_confirmation() -> None:
+                timer = foundation.NSTimer.timerWithTimeInterval_repeats_block_(0.5, False, confirm)
+                foundation.NSRunLoop.mainRunLoop().addTimer_forMode_(timer, appkit.NSModalPanelRunLoopMode)
+            app_helper.callAfter(schedule_confirmation)
+            click("start-import")
+            assert confirmed.wait(10)
+            native_setup = setup.native
+            assert native_setup is not None and not native_setup.isVisible()
+            assert setup.evaluate_js("document.getElementById('source-path').value") == ""
+            assert setup.evaluate_js("document.getElementById('destination-path').value") == ""
+            ingest = next(window for window in webview.windows if " — Ingests — " in window.title)
+            assert ingest.events.loaded.wait(10)
+            deadline = time.monotonic() + 70
+            while any(doc.ingest_job for doc in controller.documents()) and time.monotonic() < deadline:
+                time.sleep(0.1)
+            history = read_ingest_history(destination)
+            assert history.statuses[0].state == "completed", history
+            with sqlite3.connect(destination / "archive.sqlite3") as catalog:
+                assert catalog.execute("SELECT sha256 FROM messages").fetchall() == [(hashlib.sha256(raw).hexdigest(),)]
+            assert message.read_bytes() == raw
+            saved = controller.preferences.last_archive
+            assert saved is not None and saved.samefile(destination)
+            assert not errors, errors
+        except Exception:  # pylint: disable=broad-exception-caught
+            errors.append(traceback.format_exc())
+        finally:
+            application.shutdown()
+            for window in tuple(webview.windows):
+                window.destroy()
+
+    webview.start(probe, http_server=False, private_mode=True, menu=application.menu())
+    assert not errors, errors
+    if cancel_only:
+        assert not list(destination.iterdir())
+        assert not controller.preferences_store.path.exists()
+    faulthandler.cancel_dump_traceback_later()
+    print("Native setup import passed")
+
+
+if __name__ == "__main__":
+    main()

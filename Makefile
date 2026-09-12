@@ -365,3 +365,10 @@ website-gmail-illustrations:
 .PHONY: test-envelopes
 test-envelopes:
 	uv run pytest -q tests/test_envelopes.py tests/test_sources.py tests/test_publication.py tests/test_standalone_verify.py
+
+.PHONY: test-startup test-native-setup
+test-startup:
+	uv run pytest -q tests/test_application.py e2e_tests/test_startup.py --browser chromium
+
+test-native-setup:
+	MAILARCHIVER_NATIVE_SETUP_E2E=1 uv run pytest -q e2e_tests/test_startup.py::test_native_setup_import
