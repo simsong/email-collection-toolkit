@@ -1245,6 +1245,7 @@ class SetupApi:
         if not self._lock.acquire(blocking=False):
             return False
         try:
+            self.application._refresh_menus()
             reply_thread = current_thread()
 
             def quit_after_reply() -> None:
@@ -1255,6 +1256,7 @@ class SetupApi:
             return True
         finally:
             self._lock.release()
+            self.application._refresh_menus()
 
     def _dismiss(self) -> None:
         # Keep the webview alive until pywebview delivers this bridge reply.
@@ -1821,6 +1823,8 @@ class PyWebViewApplication:
         return result.errors
 
     def close_active_window(self) -> bool:
+        if self._setup_api is not None and self._setup_api._lock.locked():
+            return False
         native = webview.active_window()
         if native is None or native is self._about_window:
             return False
@@ -2136,14 +2140,12 @@ class PyWebViewApplication:
                 with self._lock:
                     search_id = self._native_search_ids.get(active.uid)
                     child = active.uid in self._native_child_ids
-                setup = (
-                    self._setup_api is not None and active is self._setup_api.window
-                    and not self._setup_api._lock.locked()
-                )
-                enabled = child or setup or (
+                setup = self._setup_api
+                busy = setup is not None and setup._lock.locked()
+                enabled = child or (setup is not None and active is setup.window) or (
                     search_id is not None and self.controller.can_close_window(search_id)
                 )
-                close_item.setEnabled_(enabled)
+                close_item.setEnabled_(enabled and not busy)
 
         AppHelper.callAfter(refresh)
 

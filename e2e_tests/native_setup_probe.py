@@ -22,6 +22,39 @@ from mailarchiver.scanner import scanner_availability
 from e2e_tests.native_application_probe import evaluate_async
 
 
+class ObservedSetupApplication(PyWebViewApplication):
+    """Inspect real native menu state at both Cancel lock transitions."""
+
+    def __init__(self, controller: ApplicationController, server: LoopbackAssetServer) -> None:
+        super().__init__(controller, server)
+        self.observe_cancel = False
+        self.cancel_menu_states: list[bool] = []
+        self.cancel_menu_errors: list[str] = []
+
+    def _refresh_menus(self) -> None:
+        super()._refresh_menus()
+        if not self.observe_cancel or self._setup_api is None:
+            return
+        # Keep each transition observable until its real queued refresh completes.
+        locked = self._setup_api._lock.locked()
+        inspected = Event()
+
+        def inspect() -> None:
+            try:
+                native = import_module("AppKit").NSApplication.sharedApplication()
+                close = native.mainMenu().itemWithTitle_("File").submenu().itemWithTitle_("Close")
+                self.cancel_menu_states.append(bool(close.isEnabled()))
+                assert close.isEnabled() != locked, "Cancel menu state did not follow its lock"
+                if locked:
+                    assert not self.close_active_window(), "Close accepted while Cancel held the setup lock"
+            except Exception:  # pylint: disable=broad-exception-caught
+                self.cancel_menu_errors.append(traceback.format_exc())
+            finally:
+                inspected.set()
+        import_module("PyObjCTools.AppHelper").callAfter(inspect)
+        assert inspected.wait(5), "Cancel menu inspection timed out"
+
+
 def main() -> None:
     """Drive accepted/cancelled native selections and import through production JS handlers."""
     faulthandler.dump_traceback_later(90)
@@ -43,7 +76,7 @@ def main() -> None:
     controller = ApplicationController(ApplicationPreferencesStore(fixture / "preferences.json"))
     server = LoopbackAssetServer(GUI_DIRECTORY)
     configure_macos_application()
-    application = PyWebViewApplication(controller, server)
+    application = ObservedSetupApplication(controller, server)
     application.create_about_window(hidden=True)
     application.show_setup()
     setup = webview.windows[-1]
@@ -148,8 +181,12 @@ def main() -> None:
             assert not list(destination.iterdir()), "Selecting a destination initialized it"
 
             if cancel_only:
+                application.observe_cancel = True
                 setup.evaluate_js("document.getElementById('cancel').click()")
                 assert setup.events.closed.wait(10), "Cancel did not close the application"
+                assert application.cancel_menu_states == [False, True], application.cancel_menu_states
+                assert not application.cancel_menu_errors, application.cancel_menu_errors
+                application.observe_cancel = False
                 return
 
             owners_confirmed = Event()

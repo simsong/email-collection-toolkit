@@ -736,6 +736,8 @@ A **Cancel** button beside Start import (also Escape) quits the application
 without creating an archive, starting import, or changing saved preferences.
 If another window is importing, use the normal Stop Import and Quit confirmation
 and retain its writer lease until checkpoint completion. It and native File → Close are disabled while a setup operation or dialog is pending.
+The Close lock applies globally, including Cancel and native modal focus falling
+back to an existing search window; a queued Close action must also refuse closure.
 Folder pickers must clear any warning accessory left by a previous import dialog.
 
 When launched through `mailsearch-gui`, macOS must not reinterpret the Python

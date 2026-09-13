@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+* Keep native Close disabled globally throughout setup operations, including
+  Cancel and modal dialogs that fall back to an existing search window; reject
+  queued Close actions while setup is locked.
+
 * Disable native Close while setup dialogs or import startup are pending, restore
   it on completion or error, and clear stale warnings from reused folder pickers.
   Add native Option sampling/reopen regression coverage.

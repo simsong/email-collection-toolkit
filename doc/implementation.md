@@ -956,7 +956,11 @@ thread at exit. Cancel (also Escape) waits for its bridge reply thread to finish
 application using the existing stop/checkpoint policy. No setup paths or
 preferences are written. Pending setup operations
 disable Cancel and native File → Close and prevent window closure. Menu state
-refreshes on setup lock acquisition and release, including error recovery. Shared
+refreshes on every setup lock acquisition and release, including Cancel and error
+recovery. The native Close gate checks the setup lock independently of the active
+or fallback window, and the Close handler rejects queued actions while locked.
+Native regressions inspect both Cancel transitions and a real modal picker over
+an existing search window with no webview key window. Shared
 NSOpenPanel instances clear their accessory view before setting a new warning. Errors stay
 visible and controls recover for retry.
 `make test-startup` covers launch precedence, preference preservation, folder

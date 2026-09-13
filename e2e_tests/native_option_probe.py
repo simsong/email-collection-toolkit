@@ -28,6 +28,7 @@ def main() -> None:
     faulthandler.dump_traceback_later(45)
     appkit = import_module("AppKit")
     helper = import_module("PyObjCTools.AppHelper")
+    foundation = import_module("Foundation")
     fixture = Path(os.environ["MAILARCHIVER_SETUP_FIXTURE"])
     store = ApplicationPreferencesStore(fixture / "preferences.json")
     controller = ApplicationController(store)
@@ -79,6 +80,48 @@ def main() -> None:
         assert completed.wait(5)
         assert not failures, failures
 
+    def check_modal_close_fallback() -> None:
+        """A native modal picker has no webview key window; the search fallback stays locked."""
+        assert archive.path is not None
+        document = controller.open_document(archive.path)
+        search = application.create_search_window(controller.new_search_window(document))
+        assert search.window.events.loaded.wait(10)
+        api = application._setup_api  # pylint: disable=protected-access
+        assert api is not None
+        api._source = fixture  # pylint: disable=protected-access
+        refreshed = False
+
+        def inspect(timer) -> None:
+            nonlocal refreshed
+            native = appkit.NSApplication.sharedApplication()
+            panel = native.modalWindow()
+            if panel is None:
+                return
+            try:
+                if not refreshed:
+                    panel.makeKeyWindow()
+                    assert webview.active_window() is None, "Panel did not exercise the search fallback"
+                    assert controller.active_window is search.search_window
+                    assert api._lock.locked()  # pylint: disable=protected-access
+                    application._refresh_menus()  # pylint: disable=protected-access
+                    refreshed = True
+                    return
+                close = native.mainMenu().itemWithTitle_("File").submenu().itemWithTitle_("Close")
+                assert not close.isEnabled(), "Search fallback enabled Close during a setup picker"
+                assert not application.close_active_window()
+            except Exception:  # pylint: disable=broad-exception-caught
+                failures.append(traceback.format_exc())
+            timer.invalidate()
+            native.stopModalWithCode_(0)
+
+        def schedule() -> None:
+            timer = foundation.NSTimer.timerWithTimeInterval_repeats_block_(0.2, True, inspect)
+            foundation.NSRunLoop.mainRunLoop().addTimer_forMode_(timer, appkit.NSModalPanelRunLoopMode)
+        helper.callAfter(schedule)
+        assert api.choose_source() == str(fixture)
+        assert refreshed and not failures, failures
+        assert not search.window.events.closed.is_set()
+
     def probe() -> None:
         try:
             assert about.events.loaded.wait(10)
@@ -101,6 +144,7 @@ def main() -> None:
                     break
                 Event().wait(0.05)
             assert setup.native.isVisible() and len(webview.windows) == 2
+            check_modal_close_fallback()
             assert store.path.read_bytes() == preferences
         except Exception:  # pylint: disable=broad-exception-caught
             failures.append(traceback.format_exc())
