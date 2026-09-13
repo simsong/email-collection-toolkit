@@ -1201,9 +1201,9 @@ class SetupApi:
             selected = macos_import_picker(
                 directory,
                 "Select archive folder" if destination else "Select root folder to ingest",
-                "Choose an existing archive or create an empty folder for a new archive."
+                "Choose an existing archive or a pre-created empty folder outside the source tree."
                 if destination else "Mail files and subfolders will be read without changing them.",
-                "Select", folders=True, files=False, create_directories=destination,
+                "Select", folders=True, files=False, create_directories=False,
             )
         else:
             selected = self.window.create_file_dialog(
@@ -2003,7 +2003,8 @@ class PyWebViewApplication:
 
     def request_quit(self) -> None:
         """Use the normal stop-and-checkpoint policy before closing every window."""
-        if any(document.ingest_job for document in self.controller.documents()):
+        # Reserve a job-free quit under the same lock used to publish imports.
+        if not self.prepare_quit():
             anchor = self._dialog_window()
             confirmed = (
                 macos_alert("Stop importing and quit?", QUIT_IMPORT_MESSAGE,
@@ -2015,9 +2016,8 @@ class PyWebViewApplication:
                 return
             for job in self.stop_imports_for_quit():
                 job.finished.wait()
-        if self.prepare_quit():
-            for window in tuple(webview.windows):
-                window.destroy()
+        for window in tuple(webview.windows):
+            window.destroy()
 
     def prepare_quit(self) -> bool:
         """Keep windows and services alive until every import has completed."""

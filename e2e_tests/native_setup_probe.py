@@ -1,23 +1,25 @@
 """Exercise the real three-step setup, Cocoa panels, and import worker on disposable mail."""
 
+from collections.abc import Callable
 import faulthandler
 import hashlib
 from importlib import import_module
 import os
 from pathlib import Path
 import sqlite3
-from threading import Event
+from threading import Event, Thread
 import time
 import traceback
 
 import webview
 
-from mailarchiver.application import ApplicationController, ApplicationPreferencesStore
+from mailarchiver.application import ApplicationController, ApplicationPreferencesStore, IngestJob
 from mailarchiver.gui_app import GUI_DIRECTORY, PyWebViewApplication, configure_macos_application, macos_import_picker
 from mailarchiver.document_options import DocumentOptions
 from mailarchiver.ingest_status import read_ingest_history
 from mailarchiver.loopback import LoopbackAssetServer
 from mailarchiver.scanner import scanner_availability
+from mailarchiver.writer_lock import WriterLease
 
 from e2e_tests.native_application_probe import evaluate_async
 
@@ -27,9 +29,17 @@ class ObservedSetupApplication(PyWebViewApplication):
 
     def __init__(self, controller: ApplicationController, server: LoopbackAssetServer) -> None:
         super().__init__(controller, server)
+        self.before_quit: Callable[[], None] | None = None
         self.observe_cancel = False
         self.cancel_menu_states: list[bool] = []
         self.cancel_menu_errors: list[str] = []
+
+    def prepare_quit(self) -> bool:
+        # Place a real competing job just before the atomic quit decision.
+        before, self.before_quit = self.before_quit, None
+        if before is not None:
+            before()
+        return super().prepare_quit()
 
     def _refresh_menus(self) -> None:
         super()._refresh_menus()
@@ -62,7 +72,9 @@ def main() -> None:
     foundation = import_module("Foundation")
     app_helper = import_module("PyObjCTools.AppHelper")
     fixture = Path(os.environ["MAILARCHIVER_SETUP_FIXTURE"])
-    cancel_only = os.environ.get("MAILARCHIVER_SETUP_ACTION") == "cancel"
+    action = os.environ.get("MAILARCHIVER_SETUP_ACTION", "import")
+    cancel_only = action.startswith("cancel")
+    quit_race = action == "cancel-race"
     source = fixture / "Mail source ü"
     source.mkdir()
     alternate = fixture / "Other source"
@@ -81,6 +93,10 @@ def main() -> None:
     application.show_setup()
     setup = webview.windows[-1]
     errors: list[str] = []
+    race_job: IngestJob | None = None
+    race_worker: Thread | None = None
+    quit_confirmed = Event()
+    preferences_before_cancel: bytes | None = None
 
     def schedule_panel(directory: Path | None, *, destination_picker: bool = False, accept: bool = True, warning: str | None = None) -> None:
         # Seed only the native browser's initial location with a disposable folder.
@@ -110,7 +126,7 @@ def main() -> None:
                 assert panel.canChooseDirectories() and not panel.canChooseFiles()
                 assert not panel.allowsMultipleSelection()
                 assert panel.treatsFilePackagesAsDirectories()
-                assert bool(panel.canCreateDirectories()) == destination_picker
+                assert not panel.canCreateDirectories(), "Setup picker can mutate a browsed source tree"
                 if directory is not None:
                     assert Path(panel.directoryURL().path()).samefile(directory)
                 native.stopModalWithCode_(1 if accept else 0)
@@ -144,6 +160,7 @@ def main() -> None:
         evaluate_async(setup, "new Promise(resolve => {const t = setInterval(() => {if (!busy) {clearInterval(t); resolve(true);}}, 25);})")
 
     def probe() -> None:
+        nonlocal race_job, race_worker, preferences_before_cancel
         try:
             assert setup.events.loaded.wait(10)
             assert setup.evaluate_js("Object.keys(window.pywebview.api).sort()") == ["cancel", "choose_destination", "choose_source", "start_import"]
@@ -154,6 +171,9 @@ def main() -> None:
             application.show_setup()
             assert len(webview.windows) == 2, "Repeated setup duplicated the window"
             check_close_enabled()
+            # Creation stays disabled even before any source selection is known.
+            schedule_panel(source, destination_picker=True, accept=False)
+            click("choose-destination")
             warning = "Fixture: previously unscanned import"
             schedule_panel(source, accept=False, warning=warning)
             assert not macos_import_picker(source, "Fixture", "Fixture", "Select", folders=True, files=False, warning=warning)
@@ -181,12 +201,66 @@ def main() -> None:
             assert not list(destination.iterdir()), "Selecting a destination initialized it"
 
             if cancel_only:
-                application.observe_cancel = True
+                if quit_race:
+                    document = controller.create_document(fixture / "Other archive.mailarchive")
+                    session = controller.new_search_window(document)
+                    search = application.create_search_window(session)
+                    assert search.window.events.loaded.wait(10)
+                    application.show_setup()
+                    preferences_before_cancel = controller.preferences_store.path.read_bytes()
+                    assert document.path is not None
+                    job = IngestJob(operation_id="quit-race", owner_window_id=session.window_id)
+                    race_job = job
+                    lease = WriterLease.acquire(document.path, document.descriptor.identity, "test", job.operation_id, "test")
+                    registered = Event()
+
+                    def worker() -> None:
+                        try:
+                            with application._lock:  # pylint: disable=protected-access
+                                controller.begin_ingest(document.descriptor.document_id, job, lease)
+                            registered.set()
+                            assert job.stop.wait(15), "Quit never stopped the competing import"
+                            assert lease.acquired, "Writer lease released before stop/checkpoint"
+                        except Exception:  # pylint: disable=broad-exception-caught
+                            errors.append(traceback.format_exc())
+                        finally:
+                            if document.ingest_job is job:
+                                controller.finish_ingest(document.descriptor.document_id, job.operation_id, published=False)
+                            else:
+                                lease.release()
+                            job.finished.set()
+
+                    race_worker = Thread(target=worker, name="setup-quit-race")
+
+                    def publish_job() -> None:
+                        assert race_worker is not None
+                        race_worker.start()
+                        assert registered.wait(5), "Competing job did not register"
+                    application.before_quit = publish_job
+
+                    def confirm_quit(timer) -> None:
+                        native = appkit.NSApplication.sharedApplication()
+                        if native.modalWindow() is not None:
+                            timer.invalidate()
+                            quit_confirmed.set()
+                            native.stopModalWithCode_(1001)
+
+                    def schedule_quit_confirmation() -> None:
+                        timer = foundation.NSTimer.timerWithTimeInterval_repeats_block_(0.1, True, confirm_quit)
+                        foundation.NSRunLoop.mainRunLoop().addTimer_forMode_(timer, appkit.NSModalPanelRunLoopMode)
+                    app_helper.callAfter(schedule_quit_confirmation)
+                application.observe_cancel = not quit_race
+                windows_before_cancel = tuple(webview.windows)
                 setup.evaluate_js("document.getElementById('cancel').click()")
-                assert setup.events.closed.wait(10), "Cancel did not close the application"
-                assert application.cancel_menu_states == [False, True], application.cancel_menu_states
-                assert not application.cancel_menu_errors, application.cancel_menu_errors
+                for window in windows_before_cancel:
+                    assert window.events.closed.wait(10), f"Cancel did not close {window.title}"
+                if not quit_race:
+                    assert application.cancel_menu_states == [False, True], application.cancel_menu_states
+                    assert not application.cancel_menu_errors, application.cancel_menu_errors
                 application.observe_cancel = False
+                if quit_race:
+                    assert quit_confirmed.is_set(), "Cancel silently abandoned quit after a concurrent import"
+                    assert race_job is not None and race_job.stop.is_set() and race_job.finished.is_set()
                 return
 
             owners_confirmed = Event()
@@ -258,6 +332,11 @@ def main() -> None:
         except Exception:  # pylint: disable=broad-exception-caught
             errors.append(traceback.format_exc())
         finally:
+            if race_job is not None:
+                race_job.stop.set()
+            if race_worker is not None and race_worker.ident is not None:
+                race_worker.join(10)
+                assert not race_worker.is_alive()
             application.shutdown()
             for window in tuple(webview.windows):
                 window.destroy()
@@ -266,7 +345,12 @@ def main() -> None:
     assert not errors, errors
     if cancel_only:
         assert not list(destination.iterdir())
-        assert not controller.preferences_store.path.exists()
+        if preferences_before_cancel is None:
+            assert not controller.preferences_store.path.exists()
+        else:
+            assert controller.preferences_store.path.read_bytes() == preferences_before_cancel
+    assert sorted(path.name for path in source.iterdir()) == ["message.eml", "owner-names.txt"]
+    assert message.read_bytes() == raw
     faulthandler.cancel_dump_traceback_later()
     print("Native setup import passed")
 

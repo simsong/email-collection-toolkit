@@ -723,8 +723,10 @@ boxes visible: **1. Select the root folder to ingest**, **2. Select where your
 archive is stored**, and **3. Start import**. Each folder button opens a native
 folder browser and displays its accepted path in a selectable, read-only text
 field. Reopening a picker starts at the previous choice; cancel preserves that
-choice. The archive may be an existing valid archive or an empty directory
-(created with the browser's New Folder control). No archive is initialized by
+choice. The archive may be an existing valid archive or a pre-created empty
+directory outside the source. macOS setup pickers must disable New Folder,
+including before source selection, so browsing cannot create input directories.
+No archive is initialized by
 selection alone. Disable Start import until both folders are selected and while
 any setup dialog is pending. Reject equal or nested source/destination folders,
 including symlink, Unicode, and case aliases, before creating or opening a
@@ -739,6 +741,8 @@ and retain its writer lease until checkpoint completion. It and native File → 
 The Close lock applies globally, including Cancel and native modal focus falling
 back to an existing search window; a queued Close action must also refuse closure.
 Folder pickers must clear any warning accessory left by a previous import dialog.
+Cancel must atomically reserve a job-free quit against import publication; if a
+job wins that race, present the normal stop confirmation and wait for its checkpoint.
 
 When launched through `mailsearch-gui`, macOS must not reinterpret the Python
 launcher or command-line option values as documents. Explicit `--archive`

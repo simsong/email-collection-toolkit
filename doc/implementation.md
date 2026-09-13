@@ -943,8 +943,9 @@ When startup produces a placeholder, the shell discards it without creating a
 native search window and opens `setup.html` with all three numbered steps.
 `SetupApi` exposes only the two folder pickers, Start import, and Cancel through
 `WindowBridge`; picker cancellation retains its server-side selection. The
-source NSOpenPanel accepts only directories; the destination panel additionally
-allows New Folder. Folder-only panels treat `.mailarchive` packages as
+source and destination NSOpenPanels accept only existing directories and disable
+New Folder, even before a source is selected. This prevents browsing from
+creating a directory inside an input tree before overlap validation. Folder-only panels treat `.mailarchive` packages as
 directories so existing archives remain selectable. `SetupSelection` compares folder and ancestor filesystem identities for overlap
 (including Cocoa Unicode and case aliases) before
 any archive initialization. Start import opens a valid existing destination or
@@ -953,7 +954,13 @@ root into the existing confirmed import workflow. A started job opens Ingests
 and hides setup after clearing its selections. The webview stays alive to
 receive the bridge reply; destroying it inside that call would strand a reply
 thread at exit. Cancel (also Escape) waits for its bridge reply thread to finish, then quits the
-application using the existing stop/checkpoint policy. No setup paths or
+application using the existing stop/checkpoint policy. `request_quit` first calls
+`prepare_quit` under the same application lock used to publish import jobs: a
+job-free decision sets `_quitting` before new jobs can register; otherwise it
+confirms, stops jobs, and waits for completion. A deterministic native regression
+publishes a real leased job immediately before that decision and verifies the
+confirmation, stop signal, lease retention, completion, and application exit.
+No setup paths or
 preferences are written. Pending setup operations
 disable Cancel and native File → Close and prevent window closure. Menu state
 refreshes on every setup lock acquisition and release, including Cancel and error

@@ -439,7 +439,8 @@ On first launch, all three setup steps appear together:
 1. **Select the root folder to ingest** with **Choose folder…**. Its files and
    subfolders are read without changing them.
 2. **Select where your archive is stored**. Choose an existing archive or an
-   empty folder (use **New Folder** in the Mac browser to create one).
+   empty folder you have already created outside the source tree. The Mac setup
+   browsers disable **New Folder** to avoid changing input folders while browsing.
 3. Click **Start import**, review the owner-name and antivirus settings, and
    follow progress in the Ingests window.
 

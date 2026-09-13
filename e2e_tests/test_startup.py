@@ -37,14 +37,17 @@ def test_setup_steps_fit_in_window(page: Page) -> None:
     sys.platform != "darwin" or os.environ.get("MAILARCHIVER_NATIVE_SETUP_E2E") != "1",
     reason="make test-native-setup requires a logged-in Mac",
 )
-@pytest.mark.parametrize("action", ["import", "cancel"])
+@pytest.mark.parametrize("action", ["import", "cancel", "cancel-race"])
 def test_native_setup_import(tmp_path: Path, action: str) -> None:
     """The native folder browsers retain/reselect paths and Start import opens real progress."""
-    result = subprocess.run(
-        [sys.executable, "-m", "e2e_tests.native_setup_probe"],
-        env=os.environ | {"MAILARCHIVER_SETUP_FIXTURE": str(tmp_path), "MAILARCHIVER_SETUP_ACTION": action},
-        capture_output=True, text=True, timeout=120, check=False,
-    )
+    try:
+        result = subprocess.run(
+            [sys.executable, "-m", "e2e_tests.native_setup_probe"],
+            env=os.environ | {"MAILARCHIVER_SETUP_FIXTURE": str(tmp_path), "MAILARCHIVER_SETUP_ACTION": action},
+            capture_output=True, text=True, timeout=120, check=False,
+        )
+    except subprocess.TimeoutExpired as error:
+        pytest.fail(f"Native setup timed out: {(error.stderr or b'').decode(errors='replace')}")
     assert result.returncode == 0, result.stdout + result.stderr
     assert "Native setup import passed" in result.stdout
 

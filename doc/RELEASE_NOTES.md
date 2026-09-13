@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+* Disable New Folder in macOS setup browsers to prevent source-tree writes before
+  validation. Reserve a job-free Cancel/quit atomically against new imports;
+  a competing import receives the normal stop confirmation and checkpoint wait.
+
 * Keep native Close disabled globally throughout setup operations, including
   Cancel and modal dialogs that fall back to an existing search window; reject
   queued Close actions while setup is locked.
