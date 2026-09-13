@@ -39,6 +39,50 @@ runtime-license-bundle:
 	uv run python scripts/check_runtime_licenses.py --output "$(LICENSE_OUTPUT)"
 
 TIKA_VERSION ?= 4.0.0
+CARGO ?= cargo
+RUST_EXE_SUFFIX := $(if $(filter Windows_NT,$(OS)),.exe,)
+RUST_TARGET_DIR ?= $(CURDIR)/target
+CARGO_RUN = $(CARGO) --config 'build.target-dir="$(RUST_TARGET_DIR)"'
+
+.PHONY: test-pst pst-import pst-smoke rust-programs mdti-validator mcti-generator pst-importer pst-downloader pst-download pst-download-plan test-pst-downloader rust-toolchain rust-lock rust-fmt rust-check test-rust rust-smoke
+rust-programs:
+	$(CARGO_RUN) build --locked --release --workspace --bins
+
+mdti-validator mcti-generator pst-importer pst-downloader:
+	$(CARGO_RUN) build --locked --release --bin $@
+
+rust-toolchain:
+	rustc --version
+	$(CARGO) --version
+
+rust-lock:
+	$(CARGO_RUN) generate-lockfile
+
+rust-fmt:
+	$(CARGO_RUN) fmt --all
+
+rust-check:
+	$(CARGO_RUN) fmt --all -- --check
+	$(CARGO_RUN) clippy --locked --workspace --all-targets -- -D warnings
+	$(MAKE) test-rust
+
+test-rust:
+	$(CARGO_RUN) test --locked --workspace
+
+export PST
+pst-import:
+	@$(MAKE) --no-print-directory pst-importer >&2
+	@"$(RUST_TARGET_DIR)/release/pst-importer$(RUST_EXE_SUFFIX)" -- "$$PST"
+
+test-pst:
+	$(CARGO_RUN) test --locked --test pst
+
+pst-smoke: rust-programs
+	bash -o pipefail -c '"$(RUST_TARGET_DIR)/release/pst-importer$(RUST_EXE_SUFFIX)" -- "$$PST" | "$(RUST_TARGET_DIR)/release/mdti-validator$(RUST_EXE_SUFFIX)"'
+
+rust-smoke: rust-programs
+	bash -o pipefail -c '"$(RUST_TARGET_DIR)/release/mcti-generator$(RUST_EXE_SUFFIX)" "$(or $(COUNT),10)" | "$(RUST_TARGET_DIR)/release/mdti-validator$(RUST_EXE_SUFFIX)"'
+
 .PHONY: sync-dependencies test-reconciliation distribution-check name-matcher-observations h3-ambiguous-review
 
 sync-dependencies:
@@ -80,6 +124,7 @@ OCR_RUN_ARGS ?=
 check:
 	$(MAKE) lint
 	$(MAKE) types
+	$(MAKE) rust-check
 	$(MAKE) copyright-check
 	$(MAKE) runtime-license-check
 	$(MAKE) test
@@ -405,6 +450,10 @@ website-gmail-illustrations:
 	uv run --group dev python -m scripts.gmail_setup_illustrations
 
 .PHONY: test-envelopes
+.PHONY: test-mboxrd
+test-mboxrd:
+	uv run --locked pytest -q tests/test_mboxrd.py tests/test_envelopes.py tests/test_standalone_verify.py tests/test_publication.py tests/test_sources.py tests/test_pdf_mail.py tests/test_data_quality_scripts.py tests/test_validation.py
+
 test-envelopes:
 	uv run pytest -q tests/test_envelopes.py tests/test_sources.py tests/test_publication.py tests/test_standalone_verify.py tests/test_ingest_diagnostics.py tests/test_mbox_framing.py \
 		tests/test_end_to_end.py::test_parser_failure_records_source_identity_and_failed_run
@@ -423,3 +472,14 @@ test-file-drag:
 .PHONY: test-owner-rules
 test-owner-rules: ruff
 	uv run pytest -q tests/test_owner_rules.py tests/test_gui_service.py tests/test_application.py
+
+# PST corpus acquisition is opt-in; ordinary checks never contact corpus servers.
+PST_DOWNLOAD_ARGS ?=
+pst-download: pst-downloader
+	"$(RUST_TARGET_DIR)/release/pst-downloader$(RUST_EXE_SUFFIX)" $(PST_DOWNLOAD_ARGS)
+
+pst-download-plan: pst-downloader
+	"$(RUST_TARGET_DIR)/release/pst-downloader$(RUST_EXE_SUFFIX)" --dry-run $(PST_DOWNLOAD_ARGS)
+
+test-pst-downloader:
+	$(CARGO_RUN) test --locked -p pst-downloader

@@ -64,9 +64,9 @@ def test_sipbadmin_pdf_extracts_reviewed_message_structure(tmp_path: Path) -> No
     assert similarities[0] > 0.55  # The PDF's page-2 text layer contains a second, interleaved message.
     assert min(similarities[1:]) > 0.90
 
-    output = tmp_path / "sipbadmin.mbox"
+    output = tmp_path / "sipbadmin.mboxrd"
     write_pdf_mbox(result, output)
-    second_output = tmp_path / "sipbadmin-again.mbox"
+    second_output = tmp_path / "sipbadmin-again.mboxrd"
     write_pdf_mbox(result, second_output)
     assert output.read_bytes() == second_output.read_bytes()
     with pytest.raises(FileExistsError):

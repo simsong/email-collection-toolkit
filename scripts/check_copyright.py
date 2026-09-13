@@ -25,7 +25,7 @@ EXCLUDED_PREFIXES = (
     "website/themes/envelope-rainbow/",
 )
 ELIGIBLE_SUFFIXES = frozenset(
-    {".applescript", ".css", ".html", ".js", ".md", ".mjs", ".py", ".pyi", ".sql", ".svg", ".swift", ".toml", ".yaml", ".yml"}
+    {".applescript", ".css", ".html", ".js", ".md", ".mjs", ".py", ".pyi", ".rs", ".sql", ".svg", ".swift", ".toml", ".yaml", ".yml"}
 )
 ELIGIBLE_NAMES = frozenset({".gitignore", "Makefile", "COPYRIGHT"})
 
@@ -57,7 +57,7 @@ def expected_header(path: Path) -> str:
         return NOTICE
     if path.name in {".gitignore", "Makefile"} or path.suffix.lower() in {".py", ".pyi", ".toml", ".yaml", ".yml"}:
         return f"# {NOTICE}"
-    if path.suffix.lower() == ".swift":
+    if path.suffix.lower() in {".swift", ".rs"}:
         return f"// {NOTICE}"
     if path.suffix.lower() in {".css", ".js", ".mjs"}:
         return f"/* {NOTICE} */"

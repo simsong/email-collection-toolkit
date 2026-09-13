@@ -348,7 +348,7 @@ email was printed and scanned. It is not for a PDF attachment inside an email.
 The first implementation produces a standard, derived MBOX for human review:
 
 ```console
-make extract-pdf-mail ARGS='tests/data/sipbadmin.pdf --output /tmp/sipbadmin.mbox --handwritten-page 2'
+make extract-pdf-mail ARGS='tests/data/sipbadmin.pdf --output /tmp/sipbadmin.mboxrd --handwritten-page 2'
 ```
 
 The command requires Poppler `pdftotext`. It reads and hashes the PDF without

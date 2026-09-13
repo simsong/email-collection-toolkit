@@ -12,6 +12,7 @@ __pycache__/
 htmlcov/
 build/
 dist/
+/target/
 .tmp
 data/
 validation/samconfig.toml
@@ -19,3 +20,5 @@ validation/samconfig.toml
 /ocr-text/
 *.p12
 *.cer
+
+/var/pst/
