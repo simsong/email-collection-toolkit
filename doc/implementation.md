@@ -337,12 +337,15 @@ distributed. The checked-in exporter and synthetic test are reproducibility
 infrastructure; the private corpus is not part of the software distribution.
 
 The [on-disk format inventory](ON_DISK_MAIL_FORMATS.md) records PST/OST research;
-the [executable importer specification](PST_DUAL_READER.md) defines the planned
-filename-to-stdout-mboxrd interface. A Rust PST adapter is the first candidate;
-another implementation can run as a second pass. Neither the runner nor a PST
-adapter is implemented. The importer constructs RFC/MIME output when required;
-Python decodes mboxrd, hashes all resulting bytes including provenance headers,
-scans and publishes through the existing archive engine. H3 already includes
+the [executable importer specification](PST_DUAL_READER.md) defines the
+filename-to-stdout-mboxrd interface. The standalone [PST adapter](PST_IMPORTER.md)
+uses Microsoft's `outlook-pst` 1.2.0 through read-only `read_from` handles,
+traverses the IPM subtree and validates each bounded temporary record before
+streaming it. It reconstructs MIME and retains attachment/transport evidence;
+source fixity checks and partial-run errors prevent false success. Another
+implementation can run as a second pass. The runner remains planned; it will
+decode mboxrd, hash all resulting bytes including provenance headers,
+scan and publish through the existing archive engine. H3 already includes
 the encoded body; its top-level header selection excludes importer annotations.
 Cross-importer duplicate suppression requires a separate explicit policy and
 must not silently discard differences in bodies or attachments.
@@ -353,7 +356,7 @@ The current macOS builder includes no PST importer. Windows installer and
 Linux Snap builders remain unimplemented, as do full native ingest prerequisites.
 
 The Cargo workspace now contains `rust/mct-importer`: the Rust library,
-`mdti-validator` and `mcti-generator` implement/test
+`pst-importer`, `mdti-validator` and `mcti-generator` implement/test
 [MCT Importer API 1.0](MCT_IMPORTER_API.md). `make rust-programs` or each named
 binary target produces release executables under `target/release`; Windows adds
 `.exe`. `make rust-check` runs rustfmt, Clippy with warnings fatal, and Rust
@@ -366,7 +369,7 @@ counts valid complete records at EOF, reporting the first error per rejected
 record. It is not a full RFC grammar oracle or an archive ingest command.
 The generator produces a deterministic 7bit text MIME part with a counter and
 From-like lines. No h4 is introduced; comparison uses h3 and exact fixity h2.
-Rust is required to build the planned PST importer; released packages will
+Rust is required to build the PST importer; released packages will
 bundle its native executable without requiring users to install Rust.
 
 ## Current package shape
@@ -2251,3 +2254,9 @@ excluding `LC_ID_DYLIB`. A real compiled-library test verifies that an install
 name alone is accepted while an executable's unresolved load of that same name
 is rejected. This avoids rejecting the packaged pydantic-core library's own
 identifier while retaining dependency checks.
+
+Derived PDF exports require a `.mboxrd` output suffix; data-quality exports and
+generated source fixtures also use `.mboxrd` names so re-import removes exactly
+one quoting level. Unknown external `.mbox` inputs retain their conservative
+interpretation. Canonical archive `.mbox` names and hash-guided recovery remain
+unchanged. This prevents generated files from silently gaining quote levels.

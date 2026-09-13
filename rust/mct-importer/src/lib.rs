@@ -1,6 +1,8 @@
 //! MCT Importer API 1.0. Validation discards input; it never publishes an archive.
 //! Requirements and limits: doc/MCT_IMPORTER_API.md.
 
+pub mod pst;
+
 use base64::{engine::general_purpose::STANDARD, Engine};
 use mailparse::{MailAddr, MailHeader, MailHeaderMap};
 use std::io::{self, BufRead, Write};
@@ -252,19 +254,26 @@ fn validate_origin(headers: &[MailHeader<'_>]) -> Result<(), String> {
     }
     if headers.get_first_header("Message-ID").is_some() {
         let id = one(headers, "Message-ID")?;
-        let inner = id.strip_prefix('<').and_then(|s| s.strip_suffix('>'));
-        if !inner.is_some_and(|s| {
-            s.split_once('@')
-                .is_some_and(|(local, domain)| !local.is_empty() && !domain.is_empty())
-                && s.bytes().filter(|b| *b == b'@').count() == 1
-                && !s
-                    .bytes()
-                    .any(|b| b.is_ascii_whitespace() || b"<>".contains(&b))
-        }) {
+        if !message_id_valid(&id) {
             return Err("invalid Message-ID".into());
         }
     }
     Ok(())
+}
+
+pub(crate) fn message_id_valid(id: &str) -> bool {
+    id.is_ascii()
+        && id
+            .strip_prefix('<')
+            .and_then(|s| s.strip_suffix('>'))
+            .is_some_and(|s| {
+                s.split_once('@')
+                    .is_some_and(|(local, domain)| !local.is_empty() && !domain.is_empty())
+                    && s.bytes().filter(|b| *b == b'@').count() == 1
+                    && !s.bytes().any(|b| {
+                        b.is_ascii_control() || b.is_ascii_whitespace() || b"<>".contains(&b)
+                    })
+            })
 }
 
 fn validate_entity(raw: &[u8], top: bool, depth: usize) -> Result<(), String> {

@@ -300,7 +300,7 @@ def analyze_bad_dates(connection: sqlite3.Connection, archive: Path, output: Pat
             previous_catalog_date=before, next_catalog_date=after,
             source_paths=" || ".join(item.source_path for item in source_items),
         ))
-    path = output / "BAD_DATES.mbox"
+    path = output / "BAD_DATES.mboxrd"
     write_mbox(path, raw_messages)
     write_csv(output / "BAD_DATES.csv", evidence)
     return evidence, path
@@ -355,7 +355,7 @@ def analyze_missing_senders(connection: sqlite3.Connection, archive: Path, outpu
             gmail_thread=message.get("X-GM-THRID") is not None,
             likely_kind=missing_kind(message, from_values, from_addresses, candidate, boundary),
         ))
-    path = output / "MISSING_SENDER.mbox"
+    path = output / "MISSING_SENDER.mboxrd"
     write_mbox(path, raw_messages)
     write_csv(output / "MISSING_SENDER.csv", evidence)
     return evidence, len(population), path

@@ -35,10 +35,11 @@ guide, not a supported Windows application release.
 ## Rust importer development
 
 Rust importer development uses `make rust-programs` to build `mdti-validator`
-and `mcti-generator`. See [MCT Importer API 1.0](doc/MCT_IMPORTER_API.md) for
+`mcti-generator`, and [`pst-importer`](doc/PST_IMPORTER.md). See [MCT Importer API 1.0](doc/MCT_IMPORTER_API.md) for
 the contract, individual targets and validation pipeline. Rust/Cargo are
-required to build these tools and the planned PST importer. Packaged PST users
-will need the compiled helper, not a compiler; PST extraction is not yet implemented.
+required to build these tools. The standalone PST helper uses Microsoft's Rust crate;
+archive-host integration and packaging remain planned. Packaged PST users will
+need the compiled helper, not a compiler.
 
 ## Goals
 

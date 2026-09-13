@@ -1,7 +1,9 @@
 # On-disk mail formats and import backends
 
 **Status:** inventory updated 2026-09-12; original research snapshot 2026-08-31.
-No PST/OST import is implemented by this repository yet. The
+A standalone [Microsoft-crate PST importer](PST_IMPORTER.md) is implemented,
+with documented extraction limits. Archive-host integration and OST remain
+unimplemented. The
 [executable importer specification](PST_DUAL_READER.md) supersedes the original
 single-backend selection and development sequence below.
 

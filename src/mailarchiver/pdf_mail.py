@@ -292,6 +292,8 @@ def _message_bytes(extraction: PdfMailExtraction, record: PrintedEmailRecord) ->
 
 def write_pdf_mbox(extraction: PdfMailExtraction, output: Path) -> None:
     """Atomically write standard MBOX records for one PDF interpretation."""
+    if output.suffix.lower() != ".mboxrd":
+        raise ValueError("derived PDF output must use the .mboxrd suffix to declare its quoting")
     destination = output.resolve()
     if destination.exists():
         raise FileExistsError(destination)
@@ -327,7 +329,7 @@ def positive_page(value: str) -> int:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="extract printed email from a standalone PDF into derived MBOX")
     parser.add_argument("pdf", type=Path)
-    parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--output", type=Path, required=True, help="new .mboxrd output file")
     parser.add_argument(
         "--handwritten-page",
         action="append",

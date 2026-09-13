@@ -10,6 +10,7 @@ from pathlib import Path
 
 import pytest
 
+from e2e_tests.generate_corpus import generate
 from mailarchiver.mbox import add_message, read_verified_location
 from mailarchiver.mboxrd import quote, unquote
 from mailarchiver.pdf_mail import PdfMailExtraction, PrintedEmailRecord, write_pdf_mbox
@@ -102,6 +103,9 @@ def test_derived_mbox_writers_preserve_quote_depth(tmp_path: Path) -> None:
         messages=(PrintedEmailRecord(page_start=1, page_end=1, headers=(), body=body,
                                      extracted_text=body, subject=""),),
     )
+    with pytest.raises(ValueError, match=".mboxrd suffix"):
+        write_pdf_mbox(extraction, tmp_path / "ambiguous.mbox")
+    assert not (tmp_path / "ambiguous.mbox").exists()
     pdf_output = tmp_path / "pdf.mboxrd"
     write_pdf_mbox(extraction, pdf_output)
     pdf_record, = source_messages(next(source_files(pdf_output)))
@@ -111,3 +115,12 @@ def test_derived_mbox_writers_preserve_quote_depth(tmp_path: Path) -> None:
     write_mbox(audit_output, [raw])
     audit_record, = source_messages(next(source_files(audit_output)))
     assert audit_record.raw == raw
+
+
+def test_generated_corpus_declares_source_dialect(tmp_path: Path) -> None:
+    """Generated source fixtures round-trip through the real source reader."""
+    generate(tmp_path)
+    source = tmp_path / "Professional/Projects/edge-cases.mboxrd"
+    message, = source_messages(next(source_files(source)))
+    assert message.raw.partition(b"\n\n")[2] == b">From unquoted body line\n>>From literal quoted body line\n"
+    assert not tuple(tmp_path.rglob("*.mbox"))

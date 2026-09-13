@@ -156,3 +156,9 @@ to skip the real message headers and reinterpret an indented body line.
 headers/MIME, source idempotence, independent archive verification, and failure
 provenance. Existing archives are not rewritten; changed normalization may require a
 separately authorized catalog rebuild or reconciliation of prior observations.
+
+Derived PDF exports require a `.mboxrd` output suffix; data-quality exports and
+generated source fixtures also use `.mboxrd` names so re-import removes exactly
+one quoting level. Unknown external `.mbox` inputs retain their conservative
+interpretation. Canonical archive `.mbox` names and hash-guided recovery remain
+unchanged. This prevents generated files from silently gaining quote levels.

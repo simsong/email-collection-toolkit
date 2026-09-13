@@ -18,14 +18,15 @@ test-addressbook-export: ruff
 
 TIKA_VERSION ?= 4.0.0
 CARGO ?= cargo
+RUST_EXE_SUFFIX := $(if $(filter Windows_NT,$(OS)),.exe,)
 RUST_TARGET_DIR ?= $(CURDIR)/target
 CARGO_RUN = $(CARGO) --config 'build.target-dir="$(RUST_TARGET_DIR)"'
 
-.PHONY: rust-programs mdti-validator mcti-generator rust-toolchain rust-lock rust-fmt rust-check test-rust rust-smoke
+.PHONY: test-pst pst-import pst-smoke rust-programs mdti-validator mcti-generator pst-importer rust-toolchain rust-lock rust-fmt rust-check test-rust rust-smoke
 rust-programs:
 	$(CARGO_RUN) build --locked --release --workspace --bins
 
-mdti-validator mcti-generator:
+mdti-validator mcti-generator pst-importer:
 	$(CARGO_RUN) build --locked --release --bin $@
 
 rust-toolchain:
@@ -46,8 +47,19 @@ rust-check:
 test-rust:
 	$(CARGO_RUN) test --locked --workspace
 
+export PST
+pst-import:
+	@$(MAKE) --no-print-directory pst-importer >&2
+	@"$(RUST_TARGET_DIR)/release/pst-importer$(RUST_EXE_SUFFIX)" -- "$$PST"
+
+test-pst:
+	$(CARGO_RUN) test --locked --test pst
+
+pst-smoke: rust-programs
+	bash -o pipefail -c '"$(RUST_TARGET_DIR)/release/pst-importer$(RUST_EXE_SUFFIX)" -- "$$PST" | "$(RUST_TARGET_DIR)/release/mdti-validator$(RUST_EXE_SUFFIX)"'
+
 rust-smoke: rust-programs
-	bash -o pipefail -c '"$(RUST_TARGET_DIR)/release/mcti-generator" "$(or $(COUNT),10)" | "$(RUST_TARGET_DIR)/release/mdti-validator"'
+	bash -o pipefail -c '"$(RUST_TARGET_DIR)/release/mcti-generator$(RUST_EXE_SUFFIX)" "$(or $(COUNT),10)" | "$(RUST_TARGET_DIR)/release/mdti-validator$(RUST_EXE_SUFFIX)"'
 
 .PHONY: sync-dependencies test-reconciliation distribution-check name-matcher-observations h3-ambiguous-review
 

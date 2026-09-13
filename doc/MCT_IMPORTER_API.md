@@ -2,23 +2,24 @@
 
 Version 1.0 defines a read-only executable interface: a production importer
 accepts one filename and emits mboxrd messages on stdout. The Rust test tools
-`mcti-generator` and `mdti-validator` implement its stream contract. The PST
-adapter and Python executable host remain planned. The validator name is
+`mcti-generator` and `mdti-validator` implement its stream contract. [`pst-importer`](PST_IMPORTER.md) implements the PST adapter; the Python
+executable host remains planned. The validator name is
 intentionally `mdti-validator`, as requested; the generator is `mcti-generator`.
 
 ## Build and run
 
-Rust and Cargo are required to build these programs and the planned Rust PST
+Rust and Cargo are required to build these programs and the Rust PST
 importer. Use the installed stable Rust toolchain, including rustfmt and Clippy.
 This change was developed with Rust 1.98.1. Other compiler versions have not
 been qualified locally. `Cargo.lock` pins dependencies for repeatable builds.
 This adds no Rust dependency to existing Python-only local-mail importing.
 Packaged PST importing will require its compiled Rust helper, not a Rust
-compiler installed by the end user. No PST importer is shipped yet.
+compiler installed by the end user. The standalone helper is implemented; installers do not yet bundle it.
 
 ```sh
 make rust-toolchain       # show compiler and Cargo versions
-make rust-programs        # build both optimized executables
+make rust-programs        # build all three optimized executables
+make pst-importer        # build the Microsoft-crate PST adapter
 make mdti-validator       # build just the validator
 make mcti-generator       # build just the generator
 make rust-check           # formatting, Clippy with warnings fatal, Rust tests

@@ -2,13 +2,23 @@
 
 ## Unreleased
 
+* Require `.mboxrd` for derived PDF output and use it for audit/source fixtures,
+  ensuring byte-preserving re-import. Make Rust run targets select `.exe` on Windows.
+
+* Add standalone Rust `pst-importer` using Microsoft's `outlook-pst` 1.2.0,
+  with read-only source handles, source SHA-256 checks, deterministic MIME,
+  body/attachment evidence, validated mboxrd stdout and nonzero partial-run status.
+  Add actual PST/process tests and build/run Makefile targets. Public fixture
+  qualification recovers 12 messages and 30 attachments while reporting two
+  upstream attachment failures; archive integration and packaging remain planned.
+
 * Implement Rust `mdti-validator` and `mcti-generator` for MCT Importer API 1.0,
   with `make rust-programs`, individual build targets, locked dependencies,
   Clippy/format checks and real-process stream tests. The validator discards
   stdin, reports errors and counts valid complete messages at EOF. The generator
   emits counted RFC/MIME text messages with mboxrd quoting and provenance.
   H2/h3 suffice; no h4 is introduced. Rust is required to build these tools and
-  the planned PST helper; PST extraction remains unimplemented.
+  the PST helper.
 
 * Correct canonical and derived MBOX writers to use reversible mboxrd quoting;
   Python's default writer uses mboxo. Decode declared `.mboxrd` sources once,
@@ -19,7 +29,7 @@
   name and version headers, starting with a Rust PST adapter candidate and
   optional additional passes. All headers remain in h2; h3 already includes the
   body. PST import and full Windows ingest are beta requirements. The runner,
-  PST adapter, cross-importer dedup policy, Windows installer and Snap remain
+  cross-importer dedup policy, Windows installer and Snap remain
   planned. Document Microsoft sources for possible MIME reconstruction.
 
 * Disable New Folder in macOS setup browsers to prevent source-tree writes before

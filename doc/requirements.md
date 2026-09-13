@@ -674,7 +674,7 @@ An indexing failure is recorded as a metadata defect and does not reject mail;
 
 The compiled desktop experience will evaluate Dioxus Desktop and Tauri with the
 system webview (WKWebView on macOS, WebView2 on Windows). Rust also implements
-the MCT importer test programs and planned PST extraction helper. Archive ingest
+the MCT importer test programs and standalone PST extraction helper. Archive ingest
 orchestration, search, scanning, locking and preservation remain in Python.
 Windows with full ingest is the next platform priority; Linux/snap
 delivery is deferred. [DIOXUS.md](DIOXUS.md) defines the trial plan and migration,
@@ -1453,9 +1453,9 @@ mboxrd stdout with `X-Imported-URI`, `X-Importer-Name`, `X-Importer-Version`.
 No h4 is required: h2 covers every header and body byte; existing h3 excludes
 top-level importer fields while covering selected headers and the encoded body.
 
-Rust/Cargo are required for building the importer tools and planned PST import
+Rust/Cargo are required for building the importer tools and standalone PST import
 helper. Packaged end users need the helper executable, not a Rust compiler.
-`make rust-programs` builds `mdti-validator` and `mcti-generator`; each has its
+`make rust-programs` builds `mdti-validator`, `mcti-generator` and `pst-importer`; each has its
 own same-named Makefile build target. Keep a committed Cargo lockfile and run
 Rust formatting, Clippy and tests through Makefile targets, including `make check`.
 The validator warns before consuming stdin that all input is discarded, reports
@@ -1465,8 +1465,14 @@ unsigned count and emits exactly that many deterministic RFC 2822/MIME text
 messages with counters and valid API provenance. Validate malformed records,
 partial EOF, size limits, MIME structure/encoding, quote levels, process exit
 statuses and recovery to following records, using actual Rust processes.
-The archive host, actual PST extraction and h3 duplicate suppression remain
-planned; these test tools must not imply they are implemented.
+The standalone [PST importer](PST_IMPORTER.md) uses Microsoft's pinned
+`outlook-pst` crate through its explicit read-only reader API. Emit validated
+mboxrd records with stable node-ID URIs, exact by-value attachment data,
+reconstruction evidence and source SHA-256 checks. Continue after recoverable
+item failures but return nonzero for any incomplete extraction. Exercise real
+PST fixtures, decoded body/attachment evidence, partial-run accounting, read-only
+source preservation, changed sources and producer/consumer failures.
+The archive host and h3 duplicate suppression remain planned.
 
 ## Windows development environment
 
@@ -1717,3 +1723,9 @@ The macOS bundle dependency audit shall distinguish a Mach-O library's own
 `LC_ID_DYLIB` from actual dylib load commands. Its own install name need not
 resolve as another bundled file; actual non-system dependencies must resolve
 inside the app. A compiled-library regression shall exercise both cases.
+
+Derived PDF exports require a `.mboxrd` output suffix; data-quality exports and
+generated source fixtures also use `.mboxrd` names so re-import removes exactly
+one quoting level. Unknown external `.mbox` inputs retain their conservative
+interpretation. Canonical archive `.mbox` names and hash-guided recovery remain
+unchanged. This prevents generated files from silently gaining quote levels.

@@ -678,3 +678,13 @@ and manifests. Authenticity requires a separately rooted signature or digest.
 The validator rejects absolute paths, traversal, unsafe manifest escapes, and
 symlinks rather than following manifest entries outside the bag. It never
 opens network resources or executes payload content.
+
+## Standalone PST source and reconstruction controls
+
+[`pst-importer`](PST_IMPORTER.md) logs a chunked SHA-256 of its read-only source
+PST and checks both the opened file and pathname again at completion. This detects
+changed final bytes and prevents success, but provides no snapshot isolation.
+Generated URI/name/version headers are covered by h2 and excluded from the selected
+top-level h3 headers. Reconstructed MIME and retained original-header/Message-ID
+evidence parts are covered by both h2 and the body portion of h3. These hashes
+protect the extraction result; retain the source PST/hash for original evidence.

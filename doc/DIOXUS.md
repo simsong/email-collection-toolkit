@@ -5,7 +5,7 @@ compiled desktop framework. The trial scope below is proposed; neither trial
 has been implemented or evaluated. Ingest, MIME processing, search, SQLite,
 scanner orchestration, archive locking, and canonical MBOX/SHA-256 preservation
 remain in Python. Separately, [MCT Importer API 1.0](MCT_IMPORTER_API.md) uses
-Rust for importer test programs and the planned PST extraction helper.
+Rust for importer test programs and the standalone PST extraction helper.
 
 ## Candidates and current status
 
