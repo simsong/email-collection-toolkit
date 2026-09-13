@@ -735,7 +735,8 @@ starting the worker. Cancellation of import settings keeps the setup choices ava
 A **Cancel** button beside Start import (also Escape) quits the application
 without creating an archive, starting import, or changing saved preferences.
 If another window is importing, use the normal Stop Import and Quit confirmation
-and retain its writer lease until checkpoint completion. It is disabled while a setup operation or dialog is pending.
+and retain its writer lease until checkpoint completion. It and native File → Close are disabled while a setup operation or dialog is pending.
+Folder pickers must clear any warning accessory left by a previous import dialog.
 
 When launched through `mailsearch-gui`, macOS must not reinterpret the Python
 launcher or command-line option values as documents. Explicit `--archive`

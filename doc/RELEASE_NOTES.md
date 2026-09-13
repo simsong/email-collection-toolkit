@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+* Disable native Close while setup dialogs or import startup are pending, restore
+  it on completion or error, and clear stale warnings from reused folder pickers.
+  Add native Option sampling/reopen regression coverage.
+
 * Reconcile startup setup with the current owner email editor and preserve
   Finder file dragging, launch-argument handling, and shared import safeguards.
 

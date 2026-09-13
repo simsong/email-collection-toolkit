@@ -428,6 +428,7 @@ def macos_import_picker(
             panel = NSOpenPanel.openPanel()
             panel.setTitle_(title)
             panel.setMessage_(message)
+            panel.setAccessoryView_(None)
             if warning:
                 appkit = import_module("AppKit")
                 banner = appkit.NSTextField.wrappingLabelWithString_(warning)
@@ -1186,26 +1187,35 @@ class SetupApi:
         return str(self._destination) if self._destination is not None else None
 
     def _choose_folder(self, previous: Path | None, *, destination: bool) -> Path | None:
-        with self._lock:
-            directory = previous or Path.home()
-            if sys.platform == "darwin":
-                selected = macos_import_picker(
-                    directory,
-                    "Select archive folder" if destination else "Select root folder to ingest",
-                    "Choose an existing archive or create an empty folder for a new archive."
-                    if destination else "Mail files and subfolders will be read without changing them.",
-                    "Select", folders=True, files=False, create_directories=destination,
-                )
-            else:
-                selected = self.window.create_file_dialog(
-                    webview.FileDialog.FOLDER, directory=str(directory), allow_multiple=False,
-                )
-            return dialog_paths(selected)[0] if selected else None
+        self._lock.acquire()
+        try:
+            self.application._refresh_menus()
+            return self._pick_folder(previous, destination=destination)
+        finally:
+            self._lock.release()
+            self.application._refresh_menus()
+
+    def _pick_folder(self, previous: Path | None, *, destination: bool) -> Path | None:
+        directory = previous or Path.home()
+        if sys.platform == "darwin":
+            selected = macos_import_picker(
+                directory,
+                "Select archive folder" if destination else "Select root folder to ingest",
+                "Choose an existing archive or create an empty folder for a new archive."
+                if destination else "Mail files and subfolders will be read without changing them.",
+                "Select", folders=True, files=False, create_directories=destination,
+            )
+        else:
+            selected = self.window.create_file_dialog(
+                webview.FileDialog.FOLDER, directory=str(directory), allow_multiple=False,
+            )
+        return dialog_paths(selected)[0] if selected else None
 
     def start_import(self) -> bool:
         if not self._lock.acquire(blocking=False):
             return False
         try:
+            self.application._refresh_menus()
             if self._source is None or self._destination is None:
                 raise ValueError("Select both folders before starting import.")
             selection = SetupSelection(source=self._source, destination=self._destination)
@@ -1228,6 +1238,7 @@ class SetupApi:
             return started
         finally:
             self._lock.release()
+            self.application._refresh_menus()
 
     def cancel(self) -> bool:
         """Quit after this bridge thread has delivered its response to JavaScript."""
@@ -2125,7 +2136,10 @@ class PyWebViewApplication:
                 with self._lock:
                     search_id = self._native_search_ids.get(active.uid)
                     child = active.uid in self._native_child_ids
-                setup = self._setup_api is not None and active is self._setup_api.window
+                setup = (
+                    self._setup_api is not None and active is self._setup_api.window
+                    and not self._setup_api._lock.locked()
+                )
                 enabled = child or setup or (
                     search_id is not None and self.controller.can_close_window(search_id)
                 )

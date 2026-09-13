@@ -47,3 +47,18 @@ def test_native_setup_import(tmp_path: Path, action: str) -> None:
     )
     assert result.returncode == 0, result.stdout + result.stderr
     assert "Native setup import passed" in result.stdout
+
+
+@pytest.mark.skipif(
+    sys.platform != "darwin" or os.environ.get("MAILARCHIVER_NATIVE_SETUP_E2E") != "1",
+    reason="make test-native-setup requires a logged-in Mac",
+)
+def test_native_option_startup_and_reopen(tmp_path: Path) -> None:
+    """Native modifier flags force setup and Dock reopen reuses the existing window."""
+    result = subprocess.run(
+        [sys.executable, "-m", "e2e_tests.native_option_probe"],
+        env=os.environ | {"MAILARCHIVER_SETUP_FIXTURE": str(tmp_path)},
+        capture_output=True, text=True, timeout=60, check=False,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "Native Option startup and reopen passed" in result.stdout

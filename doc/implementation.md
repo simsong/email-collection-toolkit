@@ -955,7 +955,9 @@ receive the bridge reply; destroying it inside that call would strand a reply
 thread at exit. Cancel (also Escape) waits for its bridge reply thread to finish, then quits the
 application using the existing stop/checkpoint policy. No setup paths or
 preferences are written. Pending setup operations
-disable Cancel and prevent window closure. Errors stay
+disable Cancel and native File → Close and prevent window closure. Menu state
+refreshes on setup lock acquisition and release, including error recovery. Shared
+NSOpenPanel instances clear their accessory view before setting a new warning. Errors stay
 visible and controls recover for retry.
 `make test-startup` covers launch precedence, preference preservation, folder
 identity checks, and the three-box layout at default/minimum window sizes.
@@ -966,6 +968,11 @@ message, verifies its SHA-256 and untouched source, and requires clean exit.
 without changing preferences. The GUI maps `--new` and macOS's current
 `NSEvent.modifierFlags()` Option flag to that path before normal startup.
 The Dock reopen delegate samples the same flag and restores or creates setup.
+The native setup target also tests the sampler before application configuration,
+explicit/remembered archive bypass, normal Dock reopen, and Option reopening one
+existing setup window. Only the global hardware-modifier source is substituted
+with real NSEvent flags to avoid sending keystrokes to the user's desktop; this
+does not establish a physical Option-click/Finder launch test.
 The user holds Option through launch because the flag reports current key state.
 About is created hidden to retain the event loop and File New/Open after setup
 closes; the application menu explicitly shows it. Native dialog

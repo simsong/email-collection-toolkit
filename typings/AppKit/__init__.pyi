@@ -191,10 +191,17 @@ def NSRectFill(rect: Rect) -> None: ...
 
 
 NSEventModifierFlagOption: int
+NSEventModifierFlagShift: int
+NSEventTypeApplicationDefined: int
 
 class NSEvent:
     @classmethod
     def modifierFlags(cls) -> int: ...
+    @classmethod
+    def otherEventWithType_location_modifierFlags_timestamp_windowNumber_context_subtype_data1_data2_(
+        cls, event_type: int, location: Point, modifier_flags: int, timestamp: float,
+        window_number: int, context: object | None, subtype: int, data1: int, data2: int,
+    ) -> Self: ...
 
 class NSPasteboardItem:
     @classmethod

@@ -13,7 +13,7 @@ import traceback
 import webview
 
 from mailarchiver.application import ApplicationController, ApplicationPreferencesStore
-from mailarchiver.gui_app import GUI_DIRECTORY, PyWebViewApplication, configure_macos_application
+from mailarchiver.gui_app import GUI_DIRECTORY, PyWebViewApplication, configure_macos_application, macos_import_picker
 from mailarchiver.document_options import DocumentOptions
 from mailarchiver.ingest_status import read_ingest_history
 from mailarchiver.loopback import LoopbackAssetServer
@@ -49,7 +49,7 @@ def main() -> None:
     setup = webview.windows[-1]
     errors: list[str] = []
 
-    def schedule_panel(directory: Path | None, *, destination_picker: bool = False, accept: bool = True) -> None:
+    def schedule_panel(directory: Path | None, *, destination_picker: bool = False, accept: bool = True, warning: str | None = None) -> None:
         # Seed only the native browser's initial location with a disposable folder.
         # Accepted results still pass through NSOpenPanel and the real JS bridge.
         api = application._setup_api  # pylint: disable=protected-access
@@ -66,6 +66,14 @@ def main() -> None:
             panel = native.modalWindow()
             try:
                 assert panel is not None
+                accessory = panel.accessoryView()
+                if warning is None:
+                    assert accessory is None, "Folder picker retained the previous warning"
+                    close = native.mainMenu().itemWithTitle_("File").submenu().itemWithTitle_("Close")
+                    assert not close.isEnabled(), "Close remained enabled during setup selection"
+                    assert not api.cancel(), "Cancel accepted while the picker held the setup lock"
+                else:
+                    assert accessory is not None and accessory.stringValue() == warning
                 assert panel.canChooseDirectories() and not panel.canChooseFiles()
                 assert not panel.allowsMultipleSelection()
                 assert panel.treatsFilePackagesAsDirectories()
@@ -82,6 +90,22 @@ def main() -> None:
             foundation.NSRunLoop.mainRunLoop().addTimer_forMode_(timer, appkit.NSModalPanelRunLoopMode)
         app_helper.callAfter(schedule)
 
+    def check_close_enabled() -> None:
+        inspected = Event()
+
+        def inspect() -> None:
+            try:
+                native = appkit.NSApplication.sharedApplication()
+                assert native.mainMenu().itemWithTitle_("File").submenu().itemWithTitle_("Close").isEnabled()
+            except Exception:  # pylint: disable=broad-exception-caught
+                errors.append(traceback.format_exc())
+            finally:
+                inspected.set()
+        application._refresh_menus()  # pylint: disable=protected-access
+        app_helper.callAfter(inspect)
+        assert inspected.wait(5)
+        assert not errors, errors
+
     def click(identifier: str) -> None:
         setup.evaluate_js(f"document.getElementById('{identifier}').click()")
         evaluate_async(setup, "new Promise(resolve => {const t = setInterval(() => {if (!busy) {clearInterval(t); resolve(true);}}, 25);})")
@@ -96,9 +120,14 @@ def main() -> None:
             assert anchor is not None and not anchor.isVisible()
             application.show_setup()
             assert len(webview.windows) == 2, "Repeated setup duplicated the window"
+            check_close_enabled()
+            warning = "Fixture: previously unscanned import"
+            schedule_panel(source, accept=False, warning=warning)
+            assert not macos_import_picker(source, "Fixture", "Fixture", "Select", folders=True, files=False, warning=warning)
             for selected in (alternate, source):
                 schedule_panel(selected)
                 click("choose-source")
+                check_close_enabled()
                 actual = setup.evaluate_js("document.getElementById('source-path').value")
                 assert Path(actual).samefile(selected), (actual, str(selected))
             schedule_panel(None, accept=False)
@@ -108,6 +137,7 @@ def main() -> None:
             schedule_panel(source, destination_picker=True)
             click("choose-destination")
             click("start-import")
+            check_close_enabled()
             assert "separate" in setup.evaluate_js("document.getElementById('error').textContent")
             assert not controller.preferences_store.path.exists()
             schedule_panel(destination, destination_picker=True)

@@ -390,7 +390,7 @@ test-startup:
 	uv run pytest -q tests/test_application.py e2e_tests/test_startup.py --browser chromium
 
 test-native-setup:
-	MAILARCHIVER_NATIVE_SETUP_E2E=1 uv run pytest -q e2e_tests/test_startup.py::test_native_setup_import
+	MAILARCHIVER_NATIVE_SETUP_E2E=1 uv run pytest -q e2e_tests/test_startup.py -k native
 
 .PHONY: test-file-drag
 test-file-drag:
