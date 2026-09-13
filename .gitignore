@@ -20,3 +20,5 @@ validation/samconfig.toml
 /ocr-text/
 *.p12
 *.cer
+
+/var/pst/

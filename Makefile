@@ -44,11 +44,11 @@ RUST_EXE_SUFFIX := $(if $(filter Windows_NT,$(OS)),.exe,)
 RUST_TARGET_DIR ?= $(CURDIR)/target
 CARGO_RUN = $(CARGO) --config 'build.target-dir="$(RUST_TARGET_DIR)"'
 
-.PHONY: test-pst pst-import pst-smoke rust-programs mdti-validator mcti-generator pst-importer rust-toolchain rust-lock rust-fmt rust-check test-rust rust-smoke
+.PHONY: test-pst pst-import pst-smoke rust-programs mdti-validator mcti-generator pst-importer pst-downloader pst-download pst-download-plan test-pst-downloader rust-toolchain rust-lock rust-fmt rust-check test-rust rust-smoke
 rust-programs:
 	$(CARGO_RUN) build --locked --release --workspace --bins
 
-mdti-validator mcti-generator pst-importer:
+mdti-validator mcti-generator pst-importer pst-downloader:
 	$(CARGO_RUN) build --locked --release --bin $@
 
 rust-toolchain:
@@ -472,3 +472,14 @@ test-file-drag:
 .PHONY: test-owner-rules
 test-owner-rules: ruff
 	uv run pytest -q tests/test_owner_rules.py tests/test_gui_service.py tests/test_application.py
+
+# PST corpus acquisition is opt-in; ordinary checks never contact corpus servers.
+PST_DOWNLOAD_ARGS ?=
+pst-download: pst-downloader
+	"$(RUST_TARGET_DIR)/release/pst-downloader$(RUST_EXE_SUFFIX)" $(PST_DOWNLOAD_ARGS)
+
+pst-download-plan: pst-downloader
+	"$(RUST_TARGET_DIR)/release/pst-downloader$(RUST_EXE_SUFFIX)" --dry-run $(PST_DOWNLOAD_ARGS)
+
+test-pst-downloader:
+	$(CARGO_RUN) test --locked -p pst-downloader

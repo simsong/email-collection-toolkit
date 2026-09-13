@@ -20,7 +20,7 @@ compiler installed by the end user. The standalone helper is implemented; instal
 
 ```sh
 make rust-toolchain       # show compiler and Cargo versions
-make rust-programs        # build all three optimized executables
+make rust-programs        # build all optimized workspace executables
 make pst-importer        # build the Microsoft-crate PST adapter
 make mdti-validator       # build just the validator
 make mcti-generator       # build just the generator

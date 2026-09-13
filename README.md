@@ -43,6 +43,10 @@ required to build these tools. The standalone PST helper uses Microsoft's Rust c
 archive-host integration and packaging remain planned. Packaged PST users will
 need the compiled helper, not a compiler.
 
+PST test inventories and the Rust corpus downloader live in [`pst/`](pst/README.md);
+use `make pst-download-plan` to inspect the plan and `make pst-download` to fetch
+into ignored `var/pst/`.
+
 ## Goals
 
 `mailarchiver` is preservation infrastructure for personal and research email

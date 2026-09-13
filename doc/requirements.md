@@ -1759,3 +1759,15 @@ generated source fixtures also use `.mboxrd` names so re-import removes exactly
 one quoting level. Unknown external `.mbox` inputs retain their conservative
 interpretation. Canonical archive `.mbox` names and hash-guided recovery remain
 unchanged. This prevents generated files from silently gaining quote levels.
+
+## PST test corpus downloader
+
+The Rust `pst/pst-downloader.rs` tool reads the supplied `pst/*.json` inventories
+and acquires direct PSTs and PST members of ZIP/7z archives under ignored
+`var/pst/`. Use [the downloader contract](../pst/README.md) for schema and limits.
+Validate supplied SHA-256/lengths and basic PST signatures on completed files
+before publishing them to the cache; retain original
+artifacts and URL/member provenance, deduplicate only byte-identical content,
+and verify cache reuse without replacing corrupt evidence. Download/extraction
+is bounded and streaming; failures remain visible and prevent success while
+later sources can proceed. Dry-run and ordinary tests must not download corpora.

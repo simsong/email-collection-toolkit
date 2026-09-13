@@ -2293,3 +2293,17 @@ generated source fixtures also use `.mboxrd` names so re-import removes exactly
 one quoting level. Unknown external `.mbox` inputs retain their conservative
 interpretation. Canonical archive `.mbox` names and hash-guided recovery remain
 unchanged. This prevents generated files from silently gaining quote levels.
+
+## PST corpus acquisition implementation
+
+The Cargo workspace includes the `pst` package with `pst/pst-downloader.rs`.
+`make pst-download-plan` validates inventories without network/filesystem output;
+`make pst-download` streams HTTP through reqwest, ZIP through zip and 7z through
+sevenz-rust. Transfers only copy bytes; validation hashes the completed temporary
+files before publication. SHA-256-addressed PST objects, URL-keyed original artifacts/receipts,
+and atomic per-run/latest reports live under ignored `var/pst/`. A cache lock
+serializes writers. Supplied expected hashes differ explicitly from observations.
+[The contract](../pst/README.md) documents reruns, limits and unavailable links.
+`make test-pst-downloader` uses real temporary HTTP servers and archives to test
+exact bytes, deduplication, cache tampering, extraction and partial failure.
+The downloader does not invoke the PST importer or canonical archive engine.

@@ -690,3 +690,13 @@ Generated URI/name/version headers are covered by h2 and excluded from the selec
 top-level h3 headers. Reconstructed MIME and retained original-header/Message-ID
 evidence parts are covered by both h2 and the body portion of h3. These hashes
 protect the extraction result; retain the source PST/hash for original evidence.
+
+## Downloaded PST corpus controls
+
+The [PST downloader](../pst/README.md) records SHA-256 and size for each HTTP
+artifact and extracted PST, comparing supplied expected values where present.
+PST object names use their byte digest; URL hashes only select cache directories
+and do not attest content. Reports pin source inventory bytes with SHA-256 and
+map URL/member observations to objects. Cache reuse rechecks actual bytes.
+Observed digests establish local fixity, not source authenticity or completeness.
+These corpus hashes do not change archive h1/h2/h3 definitions.

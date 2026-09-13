@@ -4,6 +4,10 @@
 
 ## Unreleased
 
+* Add Rust `pst/pst-downloader.rs` and Makefile targets for inventory-driven PST,
+  ZIP and 7z acquisition into ignored `var/pst/`, with source/member reports,
+  SHA-256 verification, content deduplication, cache reuse and bounded extraction.
+
 * Require `.mboxrd` for derived PDF output and use it for audit/source fixtures,
   ensuring byte-preserving re-import. Make Rust run targets select `.exe` on Windows.
 
