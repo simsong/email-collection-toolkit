@@ -1,3 +1,5 @@
+// Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved.
+
 //! MCT Importer API 1.0 PST executable; see doc/PST_IMPORTER.md.
 use std::{io, path::Path, process::ExitCode};
 fn main() -> ExitCode {

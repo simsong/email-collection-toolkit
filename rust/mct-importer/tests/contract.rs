@@ -1,3 +1,5 @@
+// Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved.
+
 //! Substantive MCT Importer API 1.0 regressions; see doc/MCT_IMPORTER_API.md.
 use mct_importer::{generate, validate, Report, DEFAULT_MAX_MESSAGE_BYTES};
 use std::io::{Cursor, Write};

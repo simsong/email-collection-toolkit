@@ -1,3 +1,5 @@
+<!-- Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved. -->
+
 # On-disk mail formats and import backends
 
 **Status:** inventory updated 2026-09-12; original research snapshot 2026-08-31.

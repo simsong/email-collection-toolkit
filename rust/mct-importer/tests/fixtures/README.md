@@ -1,3 +1,5 @@
+<!-- Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved. -->
+
 # Public PST fixtures
 
 These are public upstream examples, not a user's mail archive. Preserve their

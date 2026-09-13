@@ -1,3 +1,5 @@
+// Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved.
+
 //! Synthetic MCT Importer API 1.0 producer; see doc/MCT_IMPORTER_API.md.
 use mct_importer::{generate, API_VERSION};
 use std::io;

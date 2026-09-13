@@ -1,3 +1,5 @@
+// Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved.
+
 //! Read-only Microsoft outlook-pst adapter. Requirements: doc/PST_IMPORTER.md.
 use anyhow::{bail, ensure, Context, Result};
 use base64::{engine::general_purpose::STANDARD, Engine};

@@ -1,3 +1,5 @@
+<!-- Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved. -->
+
 # MCT Importer API Version 1.0
 
 Version 1.0 defines a read-only executable interface: a production importer

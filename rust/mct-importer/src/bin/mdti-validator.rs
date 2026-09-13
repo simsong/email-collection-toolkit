@@ -1,3 +1,5 @@
+// Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved.
+
 //! Discarding MCT Importer API 1.0 validator; see doc/MCT_IMPORTER_API.md.
 use mct_importer::{validate, API_VERSION, DEFAULT_MAX_MESSAGE_BYTES};
 use std::io;

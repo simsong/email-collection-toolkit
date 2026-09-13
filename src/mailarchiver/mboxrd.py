@@ -1,3 +1,5 @@
+# Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved.
+
 """Reversible MBOXRD storage quoting; inputs exclude the record separator."""
 
 import re

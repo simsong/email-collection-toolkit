@@ -1,3 +1,5 @@
+// Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved.
+
 //! Requirements: doc/PST_IMPORTER.md — real PST extraction, source fixity,
 //! deterministic MIME/attachment recovery, partial runs, and process failures.
 use mailparse::{MailHeaderMap, ParsedMail};

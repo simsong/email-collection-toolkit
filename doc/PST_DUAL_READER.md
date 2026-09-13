@@ -1,3 +1,5 @@
+<!-- Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved. -->
+
 # Ingest executables and independent PST passes
 
 **Status: updated 2026-09-13.** [MCT Importer API Version 1.0](MCT_IMPORTER_API.md)

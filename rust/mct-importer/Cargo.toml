@@ -1,3 +1,5 @@
+# Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved.
+
 [package]
 name = "mct-importer"
 version = "1.0.0"

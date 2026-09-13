@@ -1,3 +1,5 @@
+<!-- Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved. -->
+
 # Microsoft-crate PST importer
 
 `pst-importer` implements [MCT Importer API 1.0](MCT_IMPORTER_API.md) using

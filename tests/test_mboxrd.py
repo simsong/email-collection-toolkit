@@ -1,3 +1,5 @@
+# Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved.
+
 """Requirements: reversible MBOXRD, legacy recovery, and exact h2 including provenance.
 
 See doc/MBOX_READING.md and doc/INTEGRITY_CONTROLS.md.
