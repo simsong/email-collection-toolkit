@@ -4,6 +4,11 @@
 
 ## Unreleased
 
+* The standalone verifier announces each file before processing, displays
+  per-pass hashing and message progress bars, and supports `--quiet`/`-q`.
+  Clarify the archive-root argument and script-directory default. Ctrl-C now
+  reports incomplete verification and exits 130 without a traceback.
+
 * Report missing project copyright notices as warnings so they do not fail CI
   or release builds; retain the copyright notice in the Makefile.
 

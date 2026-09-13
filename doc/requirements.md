@@ -1403,6 +1403,12 @@ and retain the current explicit-path CLI instructions.
   Its source header and `--help` explain prerequisites, macOS/Linux and Windows
   commands, the default archive directory, checks performed, exit status, and
   read-only limitations. Instructions travel with every installed copy.
+  The optional `archive` argument names the BagIt/Mailbag root and defaults to
+  the script's directory, independent of the working directory. Before processing
+  each file, print its path to stdout. Show throttled per-pass byte/message
+  progress bars on stderr, including during the initial payload hashing pass.
+  `--quiet`/`-q` suppresses informational output but retains errors. Ctrl-C
+  reports incomplete verification without a traceback and returns status 130.
 * The MBOX container's required separator newline is not part of a source
   message that lacked a terminal newline. Catalog retrieval and standalone
   verification select the candidate matching the recorded source SHA-256.
