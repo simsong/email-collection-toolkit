@@ -52,8 +52,17 @@ Info.plist; the Cocoa delegate handles document-open events and retains
 pywebview's close/ingest safeguards. File Open also accepts extensionless archive
 directories. Installation does not force replacement of another default handler.
 
-The build mounts the candidate DMG read-only and runs both self-tests from its
-bundled executable, with a system-only PATH and no Python environment overrides.
+Ordinary `make dmg` and `make dmg-signed` mount the candidate DMG read-only and
+run its headless self-test, with a system-only PATH and no Python environment
+overrides. They do not open GUI test windows.
+
+`make check-release` builds and validates a DMG with both headless and GUI tests.
+Use `make check-release DMG=/absolute/path/to/image.dmg` to validate an existing
+build instead. The GitHub release workflow requires this target on `macos-15`.
+It announces the GUI self-test before opening synthetic About, search, Ingests,
+and source-picker windows. These windows close automatically. A GUI worker
+that remains after the five-second shutdown grace period fails the build with
+a thread dump; a printed test report alone is not evidence of process exit.
 It verifies the code-signature seal and always attempts to detach the volume.
 It also audits every bundled Mach-O file for external non-system library paths.
 Ejection retries briefly if macOS still holds the volume; cleanup is nonrecursive
@@ -67,6 +76,7 @@ make self-test
 make self-test-gui
 make test-packaging
 make test-dmg DMG="/absolute/path/to/Email-Collection-Toolkit-0.0.0-arm64.dmg"
+make check-release DMG="/absolute/path/to/Email-Collection-Toolkit-0.0.0-arm64.dmg"
 ```
 
 The first target displays no windows. The second shows and closes the real
@@ -107,7 +117,20 @@ scanned by a later ordinary import; a rescan command remains future work.
 
 ## Signing and Apple account renewal
 
-On an isolated GitHub-hosted runner, `make dmg` imports a Developer ID Application
+For local signing with a certificate and private key already in your Keychain:
+
+```sh
+make list-signatures
+make dmg-signed
+```
+
+`dmg-signed` defaults to the first valid **Developer ID Application** identity
+listed by macOS. It fails before building if none is available. To select a
+different identity, use `make dmg-signed SIGNING_IDENTITY=HASH`, using the
+certificate hash from `list-signatures`. The target signs both the application
+and DMG; notarization remains separate.
+
+On an isolated GitHub-hosted runner, `make dmg` and `make check-release` import a Developer ID Application
 identity when both
 `APPLE_CERTIFICATE_P12_BASE64` and `APPLE_CERTIFICATE_PASSWORD` are available.
 The [certificate management guide](CERTIFICATE_MANAGEMENT.md) explains exporting
@@ -145,10 +168,10 @@ The mounted local tests do not establish downloaded-file Gatekeeper acceptance.
    Renewing membership does not renew an expired signing certificate. Follow
    Apple's [Developer ID instructions](https://developer.apple.com/help/account/certificates/create-developer-id-certificates).
    Developer ID Installer is for `.pkg` installers, not this drag-install DMG.
-3. Build with the certificate's Keychain identity:
+3. Build with the default Developer ID Application identity from your Keychain:
 
    ```sh
-   make dmg ARGS='--signing-identity "Developer ID Application: YOUR NAME (TEAMID)"'
+   make dmg-signed
    ```
 
 4. Before public distribution, submit the DMG with `xcrun notarytool`, inspect

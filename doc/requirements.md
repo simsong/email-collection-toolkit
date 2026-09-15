@@ -1422,6 +1422,11 @@ error in a build-only script cannot escape ordinary validation.
 `make dmg` builds a self-contained, native-architecture PyInstaller `.app` and
 a compressed DMG containing it, an Applications shortcut, and drag-to-install
 instructions.
+`make dmg-signed` must invoke the same build with the first valid Developer ID
+Application identity in the local Keychain search list, overridable with
+`SIGNING_IDENTITY`. An absent identity or `-` must fail before building.
+`make list-signatures` must list valid local code-signing identities and their
+certificate hashes. These targets do not automate notarization.
 The Finder window must present a large app icon on the left and the real
 Applications shortcut on the right, with an arrow and drag-to-install
 instructions in the background. Only those two items are visible; instructions
@@ -1458,13 +1463,22 @@ archive and checksum the final image. Signing is not notarization: neither
 build is automatically notarized, and no Gatekeeper bypass is performed. The archive extension is declared
 in the bundle's document-type metadata.
 
-The build must mount its DMG read-only, verify the bundle seal, run a headless
-self-test and a visible native self-test using the mounted executable, and
-detach the volume even on test failure. Tests use disposable fixtures and
+Ordinary `make dmg`, `make dmg-signed`, and `make test-dmg` must run only the
+headless mounted self-test, without opening GUI test windows. `make check-release`
+must additionally run the visible native self-test on the built DMG; `DMG=path`
+selects an existing image instead of rebuilding. GitHub release assembly must
+require `make check-release` before uploading the DMG.
+Both paths must mount read-only, verify the bundle seal, and detach the volume
+even on test failure. Tests use disposable fixtures and
 preferences, never the last real archive. They exercise no-ClamAV ingest,
 source-byte preservation, search, BagIt verification, repeat-import idempotence,
 native bridge startup, and the missing-antivirus banner. A failed check prevents
 replacement of a prior DMG. JSON reports accompany the successful artifact.
+Announce the visible test before opening its windows. GUI test success requires
+background workers that block process exit to stop within a five-second grace
+period after GUI shutdown. A remaining worker must produce a failed report,
+thread stacks, and a nonzero exit rather than a successful report followed by
+an interpreter-shutdown hang. The parent must still require successful process exit.
 The bundled-library audit must distinguish `LC_ID_DYLIB` metadata from actual
 load commands; a binary's own install name is not an imported dependency.
 Unresolved imported libraries must still fail validation.

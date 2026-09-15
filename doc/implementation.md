@@ -1613,6 +1613,13 @@ documentation adds no Windows runtime or packaging support.
 
 ## macOS packaging
 
+`make dmg-signed` calls `make dmg` with `--signing-identity` in `ARGS`, selecting
+the first Developer ID Application certificate hash from
+`security find-identity -v -p codesigning`. `SIGNING_IDENTITY` overrides this
+default; an empty identity or `-` fails before building. `make list-signatures`
+prints the same command's full list of valid code-signing identities. Existing
+`ARGS` are retained, with the selected signing identity appended last.
+
 `make ruff` passes a NUL-delimited list from `git ls-files --cached --others
 --exclude-standard` to `uv run --locked ruff check --config pyproject.toml`. It is a required prerequisite
 of `make check` and `make dmg`, and CI and source-release builds also run it.
@@ -1646,7 +1653,7 @@ Missing either secret emits `::warning::` and produces `*_UNSIGNED.dmg`; invalid
 configured credentials fail. An explicit `--signing-identity` overrides secrets;
 `-` emits a distinct warning identifying that deliberate unsigned override.
 The release workflow builds the DMG on `macos-15`, passes secrets only to
-`make dmg`, and waits for the tested artifact before assembling the source and
+`make check-release`, and waits for the tested artifact before assembling the source and
 DMG checksums into a draft release. Assembly checks out the Mac job's verified
 commit and checks that the tag still names that commit. Before project commands,
 the Mac job imports the administrator's `RELEASE_SIGNING_PUBLIC_KEYS` variable
@@ -1686,10 +1693,21 @@ and ejects it when Return is pressed. This preview does not install the app.
 preferences. It verifies ingest, original bytes, FTS search, fixity, idempotence,
 and not-scanned evidence. The visible mode exercises production window bridges
 and cancels the real source picker after inspecting its warning banner.
+After GUI shutdown, it joins non-daemon workers within one five-second budget.
+Remaining workers produce a failed JSON report with their names, a Python thread
+dump, and immediate nonzero test-process exit. The 120-second watchdog also
+marks failure and dumps stacks. `make test-self-test` validates the worker gate
+with real finishing and blocked threads plus the existing packaging tests.
+The builder announces each mounted test, including its visible windows, and
+requires the subprocess to exit successfully before accepting its report.
 The DMG build stages the app, Applications symlink, and instructions, mounts
-the compressed candidate read-only, verifies its seal, runs both frozen tests
-with a system-only PATH, and detaches in `finally`. It publishes the candidate
-and JSON reports only on success. The Mach-O audit reads library import load
+the compressed candidate read-only, verifies its seal, runs the frozen headless
+test with a system-only PATH, and detaches in `finally`. `make check-release`
+adds `--check-release` to enable the frozen GUI test; `DMG=path` adds `--test-dmg`
+to validate an existing image. Ordinary builds and `make test-dmg` open no GUI
+test windows. A normal rebuild removes any stale GUI report for its output path.
+It publishes the candidate and requested JSON reports only on success.
+The Mach-O audit reads library import load
 commands explicitly, excluding `LC_ID_DYLIB`, which `otool -L` also displays.
 A compiled-library regression proves that an alternate self install name
 passes while a real unresolved import still fails. See [MACOS_DISTRIBUTION.md](MACOS_DISTRIBUTION.md)

@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+* Keep local `make dmg`, `make dmg-signed`, and `make test-dmg` headless. Add
+  `make check-release` for the visible GUI test of a new or existing (`DMG=path`)
+  image, and require it in GitHub release assembly. Require the GUI self-test's
+  background workers to exit before reporting success; fail with thread
+  diagnostics after a bounded shutdown wait and announce the test windows.
+
+* Add `make dmg-signed` to build with the first valid local Developer ID
+  Application identity, with a `SIGNING_IDENTITY` override. Add
+  `make list-signatures` to list available code-signing identities. Signed
+  builds fail if no identity is selected; notarization remains separate.
+
 * Normalize an immediate quoted MBOX delimiter into a literal `X-From:` header.
   Promote a meaningful inner envelope when the outer sender is `XXX` or
   `???@???`; retain the displaced outer value as `X-From:`. Preserve body

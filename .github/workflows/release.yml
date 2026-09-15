@@ -126,12 +126,12 @@ jobs:
         # GitHub supplies GITHUB_ACTIONS and RUNNER_ENVIRONMENT to every step:
         # https://docs.github.com/en/actions/reference/workflows-and-actions/variables#default-environment-variables
         run: make test-signing
-      - name: Build and test DMG
+      - name: Build DMG and validate release including native GUI
         if: ${{ runner.environment == 'github-hosted' }}
         env:
           APPLE_CERTIFICATE_P12_BASE64: ${{ secrets.APPLE_CERTIFICATE_P12_BASE64 }}
           APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
-        run: make dmg
+        run: make check-release
       - name: Upload tested DMG
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:

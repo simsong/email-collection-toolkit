@@ -121,7 +121,7 @@ def mounted_image(dmg: Path):
                 pass
 
 
-def test_image(dmg: Path) -> None:
+def test_image(dmg: Path, *, gui: bool = False) -> None:
     """Mount read-only and test the actual bundle outside the source checkout."""
     with mounted_image(dmg) as mount:
         app = mount / f"{APP_NAME}.app"
@@ -135,7 +135,9 @@ def test_image(dmg: Path) -> None:
                        if key not in (CERTIFICATE_SECRET, PASSWORD_SECRET)
                        and not key.startswith(("PYTHON", "DYLD_", "MAILARCHIVER", "MAIL_ARCHIVE"))}
         environment["PATH"] = "/usr/bin:/bin:/usr/sbin:/sbin"
-        for mode in ("self-test", "self-test-gui"):
+        for mode in (("self-test", "self-test-gui") if gui else ("self-test",)):
+            detail = "opens and closes synthetic test windows" if mode == "self-test-gui" else "no windows"
+            print(f"Running mounted {mode} ({detail}); waiting for the test process to exit.", flush=True)
             report_path = dmg.with_suffix(f".{mode}.json")
             run(executable, f"--{mode}", "--report", report_path,
                 cwd=mount.parent, env=environment, timeout=150)
@@ -227,7 +229,7 @@ def verify_dependencies(app: Path) -> None:
     print(f"Verified {len(checked)} bundled Mach-O files: no external non-system library paths")
 
 
-def build(signing_identity: str) -> Path:
+def build(signing_identity: str, *, gui: bool = False) -> Path:
     output = ROOT / "dist"
     output.mkdir(exist_ok=True)
     work_root = ROOT / ".tmp"
@@ -276,18 +278,22 @@ def build(signing_identity: str) -> Path:
         dmg = output / dmg_filename(version("mailarchiver"), platform.machine(), signing_identity)
         candidate = work / "candidate.dmg"
         create_image(app, app_icon, candidate, work)
-        # Keep a previous artifact until both mounted tests have passed.
-        test_image(candidate)
+        # Keep a previous artifact until the requested mounted tests have passed.
+        test_image(candidate, gui=gui)
         sign_image(candidate, signing_identity)
         candidate.replace(dmg)
-        for mode in ("self-test", "self-test-gui"):
+        for mode in (("self-test", "self-test-gui") if gui else ("self-test",)):
             candidate.with_suffix(f".{mode}.json").replace(dmg.with_suffix(f".{mode}.json"))
+        if not gui:
+            # An older GUI report must not imply this replacement image passed release checks.
+            dmg.with_suffix(".self-test-gui.json").unlink(missing_ok=True)
         return dmg
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--test-dmg", type=Path, help="mount and retest an existing DMG")
+    parser.add_argument("--check-release", action="store_true", help="include the visible GUI self-test for release validation")
     parser.add_argument("--preview-dmg", type=Path, help="open the mounted installer in Finder until Return is pressed")
     parser.add_argument("--signing-identity", help="existing Keychain identity; otherwise import optional signing secrets; '-' forces unsigned")
     args = parser.parse_args()
@@ -298,11 +304,11 @@ def main() -> None:
             run("/usr/bin/open", mount)
             input("Inspect the installer in Finder; press Return to eject: ")
     elif args.test_dmg:
-        test_image(args.test_dmg.resolve(strict=True))
+        test_image(args.test_dmg.resolve(strict=True), gui=args.check_release)
     else:
         credentials = SigningSecrets.from_environment(os.environ)
         with signing_identity(credentials, ROOT / ".tmp", args.signing_identity) as identity:
-            print(f"Built and tested: {build(identity)}")
+            print(f"Built and tested: {build(identity, gui=args.check_release)}")
 
 
 if __name__ == "__main__":

@@ -144,7 +144,7 @@ def test_release_waits_for_exact_dmg_before_checksumming() -> None:
     assert steps[download][WITH][NAME] == "macos-dmg"
     assert "*.dmg" in steps[checksum][RUN]
     secret_steps = [step for step in macos[STEPS] if CERTIFICATE_SECRET in step.get(ENV, {})]
-    assert len(secret_steps) == 1 and secret_steps[0][RUN] == "make dmg"
+    assert len(secret_steps) == 1 and secret_steps[0][RUN] == "make check-release"
     assert PASSWORD_SECRET in secret_steps[0][ENV]
     assert macos[RUNS_ON] == "macos-15"
     assert secret_steps[0][CONDITION] == "${{ runner.environment == 'github-hosted' }}"
