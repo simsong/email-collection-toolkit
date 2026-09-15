@@ -70,6 +70,13 @@ directory, and a `data/mbox/` payload directory.
 
 * Mail is stored only under `data/mbox/` in standard MBOX files, using
   byte-preserving mboxrd quoting. Do not retain a per-message EML corpus.
+* Accept LF and CRLF input independently of the host operating system. Do not
+  recode line endings in message headers, bodies, attachments, or existing
+  delimiters during import, storage, or retrieval. Preserve lone CR characters:
+  they may be content, such as terminal progress output emailed from stdout,
+  rather than line terminators. Platform newline translation must not change
+  source bytes. This policy does not change the explicitly documented MBOX
+  framing rules or normalize bytes before canonical integrity hashing.
 * Preserve every available original `From ` record delimiter, including sender,
   timestamp, whitespace, and line ending. Carry MBOX framing separately from
   RFC message bytes so message hashes and deduplication stay unchanged except

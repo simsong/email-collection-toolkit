@@ -54,6 +54,16 @@ recovery.  Capture the pre-append and post-flush file offsets for the future
 reader.  Use the standard `email` package only for header/MIME parsing while
 retaining original RFC 5322 bytes for identity hashing and output.
 
+Line-ending policy is tolerant reading with byte-preserving storage: accept LF
+and CRLF without converting either representation, and retain lone CR content.
+CR characters in emailed program output can be terminal controls, so their
+presence alone does not identify a newline convention. The raw integrity hash
+continues to describe the stored message bytes; semantic-hash normalization is
+a separate derived calculation, not permission to rewrite mail. Windows archive
+writing remains unsupported. Before enabling it, both reading and writing must
+avoid platform newline translation, including the standard-library `mailbox`
+conversion path; passing bytes alone is not sufficient on Windows.
+
 Use SHA-256 as the canonical hash.  A local OpenSSL 3.6.3 benchmark on this
 Apple Silicon host measured 2.74 GB/s for SHA-256 on 16 KiB blocks, versus
 1.61 GB/s for SHA-512 and 0.98 GB/s for SHA3-256.  Do not require BLAKE3: it
