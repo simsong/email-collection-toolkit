@@ -1,3 +1,5 @@
+<!-- Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved. -->
+
 # Mail archive GUI prototype
 
 The compiled replacement UI will evaluate **Dioxus Desktop and Tauri**, with Python
@@ -27,7 +29,8 @@ make gui ARGS="--archive /path/to/archive"
 
 The archive must contain `archive.sqlite3`, `search.sqlite3`, and the canonical
 MBOX files referenced by the catalog. Without `--archive`, the app opens the
-last valid archive or offers Open Existing, Create New, and Cancel.
+last valid archive or shows the three-step setup. Use `make gui ARGS="--new"`
+to show setup again, or hold Option while launching the Mac app until it appears.
 Use **File → Open…** (Command-O) to open an archive in a new window, and **Window → New Search
 Window** for another independently searchable view of the active archive.
 **File → New** selects a permanent destination before initialization, and

@@ -1,3 +1,5 @@
+<!-- Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved. -->
+
 # Release notes
 
 ## Unreleased
@@ -13,6 +15,32 @@
   `make list-signatures` to list available code-signing identities. Signed
   builds fail if no identity is selected; notarization remains separate.
 
+* Report missing project copyright notices as warnings so they do not fail CI
+  or release builds; retain the copyright notice in the Makefile.
+
+* Reconcile the copyright/license draft with current validation and release
+  workflows. Preserve external artwork and generated workflow bytes, cover
+  current project source files, and retain the ordered lint/type/test gates.
+* Disable New Folder in macOS setup browsers to prevent source-tree writes before
+  validation. Reserve a job-free Cancel/quit atomically against new imports;
+  a competing import receives the normal stop confirmation and checkpoint wait.
+
+* Keep native Close disabled globally throughout setup operations, including
+  Cancel and modal dialogs that fall back to an existing search window; reject
+  queued Close actions while setup is locked.
+
+* Disable native Close while setup dialogs or import startup are pending, restore
+  it on completion or error, and clear stale warnings from reused folder pickers.
+  Add native Option sampling/reopen regression coverage.
+
+* Reconcile startup setup with the current owner email editor and preserve
+  Finder file dragging, launch-argument handling, and shared import safeguards.
+
+* Add a three-step first-run setup window with repeatable source/archive folder
+  selection, Cancel to quit, and Start import opening progress. Reopen setup with `--new` or
+  Option held during macOS launch (also Option-click on the running Dock icon).
+  Preserve remembered archives, reject overlapping folders, and keep About
+  available from the application menu without showing it at startup.
 * Normalize an immediate quoted MBOX delimiter into a literal `X-From:` header.
   Promote a meaningful inner envelope when the outer sender is `XXX` or
   `???@???`; retain the displaced outer value as `X-From:`. Preserve body
@@ -137,6 +165,11 @@
   wrappers. Require pr-to-ready to integrate stranded task work before handoff
   and perform verified post-merge checkout cleanup. Retain dirty, unmerged,
   and private evidence-bearing worktrees until their disposition is settled.
+
+* Require pr-to-ready to disclose potential conflicts with active work and obtain
+  user approval for the coordination plan before proceeding. Add explicit
+  handoff cleanup with verified publication, artifact preservation, retained
+  unmerged branch refs, and removal of retired skill-distribution entries.
 
 * Limit Ruff discovery to tracked and non-ignored new Python files, avoiding
   generated directories while supporting project-local linked worktrees.
