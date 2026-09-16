@@ -749,7 +749,7 @@ def _payload_files(archive: Path) -> tuple[list[Path], list[str]]:
     return files, errors
 
 
-def verify_archive(archive: Path, quiet: bool = False) -> list[str]:
+def verify_archive(archive: Path, quiet: bool = True) -> list[str]
     progress = _Progress(quiet)
     errors: list[str] = []
     legacy = sorted((*archive.glob("*.mbox"), *archive.glob("*.mbox.integrity")))
