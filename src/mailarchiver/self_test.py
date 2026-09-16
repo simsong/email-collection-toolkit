@@ -8,14 +8,16 @@ Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved.
 from __future__ import annotations
 
 import argparse
+import faulthandler
 import hashlib
 import os
 import sqlite3
 import sys
 import tempfile
+import time
 from importlib import import_module
 from pathlib import Path
-from threading import Event, Timer
+from threading import Event, Timer, current_thread, enumerate as enumerate_threads
 
 from pydantic import BaseModel, Field
 
@@ -32,6 +34,15 @@ class SelfTestReport(BaseModel):
     passed: bool = False
     checks: list[str] = Field(default_factory=list)
     error: str | None = None
+
+
+def pending_gui_workers(timeout: float = 5) -> tuple[str, ...]:
+    """Give exit-blocking workers one bounded grace period before declaring failure."""
+    workers = [worker for worker in enumerate_threads() if worker is not current_thread() and not worker.daemon]
+    deadline = time.monotonic() + timeout
+    for worker in workers:
+        worker.join(timeout=max(0, deadline - time.monotonic()))
+    return tuple(worker.name for worker in workers if worker.is_alive())
 
 
 def exercise_core(directory: Path, report: SelfTestReport) -> Path:
@@ -202,8 +213,10 @@ def main() -> int:
             args.report.write_text(report.model_dump_json(indent=2) + "\n", encoding="utf-8")
 
     def timeout():
+        report.passed = False
         report.error = "Self-test exceeded 120 seconds"
         save()
+        faulthandler.dump_traceback()
         os._exit(1)  # Native event-loop failures must not hang a release build.
 
     watchdog = Timer(120, timeout)
@@ -220,6 +233,12 @@ def main() -> int:
             archive = exercise_core(directory, report)
             if args.self_test_gui:
                 exercise_gui(archive, directory, report)
+                if pending := pending_gui_workers():
+                    report.error = f"GUI shutdown left threads running: {', '.join(pending)}"
+                    save()
+                    faulthandler.dump_traceback()
+                    os._exit(1)  # Fail this disposable test instead of hanging during interpreter shutdown.
+                report.checks.append("GUI worker threads exited")
             elif "webview.platforms.cocoa" in sys.modules:
                 raise AssertionError("headless diagnostics loaded the native GUI")
             report.passed = True
