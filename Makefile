@@ -108,9 +108,21 @@ pyright:
 syntax-check:
 	uv run python -m compileall -q src scripts tests e2e_tests
 
-.PHONY: dmg test-dmg preview-dmg self-test self-test-gui test-packaging
+.PHONY: dmg dmg-signed list-signatures check-release test-dmg preview-dmg self-test self-test-gui test-packaging
 dmg: ruff syntax-check
 	uv run --group packaging python scripts/build_macos.py $(ARGS)
+
+# Use the first valid Developer ID Application identity in the Keychain search list.
+dmg-signed: SIGNING_IDENTITY ?= $(shell /usr/bin/security find-identity -v -p codesigning | awk '/"Developer ID Application: / {print $$2; exit}')
+dmg-signed:
+	@test -n "$(strip $(SIGNING_IDENTITY))" -a "$(strip $(SIGNING_IDENTITY))" != '-' || { echo 'No Developer ID Application identity selected. Run make list-signatures or set SIGNING_IDENTITY.' >&2; exit 2; }
+	$(MAKE) dmg ARGS='$(ARGS) --signing-identity "$(SIGNING_IDENTITY)"'
+
+list-signatures:
+	/usr/bin/security find-identity -v -p codesigning
+
+check-release: ruff syntax-check
+	uv run --group packaging python scripts/build_macos.py --check-release $(if $(DMG),--test-dmg "$(DMG)") $(ARGS)
 
 test-dmg:
 	@test -n "$(DMG)" || { echo 'usage: make test-dmg DMG=/path/to/Email-Collection-Toolkit.dmg'; exit 2; }
@@ -127,7 +139,14 @@ self-test-gui:
 	uv run mailsearch-gui --self-test-gui $(ARGS)
 
 test-packaging:
-	uv run pytest -q tests/test_packaging.py tests/test_macos_signing.py
+	uv run pytest -q tests/test_packaging.py tests/test_macos_signing.py tests/test_self_test.py
+
+.PHONY: test-self-test
+test-self-test: ruff
+	PYTHONPATH="$(CURDIR)" uv run --locked pylint src/mailarchiver/self_test.py scripts/build_macos.py tests/test_self_test.py
+	uv run --locked ty check src/mailarchiver/self_test.py scripts/build_macos.py tests/test_self_test.py --error-on-warning
+	uv run --locked pyright src/mailarchiver/self_test.py scripts/build_macos.py tests/test_self_test.py --warnings
+	uv run --locked pytest -q tests/test_self_test.py tests/test_packaging.py
 
 .PHONY: test-signing
 test-signing: ruff
