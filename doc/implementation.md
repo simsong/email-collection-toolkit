@@ -707,6 +707,22 @@ the existing `schema_info` version check does not implement those safeguards.
 
 ### Planned Contacts and geography
 
+[The proposed processor graphs](PLUGINS.md#proposed-ranked-processing-graphs)
+and website plugin page describe the agreed direction, including resumable work
+selection, handoff plugins, first-class attached messages and durable tags.
+Ingest owns scanning and filing, message processing owns header metadata, and
+content processing owns MIME dispatch. Content-only resumption operates on
+eligible already-ingested messages. Standard deduplication shares message
+content/metadata while separate observations retain attachment provenance.
+All plugins may access all headers and content of their current message.
+Filing may read what it needs after ClamAV. Content-discovered child messages
+enter message processing directly without another antivirus scan, retaining
+parent scan provenance; the handoff uses shared deduplication/publication
+services to establish their records and durable content references.
+The graphic is a shared SVG in `website/static/images/processor-dag.svg`.
+None of that dispatcher, extraction scheduling, attachment promotion or tag
+persistence is implemented by this documentation change.
+
 The standalone `make matcher-prototype` opens independent name and institution
 windows through a temporary `LoopbackAssetServer` and pywebview. Use
 `ARGS="--kind name"` or `ARGS="--kind institution"` to open just one. Closing both

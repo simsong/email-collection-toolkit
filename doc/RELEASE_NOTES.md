@@ -4,6 +4,10 @@
 
 ## Unreleased
 
+* Document proposed ranked processor DAGs with a shared website graphic and
+  track the future tag editor in issue #119. These are design documents, not a
+  completed processing-pipeline refactor.
+
 * Add experimental name and institution matcher windows with synthetic data,
   large disclosure triangles, mailbox/domain and date filters, sortable columns,
   drag-to-merge, and undo. `make matcher-prototype` opens both subclasses.

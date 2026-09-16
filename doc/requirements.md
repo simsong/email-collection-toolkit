@@ -532,6 +532,26 @@ table also stores explicitly labeled non-email Google Chat identities.
 
 ## Contacts and geographic reference data
 
+### Planned processor and identity integration
+
+The proposed ranked publish/subscribe processor DAGs, handoff plugins,
+incomplete-work prompt, scanner timeout/statistics, synthetic-part provenance,
+and first-class attached-message handling are specified in
+[PLUGINS.md](PLUGINS.md#proposed-ranked-processing-graphs). They are not yet
+implemented. Manual decisions must survive reruns. Attached messages must retain
+parent paths and an attachment tag, initially displayed with a 5% gray background.
+The future SQLite-backed tag editor is tracked in issue #119; nullable style
+attributes mean no change. The three pipelines are ingest (ClamAV then filing/handoff), message processing
+(header metadata then content handoff), and content processing (MIME dispatch).
+Content-only resumption may process already-ingested messages while ingest is
+incomplete. Attached occurrences use standard deduplication, retaining separate
+provenance records linked to shared canonical content and message metadata.
+All plugins can access every header and all content of their current message;
+the filing plugin may read what it needs after scanning. Discovered child
+messages return directly to message processing without another antivirus scan,
+retaining parent scan provenance and using shared deduplication/publication
+services for the child record and content reference.
+
 ### Synthetic matcher window prototype
 
 A reusable matcher window shall show canonical entries with large disclosure
