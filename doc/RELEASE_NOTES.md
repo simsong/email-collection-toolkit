@@ -4,6 +4,10 @@
 
 ## Unreleased
 
+* The standalone verifier announces each file before processing, displays
+  per-pass hashing and message progress bars, and supports `--quiet`/`-q`.
+  Clarify the archive-root argument and script-directory default. Ctrl-C now
+  reports incomplete verification and exits 130 without a traceback.
 * Keep local `make dmg`, `make dmg-signed`, and `make test-dmg` headless. Add
   `make check-release` for the visible GUI test of a new or existing (`DMG=path`)
   image, and require it in GitHub release assembly. Require the GUI self-test's
