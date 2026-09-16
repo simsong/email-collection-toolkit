@@ -30,6 +30,7 @@ from mailarchiver.standalone_verify import (
     IntegrityMessage,
     install_archive_verifier,
     semantic_bytes,
+    verify_archive,
     verify_mbox,
     write_integrity_file,
 )
@@ -327,6 +328,22 @@ def test_installed_verifier_progress_quiet_and_default_directory(tmp_path: Path)
     assert failed.returncode == 1 and not failed.stdout
     assert "mismatch" in failed.stderr and "FAILED:" in failed.stderr
     assert "Archive integrity verified" not in failed.stderr
+
+
+def test_verify_archive_defaults_to_observable_progress(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    """Requirement: direct archive verification remains verbose unless quiet is requested."""
+    archive = tmp_path / "archive"
+    archive.mkdir()
+    make_integrity_archive(archive)
+
+    assert verify_archive(archive) == []
+    default = capsys.readouterr()
+    assert "Checking declaration:" in default.out
+    assert "100.0%" in default.err
+
+    assert verify_archive(archive, quiet=True) == []
+    quiet = capsys.readouterr()
+    assert quiet == ("", "")
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="POSIX FIFO and SIGINT synchronization")
