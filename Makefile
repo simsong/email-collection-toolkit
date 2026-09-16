@@ -211,6 +211,16 @@ summary-smoke:
 gui:
 	uv run mailsearch-gui $(ARGS)
 
+.PHONY: matcher-prototype test-matcher-prototype
+matcher-prototype:
+	uv run --locked python scripts/matcher_prototype.py $(ARGS)
+
+test-matcher-prototype: ruff
+	uv run --locked pylint scripts/matcher_prototype.py e2e_tests/test_matcher_prototype.py
+	uv run --locked ty check scripts/matcher_prototype.py e2e_tests/test_matcher_prototype.py --error-on-warning
+	uv run --locked pyright scripts/matcher_prototype.py e2e_tests/test_matcher_prototype.py --warnings
+	uv run --locked pytest -q --browser chromium --tracing=retain-on-failure e2e_tests/test_matcher_prototype.py
+
 gui-smoke: test-native-gui
 
 .PHONY: test-native-application
