@@ -246,3 +246,114 @@ def test_failed_parent_blocks_previously_emitted_work(tmp_path: Path) -> None:
         again = run(database, plugins)
         assert again == first
         assert next(s for s in again.statistics if s.kind == "child").invocations == 0
+
+
+def test_framework_schema_is_separate_from_production_catalog(tmp_path: Path) -> None:
+    """PR 1 isolation: packaging and initialization cannot change production schemas."""
+    from importlib.resources import files
+    from mailarchiver.catalog import ARCHIVE_SCHEMA, SEARCH_SCHEMA, create_catalog
+    from mailarchiver.processing.store import DATABASE, SCHEMA_RESOURCE
+
+    production = files("mailarchiver").joinpath("sql")
+    assert sorted(path.name for path in production.iterdir() if path.name.endswith(".sql")) == [
+        ARCHIVE_SCHEMA, SEARCH_SCHEMA,
+    ]
+    schema = files("mailarchiver.processing").joinpath("sql", SCHEMA_RESOURCE)
+    assert schema.is_file()
+    source_archive = tmp_path / "production"
+    source_archive.mkdir()
+    production_path = source_archive / "archive.sqlite3"
+    create_catalog(production_path).close()
+    original = production_path.read_bytes()
+    with pytest.raises(ValueError, match="fresh framework archive"):
+        connect(source_archive, create=True)
+    assert production_path.read_bytes() == original
+    assert not (source_archive / DATABASE).exists()
+    with connect(tmp_path / "framework", create=True) as database:
+        assert database.execute("SELECT version FROM schema_info").fetchall() == [(2,)]
+        assert database.execute("SELECT name FROM tags").fetchall() == [("attachment",)]
+    assert production_path.read_bytes() == original
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX worker cancellation and writer lease")
+def test_cli_interrupt_terminates_worker_and_resumes_completed_rank(tmp_path: Path) -> None:
+    """Real SIGINT must release the lease and retry only interrupted invocations."""
+    import os
+    import signal
+    import time
+    from mailarchiver.processing.api import RunReport
+
+    plugin(tmp_path, "first", 'return ProcessingResult()')
+    plugin(tmp_path, "interrupt", 'marker = item.archive.path / "worker-pid"\n'
+           'if not marker.exists():\n'
+           '    marker.write_text(str(__import__("os").getpid()))\n'
+           '    time.sleep(30)\n'
+           '    (item.archive.path / "late-write").write_text("bad")\n'
+           'return ProcessingResult()', rank=2)
+    archive = tmp_path / "archive"
+    plugins = load_processors((tmp_path,))
+    database = connect(archive, create=True)
+    submit(database, archive, MESSAGE, fingerprint(plugins))
+    database.close()
+    command = [sys.executable, "-m", "mailarchiver.processing", "--archive", str(archive),
+               "--plugin-dir", str(tmp_path), "run"]
+    with subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True) as process:
+        try:
+            deadline = time.monotonic() + 15
+            marker = archive / "worker-pid"
+            while not marker.exists() or not marker.read_text():
+                assert process.poll() is None
+                assert time.monotonic() < deadline
+                time.sleep(0.01)
+            worker_pid = int(marker.read_text())
+            process.send_signal(signal.SIGINT)
+            stdout, stderr = process.communicate(timeout=10)
+        finally:
+            if process.poll() is None:
+                process.kill()
+                process.communicate(timeout=10)
+    assert process.returncode == 130
+    assert "Traceback" not in stderr
+    interrupted = RunReport.model_validate_json(stdout)
+    assert interrupted.statistics[0].invocations == 1
+    assert interrupted.statistics[1].errors == 1
+    with pytest.raises(ProcessLookupError):
+        os.kill(worker_pid, 0)
+    resumed = subprocess.run(command, capture_output=True, text=True, check=True, timeout=15)
+    result = RunReport.model_validate_json(resumed.stdout)
+    assert result.completed == 1 and result.pending == 0 and result.failed == 0
+    assert result.statistics[0].invocations == 1
+    assert result.statistics[1].invocations == 2
+    assert not (archive / "late-write").exists()
+
+
+def test_all_manifests_validate_before_any_plugin_executes(tmp_path: Path) -> None:
+    """Malformed registry input must not execute even an otherwise valid plugin."""
+    plugin(tmp_path, "a-valid", '(item.archive.path / "executed").touch()\nreturn ProcessingResult()')
+    directory = tmp_path / "processors/a-valid"
+    entrypoint = directory / "plugin.py"
+    marker = tmp_path / "imported"
+    entrypoint.write_text(f"from pathlib import Path\nPath({str(marker)!r}).touch()\n" + entrypoint.read_text())
+    plugin(tmp_path, "z-invalid", "return ProcessingResult()")
+    manifest = tmp_path / "processors/z-invalid/plugin.toml"
+    manifest.write_text(manifest.read_text().replace("rank=1", "rank=0"))
+    with pytest.raises(ValueError):
+        load_processors((tmp_path,))
+    assert not marker.exists()
+
+
+def test_replayed_handoff_does_not_duplicate_queued_jobs(tmp_path: Path) -> None:
+    """Replaying a durable result after interruption must preserve queue identity."""
+    plugins = load_processors((FIXTURES,))
+    archive = tmp_path / "archive"
+    with connect(archive, create=True) as database:
+        submit(database, archive, MESSAGE, fingerprint(plugins))
+        first = run(database, plugins, max_jobs=1)
+        assert first.pending == 1
+        # Simulate an interruption before the source job's final status persisted.
+        database.execute("UPDATE jobs SET status='running' WHERE job_id=1")
+        database.commit()
+        replayed = run(database, plugins)
+        assert replayed.completed == 5 and replayed.pending == 0
+        assert all(stat.invocations == 1 for stat in replayed.statistics)
+        assert database.execute("SELECT count(*) FROM jobs").fetchone()[0] == 5

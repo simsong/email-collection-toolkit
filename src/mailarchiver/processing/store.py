@@ -13,6 +13,7 @@ from pathlib import Path
 from .api import ArchiveContext, ContentReference, PluginStatistics, ProcessingObject, RAW_MESSAGE, RunReport
 
 DATABASE = "processing.sqlite3"
+SCHEMA_RESOURCE = "V2__processing.sql"
 
 
 def connect(archive: Path, *, create: bool = False) -> sqlite3.Connection:
@@ -26,7 +27,7 @@ def connect(archive: Path, *, create: bool = False) -> sqlite3.Connection:
     database = sqlite3.connect(path)
     database.execute("PRAGMA foreign_keys=ON")
     if create:
-        database.executescript(files("mailarchiver").joinpath("sql/V2__processing.sql").read_text())
+        database.executescript(files("mailarchiver.processing").joinpath("sql", SCHEMA_RESOURCE).read_text())
     if database.execute("SELECT version FROM schema_info").fetchall() != [(2,)]:
         database.close()
         raise ValueError("unsupported processing schema; use a fresh archive")

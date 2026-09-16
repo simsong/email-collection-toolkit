@@ -52,6 +52,7 @@ mailarchiver = [
     "*.swift",
     "gmail_client.json",
     "sql/*.sql",
+    "processing/sql/*.sql",
     "plugins/sources/*/plugin.toml",
     "plugins/files/*/plugin.toml",
 ]

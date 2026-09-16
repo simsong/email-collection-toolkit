@@ -4,6 +4,10 @@
 
 ## Unreleased
 
+* Isolate the test-plugin framework schema from production catalog resources.
+  Include catalog regression tests in the framework target and exercise real
+  CLI cancellation/recovery without native windows.
+
 * Add the headless API v2 processor framework, executable test plugins, resumable
   CLI jobs, rank/abort handling, process-enforced timeouts and invocation reports.
   A fresh framework schema includes person/organization, affiliation, evidence

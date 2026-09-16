@@ -557,6 +557,10 @@ This redesign may change all generated on-disk formats; no compatibility
 migration is required. A fresh schema shall include authoritative persons and
 aliases, addresses, organizations/domains, dated simultaneous affiliations,
 evidence, durable tags and manual decisions. Source mail remains untouched.
+The framework schema must be packaged separately from production catalog
+schemas; its creation must neither alter an existing catalog nor weaken its
+schema validation. CLI cancellation must terminate the worker, release the
+writer lease and permit recovery without repeating completed invocations.
 The framework harness uses copied fixture bytes and raw-digest identity;
 production deduplication and import are the second stacked PR, GUI the third.
 No member of the stack is merged before the full stack is accepted.

@@ -21,6 +21,7 @@ REQUIRED_PACKAGE_MEMBERS = (
     "mailarchiver/message_patterns.yaml",
     "mailarchiver/plugins/files/mbox/plugin.toml",
     "mailarchiver/plugins/sources/file-folder/plugin.toml",
+    "mailarchiver/processing/sql/V2__processing.sql",
     "mailarchiver/sql/V1__archive.sql",
     "mailarchiver/sql/V1__search.sql",
 )
@@ -80,6 +81,15 @@ def install_and_smoke(uv: str, artifact: Path, root: Path) -> None:
                 f"{artifact.name}: {command} returned {result.returncode}, expected {expected}: "
                 f"{result.stdout}{result.stderr}"
             )
+
+    # Exercise resource lookup from the installed artifact, outside the checkout.
+    archive = environment / "framework-fixture"
+    for command in ("init", "status"):
+        subprocess.run(
+            [str(python), "-I", "-m", "mailarchiver.processing",
+             "--archive", str(archive), command],
+            check=True, cwd=root, capture_output=True, text=True, timeout=30,
+        )
 
 
 def main() -> int:

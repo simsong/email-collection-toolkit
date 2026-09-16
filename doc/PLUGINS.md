@@ -44,7 +44,9 @@ publication. These are trusted plugins, not a security sandbox. The supported
 CLI test platform is POSIX, matching the existing archive writer lease; Windows
 process-tree supervision remains future work.
 
-The fresh processing.sqlite3 schema is packaged in V2__processing.sql.
+The fresh processing.sqlite3 schema is packaged separately under
+processing/sql/V2__processing.sql; it does not enter the production catalog
+schema directory.
 It contains messages/occurrences, jobs/invocations, persons/aliases/addresses,
 organizations/domains, dated affiliations, evidence, tags and manual decisions.
 Overlapping affiliations are allowed. Nullable tag styles mean no override.

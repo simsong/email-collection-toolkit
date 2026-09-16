@@ -741,7 +741,10 @@ before committing references. Parent-job dependencies prevent work from
 overtaking failed ranks. Restart recovers abandoned running work and reuses
 completed invocations.
 
-V2__processing.sql is a fresh framework schema, not a V1 migration.
+processing/sql/V2__processing.sql is a fresh framework schema, not a V1
+migration. It is packaged independently of the production sql/ directory.
+The focused framework target also runs catalog regression tests to enforce
+that separation.
 It includes the identity and organization relationships needed by the pickers.
 The first stacked PR leaves production V1 ingest disconnected, solely to permit
 independent framework testing. Compatibility with generated V1 archives is not
