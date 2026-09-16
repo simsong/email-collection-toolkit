@@ -452,3 +452,13 @@ test-file-drag:
 .PHONY: test-owner-rules
 test-owner-rules: ruff
 	uv run pytest -q tests/test_owner_rules.py tests/test_gui_service.py tests/test_application.py
+
+.PHONY: processor test-processors
+processor:
+	uv run --locked python -m mailarchiver.processing $(ARGS)
+
+test-processors: ruff
+	uv run --locked pylint src/mailarchiver/processing tests/test_processing.py
+	uv run --locked ty check src/mailarchiver/processing tests/test_processing.py --error-on-warning
+	uv run --locked pyright src/mailarchiver/processing tests/test_processing.py --warnings
+	uv run --locked pytest -q tests/test_processing.py

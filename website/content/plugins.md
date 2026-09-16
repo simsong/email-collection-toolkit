@@ -4,9 +4,11 @@ description = "Existing source and file plugins, and the proposed ranked mailbox
 +++
 <!-- Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved. -->
 
-The application currently has source plugins and file-parser plugins. The
+Production import currently uses source and file-parser plugins. A headless
+API v2 framework with executable test plugins is now available through the CLI;
+production wiring remains planned. The
 diagram below describes the **proposed** expansion into three processing trees;
-it is a design, not a claim that the new dispatcher is implemented.
+it shows the complete target architecture, beyond the current framework stage.
 
 [![Proposed container, message, and content processing DAGs, with ranked scanning, MIME dispatch, transactional publication, and resumable handoffs](../images/processor-dag.svg)](../images/processor-dag.svg)
 
@@ -90,7 +92,7 @@ The [processor contract](https://github.com/simsong/email-collection-toolkit/blo
 specifies the proposed API v2 manifest, one typed processing object and result,
 framework content types, rank barriers, aborts, timeout enforcement, archive
 services and durable handoffs. Existing source/file API v1 plugins remain
-supported through adapters; API v2 is not implemented yet.
+supported through adapters; production adapters are the next integration stage.
 
 Jobs checkpoint plugin versions, configuration and input identity so retries
 can skip completed work. Publication and queue handoff share a recovery

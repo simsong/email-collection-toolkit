@@ -532,6 +532,26 @@ table also stores explicitly labeled non-email Google Chat identities.
 
 ## Contacts and geographic reference data
 
+### CLI processor framework (first stacked PR)
+
+The framework shall be testable without GUI windows or production mail plugins,
+using real executable test plugins through make processor and
+make test-processors. It shall validate manifests before executing code,
+enforce rank barriers and type dependencies, preserve sibling work after a
+part abort, and persist invocations and handoffs for interruption recovery.
+Failed prerequisites must block queued downstream work across restarts.
+Timeouts shall terminate the worker before any late result can be committed.
+Input content hashes shall be verified before dispatch. Explicit reprocessing
+after registry changes shall retain manual identity decisions and audit history.
+
+This redesign may change all generated on-disk formats; no compatibility
+migration is required. A fresh schema shall include authoritative persons and
+aliases, addresses, organizations/domains, dated simultaneous affiliations,
+evidence, durable tags and manual decisions. Source mail remains untouched.
+The framework harness uses copied fixture bytes and raw-digest identity;
+production deduplication and import are the second stacked PR, GUI the third.
+No member of the stack is merged before the full stack is accepted.
+
 ### Planned processor and identity integration
 
 The proposed ranked publish/subscribe processor DAGs, handoff plugins,

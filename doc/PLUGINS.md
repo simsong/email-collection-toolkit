@@ -2,13 +2,77 @@
 
 # Plug-ins
 
+## Implemented CLI processor framework
+
+The first implementation stage supplies an API v2 **test-plugin framework**.
+It does not replace production ingest or launch any GUI. Use a fresh directory;
+there is no requirement to migrate or preserve existing generated archive
+formats. Source mail remains immutable.
+
+All commands run through the Makefile:
+
+~~~sh
+make processor ARGS="--archive .tmp/processor-demo --plugin-dir tests/processing_plugins init"
+make processor ARGS="--archive .tmp/processor-demo --plugin-dir tests/processing_plugins plugins"
+make processor ARGS="--archive .tmp/processor-demo --plugin-dir tests/processing_plugins submit tests/data/credible_date_with_quoted_body.eml"
+make processor ARGS="--archive .tmp/processor-demo --plugin-dir tests/processing_plugins run --max-jobs 1"
+make processor ARGS="--archive .tmp/processor-demo --plugin-dir tests/processing_plugins run"
+make processor ARGS="--archive .tmp/processor-demo --plugin-dir tests/processing_plugins status"
+make test-processors
+~~~
+
+The plugins command prints manifests; status and run print typed JSON reports
+with persistent invocation counts and timings. A failed run exits 1.
+Ctrl-C terminates the active worker, prints statistics and exits 130.
+Run with --retry to retry failed jobs while retaining successful checkpoints.
+After changing manifests or entrypoint code, use reprocess explicitly:
+old unfinished jobs are superseded, original inputs are queued under the new
+registry fingerprint, and manual identity/tag data and invocation history remain.
+An unchanged registry makes repeated submissions/reprocessing idempotent.
+
+The registry validates local module:factory entrypoints without importing code,
+normalized exact MIME types, required lower-rank subscribers covering the same
+inputs, and acyclic type emissions. This initial serial dispatcher is a valid
+rank-barrier implementation; concurrency is deferred. It releases typed
+emissions/handoffs transactionally and blocks them until the parent job completes.
+Part aborts retain sibling work; message aborts stop that message; import failure
+leaves other jobs pending. Unsubscribed objects complete without discarding bytes.
+
+Trusted processors execute in disposable Python subprocesses. On POSIX a timeout
+kills the worker process group before recording failure, preventing late result
+publication. These are trusted plugins, not a security sandbox. The supported
+CLI test platform is POSIX, matching the existing archive writer lease; Windows
+process-tree supervision remains future work.
+
+The fresh processing.sqlite3 schema is packaged in V2__processing.sql.
+It contains messages/occurrences, jobs/invocations, persons/aliases/addresses,
+organizations/domains, dated affiliations, evidence, tags and manual decisions.
+Overlapping affiliations are allowed. Nullable tag styles mean no override.
+The harness snapshots input bytes into content-addressed objects/ files;
+its admission identity is the raw digest, **not production message deduplication**.
+Production admission and canonical storage services are the next stacked PR.
+Generated synthetic objects are working data, not canonical message records.
+
+The processing package contains API models, registry validation, queue storage,
+worker and dispatcher modules. Workers receive application/archive contexts plus
+whole-message and current-content references. They return typed results;
+host database and queue changes stay in the parent. The current application
+context is a headless capability marker; production mailbox/catalog services,
+child-message promotion and source/file adapters are supplied in the next PR.
+
+The tests use real executable fixture plugins, subprocesses and SQLite, with
+no mocks. They exercise the three-pipeline CLI, idempotence, rank/abort behavior,
+scope selection, timeout termination, restart checkpoint recovery, blocked
+downstream work, registry changes, input integrity and identity-schema constraints.
+
+
 ## Proposed ranked processing graphs
 
 ![Proposed container, message and content processor DAGs](../website/static/images/processor-dag.svg)
 
 The same graphic appears on the [website plugin page](../website/content/plugins.md).
-This section specifies planned behavior; the implementation described below
-still provides source and file-parser plugins only.
+This section describes the complete target architecture. The CLI framework above
+implements its first stage; production processor wiring and GUI remain planned.
 
 Source/container acquisition, including its file-parser subtree, supplies raw
 messages to three processing pipelines:
@@ -89,8 +153,8 @@ The processor API is a planned versioned extension of the existing trusted
 Python plugin system, not a new package installer. Existing source/file API v1
 manifests remain supported through adapters. The new processor manifest uses
 API version 2 and a `processors/<kind>/plugin.toml` directory beneath packaged
-or explicitly trusted plugin roots. These proposed fields are not accepted by
-the current loader:
+or explicitly trusted plugin roots. These fields are accepted by the processor loader; the production API v1
+source/file loader remains separate until the next integration stage:
 
 ```toml
 api_version = 2
@@ -127,7 +191,8 @@ rules remain applicable. Trusted Python plugins are not sandboxed.
 Each processor implements the conceptual interface
 `process(item: ProcessingObject) -> ProcessingResult`. Both models and all
 nested data records are typed Pydantic structures; arbitrary dictionaries are
-not the internal API. Concrete Python classes will be implemented separately.
+not the internal API. The CLI framework implements the core classes; service capabilities and the
+remaining provenance/deadline fields are added with production integration.
 
 | Processing object field | Contract |
 |---|---|

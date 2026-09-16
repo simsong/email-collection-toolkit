@@ -1,0 +1,12 @@
+# Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved.
+api_version = 2
+plugin_type = "processor"
+kind = "attachment"
+name = "attachment"
+implementation_version = "1"
+entrypoint = "plugin:create_plugin"
+pipeline = "content"
+subscribes = ["application/octet-stream"]
+emits = []
+rank = 1
+scope = "both"

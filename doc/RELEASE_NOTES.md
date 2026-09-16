@@ -4,6 +4,12 @@
 
 ## Unreleased
 
+* Add the headless API v2 processor framework, executable test plugins, resumable
+  CLI jobs, rank/abort handling, process-enforced timeouts and invocation reports.
+  A fresh framework schema includes person/organization, affiliation, evidence
+  and tag relations. Production import and GUI integration remain subsequent
+  stacked PRs; no generated-format compatibility migration is required.
+
 * Document proposed ranked processor DAGs with a shared website graphic and
   track the future tag editor in issue #119. These are design documents, not a
   completed processing-pipeline refactor.

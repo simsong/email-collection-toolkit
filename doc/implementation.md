@@ -705,6 +705,29 @@ the existing `schema_info` version check does not implement those safeguards.
 `locations` and
 `mbox_generations` are written as part of each message publication.
 
+### CLI processor framework
+
+The processing package implements API v2 manifests, typed objects/results,
+subprocess execution and a serial rank-barrier dispatcher. Make processor
+provides init, plugins, submit, run, status and explicit reprocess commands.
+Each archive is protected by the existing writer lease. Queue release and job
+checkpoints use SQLite transactions; emission files are copied and fsynced
+before committing references. Parent-job dependencies prevent work from
+overtaking failed ranks. Restart recovers abandoned running work and reuses
+completed invocations.
+
+V2__processing.sql is a fresh framework schema, not a V1 migration.
+It includes the identity and organization relationships needed by the pickers.
+The first stacked PR leaves production V1 ingest disconnected, solely to permit
+independent framework testing. Compatibility with generated V1 archives is not
+a requirement for the redesign. Production storage/admission and source-plugin
+integration follow in the second stacked PR; GUI integration follows in the
+third. The complete stack must be accepted before any constituent PR merges.
+
+The fixture processors in tests/processing_plugins execute in real worker
+processes. Make test-processors runs Ruff, Pylint, ty, Pyright and behavioral
+tests in sequence, without native windows or scanners.
+
 ### Planned Contacts and geography
 
 [The proposed processor graphs](PLUGINS.md#proposed-ranked-processing-graphs)
@@ -720,8 +743,9 @@ enter message processing directly without another antivirus scan, retaining
 parent scan provenance; the handoff uses shared deduplication/publication
 services to establish their records and durable content references.
 The graphic is a shared SVG in `website/static/images/processor-dag.svg`.
-None of that dispatcher, extraction scheduling, attachment promotion or tag
-persistence is implemented by this documentation change.
+The CLI dispatcher and fresh tag/identity schema are implemented in the first
+framework stage. Production extraction, attachment promotion and GUI persistence
+remain work for subsequent stacked PRs.
 
 The standalone `make matcher-prototype` opens independent name and institution
 windows through a temporary `LoopbackAssetServer` and pywebview. Use
