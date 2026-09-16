@@ -51,3 +51,17 @@ a macOS audit cannot stand in for the required Windows audit, or vice versa.
 This inventory is an engineering control, not legal advice. The copyright
 owner or counsel must approve the notices and redistribution terms before a
 public binary release.
+
+## Rust importer and PST fixtures
+
+The standalone `pst-importer` uses Microsoft's MIT-licensed `outlook-pst` 1.2.0;
+its exact transitive dependency versions/checksums are pinned in `Cargo.lock`.
+The current Python runtime-license commands do not audit Rust dependencies.
+Before bundling these executables, extend the platform release license inventory
+to the compiled Cargo dependency closure and include those complete license texts.
+No installer currently bundles the Rust helpers.
+
+The public Microsoft and Aspose PST fixtures retain their upstream MIT licenses
+in `rust/mct-importer/tests/fixtures/MICROSOFT-LICENSE.txt` and
+`ASPOSE-LICENSE.txt`. Their bytes have not acquired project copyright notices;
+see that directory's README for origin revisions and SHA-256 values.

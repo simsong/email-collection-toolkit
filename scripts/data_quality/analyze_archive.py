@@ -26,7 +26,8 @@ from typing import Literal
 from pydantic import BaseModel, Field
 
 from mailarchiver.layout import mbox_path
-from mailarchiver.mbox import MboxLocation, read_verified_location
+from mailarchiver.mbox import MboxLocation, read_verified_location, synthetic_envelope
+from mailarchiver.mboxrd import quote
 from mailarchiver.source_volume import METADATA_CURRENT_MOUNT_PATH
 from mailarchiver.sources import source_files, source_messages
 
@@ -252,7 +253,7 @@ def write_mbox(path: Path, messages: list[bytes]) -> None:
     try:
         box.lock()
         for raw in messages:
-            box.add(raw)
+            box.add(synthetic_envelope(raw) + quote(raw))
         box.flush()
     finally:
         try:
@@ -301,7 +302,7 @@ def analyze_bad_dates(connection: sqlite3.Connection, archive: Path, output: Pat
             previous_catalog_date=before, next_catalog_date=after,
             source_paths=" || ".join(item.source_path for item in source_items),
         ))
-    path = output / "BAD_DATES.mbox"
+    path = output / "BAD_DATES.mboxrd"
     write_mbox(path, raw_messages)
     write_csv(output / "BAD_DATES.csv", evidence)
     return evidence, path
@@ -356,7 +357,7 @@ def analyze_missing_senders(connection: sqlite3.Connection, archive: Path, outpu
             gmail_thread=message.get("X-GM-THRID") is not None,
             likely_kind=missing_kind(message, from_values, from_addresses, candidate, boundary),
         ))
-    path = output / "MISSING_SENDER.mbox"
+    path = output / "MISSING_SENDER.mboxrd"
     write_mbox(path, raw_messages)
     write_csv(output / "MISSING_SENDER.csv", evidence)
     return evidence, len(population), path

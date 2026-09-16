@@ -25,6 +25,7 @@ def test_external_and_generated_material_is_not_claimed(filename: str) -> None:
 
 
 @pytest.mark.parametrize("filename,comment", [
+    ("rust/mct-importer/src/pst.rs", f"// {NOTICE}"),
     ("typings/AppKit/__init__.pyi", f"# {NOTICE}"),
     ("gui/file-drag.mjs", f"/* {NOTICE} */"),
     ("src/mailarchiver/file_drag.py", f"# {NOTICE}"),
