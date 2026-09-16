@@ -532,6 +532,36 @@ table also stores explicitly labeled non-email Google Chat identities.
 
 ## Contacts and geographic reference data
 
+### Synthetic matcher window prototype
+
+A reusable matcher window shall show canonical entries with large disclosure
+triangles and child email addresses with separate first-use, last-use, and
+message-count columns. Each column header toggles ascending/descending sorting
+of both groups and their children while preserving the hierarchy. Group counts
+must deduplicate message identifiers across addresses rather than sum counts.
+Case-insensitive substring filters cover mailbox before `@` and domain after
+`@`; both must match the same address. There is no full-email search box.
+Optional start/end dates restrict actual message observations inclusively;
+blank bounds are unrestricted. Recompute first use, last use, and counts within
+the selected period, omitting addresses without matching messages. A reversed
+range displays an error and no results. Retain headings only for matching
+children and show visible/total address counts when filtered.
+Dragging a canonical row moves all of its addresses, including filtered-out
+children, beneath the destination canonical entry. Dragging a child moves only
+that address. Moves retain all observations, even outside the current date
+range; empty source groups disappear. Support a keyboard-accessible destination
+picker, separating an address into its own entry, and undoing moves or a matcher
+batch. Name and institution subclasses share these interactions but maintain
+independent grouping state. Names disclose alternative email addresses;
+institutions disclose their member addresses. Unassigned personal addresses
+must not imply an institutional affiliation.
+The prototype uses fictional `.test` addresses and session-only state. Matcher
+buttons explicitly demonstrate predefined matches; authoritative algorithm and
+database connections remain future work. No archive or preferences may be
+opened or changed by this demo.
+
+### Catalog-derived Contacts
+
 The CLI and policy below are implemented; the Contacts window and geography
 features remain planned.
 
