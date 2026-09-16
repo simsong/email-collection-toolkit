@@ -33,9 +33,15 @@ WHAT IT CHECKS
   verification reads all archived mail, including quarantined messages.
 
 RESULTS
-  Prints progress for verified mailboxes and "Archive integrity verified."
+  Prints each file to stdout before processing it, with byte-based hashing and
+  message-count progress bars on stderr. Bars update in place on a terminal;
+  redirected output uses periodic lines. Percentages describe each pass, not
+  the entire archive. Use --quiet (or -q) to suppress informational output.
+  Errors and interruptions are always reported on stderr.
+  Prints "Archive integrity verified."
   when all checks pass (exit status 0). Reports integrity errors and returns
   exit status 1 when checks fail; invalid command-line usage returns status 2.
+  Ctrl-C stops gracefully with exit status 130 and no traceback.
   An interrupted or failed run is not a successful verification.
 
   This is read-only: it does not repair, rewrite, or delete archive files.
@@ -58,10 +64,12 @@ import mailbox
 import os
 import re
 import sys
+import time
 from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path, PurePosixPath
+from typing import TypeVar
 
 BUFFER_SIZE = 1024 * 1024
 FORMAT_ID = "tag:simson.net,2026:mailarchiver/integrity"
@@ -85,6 +93,51 @@ MAILBAG_ROW_LIMIT = 100_000
 MAX_AMBIGUOUS_FROM_LINES = 12
 FIELD_NAME_PATTERN = re.compile(rb"[!-9;-~]+")
 ALGORITHMS = {"sha256": 64, "sha512": 128}
+T = TypeVar("T")
+
+
+class _Progress:
+    """Dependency-free, throttled reporting; never opens or changes archive files."""
+
+    def __init__(self, quiet: bool = False) -> None:
+        self.quiet = quiet
+
+    def announce(self, path: Path, phase: str) -> None:
+        if not self.quiet:
+            print(f"{phase}: {path}", flush=True)
+
+    def track(self, items: Iterable[T], total: int, unit: str) -> Iterable[T]:
+        """Report completed work, including partial work when iteration is interrupted."""
+        if self.quiet:
+            yield from items
+            return
+        completed = 0
+        terminal = sys.stderr.isatty()
+        last_update = time.monotonic()
+
+        def render() -> None:
+            fraction = min(completed / total, 1.0) if total else 1.0
+            filled = int(fraction * 20)
+            prefix = "\r" if terminal else ""
+            print(
+                f"{prefix}[{'#' * filled}{'-' * (20 - filled)}] "
+                f"{fraction:6.1%} {completed}/{total} {unit}",
+                end="" if terminal else "\n", file=sys.stderr, flush=True,
+            )
+
+        render()
+        try:
+            for item in items:
+                yield item
+                completed += len(item) if unit == "bytes" and isinstance(item, bytes) else 1
+                now = time.monotonic()
+                if now - last_update >= (0.2 if terminal else 5.0):
+                    render()
+                    last_update = now
+        finally:
+            render()
+            if terminal:
+                print(file=sys.stderr, flush=True)
 
 TYPE = "type"
 CODE = "code"
@@ -192,10 +245,17 @@ def semantic_bytes(raw: bytes) -> bytes:
     return bytes(output)
 
 
-def _digest_file(path: Path, algorithms: Iterable[str]) -> dict[str, str]:
+def _digest_file(
+    path: Path, algorithms: Iterable[str], progress: _Progress | None = None,
+) -> dict[str, str]:
     digests = {algorithm: hashlib.new(algorithm) for algorithm in algorithms}
+    if progress is not None:
+        progress.announce(path, "Hashing")
     with path.open("rb") as source:
-        for block in iter(lambda: source.read(BUFFER_SIZE), b""):
+        blocks: Iterable[bytes] = iter(lambda: source.read(BUFFER_SIZE), b"")
+        if progress is not None:
+            blocks = progress.track(blocks, os.fstat(source.fileno()).st_size, "bytes")
+        for block in blocks:
             for digest in digests.values():
                 digest.update(block)
     return {algorithm: digest.hexdigest() for algorithm, digest in digests.items()}
@@ -403,7 +463,9 @@ def _check_hashes(tokens: list[str], standards: list[HashStandard], data: bytes)
     return errors
 
 
-def verify_mbox(path: Path, integrity: Path) -> list[str]:
+def verify_mbox(path: Path, integrity: Path, progress: _Progress | None = None) -> list[str]:
+    progress = progress if progress is not None else _Progress()
+    progress.announce(integrity, "Reading integrity records")
     if not integrity.is_file():
         return [f"{path.name}: missing integrity file {integrity.relative_to(integrity.parents[1])}"]
     try:
@@ -441,7 +503,7 @@ def verify_mbox(path: Path, integrity: Path) -> list[str]:
             parsed_mbox = [_parse_token(token, standards) for token in mbox_tokens]
             if [item.code for item, _ in parsed_mbox] != [item.code for item in mbox_standards]:
                 raise ValueError("MBOX hashes do not match declared codes")
-            file_digests = _digest_file(path, {item.algorithm for item in mbox_standards})
+            file_digests = _digest_file(path, {item.algorithm for item in mbox_standards}, progress)
             for standard, expected in parsed_mbox:
                 actual = file_digests[standard.algorithm]
                 if actual != expected:
@@ -456,8 +518,12 @@ def verify_mbox(path: Path, integrity: Path) -> list[str]:
             box = mailbox.mbox(path, factory=None, create=False)
             rows = 0
             try:
+                progress.announce(path, "Checking messages")
+                count = mbox_record.get(MESSAGES)
+                if not isinstance(count, int) or isinstance(count, bool) or count < 0:
+                    raise ValueError("invalid MBOX message count")
                 keys = iter(box.iterkeys())
-                for rows, line in enumerate(source, 1):
+                for rows, line in enumerate(progress.track(source, count, "messages"), 1):
                     if not line.endswith(b"\n"):
                         raise ValueError(f"TSV row {rows} is not LF terminated")
                     fields = line[:-1].decode("utf-8").split("\t")
@@ -493,8 +559,8 @@ def verify_mbox(path: Path, integrity: Path) -> list[str]:
                 errors.append(f"{path.name}: message count mismatch")
     except (OSError, UnicodeError, TypeError, ValueError, json.JSONDecodeError, mailbox.Error) as error:
         return [f"{integrity.name}: {error}"]
-    if not errors:
-        print(f"OK {path.name}: {rows} messages")
+    if not errors and not progress.quiet:
+        print(f"OK {path.name}: {rows} messages", flush=True)
     return errors
 
 
@@ -528,9 +594,12 @@ def _safe_manifest_target(archive: Path, value: str) -> tuple[str, Path]:
     return logical.as_posix(), target
 
 
-def _verify_bagit_manifest(path: Path, archive: Path, payload: bool) -> tuple[list[str], set[str]]:
+def _verify_bagit_manifest(
+    path: Path, archive: Path, payload: bool, progress: _Progress,
+) -> tuple[list[str], set[str]]:
     errors: list[str] = []
     declared: set[str] = set()
+    progress.announce(path, "Reading manifest")
     try:
         data = path.read_bytes()
         if b"\r" in data or (data and not data.endswith(b"\n")):
@@ -546,7 +615,7 @@ def _verify_bagit_manifest(path: Path, archive: Path, payload: bool) -> tuple[li
             if logical in declared:
                 raise ValueError(f"duplicate manifest pathname: {logical}")
             declared.add(logical)
-            actual = _digest_file(target, ("sha256",))["sha256"]
+            actual = _digest_file(target, ("sha256",), progress)["sha256"]
             if actual.lower() != fields[0].lower():
                 errors.append(f"{path.name}: SHA-256 mismatch for {logical}: expected {fields[0]}, found {actual}")
     except (OSError, UnicodeError, TypeError, ValueError) as error:
@@ -554,8 +623,9 @@ def _verify_bagit_manifest(path: Path, archive: Path, payload: bool) -> tuple[li
     return errors, declared
 
 
-def _bag_info(archive: Path, payloads: list[Path]) -> list[str]:
+def _bag_info(archive: Path, payloads: list[Path], progress: _Progress) -> list[str]:
     path = archive / "bag-info.txt"
+    progress.announce(path, "Checking metadata")
     try:
         fields: dict[str, str] = {}
         for line in path.read_text(encoding="utf-8").splitlines():
@@ -610,6 +680,7 @@ def _mailbag_csv_paths(archive: Path) -> list[Path]:
 def _verify_mailbag_csv(
     archive: Path,
     expected_mailboxes: dict[str, int],
+    progress: _Progress,
 ) -> tuple[list[str], list[Path]]:
     try:
         paths = _mailbag_csv_paths(archive)
@@ -620,6 +691,7 @@ def _verify_mailbag_csv(
     rows = 0
     try:
         for file_index, path in enumerate(paths):
+            progress.announce(path, "Checking Mailbag CSV")
             data = path.read_bytes()
             remainder = data.replace(b"\r\n", b"")
             if data and (not data.endswith(b"\r\n") or b"\n" in remainder or b"\r" in remainder):
@@ -679,7 +751,8 @@ def _payload_files(archive: Path) -> tuple[list[Path], list[str]]:
     return files, errors
 
 
-def verify_archive(archive: Path) -> list[str]:
+def verify_archive(archive: Path, quiet: bool = False) -> list[str]:
+    progress = _Progress(quiet)
     errors: list[str] = []
     legacy = sorted((*archive.glob("*.mbox"), *archive.glob("*.mbox.integrity")))
     if legacy:
@@ -688,6 +761,7 @@ def verify_archive(archive: Path) -> list[str]:
             + ", ".join(path.name for path in legacy)
         )
     declaration = archive / "bagit.txt"
+    progress.announce(declaration, "Checking declaration")
     try:
         if declaration.read_bytes() != BAGIT_DECLARATION:
             errors.append("bagit.txt: unsupported BagIt declaration")
@@ -707,7 +781,7 @@ def verify_archive(archive: Path) -> list[str]:
     payloads, payload_errors = _payload_files(archive)
     errors.extend(payload_errors)
     payload_manifest = archive / PAYLOAD_MANIFEST
-    payload_hash_errors, declared_payloads = _verify_bagit_manifest(payload_manifest, archive, True)
+    payload_hash_errors, declared_payloads = _verify_bagit_manifest(payload_manifest, archive, True, progress)
     errors.extend(payload_hash_errors)
     actual_payloads = {path.relative_to(archive).as_posix() for path in payloads}
     if declared_payloads != actual_payloads:
@@ -724,7 +798,7 @@ def verify_archive(archive: Path) -> list[str]:
     if unexpected_payloads:
         errors.append(f"unsupported native archive payloads: {', '.join(unexpected_payloads)}")
     for path in mailboxes:
-        errors.extend(verify_mbox(path, archive / "integrity" / f"{path.name}{INTEGRITY_SUFFIX}"))
+        errors.extend(verify_mbox(path, archive / "integrity" / f"{path.name}{INTEGRITY_SUFFIX}", progress))
     mailbox_names = {path.name for path in mailboxes}
     for integrity in sorted((archive / "integrity").glob(f"*.mbox{INTEGRITY_SUFFIX}")):
         if integrity.name.removesuffix(INTEGRITY_SUFFIX) not in mailbox_names:
@@ -732,17 +806,18 @@ def verify_archive(archive: Path) -> list[str]:
 
     expected_mailboxes: dict[str, int] = {}
     for path in mailboxes:
+        progress.announce(path, "Counting messages for Mailbag CSV")
         box = mailbox.mbox(path, factory=None, create=False)
         try:
             expected_mailboxes[path.name] = len(box)
         finally:
             box.close()
-    csv_errors, csv_paths = _verify_mailbag_csv(archive, expected_mailboxes)
+    csv_errors, csv_paths = _verify_mailbag_csv(archive, expected_mailboxes, progress)
     errors.extend(csv_errors)
-    errors.extend(_bag_info(archive, payloads))
+    errors.extend(_bag_info(archive, payloads, progress))
 
     tag_manifest = archive / TAG_MANIFEST
-    tag_hash_errors, declared_tags = _verify_bagit_manifest(tag_manifest, archive, False)
+    tag_hash_errors, declared_tags = _verify_bagit_manifest(tag_manifest, archive, False, progress)
     errors.extend(tag_hash_errors)
     if TAG_MANIFEST in declared_tags:
         errors.append(f"{TAG_MANIFEST}: a tag manifest must not list itself")
@@ -784,18 +859,27 @@ def main() -> int:
     )
     parser.add_argument(
         "archive", nargs="?", type=Path, default=Path(__file__).resolve().parent,
-        help="archive directory (default: the directory containing this script)",
+        help="root directory of the BagIt/Mailbag archive to verify; defaults to the "
+        "directory containing this script, not the current working directory",
     )
-    archive = parser.parse_args().archive
+    parser.add_argument("-q", "--quiet", action="store_true",
+                        help="suppress filenames, progress bars, and success output; still report errors")
+    args = parser.parse_args()
+    archive = args.archive
     if not archive.is_dir():
         parser.error(f"not a directory: {archive}")
-    errors = verify_archive(archive)
+    try:
+        errors = verify_archive(archive, quiet=args.quiet)
+    except KeyboardInterrupt:
+        print("Interrupted: archive verification incomplete.", file=sys.stderr)
+        return 130
     for error in errors:
         print(f"ERROR {error}", file=sys.stderr)
     if errors:
         print(f"FAILED: {len(errors)} integrity error(s)", file=sys.stderr)
         return 1
-    print("Archive integrity verified.")
+    if not args.quiet:
+        print("Archive integrity verified.")
     return 0
 
 

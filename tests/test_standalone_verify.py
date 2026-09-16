@@ -7,8 +7,11 @@ from __future__ import annotations
 import hashlib
 import json
 import mailbox
+import os
+import signal
 import subprocess
 import sys
+import time
 
 import pytest
 from datetime import UTC, datetime
@@ -27,6 +30,7 @@ from mailarchiver.standalone_verify import (
     IntegrityMessage,
     install_archive_verifier,
     semantic_bytes,
+    verify_archive,
     verify_mbox,
     write_integrity_file,
 )
@@ -300,3 +304,94 @@ def test_verifier_rejects_noninteger_hash_version(tmp_path: Path, invalid_versio
     integrity.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
     assert any("unsupported hash standard" in error for error in verify_mbox(path, integrity))
+
+
+def test_installed_verifier_progress_quiet_and_default_directory(tmp_path: Path) -> None:
+    """Requirement: observable read-only verification, explicit/default roots, and quiet failures."""
+    archive = tmp_path / "archive with spaces"
+    archive.mkdir()
+    path, _, _ = make_integrity_archive(archive)
+    script = archive / INSTALLED_NAME
+    before = {item.relative_to(archive): hashlib.sha256(item.read_bytes()).hexdigest()
+              for item in archive.rglob("*") if item.is_file()}
+    command = [sys.executable, "-I", str(script)]
+    default = subprocess.run(command, cwd=tmp_path, capture_output=True, text=True, check=False)
+    assert default.returncode == 0, default.stderr
+    for relative in before:
+        if relative.suffix != ".sqlite3":
+            assert str(archive / relative) in default.stdout
+    assert default.stdout.index(f"Hashing: {path}") < default.stdout.index(f"OK {path.name}")
+    assert "0.0%" in default.stderr and "100.0%" in default.stderr
+    assert "bytes" in default.stderr and "messages" in default.stderr
+    assert "\r" not in default.stderr
+    for option in ("--quiet", "-q"):
+        quiet = subprocess.run([*command, option, str(archive)], capture_output=True, text=True, check=False)
+        assert (quiet.returncode, quiet.stdout, quiet.stderr) == (0, "", "")
+    assert before == {item.relative_to(archive): hashlib.sha256(item.read_bytes()).hexdigest()
+                      for item in archive.rglob("*") if item.is_file()}
+    help_result = subprocess.run([*command, "--help"], capture_output=True, text=True, check=False)
+    assert help_result.returncode == 0
+    assert "root directory of the BagIt/Mailbag archive" in help_result.stdout
+    assert "not the current working directory" in " ".join(help_result.stdout.split())
+    path.write_bytes(path.read_bytes().replace(b"Preserve", b"Modified"))
+    failed = subprocess.run([*command, "--quiet"], capture_output=True, text=True, check=False)
+    assert failed.returncode == 1 and not failed.stdout
+    assert "mismatch" in failed.stderr and "FAILED:" in failed.stderr
+    assert "Archive integrity verified" not in failed.stderr
+
+
+def test_verify_archive_defaults_to_observable_progress(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    """Requirement: direct archive verification remains verbose unless quiet is requested."""
+    archive = tmp_path / "archive"
+    archive.mkdir()
+    make_integrity_archive(archive)
+
+    assert verify_archive(archive) == []
+    default = capsys.readouterr()
+    assert "Checking declaration:" in default.out
+    assert "100.0%" in default.err
+
+    assert verify_archive(archive, quiet=True) == []
+    quiet = capsys.readouterr()
+    assert quiet == ("", "")
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX FIFO and SIGINT synchronization")
+@pytest.mark.parametrize("quiet", [False, True])
+@pytest.mark.parametrize("phase", ["manifest", "hashing"])
+def test_installed_verifier_sigint_is_graceful(tmp_path: Path, quiet: bool, phase: str) -> None:
+    """Requirement: real Ctrl-C during archive I/O exits 130, including quiet mode."""
+    initialize_bag(tmp_path)
+    script = install_archive_verifier(tmp_path)
+    manifest = tmp_path / "manifest-sha256.txt"
+    blocked = manifest
+    if phase == "hashing":
+        blocked = mbox_directory(tmp_path) / "blocked.mbox"
+        manifest.write_text(f"{'0' * 64}  data/mbox/blocked.mbox\n", encoding="utf-8")
+    os.mkfifo(blocked)
+    command = [sys.executable, "-I", str(script), *(["--quiet"] if quiet else [])]
+    with subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True) as process:
+        writer: int | None = None
+        try:
+            deadline = time.monotonic() + 10
+            while writer is None:
+                try:
+                    writer = os.open(blocked, os.O_WRONLY | os.O_NONBLOCK)
+                except OSError:
+                    assert process.poll() is None, "verifier exited before opening the input"
+                    assert time.monotonic() < deadline, "verifier did not open the input"
+                    time.sleep(0.01)
+            process.send_signal(signal.SIGINT)
+            stdout, stderr = process.communicate(timeout=10)
+        finally:
+            if writer is not None:
+                os.close(writer)
+            if process.poll() is None:
+                process.kill()
+                process.communicate(timeout=10)
+    assert process.returncode == 130
+    assert "verification incomplete" in stderr
+    assert "Traceback" not in stderr and "KeyboardInterrupt" not in stderr
+    assert "Archive integrity verified" not in stdout
+    if quiet:
+        assert not stdout

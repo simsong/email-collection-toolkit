@@ -1461,6 +1461,16 @@ nonzero on missing, orphaned, malformed, unsupported, unsafe, unlisted, or
 mismatched files. It neither imports the package nor reads SQLite.
 Its module docstring doubles as formatted `--help`, carrying standalone run
 instructions and verification limits into the installed archive copy.
+The optional `archive` argument selects the bag root; omission uses the script's
+directory even from another working directory. The stdlib reporter flushes file
+paths to stdout before processing, and renders per-pass byte/message bars on
+stderr. Updates are throttled to 0.2 seconds on terminals (in place), or five
+seconds when redirected, with initial/final updates. `--quiet`/`-q` suppresses
+paths, bars, and success messages while retaining errors. The CLI catches
+`KeyboardInterrupt`, reports incomplete verification, and returns 130 without a
+traceback. `make test-bagit` exercises installed-script output, quiet failures,
+default-directory selection, and real POSIX SIGINT. Existing archive-local
+copies retain their old behavior until refreshed by normal archive publication.
 
 `write_bag_checkpoint()` streams catalog locations in MBOX byte order through
 `write_integrity_files()` and
