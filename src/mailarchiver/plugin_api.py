@@ -8,11 +8,14 @@ from abc import ABC, abstractmethod
 from collections.abc import Iterator
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, Literal, TYPE_CHECKING
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from .mbox_framing import MboxNormalization, is_complete_envelope
+
+if TYPE_CHECKING:
+    from .plugin_configuration import ConfigScope, ConfigValues, ReadScope
 
 API_VERSION = 1
 PluginType = Literal["source", "file"]
@@ -265,6 +268,23 @@ class PluginContext(FrozenModel):
     """Read-only framework services supplied while constructing a source plug-in."""
 
     files: tuple[LoadedPlugin, ...] = ()
+    archive: Path | None = None
+    installation_config: Path | None = None
+    plugin_name: str | None = None
+
+    def get_my_config(self, *, scope: ReadScope = "effective") -> ConfigValues:
+        from .plugin_configuration import read_plugin_configuration
+        if self.archive is None or self.plugin_name is None:
+            raise RuntimeError("plugin configuration requires an active archive")
+        return read_plugin_configuration(self.archive, self.plugin_name, self.installation_config).get_my_config(scope=scope)
+
+    def write_my_config(self, values: ConfigValues, *, scope: ConfigScope = "archive") -> None:
+        from .plugin_configuration import NamespaceWrites, apply_config_batch, read_plugin_configuration
+        if self.archive is None or self.plugin_name is None:
+            raise RuntimeError("plugin configuration requires an active archive")
+        config = read_plugin_configuration(self.archive, self.plugin_name, self.installation_config)
+        config.write_my_config(values, scope=scope)
+        apply_config_batch(self.archive, (NamespaceWrites(name=self.plugin_name, writes=config.pending_writes()),), self.installation_config)
 
 
 class PluginRegistry(FrozenModel):

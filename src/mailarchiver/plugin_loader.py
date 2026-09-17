@@ -46,7 +46,8 @@ def builtin_plugin_directory() -> Path:
     return Path(__file__).with_name("plugins")
 
 
-def load_plugins(extra_dirs: Iterable[Path] = ()) -> PluginRegistry:
+def load_plugins(extra_dirs: Iterable[Path] = (), *, archive: Path | None = None,
+                 installation_config: Path | None = None) -> PluginRegistry:
     """Validate, load, and freeze built-in and explicitly trusted plug-ins."""
     builtin = builtin_plugin_directory().resolve()
     roots: list[tuple[Path, bool]] = [(builtin, True)]
@@ -58,8 +59,9 @@ def load_plugins(extra_dirs: Iterable[Path] = ()) -> PluginRegistry:
             seen_roots.add(resolved)
 
     candidates = _validated_candidates(roots)
-    files = tuple(_load(candidate) for candidate in candidates if candidate.manifest.plugin_type == "file")
-    context = PluginContext(files=files)
+    context = PluginContext(archive=archive, installation_config=installation_config)
+    files = tuple(_load(candidate, context) for candidate in candidates if candidate.manifest.plugin_type == "file")
+    context = context.model_copy(update={"files": files})
     sources = tuple(
         _load(candidate, context) for candidate in candidates if candidate.manifest.plugin_type == "source"
     )
@@ -188,7 +190,8 @@ def _load(candidate: _Candidate, context: PluginContext | None = None) -> Loaded
             else _load_external_module(candidate.directory, module_name)
         )
         entrypoint = getattr(module, attribute)
-        implementation = _instantiate(entrypoint, context) if callable(entrypoint) else entrypoint
+        bound = context.model_copy(update={"plugin_name": candidate.manifest.kind}) if context is not None else None
+        implementation = _instantiate(entrypoint, bound) if callable(entrypoint) else entrypoint
         _validate_implementation(candidate.manifest, implementation)
     except Exception as error:
         raise PluginDiscoveryError(

@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import argparse
 from pathlib import Path
+from mailarchiver.mboxrd import quote
 
 RICH_MESSAGE = (
     b"Message-ID: <rich-e2e@example>\n"
@@ -54,7 +55,7 @@ def basic_message(number: int) -> bytes:
 def mbox_bytes(messages: list[bytes]) -> bytes:
     chunks = []
     for message in messages:
-        chunks.append(b"From fixture@example.net Mon Jan  1 00:00:00 2024\n" + message.rstrip(b"\n") + b"\n\n")
+        chunks.append(b"From fixture@example.net Mon Jan  1 00:00:00 2024\n" + quote(message.rstrip(b"\n")) + b"\n\n")
     return b"".join(chunks).rstrip(b"\n") + b"\n"
 
 
@@ -65,13 +66,13 @@ def generate(destination: Path) -> None:
     (destination / "Personal/Loose Mail").mkdir(parents=True, exist_ok=True)
     (destination / "Personal/Duplicates").mkdir(parents=True, exist_ok=True)
     bulk = [RICH_MESSAGE, *(basic_message(number) for number in range(1, 204))]
-    (destination / "Professional/Inbox/bulk.mbox").write_bytes(mbox_bytes(bulk))
+    (destination / "Professional/Inbox/bulk.mboxrd").write_bytes(mbox_bytes(bulk))
     edge = [
         (b"Message-ID: <mboxrd-e2e@example>\nDate: Sat, 3 Feb 2024 12:00:00 +0000\n"
         b"From: sender@example.net\nTo: archive-owner@example.org\nSubject: MBOX quoting\n\n"
         b">From unquoted body line\n>>From literal quoted body line\n"),
     ]
-    (destination / "Professional/Projects/edge-cases.mbox").write_bytes(mbox_bytes(edge))
+    (destination / "Professional/Projects/edge-cases.mboxrd").write_bytes(mbox_bytes(edge))
     (destination / "Professional/Projects/no-final-newline.eml").write_bytes(
         b"Message-ID: <no-final-newline-e2e@example>\nDate: Fri, 2 Feb 2024 12:00:00 +0000\n"
         b"From: sender@example.net\nTo: archive-owner@example.org\nSubject: No final newline\n\n"

@@ -20,7 +20,12 @@ REQUIRED_PACKAGE_MEMBERS = (
     "mailarchiver/local_source_rules.yaml",
     "mailarchiver/message_patterns.yaml",
     "mailarchiver/plugins/files/mbox/plugin.toml",
+    "mailarchiver/plugins/files/pst/plugin.toml",
+    "mailarchiver/plugins/processors/clamav/plugin.toml",
+    "mailarchiver/plugins/processors/mime/plugin.toml",
+    "mailarchiver/plugins/processors/identity-evidence/plugin.toml",
     "mailarchiver/plugins/sources/file-folder/plugin.toml",
+    "mailarchiver/processing/sql/V2__processing.sql",
     "mailarchiver/sql/V1__archive.sql",
     "mailarchiver/sql/V1__search.sql",
 )
@@ -29,6 +34,7 @@ SMOKE_COMMANDS = (
     ("mailarchiver-compare-apple-mail", ("--help",), 0),
     ("mailarchiver-h3-review", ("--help",), 0),
     ("mailarchiver", ("--help",), 0),
+    ("mailarchiver", ("--archive", ".", "processors"), 0),
     ("mailsearch", ("--help",), 0),
     ("mailsearch-gui", ("--help",), 0),
     ("summarize", (), 2),
@@ -80,6 +86,15 @@ def install_and_smoke(uv: str, artifact: Path, root: Path) -> None:
                 f"{artifact.name}: {command} returned {result.returncode}, expected {expected}: "
                 f"{result.stdout}{result.stderr}"
             )
+
+    # Exercise resource lookup from the installed artifact, outside the checkout.
+    archive = environment / "framework-fixture"
+    for command in ("init", "status"):
+        subprocess.run(
+            [str(python), "-I", "-m", "mailarchiver.processing",
+             "--archive", str(archive), command],
+            check=True, cwd=root, capture_output=True, text=True, timeout=30,
+        )
 
 
 def main() -> int:

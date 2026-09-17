@@ -1,0 +1,14 @@
+# Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved.
+api_version = 2
+plugin_type = "processor"
+kind = "queue-content"
+name = "queue-content"
+implementation_version = "1"
+entrypoint = "plugin:create_plugin"
+pipeline = "message"
+rank = 2
+scope = "both"
+timeout_seconds = 60
+subscribes = ["application/x-mailarchiver-raw-message"]
+emits = []
+requires = ["headers"]

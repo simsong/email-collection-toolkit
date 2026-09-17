@@ -12,6 +12,7 @@ import signal
 import subprocess
 import sys
 import time
+from array import array
 
 import pytest
 from datetime import UTC, datetime
@@ -91,6 +92,16 @@ def test_message_without_terminal_newline_retains_original_identity(tmp_path: Pa
     verified = run_verifier(script, tmp_path)
 
     assert preserved == raw
+    assert verified.returncode == 0, verified.stderr
+
+
+def test_installed_verifier_recovers_mboxrd_quote_depth(tmp_path: Path) -> None:
+    """Requirement: standalone verification recovers reversible quoting beyond the legacy ambiguity cap."""
+    raw = b"Message-ID: <verify@example>\nSubject: quoting\n\n" + b"".join(
+        b">" * depth + b"From preserved body\n" for depth in range(30)
+    )
+    make_integrity_archive(tmp_path, raw)
+    verified = run_verifier(install_archive_verifier(tmp_path), tmp_path)
     assert verified.returncode == 0, verified.stderr
 
 
@@ -351,6 +362,9 @@ def test_verify_archive_defaults_to_observable_progress(tmp_path: Path, capsys: 
 @pytest.mark.parametrize("phase", ["manifest", "hashing"])
 def test_installed_verifier_sigint_is_graceful(tmp_path: Path, quiet: bool, phase: str) -> None:
     """Requirement: real Ctrl-C during archive I/O exits 130, including quiet mode."""
+    import fcntl
+    import termios
+
     initialize_bag(tmp_path)
     script = install_archive_verifier(tmp_path)
     manifest = tmp_path / "manifest-sha256.txt"
@@ -371,7 +385,22 @@ def test_installed_verifier_sigint_is_graceful(tmp_path: Path, quiet: bool, phas
                     assert process.poll() is None, "verifier exited before opening the input"
                     assert time.monotonic() < deadline, "verifier did not open the input"
                     time.sleep(0.01)
+            # Opening the FIFO only proves that open(2) has paired its endpoints.
+            # Wait until the verifier consumes data, so SIGINT interrupts reading
+            # rather than racing CPython's buffered-file initialization.
+            os.write(writer, b"\n")
+            remaining = array("i", [1])
+            while remaining[0]:
+                fcntl.ioctl(writer, termios.FIONREAD, remaining)
+                assert process.poll() is None, "verifier exited before reading the input"
+                assert time.monotonic() < deadline, "verifier did not read the input"
+                if remaining[0]:
+                    time.sleep(0.01)
             process.send_signal(signal.SIGINT)
+            # Buffered reads may defer a pending Python signal until I/O returns.
+            # EOF releases that read; exit 130 still proves SIGINT was handled.
+            os.close(writer)
+            writer = None
             stdout, stderr = process.communicate(timeout=10)
         finally:
             if writer is not None:

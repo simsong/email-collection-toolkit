@@ -12,7 +12,7 @@ from pathlib import Path
 import tempfile
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field, JsonValue
 from yaml import YAMLError, safe_dump, safe_load
 
 from .owner_rules import OwnerRules
@@ -27,6 +27,7 @@ class ArchiveConfig(BaseModel):
     version: Literal[1, 2] = 2
     last_import_directory: Path | None = None
     owner: OwnerRules | None = None
+    plugins: dict[str, dict[str, JsonValue]] = Field(default_factory=dict)
 
 
 def config_path(archive: Path) -> Path:

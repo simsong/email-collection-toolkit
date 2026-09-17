@@ -72,6 +72,15 @@ directory, and a `data/mbox/` payload directory.
 
 * Mail is stored only under `data/mbox/` in standard MBOX files, using
   byte-preserving mboxrd quoting. Do not retain a per-message EML corpus.
+  Quote every payload line matching `^>*From ` by adding one `>`; decode exactly
+  one level. Python's default mboxo escaping is insufficient. Existing mboxo
+  archive records remain unchanged and must be recovered only through their
+  expected h2. Explicit `.mboxrd` sources declare reversible decoding; unknown
+  source dialects retain stored quoting. See [MBOX_READING.md](MBOX_READING.md).
+  All stored headers, including added provenance fields, participate in h2;
+  there is no X-header exclusion from raw-message integrity. Document every
+  digest's input, purpose and limits, and all added headers, in
+  [INTEGRITY_CONTROLS.md](INTEGRITY_CONTROLS.md).
 * Accept LF and CRLF input independently of the host operating system. Do not
   recode line endings in message headers, bodies, attachments, or existing
   delimiters during import, storage, or retrieval. Preserve lone CR characters:
@@ -532,13 +541,53 @@ table also stores explicitly labeled non-email Google Chat identities.
 
 ## Contacts and geographic reference data
 
-### Planned processor and identity integration
+### CLI processor framework (first stacked PR)
+
+The framework shall be testable without GUI windows or production mail plugins,
+using real in-process test plugins through make processor and
+make test-processors. It shall validate manifests before executing code,
+enforce rank barriers and type dependencies, preserve sibling work after a
+part abort, and persist invocations and handoffs for interruption recovery.
+Failed prerequisites must block queued downstream work across restarts.
+Python processors shall run in process. Plugins must honor cooperative deadlines
+and bound blocking I/O; timed-out results must not be committed. The Rust PST
+importer is the external plugin executable.
+Input content hashes shall be verified before dispatch. Explicit reprocessing
+after registry changes shall retain manual identity decisions and audit history.
+
+This redesign may change all generated on-disk formats; no compatibility
+migration is required. A fresh schema shall include authoritative persons and
+aliases, addresses, organizations/domains, dated simultaneous affiliations,
+evidence, durable tags and manual decisions. Source mail remains untouched.
+The framework schema must be packaged separately from production catalog
+schemas; its creation must neither alter an existing catalog nor weaken its
+schema validation. CLI cancellation must finish the active invocation and release the
+writer lease and permit recovery without repeating completed invocations.
+The framework harness uses copied fixture bytes and raw-digest identity;
+production deduplication and import now use the same dispatcher. GUI picker and
+incomplete-work dialog integration follow separately.
+
+Each processor shall receive its own configuration dictionary, identified by
+its stable manifest kind. Archive settings override installation settings;
+nested mappings merge recursively, while lists, scalars and explicit nulls
+replace inherited values. Plugins can read either layer or their effective
+settings and replace their own layer in either scope. Writes from unsuccessful
+ranks must not be published. Persistence must preserve unrelated settings,
+reject stale conflicting writes, support idempotent recovery and leave malformed
+configuration untouched. Real-worker and CLI tests exercise these requirements.
+All namespaces in a rank must be checked before any configuration replacement;
+interrupted multi-file publication must recover before settings are exposed to
+plugins. Missing or unreadable input objects must become reportable failed jobs
+and permit retry after repair. Manifest types require two nonempty ASCII MIME
+tokens. Inventory sizes and SHA-256 digests apply to 7z members as well as ZIP.
+
+### Production CLI processor and identity integration
 
 The proposed ranked publish/subscribe processor DAGs, handoff plugins,
 incomplete-work prompt, scanner timeout/statistics, synthetic-part provenance,
 and first-class attached-message handling are specified in
-[PLUGINS.md](PLUGINS.md#proposed-ranked-processing-graphs). They are not yet
-implemented. Manual decisions must survive reruns. Attached messages must retain
+[PLUGINS.md](PLUGINS.md#proposed-ranked-processing-graphs). CLI processing is
+implemented; the incomplete-work dialog and viewer/tag styling remain GUI work. Manual decisions must survive reruns. Attached messages must retain
 parent paths and an attachment tag, initially displayed with a 5% gray background.
 The future SQLite-backed tag editor is tracked in issue #119; nullable style
 attributes mean no change. The three pipelines are ingest (ClamAV then filing/handoff), message processing
@@ -723,9 +772,10 @@ An indexing failure is recorded as a metadata defect and does not reject mail;
 ## Desktop application documents and windows
 
 The compiled desktop experience will evaluate Dioxus Desktop and Tauri with the
-system webview (WKWebView on macOS, WebView2 on Windows). Rust work is limited to the desktop/UI layer;
-ingest, search, scanner orchestration, archive locking, and preservation remain
-in Python. Windows with full ingest is the next platform priority; Linux/snap
+system webview (WKWebView on macOS, WebView2 on Windows). Rust also implements
+the MCT importer test programs and standalone PST extraction helper. Archive ingest
+orchestration, search, scanning, locking and preservation remain in Python.
+Windows with full ingest is the next platform priority; Linux/snap
 delivery is deferred. [DIOXUS.md](DIOXUS.md) defines the trial plan and migration,
 typed local worker boundary, packaging, and native acceptance requirements.
 The worker protocol and both candidate frontends remain unimplemented. End users must
@@ -1118,6 +1168,9 @@ the command fails before reading or writing an archive.
 
 The Python GUI identifies itself as **Email Collection Toolkit** and uses the
 source-controlled rainbow-envelope icon in its native application identity.
+Current application development and pull-request CI are macOS-only. All jobs
+in the continuous-integration workflow must use macOS runners; Windows and Linux
+validation are outside the current scope.
 The required continuous-integration gate exercises the archive lifecycle and
 complete HTML interface in headless Chromium with disposable fixtures. Native
 Cocoa/WKWebView smoke testing is an explicit local macOS development check and
@@ -1330,6 +1383,17 @@ and retain the current explicit-path CLI instructions.
   rather than silently omitting them. The current backend decision, fixture
   matrix, and format limitations are maintained in
   [ON_DISK_MAIL_FORMATS.md](ON_DISK_MAIL_FORMATS.md).
+  **Planned beta gate:** implement standalone ingest executables accepting a
+  filename and emitting mboxrd to stdout, with diagnostics on stderr, as
+  specified in [PST_DUAL_READER.md](PST_DUAL_READER.md). Start with a qualified
+  adapter around Microsoft's Rust PST library; allow another implementation
+  as a separate pass. Each emitted record carries `X-Imported-URI`,
+  `X-Importer-Name` and `X-Importer-Version`. These fields are included in h2.
+  Existing h3 includes selected headers AND the encoded MIME body; it is a
+  comparison control, not permission to discard conflicting variants. The
+  current Message-ID-plus-h2 dedup does not collapse different importer headers.
+  Preserve failures and partial-run provenance; a successful empty stream is
+  not proof that an arbitrary PST was fully recovered. Qualify OST separately.
   Microsoft 365 has no platform-neutral Takeout equivalent. Outlook PST export
   on Windows and OLM export from legacy Outlook for Mac are recognized future
   acquisition paths, but PST, OST, OLM, Graph, and Exchange Online IMAP are not
@@ -1490,7 +1554,52 @@ and retain the current explicit-path CLI instructions.
   committed source-observation log by run, source, and disposition. Derived
   catalog fields and canonical locations are created correctly during ingest.
 
+## MCT Importer API and Rust programs
+
+[MCT Importer API Version 1.0](MCT_IMPORTER_API.md) defines filename input and
+mboxrd stdout with `X-Imported-URI`, `X-Importer-Name`, `X-Importer-Version`.
+No h4 is required: h2 covers every header and body byte; existing h3 excludes
+top-level importer fields while covering selected headers and the encoded body.
+
+Rust/Cargo are required for building the importer tools and standalone PST import
+helper. Packaged end users need the helper executable, not a Rust compiler.
+`make rust-programs` builds `mdti-validator`, `mcti-generator` and `pst-importer`; each has its
+own same-named Makefile build target. Keep a committed Cargo lockfile and run
+Rust formatting, Clippy and tests through Makefile targets, including `make check`.
+The validator warns before consuming stdin that all input is discarded, reports
+validation errors on stderr, and reports valid complete message counts after
+EOF. It never imports mail or creates archive files. The generator accepts an
+unsigned count and emits exactly that many deterministic RFC 2822/MIME text
+messages with counters and valid API provenance. Validate malformed records,
+partial EOF, size limits, MIME structure/encoding, quote levels, process exit
+statuses and recovery to following records, using actual Rust processes.
+The standalone [PST importer](PST_IMPORTER.md) uses Microsoft's pinned
+`outlook-pst` crate through its explicit read-only reader API. Emit validated
+mboxrd records with stable node-ID URIs, exact by-value attachment data,
+reconstruction evidence and source SHA-256 checks. Continue after recoverable
+item failures but return nonzero for any incomplete extraction. Exercise real
+PST fixtures, decoded body/attachment evidence, partial-run accounting, read-only
+source preservation, changed sources and producer/consumer failures.
+The CLI archive host is implemented; cross-importer h3 duplicate suppression
+remains planned.
+PST and OST share a storage-format family, but OST support must be qualified
+against genuine fixtures and internal header/version/compression variants, not
+inferred from a changed extension or relaxed signature check. Evaluate extending
+the existing reader before requiring a separate importer; report cache extraction
+completeness separately from server-mailbox completeness. See
+[PST/OST scope and current limits](PST_IMPORTER.md#relationship-between-pst-and-ost).
+
 ## Windows development environment
+
+Reliable PST import and full Windows ingest are required for the planned beta.
+Supported Windows/macOS packages and the planned Linux Snap must bundle their
+selected ingest executables and dependencies without requiring user-installed
+runtimes, compilers or Outlook. A second importer is independently selectable;
+Java is required only if a Java importer is selected for distribution.
+[PST_DUAL_READER.md](PST_DUAL_READER.md) defines architecture-specific
+packaging, runtime provenance, signing, confinement and installed-fixture gates.
+No platform is supported merely because its package builds; validate full ingest,
+scanning, locking, cancellation and recovery in the installed application.
 
 [WINDOWS.md](WINDOWS.md) documents native Windows setup with x64 CPython managed
 by uv, MSYS2 build utilities, Rust/MSVC/Dioxus tooling, WebView2, and existing
@@ -1533,6 +1642,8 @@ Python, native extension libraries, GUI assets, packaged schemas,
 plug-in manifests, and the standalone verifier source travel inside the app.
 ClamAV and experimental command-line tools (Tika/Java, PDF OCR, Apple Intelligence)
 are not prerequisites of the supported local-mail GUI and are not bundled.
+This describes the current package. The planned PST beta adds selected ingest
+executables; a private JVM is needed only if a Java importer is bundled.
 When both `APPLE_CERTIFICATE_P12_BASE64` and `APPLE_CERTIFICATE_PASSWORD`
 are present on an isolated GitHub-hosted runner, the build must import the
 PKCS#12 identity temporarily, sign the app and DMG with Developer ID, verify
@@ -1769,3 +1880,46 @@ The macOS bundle dependency audit shall distinguish a Mach-O library's own
 `LC_ID_DYLIB` from actual dylib load commands. Its own install name need not
 resolve as another bundled file; actual non-system dependencies must resolve
 inside the app. A compiled-library regression shall exercise both cases.
+
+Derived PDF exports require a `.mboxrd` output suffix; data-quality exports and
+generated source fixtures also use `.mboxrd` names so re-import removes exactly
+one quoting level. Unknown external `.mbox` inputs retain their conservative
+interpretation. Canonical archive `.mbox` names and hash-guided recovery remain
+unchanged. This prevents generated files from silently gaining quote levels.
+
+## PST test corpus downloader
+
+The Rust `pst/pst-downloader.rs` tool reads the supplied `pst/*.json` inventories
+and acquires direct PSTs and PST members of ZIP/7z archives under ignored
+`var/pst/`. Use [the downloader contract](../pst/README.md) for schema and limits.
+Validate supplied SHA-256/lengths and basic PST signatures on completed files
+before publishing them to the cache; retain original
+artifacts and URL/member provenance, deduplicate only byte-identical content,
+and verify cache reuse without replacing corrupt evidence. Download/extraction
+is bounded and streaming; failures remain visible and prevent success while
+later sources can proceed. Dry-run and ordinary tests must not download corpora.
+
+CLI `ingest --defer-content`, `process`, `processing-status`, `processors` and
+`identities` shall exercise the production framework without GUI popups. Header
+addresses are available after ingest; signature evidence, text/attachment indexes
+and attached messages are resumable content work. HTML takes precedence over RTF
+when synthesizing absent plain-text bodies; plain attachments do not suppress
+body synthesis. Mailbox/domain/date picker filters use distinct message counts.
+Manual names, address merges and simultaneous dated affiliations survive replay.
+The PST file adapter shall invoke the real Rust importer, retain bounded failed
+output and provenance, withhold its uncertain final record on failure, and never
+mark partial extraction complete. `make test-cli-processors` exercises these
+requirements with minimal RFC 5322 and PST fixtures.
+
+A positive antivirus verdict must publish to INFECTED even when header/date
+parsing fails. Quarantine may use a clearly labeled unknown-date placeholder for
+required catalog/envelope fields, with a metadata defect; it must not treat that
+placeholder as an observed date or run downstream content/identity processors.
+
+HTML, RTF and text processors must bound their derived input/output, reporting
+over-limit parts while preserving the original message. Invalidation must remove
+obsolete body/attachment search results atomically with queuing a new generation,
+including when replacement processing is deferred or fails. Known public mail
+providers must retain address evidence without creating automatic institutional
+affiliations. PST timeout/limit receipts must retain the actual reaped exit code,
+observed sizes and truncation flags; both live and post-exit output sizes are checked.

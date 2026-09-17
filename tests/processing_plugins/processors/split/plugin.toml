@@ -1,0 +1,12 @@
+# Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved.
+api_version = 2
+plugin_type = "processor"
+kind = "split"
+name = "split"
+implementation_version = "1"
+entrypoint = "plugin:create_plugin"
+pipeline = "content"
+subscribes = ["application/x-mailarchiver-raw-message"]
+emits = ["text/plain", "application/octet-stream"]
+rank = 1
+scope = "both"

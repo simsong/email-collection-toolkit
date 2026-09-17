@@ -15,6 +15,8 @@ ZOLA_SHA256 = "54d1a347781b2f32330914fcc02def81c7e3ddb6111b36d1cc89c06557aed1de"
 WORKFLOW_ON = "on"
 RELEASE = "release"
 TYPES = "types"
+JOBS = "jobs"
+RUNS_ON = "runs-on"
 
 
 def test_missing_png_reports_a_clear_failure(tmp_path: Path) -> None:
@@ -47,6 +49,8 @@ def test_ci_builds_distributions_and_site_and_retains_browser_traces() -> None:
     assert "run: make website-build-check" in text
     assert "name: Upload Playwright failure traces" in text
     assert "path: test-results" in text
+    configuration = safe_load(text)
+    assert all(job[RUNS_ON] == "macos-15" for job in configuration[JOBS].values())
 
 
 def test_release_workflow_validates_built_distributions() -> None:

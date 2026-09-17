@@ -4,6 +4,55 @@
 
 ## Unreleased
 
+* Restrict pull-request CI to macOS, with on-demand Homebrew ClamAV and pinned
+  macOS Zola binaries. Keep native GUI tests opt-in.
+
+* Bound derived HTML/RTF/text processing; invalidate stale search rows atomically
+  with processor generations; keep public providers out of automatic affiliations.
+  Preserve PST timeout exit evidence and bound retained stdout/stderr prefixes.
+
+* Retain positive antivirus messages in INFECTED even if metadata/date parsing
+  fails; label unknown-date placeholders and block downstream processing.
+
+* Run production CLI ingest, message and content processing through registered
+  Python plugins in process. Add deferred/resumable content commands, MIME and
+  HTML/RTF processing, signature evidence, identity queries/manual edits, and
+  first-class attached messages with deduplication and durable parent/tag data.
+  Integrate the external Rust PST importer, retaining partial-run evidence.
+  No Python plugin worker subprocesses are used; plugin deadlines are cooperative
+  with bounded I/O and late-result rejection. GUI integration remains follow-up.
+
+* Preflight and journal configuration writes across a complete processor rank;
+  recover interrupted publication before plugin reads. Record missing/unreadable
+  inputs as failed jobs and reject invalid MIME tokens before plugin execution.
+  Enforce inventory member size and SHA-256 for 7z as for ZIP archives.
+
+* Add processor get_my_config/write_my_config APIs with recursive archive-over-
+  installation settings, isolated plugin namespaces and atomic scoped writes.
+  Discard staged writes on plugin failures, timeouts and aborted ranks.
+* Synchronize verifier interruption tests with actual input consumption and
+  release blocked I/O after SIGINT so Python can deliver the pending signal.
+
+* Isolate the test-plugin framework schema from production catalog resources.
+  Include catalog regression tests in the framework target and exercise real
+  CLI cancellation/recovery without native windows.
+
+* Add the headless API v2 processor framework, executable test plugins, resumable
+  CLI jobs, rank/abort handling, plugin deadlines and invocation reports.
+  A fresh framework schema includes person/organization, affiliation, evidence
+  and tag relations. GUI integration remains subsequent
+  stacked PRs; no generated-format compatibility migration is required.
+
+* Document proposed ranked processor DAGs with a shared website graphic and
+  track the future tag editor in issue #119. These are design documents, not a
+  completed processing-pipeline refactor.
+
+* Add experimental name and institution matcher windows with synthetic data,
+  large disclosure triangles, mailbox/domain and date filters, sortable columns,
+  drag-to-merge, and undo. `make matcher-prototype` opens both subclasses.
+  Matcher buttons demonstrate predefined matches; real matching and database
+  integration are not connected.
+
 * The standalone verifier announces each file before processing, displays
   per-pass hashing and message progress bars, and supports `--quiet`/`-q`.
   Clarify the archive-root argument and script-directory default. Ctrl-C now
@@ -28,6 +77,41 @@
   Application identity, with a `SIGNING_IDENTITY` override. Add
   `make list-signatures` to list available code-signing identities. Signed
   builds fail if no identity is selected; notarization remains separate.
+
+* Add Rust `pst/pst-downloader.rs` and Makefile targets for inventory-driven PST,
+  ZIP and 7z acquisition into ignored `var/pst/`, with source/member reports,
+  SHA-256 verification, content deduplication, cache reuse and bounded extraction.
+
+* Require `.mboxrd` for derived PDF output and use it for audit/source fixtures,
+  ensuring byte-preserving re-import. Make Rust run targets select `.exe` on Windows.
+
+* Add standalone Rust `pst-importer` using Microsoft's `outlook-pst` 1.2.0,
+  with read-only source handles, source SHA-256 checks, deterministic MIME,
+  body/attachment evidence, validated mboxrd stdout and nonzero partial-run status.
+  Add actual PST/process tests and build/run Makefile targets. Public fixture
+  qualification recovers 12 messages and 30 attachments while reporting two
+  upstream attachment failures; CLI archive integration is now implemented, while
+  native packaging remains planned.
+
+* Implement Rust `mdti-validator` and `mcti-generator` for MCT Importer API 1.0,
+  with `make rust-programs`, individual build targets, locked dependencies,
+  Clippy/format checks and real-process stream tests. The validator discards
+  stdin, reports errors and counts valid complete messages at EOF. The generator
+  emits counted RFC/MIME text messages with mboxrd quoting and provenance.
+  H2/h3 suffice; no h4 is introduced. Rust is required to build these tools and
+  the PST helper.
+
+* Correct canonical and derived MBOX writers to use reversible mboxrd quoting;
+  Python's default writer uses mboxo. Decode declared `.mboxrd` sources once,
+  preserve unknown-source quoting and retain hash-verified legacy recovery.
+  Document the Library of Congress reference, the code audit, all hash purposes
+  and added message headers. Existing archives are not rewritten.
+* Specify filename-to-stdout-mboxrd ingest executables with separate URI, importer
+  name and version headers, starting with a Rust PST adapter candidate and
+  optional additional passes. All headers remain in h2; h3 already includes the
+  body. PST import and full Windows ingest are beta requirements. The runner,
+  cross-importer dedup policy, Windows installer and Snap remain
+  planned. Document Microsoft sources for possible MIME reconstruction.
 
 * Report missing project copyright notices as warnings so they do not fail CI
   or release builds; retain the copyright notice in the Makefile.

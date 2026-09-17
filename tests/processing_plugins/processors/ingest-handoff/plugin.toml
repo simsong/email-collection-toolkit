@@ -1,0 +1,12 @@
+# Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved.
+api_version = 2
+plugin_type = "processor"
+kind = "ingest-handoff"
+name = "ingest-handoff"
+implementation_version = "1"
+entrypoint = "plugin:create_plugin"
+pipeline = "ingest"
+subscribes = ["application/x-mailarchiver-raw-message"]
+emits = []
+rank = 1
+scope = "both"

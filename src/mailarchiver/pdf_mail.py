@@ -21,6 +21,7 @@ from typing import Literal
 from pydantic import Field, model_validator
 
 from .plugin_api import FrozenModel
+from .mboxrd import quote
 
 PDF_MAGIC = b"%PDF-"
 PDF_TEXT_POLICY = "native-pdf-text-v1"
@@ -293,6 +294,8 @@ def _message_bytes(extraction: PdfMailExtraction, record: PrintedEmailRecord) ->
 
 def write_pdf_mbox(extraction: PdfMailExtraction, output: Path) -> None:
     """Atomically write standard MBOX records for one PDF interpretation."""
+    if output.suffix.lower() != ".mboxrd":
+        raise ValueError("derived PDF output must use the .mboxrd suffix to declare its quoting")
     destination = output.resolve()
     if destination.exists():
         raise FileExistsError(destination)
@@ -304,7 +307,7 @@ def write_pdf_mbox(extraction: PdfMailExtraction, output: Path) -> None:
     try:
         box.lock()
         for record in extraction.messages:
-            raw = b"From pdf-scan@localhost Thu Jan  1 00:00:00 1970\n" + _message_bytes(extraction, record)
+            raw = b"From pdf-scan@localhost Thu Jan  1 00:00:00 1970\n" + quote(_message_bytes(extraction, record))
             box.add(raw)
         box.flush()
         box.unlock()
@@ -328,7 +331,7 @@ def positive_page(value: str) -> int:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="extract printed email from a standalone PDF into derived MBOX")
     parser.add_argument("pdf", type=Path)
-    parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--output", type=Path, required=True, help="new .mboxrd output file")
     parser.add_argument(
         "--handwritten-page",
         action="append",

@@ -51,8 +51,9 @@ library plus small, well-supported dependencies.  The observed local corpus
 
 Use the standard-library `mailbox.mbox` reader and writer.  Pass raw `bytes`,
 not parsed `Message` objects, to `mbox.add()` so that MIME serialization is
-never rewritten; `mailbox.mbox` handles mboxrd quoting, locking, and rewrite
-recovery.  Capture the pre-append and post-flush file offsets for the future
+never rewritten. `mboxrd.quote()` supplies reversible quoting before
+`mailbox.mbox` handles locking and container writes; Python alone writes mboxo.
+Capture the pre-append and post-flush file offsets for the future
 reader.  Use the standard `email` package only for header/MIME parsing while
 retaining original RFC 5322 bytes for identity hashing and output.
 
@@ -347,17 +348,47 @@ messages are private research evidence and must not be committed or
 distributed. The checked-in exporter and synthetic test are reproducibility
 infrastructure; the private corpus is not part of the software distribution.
 
-The [on-disk format inventory](ON_DISK_MAIL_FORMATS.md) is the authoritative
-PST/OST research and selection record. The selected first backend is libpff
-through pypff, wrapped by the typed source-adapter boundary. Libratom remains a
-useful higher-level comparison/entity-extraction layer, but its formatter must
-not define canonical MIME because it reconstructs a selected body rather than
-preserving a source RFC 5322 byte stream. The adapter must consume
-source-native components, account for every item, construct any necessary MIME
-with explicit reconstruction provenance, and remain replaceable by another
-backend. For extreme setup simplicity, supported releases need tested binary
-libpff bindings or a bundled runtime; requiring users to compile C tooling is
-not an acceptable default installation experience.
+The [on-disk format inventory](ON_DISK_MAIL_FORMATS.md) records PST/OST research;
+the [executable importer specification](PST_DUAL_READER.md) defines the
+filename-to-stdout-mboxrd interface. The standalone [PST adapter](PST_IMPORTER.md)
+uses Microsoft's `outlook-pst` 1.2.0 through read-only `read_from` handles,
+traverses the IPM subtree and validates each bounded temporary record before
+streaming it. It reconstructs MIME and retains attachment/transport evidence;
+source fixity checks and partial-run errors prevent false success. Another
+implementation can run as a second pass. The CLI adapter invokes the executable,
+decodes its mboxrd output and sends recovered messages through the ingest
+pipeline for hashing, scanning and publication. H3 already includes
+the encoded body; its top-level header selection excludes importer annotations.
+Cross-importer duplicate suppression requires a separate explicit policy and
+must not silently discard differences in bodies or attachments.
+
+PST and OST share the same storage-format family. The adapter and pinned crate
+currently enforce PST client magic, so OST is rejected. Extending that reader
+requires genuine OST variant/contents tests; accepting its header alone does not
+establish support. The detailed distinction and investigation scope are in
+[PST_IMPORTER.md](PST_IMPORTER.md#relationship-between-pst-and-ost).
+
+Packages will bundle selected OS/architecture-specific executables and native
+dependencies. This avoids a mandatory JVM when only the Rust adapter ships.
+The current macOS builder includes no PST importer. Windows installer and
+Linux Snap builders remain unimplemented, as do full native ingest prerequisites.
+
+The Cargo workspace now contains `rust/mct-importer`: the Rust library,
+`pst-importer`, `mdti-validator` and `mcti-generator` implement/test
+[MCT Importer API 1.0](MCT_IMPORTER_API.md). `make rust-programs` or each named
+binary target produces release executables under `target/release`; Windows adds
+`.exe`. `make rust-check` runs rustfmt, Clippy with warnings fatal, and Rust
+tests including real process pipelines. `make check` includes this stage after
+Python type checks and before pytest. Cargo.lock pins dependencies. The validator
+uses bounded byte reads, one mboxrd decode, mailparse header/address parsing,
+Chrono RFC-date validation, uriparse absolute URI validation, strict transfer
+decoding and explicit multipart closure/depth checks. It discards input and
+counts valid complete records at EOF, reporting the first error per rejected
+record. It is not a full RFC grammar oracle or an archive ingest command.
+The generator produces a deterministic 7bit text MIME part with a counter and
+From-like lines. No h4 is introduced; comparison uses h3 and exact fixity h2.
+Rust is required to build the PST importer; released packages will
+bundle its native executable without requiring users to install Rust.
 
 ## Current package shape
 
@@ -705,6 +736,90 @@ the existing `schema_info` version check does not implement those safeguards.
 `locations` and
 `mbox_generations` are written as part of each message publication.
 
+### CLI processor framework
+
+The processing package implements API v2 manifests, typed objects/results,
+in-process execution and a serial rank-barrier dispatcher. Make processor
+provides init, plugins, submit, run, status and explicit reprocess commands.
+Each archive is protected by the existing writer lease. Queue release and job
+checkpoints use SQLite transactions; emission files are copied and fsynced
+before committing references. Parent-job dependencies prevent work from
+overtaking failed ranks. Restart recovers abandoned running work and reuses
+completed invocations.
+
+processing/sql/V2__processing.sql is a fresh framework schema, not a V1
+migration. It is packaged independently of the production sql/ directory.
+The focused framework target also runs catalog regression tests to enforce
+that separation.
+It includes the identity and organization relationships needed by the pickers.
+Production CLI ingest now calls `ProductionPipeline` from the existing source
+integrity/publication host. The three registered trees scan/file, extract headers
+and queue content, then dispatch streamed MIME payloads to text, conversion,
+identity and attached-message plugins. Canonical publication keeps its existing
+journal and deduplication key. `processing.sqlite3` records raw references,
+occurrences, jobs, evidence and picker state beside the catalog/search databases.
+`process` resumes saved jobs without rereading sources; incomplete source
+traversals are continued by repeating ingest. Configuration/code changes and
+explicit replay rebuild automatic evidence while retaining manual decisions.
+The default registry is packaged under `plugins/processors`; `processors` lists
+it. The independent `make processor` fixture harness remains available.
+
+Python plugins run synchronously in the host. A per-call context binds namespace
+settings, deadline and cancellation checks. `remaining_seconds` bounds native
+scanner I/O; POSIX main-thread invocations also receive an alarm. Portable or
+background-thread execution requires cooperative checks. Late results never
+publish. There is no separate Python worker executable. The Rust PST adapter
+alone uses the external importer protocol, spooling output and retaining failed
+tails with source/executable hashes and diagnostics under `processing-pst`.
+`make test` builds the helper; real fixture tests cover partial-run recovery.
+
+`make test-processors` runs lint/types and substantive framework tests;
+`make test-cli-processors` validates production pipelines, deferred resume,
+HTML/RTF selection, child byte preservation, identity edits and PST extraction.
+No native windows or private archives are used. GUI picker, incomplete-work
+prompt and attachment-style display wiring remain follow-up work.
+
+On a positive ClamAV result, best-effort header metadata cannot prevent filing.
+If parsing fails, quarantine records the raw digest as identity, labels its
+required date/envelope placeholder `quarantine-unknown`, records the defect and
+aborts subsequent processors. A real undated EICAR CLI test verifies exact bytes,
+the positive scan checkpoint and exclusion from search/content processing.
+
+HTML, RTF, text indexing and signature extraction use bounded reads and an 8 MiB
+default UTF-8 output bound (`max_text_bytes` in each plugin's configuration).
+Over-limit parts abort with a retained-content diagnostic. Generation invalidation
+attaches the search database to the processing connection and uses SQLite's
+rollback-journal multi-database transaction to remove FTS/suggestion data and queue
+replacement jobs together; a SQLite trigger that rejects deletion checks rollback
+of both databases after search-row changes have begun.
+Provider domains use a built-in local set plus `plugins.identity-evidence.provider_domains`;
+their evidence remains, but automatic affiliations are suppressed. PST receipts
+record exit status after reaping even on timeout. Retained stdout/stderr prefixes
+obey configured limits, with observed sizes and truncation flags in the receipt.
+
+ProcessingObject.get_my_config() returns a defensive dictionary snapshot from
+plugins.<manifest kind> in installation and archive config.yaml, with archive
+values taking precedence. write_my_config(values, scope="archive") stages a
+replacement of that plugin's selected layer; scope="installation" selects the
+shared layer. Installation config.yaml lives beside application preferences;
+the CLI --installation-config option provides an explicit path. The parent
+preflights all writes after a successful rank using file locks and expected-value
+hashes, then journals the batch before atomic file replacements. Recovery finishes
+the batch before plugin reads. Equal-value replay is harmless; preflight conflicts
+fail the job and require fresh invocations. See PLUGINS.md for the API.
+Tests cover recursive precedence, namespace isolation, both write scopes,
+abort/exception/timeout isolation and malformed settings without mocks.
+Regression tests also cover later-plugin conflicts, interrupted multi-file
+configuration publication, unreadable input recovery, invalid MIME tokens and
+7z inventory size/digest checks.
+
+The verifier SIGINT tests synchronize on consumption of FIFO data before
+sending the signal, then close the writer so buffered I/O returns and Python
+can deliver a pending signal. Holding the writer open indefinitely previously
+caused intermittent CI timeouts. The tests require exit 130 with an incomplete
+verification message, no traceback and no success output in normal/quiet modes;
+they do not assert interrupt latency for I/O that never returns.
+
 ### Planned Contacts and geography
 
 [The proposed processor graphs](PLUGINS.md#proposed-ranked-processing-graphs)
@@ -720,8 +835,8 @@ enter message processing directly without another antivirus scan, retaining
 parent scan provenance; the handoff uses shared deduplication/publication
 services to establish their records and durable content references.
 The graphic is a shared SVG in `website/static/images/processor-dag.svg`.
-None of that dispatcher, extraction scheduling, attachment promotion or tag
-persistence is implemented by this documentation change.
+The CLI dispatcher, production extraction, attachment promotion and identity/tag
+persistence are implemented. GUI control and display wiring remain subsequent work.
 
 The standalone `make matcher-prototype` opens independent name and institution
 windows through a temporary `LoopbackAssetServer` and pywebview. Use
@@ -1425,7 +1540,8 @@ copies retain their old behavior until refreshed by normal archive publication.
 
 `write_bag_checkpoint()` streams catalog locations in MBOX byte order through
 `write_integrity_files()` and
-uses each catalogued raw SHA-256 to resolve mboxrd `>From ` ambiguity. It then
+uses each catalogued raw SHA-256 to verify mboxrd decoding and resolve legacy
+mboxo `>From ` ambiguity. It then
 atomically writes deterministic JSON control records followed by the TSV table.
 The initial declarations are `h1` (complete MBOX, SHA-256), `h2` (recovered
 RFC 5322 bytes, SHA-256), and `h3` (semantic-message version 1, SHA-256).
@@ -1638,8 +1754,10 @@ command is currently implemented.
 ## MBOX mechanics and sorting
 
 Input detection must validate a stream rather than trust filename extensions.
-The MBOX reader recognizes separator lines, handles mboxrd `>From ` escaping,
-and reports malformed boundaries without silently merging messages. It also
+The MBOX reader recognizes separator lines and decodes declared `.mboxrd`
+sources once. Unknown-dialect sources retain stored quoting except for explicit
+legacy framing rules; unescaped body delimiters remain structurally ambiguous.
+Physical `get_file()` reads avoid `get_bytes()` newline translation. It also
 accepts a first separator within the first 16 lines when the separator has a
 classic ctime timestamp and an RFC header block follows. This recovers short
 terminal-capture preambles without claiming later `From ` text in documents.
@@ -1661,9 +1779,11 @@ zero-byte-message case. The implementation hashes the complete stored candidate
 first, then tries removing one terminal LF and one terminal CRLF in that order;
 it fails closed if no candidate has the expected hash. The MBOX-level hash still
 covers every stored byte.
-The standard-library writer's `>From ` representation is ambiguous when the
-source already contained a literal `>From ` line. The reader enumerates a
-bounded set of quote interpretations and selects only the candidate matching
+The previous standard-library mboxo writer's `>From ` representation is ambiguous
+when the source already contained a literal `>From ` line. New writes prequote
+all `^>*From ` payload lines with one `>` and are reversible. Recovery tries
+one mboxrd decoding first, then a bounded set of legacy interpretations, selecting
+only the candidate matching
 the authoritative raw-message SHA-256. Candidates are yielded once and not
 retained as a second in-memory copy of the message set; unresolved
 high-ambiguity input fails closed. A second ambiguity occurs when source bytes
@@ -1830,6 +1950,15 @@ passes while a real unresolved import still fails. See [MACOS_DISTRIBUTION.md](M
 for commands, limitations, and Apple's renewal/notarization steps.
 
 ### Existing scanner configuration
+
+Pull-request CI runs one `macos-15` job for `make check`, distribution and website
+validation. Separate Rust/lint jobs are omitted because `make check` includes them. It installs ClamAV through Homebrew into the disposable runner,
+uses a private temporary signature/configuration/socket directory and starts
+the daemon only on demand. Website validation selects the pinned, SHA-256-checked
+Zola macOS binary for the runner architecture. Poppler is installed for the PDF
+ground-truth test. Native GUI checks remain disabled. Ingest telemetry tests
+check monotonic worker peaks within the CPU/source-file limit; reaching exactly
+four concurrent workers is not required on smaller runners or faster scheduling.
 
 Homebrew installed these commands:
 
@@ -2348,3 +2477,26 @@ excluding `LC_ID_DYLIB`. A real compiled-library test verifies that an install
 name alone is accepted while an executable's unresolved load of that same name
 is rejected. This avoids rejecting the packaged pydantic-core library's own
 identifier while retaining dependency checks.
+
+Derived PDF exports require a `.mboxrd` output suffix; data-quality exports and
+generated source fixtures also use `.mboxrd` names so re-import removes exactly
+one quoting level. Unknown external `.mbox` inputs retain their conservative
+interpretation. Canonical archive `.mbox` names and hash-guided recovery remain
+unchanged. This prevents generated files from silently gaining quote levels.
+
+## PST corpus acquisition implementation
+
+The Cargo workspace includes the `pst` package with `pst/pst-downloader.rs`.
+`make pst-download-plan` validates inventories without network/filesystem output;
+`make pst-download` streams HTTP through reqwest, ZIP through zip and 7z through
+sevenz-rust. Transfers only copy bytes; validation hashes the completed temporary
+files before publication. SHA-256-addressed PST objects, URL-keyed original artifacts/receipts,
+and atomic per-run/latest reports live under ignored `var/pst/`. A cache lock
+serializes writers. Supplied expected hashes differ explicitly from observations.
+[The contract](../pst/README.md) documents reruns, limits and unavailable links.
+`make test-pst-downloader` uses real temporary HTTP servers and archives to test
+exact bytes, deduplication, cache tampering, extraction and partial failure.
+The fixture server explicitly puts accepted sockets into blocking mode with a
+read timeout. A real split-header regression checks that packet gaps cannot
+produce a premature response, as observed in a failing local macOS run.
+The downloader does not invoke the PST importer or canonical archive engine.
