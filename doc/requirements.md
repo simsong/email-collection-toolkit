@@ -544,12 +544,14 @@ table also stores explicitly labeled non-email Google Chat identities.
 ### CLI processor framework (first stacked PR)
 
 The framework shall be testable without GUI windows or production mail plugins,
-using real executable test plugins through make processor and
+using real in-process test plugins through make processor and
 make test-processors. It shall validate manifests before executing code,
 enforce rank barriers and type dependencies, preserve sibling work after a
 part abort, and persist invocations and handoffs for interruption recovery.
 Failed prerequisites must block queued downstream work across restarts.
-Timeouts shall terminate the worker before any late result can be committed.
+Python processors shall run in process. Plugins must honor cooperative deadlines
+and bound blocking I/O; timed-out results must not be committed. The Rust PST
+importer is the external plugin executable.
 Input content hashes shall be verified before dispatch. Explicit reprocessing
 after registry changes shall retain manual identity decisions and audit history.
 
@@ -559,11 +561,11 @@ aliases, addresses, organizations/domains, dated simultaneous affiliations,
 evidence, durable tags and manual decisions. Source mail remains untouched.
 The framework schema must be packaged separately from production catalog
 schemas; its creation must neither alter an existing catalog nor weaken its
-schema validation. CLI cancellation must terminate the worker, release the
+schema validation. CLI cancellation must finish the active invocation and release the
 writer lease and permit recovery without repeating completed invocations.
 The framework harness uses copied fixture bytes and raw-digest identity;
-production deduplication and import are the second stacked PR, GUI the third.
-No member of the stack is merged before the full stack is accepted.
+production deduplication and import now use the same dispatcher. GUI picker and
+incomplete-work dialog integration follow separately.
 
 Each processor shall receive its own configuration dictionary, identified by
 its stable manifest kind. Archive settings override installation settings;
@@ -579,13 +581,13 @@ plugins. Missing or unreadable input objects must become reportable failed jobs
 and permit retry after repair. Manifest types require two nonempty ASCII MIME
 tokens. Inventory sizes and SHA-256 digests apply to 7z members as well as ZIP.
 
-### Planned processor and identity integration
+### Production CLI processor and identity integration
 
 The proposed ranked publish/subscribe processor DAGs, handoff plugins,
 incomplete-work prompt, scanner timeout/statistics, synthetic-part provenance,
 and first-class attached-message handling are specified in
-[PLUGINS.md](PLUGINS.md#proposed-ranked-processing-graphs). They are not yet
-implemented. Manual decisions must survive reruns. Attached messages must retain
+[PLUGINS.md](PLUGINS.md#proposed-ranked-processing-graphs). CLI processing is
+implemented; the incomplete-work dialog and viewer/tag styling remain GUI work. Manual decisions must survive reruns. Attached messages must retain
 parent paths and an attachment tag, initially displayed with a 5% gray background.
 The future SQLite-backed tag editor is tracked in issue #119; nullable style
 attributes mean no change. The three pipelines are ingest (ClamAV then filing/handoff), message processing
@@ -1886,3 +1888,15 @@ artifacts and URL/member provenance, deduplicate only byte-identical content,
 and verify cache reuse without replacing corrupt evidence. Download/extraction
 is bounded and streaming; failures remain visible and prevent success while
 later sources can proceed. Dry-run and ordinary tests must not download corpora.
+
+CLI `ingest --defer-content`, `process`, `processing-status`, `processors` and
+`identities` shall exercise the production framework without GUI popups. Header
+addresses are available after ingest; signature evidence, text/attachment indexes
+and attached messages are resumable content work. HTML takes precedence over RTF
+when synthesizing absent plain-text bodies; plain attachments do not suppress
+body synthesis. Mailbox/domain/date picker filters use distinct message counts.
+Manual names, address merges and simultaneous dated affiliations survive replay.
+The PST file adapter shall invoke the real Rust importer, retain bounded failed
+output and provenance, withhold its uncertain final record on failure, and never
+mark partial extraction complete. `make test-cli-processors` exercises these
+requirements with minimal RFC 5322 and PST fixtures.

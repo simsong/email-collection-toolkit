@@ -1,0 +1,14 @@
+# Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved.
+api_version = 2
+plugin_type = "processor"
+kind = "html-text"
+name = "html-text"
+implementation_version = "1"
+entrypoint = "plugin:create_plugin"
+pipeline = "content"
+rank = 1
+scope = "both"
+timeout_seconds = 60
+subscribes = ["text/html"]
+emits = ["text/plain"]
+requires = []

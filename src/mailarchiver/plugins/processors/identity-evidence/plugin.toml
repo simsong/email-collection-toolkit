@@ -1,0 +1,14 @@
+# Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved.
+api_version = 2
+plugin_type = "processor"
+kind = "identity-evidence"
+name = "identity-evidence"
+implementation_version = "1"
+entrypoint = "plugin:create_plugin"
+pipeline = "content"
+rank = 2
+scope = "body"
+timeout_seconds = 60
+subscribes = ["text/plain"]
+emits = []
+requires = ["text-index"]

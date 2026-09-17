@@ -4,7 +4,7 @@
 
 **Status:** inventory updated 2026-09-12; original research snapshot 2026-08-31.
 A standalone [Microsoft-crate PST importer](PST_IMPORTER.md) is implemented,
-with documented extraction limits. Archive-host integration and OST remain
+with documented extraction limits and a CLI archive-host adapter. OST remains
 unimplemented. The
 [executable importer specification](PST_DUAL_READER.md) supersedes the original
 single-backend selection and development sequence below.

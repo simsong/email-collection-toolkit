@@ -4,12 +4,10 @@ description = "Existing source and file plugins, and the proposed ranked mailbox
 +++
 <!-- Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved. -->
 
-Production import currently uses source and file-parser plugins. A headless
-API v2 framework with executable test plugins is now available through the CLI;
-production wiring remains planned. The
-diagram below describes the **proposed** expansion into three processing trees;
-it shows the complete target architecture, beyond the current framework stage.
-
+Production CLI import uses source/file adapters followed by API v2 ingest,
+message and content pipelines. Python plugins run through the interface in the
+host interpreter; the Rust PST importer is an external executable. The diagram
+shows those pipelines and the planned GUI controls.
 [![Proposed container, message, and content processing DAGs, with ranked scanning, MIME dispatch, transactional publication, and resumable handoffs](../images/processor-dag.svg)](../images/processor-dag.svg)
 
 Open the graphic for a larger view. The file-parser layer is a subtree of local
@@ -39,7 +37,7 @@ Types and body/attachment settings control invocation, not access. The filing
 plugin may read whatever it needs after ClamAV; full metadata storage stays
 in the second pipeline.
 
-The proposed TOML settings declare rank, body/attachment/both scope, and scanner
+The TOML settings declare rank, body/attachment/both scope, and scanner
 timeout (60 seconds by default). End-of-run statistics report each plugin's
 invocation count, total time, shortest, longest, and average invocation.
 About will list registered plugins by subscribed type.
@@ -55,7 +53,7 @@ for layer reads, paths, conflict handling and failure semantics.
 
 ## Incomplete work
 
-When an archive opens with unfinished work, show **Incomplete work** with two
+The planned GUI integration will show **Incomplete work** with two
 initially checked choices: **Continue ingest** and **Continue content
 processing**. Confirmed work resumes from durable checkpoints. Unchecking both
 opens the archive without starting either job. The dialog returns on the next
@@ -72,8 +70,8 @@ RTF when creating synthetic text/plain content. A text attachment does not count
 as a plain-text body. Synthetic representations are processing inputs, not new
 canonical mail or MIME parts added to the original message.
 
-Attached emails are proposed as first-class child messages with a path back to
-their parent message and MIME part, visible in the message viewer. They start
+Attached emails are first-class child messages with durable paths back to their
+parent message and MIME part. Viewer controls for those paths are planned. They start
 independent jobs at message processing, bypassing ingest and another antivirus
 scan. The child retains its parent's scan provenance. The handoff uses shared
 deduplication/publication services to establish the child record and content
@@ -98,10 +96,15 @@ for the implemented API and the proposed extension.
 ## Writing a processor
 
 The [processor contract](https://github.com/simsong/email-collection-toolkit/blob/main/doc/PLUGINS.md#registration-and-manifest-contract)
-specifies the proposed API v2 manifest, one typed processing object and result,
+specifies the API v2 manifest, one typed processing object and result,
 framework content types, rank barriers, aborts, timeout enforcement, archive
 services and durable handoffs. Existing source/file API v1 plugins remain
-supported through adapters; production adapters are the next integration stage.
+supported before raw-message dispatch. Use `make run ARGS="--archive PATH
+processors"` to inspect the production registry, `processing-status` to inspect
+work, and `process --phase content` to resume content without source files.
+`identities addresses` and `identities organizations` expose picker data through
+the CLI. Plugins use cooperative cancellation and I/O deadlines; late results
+are rejected before publication.
 
 The complete design checkpoints plugin versions, configuration and input identity so retries
 can skip completed work. Publication and queue handoff share a recovery

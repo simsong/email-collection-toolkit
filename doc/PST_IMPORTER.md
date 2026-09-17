@@ -4,8 +4,8 @@
 
 `pst-importer` implements [MCT Importer API 1.0](MCT_IMPORTER_API.md) using
 Microsoft's MIT-licensed [`outlook-pst` 1.2.0](https://docs.rs/outlook-pst/1.2.0/outlook_pst/).
-It is a standalone extractor. Python archive-host integration, h3 duplicate
-suppression and installer bundling remain separate work. The current fixture
+The Python CLI invokes it through the PST file adapter and common processor
+pipelines. h3 duplicate suppression and native installer bundling remain separate work. The current fixture
 results demonstrate useful extraction and real reader failures; this is not
 complete PST beta qualification.
 

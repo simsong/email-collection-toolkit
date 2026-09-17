@@ -53,3 +53,18 @@ CREATE TABLE tags(tagid INTEGER PRIMARY KEY, name TEXT NOT NULL UNIQUE, backgrou
 INSERT INTO tags(name,background_color) VALUES('attachment','#f2f2f2');
 CREATE TABLE message_tags(message_id TEXT NOT NULL REFERENCES messages, tagid INTEGER NOT NULL REFERENCES tags, PRIMARY KEY(message_id,tagid));
 CREATE TABLE manual_decisions(decision_id INTEGER PRIMARY KEY, subject TEXT NOT NULL, operation TEXT NOT NULL, value TEXT NOT NULL, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
+CREATE TABLE message_state(
+ message_id TEXT PRIMARY KEY REFERENCES messages, root_item_json TEXT NOT NULL,
+ parsed_json TEXT, headers_json TEXT, mime_json TEXT, scan_status TEXT,
+ category TEXT, catalog_message_pk INTEGER, excluded INTEGER NOT NULL DEFAULT 0
+);
+CREATE TABLE content_parts(
+ message_id TEXT NOT NULL REFERENCES messages, part_path TEXT NOT NULL, producer TEXT NOT NULL,
+ content_type TEXT NOT NULL, scope TEXT NOT NULL, synthetic INTEGER NOT NULL, text TEXT,
+ PRIMARY KEY(message_id,part_path,producer)
+);
+CREATE TABLE message_addresses(
+ message_id TEXT NOT NULL REFERENCES messages, address_id INTEGER NOT NULL REFERENCES addresses,
+ seen_at TEXT NOT NULL, kind TEXT NOT NULL, PRIMARY KEY(message_id,address_id,kind)
+);
+CREATE TABLE processing_settings(name TEXT PRIMARY KEY, value TEXT NOT NULL);

@@ -5,7 +5,7 @@
 **Status: updated 2026-09-13.** [MCT Importer API Version 1.0](MCT_IMPORTER_API.md)
 defines the contract, with implemented Rust generator and validator programs.
 The standalone [PST adapter](PST_IMPORTER.md) now uses Microsoft's crate.
-The executable archive host and cross-importer duplicate suppression remain planned. See [MBOX_READING.md](MBOX_READING.md) and
+The CLI archive host is implemented; cross-importer h3 duplicate suppression remains planned. See [MBOX_READING.md](MBOX_READING.md) and
 [INTEGRITY_CONTROLS.md](INTEGRITY_CONTROLS.md) for current storage/hash controls.
 
 ## Contract

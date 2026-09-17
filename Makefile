@@ -292,7 +292,7 @@ release-tag-check:
 	@test -n "$(GITHUB_REF_NAME)" || { echo 'usage: make release-tag-check GITHUB_REF_NAME=v1.2.3'; exit 2; }
 	uv run --no-project --python '>=3.12' python scripts/release_tag.py --tag "$(GITHUB_REF_NAME)" $(ARGS)
 
-test:
+test: pst-importer
 	uv run pytest -q
 
 .PHONY: test-corpus-import update-corpus-expectations
@@ -511,6 +511,10 @@ test-processors: ruff
 	uv run --locked ty check src/mailarchiver/processing src/mailarchiver/plugin_configuration.py tests/test_processing.py tests/test_plugin_configuration.py --error-on-warning
 	uv run --locked pyright src/mailarchiver/processing src/mailarchiver/plugin_configuration.py tests/test_processing.py tests/test_plugin_configuration.py --warnings
 	uv run --locked pytest -q tests/test_processing.py tests/test_plugin_configuration.py tests/test_catalog.py
+
+.PHONY: test-cli-processors
+test-cli-processors: ruff pst-importer
+	uv run --locked pytest -q tests/test_cli_processing.py
 
 # PST corpus acquisition is opt-in; ordinary checks never contact corpus servers.
 PST_DOWNLOAD_ARGS ?=

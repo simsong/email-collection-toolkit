@@ -548,9 +548,9 @@ importer's claims are truthful or that extraction is complete.
 
 | Header | Producer and purpose | Status |
 | --- | --- | --- |
-| `X-Imported-URI` | Ingest executable: source URI, with an item selector where available; file URI for a PST, HTTPS for a remote source | Generator/validator and standalone PST importer implemented; archive-host integration planned |
-| `X-Importer-Name` | Ingest executable: stable importer identity | Generator/validator and standalone PST importer implemented; archive-host integration planned |
-| `X-Importer-Version` | Ingest executable: exact adapter version, with upstream parser version recorded in the run provenance | Generator/validator and standalone PST importer implemented; archive-host integration planned |
+| `X-Imported-URI` | Ingest executable: source URI, with an item selector where available; file URI for a PST, HTTPS for a remote source | Generator/validator, PST importer and CLI archive host implemented |
+| `X-Importer-Name` | Ingest executable: stable importer identity | Generator/validator, PST importer and CLI archive host implemented |
+| `X-Importer-Version` | Ingest executable: exact adapter version, with upstream parser version recorded in the run provenance | Generator/validator, PST importer and CLI archive host implemented |
 | `X-From` | Legacy double-framing normalizer: displaced envelope sender/timestamp; exact old framing plus pre-normalization SHA-256 retained separately | Implemented |
 | `X-Mailarchiver-Derived`, `X-Mailarchiver-Transcription-Status` | PDF exporter: reconstruction kind and machine-unreviewed status | Implemented, derived output |
 | `X-Mailarchiver-Source-PDF`, `X-Mailarchiver-Source-PDF-SHA256` | PDF exporter: source name and complete original file SHA-256 | Implemented, derived output |
@@ -563,7 +563,7 @@ participate in h2. H3 does not generically remove headers inside the MIME body.
 The synthetic PDF `Message-ID` is in both h2 and h3. Existing source X headers
 are retained; they are not automatically evidence created by this application.
 MCT Importer API 1.0 distinguishes its first three added header lines from
-same-named source fields later in the message. The future host must retain their
+same-named source fields later in the message. The host retains their
 bytes and record independently observed executable/version/source hashes.
 
 Current deduplication uses normalized Message-ID plus h2. Different importer

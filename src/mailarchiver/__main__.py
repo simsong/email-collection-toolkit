@@ -65,11 +65,12 @@ from .mbox import (
     add_message,
     clear_publication_journal,
     journal_publication,
-    mailbox_name,
     read_verified_location,
     recover_publication,
 )
-from .message import ParsedMessage, parse_message
+from .message import ParsedMessage
+from .processing.contracts import MailboxReference, ProcessingPolicy, SourceMetadata
+from .processing.production import ProductionPipeline
 from .plugin_api import (
     ArchiveReference,
     IntegrityDecision,
@@ -88,7 +89,6 @@ from .search import (
     QUARANTINE_MAILBOX,
     SEARCH_CATEGORIES,
     PreparedSearchMessage,
-    index_message_safely,
     prepare_search_message,
     write_prepared_search_message,
 )
@@ -144,12 +144,17 @@ class IngestRequest(BaseModel):
     archive: Path
     owner_names_file: Path | None = None
     owner_rules: OwnerRules | None = None
-    roots: list[str] = Field(min_length=1)
+    roots: list[str] = Field(default_factory=list)
     earliest_year: int = Field(default=1900, ge=1)
     workers: int = Field(default_factory=lambda: min(os.cpu_count() or 1, 8), ge=1)
     plugin_dir: list[Path] = Field(default_factory=list)
     index_attachments: bool = False
     scan_policy: Literal["clamav", "not-scanned"] = "clamav"
+    continue_ingest: bool = True
+    continue_content: bool = True
+    max_content_jobs: int | None = Field(default=None, ge=1)
+    installation_config: Path | None = None
+    reprocess: bool = False
 
 
 def positive_integer(value: str) -> int:
@@ -1015,8 +1020,59 @@ def ingest(args: argparse.Namespace) -> None:
             plugin_dir=list(args.plugin_dir),
             index_attachments=args.index_attachments,
             scan_policy="not-scanned" if args.no_scan else "clamav",
+            continue_content=not args.defer_content,
+            installation_config=args.installation_config,
         )
     )
+
+
+def process_archive(args: argparse.Namespace) -> None:
+    """Continue either processing phase with the archive's last ingest policy."""
+    archive = Path(args.archive)
+    with sqlite3.connect(f"file:{archive / 'processing.sqlite3'}?mode=ro", uri=True) as database:
+        row = database.execute("SELECT value FROM processing_settings WHERE name='policy'").fetchone()
+    if row is None:
+        raise ValueError("archive has no saved processor policy; ingest a source first")
+    policy = ProcessingPolicy.model_validate_json(row[0])
+    run_ingest(IngestRequest(archive=archive, owner_rules=policy.owners,
+        earliest_year=policy.earliest_year, index_attachments=policy.index_attachments,
+        scan_policy=policy.scan_policy, continue_ingest=args.phase in ("ingest", "all"),
+        continue_content=args.phase in ("content", "all"), max_content_jobs=args.max_jobs,
+        plugin_dir=args.plugin_dir, installation_config=args.installation_config, reprocess=args.reprocess))
+
+
+def processing_status_report(args: argparse.Namespace) -> None:
+    from .processing.store import report
+    with sqlite3.connect(f"file:{Path(args.archive) / 'processing.sqlite3'}?mode=ro", uri=True) as database:
+        kinds = tuple(row[0] for row in database.execute("SELECT DISTINCT kind FROM invocations ORDER BY kind"))
+        print(report(database, kinds).model_dump_json())
+
+
+def processor_inventory(args: argparse.Namespace) -> None:
+    from .plugin_loader import builtin_plugin_directory
+    from .processing.registry import load_processors
+    for plugin in load_processors((builtin_plugin_directory(), *args.plugin_dir)):
+        print(plugin.manifest.model_dump_json())
+
+
+def identity_command(args: argparse.Namespace) -> None:
+    from .processing.identities import IdentityFilter, ManualDecision, addresses, organizations, edit
+    archive = Path(args.archive).resolve()
+    if args.action in ("addresses", "organizations"):
+        filters = IdentityFilter(name=args.name or "", mailbox=args.mailbox, domain=args.domain, start=args.start, end=args.end)
+        with sqlite3.connect(f"{archive.as_uri()}/processing.sqlite3?mode=ro", uri=True) as database:
+            rows = addresses(database, filters) if args.action == "addresses" else organizations(database, filters)
+        print("[" + ",".join(row.model_dump_json() for row in rows) + "]")
+        return
+    if args.subject is None:
+        raise ValueError("manual identity edits require --subject")
+    decision = ManualDecision(operation=args.action, subject=args.subject, target=args.target,
+                              name=args.name, start=args.start, end=args.end)
+    with WriterLease.acquire(archive, str(archive), "identities", uuid4().hex, "2"):
+        with sqlite3.connect(archive / "processing.sqlite3") as database:
+            database.execute("PRAGMA foreign_keys=ON")
+            edit(database, decision)
+    print(decision.model_dump_json())
 
 
 class IngestInterrupted(KeyboardInterrupt):
@@ -1055,7 +1111,7 @@ def _run_ingest(request: IngestRequest, writer_lease: WriterLease, outcome: Inge
         owners = OwnerRules(include=read_owner_names(request.owner_names_file), exclude=owners.exclude)
     if not owners.include:
         raise ValueError("Set owner include rules in config.yaml or supply --owner-names-file before importing.")
-    plugins = load_plugins(request.plugin_dir)
+    plugins = load_plugins(request.plugin_dir, archive=request.archive, installation_config=request.installation_config)
     source_specs = [SourceSpec(locator=root) for root in request.roots]
     selected_sources: list[tuple[SourceSpec, LoadedPlugin]] = []
     selected_source_keys: set[tuple[str, str, str | None]] = set()
@@ -1159,8 +1215,6 @@ def _run_ingest(request: IngestRequest, writer_lease: WriterLease, outcome: Inge
     progress.scan_policy = request.scan_policy
     source_file_pks: dict[tuple[str, str, str], int] = {}
     source_volume_pks: dict[str, int] = {}
-    pending_duplicate_observations: dict[tuple[str, str], list[int]] = {}
-    pending_identities: set[tuple[str, str]] = set()
     publication_lock = threading.RLock()
     stop = threading.Event()
 
@@ -1173,7 +1227,13 @@ def _run_ingest(request: IngestRequest, writer_lease: WriterLease, outcome: Inge
         progress.refresh()
         check_interrupted()
 
+    def check_processor_cancelled() -> None:
+        check_interrupted()
+        if stop.is_set():
+            raise IngestInterrupted("Processing stopped; unfinished work is retained.")
+
     scanner: ClamScanner | None = None
+    pipeline: ProductionPipeline | None = None
     discovery = sqlite3.connect("")
     discovery.executescript(
         "CREATE TABLE containers ("
@@ -1498,10 +1558,10 @@ def _run_ingest(request: IngestRequest, writer_lease: WriterLease, outcome: Inge
             catalog.commit()
         progress.record_file_complete(path, progress_length)
 
-    def archive_scanned(candidate: PendingScan, infected: bool) -> int:
+    def archive_scanned(candidate: PendingScan, target: MailboxReference) -> int:
         raw, parsed = candidate.source.raw, candidate.parsed
-        category = "INFECTED" if infected else ("Sent" if owners.matches(parsed.sender) else "Archive")
-        destination = mbox_path(archive, mailbox_name(parsed, category))
+        category = target.category
+        destination = target.path
         file_existed = destination.exists()
         publication = PendingPublication(
             filename=destination.name,
@@ -1564,31 +1624,16 @@ def _run_ingest(request: IngestRequest, writer_lease: WriterLease, outcome: Inge
             if recover_publication(archive, catalog, search) is not PublicationRecovery.NONE:
                 checkpoint_archive()
             raise
-        if category in SEARCH_CATEGORIES:
-            index_message_safely(
-                catalog,
-                search,
-                message_pk,
-                raw,
-                request.index_attachments,
-                date_utc=parsed.date_utc,
-            )
         progress.record_disposition("archived")
         if category == "INFECTED":
             progress.record_disposition("infected")
         return int(message_pk)
 
-    def scan_message(source: MailObject) -> bool:
-        if request.scan_policy == "not-scanned":
-            return False
-        assert scanner is not None
-        progress.record_worker(
-            "scanning",
-            source.source.display_name,
-            source.completed_bytes or 0,
-            source.total_bytes or 0,
-        )
-        return scanner.infected(source.raw)
+    def publish_processed(source: MailObject, parsed: ParsedMessage, target: MailboxReference, source_file_pk: int) -> int:
+        source_file_pks[(source.source.plugin_kind, source.source.source_id, source.work_id)] = source_file_pk
+        if "#mime=" in source.cursor:
+            progress.record(parsed, source)
+        return archive_scanned(PendingScan(source=source, parsed=parsed), target)
 
     def ingest_container(work: ContainerWork) -> None:
         source_plugin = work.plugin.implementation
@@ -1666,95 +1711,34 @@ def _run_ingest(request: IngestRequest, writer_lease: WriterLease, outcome: Inge
                         catalog.commit()
                     progress.record_disposition("source-metadata-excluded")
                     continue
-                try:
-                    parsed = parse_message(
-                        raw,
-                        None if source_file is None else source_file.path,
-                        prior_date,
-                        source.source_date_utc,
-                        request.earliest_year,
-                    )
-                except Exception as error:
-                    digest = hashlib.sha256(raw).hexdigest()
-                    with publication_lock:
-                        observe(source, "error", f"{type(error).__name__}: {error}", digest)
+                if pipeline is None:
+                    raise RuntimeError("processor host is not initialized")
+                progress.record_worker("processing", source.source.display_name,
+                                       source.completed_bytes or 0, source.total_bytes or 0)
+                metadata = SourceMetadata(source=source.source, source_file_pk=source_file_pk,
+                    work_id=source.work_id, cursor=source.cursor,
+                    source_path=source_file.path if source_file is not None else None,
+                    prior_date=prior_date, source_date=source.source_date_utc,
+                    envelope_hex=None if source.mbox_envelope is None else source.mbox_envelope.hex(),
+                    normalization=source.mbox_normalization)
+                with publication_lock:
+                    try:
+                        decision = pipeline.ingest(source, metadata)
+                    except RuntimeError as error:
+                        cause = error.__cause__ or error
+                        observe(source, "error", f"{type(cause).__name__}: {cause}", hashlib.sha256(raw).hexdigest())
                         catalog.commit()
-                    # Source identity/cursor belong in bounded failure notes, not
-                    # an unbounded duplicate in the exception summary.
-                    raise RuntimeError(f"failed to parse message; sha256={digest}") from error
-                prior_date = datetime.fromisoformat(parsed.date_utc)
-                progress.record(parsed, source)
-                if parsed.autosave:
-                    progress.record_worker(
-                        "publishing",
-                        source.source.display_name,
-                        source.completed_bytes or 0,
-                        source.total_bytes or 0,
-                    )
-                    with publication_lock:
+                        raise
+                    parsed = decision.parsed
+                    prior_date = datetime.fromisoformat(parsed.date_utc)
+                    progress.record(parsed, source)
+                    if decision.excluded:
                         observe(source, "autosave-excluded", "X-Apple-Auto-Saved", parsed.sha256)
-                        catalog.commit()
-                    progress.record_disposition("autosave-excluded")
-                    continue
-
-                identity = (parsed.message_id, parsed.sha256)
-                progress.record_worker(
-                    "deduplicating",
-                    source.source.display_name,
-                    source.completed_bytes or 0,
-                    source.total_bytes or 0,
-                )
-                with publication_lock:
-                    existing = catalog.execute(
-                        "SELECT message_pk FROM messages WHERE message_id_normalized = ? AND sha256 = ?", identity
-                    ).fetchone()
-                    if existing is not None or identity in pending_identities:
-                        message_pk = None if existing is None else existing[0]
-                        detail = (
-                            "same Message-ID and SHA-256"
-                            if existing is not None
-                            else "same Message-ID and SHA-256 pending scan"
-                        )
-                        if message_pk is not None:
-                            catalog.executemany(
-                                "INSERT OR IGNORE INTO metadata_defects(message_pk, field, detail) VALUES (?, ?, ?)",
-                                ((message_pk, defect.field, defect.detail) for defect in parsed.defects),
-                            )
-                        observation_pk = observe(source, "duplicate", detail, parsed.sha256, message_pk)
-                        if message_pk is None:
-                            pending_duplicate_observations.setdefault(identity, []).append(observation_pk)
-                        catalog.commit()
+                        progress.record_disposition("autosave-excluded")
+                    elif decision.duplicate:
+                        observe(source, "duplicate", "same Message-ID and SHA-256", parsed.sha256, decision.message_pk)
                         progress.record_disposition("duplicate")
-                        continue
-                    pending_identities.add(identity)
-
-                candidate = PendingScan(source=source, parsed=parsed)
-                infected = scan_message(source)
-                if stop.is_set():
-                    return
-                progress.record_worker(
-                    "waiting to publish",
-                    source.source.display_name,
-                    source.completed_bytes or 0,
-                    source.total_bytes or 0,
-                )
-                with publication_lock:
-                    progress.record_worker(
-                        "publishing",
-                        source.source.display_name,
-                        source.completed_bytes or 0,
-                        source.total_bytes or 0,
-                    )
-                    message_pk = archive_scanned(candidate, infected)
-                    catalog.executemany(
-                        "UPDATE observations SET message_pk = ? WHERE observation_pk = ?",
-                        (
-                            (message_pk, observation_pk)
-                            for observation_pk in pending_duplicate_observations.pop(identity, [])
-                        ),
-                    )
                     catalog.commit()
-                    pending_identities.remove(identity)
 
             if stop.is_set():
                 return
@@ -1880,12 +1864,26 @@ def _run_ingest(request: IngestRequest, writer_lease: WriterLease, outcome: Inge
         verify_stable_discovery()
         progress.finish_inventory(inventory)
         check_interrupted()
-        if request.scan_policy == "clamav":
+        if request.scan_policy == "clamav" and request.continue_ingest:
             progress.set_phase(CLAMAV_START_PHASE)
             scanner = ClamScanner(refresh_import)
             scanner.__enter__()
-        else:
+        elif request.continue_ingest:
             print("WARNING: importing without antivirus scanning; messages are NOT scanned or certified clean.", file=sys.stderr)
+        pipeline = ProductionPipeline(archive, catalog, search, ProcessingPolicy(
+            owners=owners, earliest_year=request.earliest_year, index_attachments=request.index_attachments,
+            scan_policy=request.scan_policy,
+            scanner_configuration=scanner.configuration_path if scanner is not None else None,
+            scanner_executable=scanner.clamdscan if scanner is not None else "clamdscan"),
+            publish_processed, plugin_dirs=tuple(request.plugin_dir), installation_config=request.installation_config,
+            cancelled=check_processor_cancelled)
+        if request.reprocess:
+            pipeline.reprocess()
+        if request.continue_ingest:
+            def resume_ingest(_unused: int) -> None:
+                assert pipeline is not None
+                pipeline.resume(("ingest", "message"))
+            run_file_workers([0], 1, resume_ingest, stop, refresh_import)
         progress.set_phase("checking sources")
         run_file_workers(
             snapshotted_containers(),
@@ -1899,6 +1897,12 @@ def _run_ingest(request: IngestRequest, writer_lease: WriterLease, outcome: Inge
             ),
         )
         check_interrupted()
+        if request.continue_content:
+            progress.set_phase("processing content")
+            def process_content(_unused: int) -> None:
+                assert pipeline is not None
+                pipeline.resume(("message", "content"), max_jobs=request.max_content_jobs)
+            run_file_workers([0], 1, process_content, stop, refresh_import)
         catalog.commit()
         search.commit()
         succeeded = True
@@ -1952,6 +1956,12 @@ def _run_ingest(request: IngestRequest, writer_lease: WriterLease, outcome: Inge
                 (result, failure_detail, run_pk),
             )
             catalog.commit()
+        if pipeline is not None:
+            for statistic in pipeline.statistics().statistics:
+                print(f"processor {statistic.kind}: invocations={statistic.invocations} "
+                      f"shortest={statistic.shortest or 0:.3f}s longest={statistic.longest or 0:.3f}s "
+                      f"average={statistic.average or 0:.3f}s total={statistic.total:.3f}s", file=sys.stderr)
+            pipeline.close()
         catalog.close()
         search.close()
         progress.finish(result, failure_detail)
@@ -2266,8 +2276,32 @@ def main() -> int:
         help="trusted plug-in root to load (repeatable; Python code in this directory will execute)",
     )
     ingest_parser.add_argument("--index-attachments", action="store_true", help="index text attachments; non-text attachments require the planned Tika extractor")
+    ingest_parser.add_argument("--defer-content", action="store_true", help="file messages and extract headers; leave content jobs pending")
+    ingest_parser.add_argument("--installation-config", type=Path, help="installation plugin settings override")
     ingest_parser.add_argument("roots", nargs="+", metavar="ROOT")
     ingest_parser.set_defaults(function=ingest)
+    processing = commands.add_parser("process", help="resume saved processing jobs without rereading source mailboxes")
+    processing.add_argument("--phase", choices=("ingest", "content", "all"), default="content")
+    processing.add_argument("--max-jobs", type=positive_integer, help="stop after this many content/message jobs")
+    processing.add_argument("--reprocess", action="store_true", help="queue a fresh processing generation, preserving manual identity decisions")
+    processing.add_argument("--plugin-dir", type=Path, action="append", default=[])
+    processing.add_argument("--installation-config", type=Path)
+    processing.set_defaults(function=process_archive)
+    processing_status = commands.add_parser("processing-status", help="show durable processor work and invocation statistics")
+    processing_status.set_defaults(function=processing_status_report)
+    processors = commands.add_parser("processors", help="list registered processors by pipeline, type and rank")
+    processors.add_argument("--plugin-dir", type=Path, action="append", default=[])
+    processors.set_defaults(function=processor_inventory)
+    identities = commands.add_parser("identities", help="query address/organization pickers or save a manual decision")
+    identities.add_argument("action", choices=("addresses", "organizations", "rename-person", "merge-person", "rename-organization", "affiliate"))
+    identities.add_argument("--name")
+    identities.add_argument("--mailbox", default="")
+    identities.add_argument("--domain", default="")
+    identities.add_argument("--start", help="inclusive first date, YYYY-MM-DD")
+    identities.add_argument("--end", help="inclusive last date, YYYY-MM-DD")
+    identities.add_argument("--subject", type=positive_integer)
+    identities.add_argument("--target", type=positive_integer)
+    identities.set_defaults(function=identity_command)
     review_parser = commands.add_parser("review")
     review_parser.add_argument("--run", type=int, help="only show this ingest run's observations")
     review_parser.set_defaults(function=review)

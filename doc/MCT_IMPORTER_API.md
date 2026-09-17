@@ -5,7 +5,7 @@
 Version 1.0 defines a read-only executable interface: a production importer
 accepts one filename and emits mboxrd messages on stdout. The Rust test tools
 `mcti-generator` and `mdti-validator` implement its stream contract. [`pst-importer`](PST_IMPORTER.md) implements the PST adapter; the Python
-executable host remains planned. The validator name is
+executable host is implemented by `pst_source.py`. The validator name is
 intentionally `mdti-validator`, as requested; the generator is `mcti-generator`.
 
 ## Build and run

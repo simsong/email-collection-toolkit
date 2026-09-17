@@ -4,11 +4,20 @@ from __future__ import annotations
 
 from pathlib import Path
 import re
+import hashlib
+from uuid import uuid4
+import time
+from collections.abc import Callable
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, field_validator
 
 from ..plugin_configuration import ConfigScope, ConfigValues, ConfigWrite, PluginConfiguration, ReadScope
+from ..layout import mbox_path
+from .contracts import (
+    AddressEvidence, ContentMetadata, Filing, HeaderMetadata, MailboxReference,
+    MimeInventory, ProcessingPolicy, ScanEvidence, SourceMetadata, TextContent,
+)
 
 Pipeline = Literal["ingest", "message", "content"]
 Scope = Literal["body", "attachment"]
@@ -31,6 +40,7 @@ class ProcessorManifest(Model):
     pipeline: Pipeline
     subscribes: tuple[str, ...] = Field(min_length=1)
     emits: tuple[str, ...] = ()
+    emits_mime_parts: bool = False
     rank: int = Field(gt=0)
     scope: Literal["body", "attachment", "both"] = "both"
     timeout_seconds: float = Field(default=60, gt=0, allow_inf_nan=False)
@@ -60,10 +70,20 @@ class ContentReference(Model):
 class ArchiveContext(Model):
     path: Path
 
+    def mailbox(self, year: int | Literal["INFECTED"], role: Literal["Sender", "Archive"] | None) -> MailboxReference:
+        if year == "INFECTED" and role is None:
+            return MailboxReference(path=mbox_path(self.path, "INFECTED1.mbox"), category="INFECTED")
+        if not isinstance(year, int) or role is None or not 1 <= year <= 9999:
+            raise ValueError("mailbox requires a year and role, or INFECTED with no role")
+        category = "Sent" if role == "Sender" else "Archive"
+        return MailboxReference(path=mbox_path(self.path, f"{year}-{category}1.mbox"), category=category)
+
 
 class ApplicationContext(Model):
     """Headless service identity; writes are requested through typed results."""
     api_version: Literal[2] = 2
+    policy: ProcessingPolicy | None = None
+    workspace: Path | None = None
 
 
 class ProcessingObject(Model):
@@ -80,8 +100,29 @@ class ProcessingObject(Model):
     parent_message_id: str | None = None
     scan_provenance: str | None = None
     producer: str | None = None
+    source_metadata: SourceMetadata | None = None
+    content_metadata: ContentMetadata = ContentMetadata()
+    generation: str = ""
 
     _configuration: PluginConfiguration | None = PrivateAttr(default=None)
+    _deadline: float | None = PrivateAttr(default=None)
+    _cancelled: Callable[[], None] | None = PrivateAttr(default=None)
+
+    def bind_deadline(self, deadline: float, cancelled: Callable[[], None] | None = None) -> None:
+        self._deadline = deadline
+        self._cancelled = cancelled
+
+    def check_cancelled(self) -> None:
+        if self._cancelled is not None:
+            self._cancelled()
+        if self._deadline is not None and time.monotonic() >= self._deadline:
+            raise TimeoutError("processor timeout")
+
+    @property
+    def remaining_seconds(self) -> float:
+        """Use this budget for blocking I/O; check_cancelled in long processing loops."""
+        self.check_cancelled()
+        return max(0.001, self._deadline - time.monotonic()) if self._deadline is not None else 60
 
     def bind_configuration(self, configuration: PluginConfiguration) -> None:
         """Host binding for this invocation's registered plugin namespace."""
@@ -97,6 +138,14 @@ class ProcessingObject(Model):
             raise RuntimeError("plugin configuration is available only during an invocation")
         self._configuration.write_my_config(values, scope=scope)
 
+    def create_content(self, data: bytes) -> ContentReference:
+        """Create a worker output; the host snapshots accepted output before cleanup."""
+        if self.application.workspace is None:
+            raise RuntimeError("content output is available only during an invocation")
+        path = self.application.workspace / str(uuid4())
+        path.write_bytes(data)
+        return ContentReference(path=path, sha256=hashlib.sha256(data).hexdigest())
+
 
 class Emission(Model):
     content_ref: ContentReference
@@ -104,6 +153,12 @@ class Emission(Model):
     part_path: tuple[int, ...] = ()
     scope: Scope = "body"
     synthetic: bool = False
+    metadata: ContentMetadata = ContentMetadata()
+
+
+class PromotedMessage(Model):
+    content_ref: ContentReference
+    part_path: tuple[int, ...]
 
 
 class Handoff(Model):
@@ -116,6 +171,13 @@ class ProcessingResult(Model):
     handoffs: tuple[Handoff, ...] = ()
     diagnostics: tuple[str, ...] = ()
     config_writes: tuple[ConfigWrite, ...] = ()
+    scan: ScanEvidence | None = None
+    filing: Filing | None = None
+    headers: HeaderMetadata | None = None
+    text: TextContent | None = None
+    evidence: tuple[AddressEvidence, ...] = ()
+    mime: MimeInventory | None = None
+    promotions: tuple[PromotedMessage, ...] = ()
 
 
 class PluginSpec(Model):
@@ -123,15 +185,20 @@ class PluginSpec(Model):
     directory: Path
 
 
-class InvocationRequest(Model):
-    plugin: PluginSpec
-    item: ProcessingObject
-    configuration: PluginConfiguration = Field(default_factory=PluginConfiguration)
-
-
 class InvocationResponse(Model):
     result: ProcessingResult | None = None
     error: str | None = None
+    _cause: Exception | None = PrivateAttr(default=None)
+
+    @classmethod
+    def failure(cls, error: Exception) -> InvocationResponse:
+        response = cls(error=f"{type(error).__name__}: {error}")
+        response._cause = error
+        return response
+
+    @property
+    def cause(self) -> Exception | None:
+        return self._cause
 
 
 class PluginStatistics(Model):

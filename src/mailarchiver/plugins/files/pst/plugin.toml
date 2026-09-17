@@ -1,0 +1,8 @@
+# Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved.
+api_version = 1
+plugin_type = "file"
+kind = "pst"
+name = "Outlook PST (Rust importer)"
+implementation_version = "1"
+priority = 250
+entrypoint = "mailarchiver.pst_source:PstFileParser"

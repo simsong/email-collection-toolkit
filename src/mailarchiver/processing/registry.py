@@ -47,7 +47,11 @@ def load_processors(roots: tuple[Path, ...]) -> tuple[PluginSpec, ...]:
         for plugin in ordered:
             spec = plugin.manifest
             if spec.pipeline == phase and content_type in spec.subscribes:
-                for emitted in spec.emits:
+                targets = set(spec.emits)
+                if spec.emits_mime_parts:
+                    targets.update(value for candidate in ordered for value in candidate.manifest.subscribes
+                                   if not value.startswith("application/x-mailarchiver-"))
+                for emitted in targets:
                     visit(phase, emitted, ancestors | {content_type})
     for plugin in ordered:
         for content_type in plugin.manifest.subscribes:
@@ -62,10 +66,11 @@ def subscribers(plugins: tuple[PluginSpec, ...], item: ProcessingObject) -> tupl
 
 
 def fingerprint(plugins: tuple[PluginSpec, ...]) -> str:
-    """Changing manifests or entrypoint code cannot reuse stale checkpoints."""
+    """Changing manifests or local Python helpers cannot reuse stale checkpoints."""
     digest = hashlib.sha256()
     for plugin in plugins:
         digest.update(plugin.manifest.model_dump_json().encode())
-        module = plugin.manifest.entrypoint.split(":")[0]
-        digest.update((plugin.directory / f"{module}.py").read_bytes())
+        for source in sorted(plugin.directory.rglob("*.py")):
+            digest.update(source.relative_to(plugin.directory).as_posix().encode())
+            digest.update(source.read_bytes())
     return digest.hexdigest()

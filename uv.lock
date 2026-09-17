@@ -530,6 +530,15 @@ wheels = [
 ]
 
 [[package]]
+name = "filelock"
+version = "3.32.7"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/0f/59/e19834834cb01a32febfbb0f8a23a9088088f5d45991824ff2bc3b5e8acb/filelock-3.32.7.tar.gz", hash = "sha256:37b8a3d9811b0f9aef7e5ec5c71bb320de52df51e6ca9bcd6f5ad81187660da7", size = 225154, upload-time = "2026-09-16T00:24:20.907Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/15/df/31098c5aeb4d966b553641472bd55fcf5fdfac953549894b8a765ba44e91/filelock-3.32.7-py3-none-any.whl", hash = "sha256:65ff0d0190ea42038b32bda4b77834fb05be2cad4c5b9b01aa4dfb3614536e52", size = 100157, upload-time = "2026-09-16T00:24:19.543Z" },
+]
+
+[[package]]
 name = "ftfy"
 version = "6.3.1"
 source = { registry = "https://pypi.org/simple" }
@@ -814,7 +823,9 @@ dependencies = [
     { name = "pywebview" },
     { name = "pyyaml" },
     { name = "requests" },
+    { name = "striprtf" },
     { name = "tabulate" },
+    { name = "tldextract" },
 ]
 
 [package.dev-dependencies]
@@ -849,7 +860,9 @@ requires-dist = [
     { name = "pywebview", specifier = ">=6.2" },
     { name = "pyyaml", specifier = ">=6.0.2" },
     { name = "requests", specifier = ">=2.32.0" },
+    { name = "striprtf", specifier = ">=0.0.29" },
     { name = "tabulate", specifier = ">=0.9.0" },
+    { name = "tldextract", specifier = ">=5.3" },
 ]
 
 [package.metadata.requires-dev]
@@ -1649,6 +1662,18 @@ wheels = [
 ]
 
 [[package]]
+name = "requests-file"
+version = "3.0.1"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "requests" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/3c/f8/5dc70102e4d337063452c82e1f0d95e39abfe67aa222ed8a5ddeb9df8de8/requests_file-3.0.1.tar.gz", hash = "sha256:f14243d7796c588f3521bd423c5dea2ee4cc730e54a3cac9574d78aca1272576", size = 6967, upload-time = "2025-10-20T18:56:42.279Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/e1/d5/de8f089119205a09da657ed4784c584ede8381a0ce6821212a6d4ca47054/requests_file-3.0.1-py2.py3-none-any.whl", hash = "sha256:d0f5eb94353986d998f80ac63c7f146a307728be051d4d1cd390dbdb59c10fa2", size = 4514, upload-time = "2025-10-20T18:56:41.184Z" },
+]
+
+[[package]]
 name = "requests-oauthlib"
 version = "2.0.0"
 source = { registry = "https://pypi.org/simple" }
@@ -1739,6 +1764,15 @@ wheels = [
 ]
 
 [[package]]
+name = "striprtf"
+version = "0.0.33"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/3e/3b/c42830804cb2da515d0cb8aa200fb199ce57f7dcc344ff73db9dfe37cf3b/striprtf-0.0.33.tar.gz", hash = "sha256:c2d3d9ff3118df6dab558675f10a31ff8bb999ac1f8921f00c6dc9ea19961f18", size = 8010, upload-time = "2026-08-17T21:11:15.706Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/f5/85/bee751fd2096accfc8b76186d49fbb2871163723e45f1e721e03c3f044ae/striprtf-0.0.33-py3-none-any.whl", hash = "sha256:f9637632a4414de05b1c399ee34d324dc336133ae45769992143a024e0f919ef", size = 8446, upload-time = "2026-08-17T21:11:14.696Z" },
+]
+
+[[package]]
 name = "tabulate"
 version = "0.10.0"
 source = { registry = "https://pypi.org/simple" }
@@ -1763,6 +1797,21 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/1c/dc/0aff23d6036a4d3bf4f1d8c8204c5c79c4437e25e0ae94ffe4bbb55ee3c2/texttable-1.7.0.tar.gz", hash = "sha256:2d2068fb55115807d3ac77a4ca68fa48803e84ebb0ee2340f858107a36522638", size = 12831, upload-time = "2023-10-03T09:48:12.272Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/24/99/4772b8e00a136f3e01236de33b0efda31ee7077203ba5967fcc76da94d65/texttable-1.7.0-py2.py3-none-any.whl", hash = "sha256:72227d592c82b3d7f672731ae73e4d1f88cd8e2ef5b075a7a7f01a23a3743917", size = 10768, upload-time = "2023-10-03T09:48:10.434Z" },
+]
+
+[[package]]
+name = "tldextract"
+version = "5.3.2"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "filelock" },
+    { name = "idna" },
+    { name = "requests" },
+    { name = "requests-file" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/01/a9/ed5d3be29bfaf90c00b7159d3884b311f3880b55833d1c7be764164dc288/tldextract-5.3.2.tar.gz", hash = "sha256:c017431bc0800f2d3d1b57cce36e06668f0930f60a6d8c4615d4e2b8da298fa9", size = 191971, upload-time = "2026-08-08T20:53:13.732Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/4a/3b/930310b274dfe3b9a4fe64ef8b24e5faf376c9a6f94bba6fc6e438058598/tldextract-5.3.2-py3-none-any.whl", hash = "sha256:6c90d2a259f5c89f4fcf01f97af15708416a59ffedddff006d67222ab30d0fb0", size = 106415, upload-time = "2026-08-08T20:53:12.675Z" },
 ]
 
 [[package]]

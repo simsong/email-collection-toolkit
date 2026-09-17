@@ -1,5 +1,5 @@
 # Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved.
-"""PLUGINS.md API v2: actual subprocess dispatch, persistence and abort requirements."""
+"""PLUGINS.md API v2: in-process dispatch, persistence and abort requirements."""
 from __future__ import annotations
 
 import json
@@ -75,6 +75,28 @@ def test_rank_barrier_and_part_abort(tmp_path: Path) -> None:
             ("a-emitter", 1), ("b-abort", 1), ("d-child", 0), ("c-later", 0)]
 
 
+def test_plugin_local_models_and_relative_imports_run_in_host(tmp_path: Path) -> None:
+    """Plugin packages may define typed helper data without losing normal module semantics."""
+    import os
+    plugin(tmp_path, "models", 'from .helper import Detail\n'
+           'return ProcessingResult(diagnostics=(Detail(pid=__import__("os").getpid()).model_dump_json(),))')
+    (tmp_path / "processors/models/helper.py").write_text(
+        "from __future__ import annotations\nfrom pydantic import BaseModel\nclass Detail(BaseModel):\n    pid: int\n")
+    plugins = load_processors((tmp_path,))
+    with connect(tmp_path / "archive", create=True) as database:
+        submit(database, tmp_path / "archive", MESSAGE, fingerprint(plugins))
+        assert run(database, plugins).completed == 1
+        result = json.loads(database.execute("SELECT result_json FROM invocations").fetchone()[0])
+        assert json.loads(result["diagnostics"][0])["pid"] == os.getpid()
+        original = fingerprint(plugins)
+        helper = tmp_path / "processors/models/helper.py"
+        helper.write_text(helper.read_text().replace("pid: int", "pid: str"))
+        assert fingerprint(plugins) != original
+        from mailarchiver.processing.store import reprocess
+        reprocess(database, tmp_path / "archive", fingerprint(plugins))
+        assert run(database, plugins).failed == 1  # The edited helper, not an old module, ran.
+
+
 @pytest.mark.parametrize("outcome", ["abort-message", "fail-import"])
 def test_message_and_import_aborts(tmp_path: Path, outcome: str) -> None:
     plugin(tmp_path, "abort", f'return ProcessingResult(outcome="{outcome}")')
@@ -91,8 +113,8 @@ def test_message_and_import_aborts(tmp_path: Path, outcome: str) -> None:
             assert result.aborted == 2 and result.pending == 0
 
 
-def test_timeout_kills_worker_and_retry_reuses_checkpoint(tmp_path: Path) -> None:
-    """Noncooperative plugin cannot emit after timeout; previous successful rank is reused."""
+def test_timeout_rejects_result_and_retry_reuses_checkpoint(tmp_path: Path) -> None:
+    """Deadline blocks publication and previous successful rank is reused."""
     plugin(tmp_path, "first", 'return ProcessingResult()')
     plugin(tmp_path, "slow", 'time.sleep(10)\nreturn ProcessingResult()', rank=2, timeout=0.2)
     plugins = load_processors((tmp_path,))
@@ -296,7 +318,7 @@ def test_framework_schema_is_separate_from_production_catalog(tmp_path: Path) ->
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="POSIX worker cancellation and writer lease")
-def test_cli_interrupt_terminates_worker_and_resumes_completed_rank(tmp_path: Path) -> None:
+def test_cli_interrupt_exits_host_and_resumes_completed_rank(tmp_path: Path) -> None:
     """Real SIGINT must release the lease and retry only interrupted invocations."""
     import os
     import signal
@@ -326,6 +348,7 @@ def test_cli_interrupt_terminates_worker_and_resumes_completed_rank(tmp_path: Pa
                 assert time.monotonic() < deadline
                 time.sleep(0.01)
             worker_pid = int(marker.read_text())
+            assert worker_pid == process.pid  # Plugin runs in its CLI host, not a child Python process.
             process.send_signal(signal.SIGINT)
             stdout, stderr = process.communicate(timeout=10)
         finally:

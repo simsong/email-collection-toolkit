@@ -4,8 +4,9 @@
 
 ## Implemented CLI processor framework
 
-The first implementation stage supplies an API v2 **test-plugin framework**.
-It does not replace production ingest or launch any GUI. Use a fresh directory;
+API v2 runs both executable test plugins and production CLI processing.
+Python plugins execute in the host interpreter; no Python plugin subprocesses
+are created. The Rust PST importer remains an external executable. Use a fresh directory;
 there is no requirement to migrate or preserve existing generated archive
 formats. Source mail remains immutable.
 
@@ -23,7 +24,7 @@ make test-processors
 
 The plugins command prints manifests; status and run print typed JSON reports
 with persistent invocation counts and timings. A failed run exits 1.
-Ctrl-C terminates the active worker, prints statistics and exits 130.
+Ctrl-C stops CLI processing, retains unfinished jobs, prints statistics and exits 130.
 Run with --retry to retry failed jobs while retaining successful checkpoints.
 After changing manifests or entrypoint code, use reprocess explicitly:
 old unfinished jobs are superseded, original inputs are queued under the new
@@ -38,11 +39,15 @@ emissions/handoffs transactionally and blocks them until the parent job complete
 Part aborts retain sibling work; message aborts stop that message; import failure
 leaves other jobs pending. Unsubscribed objects complete without discarding bytes.
 
-Trusted processors execute in disposable Python subprocesses. On POSIX a timeout
-kills the worker process group before recording failure, preventing late result
-publication. These are trusted plugins, not a security sandbox. The supported
-CLI test platform is POSIX, matching the existing archive writer lease; Windows
-process-tree supervision remains future work.
+Trusted processors execute synchronously through `process(item)` in the Python
+host. `item.check_cancelled()` checks cancellation and the manifest deadline;
+`item.remaining_seconds` supplies the remaining budget to blocking I/O. Long
+loops must cooperate. The POSIX main-thread harness also uses an alarm. A late
+result is rejected before configuration, queue or catalog publication. Arbitrary
+native code that ignores deadlines cannot be force-stopped safely in process;
+this interface is not a security sandbox. ClamAV uses its existing on-demand
+native service and a bounded command invocation; the Python ClamAV plugin itself
+runs in process. No persistent service is installed or enabled.
 
 The fresh processing.sqlite3 schema is packaged separately under
 processing/sql/V2__processing.sql; it does not enter the production catalog
@@ -52,20 +57,75 @@ organizations/domains, dated affiliations, evidence, tags and manual decisions.
 Overlapping affiliations are allowed. Nullable tag styles mean no override.
 The harness snapshots input bytes into content-addressed objects/ files;
 its admission identity is the raw digest, **not production message deduplication**.
-Production admission and canonical storage services are the next stacked PR.
+Production admission uses normalized Message-ID plus raw SHA-256 and the existing
+transactional MBOX publisher. Every source/attachment occurrence is retained.
 Generated synthetic objects are working data, not canonical message records.
 
 The processing package contains API models, registry validation, queue storage,
-worker and dispatcher modules. Workers receive application/archive contexts plus
-whole-message and current-content references. They return typed results;
-host database and queue changes stay in the parent. The current application
-context is a headless capability marker; production mailbox/catalog services,
-child-message promotion and source/file adapters are supplied in the next PR.
+the dispatcher, production services and built-in processors. The invocation
+carries application/archive contexts, the raw message and current content,
+source/parent provenance and processing policy. Typed results request host
+publication; plugins do not manipulate the live catalogs directly.
 
-The tests use real executable fixture plugins, subprocesses and SQLite, with
-no mocks. They exercise the three-pipeline CLI, idempotence, rank/abort behavior,
-scope selection, timeout termination, restart checkpoint recovery, blocked
-downstream work, registry changes, input integrity and identity-schema constraints.
+The tests invoke real plugins and CLI programs with SQLite and synthetic mail,
+without mocks. They cover rank/abort behavior, deadlines, checkpoint recovery,
+configuration, input integrity, deferred processing, identity edits, MIME
+selection, attached messages and the real Rust PST adapter.
+
+### Production CLI
+
+~~~sh
+make run ARGS="--archive .tmp/demo ingest --owner-names-file tests/fixtures/owner-names.txt --clamav --defer-content tests/data/three_messages.mbox"
+make run ARGS="--archive .tmp/demo processors"
+make run ARGS="--archive .tmp/demo processing-status"
+make run ARGS="--archive .tmp/demo process --phase content"
+make run ARGS="--archive .tmp/demo identities addresses --mailbox sender --start 2024-01-01"
+make run ARGS="--archive .tmp/demo identities organizations --domain example.net"
+make test-cli-processors
+~~~
+
+`ingest` finishes ingest/message jobs before running content. `--defer-content`
+leaves content pending. `process --phase ingest|content|all` resumes stored jobs
+without needing source files; continuing an unfinished source traversal still
+requires repeating `ingest` with that source. `--max-jobs` bounds a content pass.
+Failed work is retried; successful invocations are reused. Registry, processor
+code, policy or effective settings changes queue a new generation automatically;
+`process --reprocess` does so explicitly. Reprocessing filed messages starts at
+message processing, retaining their original antivirus provenance. It never
+unquarantines infected messages. Original source bytes, canonical MBOX files and
+manual decisions are retained. Working `objects/` files, including synthetic
+parts, are outside the canonical BagIt payload.
+
+`identities` returns JSON address rows with canonical names, first/last use and
+distinct message counts, or organization rows grouped by parent domain using an
+offline Public Suffix List. Mailbox/domain/name and inclusive start/end filters
+are independent. `rename-person`, `merge-person`, `rename-organization` and
+`affiliate` use `--subject`, `--target`, `--name`, `--start`, `--end` as applicable;
+edits and audit records commit immediately under the archive writer lease.
+Signature addresses enter the evidence index before authoritative matching.
+Heuristic signature evidence is not an automatic identity merge. Explicit
+manual affiliations allow overlapping dates and open endpoints.
+
+`item.archive.mailbox(year, role)` returns a typed filing destination, for example
+`(2006, "Sender")`, `(2006, "Archive")`, or `("INFECTED", None)`. A `Filing` result
+requests transactional publication of original bytes. Header, text, MIME
+inventory, scan, identity evidence and child-message promotion results are typed.
+The MIME extractor declares `emits_mime_parts = true` to dispatch normalized
+actual MIME labels; it cannot emit framework-only labels through that permission.
+Attached RFC 822 messages use inherited scan provenance, shared deduplication,
+parent/MIME-path occurrences and the persisted attachment tag. Viewer/tag-editor
+and incomplete-work dialog wiring remain the GUI phase.
+
+The source/file acquisition interfaces remain the adapters before raw-message
+dispatch. Their `PluginContext` exposes the same namespace configuration reads
+and writes; acquisition writes commit synchronously. `plugins.pst` configures the
+Rust executable, timeout and output bound. PST stdout is spooled privately under
+`processing-pst/`; failure retains output, executable/source hashes, diagnostics
+and an exit receipt. Complete records preceding the final uncertain tail can be
+filed; an unsuccessful importer never marks source traversal complete. A rerun
+deduplicates those earlier records. Successful spools are removed after filing;
+receipts remain. Build the executable with `make pst-importer` or configure its
+path. Native installer bundling is separate release work.
 
 ### Plugin-owned configuration
 
@@ -106,7 +166,7 @@ writing `{}` clears that layer's overrides. To change one setting, read that
 layer, edit it, then write it back. Writing the effective dictionary to the
 archive intentionally pins inherited installation settings as archive overrides.
 
-Writes are staged in the worker and visible immediately to its later reads.
+Writes are staged in the invocation and visible immediately to its later reads.
 The parent persists them only after all subscribers at that rank succeed.
 Timeouts, exceptions and part/message/import aborts discard that rank's staged
 writes. The complete rank locks its target files, re-reads them and preflights
@@ -119,11 +179,10 @@ preflight conflicts fail the job so `run --retry` obtains fresh snapshots.
 I/O failure after journaling retains completed invocations for publication retry.
 Earlier successful ranks retain their committed writes if a later rank fails.
 
-The configuration service is available to API v2 processors now; production
-source/file adapters will use it when migrated in the next stacked PR. Settings
-changes affect subsequent invocations; automatic invalidation of previously
-completed derived work remains part of that production integration. The current
-registry fingerprint covers manifests and entrypoint code.
+The configuration service is available to processors and source/file adapters.
+Settings changes affect subsequent invocations; the production host fingerprints
+effective settings, processing code and policy to invalidate completed derived
+work. The registry fingerprint covers manifests and local Python code, including helpers.
 
 
 ## Proposed ranked processing graphs
@@ -132,7 +191,7 @@ registry fingerprint covers manifests and entrypoint code.
 
 The same graphic appears on the [website plugin page](../website/content/plugins.md).
 This section describes the complete target architecture. The CLI framework above
-implements its first stage; production processor wiring and GUI remain planned.
+implements production processing; the GUI controls remain planned.
 
 Source/container acquisition, including its file-parser subtree, supplies raw
 messages to three processing pipelines:
@@ -166,7 +225,7 @@ same type run. Required cross-type outputs must also precede their consumers.
 ClamAV rank 1 and filing/handoff rank 2 are ingest ranks; MIME extraction belongs
 to content processing. Abort scopes are part, message, and import. Scanner timeouts default to 60 seconds and are configurable in TOML.
 Invocation statistics include count, total time, shortest, longest, average,
-errors, and timeouts. About lists registered plugins by subscribed type.
+errors, and timeouts. The CLI lists registered plugins by subscribed type; About integration is planned.
 
 Publication uses a framework service selecting year/role, including the
 INFECTED destination, and preserving transactions, locking, byte fidelity and
@@ -307,10 +366,11 @@ is never a clean verdict. Record the failure, retain recoverable input and leave
 the work retryable; stop normal filing of that input. Malformed MIME, decoding
 failures and unscannable content must never silently discard original bytes.
 
-Timeout enforcement must stop execution, not merely stop waiting on a live
-thread that can still write. Framework-owned subprocesses or another mechanism
-with equivalent cancellation guarantees are required for noncooperative
-scanners. Failed/timed-out invocations cannot publish late outputs.
+In-process plugins must honor cancellation and pass their remaining timeout to
+blocking operations. The host rejects late results and their staged writes.
+It does not launch disposable Python processes or leave timed-out plugin threads
+running in the background. The native scanner command and Rust importer have
+bounded waits and are reaped before their resources are released.
 
 ### Archive services and durable handoffs
 
@@ -414,7 +474,7 @@ The planned [ingest executable protocol](PST_DUAL_READER.md) is a subprocess
 adapter into these layers: filename input, mboxrd stdout, stderr diagnostics,
 and separate `X-Imported-URI`, `X-Importer-Name`, `X-Importer-Version` fields.
 The [MCT Importer API 1.0](MCT_IMPORTER_API.md) Rust generator and validator are
-implemented, as is the standalone PST adapter; archive-host integration remains planned. All added fields remain in
+implemented, as is the PST adapter and its CLI archive-host integration. All added fields remain in
 h2; see [added headers and integrity](INTEGRITY_CONTROLS.md#headers-added-by-mail-archiver-and-ingest-executables).
 
 Plug-ins do not create threads, render status, scan messages, open the archive

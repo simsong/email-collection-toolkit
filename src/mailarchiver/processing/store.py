@@ -16,15 +16,15 @@ DATABASE = "processing.sqlite3"
 SCHEMA_RESOURCE = "V2__processing.sql"
 
 
-def connect(archive: Path, *, create: bool = False) -> sqlite3.Connection:
+def connect(archive: Path, *, create: bool = False, production: bool = False) -> sqlite3.Connection:
     path = archive / DATABASE
     if create:
         archive.mkdir(parents=True, exist_ok=True)
-        if path.exists() or (archive / "archive.sqlite3").exists():
+        if path.exists() or (not production and (archive / "archive.sqlite3").exists()):
             raise ValueError("initialization requires a fresh framework archive")
     if not path.exists() and not create:
         raise ValueError("framework archive does not exist; use init")
-    database = sqlite3.connect(path)
+    database = sqlite3.connect(path, check_same_thread=not production)
     database.execute("PRAGMA foreign_keys=ON")
     if create:
         database.executescript(files("mailarchiver.processing").joinpath("sql", SCHEMA_RESOURCE).read_text())

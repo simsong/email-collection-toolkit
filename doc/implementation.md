@@ -733,7 +733,7 @@ the existing `schema_info` version check does not implement those safeguards.
 ### CLI processor framework
 
 The processing package implements API v2 manifests, typed objects/results,
-subprocess execution and a serial rank-barrier dispatcher. Make processor
+in-process execution and a serial rank-barrier dispatcher. Make processor
 provides init, plugins, submit, run, status and explicit reprocess commands.
 Each archive is protected by the existing writer lease. Queue release and job
 checkpoints use SQLite transactions; emission files are copied and fsynced
@@ -746,15 +746,32 @@ migration. It is packaged independently of the production sql/ directory.
 The focused framework target also runs catalog regression tests to enforce
 that separation.
 It includes the identity and organization relationships needed by the pickers.
-The first stacked PR leaves production V1 ingest disconnected, solely to permit
-independent framework testing. Compatibility with generated V1 archives is not
-a requirement for the redesign. Production storage/admission and source-plugin
-integration follow in the second stacked PR; GUI integration follows in the
-third. The complete stack must be accepted before any constituent PR merges.
+Production CLI ingest now calls `ProductionPipeline` from the existing source
+integrity/publication host. The three registered trees scan/file, extract headers
+and queue content, then dispatch streamed MIME payloads to text, conversion,
+identity and attached-message plugins. Canonical publication keeps its existing
+journal and deduplication key. `processing.sqlite3` records raw references,
+occurrences, jobs, evidence and picker state beside the catalog/search databases.
+`process` resumes saved jobs without rereading sources; incomplete source
+traversals are continued by repeating ingest. Configuration/code changes and
+explicit replay rebuild automatic evidence while retaining manual decisions.
+The default registry is packaged under `plugins/processors`; `processors` lists
+it. The independent `make processor` fixture harness remains available.
 
-The fixture processors in tests/processing_plugins execute in real worker
-processes. Make test-processors runs Ruff, Pylint, ty, Pyright and behavioral
-tests in sequence, without native windows or scanners.
+Python plugins run synchronously in the host. A per-call context binds namespace
+settings, deadline and cancellation checks. `remaining_seconds` bounds native
+scanner I/O; POSIX main-thread invocations also receive an alarm. Portable or
+background-thread execution requires cooperative checks. Late results never
+publish. There is no separate Python worker executable. The Rust PST adapter
+alone uses the external importer protocol, spooling output and retaining failed
+tails with source/executable hashes and diagnostics under `processing-pst`.
+`make test` builds the helper; real fixture tests cover partial-run recovery.
+
+`make test-processors` runs lint/types and substantive framework tests;
+`make test-cli-processors` validates production pipelines, deferred resume,
+HTML/RTF selection, child byte preservation, identity edits and PST extraction.
+No native windows or private archives are used. GUI picker, incomplete-work
+prompt and attachment-style display wiring remain follow-up work.
 
 ProcessingObject.get_my_config() returns a defensive dictionary snapshot from
 plugins.<manifest kind> in installation and archive config.yaml, with archive
@@ -794,9 +811,8 @@ enter message processing directly without another antivirus scan, retaining
 parent scan provenance; the handoff uses shared deduplication/publication
 services to establish their records and durable content references.
 The graphic is a shared SVG in `website/static/images/processor-dag.svg`.
-The CLI dispatcher and fresh tag/identity schema are implemented in the first
-framework stage. Production extraction, attachment promotion and GUI persistence
-remain work for subsequent stacked PRs.
+The CLI dispatcher, production extraction, attachment promotion and identity/tag
+persistence are implemented. GUI control and display wiring remain subsequent work.
 
 The standalone `make matcher-prototype` opens independent name and institution
 windows through a temporary `LoopbackAssetServer` and pywebview. Use

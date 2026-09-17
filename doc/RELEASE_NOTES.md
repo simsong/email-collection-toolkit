@@ -4,6 +4,14 @@
 
 ## Unreleased
 
+* Run production CLI ingest, message and content processing through registered
+  Python plugins in process. Add deferred/resumable content commands, MIME and
+  HTML/RTF processing, signature evidence, identity queries/manual edits, and
+  first-class attached messages with deduplication and durable parent/tag data.
+  Integrate the external Rust PST importer, retaining partial-run evidence.
+  No Python plugin worker subprocesses are used; plugin deadlines are cooperative
+  with bounded I/O and late-result rejection. GUI integration remains follow-up.
+
 * Preflight and journal configuration writes across a complete processor rank;
   recover interrupted publication before plugin reads. Record missing/unreadable
   inputs as failed jobs and reject invalid MIME tokens before plugin execution.
@@ -20,9 +28,9 @@
   CLI cancellation/recovery without native windows.
 
 * Add the headless API v2 processor framework, executable test plugins, resumable
-  CLI jobs, rank/abort handling, process-enforced timeouts and invocation reports.
+  CLI jobs, rank/abort handling, plugin deadlines and invocation reports.
   A fresh framework schema includes person/organization, affiliation, evidence
-  and tag relations. Production import and GUI integration remain subsequent
+  and tag relations. GUI integration remains subsequent
   stacked PRs; no generated-format compatibility migration is required.
 
 * Document proposed ranked processor DAGs with a shared website graphic and
@@ -63,7 +71,8 @@
   body/attachment evidence, validated mboxrd stdout and nonzero partial-run status.
   Add actual PST/process tests and build/run Makefile targets. Public fixture
   qualification recovers 12 messages and 30 attachments while reporting two
-  upstream attachment failures; archive integration and packaging remain planned.
+  upstream attachment failures; CLI archive integration is now implemented, while
+  native packaging remains planned.
 
 * Implement Rust `mdti-validator` and `mcti-generator` for MCT Importer API 1.0,
   with `make rust-programs`, individual build targets, locked dependencies,
