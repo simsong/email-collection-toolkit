@@ -1945,6 +1945,12 @@ for commands, limitations, and Apple's renewal/notarization steps.
 
 ### Existing scanner configuration
 
+Pull-request CI runs one `macos-15` job for `make check`, distribution and website
+validation. Separate Rust/lint jobs are omitted because `make check` includes them. It installs ClamAV through Homebrew into the disposable runner,
+uses a private temporary signature/configuration/socket directory and starts
+the daemon only on demand. Website validation selects the pinned, SHA-256-checked
+Zola macOS binary for the runner architecture. Native GUI checks remain disabled.
+
 Homebrew installed these commands:
 
 ```text
@@ -2481,4 +2487,7 @@ serializes writers. Supplied expected hashes differ explicitly from observations
 [The contract](../pst/README.md) documents reruns, limits and unavailable links.
 `make test-pst-downloader` uses real temporary HTTP servers and archives to test
 exact bytes, deduplication, cache tampering, extraction and partial failure.
+The fixture server explicitly puts accepted sockets into blocking mode with a
+read timeout. A real split-header regression checks that packet gaps cannot
+produce a premature response, as observed in a failing local macOS run.
 The downloader does not invoke the PST importer or canonical archive engine.

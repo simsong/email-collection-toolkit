@@ -4,6 +4,9 @@
 
 ## Unreleased
 
+* Restrict pull-request CI to macOS, with on-demand Homebrew ClamAV and pinned
+  macOS Zola binaries. Keep native GUI tests opt-in.
+
 * Bound derived HTML/RTF/text processing; invalidate stale search rows atomically
   with processor generations; keep public providers out of automatic affiliations.
   Preserve PST timeout exit evidence and bound retained stdout/stderr prefixes.

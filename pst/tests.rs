@@ -4,7 +4,7 @@
 use super::*;
 use std::{
     io::Cursor,
-    net::TcpListener,
+    net::{TcpListener, TcpStream},
     sync::{
         atomic::{AtomicBool, AtomicUsize, Ordering},
         Arc,
@@ -34,6 +34,9 @@ impl Server {
                     thread::sleep(Duration::from_millis(5));
                     continue;
                 };
+                // Accepted sockets may inherit nonblocking mode. A packet gap
+                // must not be interpreted as the end of the HTTP request.
+                socket.set_nonblocking(false).unwrap();
                 socket
                     .set_read_timeout(Some(Duration::from_secs(5)))
                     .unwrap();
@@ -83,6 +86,26 @@ impl Drop for Server {
         self.stop.store(true, Ordering::Relaxed);
         self.worker.take().unwrap().join().unwrap();
     }
+}
+
+#[test]
+/// Request headers split across packets must be received before choosing a response.
+fn fixture_server_waits_for_complete_request() {
+    let server = Server::new(BTreeMap::from([("/split.pst".into(), b"fixture".to_vec())]));
+    let mut socket = TcpStream::connect(server.url.trim_start_matches("http://")).unwrap();
+    socket
+        .set_read_timeout(Some(Duration::from_secs(5)))
+        .unwrap();
+    socket.write_all(b"GET /split.pst HTTP/1.1\r\n").unwrap();
+    thread::sleep(Duration::from_millis(50));
+    socket
+        .write_all(b"Host: localhost\r\nConnection: close\r\n\r\n")
+        .unwrap();
+    let mut response = Vec::new();
+    socket.read_to_end(&mut response).unwrap();
+    assert!(response.starts_with(b"HTTP/1.1 200 OK\r\n"));
+    assert!(response.ends_with(b"\r\n\r\nfixture"));
+    assert_eq!(server.hits.load(Ordering::Relaxed), 1);
 }
 
 /// Return the small, checked-in PST used to verify exact downloaded bytes.

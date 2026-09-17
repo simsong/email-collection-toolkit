@@ -1168,6 +1168,9 @@ the command fails before reading or writing an archive.
 
 The Python GUI identifies itself as **Email Collection Toolkit** and uses the
 source-controlled rainbow-envelope icon in its native application identity.
+Current application development and pull-request CI are macOS-only. All jobs
+in the continuous-integration workflow must use macOS runners; Windows and Linux
+validation are outside the current scope.
 The required continuous-integration gate exercises the archive lifecycle and
 complete HTML interface in headless Chromium with disposable fixtures. Native
 Cocoa/WKWebView smoke testing is an explicit local macOS development check and
