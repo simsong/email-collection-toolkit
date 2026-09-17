@@ -1582,6 +1582,12 @@ PST fixtures, decoded body/attachment evidence, partial-run accounting, read-onl
 source preservation, changed sources and producer/consumer failures.
 The CLI archive host is implemented; cross-importer h3 duplicate suppression
 remains planned.
+PST and OST share a storage-format family, but OST support must be qualified
+against genuine fixtures and internal header/version/compression variants, not
+inferred from a changed extension or relaxed signature check. Evaluate extending
+the existing reader before requiring a separate importer; report cache extraction
+completeness separately from server-mailbox completeness. See
+[PST/OST scope and current limits](PST_IMPORTER.md#relationship-between-pst-and-ost).
 
 ## Windows development environment
 

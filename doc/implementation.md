@@ -355,12 +355,18 @@ uses Microsoft's `outlook-pst` 1.2.0 through read-only `read_from` handles,
 traverses the IPM subtree and validates each bounded temporary record before
 streaming it. It reconstructs MIME and retains attachment/transport evidence;
 source fixity checks and partial-run errors prevent false success. Another
-implementation can run as a second pass. The runner remains planned; it will
-decode mboxrd, hash all resulting bytes including provenance headers,
-scan and publish through the existing archive engine. H3 already includes
+implementation can run as a second pass. The CLI adapter invokes the executable,
+decodes its mboxrd output and sends recovered messages through the ingest
+pipeline for hashing, scanning and publication. H3 already includes
 the encoded body; its top-level header selection excludes importer annotations.
 Cross-importer duplicate suppression requires a separate explicit policy and
 must not silently discard differences in bodies or attachments.
+
+PST and OST share the same storage-format family. The adapter and pinned crate
+currently enforce PST client magic, so OST is rejected. Extending that reader
+requires genuine OST variant/contents tests; accepting its header alone does not
+establish support. The detailed distinction and investigation scope are in
+[PST_IMPORTER.md](PST_IMPORTER.md#relationship-between-pst-and-ost).
 
 Packages will bundle selected OS/architecture-specific executables and native
 dependencies. This avoids a mandatory JVM when only the Rust adapter ships.

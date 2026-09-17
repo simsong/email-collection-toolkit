@@ -64,6 +64,30 @@ Recognized file variants are ANSI PST versions 14/15 and Unicode PST version 23.
 Only Unicode fixtures are currently qualified. OST, version 36 and other formats
 are rejected explicitly; a `.pst` suffix is not sufficient to accept a source.
 
+## Relationship between PST and OST
+
+PST and OST share the same underlying storage-format family and much of their
+structure. Their usual roles differ: PST is a standalone store/export, while OST
+is a synchronized mailbox cache. They are not distinguished solely by extension:
+the header's client magic is `SM` for PST and `SO` for OST, and some OST variants
+use 4-KiB pages and DEFLATE compression. See Microsoft's
+[PST header specification](https://learn.microsoft.com/en-us/openspecs/office_file_formats/ms-pst/c9876f5a-664b-46a3-9887-ba63f113abf5)
+and libpff's
+[PST/OST format documentation](https://github.com/libyal/libpff/blob/main/documentation/Personal%20Folder%20File%20%28PFF%29%20format.asciidoc).
+
+Both our adapter and the pinned `outlook-pst` library currently require the PST
+client magic. This explains the current OST rejection; it does not establish
+that OST needs an entirely separate importer, or that changing the header check
+alone would make OST extraction correct. Renaming a file does not change its
+internal format.
+
+Before estimating or implementing OST support, evaluate extending the existing
+reader using genuine OST fixtures covering their header/version and compression
+variants. Verify recovered folders, messages, bodies and attachments against known
+evidence, preserve source bytes and hashes, and report incomplete extraction.
+Distinguish successful extraction of the available cache from completeness of
+the server mailbox. Current CI validates PST extraction, not OST support.
+
 ## Reconstructed MIME and preservation limits
 
 PST exposes MAPI properties, not necessarily original complete RFC bytes. Output
@@ -129,7 +153,7 @@ missing inputs, source changes, and real producer/validator/broken-pipe processe
 The fixture count is an observed regression baseline, not independent proof
 that every object in an arbitrary PST can be recovered.
 
-Native Linux/macOS/Windows CI builds/tests this helper through the existing Cargo
-workspace matrix. Local validation is on macOS; installer behavior, ANSI inputs,
+The single macOS CI job builds/tests this helper through the Cargo workspace and
+exercises its Python CLI integration through `make check`. Installer behavior, ANSI inputs,
 RTF-only mail, embedded attachments, Exchange address resolution, encrypted mail
 semantics, large files and damaged-store recovery require additional qualification.
