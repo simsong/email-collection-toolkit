@@ -1,3 +1,5 @@
+# Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved.
+
 """Desktop delivery: GUI success requires bounded shutdown of exit-blocking workers."""
 
 from threading import Event, Thread, Timer

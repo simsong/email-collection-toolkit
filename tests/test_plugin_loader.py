@@ -79,7 +79,7 @@ def test_packaged_manifests_load_existing_builtin_parsers_in_priority_order() ->
         "microsoft-exchange",
         "stdin",
     ]
-    assert [plugin.manifest.kind for plugin in registry.files] == ["emlx", "babyl", "pst", "mbox", "message"]
+    assert [plugin.manifest.kind for plugin in registry.files] == ["emlx", "babyl", "ost", "pst", "mbox", "message"]
     assert registry.source("file-folder").implementation.__class__.__name__ == "LocalSourcePlugin"
     assert registry.file("babyl").implementation.__class__.__name__ == "BabylFileParser"
     assert all(plugin.builtin for plugin in (*registry.sources, *registry.files))
@@ -274,7 +274,7 @@ def test_registry_order_is_independent_of_directory_creation_order(tmp_path: Pat
 
     kinds = [plugin.manifest.kind for plugin in load_plugins([root]).files]
 
-    assert kinds == ["first", "emlx", "alpha", "zulu", "babyl", "pst", "mbox", "message"]
+    assert kinds == ["first", "emlx", "alpha", "zulu", "babyl", "ost", "pst", "mbox", "message"]
 
 
 def test_registry_is_frozen_after_loading() -> None:

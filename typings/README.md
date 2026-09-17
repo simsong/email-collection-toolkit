@@ -7,6 +7,10 @@ application, packaging scripts, and native probes. PyObjC exposes these APIs
 dynamically, so they are absent from its Python source interface. Both ty and
 Pyright load this directory; it is not installed into the runtime package.
 
+`pypff` describes only the libpff-python 20231205 native APIs used by the
+in-process Outlook reader. Signatures are checked against the upstream C binding
+and exercised with genuine PST/OST fixtures by `make test-pff`.
+
 Keep parameter and return types precise. Cocoa `id` values whose concrete class
 depends on the installed window or delegate use `Any` at that native boundary.
 Do not add a catch-all module or class `__getattr__` to hide missing APIs. Extend

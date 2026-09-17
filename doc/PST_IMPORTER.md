@@ -75,18 +75,62 @@ use 4-KiB pages and DEFLATE compression. See Microsoft's
 and libpff's
 [PST/OST format documentation](https://github.com/libyal/libpff/blob/main/documentation/Personal%20Folder%20File%20%28PFF%29%20format.asciidoc).
 
-Both our adapter and the pinned `outlook-pst` library currently require the PST
-client magic. This explains the current OST rejection; it does not establish
-that OST needs an entirely separate importer, or that changing the header check
-alone would make OST extraction correct. Renaming a file does not change its
-internal format.
+The Rust adapter and pinned `outlook-pst` crate require PST client magic. The
+Python host routes OST to the in-process `pypff` binding from
+`libpff-python==20231205`. Renaming a file does not change its internal format:
+`SO` selects libpff, while `SM` remains PST even with an `.ost` suffix.
 
-Before estimating or implementing OST support, evaluate extending the existing
-reader using genuine OST fixtures covering their header/version and compression
-variants. Verify recovered folders, messages, bodies and attachments against known
-evidence, preserve source bytes and hashes, and report incomplete extraction.
-Distinguish successful extraction of the available cache from completeness of
-the server mailbox. Current CI validates PST extraction, not OST support.
+`make test-pff` exercises a genuine Unicode/version-23 OST from the public,
+MIT-licensed Aspose examples. It contains 92 normal-folder objects: 87 mail
+records and 5 excluded non-mail items. One mail record has an embedded MAPI
+attachment that this Python binding cannot reconstruct. Its readable parent is
+retained and flagged; diagnostics make the run incomplete. Compressed/version-36
+OST is not yet fixture-qualified. Cache extraction never establishes completeness
+of the corresponding server mailbox.
+
+Libpff runs in the importing Python process and reads sources without write
+handles. It retains deterministic reconstructed MIME, folder/node provenance,
+by-value and OLE attachments, decompressed RTF, and original transport-header
+text. Missing transport headers use available MAPI properties, including display
+recipient names that may lack SMTP addresses. Native body reads allocate before
+output limits are checked; deadlines are cooperative between native calls, not
+hard process termination. Per-run receipts and streamed diagnostics are under
+`processing-libpff/`. Unsupported embedded/external attachment methods retain a
+flagged parent and produce an incomplete result; external references are not fetched.
+
+## Redundant PST Import (testing option)
+
+**Redundant PST Import** defaults off and is not exposed in GUI controls or
+ordinary CLI help. For developer testing, add this to the archive's `config.yaml`
+(merge into the existing `plugins` mapping):
+
+```yaml
+plugins:
+  pst:
+    redundant_import: true
+  ost:
+    timeout_seconds: 60
+    max_message_bytes: 67108864
+    max_folder_depth: 64
+```
+
+The same namespaces work in installation configuration; archive values override
+them. `plugins.ost` governs libpff for OST and redundant PST passes. Then run the
+usual CLI ingest, for example:
+
+```sh
+make run ARGS='--archive "/path/to/test-archive" ingest --owner-names-file owner-names.txt --no-scan "/path/to/pst-directory"'
+make test-pff
+```
+
+The test command above deliberately opts out of antivirus; use `--clamav` for
+normal ingestion. Both Rust and libpff run for each PST, even if either reports a
+recoverable partial failure. Both outputs go through ordinary archive deduplication.
+Exact reconstructions deduplicate on retry; differences in MIME or annotations
+remain separate variants. This option does not enable the planned h3 suppression.
+Each reader retains its own receipt, and either failure leaves the import incomplete.
+Changing the option or reader settings invalidates the source checkpoint so an
+unchanged PST is reconsidered. Repeating an unchanged successful run skips it.
 
 ## Reconstructed MIME and preservation limits
 

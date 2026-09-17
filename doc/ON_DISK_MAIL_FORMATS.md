@@ -2,10 +2,11 @@
 
 # On-disk mail formats and import backends
 
-**Status:** inventory updated 2026-09-12; original research snapshot 2026-08-31.
+**Status:** inventory updated 2026-09-17; original research snapshot 2026-08-31.
 A standalone [Microsoft-crate PST importer](PST_IMPORTER.md) is implemented,
-with documented extraction limits and a CLI archive-host adapter. OST remains
-unimplemented. The
+with documented extraction limits and a CLI archive-host adapter. OST uses
+in-process libpff, qualified against a genuine Unicode/version-23 fixture with
+explicit partial-import reporting; compressed OST remains unqualified. The
 [executable importer specification](PST_DUAL_READER.md) supersedes the original
 single-backend selection and development sequence below.
 
@@ -222,8 +223,8 @@ source lacked that property.
 | Local mailbox | Maildir | Implemented | Treat `cur`/`new` messages as individual source messages. |
 | Apple Mail cache | `.emlx` and `.mbox` package hierarchy | Implemented for complete `.emlx` | Preserve the declared RFC 5322 payload; package metadata is not a message. |
 | Standalone document | Printed-email PDF | Partial/derived | Preserve the PDF separately; extracted messages are explicitly derived and unreviewed until reviewed. |
-| Outlook local store | `.pst` | Planned; next milestone | Preserve source file/hash and native provenance; RFC 5322 is normally reconstructed. |
-| Outlook cached store | `.ost` | Planned; next milestone | Read-only, report partial/deleted/unsupported items; do not fetch from Exchange. |
+| Outlook local store | `.pst` | Rust CLI reader; optional redundant libpff pass | Preserve source file/hash and native provenance; RFC 5322 is reconstructed and partial results reported. |
+| Outlook cached store | `.ost` | In-process libpff; Unicode/version-23 fixture qualified | Read-only; flag incomplete embedded MAPI attachments; no Exchange access or deleted-record carving. |
 | Outlook Mac archive | `.olm` | Planned, separate | Separate parser and fixture matrix; not PST/OST. |
 | Eudora | mailbox plus TOC/attachment conventions | Planned | Treat companion files as one source package; absence of TOC is not absence of mail. |
 | Thunderbird | mbox plus `.msf`/profile hierarchy | Planned | MBOX is the message format; profile indexes are metadata and must not be trusted as complete. |

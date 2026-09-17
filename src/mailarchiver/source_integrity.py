@@ -19,6 +19,7 @@ from .plugin_api import (
 from .sources import SourceFile, SourcePlan
 
 LOCAL_FILE_CONTROL_ID = "local-file-sha256-v1"
+LOCAL_PARSER_CONTROL_ID = "local-parser-settings-v1"
 LOCAL_FILE_PREFIX_CONTROL_ID = "local-file-prefix-sha256-v1"
 SOURCE_INTEGRITY_PHASE = "checking source integrity"
 
@@ -196,8 +197,10 @@ class LocalContainerIntegrityControls(SourceIntegrityControls):
 
     control_id = LOCAL_FILE_CONTROL_ID
 
-    def __init__(self, source_file: Callable[[MailContainer], SourceFile]) -> None:
+    def __init__(self, source_file: Callable[[MailContainer], SourceFile],
+                 parser_fingerprint: Callable[[MailContainer], str | None] | None = None) -> None:
         self.source_file = source_file
+        self.parser_fingerprint = parser_fingerprint
         self.local = LocalFileIntegrityControls()
 
     def plan(
@@ -218,6 +221,11 @@ class LocalContainerIntegrityControls(SourceIntegrityControls):
         )
         if full is not None:
             checkpoint = SourceIntegrityCheckpoint(byte_length=full.byte_length, sha256=full.value)
+        fingerprint = self._parser_evidence(container)
+        if fingerprint is not None:
+            if not any(item == fingerprint for item in prior):
+                checkpoint = None
+            yield fingerprint
         yield from self.local.plan(self.source_file(container), checkpoint)
 
     def complete(
@@ -233,6 +241,17 @@ class LocalContainerIntegrityControls(SourceIntegrityControls):
             self.source_file(container),
             None if full is None else full.value,
         )
+
+        fingerprint = self._parser_evidence(container)
+        if fingerprint is not None:
+            yield fingerprint
+
+    def _parser_evidence(self, container: MailContainer) -> IntegrityEvidence | None:
+        digest = self.parser_fingerprint(container) if self.parser_fingerprint else None
+        if digest is None:
+            return None
+        return IntegrityEvidence(control_id=LOCAL_PARSER_CONTROL_ID, subject_id=_subject_id(self.source_file(container)),
+                                 evidence_kind="cryptographic-digest", algorithm="sha256", value=digest)
 
 
 def _report_progress(event: ProgressEvent, progress: ProgressCallback | None) -> None:

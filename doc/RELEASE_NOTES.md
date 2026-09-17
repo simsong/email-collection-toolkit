@@ -4,6 +4,12 @@
 
 ## Unreleased
 
+* Add in-process libpff OST extraction with genuine cache-fixture coverage,
+  source fixity, streamed attachments, and explicit partial-import diagnostics.
+  Add the default-off developer configuration option **Redundant PST Import**
+  to run Rust and libpff through existing deduplication. Changed reader settings
+  invalidate source checkpoints. Document CLI directory ingestion and search.
+
 * Restrict pull-request CI to macOS, with on-demand Homebrew ClamAV and pinned
   macOS Zola binaries. Keep native GUI tests opt-in.
 

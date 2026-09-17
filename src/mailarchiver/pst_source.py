@@ -20,6 +20,7 @@ IMPORT_HEADERS = (b"X-Imported-URI: ", b"X-Importer-Name: ", b"X-Importer-Versio
 
 class PstSettings(BaseModel):
     model_config = ConfigDict(extra="forbid")
+    redundant_import: bool = False
     executable: str | None = None
     max_output_bytes: int = Field(default=1024 * 1024 * 1024, gt=0)
     max_diagnostics_bytes: int = Field(default=64 * 1024 * 1024, gt=0)
@@ -62,9 +63,36 @@ class PstFileParser:
         self.context = context
 
     def recognizes(self, probe: FileProbe) -> bool:
-        return probe.prefix.startswith(b"!BDN") or probe.path.suffix.lower() == ".pst"
+        if probe.prefix.startswith(b"!BDN"):
+            return probe.prefix[8:10] != b"SO"
+        return probe.path.suffix.lower() == ".pst"
+
+    def configuration_fingerprint(self) -> str:
+        from .pff_source import PffFileParser
+        settings = PstSettings.model_validate(self.context.get_my_config())
+        value = settings.model_dump_json()
+        if settings.redundant_import:
+            value += PffFileParser(self.context.model_copy(update={"plugin_name": "ost"})).configuration_fingerprint()
+        return hashlib.sha256(("pst-v2:" + value).encode()).hexdigest()
 
     def messages(self, container: MailContainer, resume_cursor: str | None) -> Iterator[MailObject | ProgressEvent]:
+        settings = PstSettings.model_validate(self.context.get_my_config())
+        if not settings.redundant_import:
+            yield from self._rust_messages(container, resume_cursor)
+            return
+        from .pff_source import PffFileParser
+        errors: list[Exception] = []
+        readers = (self._rust_messages(container, None),
+                   PffFileParser(self.context.model_copy(update={"plugin_name": "ost"})).messages(container, None))
+        for reader in readers:
+            try:
+                yield from reader
+            except (OSError, ValueError, RuntimeError) as error:
+                errors.append(error)
+        if errors:
+            raise RuntimeError("Redundant PST Import incomplete: " + "; ".join(str(error) for error in errors)) from errors[0]
+
+    def _rust_messages(self, container: MailContainer, resume_cursor: str | None) -> Iterator[MailObject | ProgressEvent]:
         if self.context.archive is None:
             raise ValueError("PST extraction requires an archive workspace")
         settings = PstSettings.model_validate(self.context.get_my_config())

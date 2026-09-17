@@ -131,6 +131,7 @@ class LocalContainerData(BaseModel):
     """Local-only state carried opaquely through the source-neutral framework."""
 
     source: SourceFile
+    parser_fingerprint: str | None = None
 
 
 class IncompleteAppleMailMessageError(ValueError):
@@ -382,7 +383,7 @@ class LocalSourcePlugin(SourcePlugin):
         from .source_integrity import LocalContainerIntegrityControls
 
         self.file_plugins = context.files
-        self.integrity_controls = LocalContainerIntegrityControls(self.source_file)
+        self.integrity_controls = LocalContainerIntegrityControls(self.source_file, self.parser_fingerprint)
         self.volumes: dict[tuple[int, Path], SourceVolume] = {}
         self.mount_paths: dict[Path, Path] = {}
 
@@ -460,7 +461,10 @@ class LocalSourcePlugin(SourcePlugin):
                 parser_kind=local.kind,
                 estimated_bytes=local.byte_length,
                 concurrency_key=reference.source_id,
-                plugin_data_json=LocalContainerData(source=local).model_dump_json(),
+                plugin_data_json=LocalContainerData(
+                    source=local, parser_fingerprint=(parser.implementation.configuration_fingerprint()
+                    if hasattr(parser.implementation, "configuration_fingerprint") else None),
+                ).model_dump_json(),
             )
 
     def messages(
@@ -502,6 +506,10 @@ class LocalSourcePlugin(SourcePlugin):
     @staticmethod
     def source_file(container: MailContainer) -> SourceFile:
         return LocalContainerData.model_validate_json(container.plugin_data_json).source
+
+    @staticmethod
+    def parser_fingerprint(container: MailContainer) -> str | None:
+        return LocalContainerData.model_validate_json(container.plugin_data_json).parser_fingerprint
 
     def _recognize_file(self, path: Path, byte_length: int):
         with path.open("rb") as source:
@@ -608,6 +616,8 @@ def _logical_container_hierarchy(source: SourceFile) -> tuple[str, ...] | None:
 
 
 def _local_relationship(source: SourceFile) -> SourceRelationship:
+    if source.kind == "ost":
+        return SourceRelationship(role="cache", upstream_plugin_kind="outlook")
     packages = [part for part in source.path.parts if part.lower().endswith(".mbox")]
     if source.kind != "emlx" or not any(part.casefold() == "[gmail].mbox" for part in packages):
         return SourceRelationship()
