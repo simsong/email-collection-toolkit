@@ -215,7 +215,7 @@ ClamAV. Replace the paths with your source directory and a new archive location;
 
 ```sh
 export MAIL_ARCHIVE_DIR="/path/to/new-archive"
-make run ARGS='ingest --owner-names-file owner-names.txt --clamav "/path/to/source-directory"'
+make run ARGS='ingest --owner-names-file owner-names.txt --clamav "/path/to/email-source-root-directory"'
 make search ARGS='subject:invoice after:2024-01-01'
 make search ARGS='--limit 0 from:alice@example.com'
 ```
@@ -531,6 +531,15 @@ CI/CD, which retains the complete headless Chromium GUI test.
 WKWebView HTML finder highlighting and scrolling.
 Regenerate the committed safe corpus after an
 intentional fixture change with `make fixture-e2e`.
+
+## Other Resources
+Interested in email preservation? Check out:
+
+* [Digital Preservation Coalition](https://www.dpconline.org/) established in 2002 as a collaboration between a number of agencies   operating in the UK and Ireland, building a welcoming and inclusive global community, working together to bring about a sustainable future for our digital assets.
+* [code{4{lib](https://code4lib.org/) a volunteer-driven collective of hackers, designers, architects, curators, catalogers, artists and instigators from around the world, who largely work for and with libraries, archives and museums on technology “stuff.”
+* [DigiPres.org](https://www.digipres.org/) a gateway to all of the wonderful community-owned and community-oriented resources dedicated to digital preservation!
+* [The Digital Library Federation](https://www.diglib.org/), a community of practitioners who advance research, learning, social justice, and the public good through the creative design and wise application of digital library technologies.
+
 
 ## Copyright and licenses
 
