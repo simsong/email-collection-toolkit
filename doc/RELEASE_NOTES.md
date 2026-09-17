@@ -4,6 +4,10 @@
 
 ## Unreleased
 
+* The standalone verifier announces each file before processing, displays
+  per-pass hashing and message progress bars, and supports `--quiet`/`-q`.
+  Clarify the archive-root argument and script-directory default. Ctrl-C now
+  reports incomplete verification and exits 130 without a traceback.
 * Document proposed ranked processor DAGs with a shared website graphic and
   track the future tag editor in issue #119. These are design documents, not a
   completed processing-pipeline refactor.
