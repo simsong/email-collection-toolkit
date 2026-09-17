@@ -1584,8 +1584,8 @@ The CLI archive host is implemented; cross-importer h3 duplicate suppression
 remains planned.
 PST and OST share a storage-format family, but OST support must be qualified
 against genuine fixtures and internal header/version/compression variants, not
-inferred from a changed extension or relaxed signature check. Evaluate extending
-the existing reader before requiring a separate importer; report cache extraction
+inferred from a changed extension or relaxed signature check. Use in-process
+libpff for OST; report cache extraction
 completeness separately from server-mailbox completeness. See
 [PST/OST scope and current limits](PST_IMPORTER.md#relationship-between-pst-and-ost).
 
@@ -1923,3 +1923,31 @@ including when replacement processing is deferred or fails. Known public mail
 providers must retain address evidence without creating automatic institutional
 affiliations. PST timeout/limit receipts must retain the actual reaped exit code,
 observed sizes and truncation flags; both live and post-exit output sizes are checked.
+
+## In-process OST and Redundant PST Import
+
+Read OST through pinned `libpff-python` in the importing Python process, with a
+read-only handle and before/after SHA-256 checks. Route genuine `SO` client magic
+to OST regardless of extension; `SM` files remain PST even when named `.ost`.
+Retain folder/node provenance, receipts, and partial-item diagnostics. OST is a
+cache: extraction does not establish server-mailbox completeness. Preserve
+readable parent content when an embedded MAPI message cannot be reconstructed;
+flag the parent and fail the run as incomplete, retaining source references.
+Never fetch external attachment references. Exclude search folders and non-mail
+objects explicitly; unknown MAPI classes must report incomplete extraction rather
+than silently count as non-mail. Stream attachment reads, verify their declared
+lengths, bound reconstructed message sizes,
+and check cooperative deadlines between native calls; native body allocations
+are not a hard memory-isolation boundary.
+
+The developer-only **Redundant PST Import** option is `plugins.pst.redundant_import`
+(default false). When enabled, run both Microsoft's Rust importer and in-process
+libpff on each PST, including after a reader's recoverable failure. Feed both
+outputs to ordinary canonical deduplication without changing its policy. Different
+reconstructions remain variants; exact retries do not multiply canonical content.
+Both passes must complete before recording a successful source checkpoint.
+Parser/settings fingerprints must invalidate unchanged-file checkpoints when this
+option or reader settings change. Keep this option out of the GUI and ordinary CLI
+help until qualified. `plugins.ost` configures the libpff reader in either mode.
+`make test-pff` exercises a genuine OST fixture, both real PST readers, partial
+results, source fixity, limits, option changes, repeat deduplication, and CLI search.

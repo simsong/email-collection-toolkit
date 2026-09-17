@@ -1,0 +1,8 @@
+# Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved.
+api_version = 1
+plugin_type = "file"
+kind = "ost"
+name = "Outlook OST (in-process libpff)"
+implementation_version = "1"
+priority = 240
+entrypoint = "mailarchiver.pff_source:PffFileParser"

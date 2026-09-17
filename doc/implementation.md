@@ -363,9 +363,10 @@ Cross-importer duplicate suppression requires a separate explicit policy and
 must not silently discard differences in bodies or attachments.
 
 PST and OST share the same storage-format family. The adapter and pinned crate
-currently enforce PST client magic, so OST is rejected. Extending that reader
-requires genuine OST variant/contents tests; accepting its header alone does not
-establish support. The detailed distinction and investigation scope are in
+enforce PST client magic. The separate `ost` file plugin uses in-process libpff
+and recognizes OST client magic before considering extensions. Genuine Unicode
+OST fixture tests exercise recovered mail and incomplete embedded MAPI items.
+The detailed distinction and reader limits are in
 [PST_IMPORTER.md](PST_IMPORTER.md#relationship-between-pst-and-ost).
 
 Packages will bundle selected OS/architecture-specific executables and native
@@ -681,7 +682,7 @@ daemon must pass `clamdscan --ping` after its socket appears before any message
 scan is submitted.
 
 Rollover, date sorting/repacking, complete recipient metadata, `verify`, richer
-text extraction, Outlook PST/OST, Eudora, working IMAP cache directories, live
+text extraction, Eudora, working IMAP cache directories, live
 IMAP, Gmail, redaction, and research-oriented metadata remain planned work. The delivered
 `mailsearch` command reads both databases without writing:
 it applies `to:`/`from:`/`subject:` catalog filters, UTC calendar-day
@@ -2500,3 +2501,52 @@ The fixture server explicitly puts accepted sockets into blocking mode with a
 read timeout. A real split-header regression checks that packet gaps cannot
 produce a premature response, as observed in a failing local macOS run.
 The downloader does not invoke the PST importer or canonical archive engine.
+
+## In-process libpff reader and redundant PST testing
+
+`pff_source.py` loads `pypff` from pinned `libpff-python==20231205`. The `ost`
+file plugin uses read-only file objects, labels the source as an Outlook cache,
+walks normal folders with cycle/depth controls, and streams base64 attachment
+chunks into a bounded per-message MIME buffer. Headers and Unicode text are
+reconstructed; original transport-header text is retained as a separate evidence
+part. libpff supplies decompressed RTF. By-value and OLE attachment streams are
+retained. The Python binding does not expose embedded MAPI message reconstruction:
+its parent is retained with `X-Mailarchiver-Extraction-Incomplete`, node/folder
+diagnostics, and a nonzero import result. Non-mail classes and search folders are
+excluded, with item/folder counts in receipts. No deleted-record carving occurs.
+Missing transport headers use available MAPI display recipients; these may contain
+names rather than resolved SMTP addresses. Sender reconstruction retains the name
+and an available SMTP property; it does not treat an Exchange DN as an SMTP address.
+Unrecognized MAPI classes report incomplete extraction instead of being silently
+excluded. Native attachment lengths are checked against bytes read.
+This is recorded reconstruction, not
+proof of original wire headers or all server contents.
+
+`processing-libpff/<run>/receipt.json` records source SHA-256, libpff version,
+process ID, content type, counts, completion, and fatal failure details;
+`diagnostics.jsonl` streams bounded per-item descriptions. Sources are rehashed
+before success. `plugins.ost` settings are `timeout_seconds` (60),
+`max_message_bytes` (64 MiB), and `max_folder_depth` (64). Deadline checks happen
+between native calls/chunks; a blocking native call can exceed the cooperative
+deadline, and libpff allocates each body before its output size can be checked.
+There is no new subprocess or background service.
+
+`PstSettings.redundant_import` defaults false. With `plugins.pst.redundant_import`
+true, the existing Rust generator and libpff generator execute sequentially,
+retain independent receipts, and aggregate failures after attempting both readers.
+Rust offsets retain their existing cursors; libpff cursors use `libpff:<node>`.
+Canonical identity/SHA-256 deduplication is unchanged. Importer annotations and
+MIME differences can prevent cross-reader collapse, intentionally retaining those
+variants; repeat imports of the same reconstruction deduplicate normally.
+
+Local container metadata carries an optional parser/settings fingerprint. Local
+integrity controls persist it alongside the source hash under
+`local-parser-settings-v1`; missing or changed fingerprints require a new read.
+This allows enabling redundant import on an already-completed PST. Existing
+non-Outlook parsers retain their source-only checkpoint behavior.
+
+`make test-pff` uses the real Aspose Unicode/version-23 OST and existing PST
+fixtures, with CLI archive creation, content resume, search, and canonical fixity
+verification. Compressed/version-36 OST is not yet fixture-qualified. The native
+extension is a runtime dependency; its complete LGPL/GPL license texts are retained
+and included in runtime license bundles because its wheel omits them.

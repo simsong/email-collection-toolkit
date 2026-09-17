@@ -21,6 +21,8 @@ REQUIRED_PACKAGE_MEMBERS = (
     "mailarchiver/message_patterns.yaml",
     "mailarchiver/plugins/files/mbox/plugin.toml",
     "mailarchiver/plugins/files/pst/plugin.toml",
+    "mailarchiver/plugins/files/ost/plugin.toml",
+    "mailarchiver/pff_source.py",
     "mailarchiver/plugins/processors/clamav/plugin.toml",
     "mailarchiver/plugins/processors/mime/plugin.toml",
     "mailarchiver/plugins/processors/identity-evidence/plugin.toml",

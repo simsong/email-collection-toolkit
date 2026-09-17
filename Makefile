@@ -526,3 +526,7 @@ pst-download-plan: pst-downloader
 
 test-pst-downloader:
 	$(CARGO_RUN) test --locked -p pst-downloader
+
+.PHONY: test-pff
+test-pff: pst-importer
+	uv run --locked pytest -q tests/test_pff_source.py tests/test_cli_processing.py tests/test_plugin_loader.py tests/test_source_integrity.py

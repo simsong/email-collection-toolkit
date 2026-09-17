@@ -83,7 +83,9 @@ integrity tags are the portable durable record.
 
 This is the initial local-ingest implementation, not yet the complete email
 archiving system. It currently ingests local MBOX, Emacs RMAIL Babyl, EML,
-Maildir, and complete Apple Mail `.emlx` messages. Outlook `.pst`/`.ost`,
+Maildir, complete Apple Mail `.emlx` messages, Outlook PST through the Rust reader,
+and OST through in-process libpff. Both Outlook readers report partial extraction
+and preserve reconstruction evidence; see [reader limits](doc/PST_IMPORTER.md).
 Eudora, working IMAP cache directories, Gmail, live IMAP, redaction, richer
 research data, sorting/repacking, and rollover remain planned; see
 [doc/implementation.md](doc/implementation.md).
@@ -206,9 +208,31 @@ scheduled scan.  It requires a configured ClamAV signature database; scanner
 startup or scan errors stop the current ingest rather than silently treating
 mail as clean.  A positive detection is retained in `INFECTED1.mbox`.
 
-```console
-uv run mailarchiver ingest --owner-names-file owner-names.txt --clamav /path/to/source-mail
+To create a new archive from a directory and then search it, run from the
+repository root after installing the development dependencies and configuring
+ClamAV. Replace the paths with your source directory and a new archive location;
+`owner-names.txt` lists the owner's names or addresses, one per line.
+
+```sh
+export MAIL_ARCHIVE_DIR="/path/to/new-archive"
+make run ARGS='ingest --owner-names-file owner-names.txt --clamav "/path/to/source-directory"'
+make search ARGS='subject:invoice after:2024-01-01'
+make search ARGS='--limit 0 from:alice@example.com'
 ```
+
+Ingest creates the archive and reads supported files recursively. Search uses the
+same `MAIL_ARCHIVE_DIR`; ordinary words search headers and body text. To resume
+content work left by an interrupted or partial import:
+
+```sh
+make run ARGS='process --phase content'
+```
+
+Use `--no-scan` in place of `--clamav` only when deliberately opting out of
+antivirus, such as for purpose-made test fixtures. Build the Rust helper with
+`make pst-importer` before importing PST files. OST uses the `libpff-python`
+dependency inside the CLI process. [Redundant PST Import](doc/PST_IMPORTER.md#redundant-pst-import-testing-option)
+is an off-by-default configuration option for developer testing.
 
 For example, with the project's supplied owner-token list and a new archive:
 

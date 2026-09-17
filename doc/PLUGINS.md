@@ -835,6 +835,16 @@ run. `source_files.sha256`, `checked_at`, and `completed_run` remain local
 display/cache fields; skip and resume decisions use only the most recent
 completed typed integrity check.
 
+An optional local file-parser `configuration_fingerprint()` returns a stable
+SHA-256 of the reader version/settings that affect extraction. The local source
+stores it in container metadata and integrity evidence under
+`local-parser-settings-v1`. Missing or changed fingerprints force a fresh read,
+even when file bytes match. This supports turning on the developer-only
+[Redundant PST Import](PST_IMPORTER.md#redundant-pst-import-testing-option) option
+after a Rust-only import. Other file parsers retain source-only checkpoints.
+OST uses the in-process `ost`/libpff file plugin and an Outlook cache relationship.
+Its receipts distinguish extracted cache contents from server completeness.
+
 ## Planned geography data providers
 
 Geography refresh is a data-installation pipeline, not an ingest plug-in. It

@@ -787,6 +787,15 @@ wheels = [
 ]
 
 [[package]]
+name = "libpff-python"
+version = "20231205"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/0b/a3/826777491832478f5e1555a16bc9de794ef0264eac53d213340dddae5bd4/libpff-python-20231205.tar.gz", hash = "sha256:06c218be51321b16dc3b835185ee1cd2fa5c2a1ca856e0390c1d6e4ddf329250", size = 2141621, upload-time = "2023-12-05T15:42:22.945Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/72/65/cd71e93d23c4caa1b0079e9ead9715b3bda12189c10cc48096d29fca62b7/libpff_python-20231205-cp312-cp312-macosx_12_0_x86_64.whl", hash = "sha256:aee688ca5063abd35a067cf36d949e0b3623ce3a61135e3dad76068c3b647635", size = 679693, upload-time = "2023-12-06T19:03:20.731Z" },
+]
+
+[[package]]
 name = "mac-alias"
 version = "2.2.3"
 source = { registry = "https://pypi.org/simple" }
@@ -818,6 +827,7 @@ dependencies = [
     { name = "ftfy" },
     { name = "google-auth-oauthlib" },
     { name = "keyring" },
+    { name = "libpff-python" },
     { name = "py7zr" },
     { name = "pydantic" },
     { name = "pywebview" },
@@ -855,6 +865,7 @@ requires-dist = [
     { name = "ftfy", specifier = ">=6.3.0" },
     { name = "google-auth-oauthlib", specifier = ">=1.4.1" },
     { name = "keyring", specifier = ">=25.6.0" },
+    { name = "libpff-python", specifier = "==20231205" },
     { name = "py7zr", specifier = ">=1.0.0" },
     { name = "pydantic", specifier = ">=2.13.4" },
     { name = "pywebview", specifier = ">=6.2" },
