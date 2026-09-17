@@ -207,16 +207,36 @@ def test_dependency_and_entrypoint_validation_before_execution(tmp_path: Path) -
         load_processors((tmp_path,))
 
 
-def test_modified_input_is_not_processed(tmp_path: Path) -> None:
+@pytest.mark.parametrize("damage", ["modified", "missing", "directory"])
+def test_modified_input_is_not_processed(tmp_path: Path, damage: str) -> None:
     plugins = load_processors((FIXTURES,))
     archive = tmp_path / "archive"
     with connect(archive, create=True) as database:
         submit(database, archive, MESSAGE, fingerprint(plugins))
         path = database.execute("SELECT content_path FROM messages").fetchone()[0]
-        Path(path).write_bytes(b"altered")
+        if damage == "modified":
+            Path(path).write_bytes(b"altered")
+        else:
+            Path(path).unlink()
+            if damage == "directory":
+                Path(path).mkdir()
         result = run(database, plugins)
         assert result.failed == 1
         assert all(stat.invocations == 0 for stat in result.statistics)
+        assert database.execute("SELECT detail FROM jobs").fetchone()[0].startswith("input ")
+        if damage != "modified":
+            if damage == "directory":
+                Path(path).rmdir()
+            Path(path).write_bytes(MESSAGE.read_bytes())
+            assert run(database, plugins, retry=True).failed == 0
+
+
+@pytest.mark.parametrize("content_type", ["/", "text/", "/plain", "téxt/plain", "text/(plain)", "text/*", "Text/plain"])
+def test_mime_tokens_are_validated_before_plugin_execution(tmp_path: Path, content_type: str) -> None:
+    """Manifest input/output types must each contain two nonempty ASCII MIME tokens."""
+    plugin(tmp_path, "invalid", 'raise AssertionError("must never execute")', subscribes=content_type)
+    with pytest.raises(ValueError, match="MIME types"):
+        load_processors((tmp_path,))
 
 
 def test_timeout_cannot_write_late_result(tmp_path: Path) -> None:

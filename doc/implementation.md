@@ -762,12 +762,15 @@ values taking precedence. write_my_config(values, scope="archive") stages a
 replacement of that plugin's selected layer; scope="installation" selects the
 shared layer. Installation config.yaml lives beside application preferences;
 the CLI --installation-config option provides an explicit path. The parent
-applies writes after a successful rank using file locks, expected-value hashes
-and atomic file replacement. Equal-value replay is harmless; conflicting writes
-fail the job and require a fresh invocation. Each file is atomic separately;
-two scopes are not one filesystem transaction. See PLUGINS.md for the API.
+preflights all writes after a successful rank using file locks and expected-value
+hashes, then journals the batch before atomic file replacements. Recovery finishes
+the batch before plugin reads. Equal-value replay is harmless; preflight conflicts
+fail the job and require fresh invocations. See PLUGINS.md for the API.
 Tests cover recursive precedence, namespace isolation, both write scopes,
 abort/exception/timeout isolation and malformed settings without mocks.
+Regression tests also cover later-plugin conflicts, interrupted multi-file
+configuration publication, unreadable input recovery, invalid MIME tokens and
+7z inventory size/digest checks.
 
 The verifier SIGINT tests synchronize on consumption of FIFO data before
 sending the signal, then close the writer so buffered I/O returns and Python

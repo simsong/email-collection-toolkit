@@ -573,6 +573,11 @@ settings and replace their own layer in either scope. Writes from unsuccessful
 ranks must not be published. Persistence must preserve unrelated settings,
 reject stale conflicting writes, support idempotent recovery and leave malformed
 configuration untouched. Real-worker and CLI tests exercise these requirements.
+All namespaces in a rank must be checked before any configuration replacement;
+interrupted multi-file publication must recover before settings are exposed to
+plugins. Missing or unreadable input objects must become reportable failed jobs
+and permit retry after repair. Manifest types require two nonempty ASCII MIME
+tokens. Inventory sizes and SHA-256 digests apply to 7z members as well as ZIP.
 
 ### Planned processor and identity integration
 

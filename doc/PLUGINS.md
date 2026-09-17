@@ -109,11 +109,14 @@ archive intentionally pins inherited installation settings as archive overrides.
 Writes are staged in the worker and visible immediately to its later reads.
 The parent persists them only after all subscribers at that rank succeed.
 Timeouts, exceptions and part/message/import aborts discard that rank's staged
-writes. Each file update locks, re-reads, preserves unrelated plugin namespaces
-and archive owner/import settings, checks the original namespace hash, and
-atomically replaces the file. Two scopes are separate atomic updates, not a
-single transaction. Interrupted publication can replay equal-value writes;
-conflicting edits fail the job so `run --retry` obtains a fresh snapshot.
+writes. The complete rank locks its target files, re-reads them and preflights
+every namespace hash before any replacement. It preserves unrelated plugin
+namespaces and archive owner/import settings. A durable transaction journal
+commits the batch; individual files are atomically replaced. Interrupted
+publication is completed from that journal before another plugin reads settings.
+Recovery preserves unrelated edits and replays equal-value writes;
+preflight conflicts fail the job so `run --retry` obtains fresh snapshots.
+I/O failure after journaling retains completed invocations for publication retry.
 Earlier successful ranks retain their committed writes if a later rank fails.
 
 The configuration service is available to API v2 processors now; production
@@ -411,7 +414,7 @@ The planned [ingest executable protocol](PST_DUAL_READER.md) is a subprocess
 adapter into these layers: filename input, mboxrd stdout, stderr diagnostics,
 and separate `X-Imported-URI`, `X-Importer-Name`, `X-Importer-Version` fields.
 The [MCT Importer API 1.0](MCT_IMPORTER_API.md) Rust generator and validator are
-implemented; its archive runner and PST adapters are not. All added fields remain in
+implemented, as is the standalone PST adapter; archive-host integration remains planned. All added fields remain in
 h2; see [added headers and integrity](INTEGRITY_CONTROLS.md#headers-added-by-mail-archiver-and-ingest-executables).
 
 Plug-ins do not create threads, render status, scan messages, open the archive

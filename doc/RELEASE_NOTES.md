@@ -4,6 +4,11 @@
 
 ## Unreleased
 
+* Preflight and journal configuration writes across a complete processor rank;
+  recover interrupted publication before plugin reads. Record missing/unreadable
+  inputs as failed jobs and reject invalid MIME tokens before plugin execution.
+  Enforce inventory member size and SHA-256 for 7z as for ZIP archives.
+
 * Add processor get_my_config/write_my_config APIs with recursive archive-over-
   installation settings, isolated plugin namespaces and atomic scoped writes.
   Discard staged writes on plugin failures, timeouts and aborted ranks.

@@ -633,13 +633,21 @@ fn extract(job: &Job, path: &Path, args: &Args, report: &mut Report) -> Result<(
                             seen.insert(member.name().to_owned()),
                             "duplicate PST member name"
                         );
+                        let expected_member = job.members.get(member.name());
+                        if let Some(expected_member) = expected_member {
+                            ensure!(
+                                expected_member.size == member.size(),
+                                "inventory member size mismatch"
+                            );
+                        }
                         save_pst(
                             reader,
                             job,
                             ExpectedPst {
                                 member_name: Some(member.name()),
                                 expected_size: Some(member.size()),
-                                expected_sha256: None,
+                                expected_sha256: expected_member
+                                    .map(|member| member.sha256.as_str()),
                             },
                             &mut remaining,
                             args,

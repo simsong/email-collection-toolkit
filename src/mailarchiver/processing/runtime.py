@@ -11,7 +11,7 @@ import tempfile
 import time
 from pathlib import Path
 
-from ..plugin_configuration import apply_config_writes, read_plugin_configuration
+from ..plugin_configuration import NamespaceWrites, apply_config_batch, read_plugin_configuration, recover_config_transaction
 
 from .api import (
     InvocationRequest, InvocationResponse, PluginSpec, ProcessingObject,
@@ -142,9 +142,15 @@ def run(database: sqlite3.Connection, plugins: tuple[PluginSpec, ...], *, retry:
             break
         job_id, payload = row
         item = ProcessingObject.model_validate_json(payload)
-        if any(content_reference(ref.path).sha256 != ref.sha256 for ref in (item.message_ref, item.content_ref)):
+        recover_config_transaction(item.archive.path)
+        try:
+            input_error = "input digest mismatch" if any(
+                content_reference(ref.path).sha256 != ref.sha256 for ref in (item.message_ref, item.content_ref)) else None
+        except OSError as error:
+            input_error = f"input unreadable: {error}"
+        if input_error:
             with database:
-                database.execute("UPDATE jobs SET status='failed',detail='input digest mismatch' WHERE job_id=?", (job_id,))
+                database.execute("UPDATE jobs SET status='failed',detail=? WHERE job_id=?", (input_error, job_id))
             break
         selected = subscribers(plugins, item)
         with database:
@@ -169,17 +175,19 @@ def run(database: sqlite3.Connection, plugins: tuple[PluginSpec, ...], *, retry:
                     _abort(database, item, "abort-message" in outcomes)
                     aborted = True
                 else:
-                    for plugin, result in results:
-                        try:
-                            apply_config_writes(item.archive.path, plugin.manifest.kind,
-                                                result.config_writes, installation_config)
-                        except (OSError, ValueError) as error:
-                            database.execute("UPDATE invocations SET status='failed',error=? WHERE job_id=? AND kind=? AND status='completed'",
-                                             (str(error), job_id, plugin.manifest.kind))
-                            database.execute("UPDATE jobs SET status='failed',detail=? WHERE job_id=?", (str(error), job_id))
-                            stop_import = True
-                            break
-                        _publish(database, item, plugin, result, registry_hash, job_id)
+                    try:
+                        apply_config_batch(item.archive.path, tuple(NamespaceWrites(
+                            name=plugin.manifest.kind, writes=result.config_writes) for plugin, result in results), installation_config)
+                    except (OSError, ValueError) as error:
+                        if isinstance(error, ValueError):
+                            for plugin, _result in results:
+                                database.execute("UPDATE invocations SET status='failed',error=? WHERE job_id=? AND kind=? AND status='completed'",
+                                                 (str(error), job_id, plugin.manifest.kind))
+                        database.execute("UPDATE jobs SET status='failed',detail=? WHERE job_id=?", (str(error), job_id))
+                        stop_import = True
+                    else:
+                        for plugin, result in results:
+                            _publish(database, item, plugin, result, registry_hash, job_id)
             if stop_import or aborted:
                 break
         if stop_import:

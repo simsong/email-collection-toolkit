@@ -46,9 +46,10 @@ have. Canonical archive reads use recorded offsets and h2 verification, not
 the unknown-source parser. A generic reimport of a canonical `.mbox` is not
 equivalent to that verified read.
 
-The planned [executable importer protocol](PST_DUAL_READER.md) declares stdout
+The [executable importer protocol](PST_DUAL_READER.md) declares stdout
 to be mboxrd. Its receiver must decode once before h2, and canonical publication
-then encodes once. That receiver and PST importers are not implemented yet.
+then encodes once. The standalone PST importer is implemented; its archive-host
+receiver integration remains planned.
 
 ## Code audit (2026-09-12)
 

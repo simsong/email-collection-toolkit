@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import re
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, field_validator
@@ -13,6 +14,7 @@ Pipeline = Literal["ingest", "message", "content"]
 Scope = Literal["body", "attachment"]
 Outcome = Literal["continue", "abort-part", "abort-message", "fail-import"]
 RAW_MESSAGE = "application/x-mailarchiver-raw-message"
+MIME_TYPE = re.compile(r"[a-z0-9!#$%&'+.^_`|~-]+/[a-z0-9!#$%&'+.^_`|~-]+", re.ASCII)
 
 
 class Model(BaseModel):
@@ -38,8 +40,7 @@ class ProcessorManifest(Model):
     @classmethod
     def normalized_types(cls, values: tuple[str, ...]) -> tuple[str, ...]:
         if len(set(values)) != len(values) or any(
-            value != value.lower() or value.count("/") != 1 or
-            any(char.isspace() for char in value) or ";" in value or "*" in value
+            MIME_TYPE.fullmatch(value) is None
             for value in values
         ):
             raise ValueError("types must be unique normalized MIME types without parameters or wildcards")

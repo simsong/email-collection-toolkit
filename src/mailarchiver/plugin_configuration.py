@@ -8,6 +8,7 @@ import hashlib
 import json
 import os
 import tempfile
+from contextlib import ExitStack
 from pathlib import Path
 from typing import Literal
 
@@ -21,6 +22,7 @@ ConfigValues = dict[str, JsonValue]
 ConfigScope = Literal["archive", "installation"]
 ReadScope = Literal["effective", "archive", "installation"]
 VALUES = TypeAdapter(ConfigValues)
+CONFIG_JOURNAL = ".plugin-config-transaction.json"
 
 
 def value_hash(value: ConfigValues) -> str:
@@ -41,6 +43,21 @@ class ConfigWrite(BaseModel):
     scope: ConfigScope
     values: ConfigValues
     expected_hash: str
+
+
+class NamespaceWrites(BaseModel):
+    name: str
+    writes: tuple[ConfigWrite, ...]
+
+
+class ConfigTransaction(BaseModel):
+    installation: Path
+    namespaces: tuple[NamespaceWrites, ...]
+
+
+class PreparedConfig(BaseModel):
+    path: Path
+    text: str
 
 
 class PluginConfiguration(BaseModel):
@@ -94,6 +111,7 @@ def load_installation_config(path: Path) -> InstallationConfig:
 
 
 def read_plugin_configuration(archive: Path, name: str, installation_path: Path | None = None) -> PluginConfiguration:
+    recover_config_transaction(archive)
     installation = load_installation_config(installation_path or installation_config_path())
     local = load_archive_config(archive)
     return PluginConfiguration(installation=installation.plugins.get(name, {}), archive=local.plugins.get(name, {}))
@@ -101,35 +119,84 @@ def read_plugin_configuration(archive: Path, name: str, installation_path: Path 
 
 def apply_config_writes(archive: Path, name: str, writes: tuple[ConfigWrite, ...],
                         installation_path: Path | None = None) -> None:
-    """Preserve unrelated settings; detect stale same-plugin writes under a file lock."""
-    # Collapse sequential writes to one replacement per scope with its original precondition.
+    apply_config_batch(archive, (NamespaceWrites(name=name, writes=writes),), installation_path)
+
+
+def _atomic_write(path: Path, text: str) -> None:
+    descriptor, temporary = tempfile.mkstemp(prefix=".plugin-config-", dir=path.parent)
+    try:
+        with os.fdopen(descriptor, "w", encoding="utf-8") as output:
+            output.write(text)
+            output.flush()
+            os.fsync(output.fileno())
+        os.replace(temporary, path)
+        _sync_directory(path.parent)
+    finally:
+        Path(temporary).unlink(missing_ok=True)
+
+
+def _sync_directory(path: Path) -> None:
+    directory = os.open(path, os.O_RDONLY)
+    try:
+        os.fsync(directory)
+    finally:
+        os.close(directory)
+
+
+def _prepare(archive: Path, transaction: ConfigTransaction) -> list[PreparedConfig]:
+    """Check every namespace before replacing any configuration file."""
+    prepared: list[PreparedConfig] = []
     for scope in ("archive", "installation"):
-        selected = [write for write in writes if write.scope == scope]
-        if not selected:
+        if not any(write.scope == scope for entry in transaction.namespaces for write in entry.writes):
             continue
-        path = config_path(archive) if scope == "archive" else installation_path or installation_config_path()
-        path.parent.mkdir(parents=True, exist_ok=True)
-        with path.with_name(path.name + ".lock").open("a+b") as lock:
-            fcntl.flock(lock.fileno(), fcntl.LOCK_EX)
-            config = load_archive_config(archive) if scope == "archive" else load_installation_config(path)
-            current = config.plugins.get(name, {})
+        path = config_path(archive) if scope == "archive" else transaction.installation
+        config = load_archive_config(archive) if scope == "archive" else load_installation_config(path)
+        for entry in transaction.namespaces:
+            selected = [write for write in entry.writes if write.scope == scope]
+            if not selected:
+                continue
+            current = config.plugins.get(entry.name, {})
             desired = selected[-1].values
             if current == desired:
-                continue  # Replay after interruption is idempotent.
+                continue
             if value_hash(current) != selected[0].expected_hash:
-                raise ValueError(f"configuration changed concurrently for {name} ({scope}); retry with a fresh snapshot")
-            config.plugins[name] = desired
-            descriptor, temporary = tempfile.mkstemp(prefix=".plugin-config-", dir=path.parent)
-            try:
-                with os.fdopen(descriptor, "w", encoding="utf-8") as output:
-                    safe_dump(config.model_dump(mode="json"), output, sort_keys=False, allow_unicode=True)
-                    output.flush()
-                    os.fsync(output.fileno())
-                os.replace(temporary, path)
-                directory = os.open(path.parent, os.O_RDONLY)
-                try:
-                    os.fsync(directory)
-                finally:
-                    os.close(directory)
-            finally:
-                Path(temporary).unlink(missing_ok=True)
+                raise ValueError(f"configuration changed concurrently for {entry.name} ({scope}); retry with a fresh snapshot")
+            config.plugins[entry.name] = desired
+        prepared.append(PreparedConfig(path=path, text=safe_dump(config.model_dump(mode="json"), sort_keys=False, allow_unicode=True)))
+    return prepared
+
+
+def _commit_config_transaction(archive: Path, transaction: ConfigTransaction) -> None:
+    paths = {config_path(archive) if write.scope == "archive" else transaction.installation
+             for entry in transaction.namespaces for write in entry.writes}
+    if not paths:
+        return
+    with ExitStack() as stack:
+        for path in sorted(paths):
+            path.parent.mkdir(parents=True, exist_ok=True)
+            lock = stack.enter_context(path.with_name(path.name + ".lock").open("a+b"))
+            fcntl.flock(lock.fileno(), fcntl.LOCK_EX)
+        prepared = _prepare(archive, transaction)
+        archive.mkdir(parents=True, exist_ok=True)
+        journal = archive / CONFIG_JOURNAL
+        # This durable intent commits the batch. Recovery finishes all files before
+        # another invocation can observe settings, without rerunning the plugins.
+        _atomic_write(journal, transaction.model_dump_json())
+        for output in prepared:
+            _atomic_write(output.path, output.text)
+        journal.unlink()
+        _sync_directory(archive)
+
+
+def recover_config_transaction(archive: Path) -> None:
+    journal = archive / CONFIG_JOURNAL
+    if journal.exists():
+        _commit_config_transaction(archive, ConfigTransaction.model_validate_json(journal.read_text()))
+
+
+def apply_config_batch(archive: Path, namespaces: tuple[NamespaceWrites, ...],
+                       installation_path: Path | None = None) -> None:
+    """Caller owns the archive writer lease; all rank writes share one journal."""
+    recover_config_transaction(archive)
+    _commit_config_transaction(archive, ConfigTransaction(
+        installation=(installation_path or installation_config_path()).resolve(), namespaces=namespaces))

@@ -201,6 +201,48 @@ fn zip_and_sevenz_stream_exact_pst_members() {
 }
 
 #[test]
+/// A 7z member must agree with both the inventory size and digest before publication.
+fn sevenz_enforces_inventory_member_integrity() {
+    let data = pst();
+    for (size, digest, valid) in [
+        (data.len(), sha256_hex(&data), true),
+        (data.len() + 1, sha256_hex(&data), false),
+        (data.len(), "0".repeat(64), false),
+    ] {
+        let dir = tempfile::tempdir().unwrap();
+        let input = dir.path().join("source.pst");
+        fs::write(&input, &data).unwrap();
+        let seven = dir.path().join("source.7z");
+        sevenz_rust::compress_to_path(&input, &seven).unwrap();
+        let server = Server::new(BTreeMap::from([(
+            "/mail.7z".into(),
+            fs::read(seven).unwrap(),
+        )]));
+        inventory(
+            dir.path(),
+            &serde_json::json!({"enron_packages":[{
+                "url": format!("{}/mail.7z", server.url),
+                "files": [{"name": "source.pst", "size": size, "sha256": digest}]
+            }]}),
+        );
+        assert_eq!(run(args(dir.path())).unwrap(), valid);
+        let result = report(dir.path());
+        if valid {
+            assert_eq!(result.observations.len(), 1);
+            assert!(result.observations[0].expected_sha256_verified);
+        } else {
+            assert!(result.observations.is_empty());
+            assert_eq!(
+                fs::read_dir(dir.path().join("cache/objects"))
+                    .unwrap()
+                    .count(),
+                0
+            );
+        }
+    }
+}
+
+#[test]
 /// Verify that bad downloads and unsafe or oversized members fail while later jobs proceed.
 fn failures_continue_without_publishing_bad_or_oversized_files() {
     let dir = tempfile::tempdir().unwrap();

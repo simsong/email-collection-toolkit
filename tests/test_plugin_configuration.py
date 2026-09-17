@@ -10,7 +10,7 @@ import pytest
 
 from mailarchiver.archive_config import ArchiveConfig, load_archive_config, save_archive_config
 from mailarchiver.plugin_configuration import (
-    ConfigWrite, apply_config_writes, load_installation_config,
+    CONFIG_JOURNAL, ConfigTransaction, ConfigWrite, NamespaceWrites, apply_config_batch, apply_config_writes, load_installation_config,
     read_plugin_configuration, value_hash,
 )
 from mailarchiver.processing.api import RAW_MESSAGE, RunReport
@@ -136,3 +136,36 @@ def test_malformed_configuration_is_not_overwritten(tmp_path: Path, invalid: str
         apply_config_writes(tmp_path / "archive", "one",
                             (ConfigWrite(scope="installation", values={}, expected_hash=value_hash({})),), installation)
     assert installation.read_text() == invalid
+
+
+def test_rank_conflict_cannot_publish_an_earlier_plugin_or_scope(tmp_path: Path) -> None:
+    """A stale later namespace rejects the whole rank before any file replacement."""
+    archive = tmp_path / "archive"
+    installation = tmp_path / "install.yaml"
+    installation.write_text("plugins: {second: {value: changed}}\n")
+    before = installation.read_bytes()
+    writes = (
+        NamespaceWrites(name="first", writes=(ConfigWrite(scope="archive", values={"new": 1}, expected_hash=value_hash({})),)),
+        NamespaceWrites(name="second", writes=(ConfigWrite(scope="installation", values={"new": 2}, expected_hash=value_hash({})),)),
+    )
+    with pytest.raises(ValueError, match="concurrently"):
+        apply_config_batch(archive, writes, installation)
+    assert not (archive / "config.yaml").exists()
+    assert not (archive / CONFIG_JOURNAL).exists()
+    assert installation.read_bytes() == before
+
+
+def test_interrupted_rank_configuration_recovers_before_plugin_reads(tmp_path: Path) -> None:
+    """Real persisted journal models interruption between the two file replacements."""
+    archive = tmp_path / "archive"
+    installation = tmp_path / "install.yaml"
+    installation.write_text("plugins: {unrelated: {keep: true}}\n")
+    archive_write = ConfigWrite(scope="archive", values={"limit": 3}, expected_hash=value_hash({}))
+    install_write = ConfigWrite(scope="installation", values={"inherited": True}, expected_hash=value_hash({}))
+    transaction = ConfigTransaction(installation=installation, namespaces=(
+        NamespaceWrites(name="one", writes=(archive_write, install_write)),))
+    save_archive_config(archive, ArchiveConfig(plugins={"one": archive_write.values}))
+    (archive / CONFIG_JOURNAL).write_text(transaction.model_dump_json())
+    assert read_plugin_configuration(archive, "one", installation).get_my_config() == {"limit": 3, "inherited": True}
+    assert not (archive / CONFIG_JOURNAL).exists()
+    assert load_installation_config(installation).plugins["unrelated"] == {"keep": True}

@@ -548,9 +548,9 @@ importer's claims are truthful or that extraction is complete.
 
 | Header | Producer and purpose | Status |
 | --- | --- | --- |
-| `X-Imported-URI` | Ingest executable: source URI, with an item selector where available; file URI for a PST, HTTPS for a remote source | Generator/validator implemented; PST planned |
-| `X-Importer-Name` | Ingest executable: stable importer identity | Generator/validator implemented; PST planned |
-| `X-Importer-Version` | Ingest executable: exact adapter version, with upstream parser version recorded in the run provenance | Generator/validator implemented; PST planned |
+| `X-Imported-URI` | Ingest executable: source URI, with an item selector where available; file URI for a PST, HTTPS for a remote source | Generator/validator and standalone PST importer implemented; archive-host integration planned |
+| `X-Importer-Name` | Ingest executable: stable importer identity | Generator/validator and standalone PST importer implemented; archive-host integration planned |
+| `X-Importer-Version` | Ingest executable: exact adapter version, with upstream parser version recorded in the run provenance | Generator/validator and standalone PST importer implemented; archive-host integration planned |
 | `X-From` | Legacy double-framing normalizer: displaced envelope sender/timestamp; exact old framing plus pre-normalization SHA-256 retained separately | Implemented |
 | `X-Mailarchiver-Derived`, `X-Mailarchiver-Transcription-Status` | PDF exporter: reconstruction kind and machine-unreviewed status | Implemented, derived output |
 | `X-Mailarchiver-Source-PDF`, `X-Mailarchiver-Source-PDF-SHA256` | PDF exporter: source name and complete original file SHA-256 | Implemented, derived output |
