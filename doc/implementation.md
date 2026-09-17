@@ -1949,7 +1949,10 @@ Pull-request CI runs one `macos-15` job for `make check`, distribution and websi
 validation. Separate Rust/lint jobs are omitted because `make check` includes them. It installs ClamAV through Homebrew into the disposable runner,
 uses a private temporary signature/configuration/socket directory and starts
 the daemon only on demand. Website validation selects the pinned, SHA-256-checked
-Zola macOS binary for the runner architecture. Native GUI checks remain disabled.
+Zola macOS binary for the runner architecture. Poppler is installed for the PDF
+ground-truth test. Native GUI checks remain disabled. Ingest telemetry tests
+check monotonic worker peaks within the CPU/source-file limit; reaching exactly
+four concurrent workers is not required on smaller runners or faster scheduling.
 
 Homebrew installed these commands:
 

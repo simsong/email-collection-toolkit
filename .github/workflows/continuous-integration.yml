@@ -30,9 +30,9 @@ jobs:
           python-version: "3.12"
       - name: Set up uv
         uses: astral-sh/setup-uv@v10.0.1
-      - name: Install ClamAV
+      - name: Install ClamAV and PDF tools
         run: |
-          brew install clamav
+          brew install clamav poppler
           scanner_prefix="$(brew --prefix clamav)"
           scanner_runtime="$(mktemp -d /tmp/mct-ci-clamav.XXXXXX)"
           mkdir "$scanner_runtime/database"

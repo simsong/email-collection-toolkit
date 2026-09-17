@@ -9,6 +9,7 @@ import hashlib
 import json
 import mailbox
 import os
+import re
 import signal
 import sqlite3
 import subprocess
@@ -160,7 +161,9 @@ def test_ingest_routes_preserves_and_indexes_messages(
     assert startup < ingesting
     assert "processed=0 active_workers=0" in result.stderr[startup:ingesting]
     assert "workers=" in result.stderr
-    assert "peak_workers=4" in result.stderr
+    peaks = [int(value) for value in re.findall(r"\bpeak_workers=(\d+)", result.stderr)]
+    assert peaks and peaks == sorted(peaks)
+    assert 1 <= peaks[-1] <= min(4, os.cpu_count() or 1)
     assert "seen_skipped=" in result.stderr
     assert "overall_percent=100.0%" in result.stderr
     assert "files_total=4" in result.stderr
