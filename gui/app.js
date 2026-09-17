@@ -768,9 +768,11 @@ function effectiveQuery() {
 }
 
 function scheduleSuggestions() {
-  window.clearTimeout(state.suggestionTimer);
+  // Retire visible and in-flight suggestions before accepting a different query.
+  closeSuggestions();
   const query = elements.search.value.trim();
-  if (query.length < SUGGESTION_MINIMUM) { closeSuggestions(); return; }
+  // Explicit query syntax belongs to the search parser, never a subject chip.
+  if (query.length < SUGGESTION_MINIMUM || /(?:^|\s)["']?(?:any|from|to|cc|bcc|subject|date|before|after):/i.test(query)) return;
   const request = ++state.suggestionRequest;
   state.suggestionTimer = window.setTimeout(() => loadSuggestions(query, request), SUGGESTION_DELAY_MS);
 }
@@ -1128,7 +1130,7 @@ function resultCardFormatter(cell) {
   const result = cell.getRow().getData();
   queueResultPreview(result.message_pk, state.searchRequest);
   const card = document.createElement("div");
-  card.className = "result";
+  card.className = result.attached_message ? "result attached-message" : "result";
   card.id = `message-result-${result.message_pk}`;
   card.dataset.messagePk = result.message_pk;
   card.draggable = state.fileDragSupported;
@@ -1147,6 +1149,10 @@ function resultCardFormatter(cell) {
   paperclip.setAttribute("aria-label", paperclip.title);
   paperclip.hidden = result.attachment_count === 0;
   subjectLine.append(subject, paperclip);
+  if (result.attached_message) {
+    const tag = document.createElement("span"); tag.className = "attachment-tag"; tag.textContent = "attachment";
+    subjectLine.append(tag);
+  }
   const line = document.createElement("div");
   line.className = "result-line";
   const sender = document.createElement("span");
@@ -1270,9 +1276,15 @@ async function selectMessage(messagePk) {
   }
   state.messageFindIndex = -1;
   state.resultTable?.deselectRow();
-  state.resultTable?.selectRow(messagePk);
+  if (result && state.resultTable?.getRow(messagePk)) {
+    state.resultTable.selectRow(messagePk);
+    void state.resultTable.scrollToRow(messagePk, "middle", false).catch(error => {
+      if (state.selectionRequest === messagePk && state.results.includes(result)) {
+        showError(`Could not scroll to the selected result: ${error?.message || error}`);
+      }
+    });
+  }
   updateMessageFileWell();
-  void state.resultTable?.scrollToRow(messagePk, "middle", false);
   elements["message-content"].hidden = false;
   const adjustment = view.date_adjustment;
   const banner = elements["computed-date-banner"];
@@ -1314,6 +1326,14 @@ function renderLocations(view) {
     }
     nodes.push(term, detail);
   };
+  for (const origin of view.attached_origins || []) {
+    addLocation("Attached message", `MIME path ${origin.part_path.join(".")} in parent ${origin.parent_message_id}`);
+    if (origin.parent_message_pk) {
+      const link = document.createElement("button"); link.type = "button"; link.textContent = "Open parent message";
+      link.addEventListener("click", () => selectMessage(origin.parent_message_pk));
+      nodes.at(-1).append(link);
+    }
+  }
   if (view.archive_path) addLocation("Archive mailbox", view.archive_path);
   view.source_locations.forEach((source, index) => {
     const origin = source.preferred ? `Preferred source (${source.origin})` : source.origin;

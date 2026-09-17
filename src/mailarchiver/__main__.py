@@ -448,9 +448,22 @@ class ProgressReporter:
         self.status_write_error: str | None = None
         self.last_status_monotonic: float | None = None
         self.scan_policy: Literal["clamav", "not-scanned", "unknown"] = "unknown"
+        self.interrupt_announced = False
 
     def start(self) -> None:
         self.display(self.phase)
+
+    def announce_interrupt(self) -> None:
+        """Acknowledge cancellation before waiting for workers or archive cleanup."""
+        self._assert_driver_thread()
+        if self.interrupt_announced:
+            return
+        self.interrupt_announced = True
+        # Start a new dashboard below the notice; subsequent redraws must not erase it.
+        self.rendered_lines = 0
+        self.base_phase = "shutting down"
+        if self.output is not None:
+            print("\n**Interrupted. Shutting down…**", file=self.output, flush=True)
 
     def set_phase(self, phase: str) -> None:
         self._assert_driver_thread()
@@ -720,6 +733,8 @@ class ProgressReporter:
         self.emitted_notices.update(selected)
 
     def _worker_phase(self) -> str:
+        if self.interrupt_announced:
+            return "shutting down"
         phases = {worker.phase for worker in self.state.workers}
         if phases != {"idle"}:
             return "ingesting"
@@ -902,6 +917,7 @@ def run_file_workers[WorkerItem](
     stop: threading.Event,
     status_driver: Callable[[], None],
     concurrency: Callable[[WorkerItem], tuple[str, int | None]] | None = None,
+    on_interrupt: Callable[[], None] | None = None,
 ) -> None:
     """Run framework workers with optional source-declared per-key concurrency limits."""
     iterator = iter(items)
@@ -922,6 +938,8 @@ def run_file_workers[WorkerItem](
                     item = next(iterator)
                 except StopIteration:
                     exhausted = True
+                except KeyboardInterrupt:
+                    raise
                 except BaseException as error:
                     logging.getLogger(__name__).debug("Best-effort operation failed", exc_info=True)
                     discovery_error = (error, error.__traceback__)
@@ -969,10 +987,12 @@ def run_file_workers[WorkerItem](
         if discovery_error is not None:
             error, traceback = discovery_error
             raise error.with_traceback(traceback)
-    except BaseException:
+    except BaseException as error:
         stop.set()
         for future in pending:
             future.cancel()
+        if isinstance(error, KeyboardInterrupt) and on_interrupt is not None:
+            on_interrupt()
         raise
     finally:
         pool.shutdown(wait=True, cancel_futures=True)
@@ -1112,7 +1132,7 @@ def _run_ingest(request: IngestRequest, writer_lease: WriterLease, outcome: Inge
     if not owners.include:
         raise ValueError("Set owner include rules in config.yaml or supply --owner-names-file before importing.")
     plugins = load_plugins(request.plugin_dir, archive=request.archive, installation_config=request.installation_config)
-    source_specs = [SourceSpec(locator=root) for root in request.roots]
+    source_specs = [SourceSpec(locator=str(Path(root).resolve()) if Path(root).exists() else root) for root in request.roots]
     selected_sources: list[tuple[SourceSpec, LoadedPlugin]] = []
     selected_source_keys: set[tuple[str, str, str | None]] = set()
     for source_spec in source_specs:
@@ -1856,9 +1876,9 @@ def _run_ingest(request: IngestRequest, writer_lease: WriterLease, outcome: Inge
                 container=MailContainer.model_validate_json(payload_json),
             )
 
-    progress.start()
-    progress_started = True
     try:
+        progress.start()
+        progress_started = True
         progress.set_phase(DISCOVERY_PHASE)
         inventory = capture_discovery(selected_sources, "containers", report_skipped=True)
         verify_stable_discovery()
@@ -1877,13 +1897,21 @@ def _run_ingest(request: IngestRequest, writer_lease: WriterLease, outcome: Inge
             scanner_executable=scanner.clamdscan if scanner is not None else "clamdscan"),
             publish_processed, plugin_dirs=tuple(request.plugin_dir), installation_config=request.installation_config,
             cancelled=check_processor_cancelled)
+        with pipeline.database:
+            saved_request = request.model_copy(update={"owner_rules": owners, "owner_names_file": None,
+                "plugin_dir": [path.resolve() for path in request.plugin_dir],
+                "installation_config": request.installation_config.resolve() if request.installation_config else None})
+            pipeline.database.execute("INSERT OR REPLACE INTO processing_settings VALUES('request',?)",
+                                      (saved_request.model_dump_json(),))
+            pipeline.database.execute("INSERT OR REPLACE INTO processing_settings VALUES('policy',?)",
+                                      (pipeline.policy.model_dump_json(exclude={"scanner_configuration"}),))
         if request.reprocess:
             pipeline.reprocess()
         if request.continue_ingest:
             def resume_ingest(_unused: int) -> None:
                 assert pipeline is not None
                 pipeline.resume(("ingest", "message"))
-            run_file_workers([0], 1, resume_ingest, stop, refresh_import)
+            run_file_workers([0], 1, resume_ingest, stop, refresh_import, on_interrupt=progress.announce_interrupt)
         progress.set_phase("checking sources")
         run_file_workers(
             snapshotted_containers(),
@@ -1895,6 +1923,7 @@ def _run_ingest(request: IngestRequest, writer_lease: WriterLease, outcome: Inge
                 f"{work.plugin.manifest.kind}:{work.container.concurrency_key}",
                 work.plugin.implementation.capabilities.max_concurrency,
             ),
+            on_interrupt=progress.announce_interrupt,
         )
         check_interrupted()
         if request.continue_content:
@@ -1902,11 +1931,12 @@ def _run_ingest(request: IngestRequest, writer_lease: WriterLease, outcome: Inge
             def process_content(_unused: int) -> None:
                 assert pipeline is not None
                 pipeline.resume(("message", "content"), max_jobs=request.max_content_jobs)
-            run_file_workers([0], 1, process_content, stop, refresh_import)
+            run_file_workers([0], 1, process_content, stop, refresh_import, on_interrupt=progress.announce_interrupt)
         catalog.commit()
         search.commit()
         succeeded = True
     except KeyboardInterrupt as error:
+        progress.announce_interrupt()
         interrupted = True
         failure_detail = type(error).__name__
         catalog.commit()

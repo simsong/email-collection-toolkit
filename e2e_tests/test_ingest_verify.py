@@ -389,6 +389,8 @@ def test_about_window_displays_version_disk_and_warnings(tmp_path: Path, page: P
     page.wait_for_function("document.getElementById('version').textContent.startsWith('Version ')")
     assert "available on" in page.locator("#disk").inner_text()
     assert "invalid" in page.locator("#notices").inner_text()
+    expect(page.locator("#processors")).to_contain_text("clamav")
+    expect(page.locator("#processors")).to_contain_text("text/plain")
 
 
 def test_gui_import_uses_typed_ingest_service_without_a_subprocess(tmp_path: Path) -> None:

@@ -23,6 +23,20 @@
         <label class="attachment-search"><input id="show-original-folders" type="checkbox"> Show original folder structure</label>
       </header>
 
+      <nav class="archive-tools no-print" aria-label="Archive tools">
+        <button id="name-picker" type="button">Names and addresses</button>
+        <button id="institution-picker" type="button">Institutions</button>
+        <button id="processing-open" type="button">Continue Processing</button>
+      </nav>
+      <dialog id="processing-dialog" aria-labelledby="processing-heading">
+        <h2 id="processing-heading">Incomplete work</h2>
+        <p id="processing-detail"></p>
+        <p><label><input id="continue-ingest" type="checkbox" checked> Continue ingest</label></p>
+        <p><label><input id="continue-content" type="checkbox" checked> Continue content processing</label></p>
+        <p id="processing-error" role="alert"></p>
+        <button id="processing-later" type="button">Later</button>
+        <button id="processing-continue" type="button">Continue</button>
+      </dialog>
       <section class="workspace">
         <aside id="mailbox-browser" class="mailbox-browser no-print" hidden>
           <h2>Original mailboxes</h2>
@@ -154,5 +168,6 @@
     </main>
     <script src="vendor/tabulator/dist/js/tabulator.min.js"></script>
     <script src="app.js"></script>
+    <script src="processing.js"></script>
   </body>
 </html>

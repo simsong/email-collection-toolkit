@@ -270,9 +270,9 @@ in an actual message body.
 ## Deduplication and provenance
 
 On macOS, Command-Q during an active import must offer Cancel or Stop Import
-and Quit. Explain that quitting stops imports, that restarting requires File →
-Import with the same source, and that already archived messages are not imported
-twice. Cancel leaves imports running. Confirmed quit stops all active imports
+and Quit. Explain that quitting stops imports, that **Continue Processing**
+resumes saved work (or File → Import retries the source), and that already
+archived messages are not imported twice. Cancel leaves imports running. Confirmed quit stops all active imports
 cooperatively, disallows new imports, and waits for checkpointing and writer-lease
 release before terminating. Window-close restrictions during ingest remain intact.
 
@@ -451,7 +451,9 @@ mailbox destinations. Dedicated EICAR tests also verify infected routing.
   socket or launching a new daemon, and release the startup lock.
   A timeout is a scanner failure, never a clean or infected result, and plaintext
   temporary message bytes are removed after every outcome.
-* Control-C is a graceful stop: close scanner and MBOX resources, commit
+* Control-C immediately prints and flushes `**Interrupted. Shutting down…**`
+  before waiting for workers or beginning cleanup. Print it once and preserve
+  it across terminal dashboard redraws. It is a graceful stop: close scanner and MBOX resources, commit
   completed messages and observations, publish a complete BagIt/Mailbag
   checkpoint, report interruption,
   print the standard archive report for the completed partial run, and return
@@ -564,8 +566,7 @@ schemas; its creation must neither alter an existing catalog nor weaken its
 schema validation. CLI cancellation must finish the active invocation and release the
 writer lease and permit recovery without repeating completed invocations.
 The framework harness uses copied fixture bytes and raw-digest identity;
-production deduplication and import now use the same dispatcher. GUI picker and
-incomplete-work dialog integration follow separately.
+production deduplication and import now use the same dispatcher. GUI pickers and the incomplete-work dialog shall use the same durable queues and identity tables.
 
 Each processor shall receive its own configuration dictionary, identified by
 its stable manifest kind. Archive settings override installation settings;
@@ -586,8 +587,7 @@ tokens. Inventory sizes and SHA-256 digests apply to 7z members as well as ZIP.
 The proposed ranked publish/subscribe processor DAGs, handoff plugins,
 incomplete-work prompt, scanner timeout/statistics, synthetic-part provenance,
 and first-class attached-message handling are specified in
-[PLUGINS.md](PLUGINS.md#proposed-ranked-processing-graphs). CLI processing is
-implemented; the incomplete-work dialog and viewer/tag styling remain GUI work. Manual decisions must survive reruns. Attached messages must retain
+[PLUGINS.md](PLUGINS.md#proposed-ranked-processing-graphs). CLI and GUI processing shall use the same services, writer lease, and saved import policy. Manual decisions must survive reruns. Attached messages must retain
 parent paths and an attachment tag, initially displayed with a 5% gray background.
 The future SQLite-backed tag editor is tracked in issue #119; nullable style
 attributes mean no change. The three pipelines are ingest (ClamAV then filing/handoff), message processing
@@ -600,6 +600,38 @@ the filing plugin may read what it needs after scanning. Discovered child
 messages return directly to message processing without another antivirus scan,
 retaining parent scan provenance and using shared deduplication/publication
 services for the child record and content reference.
+
+### Desktop processor integration
+
+Opening an archive with pending, failed, or interrupted processing shall show
+**Incomplete work**, with **Continue ingest** and **Continue content processing**
+checked. Later, or clearing both choices, opens it without starting work; the
+prompt returns on the next opening until work finishes. Source traversal resumes
+from its original roots; rootless content runs must not hide interrupted imports.
+Content-only processing must work without the source being available. Missing
+saved policy requires an explicit File → Import instead of guessing scan settings.
+Background processing must retain the GUI's stop/quit and single-writer safeguards.
+Pending work alone must not trigger a quit warning. Content-only jobs stop and
+checkpoint on quit without an ingest warning. Active ingest still requires stop
+confirmation. Quit must not block the Cocoa event loop while waiting for workers;
+workers must skip final UI refresh during shutdown. Ctrl-C requests the same
+orderly shutdown without a confirmation dialog.
+
+Matcher matrix cells use two-point vertical padding, black text and column
+headings, and dark supporting text. Live pickers have no Archive identities badge.
+The main-window resume action is labeled **Continue Processing**.
+
+Archive-backed name and institution windows shall show header and signature
+addresses, date-filtered statistics, and distinct message counts per group. Name
+moves, separation and renames save immediately under the writer lease. Institution
+membership follows parent domains; institution names can be edited. The synthetic
+prototype retains its session-only undo; live edits are durable and do not expose
+that prototype reset/undo. Authoritative matching remains disabled until its
+production algorithm is connected. About lists registered processors by input
+MIME type, with pipeline, rank, scope and timeout. Attached message rows show an
+attachment tag on a 5% gray background; the viewer shows the parent and MIME path.
+`make test-gui-processing` exercises these services and shipped pages headlessly
+against actual synthetic archives, without native windows or mocked services.
 
 ### Synthetic matcher window prototype
 
@@ -1020,7 +1052,9 @@ the same statements to verify results and bound work on sparse large fixtures.
 
 After three characters and a 120-millisecond debounce, the GUI suggests at most
 20 matching addresses and 20 matching subjects with deduplicated message
-counts. Stale responses are discarded. Addresses rank by message count, then
+counts. Explicit selectors such as `from:simsong` bypass autocomplete and remain
+unchanged search queries; typing a new query immediately dismisses old suggestions.
+Stale responses are discarded. Addresses rank by message count, then
 most recent message date. Email-address substrings use the disposable
 trigram accelerator; display-name and subject substring matching do not. Selecting an
 address creates a removable filter whose menu scopes it to Any, From, To, Cc,

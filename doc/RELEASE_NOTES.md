@@ -4,6 +4,22 @@
 
 ## Unreleased
 
+* Distinguish active ingest from background content work on quit. Stop content
+  without an ingest warning, keep the event loop alive through checkpointing,
+  and handle Ctrl-C through the orderly GUI shutdown path.
+
+* Tighten matcher rows and darken text, remove the archive-identities badge,
+  and label the resume action Continue Processing. Keep explicit search selectors
+  such as `from:simsong` out of subject autocomplete.
+
+* Connect the desktop GUI to resumable processor work, saved ingest policy,
+  archive-backed name/institution pickers and immediate manual edits. Show
+  registered processors in About and attached-message tags and parent paths.
+  Exercise the shipped pages against real archives in headless browser tests.
+
+* Immediately acknowledge Ctrl-C during CLI ingestion before waiting for workers
+  and archive cleanup, preserving the notice across dashboard redraws.
+
 * Add in-process libpff OST extraction with genuine cache-fixture coverage,
   source fixity, streamed attachments, and explicit partial-import diagnostics.
   Add the default-off developer configuration option **Redundant PST Import**
@@ -26,7 +42,7 @@
   first-class attached messages with deduplication and durable parent/tag data.
   Integrate the external Rust PST importer, retaining partial-run evidence.
   No Python plugin worker subprocesses are used; plugin deadlines are cooperative
-  with bounded I/O and late-result rejection. GUI integration remains follow-up.
+  with bounded I/O and late-result rejection.
 
 * Preflight and journal configuration writes across a complete processor rank;
   recover interrupted publication before plugin reads. Record missing/unreadable

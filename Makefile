@@ -355,6 +355,10 @@ test-headers:
 test-progress:
 	uv run pytest -q tests/test_progress.py tests/test_sources.py
 
+.PHONY: test-interrupt
+test-interrupt:
+	uv run --locked pytest -q tests/test_progress.py tests/test_end_to_end.py::test_interrupt_stops_cleanly
+
 test-tika:
 	uv run pytest -q tests/test_tika.py
 
@@ -530,3 +534,12 @@ test-pst-downloader:
 .PHONY: test-pff
 test-pff: pst-importer
 	uv run --locked pytest -q tests/test_pff_source.py tests/test_cli_processing.py tests/test_plugin_loader.py tests/test_source_integrity.py
+
+.PHONY: test-gui-processing
+test-gui-processing: ruff
+	uv run --locked pytest -q tests/test_gui_processing.py
+	uv run --locked pytest -q --browser chromium e2e_tests/test_gui_processing.py
+
+.PHONY: website-preview-screenshots
+website-preview-screenshots: website-build-check
+	uv run --group dev python -m scripts.website_screenshots --site-only

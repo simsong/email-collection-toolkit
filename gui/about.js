@@ -38,6 +38,18 @@ function render(status) {
   byId("disk").textContent = `${formatBytes(status.disk_free_bytes)} available on ${status.disk_path}`;
   byId("internet").textContent = status.internet.detail;
   if (byId("antivirus")) byId("antivirus").textContent = status.antivirus?.detail || "Unknown";
+  const types = [...new Set((status.processors || []).flatMap(plugin => plugin.subscribes))].sort();
+  byId("processors").replaceChildren(...types.map(type => {
+    const group = document.createElement("div");
+    const heading = document.createElement("strong"); heading.textContent = type;
+    group.append(heading);
+    for (const plugin of status.processors.filter(plugin => plugin.subscribes.includes(type))) {
+      const line = document.createElement("p");
+      line.textContent = `${plugin.name} (${plugin.kind}) — ${plugin.pipeline}, rank ${plugin.rank}, ${plugin.scope}, timeout ${plugin.timeout_seconds}s`;
+      group.append(line);
+    }
+    return group;
+  }));
   const activity = status.ingests.length ? status.ingests.map(activityCard) : [empty("No saved archive is open.")];
   byId("activity").replaceChildren(...activity);
   const notices = status.notices.length ? [...status.notices].reverse().map(noticeCard) : [empty("No messages.")];

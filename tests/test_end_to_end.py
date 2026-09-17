@@ -1018,6 +1018,8 @@ def test_interrupt_stops_cleanly(source_mail: tuple[Path, dict[str, bytes]], tmp
     stdout, stderr = process.communicate(timeout=20)
     assert process.returncode == 130, stdout + stderr
     assert "interrupted:" in stderr
+    assert "**Interrupted. Shutting down…**" in stderr
+    assert stderr.index("**Interrupted. Shutting down…**") < stderr.index("interrupted:")
     assert "Traceback" not in stderr
     assert stdout.startswith("year    sent    received    people\n")
 

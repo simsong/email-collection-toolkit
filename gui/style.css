@@ -52,7 +52,7 @@ button { min-height: 28px; }
 .suggestion-empty { padding: 10px 8px; color: var(--muted); }
 .attachment-search { display: flex; align-items: center; gap: 5px; white-space: nowrap; }
 
-.workspace { display: grid; grid-template-columns: minmax(0, var(--results-width, 38%)) 7px minmax(0, 1fr); height: calc(100% - 78px); }
+.workspace { display: grid; grid-template-columns: minmax(0, var(--results-width, 38%)) 7px minmax(0, 1fr); height: calc(100% - 114px); }
 .workspace.tree-visible { grid-template-columns: min(30%, max(235px, 20%)) minmax(0, var(--results-width, 31%)) 7px minmax(0, 1fr); }
 .message-splitter { cursor: col-resize; touch-action: none; background: var(--surface); border-inline: 1px solid var(--border); }
 .message-splitter:hover, .message-splitter:focus-visible { background: var(--selection); }
@@ -175,7 +175,7 @@ dialog h2 { margin: 0 0 16px; font-size: 18px; }
 .filter-set-row { display: grid; grid-template-columns: 1fr auto auto; gap: 6px; margin: 7px 0; }
 .link-destination { max-height: 12em; overflow: auto; overflow-wrap: anywhere; color: var(--muted); font: 12px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace; }
 
-body.standalone .toolbar, body.standalone .results, body.standalone .mailbox-browser, body.standalone .message-splitter, body.standalone .ingest-status-line { display: none; }
+body.standalone .archive-tools, body.standalone .toolbar, body.standalone .results, body.standalone .mailbox-browser, body.standalone .message-splitter, body.standalone .ingest-status-line { display: none; }
 body.standalone .workspace { display: block; height: 100%; }
 body.standalone .message { height: 100%; overflow: auto; }
 
@@ -187,3 +187,10 @@ body.standalone .message { height: 100%; overflow: auto; }
   #message-well { display: block; padding: 0; }
   .html-frame { min-height: 0; height: auto; }
 }
+
+.archive-tools { height: 36px; display: flex; gap: 8px; padding: 4px 12px; }
+#processing-dialog { max-width: 540px; }
+#processing-error { color: #b00020; }
+
+.result.attached-message, .attachment-tag { background-color: #f2f2f2; }
+.attachment-tag { font-size: 11px; padding: 2px 4px; }

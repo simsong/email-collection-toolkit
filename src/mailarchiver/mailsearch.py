@@ -55,6 +55,7 @@ class MessageHeader(BaseModel):
     subject: str
     date_utc: str
     attachment_count: int = 0
+    attached_message: bool = False
 
 
 class SearchStatement(BaseModel):

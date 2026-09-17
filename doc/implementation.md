@@ -533,7 +533,12 @@ shows active and peak concurrency, sanitized plug-in phases, per-worker
 checking/ingesting/scanning/publishing/checkpointing/idle state, streaming
 source byte or provider-message progress, and completion percentage, and reports processed/total source-file plus
 archived/previously-seen/autosave/source-metadata/infected, unrecognized-file,
-and unchanged-container counts. Control-C commits completed work, closes the
+and unchanged-container counts. Control-C prints and flushes
+`**Interrupted. Shutting down…**` before worker-pool shutdown waits; the outer
+ingest handler also announces interruptions during preflight. The reporter emits
+the notice once and starts subsequent dashboard frames below it. Real-SIGINT
+tests hold a worker blocked until the acknowledgement is observed.
+Control-C commits completed work, closes the
 temporary scanner, publishes a BagIt/Mailbag checkpoint, reports a controlled interruption, and
 prints the partial-run archive report before returning 130.  An `ENOSPC` append is truncated back to the prior MBOX size where
 possible and reports a controlled nonzero stop.  Acceptance coverage includes
@@ -777,8 +782,8 @@ tails with source/executable hashes and diagnostics under `processing-pst`.
 `make test-processors` runs lint/types and substantive framework tests;
 `make test-cli-processors` validates production pipelines, deferred resume,
 HTML/RTF selection, child byte preservation, identity edits and PST extraction.
-No native windows or private archives are used. GUI picker, incomplete-work
-prompt and attachment-style display wiring remain follow-up work.
+No native windows or private archives are used. Desktop processor integration is
+validated separately by `make test-gui-processing`.
 
 On a positive ClamAV result, best-effort header metadata cannot prevent filing.
 If parsing fails, quarantine records the raw digest as identity, labels its
@@ -837,7 +842,31 @@ parent scan provenance; the handoff uses shared deduplication/publication
 services to establish their records and durable content references.
 The graphic is a shared SVG in `website/static/images/processor-dag.svg`.
 The CLI dispatcher, production extraction, attachment promotion and identity/tag
-persistence are implemented. GUI control and display wiring remain subsequent work.
+persistence are implemented. `gui_processing.py` supplies read-only status and
+identity queries plus writer-leased manual edits. `GuiApi.resume_processing`
+builds an `IngestRequest` from saved policy and starts the existing GUI import
+thread; it never starts a Python plugin subprocess. Ingest saves resolved owner
+rules and plugin/config paths in `processing_settings` before message processing.
+Run history preserves unfinished source roots across later rootless content runs.
+Content-only work reuses archived objects, and read-only access never creates a
+missing processing database. Unsupported/missing saved policy reports an error.
+
+`processing.js` shows the two checked resume options on opening and provides an
+explicit **Continue Processing** action. `identity.html` and `identity.js` subclass the shared
+matcher widgets with database queries, distinct per-group counts and immediate
+manual writes. Name moves and separation update manual address assignments;
+institutions retain domain-based membership and permit name edits. Prototype
+undo/reset are not exposed for persisted edits. Authoritative matching remains
+unconnected and disabled. About groups the registered processor manifests by
+subscribed type. `gui_provenance.py` reads attachment tags and parent occurrences;
+search rows show the gray tag and the viewer links to each parent and MIME path.
+A parent outside the current search results opens in the viewer without trying
+to select or scroll to an absent result row.
+`make website-preview-screenshots` builds the website and renders its homepage,
+Searching and Importing pages using local assets into `.tmp/website-previews`.
+The headless tests use real bridges, queues and SQLite databases, including edits
+surviving replay, competing writers, content resume without source files, and
+attached-message navigation. Native macOS window behavior remains an opt-in check.
 
 The standalone `make matcher-prototype` opens independent name and institution
 windows through a temporary `LoopbackAssetServer` and pywebview. Use
@@ -1138,7 +1167,7 @@ thread at exit. Cancel (also Escape) waits for its bridge reply thread to finish
 application using the existing stop/checkpoint policy. `request_quit` first calls
 `prepare_quit` under the same application lock used to publish import jobs: a
 job-free decision sets `_quitting` before new jobs can register; otherwise it
-confirms, stops jobs, and waits for completion. A deterministic native regression
+confirms active ingest, stops jobs, and waits on a background thread. An opt-in native regression
 publishes a real leased job immediately before that decision and verifies the
 confirmation, stop signal, lease retention, completion, and application exit.
 Picker selection and the Cancel action do not persist setup paths or write
@@ -1907,7 +1936,8 @@ Mac release trial; pure policy tests do not establish those properties.
 `scripts/desktop_entry.py` dispatches normal GUI launch, `--cli`, `--self-test`,
 and `--self-test-gui`. Frozen GUI resources use PyInstaller's bundle root;
 the verifier's actual `.py` source is explicitly bundled for archive installation.
-The Cocoa document delegate extends rather than replaces pywebview's quit guards.
+The Cocoa document delegate routes quit through the shared stop/checkpoint policy
+and closes pywebview windows only after processing workers finish.
 
 `scripts/dmg_layout.py` uses build-only `dmgbuild` to write the Finder `.DS_Store`
 and background into the image without changing global Finder preferences.
@@ -2242,13 +2272,13 @@ for stored Tabulator and website-theme code in source distributions.
 before antivirus confirmation and verifies the saved rules after a synthetic
 import. Setup reuses File Import's current revision-checked owner-rule workflow.
 
-The Cocoa termination delegate confirms an active-import quit and returns
-`NSTerminateLater`, keeping the event loop alive while `IngestJob.stop` requests
-cooperative cancellation. The shared service checks this event during discovery,
+The Cocoa termination delegate confirms active ingest, then returns
+`NSTerminateCancel` while a background waiter arranges orderly window closure.
+The event loop stays alive while `IngestJob.stop` requests cooperative cancellation. The shared service checks this event during discovery,
 scanner startup, and worker status refresh; ordinary worker failures remain
 distinct from cancellation. It follows the existing interrupted-run checkpoint
-and lease-release path. A completion event allows Cocoa termination only after
-the GUI worker finishes. No automatic resume is promised: File → Import safely
+and lease-release path. Completion events and worker joins allow pywebview window closure only after
+the GUI workers finish, including their final callbacks. The incomplete-work prompt offers resumption; File → Import also safely
 retries the same source. `make test-application` tests partial publication,
 interrupted status, verification, duplicate-free restart, and multi-document stop.
 
@@ -2550,3 +2580,17 @@ fixtures, with CLI archive creation, content resume, search, and canonical fixit
 verification. Compressed/version-36 OST is not yet fixture-qualified. The native
 extension is a runtime dependency; its complete LGPL/GPL license texts are retained
 and included in runtime license bundles because its wheel omits them.
+
+Matcher rows use 2pt vertical cell padding and compact disclosure controls, with
+black matrix text and darker supporting labels. `scheduleSuggestions` dismisses
+stale choices immediately and bypasses autocomplete for explicit query selectors,
+so `from:simsong` reaches the shared parser unchanged instead of becoming a
+subject filter. Headless regression coverage distinguishes sender and subject matches.
+
+GUI jobs distinguish ingest from content-only processing. Quit confirms only
+active ingest, then a background waiter closes pywebview windows after workers
+checkpoint. The Cocoa delegate returns Cancel while that orderly close runs,
+avoiding Cocoa termination before Python workers finish. Final import refreshes
+are suppressed during shutdown. SIGINT requests the same stop without a dialog.
+Headless regressions cancel a real cooperative processor and verify retained
+pending work; deferred-but-unstarted jobs never become active merely on quit.

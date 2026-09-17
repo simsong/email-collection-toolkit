@@ -10,6 +10,7 @@ import json
 import logging
 import os
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
@@ -47,6 +48,9 @@ from .archive_config import (
     import_directory as configured_import_directory,
     remember_import_directory,
 )
+from .gui_processing import picker_page, registered_processors, resume_request, save_identity, unfinished_work
+from .processing.api import ProcessorManifest
+from .processing.identities import IdentityFilter, ManualDecision
 from .gui_service import (
     MessagePreview,
     MessageView,
@@ -171,6 +175,7 @@ class AboutIngestStatus(BaseModel):
 
 
 class AboutStatus(BaseModel):
+    processors: list[ProcessorManifest] = Field(default_factory=list)
     metadata: ApplicationMetadata
     disk_path: str
     disk_free_bytes: int
@@ -352,9 +357,8 @@ def application_icon_path() -> Path:
 
 IMPORT_CONFIRMATION_WIDTH = 560
 QUIT_IMPORT_MESSAGE = (
-    "Quitting will stop all active imports. To restart an import, reopen Email Collection Toolkit "
-    "and use File → Import to select the same source again. Messages already archived "
-    "will not be imported twice.\n\n"
+    "Quitting will stop active ingest and content processing. Reopen the archive and use "
+    "Continue Processing to resume. Messages already archived will not be imported twice.\n\n"
     "The application will quit after the current work has stopped and the archive has been checkpointed."
 )
 
@@ -565,6 +569,21 @@ class IngestWindowApi:
         return self._application.import_directory(self._document, self.window)
 
 
+class IdentityPickerApi:
+    """A picker is permanently bound to its archive; writes share the import lease."""
+
+    def __init__(self, archive: Path, kind: Literal["name", "institution"]) -> None:
+        self.archive = archive
+        self.kind: Literal["name", "institution"] = kind
+
+    def query(self, filters: dict[str, Any]) -> dict[str, Any]:
+        return picker_page(self.archive, self.kind, IdentityFilter.model_validate(filters)).model_dump(mode="json")
+
+    def update(self, decision: dict[str, Any]) -> bool:
+        save_identity(self.archive, ManualDecision.model_validate(decision))
+        return True
+
+
 class AboutApi:
     """Read-only bridge for persistent application health and activity."""
 
@@ -649,6 +668,7 @@ class WindowBridge:
 
 
 SEARCH_BRIDGE_METHODS = (
+    "processing_work", "resume_processing", "open_picker",
     "status", "activate", "search", "suggestions", "ingest_overview", "open_ingest_window",
     "mailbox_tree", "saved_filter_sets", "save_filter_set", "rename_filter_set", "delete_filter_set",
     "open_message_window", "request_previews", "take_previews", "message", "part", "attachment",
@@ -743,6 +763,26 @@ class GuiApi:
         if self.application is not None and self.search_window is not None:
             self.application.activate_window(self.search_window.window_id)
         return True
+
+    def processing_work(self) -> dict[str, Any]:
+        if self.archive is None:
+            return {"available": False, "ingest": 0, "content": 0, "source_roots": [], "active": False}
+        work = unfinished_work(self._archive()).model_dump(mode="json")
+        work["active"] = bool(self.document and self.document.ingest_job)
+        return work
+
+    def resume_processing(self, ingest: bool, content: bool) -> bool:
+        if self.application is None:
+            raise ValueError("Processing requires an open archive document.")
+        request = resume_request(self._archive(), ingest, content)
+        return self.application.start_import(self, [], processing_request=request)
+
+    def open_picker(self, kind: str) -> bool:
+        if kind not in ("name", "institution"):
+            raise ValueError("Unknown picker")
+        if self.application is None or self.document is None:
+            return False
+        return self.application.open_picker(self.document, kind)
 
     def ingest_overview(self) -> dict[str, Any]:
         status = latest_ingest_status(self._archive()) if self.archive and _is_archive(self.archive) else None
@@ -1356,7 +1396,7 @@ class PyWebViewApplication:
                 return
             self._notices.append(notice)
             self._notices = self._notices[-100:]
-        if severity != "information":
+        if severity != "information" and not self._quitting:
             for api in self._search_apis():
                 if api.window is not None:
                     api.window.run_js(f"window.mailArchiverNotice?.({json.dumps(message)});")
@@ -1398,6 +1438,7 @@ class PyWebViewApplication:
             notices=self.notices(),
             ingests=ingests,
             antivirus=scanner_availability(),
+            processors=registered_processors(active.path if active else None),
         )
 
     def create_search_window(self, session: SearchWindow) -> GuiApi:
@@ -1653,6 +1694,7 @@ class PyWebViewApplication:
         self, api: GuiApi, roots: list[Path], owner_names: Path | None = None, *, owner_rules: OwnerRules | None = None,
         owner_revision: str | None = None,
         scan_policy: Literal["clamav", "not-scanned"] = "clamav",
+        processing_request: IngestRequest | None = None,
     ) -> bool:
         """Acquire both ingest layers before launching the shared service."""
         if self._quitting:
@@ -1661,6 +1703,11 @@ class PyWebViewApplication:
         session = api.search_window
         if document is None or document.path is None or session is None:
             return False
+        request = processing_request or IngestRequest(
+            archive=document.path, owner_names_file=owner_names, owner_rules=owner_rules,
+            roots=[str(root) for root in roots], scan_policy=scan_policy,
+        )
+        ingesting = bool(request.roots or (request.continue_ingest and unfinished_work(document.path).ingest))
         operation_id = uuid4().hex
         lease: WriterLease | None = None
         try:
@@ -1673,7 +1720,8 @@ class PyWebViewApplication:
             )
             if owner_rules is not None:
                 DocumentOptions(document.path).save(owner_rules, lease, owner_revision)
-            job = IngestJob(operation_id=operation_id, owner_window_id=session.window_id)
+            job = IngestJob(operation_id=operation_id, owner_window_id=session.window_id,
+                            kind="ingest" if ingesting else "content")
             with self._lock:
                 if self._quitting:
                     raise ValueError("The application is stopping imports and quitting.")
@@ -1684,16 +1732,9 @@ class PyWebViewApplication:
             self.add_notice("warning", f"Import did not start: {error}")
             return False
         self.add_notice("information", f"Import started for {document.display_path}")
-        if scan_policy == "not-scanned":
+        if (processing_request.scan_policy if processing_request else scan_policy) == "not-scanned":
             self.add_notice("warning", f"{document.display_path}: importing WITHOUT antivirus scanning.")
         self._refresh_menus()
-        request = IngestRequest(
-            archive=document.path,
-            owner_names_file=owner_names,
-            owner_rules=owner_rules,
-            roots=[str(root) for root in roots],
-            scan_policy=scan_policy,
-        )
         def import_worker() -> None:
             try:
                 self._run_import(document, operation_id, lease, request, job.stop)
@@ -1733,7 +1774,8 @@ class PyWebViewApplication:
         try:
             run_ingest(request, lease, stop_event=stop, outcome=outcome, terminal=False)
             try:
-                remember_import_directory(request.archive, [Path(root) for root in request.roots])
+                if request.roots:
+                    remember_import_directory(request.archive, [Path(root) for root in request.roots])
             except (OSError, ValueError) as config_error:
                 self.add_notice("warning", f"Import completed but the source directory could not be saved: {config_error}")
         except BaseException as caught:  # pylint: disable=broad-exception-caught
@@ -1748,8 +1790,9 @@ class PyWebViewApplication:
                 )
             except ValueError:
                 refresh = ()
-            self._refresh_search_windows(refresh)
-            self._refresh_menus()
+            if not self._quitting:
+                self._refresh_search_windows(refresh)
+                self._refresh_menus()
         if isinstance(error, IngestInterrupted):
             self.add_notice("information", f"Import stopped for {document.display_path}; import the same source again to continue.")
         elif error is None:
@@ -1881,6 +1924,31 @@ class PyWebViewApplication:
         self._refresh_menus()
         return True
 
+    def open_picker(self, document: ArchiveDocument, kind: Literal["name", "institution"]) -> bool:
+        if document.path is None:
+            return False
+        api = IdentityPickerApi(document.path, kind)
+        window = webview.create_window(
+            f"{APPLICATION_NAME} — {kind.title()} matcher — {document.display_path}",
+            self.asset_url("identity.html", [("kind", kind)]),
+            js_api=WindowBridge(api, ("query", "update")),
+            width=1100, height=750, min_size=(900, 560), menu=self.menu(),
+        )
+        if window is None:
+            raise RuntimeError("pywebview failed to create a window")
+        document_id = document.descriptor.document_id
+        self._native_child_ids[window.uid] = document_id
+        self.controller.attach_child_window(document_id, window.uid)
+
+        def closed(*_args: object) -> None:
+            self._native_child_ids.pop(window.uid, None)
+            self.controller.close_child_window(document_id, window.uid)
+            self._refresh_menus()
+
+        window.events.closed += closed
+        self._refresh_menus()
+        return True
+
     def open_ingest_window(self, document: ArchiveDocument, status_id: str | None = None) -> bool:
         if document.path is None:
             return False
@@ -2003,10 +2071,17 @@ class PyWebViewApplication:
             worker.join()
         return self.controller.can_close_window(window_id)
 
-    def request_quit(self) -> None:
+    def has_active_ingest(self) -> bool:
+        return any(job.kind == "ingest" for document in self.controller.documents()
+                   if (job := document.ingest_job) is not None)
+
+    def request_quit(self, *, confirm_ingest: bool = True) -> None:
         """Use the normal stop-and-checkpoint policy before closing every window."""
-        # Reserve a job-free quit under the same lock used to publish imports.
-        if not self.prepare_quit():
+        # Never wait for workers on Cocoa's event thread: they may still be
+        # returning from a bridge callback that needs that same event loop.
+        if self._quitting:
+            return
+        if not self.prepare_quit() and self.has_active_ingest() and confirm_ingest:
             anchor = self._dialog_window()
             confirmed = (
                 macos_alert("Stop importing and quit?", QUIT_IMPORT_MESSAGE,
@@ -2016,10 +2091,21 @@ class PyWebViewApplication:
             )
             if not confirmed:
                 return
-            for job in self.stop_imports_for_quit():
+        jobs = self.stop_imports_for_quit()
+
+        def finish_quit() -> None:
+            for job in jobs:
                 job.finished.wait()
-        for window in tuple(webview.windows):
-            window.destroy()
+            # A completed job may have released its lease but still be returning
+            # from a UI refresh. Keep the event loop alive through that tail too.
+            with self._lock:
+                workers = tuple(self._import_threads)
+            for worker in workers:
+                worker.join()
+            for window in tuple(webview.windows):
+                window.destroy()
+
+        Thread(target=finish_quit, name="mailarchiver-quit", daemon=True).start()
 
     def prepare_quit(self) -> bool:
         """Keep windows and services alive until every import has completed."""
@@ -2031,6 +2117,7 @@ class PyWebViewApplication:
 
     def shutdown(self) -> None:
         """Release non-document resources after the native event loop exits."""
+        self.stop_imports_for_quit()
         with self._lock:
             workers = tuple(self._import_threads)
         for worker in workers:
@@ -2075,7 +2162,7 @@ class PyWebViewApplication:
 
     def _refresh_macos_menu(self) -> None:
         """Refresh pywebview's process menu and its dynamic Close enabled state."""
-        if sys.platform != "darwin":
+        if sys.platform != "darwin" or not webview.windows:
             return
         try:
             from PyObjCTools import AppHelper  # pylint: disable=import-error,import-outside-toplevel
@@ -2269,29 +2356,11 @@ def install_macos_document_events(application: PyWebViewApplication) -> None:
     class MailArchiverDelegate(BrowserView.AppDelegate):
         def applicationShouldTerminate_(self, app):
             import AppKit  # pylint: disable=import-outside-toplevel,import-error
-            import objc  # pylint: disable=import-outside-toplevel,import-error
-            AppHelper = import_module("PyObjCTools.AppHelper")
 
-            if application._quitting:
-                return AppKit.NSTerminateLater
-            if not any(document.ingest_job for document in application.controller.documents()):
-                application._quitting = True
-                decision = objc.super(MailArchiverDelegate, self).applicationShouldTerminate_(app)
-                if decision == AppKit.NSTerminateCancel:
-                    application._quitting = False
-                return decision
-            if macos_alert("Stop importing and quit?", QUIT_IMPORT_MESSAGE,
-                           ("Cancel", "Stop Import and Quit"), body_width=IMPORT_CONFIRMATION_WIDTH) != 1:
-                return AppKit.NSTerminateCancel
-            jobs = application.stop_imports_for_quit()
-
-            def finish_quit():
-                for job in jobs:
-                    job.finished.wait()
-                AppHelper.callAfter(app.replyToApplicationShouldTerminate_, True)
-
-            Thread(target=finish_quit, name="mailarchiver-quit", daemon=True).start()
-            return AppKit.NSTerminateLater
+            application.request_quit()
+            # Close through pywebview after workers finish, keeping Cocoa's event
+            # loop alive until window destruction releases webview.start().
+            return AppKit.NSTerminateCancel
 
         def application_openFiles_(self, sender, filenames):
             paths = tuple(Path(str(filename)) for filename in filenames)
@@ -2408,6 +2477,13 @@ def main() -> int:
     webview.settings["OPEN_EXTERNAL_LINKS_IN_BROWSER"] = False
     if smoke:
         smoke.mark("event-loop-starting")
+    previous_sigint = signal.getsignal(signal.SIGINT)
+    if application is not None:
+        def interrupt_gui(_signum: int, _frame: object) -> None:
+            assert application is not None
+            print("**Interrupted. Shutting down…**", file=sys.stderr, flush=True)
+            application.request_quit(confirm_ingest=False)
+        signal.signal(signal.SIGINT, interrupt_gui)
     try:
         webview.start(
             http_server=False,
@@ -2415,6 +2491,7 @@ def main() -> int:
             menu=application.menu() if application is not None else [],
         )
     finally:
+        signal.signal(signal.SIGINT, previous_sigint)
         if application is not None:
             application.shutdown()
         else:

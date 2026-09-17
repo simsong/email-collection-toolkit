@@ -272,7 +272,12 @@ attached. Child-byte recovery and resource-limit behavior are specified below.
 The viewer shows origin paths; the attachment tag initially has a 5% gray background.
 
 On archive opening, unfinished work prompts **Incomplete work**, with checked
-**Continue ingest** and **Continue content processing** choices. No persistent
+**Continue ingest** and **Continue content processing** choices. The desktop bridge
+uses the shared `IngestRequest` service, saved owner/scanner/plugin settings and
+writer lease. The **Names and addresses** and **Institutions** controls query the
+processor database; manual name/address decisions commit immediately and survive
+replay. Institution membership is domain-based. About lists processor manifests
+by subscribed MIME type. Authoritative matching is not yet connected. No persistent
 “do not ask again” option suppresses unfinished work. Selecting only content processing runs eligible already-ingested messages even
 when ingest remains incomplete; required message-metadata processing precedes
 their content jobs. Selecting both completes ingest before deferred content

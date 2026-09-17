@@ -20,6 +20,7 @@ from urllib.parse import urlparse
 from bs4 import BeautifulSoup
 from pydantic import BaseModel, Field
 
+from .gui_provenance import AttachedOrigin, attached_messages, attached_origins
 from .encoding import decode_text
 from .mailbox_tree import MailboxSelection
 from .mailsearch import (
@@ -146,6 +147,7 @@ class DateAdjustment(BaseModel):
 
 
 class MessageView(BaseModel):
+    attached_origins: list[AttachedOrigin] = Field(default_factory=list)
     message_pk: int
     subject: str
     date_source: str
@@ -201,8 +203,12 @@ def search_page(
         SortDirection(direction), search_attachments, selections, find_older=True,
         complete_sort=True,
     )
+    results = page.results[:limit] if limit else page.results
+    tagged = attached_messages(archive, [row.message_pk for row in results])
+    for row in results:
+        row.attached_message = row.message_pk in tagged
     return SearchPage(
-        results=page.results[:limit] if limit else page.results,
+        results=results,
         offset=offset,
         highlight_terms=_highlight_terms(terms),
         has_more=bool(limit and len(page.results) > limit),
@@ -382,6 +388,7 @@ def describe_message(archive: Path, message_pk: int) -> MessageView:
             archive_routing_utc=date_utc,
         )
     return MessageView(
+        attached_origins=attached_origins(archive, message_pk),
         message_pk=message_pk,
         subject=decoded_message_header(raw, message, "Subject") or "(no subject)",
         date_source=date_source,

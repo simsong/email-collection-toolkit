@@ -35,7 +35,7 @@ class IdentityFilter(BaseModel):
 
 
 class ManualDecision(BaseModel):
-    operation: Literal["rename-person", "merge-person", "rename-organization", "affiliate"]
+    operation: Literal["rename-person", "merge-person", "rename-organization", "affiliate", "move-address", "separate-address"]
     subject: int = Field(gt=0)
     target: int | None = Field(default=None, gt=0)
     name: str | None = None
@@ -75,12 +75,21 @@ def edit(database: sqlite3.Connection, decision: ManualDecision) -> None:
     """Caller holds the writer lease; every accepted edit and audit record commit together."""
     if decision.start and decision.end and decision.start > decision.end:
         raise ValueError("start date must not follow end date")
-    table = "organizations" if decision.operation == "rename-organization" else "persons"
-    key = "organization_id" if table == "organizations" else "person_id"
+    table = ("organizations" if decision.operation == "rename-organization" else
+             "addresses" if decision.operation in ("move-address", "separate-address") else "persons")
+    key = {"organizations": "organization_id", "addresses": "address_id", "persons": "person_id"}[table]
     if database.execute(f"SELECT 1 FROM {table} WHERE {key}=?", (decision.subject,)).fetchone() is None:
         raise ValueError("unknown manual decision subject")
     with database:
-        if decision.operation.startswith("rename-"):
+        if decision.operation in ("move-address", "separate-address"):
+            target = decision.target
+            if decision.operation == "separate-address":
+                address = database.execute("SELECT address FROM addresses WHERE address_id=?", (decision.subject,)).fetchone()[0]
+                target = database.execute("INSERT INTO persons(canonical_name,manual) VALUES(?,1)", (address,)).lastrowid
+            elif database.execute("SELECT 1 FROM persons WHERE person_id=?", (target,)).fetchone() is None:
+                raise ValueError("move requires an existing target person")
+            database.execute("UPDATE person_addresses SET person_id=?,manual=1 WHERE address_id=?", (target, decision.subject))
+        elif decision.operation.startswith("rename-"):
             if not decision.name or not decision.name.strip():
                 raise ValueError("a nonempty name is required")
             column = "name" if table == "organizations" else "canonical_name"
