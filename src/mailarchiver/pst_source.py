@@ -22,6 +22,7 @@ class PstSettings(BaseModel):
     model_config = ConfigDict(extra="forbid")
     executable: str | None = None
     max_output_bytes: int = Field(default=1024 * 1024 * 1024, gt=0)
+    max_diagnostics_bytes: int = Field(default=64 * 1024 * 1024, gt=0)
     timeout_seconds: float = Field(default=60, gt=0, allow_inf_nan=False)
 
 
@@ -33,6 +34,10 @@ class ImportReceipt(BaseModel):
     exit_code: int | None = None
     emitted: int = 0
     reconstructed_mime: bool = True
+    output_bytes: int = 0
+    diagnostics_bytes: int = 0
+    output_truncated: bool = False
+    diagnostics_truncated: bool = False
 
 
 def file_hash(path: Path) -> str:
@@ -76,11 +81,12 @@ class PstFileParser:
         root.mkdir(exist_ok=True)
         workspace = Path(tempfile.mkdtemp(dir=root))
         output_path = workspace / "output.mboxrd"
+        diagnostics_path = workspace / "stderr.txt"
         receipt = ImportReceipt(executable=program, executable_sha256=file_hash(program),
                                 source=source.path, source_sha256=file_hash(source.path))
         completed = False
         try:
-            with output_path.open("wb") as output, (workspace / "stderr.txt").open("wb") as diagnostics:
+            with output_path.open("wb") as output, diagnostics_path.open("wb") as diagnostics:
                 with subprocess.Popen([str(program), "--", str(source.path)], stdout=output, stderr=diagnostics) as process:
                     try:
                         import time
@@ -88,19 +94,19 @@ class PstFileParser:
                         while process.poll() is None:
                             if time.monotonic() >= deadline:
                                 raise TimeoutError("PST importer timeout")
-                            if output_path.stat().st_size > settings.max_output_bytes or (workspace / "stderr.txt").stat().st_size > 64 * 1024 * 1024:
+                            if output_path.stat().st_size > settings.max_output_bytes or diagnostics_path.stat().st_size > settings.max_diagnostics_bytes:
                                 raise ValueError("PST importer output limit exceeded")
                             yield ProgressEvent(work_id=container.work_id, phase="extracting PST", completed=output_path.stat().st_size, unit="bytes")
                             try:
                                 process.wait(timeout=0.05)
                             except subprocess.TimeoutExpired:
                                 pass
-                        receipt.exit_code = process.returncode
                     finally:
                         if process.poll() is None:
                             process.kill()
                             process.wait()
-            if output_path.stat().st_size > settings.max_output_bytes:
+                        receipt.exit_code = process.returncode
+            if output_path.stat().st_size > settings.max_output_bytes or diagnostics_path.stat().st_size > settings.max_diagnostics_bytes:
                 raise ValueError("PST importer output limit exceeded")
             extracted = source.model_copy(update={"path": output_path, "byte_length": output_path.stat().st_size, "kind": "mbox"})
             previous = None
@@ -127,6 +133,16 @@ class PstFileParser:
                 raise ValueError("PST source changed during extraction")
             completed = True
         finally:
+            # Bound retained derived evidence even when a fast exit bypassed polling.
+            receipt.output_bytes = output_path.stat().st_size if output_path.exists() else 0
+            receipt.diagnostics_bytes = diagnostics_path.stat().st_size if diagnostics_path.exists() else 0
+            receipt.output_truncated = receipt.output_bytes > settings.max_output_bytes
+            receipt.diagnostics_truncated = receipt.diagnostics_bytes > settings.max_diagnostics_bytes
+            for path, size, limit in ((output_path, receipt.output_bytes, settings.max_output_bytes),
+                                       (diagnostics_path, receipt.diagnostics_bytes, settings.max_diagnostics_bytes)):
+                if size > limit:
+                    with path.open("r+b") as retained:
+                        retained.truncate(limit)
             (workspace / "receipt.json").write_text(receipt.model_dump_json())
             if completed:
                 output_path.unlink()  # Canonical messages are now filed; retain receipt and diagnostics.

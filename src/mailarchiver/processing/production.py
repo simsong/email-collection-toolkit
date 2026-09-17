@@ -19,7 +19,7 @@ from ..message import ParsedMessage, parse_message
 from ..plugin_api import MailObject
 from ..plugin_configuration import read_plugin_configuration
 from ..plugin_loader import builtin_plugin_directory
-from ..search import PreparedSearchMessage, SEARCH_CATEGORIES, body_preview, write_prepared_search_message
+from ..search import PreparedSearchMessage, SEARCH_CATEGORIES, body_preview, delete_indexed_message, write_prepared_search_message
 from .api import (
     ApplicationContext, ArchiveContext, ContentReference, Pipeline, PluginSpec, ProcessingObject,
     ProcessingResult, RAW_MESSAGE, RunReport,
@@ -31,6 +31,10 @@ from .store import DATABASE, connect, enqueue, report, snapshot
 
 DOMAIN = TLDExtract(cache_dir=None, suffix_list_urls=())
 Publisher = Callable[[MailObject, ParsedMessage, MailboxReference, int], int]
+PROVIDER_DOMAINS = "provider_domains"
+PUBLIC_PROVIDERS = frozenset({"gmail.com", "googlemail.com", "outlook.com", "hotmail.com", "live.com", "msn.com",
+    "yahoo.com", "yahoo.co.uk", "yahoo.co.jp", "ymail.com", "aol.com", "icloud.com", "me.com", "mac.com",
+    "proton.me", "protonmail.com", "pm.me", "fastmail.com", "hey.com", "mail.com", "gmx.com", "gmx.de"})
 
 
 class IngestedMessage(BaseModel):
@@ -55,6 +59,10 @@ class ProductionPipeline:
         self.registry_hash = fingerprint(self.plugins)
         self.database = connect(self.archive, create=not (self.archive / DATABASE).exists(), production=True)
         self.configuration_hash = self._configuration_hash()
+        supplied = read_plugin_configuration(self.archive, "identity-evidence", installation_config).get_my_config().get(PROVIDER_DOMAINS, [])
+        if not isinstance(supplied, list) or any(not isinstance(domain, str) or not domain for domain in supplied):
+            raise ValueError("provider_domains must be a list of domain names")
+        self.provider_domains = PUBLIC_PROVIDERS | {str(domain).lower() for domain in supplied}
         previous = self.database.execute("SELECT value FROM processing_settings WHERE name='configuration'").fetchone()
         if previous and previous[0] != self.configuration_hash:
             self.reprocess()
@@ -129,6 +137,17 @@ class ProductionPipeline:
 
     def reprocess(self) -> None:
         generation = str(uuid4())
+        # Both databases use rollback journals: SQLite's attached-database commit
+        # atomically removes stale FTS rows with the new generation's checkpoints.
+        self.database.execute("ATTACH DATABASE ? AS derived_search", (str(self.archive / "search.sqlite3"),))
+        try:
+            if any(self.database.execute(f"PRAGMA {schema}.journal_mode").fetchone()[0] != "delete" for schema in ("main", "derived_search")):
+                raise ValueError("atomic processing invalidation requires rollback-journal databases")
+            self._invalidate(generation)
+        finally:
+            self.database.execute("DETACH DATABASE derived_search")
+
+    def _invalidate(self, generation: str) -> None:
         with self.database:
             self.database.execute("UPDATE jobs SET status='aborted',detail='superseded processing configuration' WHERE status IN ('pending','running','failed')")
             self.database.execute("DELETE FROM content_parts")
@@ -137,6 +156,7 @@ class ProductionPipeline:
             self.database.execute("DELETE FROM affiliations WHERE manual=0")
             for payload, message_pk, scan in self.database.execute("SELECT root_item_json,catalog_message_pk,scan_status FROM message_state WHERE excluded=0 AND coalesce(category,'')<>'INFECTED'").fetchall():
                 original = ProcessingObject.model_validate_json(payload)
+                delete_indexed_message(self.database, original.message_id)
                 pipeline: Pipeline = "ingest" if message_pk is None else "message"
                 item = original.model_copy(update={"generation": generation, "pipeline": pipeline, "scan_provenance": scan})
                 enqueue(self.database, item, self.registry_hash)
@@ -226,16 +246,18 @@ class ProductionPipeline:
             if entry.name:
                 self.database.execute("INSERT OR IGNORE INTO person_aliases VALUES(?,?)", (person_id, entry.name))
             parent_domain = DOMAIN(domain).top_domain_under_public_suffix or ".".join(domain.split(".")[-2:])
-            organization = self.database.execute("SELECT organization_id FROM organization_domains WHERE domain=?", (parent_domain,)).fetchone()
+            if parent_domain in self.provider_domains:
+                self.database.execute("INSERT INTO organization_domains VALUES(?,NULL,1) ON CONFLICT(domain) DO UPDATE SET provider=1", (parent_domain,))
+            organization = self.database.execute("SELECT organization_id,provider FROM organization_domains WHERE domain=?", (parent_domain,)).fetchone()
             if organization:
-                organization_id = organization[0]
+                organization_id = organization[0] if not organization[1] else None
             else:
                 organization_id = self.database.execute("INSERT INTO organizations(name) VALUES(?) RETURNING organization_id", (parent_domain,)).fetchone()[0]
                 self.database.execute("INSERT INTO organization_domains VALUES(?,?,0)", (parent_domain, organization_id))
             affiliation = self.database.execute("SELECT affiliation_id FROM affiliations WHERE person_id=? AND organization_id=? AND manual=0", (person_id, organization_id)).fetchone()
             if affiliation:
                 self.database.execute("UPDATE affiliations SET start_date=min(start_date,?),end_date=max(end_date,?) WHERE affiliation_id=?", (seen, seen, affiliation[0]))
-            else:
+            elif organization_id is not None:
                 self.database.execute("INSERT INTO affiliations(person_id,organization_id,start_date,end_date) VALUES(?,?,?,?)", (person_id, organization_id, seen, seen))
             self.database.execute("INSERT OR IGNORE INTO message_addresses VALUES(?,?,?,?)", (item.message_id, address_id, seen, entry.kind))
             self.database.execute("INSERT OR IGNORE INTO evidence(message_id,part_path,plugin,version,kind,address_id,person_id,organization_id,value) VALUES(?,?,?,?,?,?,?,?,?)",

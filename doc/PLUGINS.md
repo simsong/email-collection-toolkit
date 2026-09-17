@@ -106,6 +106,19 @@ Signature addresses enter the evidence index before authoritative matching.
 Heuristic signature evidence is not an automatic identity merge. Explicit
 manual affiliations allow overlapping dates and open endpoints.
 
+Known public providers such as Gmail, Outlook and Yahoo retain address evidence
+without creating automatic institutional affiliations. Add domains to the local
+set with `plugins.identity-evidence.provider_domains` (a list of parent domains).
+Generation invalidation removes stale search rows and queues replacement work
+in one rollback-journal SQLite transaction across the processing/search databases.
+Searches cannot keep using the old body or attachment index after that commit.
+
+HTML, RTF, text-index and identity-evidence processors default to at most 8 MiB
+of input and derived UTF-8 output per part. Their `max_text_bytes` setting can
+change that finite bound. Over-limit parts are explicitly skipped with a diagnostic;
+canonical message and attachment bytes remain available. This bounds derived
+conversion work; it does not impose a maximum canonical message size.
+
 `item.archive.mailbox(year, role)` returns a typed filing destination, for example
 `(2006, "Sender")`, `(2006, "Archive")`, or `("INFECTED", None)`. A `Filing` result
 requests transactional publication of original bytes. Header, text, MIME
@@ -126,6 +139,12 @@ filed; an unsuccessful importer never marks source traversal complete. A rerun
 deduplicates those earlier records. Successful spools are removed after filing;
 receipts remain. Build the executable with `make pst-importer` or configure its
 path. Native installer bundling is separate release work.
+
+PST defaults are 60 seconds, 1 GiB stdout and 64 MiB diagnostics; settings are
+`timeout_seconds`, `max_output_bytes` and `max_diagnostics_bytes`. Limits are checked
+while running and after exit. The receipt records the actual reaped exit code and
+observed byte counts. Retained oversized outputs are explicitly truncated to
+bounded prefixes, with truncation flags; original PST bytes are untouched.
 
 ### Plugin-owned configuration
 

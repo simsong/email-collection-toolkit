@@ -40,7 +40,8 @@ Rust importer development uses `make rust-programs` to build `mdti-validator`
 `mcti-generator`, and [`pst-importer`](doc/PST_IMPORTER.md). See [MCT Importer API 1.0](doc/MCT_IMPORTER_API.md) for
 the contract, individual targets and validation pipeline. Rust/Cargo are
 required to build these tools. The standalone PST helper uses Microsoft's Rust crate;
-archive-host integration and packaging remain planned. Packaged PST users will
+the CLI archive host runs it through the common processing pipelines. Native
+installer bundling remains planned. Packaged PST users will
 need the compiled helper, not a compiler.
 
 PST test inventories and the Rust corpus downloader live in [`pst/`](pst/README.md);

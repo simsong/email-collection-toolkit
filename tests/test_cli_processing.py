@@ -14,6 +14,10 @@ import pytest
 from mailarchiver.layout import mbox_directory
 from mailarchiver.standalone_verify import verify_archive
 from mailarchiver.pst_source import ImportReceipt
+from mailarchiver.processing.builtin import QUARANTINE_UNKNOWN_DATE
+from e2e_tests.eicar_fixture import EICAR_PIECES
+from mailarchiver.archive_config import ArchiveConfig, load_archive_config, save_archive_config
+from mailarchiver.plugin_configuration import ConfigValues
 from tests.test_end_to_end import mailbox_message_bytes
 
 
@@ -22,6 +26,12 @@ def cli(archive: Path, *arguments: str) -> subprocess.CompletedProcess[str]:
                             capture_output=True, text=True, check=False, timeout=60)
     assert result.returncode == 0, result.stdout + result.stderr
     return result
+
+
+def configure(archive: Path, name: str, values: ConfigValues) -> None:
+    config = load_archive_config(archive)
+    config.plugins[name] = values
+    save_archive_config(archive, config)
 
 
 def ingest(tmp_path: Path, raw: bytes, *arguments: str) -> tuple[Path, Path]:
@@ -64,7 +74,11 @@ def test_cli_deferred_content_resume_and_manual_evidence(tmp_path: Path) -> None
     orgs = json.loads(cli(archive, "identities", "organizations").stdout)
     for org in orgs:
         cli(archive, "identities", "affiliate", "--subject", str(sender["person_id"]), "--target", str(org["organization_id"]), "--start", "2020-01-01")
-    cli(archive, "process", "--reprocess")
+    cli(archive, "process", "--reprocess", "--max-jobs", "1")
+    with sqlite3.connect(archive / "search.sqlite3") as db:
+        assert db.execute("SELECT count(*) FROM message_fts").fetchone() == (0,)
+        assert db.execute("SELECT count(*) FROM attachment_fts").fetchone() == (0,)
+    cli(archive, "process")
     with sqlite3.connect(archive / "processing.sqlite3") as db:
         assert db.execute("SELECT name FROM organizations ORDER BY name").fetchall() == [("example.ac.uk",), ("example.test",)]
         assert db.execute("SELECT count(*) FROM addresses WHERE address='other@dept.example.ac.uk'").fetchone() == (1,)
@@ -154,3 +168,118 @@ def test_cli_pst_partial_import_preserves_evidence_and_valid_records(tmp_path: P
     cli(archive, "process", "--phase", "content")
     assert source.read_bytes() == fixture.read_bytes()
     assert not verify_archive(archive)
+
+
+def test_cli_infected_undated_message_quarantines_before_metadata(tmp_path: Path) -> None:
+    """A real positive ClamAV scan files exact bytes without a usable date and aborts later plugins."""
+    source = tmp_path / "undated.eml"
+    raw = b"From: fixture@example.test\nMessage-ID: <infected-undated@example.test>\n\n" + b"".join(EICAR_PIECES) + b"\n"
+    source.write_bytes(raw)
+    owners = tmp_path / "owners.txt"
+    owners.write_text("owner@example.test\n")
+    archive = tmp_path / "archive"
+    cli(archive, "ingest", "--clamav", "--owner-names-file", str(owners), str(source))
+    assert mailbox_message_bytes(mbox_directory(archive) / "INFECTED1.mbox") == [raw]
+    with sqlite3.connect(archive / "archive.sqlite3") as db:
+        assert db.execute("SELECT category,date_source FROM messages").fetchone() == ("INFECTED", QUARANTINE_UNKNOWN_DATE)
+    with sqlite3.connect(archive / "processing.sqlite3") as db:
+        assert db.execute("SELECT kind,status FROM invocations").fetchall() == [("clamav", "completed")]
+        assert db.execute("SELECT scan_status FROM message_state").fetchone() == ("infected",)
+    with sqlite3.connect(archive / "search.sqlite3") as db:
+        assert db.execute("SELECT count(*) FROM message_fts").fetchone() == (0,)
+    assert source.read_bytes() == raw
+    assert not verify_archive(archive)
+
+
+@pytest.mark.parametrize("content_type,processor", [("text/html", "html-text"), ("text/rtf", "rtf-text"), ("text/plain", "text-index")])
+def test_cli_attachment_text_bound_preserves_bytes(tmp_path: Path, content_type: str, processor: str) -> None:
+    """Over-limit derived HTML/RTF/text is explicitly skipped without losing the attachment."""
+    raw = HEADER + (f'Content-Type: {content_type}\r\nContent-Disposition: attachment; filename="large.txt"\r\n\r\n' + "x" * 128 + "\r\n").encode()
+    archive, _source = ingest(tmp_path, raw, "--defer-content")
+    configure(archive, processor, {"max_text_bytes": 32})
+    cli(archive, "process")
+    with sqlite3.connect(archive / "processing.sqlite3") as db:
+        assert db.execute("SELECT count(*) FROM content_parts").fetchone() == (0,)
+        outcomes = [json.loads(row[0]) for row in db.execute("SELECT result_json FROM invocations WHERE kind=?", (processor,))]
+        assert any(result["outcome"] == "abort-part" and "original content retained" in result["diagnostics"][0] for result in outcomes)
+    assert mailbox_message_bytes(mbox_directory(archive) / "2024-Archive1.mbox") == [raw]
+    assert not verify_archive(archive)
+
+
+def test_cli_failed_reprocessing_removes_stale_search_content(tmp_path: Path) -> None:
+    """An invalidated generation cannot continue serving stale FTS body or attachment results."""
+    raw = HEADER + (b'Content-Type: multipart/mixed; boundary="mix"\r\n\r\n'
+        b'--mix\r\nContent-Type: text/plain\r\n\r\nstalebodytoken\r\n'
+        b'--mix\r\nContent-Type: text/plain\r\nContent-Disposition: attachment\r\n\r\nstaleattachmenttoken\r\n--mix--\r\n')
+    archive, _source = ingest(tmp_path, raw, "--index-attachments")
+    with sqlite3.connect(archive / "search.sqlite3") as db:
+        assert "stalebodytoken" in db.execute("SELECT content FROM message_fts").fetchone()[0]
+        assert "staleattachmenttoken" in db.execute("SELECT content FROM attachment_fts").fetchone()[0]
+    configure(archive, "text-index", {"max_text_bytes": 0})
+    result = subprocess.run([sys.executable, "-m", "mailarchiver", "--archive", str(archive), "process"],
+                            capture_output=True, text=True, check=False, timeout=60)
+    assert result.returncode != 0 and "max_text_bytes must be a positive integer" in result.stderr
+    with sqlite3.connect(archive / "search.sqlite3") as db:
+        assert all("stalebodytoken" not in row[0] for row in db.execute("SELECT content FROM message_fts"))
+        assert db.execute("SELECT count(*) FROM attachment_fts").fetchone() == (0,)
+
+
+def test_cli_invalidation_failure_rolls_back_both_databases(tmp_path: Path) -> None:
+    """A real index error cannot commit half of the attached-database generation invalidation."""
+    archive, _source = ingest(tmp_path, HEADER + b"\r\nbody\r\n")
+    with sqlite3.connect(archive / "search.sqlite3") as db:
+        before = db.execute("SELECT * FROM message_address_suggestions").fetchall()
+        assert before
+        db.execute("CREATE TRIGGER reject_invalidation BEFORE DELETE ON message_metadata "
+                   "BEGIN SELECT RAISE(ABORT, 'fixture invalidation failure'); END")
+    with sqlite3.connect(archive / "processing.sqlite3") as db:
+        jobs = db.execute("SELECT job_id,status FROM jobs").fetchall()
+        evidence = db.execute("SELECT * FROM evidence").fetchall()
+    result = subprocess.run([sys.executable, "-m", "mailarchiver", "--archive", str(archive), "process", "--reprocess"],
+                            capture_output=True, text=True, check=False, timeout=60)
+    assert result.returncode != 0 and "fixture invalidation failure" in result.stderr
+    with sqlite3.connect(archive / "processing.sqlite3") as db:
+        assert db.execute("SELECT job_id,status FROM jobs").fetchall() == jobs
+        assert db.execute("SELECT * FROM evidence").fetchall() == evidence
+    with sqlite3.connect(archive / "search.sqlite3") as db:
+        assert db.execute("SELECT * FROM message_address_suggestions").fetchall() == before
+
+
+def test_cli_public_providers_are_not_institutional_affiliations(tmp_path: Path) -> None:
+    """Provider addresses remain searchable evidence without implying employment by the provider."""
+    archive = tmp_path / "archive"
+    archive.mkdir()
+    save_archive_config(archive, ArchiveConfig(plugins={"identity-evidence": {"provider_domains": ["hosting.example"]}}))
+    raw = HEADER + b"Cc: person@gmail.com, other@hosting.example\r\n\r\n-- \r\nalternate@yahoo.com\r\n"
+    ingest(tmp_path, raw)
+    with sqlite3.connect(archive / "processing.sqlite3") as db:
+        assert db.execute("SELECT domain,provider FROM organization_domains WHERE provider=1 ORDER BY domain").fetchall() == [
+            ("gmail.com", 1), ("hosting.example", 1), ("yahoo.com", 1)]
+        assert db.execute("SELECT count(*) FROM affiliations JOIN person_addresses USING(person_id) JOIN addresses USING(address_id) WHERE domain IN ('gmail.com','hosting.example','yahoo.com')").fetchone() == (0,)
+        assert db.execute("SELECT count(*) FROM evidence JOIN addresses USING(address_id) WHERE domain IN ('gmail.com','hosting.example','yahoo.com')").fetchone() == (3,)
+        assert db.execute("SELECT name FROM organizations ORDER BY name").fetchall() == [("example.ac.uk",), ("example.test",)]
+
+
+@pytest.mark.parametrize("setting,value", [("timeout_seconds", 0.000001), ("max_output_bytes", 1), ("max_diagnostics_bytes", 1)])
+def test_cli_pst_failed_limits_record_exit_and_bound_evidence(tmp_path: Path, setting: str, value: int | float) -> None:
+    """Actual Rust timeout and fast stdout/stderr overflow preserve exit evidence and bounded prefixes."""
+    fixture = Path(__file__).resolve().parents[1] / "rust/mct-importer/tests/fixtures/mail.pst"
+    archive = tmp_path / "archive"
+    archive.mkdir()
+    save_archive_config(archive, ArchiveConfig(plugins={"pst": {setting: value}}))
+    owners = tmp_path / "owners.txt"
+    owners.write_text("owner@example.test\n")
+    result = subprocess.run([sys.executable, "-m", "mailarchiver", "--archive", str(archive), "ingest", "--no-scan", "--owner-names-file", str(owners), str(fixture)],
+                            capture_output=True, text=True, check=False, timeout=60)
+    assert result.returncode != 0
+    path, = (archive / "processing-pst").glob("*/receipt.json")
+    receipt = ImportReceipt.model_validate_json(path.read_text())
+    assert receipt.exit_code is not None
+    if setting == "timeout_seconds":
+        assert "PST importer timeout" in result.stderr
+    elif setting == "max_output_bytes":
+        assert receipt.output_truncated and receipt.output_bytes > 1
+        assert path.with_name("output.mboxrd").stat().st_size == 1
+    else:
+        assert receipt.diagnostics_truncated and receipt.diagnostics_bytes > 1
+        assert path.with_name("stderr.txt").stat().st_size == 1

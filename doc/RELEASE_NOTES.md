@@ -4,6 +4,13 @@
 
 ## Unreleased
 
+* Bound derived HTML/RTF/text processing; invalidate stale search rows atomically
+  with processor generations; keep public providers out of automatic affiliations.
+  Preserve PST timeout exit evidence and bound retained stdout/stderr prefixes.
+
+* Retain positive antivirus messages in INFECTED even if metadata/date parsing
+  fails; label unknown-date placeholders and block downstream processing.
+
 * Run production CLI ingest, message and content processing through registered
   Python plugins in process. Add deferred/resumable content commands, MIME and
   HTML/RTF processing, signature evidence, identity queries/manual edits, and

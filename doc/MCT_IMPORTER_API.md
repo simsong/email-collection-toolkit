@@ -140,8 +140,8 @@ malware scanner, or proof of source completeness. Address parsing uses mailparse
 date validation uses Chrono, and Message-ID validation is deliberately basic. MIME parameter and
 obsolete header grammar are not exhaustively checked. Original-source quote
 depth, omitted attachments/messages, producer exit status, and a body truncated
-exactly at a legal ending cannot be established from stdin alone. The future
-host must independently observe process success and preserve partial-run evidence.
+exactly at a legal ending cannot be established from stdin alone. The implemented CLI host independently observes process success and preserves
+bounded partial-run output, diagnostics and exit receipts.
 
 ## Integrity and deduplication
 

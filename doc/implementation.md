@@ -773,6 +773,24 @@ HTML/RTF selection, child byte preservation, identity edits and PST extraction.
 No native windows or private archives are used. GUI picker, incomplete-work
 prompt and attachment-style display wiring remain follow-up work.
 
+On a positive ClamAV result, best-effort header metadata cannot prevent filing.
+If parsing fails, quarantine records the raw digest as identity, labels its
+required date/envelope placeholder `quarantine-unknown`, records the defect and
+aborts subsequent processors. A real undated EICAR CLI test verifies exact bytes,
+the positive scan checkpoint and exclusion from search/content processing.
+
+HTML, RTF, text indexing and signature extraction use bounded reads and an 8 MiB
+default UTF-8 output bound (`max_text_bytes` in each plugin's configuration).
+Over-limit parts abort with a retained-content diagnostic. Generation invalidation
+attaches the search database to the processing connection and uses SQLite's
+rollback-journal multi-database transaction to remove FTS/suggestion data and queue
+replacement jobs together; a SQLite trigger that rejects deletion checks rollback
+of both databases after search-row changes have begun.
+Provider domains use a built-in local set plus `plugins.identity-evidence.provider_domains`;
+their evidence remains, but automatic affiliations are suppressed. PST receipts
+record exit status after reaping even on timeout. Retained stdout/stderr prefixes
+obey configured limits, with observed sizes and truncation flags in the receipt.
+
 ProcessingObject.get_my_config() returns a defensive dictionary snapshot from
 plugins.<manifest kind> in installation and archive config.yaml, with archive
 values taking precedence. write_my_config(values, scope="archive") stages a

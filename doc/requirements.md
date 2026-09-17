@@ -1577,7 +1577,8 @@ reconstruction evidence and source SHA-256 checks. Continue after recoverable
 item failures but return nonzero for any incomplete extraction. Exercise real
 PST fixtures, decoded body/attachment evidence, partial-run accounting, read-only
 source preservation, changed sources and producer/consumer failures.
-The archive host and h3 duplicate suppression remain planned.
+The CLI archive host is implemented; cross-importer h3 duplicate suppression
+remains planned.
 
 ## Windows development environment
 
@@ -1900,3 +1901,16 @@ The PST file adapter shall invoke the real Rust importer, retain bounded failed
 output and provenance, withhold its uncertain final record on failure, and never
 mark partial extraction complete. `make test-cli-processors` exercises these
 requirements with minimal RFC 5322 and PST fixtures.
+
+A positive antivirus verdict must publish to INFECTED even when header/date
+parsing fails. Quarantine may use a clearly labeled unknown-date placeholder for
+required catalog/envelope fields, with a metadata defect; it must not treat that
+placeholder as an observed date or run downstream content/identity processors.
+
+HTML, RTF and text processors must bound their derived input/output, reporting
+over-limit parts while preserving the original message. Invalidation must remove
+obsolete body/attachment search results atomically with queuing a new generation,
+including when replacement processing is deferred or fails. Known public mail
+providers must retain address evidence without creating automatic institutional
+affiliations. PST timeout/limit receipts must retain the actual reaped exit code,
+observed sizes and truncation flags; both live and post-exit output sizes are checked.
