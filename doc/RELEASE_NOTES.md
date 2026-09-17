@@ -4,6 +4,12 @@
 
 ## Unreleased
 
+* Add processor get_my_config/write_my_config APIs with recursive archive-over-
+  installation settings, isolated plugin namespaces and atomic scoped writes.
+  Discard staged writes on plugin failures, timeouts and aborted ranks.
+* Synchronize verifier interruption tests with actual input consumption and
+  release blocked I/O after SIGINT so Python can deliver the pending signal.
+
 * Isolate the test-plugin framework schema from production catalog resources.
   Include catalog regression tests in the framework target and exercise real
   CLI cancellation/recovery without native windows.

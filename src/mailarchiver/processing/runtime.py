@@ -11,6 +11,8 @@ import tempfile
 import time
 from pathlib import Path
 
+from ..plugin_configuration import apply_config_writes, read_plugin_configuration
+
 from .api import (
     InvocationRequest, InvocationResponse, PluginSpec, ProcessingObject,
     ProcessingResult, RAW_MESSAGE, RunReport,
@@ -19,10 +21,11 @@ from .registry import fingerprint, subscribers
 from .store import content_reference, enqueue, report, snapshot
 
 
-def invoke(plugin: PluginSpec, item: ProcessingObject) -> InvocationResponse:
+def invoke(plugin: PluginSpec, item: ProcessingObject, installation_config: Path | None = None) -> InvocationResponse:
     with tempfile.TemporaryDirectory(prefix="processor-") as directory:
         request_path, result_path = Path(directory) / "request.json", Path(directory) / "result.json"
-        request_path.write_text(InvocationRequest(plugin=plugin, item=item).model_dump_json())
+        request_path.write_text(InvocationRequest(plugin=plugin, item=item, configuration=read_plugin_configuration(
+            item.archive.path, plugin.manifest.kind, installation_config)).model_dump_json())
         with (Path(directory) / "log").open("wb") as log:
             process = subprocess.Popen(
                 [sys.executable, "-m", "mailarchiver.processing.worker", str(request_path), str(result_path)],
@@ -62,7 +65,7 @@ def validate_result(plugin: PluginSpec, item: ProcessingObject, result: Processi
             raise ValueError("same-message handoff must advance its pipeline")
 
 
-def _checkpoint(database: sqlite3.Connection, job_id: int, plugin: PluginSpec, item: ProcessingObject) -> ProcessingResult | None:
+def _checkpoint(database: sqlite3.Connection, job_id: int, plugin: PluginSpec, item: ProcessingObject, installation_config: Path | None) -> ProcessingResult | None:
     previous = database.execute(
         "SELECT result_json FROM invocations WHERE job_id=? AND kind=? AND status='completed' ORDER BY invocation_id DESC LIMIT 1",
         (job_id, plugin.manifest.kind)).fetchone()
@@ -74,7 +77,7 @@ def _checkpoint(database: sqlite3.Connection, job_id: int, plugin: PluginSpec, i
         invocation_id = cursor.lastrowid
     started = time.monotonic()
     try:
-        response = invoke(plugin, item)
+        response = invoke(plugin, item, installation_config)
         if response.result is not None:
             validate_result(plugin, item, response.result)
     except KeyboardInterrupt:
@@ -121,7 +124,7 @@ def _abort(database: sqlite3.Connection, item: ProcessingObject, whole_message: 
 
 
 def run(database: sqlite3.Connection, plugins: tuple[PluginSpec, ...], *, retry: bool = False,
-        max_jobs: int | None = None) -> RunReport:
+        max_jobs: int | None = None, installation_config: Path | None = None) -> RunReport:
     """Caller holds the archive writer lease. Atomic output release follows each barrier."""
     registry_hash = fingerprint(plugins)
     incompatible = database.execute("SELECT 1 FROM jobs WHERE registry_hash<>? AND status IN ('pending','running','failed') LIMIT 1", (registry_hash,)).fetchone()
@@ -152,7 +155,7 @@ def run(database: sqlite3.Connection, plugins: tuple[PluginSpec, ...], *, retry:
             results: list[tuple[PluginSpec, ProcessingResult]] = []
             failed = False
             for plugin in (p for p in selected if p.manifest.rank == rank):
-                result = _checkpoint(database, job_id, plugin, item)
+                result = _checkpoint(database, job_id, plugin, item, installation_config)
                 if result is None:
                     failed = True
                 else:
@@ -167,6 +170,15 @@ def run(database: sqlite3.Connection, plugins: tuple[PluginSpec, ...], *, retry:
                     aborted = True
                 else:
                     for plugin, result in results:
+                        try:
+                            apply_config_writes(item.archive.path, plugin.manifest.kind,
+                                                result.config_writes, installation_config)
+                        except (OSError, ValueError) as error:
+                            database.execute("UPDATE invocations SET status='failed',error=? WHERE job_id=? AND kind=? AND status='completed'",
+                                             (str(error), job_id, plugin.manifest.kind))
+                            database.execute("UPDATE jobs SET status='failed',detail=? WHERE job_id=?", (str(error), job_id))
+                            stop_import = True
+                            break
                         _publish(database, item, plugin, result, registry_hash, job_id)
             if stop_import or aborted:
                 break

@@ -44,6 +44,15 @@ timeout (60 seconds by default). End-of-run statistics report each plugin's
 invocation count, total time, shortest, longest, and average invocation.
 About will list registered plugins by subscribed type.
 
+API v2 processors can call `item.get_my_config()` for their own configuration
+dictionary, with archive settings overriding installation settings recursively.
+`item.write_my_config(values, scope="archive")` replaces their archive layer;
+`scope="installation"` updates defaults shared across archives. The stable
+plugin registration name selects its namespace. Writes are staged until their
+rank succeeds, and unrelated settings are preserved. See the
+[configuration API](https://github.com/simsong/email-collection-toolkit/blob/main/doc/PLUGINS.md#plugin-owned-configuration)
+for layer reads, paths, conflict handling and failure semantics.
+
 ## Incomplete work
 
 When an archive opens with unfinished work, show **Incomplete work** with two
@@ -94,7 +103,7 @@ framework content types, rank barriers, aborts, timeout enforcement, archive
 services and durable handoffs. Existing source/file API v1 plugins remain
 supported through adapters; production adapters are the next integration stage.
 
-Jobs checkpoint plugin versions, configuration and input identity so retries
+The complete design checkpoints plugin versions, configuration and input identity so retries
 can skip completed work. Publication and queue handoff share a recovery
 protocol. Scanner failure never counts as clean; child messages retain parent
 scan provenance. Manual identity edits and tags survive processing reruns.

@@ -756,6 +756,26 @@ The fixture processors in tests/processing_plugins execute in real worker
 processes. Make test-processors runs Ruff, Pylint, ty, Pyright and behavioral
 tests in sequence, without native windows or scanners.
 
+ProcessingObject.get_my_config() returns a defensive dictionary snapshot from
+plugins.<manifest kind> in installation and archive config.yaml, with archive
+values taking precedence. write_my_config(values, scope="archive") stages a
+replacement of that plugin's selected layer; scope="installation" selects the
+shared layer. Installation config.yaml lives beside application preferences;
+the CLI --installation-config option provides an explicit path. The parent
+applies writes after a successful rank using file locks, expected-value hashes
+and atomic file replacement. Equal-value replay is harmless; conflicting writes
+fail the job and require a fresh invocation. Each file is atomic separately;
+two scopes are not one filesystem transaction. See PLUGINS.md for the API.
+Tests cover recursive precedence, namespace isolation, both write scopes,
+abort/exception/timeout isolation and malformed settings without mocks.
+
+The verifier SIGINT tests synchronize on consumption of FIFO data before
+sending the signal, then close the writer so buffered I/O returns and Python
+can deliver a pending signal. Holding the writer open indefinitely previously
+caused intermittent CI timeouts. The tests require exit 130 with an incomplete
+verification message, no traceback and no success output in normal/quiet modes;
+they do not assert interrupt latency for I/O that never returns.
+
 ### Planned Contacts and geography
 
 [The proposed processor graphs](PLUGINS.md#proposed-ranked-processing-graphs)

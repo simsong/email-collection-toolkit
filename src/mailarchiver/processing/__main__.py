@@ -14,6 +14,7 @@ from ..writer_lock import WriterLease
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--installation-config", type=Path, help="installation YAML settings path")
     parser.add_argument("--archive", type=Path, required=True)
     parser.add_argument("--plugin-dir", type=Path, action="append", default=[])
     commands = parser.add_subparsers(dest="command", required=True)
@@ -46,7 +47,8 @@ def main() -> None:
                 if args.max_jobs is not None and args.max_jobs < 1:
                     parser.error("--max-jobs must be positive")
                 try:
-                    result = run(database, plugins, retry=args.retry, max_jobs=args.max_jobs)
+                    result = run(database, plugins, retry=args.retry, max_jobs=args.max_jobs,
+                                 installation_config=args.installation_config)
                 except KeyboardInterrupt:
                     print(report(database, tuple(p.manifest.kind for p in plugins)).model_dump_json())
                     raise SystemExit(130) from None

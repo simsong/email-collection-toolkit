@@ -11,6 +11,7 @@ from .api import InvocationRequest, InvocationResponse, ProcessingResult
 
 def main() -> None:
     request = InvocationRequest.model_validate_json(Path(sys.argv[1]).read_text())
+    request.item.bind_configuration(request.configuration)
     module_name, factory_name = request.plugin.manifest.entrypoint.split(":")
     try:
         spec = importlib.util.spec_from_file_location("processor", request.plugin.directory / f"{module_name}.py")
@@ -22,6 +23,9 @@ def main() -> None:
         result = plugin.process(request.item)
         if not isinstance(result, ProcessingResult):
             raise TypeError("processor must return ProcessingResult")
+        result = ProcessingResult(outcome=result.outcome, emissions=result.emissions,
+                                  handoffs=result.handoffs, diagnostics=result.diagnostics,
+                                  config_writes=request.configuration.pending_writes())
         response = InvocationResponse(result=result)
     except Exception as error:  # structured worker failure, never a successful checkpoint
         response = InvocationResponse(error=f"{type(error).__name__}: {error}")

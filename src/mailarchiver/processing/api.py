@@ -5,7 +5,9 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, field_validator
+
+from ..plugin_configuration import ConfigScope, ConfigValues, ConfigWrite, PluginConfiguration, ReadScope
 
 Pipeline = Literal["ingest", "message", "content"]
 Scope = Literal["body", "attachment"]
@@ -78,6 +80,22 @@ class ProcessingObject(Model):
     scan_provenance: str | None = None
     producer: str | None = None
 
+    _configuration: PluginConfiguration | None = PrivateAttr(default=None)
+
+    def bind_configuration(self, configuration: PluginConfiguration) -> None:
+        """Host binding for this invocation's registered plugin namespace."""
+        self._configuration = configuration
+
+    def get_my_config(self, *, scope: ReadScope = "effective") -> ConfigValues:
+        if self._configuration is None:
+            raise RuntimeError("plugin configuration is available only during an invocation")
+        return self._configuration.get_my_config(scope=scope)
+
+    def write_my_config(self, values: ConfigValues, *, scope: ConfigScope = "archive") -> None:
+        if self._configuration is None:
+            raise RuntimeError("plugin configuration is available only during an invocation")
+        self._configuration.write_my_config(values, scope=scope)
+
 
 class Emission(Model):
     content_ref: ContentReference
@@ -96,6 +114,7 @@ class ProcessingResult(Model):
     emissions: tuple[Emission, ...] = ()
     handoffs: tuple[Handoff, ...] = ()
     diagnostics: tuple[str, ...] = ()
+    config_writes: tuple[ConfigWrite, ...] = ()
 
 
 class PluginSpec(Model):
@@ -106,6 +125,7 @@ class PluginSpec(Model):
 class InvocationRequest(Model):
     plugin: PluginSpec
     item: ProcessingObject
+    configuration: PluginConfiguration = Field(default_factory=PluginConfiguration)
 
 
 class InvocationResponse(Model):

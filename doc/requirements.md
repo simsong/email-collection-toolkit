@@ -565,6 +565,15 @@ The framework harness uses copied fixture bytes and raw-digest identity;
 production deduplication and import are the second stacked PR, GUI the third.
 No member of the stack is merged before the full stack is accepted.
 
+Each processor shall receive its own configuration dictionary, identified by
+its stable manifest kind. Archive settings override installation settings;
+nested mappings merge recursively, while lists, scalars and explicit nulls
+replace inherited values. Plugins can read either layer or their effective
+settings and replace their own layer in either scope. Writes from unsuccessful
+ranks must not be published. Persistence must preserve unrelated settings,
+reject stale conflicting writes, support idempotent recovery and leave malformed
+configuration untouched. Real-worker and CLI tests exercise these requirements.
+
 ### Planned processor and identity integration
 
 The proposed ranked publish/subscribe processor DAGs, handoff plugins,

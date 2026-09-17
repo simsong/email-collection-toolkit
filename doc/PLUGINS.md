@@ -67,6 +67,61 @@ no mocks. They exercise the three-pipeline CLI, idempotence, rank/abort behavior
 scope selection, timeout termination, restart checkpoint recovery, blocked
 downstream work, registry changes, input integrity and identity-schema constraints.
 
+### Plugin-owned configuration
+
+The invocation object binds settings to the plugin's stable manifest `kind`
+(its registration name), independent of its human-readable `name`:
+
+~~~python
+settings = item.get_my_config()  # dict; archive overrides installation
+archive_settings = item.get_my_config(scope="archive")
+installation_settings = item.get_my_config(scope="installation")
+item.write_my_config(archive_settings, scope="archive")
+item.write_my_config(installation_settings, scope="installation")
+~~~
+
+Both configuration files contain a `plugins` mapping indexed by registration
+name. For example, an archive override for the `identity-extraction` plugin is:
+
+~~~yaml
+version: 2
+plugins:
+  identity-extraction:
+    languages: [en, fr]
+    signatures:
+      maximum_lines: 20
+~~~
+
+Archive settings live in `<archive>/config.yaml`. Installation settings use
+version 1 and live in `config.yaml` beside the application's per-user
+`preferences.json`, shared across archives. They do not modify the packaged
+read-only `configuration.yaml`. The CLI accepts `--installation-config PATH`
+before the subcommand for an explicit installation file, including fixture runs.
+Absent namespaces/files yield empty dictionaries; invalid files fail visibly.
+
+Effective settings recursively merge dictionaries. Archive lists, scalars and
+explicit nulls replace installation values. Reads return defensive copies.
+Writes **replace only this plugin's selected layer**, defaulting to archive;
+writing `{}` clears that layer's overrides. To change one setting, read that
+layer, edit it, then write it back. Writing the effective dictionary to the
+archive intentionally pins inherited installation settings as archive overrides.
+
+Writes are staged in the worker and visible immediately to its later reads.
+The parent persists them only after all subscribers at that rank succeed.
+Timeouts, exceptions and part/message/import aborts discard that rank's staged
+writes. Each file update locks, re-reads, preserves unrelated plugin namespaces
+and archive owner/import settings, checks the original namespace hash, and
+atomically replaces the file. Two scopes are separate atomic updates, not a
+single transaction. Interrupted publication can replay equal-value writes;
+conflicting edits fail the job so `run --retry` obtains a fresh snapshot.
+Earlier successful ranks retain their committed writes if a later rank fails.
+
+The configuration service is available to API v2 processors now; production
+source/file adapters will use it when migrated in the next stacked PR. Settings
+changes affect subsequent invocations; automatic invalidation of previously
+completed derived work remains part of that production integration. The current
+registry fingerprint covers manifests and entrypoint code.
+
 
 ## Proposed ranked processing graphs
 
