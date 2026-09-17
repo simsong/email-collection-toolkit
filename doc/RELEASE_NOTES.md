@@ -8,6 +8,16 @@
   per-pass hashing and message progress bars, and supports `--quiet`/`-q`.
   Clarify the archive-root argument and script-directory default. Ctrl-C now
   reports incomplete verification and exits 130 without a traceback.
+* Document proposed ranked processor DAGs with a shared website graphic and
+  track the future tag editor in issue #119. These are design documents, not a
+  completed processing-pipeline refactor.
+
+* Add experimental name and institution matcher windows with synthetic data,
+  large disclosure triangles, mailbox/domain and date filters, sortable columns,
+  drag-to-merge, and undo. `make matcher-prototype` opens both subclasses.
+  Matcher buttons demonstrate predefined matches; real matching and database
+  integration are not connected.
+
 * Keep local `make dmg`, `make dmg-signed`, and `make test-dmg` headless. Add
   `make check-release` for the visible GUI test of a new or existing (`DMG=path`)
   image, and require it in GitHub release assembly. Require the GUI self-test's

@@ -5,6 +5,11 @@ description = "Changes to the Email Collection Toolkit website, separate from ap
 <!-- Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved. -->
 
 
+## 2026-09-16
+
+- Add the plugin-system page and a graphic of the proposed container, message,
+  and content processor DAGs, clearly distinguished from implemented plugins.
+
 ## 2026-09-10
 
 - Make all banner lettering selectable HTML over text-free artwork, reflow it

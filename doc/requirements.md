@@ -532,6 +532,56 @@ table also stores explicitly labeled non-email Google Chat identities.
 
 ## Contacts and geographic reference data
 
+### Planned processor and identity integration
+
+The proposed ranked publish/subscribe processor DAGs, handoff plugins,
+incomplete-work prompt, scanner timeout/statistics, synthetic-part provenance,
+and first-class attached-message handling are specified in
+[PLUGINS.md](PLUGINS.md#proposed-ranked-processing-graphs). They are not yet
+implemented. Manual decisions must survive reruns. Attached messages must retain
+parent paths and an attachment tag, initially displayed with a 5% gray background.
+The future SQLite-backed tag editor is tracked in issue #119; nullable style
+attributes mean no change. The three pipelines are ingest (ClamAV then filing/handoff), message processing
+(header metadata then content handoff), and content processing (MIME dispatch).
+Content-only resumption may process already-ingested messages while ingest is
+incomplete. Attached occurrences use standard deduplication, retaining separate
+provenance records linked to shared canonical content and message metadata.
+All plugins can access every header and all content of their current message;
+the filing plugin may read what it needs after scanning. Discovered child
+messages return directly to message processing without another antivirus scan,
+retaining parent scan provenance and using shared deduplication/publication
+services for the child record and content reference.
+
+### Synthetic matcher window prototype
+
+A reusable matcher window shall show canonical entries with large disclosure
+triangles and child email addresses with separate first-use, last-use, and
+message-count columns. Each column header toggles ascending/descending sorting
+of both groups and their children while preserving the hierarchy. Group counts
+must deduplicate message identifiers across addresses rather than sum counts.
+Case-insensitive substring filters cover mailbox before `@` and domain after
+`@`; both must match the same address. There is no full-email search box.
+Optional start/end dates restrict actual message observations inclusively;
+blank bounds are unrestricted. Recompute first use, last use, and counts within
+the selected period, omitting addresses without matching messages. A reversed
+range displays an error and no results. Retain headings only for matching
+children and show visible/total address counts when filtered.
+Dragging a canonical row moves all of its addresses, including filtered-out
+children, beneath the destination canonical entry. Dragging a child moves only
+that address. Moves retain all observations, even outside the current date
+range; empty source groups disappear. Support a keyboard-accessible destination
+picker, separating an address into its own entry, and undoing moves or a matcher
+batch. Name and institution subclasses share these interactions but maintain
+independent grouping state. Names disclose alternative email addresses;
+institutions disclose their member addresses. Unassigned personal addresses
+must not imply an institutional affiliation.
+The prototype uses fictional `.test` addresses and session-only state. Matcher
+buttons explicitly demonstrate predefined matches; authoritative algorithm and
+database connections remain future work. No archive or preferences may be
+opened or changed by this demo.
+
+### Catalog-derived Contacts
+
 The CLI and policy below are implemented; the Contacts window and geography
 features remain planned.
 

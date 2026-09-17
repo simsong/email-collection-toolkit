@@ -707,6 +707,59 @@ the existing `schema_info` version check does not implement those safeguards.
 
 ### Planned Contacts and geography
 
+[The proposed processor graphs](PLUGINS.md#proposed-ranked-processing-graphs)
+and website plugin page describe the agreed direction, including resumable work
+selection, handoff plugins, first-class attached messages and durable tags.
+Ingest owns scanning and filing, message processing owns header metadata, and
+content processing owns MIME dispatch. Content-only resumption operates on
+eligible already-ingested messages. Standard deduplication shares message
+content/metadata while separate observations retain attachment provenance.
+All plugins may access all headers and content of their current message.
+Filing may read what it needs after ClamAV. Content-discovered child messages
+enter message processing directly without another antivirus scan, retaining
+parent scan provenance; the handoff uses shared deduplication/publication
+services to establish their records and durable content references.
+The graphic is a shared SVG in `website/static/images/processor-dag.svg`.
+None of that dispatcher, extraction scheduling, attachment promotion or tag
+persistence is implemented by this documentation change.
+
+The standalone `make matcher-prototype` opens independent name and institution
+windows through a temporary `LoopbackAssetServer` and pywebview. Use
+`ARGS="--kind name"` or `ARGS="--kind institution"` to open just one. Closing both
+windows stops the server. The launcher does not construct the archive
+application, read preferences, or open databases. `gui/matcher.js` defines the
+shared `MatcherWindow`, model, and immutable message/address record classes.
+`matcher-types.js` supplies `NameMatcherWindow` and `InstitutionMatcherWindow`
+subclasses with their respective labels and matcher callbacks.
+`matcher-demo.js` supplies twelve fictional addresses, deterministic synthetic
+message dates/identifiers, name groups, and institution groups (including an
+explicit unassigned/personal group). Its two predefined name matches and one
+institution match do not execute an authoritative research algorithm.
+
+The shared window owns 39px disclosure triangles, mailbox/domain substring
+filters, optional inclusive date bounds, header sorting, selection, parent/child
+drag moves, a destination picker including hidden groups, separation, reset, and
+session-only undo. Date filters project message observations without changing
+the source records; first/last use and counts reflect that projection. Empty
+date controls display “Any date”, overriding WKWebView's current-date placeholder
+while leaving the native date editor available on focus. Group
+counts use distinct message identifiers, including a shared-message fixture.
+Clicking Messages initially sorts descending; other headers initially sort
+ascending. Repeated clicks reverse direction, with `aria-sort` and visible
+arrows. Sorting reorders groups and their children independently.
+Parent moves include hidden children and every original observation; the
+selection toolbar reports the complete source count. A matcher batch applies
+to a separate model and becomes one undo step; failures leave data unchanged,
+and mutation controls are disabled while it runs. Filter edits reveal matching
+children; disclosure can then collapse them. A filtered group badge shows
+matching/total addresses. `make test-matcher-prototype` runs Ruff, focused
+lint/type checks, and real Chromium interactions for filters, inclusive/open
+and reversed date ranges, count deduplication, sorting, disclosure, dragging,
+separation, undo/reset, matcher batches, both subclasses, and minimum layout.
+This is a synthetic UI experiment; catalog integration and authoritative
+matching remain unimplemented. Browser evidence does not establish native Cocoa
+drag behavior; manual testing uses `make matcher-prototype`.
+
 Contacts are a derived address-level projection over the catalog. Extraction
 will stream each message's `From`, `To`, `Cc`, and `Bcc` headers once and write
 one deduplicated address appearance per message. It will separately derive the

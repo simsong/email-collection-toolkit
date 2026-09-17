@@ -9,6 +9,9 @@ Email Collection Toolkit preserves source evidence while making repeated acquisi
 These details matter when the same mail appears in provider exports, backups,
 and working mail-client caches.
 
+See the [plugin system and proposed processor DAGs](@/plugins.md) for source,
+message-ingest, and deferred content-processing boundaries.
+
 ## Planned compiled desktop experience
 
 The compiled desktop UI will evaluate Dioxus Desktop and Tauri with the system webview.
