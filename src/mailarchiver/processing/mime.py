@@ -99,20 +99,26 @@ def read_headers(source: BinaryIO) -> Message:
     return BytesHeaderParser(policy=policy.compat32).parsebytes(bytes(data))
 
 
-def _decoded(source: BinaryIO, destination: Path, transfer: str, check: Callable[[], None], budget: MimeBudget) -> None:
+def _decoded(source: BinaryIO, destination: Path, transfer: str, check: Callable[[], None], budget: MimeBudget, *, exact: bool = False) -> None:
+    if exact and transfer not in ("", "7bit", "8bit", "binary", "base64", "quoted-printable"):
+        raise ValueError(f"unsupported attached-message transfer encoding: {transfer}")
     with destination.open("wb") as output:
         target = BoundedOutput(output, budget, check)
         if transfer == "base64":
             pending = b""
+            ended = False
             while chunk := source.read(CHUNK):
                 check()
-                pending += re.sub(rb"[^A-Za-z0-9+/=]", b"", chunk)
+                pending += re.sub(rb"[ \t\r\n]", b"", chunk)
+                if ended and pending:
+                    raise ValueError("base64 data after padding")
                 count = len(pending) // 4 * 4
                 if count:
-                    target.write(base64.b64decode(pending[:count]))
+                    target.write(base64.b64decode(pending[:count], validate=True))
+                    ended = b"=" in pending[:count]
                     pending = pending[count:]
             if pending:
-                target.write(base64.b64decode(pending + b"=" * (-len(pending) % 4)))
+                raise ValueError("incomplete base64 quartet")
         elif transfer == "quoted-printable":
             pending = b""
             while chunk := source.readline(CHUNK):
@@ -125,9 +131,13 @@ def _decoded(source: BinaryIO, destination: Path, transfer: str, check: Callable
                         if pending[-length:].startswith(b"="):
                             split -= length
                             break
+                if exact and re.search(rb"=(?![0-9A-Fa-f]{2}|\r?\n)", pending[:split]):
+                    raise ValueError("invalid quoted-printable escape")
                 target.write(quopri.decodestring(pending[:split]))
                 pending = pending[split:]
             if pending:
+                if exact:
+                    raise ValueError("incomplete quoted-printable escape")
                 target.write(quopri.decodestring(pending))
         else:
             while chunk := source.read(CHUNK):
@@ -213,8 +223,10 @@ def extract_parts(path: Path, workspace: Path, *, cancelled: Callable[[], None] 
             source.seek(body_offset)
             output = workspace / str(uuid4())
             try:
-                _decoded(source, output, str(headers.get("Content-Transfer-Encoding", "")).strip().lower(), check, budget)
+                _decoded(source, output, str(headers.get("Content-Transfer-Encoding", "")).strip().lower(), check, budget, exact=content_type == "message/rfc822")
             except (binascii.Error, ValueError) as error:
+                if content_type == "message/rfc822":
+                    raise ValueError(f"attached-message transfer decoding failed at {part_path}; parent retained: {error}") from error
                 result.diagnostics.append(f"invalid transfer encoding at {part_path}: {error}")
                 source.seek(body_offset)
                 _decoded(source, output, "", check, budget)

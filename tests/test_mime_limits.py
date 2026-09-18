@@ -57,3 +57,21 @@ def test_streamed_quoted_printable_chunk_boundaries(tmp_path: Path, suffix: byte
     source.write_bytes(b"Content-Type: text/plain\nContent-Transfer-Encoding: quoted-printable\n\n" + payload)
     result = extract_parts(source, tmp_path, limits=MimeLimits(max_expanded_bytes=2 * CHUNK))
     assert result.parts[0].reference.path.read_bytes() == quopri.decodestring(payload)
+
+
+@pytest.mark.parametrize("encoding,payload", [
+    ("base64", b"!!!!"), ("base64", b"SGVsbG8"), ("base64", b"YQ==Yg=="),
+    ("quoted-printable", b"bad=XY"), ("quoted-printable", b"unfinished="),
+    ("unknown", b"uninterpretable"),
+])
+def test_invalid_attached_transfer_never_promoted(tmp_path: Path, encoding: str, payload: bytes) -> None:
+    """PLUGINS preservation: invalid decoding cannot invent canonical child bytes."""
+    raw = HEADER + f"Content-Type: message/rfc822\r\nContent-Transfer-Encoding: {encoding}\r\n\r\n".encode() + payload
+    archive, source = ingest(tmp_path, raw, "--defer-content")
+    failed = subprocess.run([sys.executable, "-m", "mailarchiver", "--archive", str(archive), "process"],
+                            capture_output=True, text=True, check=False, timeout=30)
+    assert failed.returncode != 0 and "attached-message transfer decoding failed" in failed.stderr
+    with sqlite3.connect(archive / "archive.sqlite3") as database:
+        assert database.execute("SELECT count(*) FROM messages").fetchone() == (1,)
+    assert unfinished_work(archive).failed
+    assert source.read_bytes() == raw and not verify_archive(archive)

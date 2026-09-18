@@ -440,6 +440,12 @@ also uses bounded chunks. Depth limits also leave failed jobs.
 
 ### Persistent work, identity evidence and manual decisions
 
+Attached-message promotion requires valid transfer decoding. Invalid base64
+(including padding/trailing data), invalid quoted-printable escapes, and unknown
+encodings leave failed extraction and retain the parent, without publishing a
+child. Ordinary non-message MIME parts retain best-effort decode fallback.
+
+
 MIME depth (default 40, `plugins.mime.max_depth`), attached-message depth
 (default 20, `plugins.attached-message.max_depth`), and text size limits
 (`max_text_bytes` on each text plugin) leave failed, retryable jobs. The GUI
@@ -496,7 +502,7 @@ message bounds; body versus attachment selection; HTML-before-RTF fallback;
 synthetic content exclusion from canonical mail; durable manual edits; and
 accurate statistics. Use fixtures and the existing on-demand ClamAV EICAR test.
 The processing framework and GUI integration are implemented and tested.
-Remaining implementation gaps in this contract are invalid attached-message decoding, typed
+Remaining implementation gaps in this contract are typed
 scanner failure/version evidence, separate signature/header counts, complete
 About inventory, and timeout/empty-sample statistics. Exact API fields and
 cancellation states must also be reconciled with the public models. These gaps

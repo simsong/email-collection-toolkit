@@ -4,6 +4,9 @@
 
 ## Unreleased
 
+* Prevent malformed attached-message transfer encodings from becoming canonical
+  child messages; retain the original parent with failed extraction diagnostics.
+
 * Keep depth/text-limit failures visible as incomplete work; allow configured
   depth limits and resume after raising them without losing original bytes.
 

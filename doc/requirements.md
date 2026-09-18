@@ -603,6 +603,12 @@ tokens. Inventory sizes and SHA-256 digests apply to 7z members as well as ZIP.
 
 ### Production CLI processor and identity integration
 
+Attached-message promotion requires valid transfer decoding. Invalid base64
+(including padding/trailing data), invalid quoted-printable escapes, and unknown
+encodings leave failed extraction and retain the parent, without publishing a
+child. Ordinary non-message MIME parts retain best-effort decode fallback.
+
+
 MIME depth (default 40, `plugins.mime.max_depth`), attached-message depth
 (default 20, `plugins.attached-message.max_depth`), and text size limits
 (`max_text_bytes` on each text plugin) leave failed, retryable jobs. The GUI
