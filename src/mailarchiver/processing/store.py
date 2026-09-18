@@ -66,7 +66,7 @@ def snapshot(archive: Path, path: Path) -> ContentReference:
 
 
 def enqueue(database: sqlite3.Connection, item: ProcessingObject, registry_hash: str, parent_job_id: int | None = None) -> None:
-    payload = item.model_dump_json()
+    payload = item.model_copy(update={"job_id": None}).model_dump_json()
     identity = hashlib.sha256((registry_hash + payload + str(parent_job_id)).encode()).hexdigest()
     database.execute("INSERT OR IGNORE INTO jobs(identity,item_json,registry_hash,parent_job_id,status) VALUES(?,?,?,?,'pending')",
                      (identity, payload, registry_hash, parent_job_id))

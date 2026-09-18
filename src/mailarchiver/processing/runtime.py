@@ -247,7 +247,7 @@ def run(database: sqlite3.Connection, plugins: tuple[PluginSpec, ...], *, retry:
         if row is None:
             break
         job_id, payload = row
-        item = ProcessingObject.model_validate_json(payload)
+        item = ProcessingObject.model_validate_json(payload).model_copy(update={"job_id": job_id})
         if services is not None:
             item = services.prepare(item)
         recover_config_transaction(item.archive.path)

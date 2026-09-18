@@ -88,6 +88,7 @@ class ApplicationContext(Model):
 
 
 class ProcessingObject(Model):
+    job_id: int | None = Field(default=None, gt=0, strict=True)
     application: ApplicationContext = ApplicationContext()
     archive: ArchiveContext
     message_id: str

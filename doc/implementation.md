@@ -771,6 +771,13 @@ the existing `schema_info` version check does not implement those safeguards.
 
 ### CLI processor framework
 
+During dispatch, ProcessingObject.job_id exposes the durable SQLite job ID;
+retries retain it and new emissions/handoffs receive their own IDs. Provenance
+uses source_metadata, parent_message_id, part_path and scan_provenance. Plugins
+use check_cancelled() and remaining_seconds; cancellation leaves resumable work
+within pending/running/failed statuses rather than inventing a cancelled state.
+
+
 Processor reports count completed/failed attempts across archive history,
 including explicit fail-import results. They show errors and typed timeout
 counts; unfinished running attempts are not zero-duration samples. No-invocation

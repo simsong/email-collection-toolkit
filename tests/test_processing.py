@@ -419,3 +419,27 @@ def test_error_text_is_not_a_timeout_and_empty_samples_are_unavailable(tmp_path:
         assert "shortest=n/a longest=n/a average=n/a total=n/a" in empty.summary()
         database.execute("INSERT INTO invocations(job_id,kind,version,rank,status) VALUES(1,'unreached','1',2,'running')")
         assert report(database, ("unreached",)).statistics[0].invocations == 0
+
+
+def test_job_identity_survives_retry_and_new_submission_gets_its_own(tmp_path: Path) -> None:
+    """Public job IDs identify durable jobs, not attempts or parent invocations."""
+    plugin(tmp_path, "identity", 'if not (item.archive.path / "allow").exists():\n'
+           '    raise RuntimeError(f"blocked job {item.job_id}")\n'
+           'return ProcessingResult(diagnostics=(str(item.job_id),))')
+    plugins = load_processors((tmp_path,))
+    archive = tmp_path / "archive"
+    with connect(archive, create=True) as database:
+        submit(database, archive, MESSAGE, fingerprint(plugins))
+        job_id = database.execute("SELECT job_id FROM jobs").fetchone()[0]
+        assert run(database, plugins).failed == 1
+        assert database.execute("SELECT error FROM invocations").fetchone()[0] == f"RuntimeError: blocked job {job_id}"
+        (archive / "allow").touch()
+        assert run(database, plugins, retry=True).completed == 1
+        assert json.loads(database.execute("SELECT result_json FROM invocations WHERE status='completed'").fetchone()[0])["diagnostics"] == [str(job_id)]
+        other = tmp_path / "other.eml"
+        other.write_bytes(b"Subject: another\n\nbody")
+        submit(database, archive, other, fingerprint(plugins))
+        assert run(database, plugins).completed == 2
+        for stored_id, result in database.execute("SELECT job_id,result_json FROM invocations WHERE status='completed'"):
+            assert json.loads(result)["diagnostics"] == [str(stored_id)]
+        assert database.execute("SELECT count(DISTINCT job_id) FROM invocations").fetchone() == (2,)

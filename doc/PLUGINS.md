@@ -336,20 +336,21 @@ rules remain applicable. Trusted Python plugins are not sandboxed.
 Each processor implements the conceptual interface
 `process(item: ProcessingObject) -> ProcessingResult`. Both models and all
 nested data records are typed Pydantic structures; arbitrary dictionaries are
-not the internal API. The CLI framework implements the core classes; service capabilities and the
-remaining provenance/deadline fields are added with production integration.
+not the internal API. CLI and GUI processing use these concrete public fields
+and methods.
 
 | Processing object field | Contract |
 |---|---|
 | `application` | Application/service context; no GUI-thread assumption |
 | `archive` | Current archive and its controlled mailbox/catalog services |
-| `job_id`, `pipeline` | Durable job identity and current pipeline |
+| `job_id`, `pipeline` | Durable positive job ID during dispatch (None before enqueue); current pipeline |
 | `message_ref` | Whole raw-message reference, all headers and content accessible |
 | `content_ref`, `content_type` | Current immutable stream/reference and dispatch type |
 | `part_path`, `scope` | Stable MIME-part path and local body/attachment scope |
-| `provenance` | Source occurrence, parent message/path, and scan provenance |
+| `source_metadata`, `parent_message_id`, `part_path`, `scan_provenance` | Typed source occurrence and parent/scan provenance |
+| `content_metadata` | Charset, filename, MIME part ID, body alternatives and depth |
 | `synthetic`, `producer` | Derived status and generating plugin/version |
-| `cancellation`, `deadline` | Framework cancellation and invocation deadline |
+| `check_cancelled()`, `remaining_seconds` | Check cancellation/deadline; remaining invocation time for bounded native calls |
 
 References support bounded streaming; emitting an object does not require
 copying a message or attachment into memory. Application/service handles are
@@ -359,10 +360,10 @@ parse lazily; creating the raw object must not MIME-parse before ClamAV.
 
 Dispatch uses normalized MIME types without parameters; charset and other MIME
 parameters remain in typed content metadata. Framework types are explicitly
-namespaced: `application/x-mailarchiver-raw-message`,
-`application/x-mailarchiver-message-headers`, and
-`application/x-mailarchiver-identity-evidence`. Actual parts retain their MIME
-types, including `message/rfc822`. These framework labels are internal types,
+namespaced: `application/x-mailarchiver-raw-message` is currently dispatched.
+Header metadata and identity evidence are typed result fields, not separately
+emitted framework types. Actual parts retain their MIME types, including
+`message/rfc822`. These framework labels are internal types,
 not headers added to canonical messages.
 
 A result contains emitted processing objects, typed diagnostics, and one
@@ -484,7 +485,9 @@ resuming reprocesses the retained source. Limits never mark truncated work compl
 
 Persist job phase, message/part identity, plugin kind/version, relevant
 configuration fingerprint, input digest, attempts, status and diagnostics.
-Statuses distinguish pending, running, completed, aborted, failed and cancelled.
+Job statuses are pending, running, completed, aborted and failed. Cancellation
+records an interrupted invocation and leaves the job resumable; it is not a
+separate terminal job state.
 On restart, abandoned running jobs become retryable; successful unchanged work
 is skipped. A plugin/version/configuration change invalidates its derived work
 and dependent outputs without rewriting canonical messages or manual decisions.
@@ -532,8 +535,8 @@ message bounds; body versus attachment selection; HTML-before-RTF fallback;
 synthetic content exclusion from canonical mail; durable manual edits; and
 accurate statistics. Use fixtures and the existing on-demand ClamAV EICAR test.
 The processing framework and GUI integration are implemented and tested.
-The remaining contract reconciliation concerns exact public API fields and
-cancellation state names.
+The public object table and cancellation state names above describe the
+implemented API; a retry retains its job ID while a derived job gets a new ID.
 
 ## Implemented ingest plugins
 

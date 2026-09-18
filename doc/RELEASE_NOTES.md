@@ -4,6 +4,9 @@
 
 ## Unreleased
 
+* Expose stable processing job IDs and align API documentation with concrete
+  provenance fields, cancellation methods and durable states.
+
 * Report typed timeout/error counts and n/a for unobserved plugin timings; exclude
   unfinished invocations from duration statistics.
 
