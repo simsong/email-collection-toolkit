@@ -15,7 +15,7 @@ from ..message import MetadataDefect, ParsedMessage, decoded_header, decoded_mes
 from ..search import html_text, suggested_addresses
 from .api import Emission, Handoff, ProcessingObject, ProcessingResult, PromotedMessage
 from .contracts import AddressEvidence, Filing, HeaderMetadata, MimeInventory, ScanEvidence, TextContent
-from .mime import extract_parts, read_headers
+from .mime import MimeLimits, extract_parts, read_headers
 
 SIGNATURE_LINES = "signature_lines"
 EMAIL = re.compile(r"[A-Za-z0-9.!#$%&'*+/=?^_`{|}~-]+@[A-Za-z0-9](?:[A-Za-z0-9.-]*[A-Za-z0-9])?")
@@ -141,7 +141,8 @@ class MimeProcessor:
         workspace = item.application.workspace
         if workspace is None:
             raise ValueError("MIME processor requires an output workspace")
-        result = extract_parts(item.message_ref.path, workspace, cancelled=item.check_cancelled)
+        result = extract_parts(item.message_ref.path, workspace, cancelled=item.check_cancelled,
+                               limits=MimeLimits.model_validate(item.get_my_config()))
         plain = any(part.scope == "body" and part.content_type == "text/plain" for part in result.parts)
         html = any(part.scope == "body" and part.content_type == "text/html" for part in result.parts)
         return ProcessingResult(mime=MimeInventory(attachments=tuple(result.attachments)),

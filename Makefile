@@ -524,6 +524,10 @@ test-cli-processors: ruff pst-importer
 test-rollover: ruff
 	uv run --locked pytest -q tests/test_rollover.py tests/test_publication.py tests/test_mboxrd.py
 
+.PHONY: test-mime-limits
+test-mime-limits: ruff
+	uv run --locked pytest -q tests/test_mime_limits.py tests/test_cli_processing.py tests/test_gui_processing.py
+
 # PST corpus acquisition is opt-in; ordinary checks never contact corpus servers.
 PST_DOWNLOAD_ARGS ?=
 pst-download: pst-downloader

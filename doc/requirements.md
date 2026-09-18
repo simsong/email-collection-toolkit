@@ -603,6 +603,13 @@ tokens. Inventory sizes and SHA-256 digests apply to 7z members as well as ZIP.
 
 ### Production CLI processor and identity integration
 
+Before releasing MIME outputs, bound cumulative intermediate split/decoded
+bytes, multipart children and attached messages across the entire nested tree.
+Configure positive integer limits under `plugins.mime`; defaults are 128 MiB,
+10000 parts and 1000 attached messages. Limit failures retain the canonical
+parent and a retryable failed job. Decoders must bound reads as well as writes.
+Synthetic fixtures test cumulative nested limits, retry and QP chunk boundaries.
+
 The proposed ranked publish/subscribe processor DAGs, handoff plugins,
 incomplete-work prompt, scanner timeout/statistics, synthetic-part provenance,
 and first-class attached-message handling are specified in

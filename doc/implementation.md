@@ -771,6 +771,15 @@ the existing `schema_info` version check does not implement those safeguards.
 
 ### CLI processor framework
 
+`MimeLimits` and a traversal-local `MimeBudget` charge all split/decoded output
+before writing. A root MIME traversal visits nested attached messages before
+releasing any child emissions, so budgets cover the complete tree without
+per-message resets bypassing the root limit. Part and attached-message counts
+are checked before creating/decoding further children. Limit exceptions make
+the job retryable; per-invocation temporary files are cleaned. Quoted-printable
+decoding preserves incomplete escapes across bounded chunks. `make test-mime-limits`
+uses actual CLI archives to check failure, preservation and configuration retry.
+
 The processing package implements API v2 manifests, typed objects/results,
 in-process execution and a serial rank-barrier dispatcher. Make processor
 provides init, plugins, submit, run, status and explicit reprocess commands.

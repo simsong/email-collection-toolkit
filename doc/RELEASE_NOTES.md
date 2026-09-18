@@ -4,6 +4,10 @@
 
 ## Unreleased
 
+* Bound cumulative MIME split/decoded bytes, parts and child messages before
+  publishing a nested tree. Make limits configurable under `plugins.mime` and
+  preserve failed work for retry; stream quoted-printable decoding in chunks.
+
 * Reconcile stale search, owner-rule, PST/OST, Apple Mail, processor GUI and
   packaging descriptions; distinguish manual identity data from disposable
   indexes, and mark historical planning inventories explicitly.
