@@ -21,9 +21,9 @@ support optional signing; secrets must still be supplied by a repository admin.
 - `.github/workflows/release.yml` builds and tests the DMG on `macos-15`, then
   includes it alongside the source archive and SHA-256 checksums in a draft
   release. Both jobs use the Mac job's verified release commit; assembly fails
-  if the tag has moved. Before executing project code, the Mac job verifies the
-  tag against administrator-configured OpenPGP public keys. The release tag
-  must contain this builder/workflow.
+  if the tag has moved to another commit. Both jobs require a version-matching
+  annotated tag; unsigned tags are accepted without release-signing public keys.
+  The release tag must contain this builder/workflow.
 - Automatic notarization and stapling remain **unimplemented**. A signed DMG
   alone is not evidence of Gatekeeper acceptance.
 
@@ -193,45 +193,35 @@ current repository-secret setup does not acquire environment approval gates
 merely because an environment with the same secrets exists. See
 [environment configuration](https://docs.github.com/en/actions/how-tos/deploy/configure-and-manage-deployments/manage-environments).
 
-### Configure trusted release tag signers
+### Release tags and credential access
 
-In **Settings → Secrets and variables → Actions → Variables**, set repository
-variable `RELEASE_SIGNING_PUBLIC_KEYS` to the ASCII-armored **public** OpenPGP
-keys of the maintainers authorized to sign releases. Verify their full
-fingerprints independently before adding them. For example, export a known key
-with `gpg --armor --export FULL_FINGERPRINT`; never export its secret key.
-Concatenate public-key exports to authorize multiple release signers.
+The workflow accepts unsigned annotated `v*` tags matching the project version.
+No `RELEASE_SIGNING_PUBLIC_KEYS` variable, GPG key import, or GitHub signature
+verification is required. Both jobs check the tag's commit, annotation and
+version before dependency installation. Git-tag signing remains optional and
+independent of Apple app/DMG signing.
 
-The Mac job imports only these keys into a fresh temporary GnuPG home with
-automatic key retrieval disabled, then runs `git verify-tag`. Missing or invalid
-configuration, a lightweight tag, or a tag signed by any other key fails before
-project commands or Apple secrets are used, including for unsigned DMG builds.
-This checks the actual signature, not the tagger's name/email or GitHub's generic
-verified badge. GitHub's signature verification and tag/version checks also run.
-
-Signing credentials are available only to the `Build and test DMG` step in
+Signing credentials are available only to the `Build DMG and validate release including native GUI` step in
 this workflow; they are not needed for PR testing. Anyone who can modify and
 execute workflows with repository secrets could extract them. Restrict release
 tag creation and workflow changes, review dependencies, and never expose these
 secrets to untrusted PR code. The macOS job's actions are pinned to commit SHAs.
-The signer gate assumes the workflow itself is trusted: someone able to replace
-and execute that workflow with repository secrets can remove the gate. Repository
-administrators must restrict workflow changes and release tag creation; this PR
-does not configure those remote protections or the public-key variable.
+Repository administrators control workflow changes and release-tag creation;
+this workflow does not configure remote repository protections.
 Do not commit `.p12` exports, put passwords in YAML, or upload keychains as
 artifacts. Repository secret storage is not a substitute for reviewing Apple's
 service-provider conditions in section 1.
 
 ## 6. Run and verify DMG production
 
-After the implementation is merged, create the project's normal signed,
-annotated release tag containing it, or use **Actions → Assemble draft GitHub
+After the implementation is merged, create an annotated release tag containing
+it and matching the project version, or use **Actions → Assemble draft GitHub
 release → Run workflow** with such an existing tag. Follow the repository's
 release authorization rules; this document does not authorize publishing a
 release or creating a tag. Dispatching an older tag uses its older build code.
 
-The trusted-signer, GitHub signature, and tag/version checks run before project
-dependency installation or packaging. The macOS job builds with `make dmg`, verifies the
+The commit and tag/version checks run before project
+dependency installation or packaging. The macOS job builds with `make check-release`, verifies the
 mounted app, and runs its frozen headless and GUI tests. Any packaging, signing,
 or mounted-test failure blocks draft-release assembly. The builder uses the
 runner's Python architecture; this is not a universal2 build. Hosted GUI and

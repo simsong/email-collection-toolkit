@@ -4,6 +4,10 @@
 
 ## Unreleased
 
+* Accept unsigned annotated release tags matching the project version. Remove
+  the release-signing public-key variable and GitHub tag-signature checks while
+  retaining commit consistency checks and optional Apple app/DMG signing.
+
 * Add in-process libpff OST extraction with genuine cache-fixture coverage,
   source fixity, streamed attachments, and explicit partial-import diagnostics.
   Add the default-off developer configuration option **Redundant PST Import**
@@ -157,8 +161,7 @@
   cursor previews, exception messages/notes and total failure reports; reject
   malformed outer lines before header normalization. Double-framed Eudora
   metadata stubs remain excluded. Existing archives are not rewritten.
-* Require an administrator-configured OpenPGP release signer allowlist before
-  running release code with Apple secrets. Restrict automatic PKCS#12 import to
+* Restrict automatic PKCS#12 import to
   GitHub-hosted runners and document process-argument visibility. Correct the
   certificate setup repository and distinguish deliberate unsigned builds from
   missing credentials. Existing local keychain identities remain supported.

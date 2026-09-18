@@ -60,14 +60,14 @@ def test_release_workflow_validates_built_distributions() -> None:
 
     assert "run: make distribution-check" in text
     gates = (
-        "name: Verify tag signature",
+        "name: Verify release commit",
         "name: Verify annotated tag and project version",
         "name: Install dependencies",
         "name: Validate distributions",
         "name: Build source distribution",
         "name: Create draft release",
     )
-    # Test execution order, not merely the presence of a signature-check step.
+    # Validate the release commit and version before installing or building.
     assert [text.index(gate) for gate in gates] == sorted(text.index(gate) for gate in gates)
     makefile = (workflow.parents[2] / "Makefile").read_text(encoding="utf-8")
     assert "uv run --no-project --python '>=3.12' python scripts/release_tag.py" in makefile
