@@ -4,6 +4,9 @@
 
 ## Unreleased
 
+* Report typed timeout/error counts and n/a for unobserved plugin timings; exclude
+  unfinished invocations from duration statistics.
+
 * Show all registered acquisition plugins and processor versions in About.
 
 * Separate header-message counts from signature occurrences in identity queries

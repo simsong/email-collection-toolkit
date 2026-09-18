@@ -185,7 +185,7 @@ def _checkpoint(database: sqlite3.Connection, job_id: int, plugin: PluginSpec, i
     with database:
         database.execute("UPDATE invocations SET status=?,elapsed=?,result_json=?,error=? WHERE invocation_id=?",
                          ("completed" if success else "failed", elapsed,
-                          response.result.model_dump_json() if response.result else None,
+                          response.result.model_dump_json() if success and response.result else response.model_dump_json(),
                           response.error, invocation_id))
         if not success and response.result is not None and response.result.scan is not None and services is not None:
             services.publish(database, job_id, item, plugin, ProcessingResult(scan=response.result.scan))

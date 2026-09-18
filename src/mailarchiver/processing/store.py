@@ -89,11 +89,13 @@ def submit(database: sqlite3.Connection, archive: Path, source: Path, registry_h
 def report(database: sqlite3.Connection, kinds: tuple[str, ...]) -> RunReport:
     stats: list[PluginStatistics] = []
     for kind in kinds:
-        count, total, minimum, maximum, errors = database.execute(
+        count, total, minimum, maximum, errors, timeouts = database.execute(
             "SELECT count(*),coalesce(sum(elapsed),0),min(elapsed),max(elapsed),"
-            "coalesce(sum(status='failed'),0) FROM invocations WHERE kind=?", (kind,)).fetchone()
+            "coalesce(sum(status='failed' OR json_extract(result_json,'$.outcome')='fail-import'),0),"
+            "coalesce(sum(json_extract(result_json,'$.timed_out')=1),0) "
+            "FROM invocations WHERE kind=? AND status<>'running'", (kind,)).fetchone()
         stats.append(PluginStatistics(kind=kind, invocations=count, total=total, shortest=minimum,
-                                      longest=maximum, average=total / count if count else None, errors=errors))
+                                      longest=maximum, average=total / count if count else None, errors=errors, timeouts=timeouts))
     def job_count(status: str) -> int:
         return database.execute("SELECT count(*) FROM jobs WHERE status=?", (status,)).fetchone()[0]
     return RunReport(completed=job_count("completed"), pending=job_count("pending") + job_count("running"),

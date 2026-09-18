@@ -7,6 +7,7 @@ import re
 import hashlib
 from uuid import uuid4
 import time
+import subprocess
 from collections.abc import Callable
 from typing import Literal
 
@@ -188,12 +189,21 @@ class PluginSpec(Model):
 class InvocationResponse(Model):
     result: ProcessingResult | None = None
     error: str | None = None
+    timed_out: bool = False
     _cause: Exception | None = PrivateAttr(default=None)
 
     @classmethod
     def failure(cls, error: Exception) -> InvocationResponse:
         response = cls(error=f"{type(error).__name__}: {error}",
                        result=ProcessingResult(scan=error.evidence) if isinstance(error, ScanFailure) else None)
+        cause: BaseException | None = error
+        seen: set[int] = set()
+        timed_out = False
+        while cause is not None and id(cause) not in seen:
+            seen.add(id(cause))
+            timed_out |= isinstance(cause, (TimeoutError, subprocess.TimeoutExpired))
+            cause = cause.__cause__
+        response = response.model_copy(update={"timed_out": timed_out})
         response._cause = error
         return response
 
@@ -210,6 +220,14 @@ class PluginStatistics(Model):
     longest: float | None
     average: float | None
     errors: int
+    timeouts: int = 0
+
+    def summary(self) -> str:
+        def duration(value: float | None) -> str:
+            return "n/a" if value is None else f"{value:.3f}s"
+        return (f"processor {self.kind}: invocations={self.invocations} errors={self.errors} timeouts={self.timeouts} "
+                f"shortest={duration(self.shortest)} longest={duration(self.longest)} "
+                f"average={duration(self.average)} total={duration(self.total if self.invocations else None)}")
 
 
 class RunReport(Model):

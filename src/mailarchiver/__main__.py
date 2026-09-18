@@ -1995,9 +1995,7 @@ def _run_ingest(request: IngestRequest, writer_lease: WriterLease, outcome: Inge
             catalog.commit()
         if pipeline is not None:
             for statistic in pipeline.statistics().statistics:
-                print(f"processor {statistic.kind}: invocations={statistic.invocations} "
-                      f"shortest={statistic.shortest or 0:.3f}s longest={statistic.longest or 0:.3f}s "
-                      f"average={statistic.average or 0:.3f}s total={statistic.total:.3f}s", file=sys.stderr)
+                print(statistic.summary(), file=sys.stderr)
             pipeline.close()
         catalog.close()
         search.close()

@@ -440,6 +440,14 @@ also uses bounded chunks. Depth limits also leave failed jobs.
 
 ### Persistent work, identity evidence and manual decisions
 
+Processor reports count completed/failed attempts across archive history,
+including explicit fail-import results. They show errors and typed timeout
+counts; unfinished running attempts are not zero-duration samples. No-invocation
+timings display n/a. Failed invocation JSON stores the typed response, including
+its timeout flag and any scan evidence; successful JSON remains a ProcessingResult.
+Legacy failure records without a timeout flag retain error counts only.
+
+
 About lists processor versions by subscribed type and source/file acquisition
 plugins by role and version. Both inventories include the archive's saved extra
 plugin directories; acquisition discovery validates manifests without invoking
@@ -524,9 +532,8 @@ message bounds; body versus attachment selection; HTML-before-RTF fallback;
 synthetic content exclusion from canonical mail; durable manual edits; and
 accurate statistics. Use fixtures and the existing on-demand ClamAV EICAR test.
 The processing framework and GUI integration are implemented and tested.
-Remaining implementation gaps in this contract are timeout/empty-sample statistics. Exact API fields and
-cancellation states must also be reconciled with the public models. These gaps
-are not claims that the entire framework remains unimplemented.
+The remaining contract reconciliation concerns exact public API fields and
+cancellation state names.
 
 ## Implemented ingest plugins
 

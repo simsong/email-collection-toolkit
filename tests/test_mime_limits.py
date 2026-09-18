@@ -101,7 +101,7 @@ def test_scan_failure_evidence_blocks_filing(tmp_path: Path, code: str, status: 
     with sqlite3.connect(archive / "processing.sqlite3") as database:
         assert database.execute("SELECT scan_status FROM message_state").fetchone() == (status,)
         assert database.execute("SELECT count(*) FROM invocations WHERE kind='file-message'").fetchone() == (0,)
-        assert database.execute("SELECT json_extract(result_json,'$.scan.status') FROM invocations WHERE status='failed'").fetchone() == (status,)
+        assert database.execute("SELECT json_extract(result_json,'$.result.scan.status') FROM invocations WHERE status='failed'").fetchone() == (status,)
         assert Path(database.execute("SELECT content_path FROM messages").fetchone()[0]).read_bytes() == raw
     assert source.read_bytes() == raw
 

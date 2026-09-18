@@ -771,6 +771,14 @@ the existing `schema_info` version check does not implement those safeguards.
 
 ### CLI processor framework
 
+Processor reports count completed/failed attempts across archive history,
+including explicit fail-import results. They show errors and typed timeout
+counts; unfinished running attempts are not zero-duration samples. No-invocation
+timings display n/a. Failed invocation JSON stores the typed response, including
+its timeout flag and any scan evidence; successful JSON remains a ProcessingResult.
+Legacy failure records without a timeout flag retain error counts only.
+
+
 About lists processor versions by subscribed type and source/file acquisition
 plugins by role and version. Both inventories include the archive's saved extra
 plugin directories; acquisition discovery validates manifests without invoking
