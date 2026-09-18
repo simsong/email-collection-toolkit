@@ -4,6 +4,8 @@
 
 ## Unreleased
 
+* Show all registered acquisition plugins and processor versions in About.
+
 * Separate header-message counts from signature occurrences in identity queries
   and both live pickers, including filtered, deduplicated group totals.
 

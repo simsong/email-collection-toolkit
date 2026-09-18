@@ -48,7 +48,8 @@ from .archive_config import (
     import_directory as configured_import_directory,
     remember_import_directory,
 )
-from .gui_processing import picker_page, registered_processors, resume_request, save_identity, unfinished_work
+from .plugin_api import PluginManifest
+from .gui_processing import picker_page, registered_acquisition_plugins, registered_processors, resume_request, save_identity, unfinished_work
 from .processing.api import ProcessorManifest
 from .processing.identities import IdentityFilter, ManualDecision
 from .gui_service import (
@@ -175,6 +176,7 @@ class AboutIngestStatus(BaseModel):
 
 
 class AboutStatus(BaseModel):
+    acquisition_plugins: list[PluginManifest] = Field(default_factory=list)
     processors: list[ProcessorManifest] = Field(default_factory=list)
     metadata: ApplicationMetadata
     disk_path: str
@@ -1439,6 +1441,7 @@ class PyWebViewApplication:
             ingests=ingests,
             antivirus=scanner_availability(),
             processors=registered_processors(active.path if active else None),
+            acquisition_plugins=registered_acquisition_plugins(active.path if active else None),
         )
 
     def create_search_window(self, session: SearchWindow) -> GuiApi:

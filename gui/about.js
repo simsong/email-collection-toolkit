@@ -45,10 +45,15 @@ function render(status) {
     group.append(heading);
     for (const plugin of status.processors.filter(plugin => plugin.subscribes.includes(type))) {
       const line = document.createElement("p");
-      line.textContent = `${plugin.name} (${plugin.kind}) — ${plugin.pipeline}, rank ${plugin.rank}, ${plugin.scope}, timeout ${plugin.timeout_seconds}s`;
+      line.textContent = `${plugin.name} (${plugin.kind}) version ${plugin.implementation_version} — ${plugin.pipeline}, rank ${plugin.rank}, ${plugin.scope}, timeout ${plugin.timeout_seconds}s`;
       group.append(line);
     }
     return group;
+  }));
+  byId("acquisition-plugins").replaceChildren(...(status.acquisition_plugins || []).map(plugin => {
+    const line = document.createElement("p");
+    line.textContent = `${plugin.name} (${plugin.kind}) version ${plugin.implementation_version} — ${plugin.plugin_type} acquisition`;
+    return line;
   }));
   const activity = status.ingests.length ? status.ingests.map(activityCard) : [empty("No saved archive is open.")];
   byId("activity").replaceChildren(...activity);

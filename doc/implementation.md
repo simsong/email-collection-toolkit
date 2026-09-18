@@ -771,6 +771,12 @@ the existing `schema_info` version check does not implement those safeguards.
 
 ### CLI processor framework
 
+About lists processor versions by subscribed type and source/file acquisition
+plugins by role and version. Both inventories include the archive's saved extra
+plugin directories; acquisition discovery validates manifests without invoking
+plugin factories during status refresh.
+
+
 Identity address/group counts keep header and signature channels separate:
 `messages` counts distinct messages containing the address in headers;
 `signature_messages` counts distinct signature-bearing messages. The pickers

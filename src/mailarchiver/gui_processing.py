@@ -13,7 +13,8 @@ from pydantic import BaseModel, Field
 
 from .__main__ import IngestRequest
 from .ingest_status import read_ingest_history
-from .plugin_loader import builtin_plugin_directory
+from .plugin_api import PluginManifest
+from .plugin_loader import builtin_plugin_directory, discover_manifests
 from .processing.api import ProcessorManifest
 from .processing.contracts import ProcessingPolicy
 from .processing.identities import AddressRow, IdentityFilter, ManualDecision, addresses, edit, organizations
@@ -83,14 +84,22 @@ def resume_request(archive: Path, ingest: bool, content: bool) -> IngestRequest:
                                       "max_content_jobs": None, "reprocess": False})
 
 
-def registered_processors(archive: Path | None = None) -> list[ProcessorManifest]:
+def _plugin_roots(archive: Path | None) -> list[Path]:
     roots = [builtin_plugin_directory()]
     if archive is not None and (archive / DATABASE).is_file():
         with connection(archive) as database:
             row = database.execute("SELECT value FROM processing_settings WHERE name='request'").fetchone()
         if row:
             roots.extend(IngestRequest.model_validate_json(row[0]).plugin_dir)
-    return [plugin.manifest for plugin in load_processors(tuple(roots))]
+    return roots
+
+
+def registered_processors(archive: Path | None = None) -> list[ProcessorManifest]:
+    return [plugin.manifest for plugin in load_processors(tuple(_plugin_roots(archive)))]
+
+
+def registered_acquisition_plugins(archive: Path | None = None) -> list[PluginManifest]:
+    return list(discover_manifests(_plugin_roots(archive)))
 
 
 class PickerGroup(BaseModel):

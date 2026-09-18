@@ -551,3 +551,8 @@ test-gui-processing: ruff
 .PHONY: website-preview-screenshots
 website-preview-screenshots: website-build-check
 	uv run --group dev python -m scripts.website_screenshots --site-only
+
+.PHONY: test-plugin-inventory
+test-plugin-inventory: ruff
+	uv run --locked pytest -q tests/test_plugin_loader.py
+	uv run --locked pytest -q --browser chromium e2e_tests/test_ingest_verify.py -k about_window_displays
