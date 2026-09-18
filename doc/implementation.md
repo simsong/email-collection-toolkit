@@ -1300,7 +1300,7 @@ About links to `changelog.md`, a dated record of website changes distinct from
 application release notes. The 2026-09-07 entry records the storage-format
 wording correction and the new About/changelog pages.
 The release workflow follows the repository's draft-release
-pattern: it requires a version-matching signed annotated tag, builds a source
+pattern: it requires a version-matching annotated tag, builds a source
 distribution, writes `SHA256SUMS`, and creates a draft GitHub Release.
 
 Result ordering is a server-side SQL whitelist over date, case-folded subject,
@@ -1892,16 +1892,17 @@ configured credentials fail. An explicit `--signing-identity` overrides secrets;
 The release workflow builds the DMG on `macos-15`, passes secrets only to
 `make check-release`, and waits for the tested artifact before assembling the source and
 DMG checksums into a draft release. Assembly checks out the Mac job's verified
-commit and checks that the tag still names that commit. Before project commands,
-the Mac job imports the administrator's `RELEASE_SIGNING_PUBLIC_KEYS` variable
-into an isolated temporary GnuPG home, disables automatic key retrieval, and
-verifies the tag using only that keyring. Missing/invalid keys and other signers
-fail. Workflow/tag protection remains an administrator prerequisite. There is
+commit and checks that the tag still names that commit. Both jobs validate the
+tag reference, checked-out commit, annotation, and project version before
+installing dependencies. Unsigned annotated tags are accepted without a public-key
+allowlist or GitHub signature verification. Repository permissions control
+workflow changes and release-tag creation. There is
 no automatic notarization. `make test-signing` runs ordered focused lint/type checks and
 regressions for credential selection, malformed input, identity ambiguity,
 unsigned naming/warnings, sanitized errors, shared-runner rejection, and release
-artifact ordering. A real Git/GnuPG fixture executes the workflow's signer gate
-against trusted/untrusted signed tags, missing/invalid keys, and lightweight tags.
+artifact ordering. A real Git fixture executes both workflow commit checks and
+the tag/version validator: unsigned annotated tags pass; lightweight tags,
+version mismatches, and a different checked-out commit fail.
 Real Developer ID import/signing and hosted GUI execution require a credentialed
 Mac release trial; pure policy tests do not establish those properties.
 `scripts/desktop_entry.py` dispatches normal GUI launch, `--cli`, `--self-test`,
@@ -2348,7 +2349,7 @@ and explicitly skip Windows before importing the `fcntl`-based scanner. They do 
 scanner support. Pages release-trigger checks parse YAML rather than relying on
 indentation, accepting PyYAML's YAML 1.1 interpretation of an unquoted `on` key.
 
-Release assembly checks the GitHub tag signature, then runs the standard-library
+Release assembly checks the tag's commit, then runs the standard-library
 tag/version validator through `make release-tag-check` with `uv --no-project`.
 Only afterward does it install project dependencies and smoke built artifacts.
 The website header and navigation wrap without positional hiding rules.
