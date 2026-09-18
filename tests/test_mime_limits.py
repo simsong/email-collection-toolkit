@@ -8,6 +8,7 @@ import sys
 
 import pytest
 
+from mailarchiver.gui_processing import unfinished_work
 from mailarchiver.processing.mime import CHUNK, MimeLimits, extract_parts
 from mailarchiver.standalone_verify import verify_archive
 from tests.test_cli_processing import HEADER, cli, configure, ingest
@@ -19,25 +20,28 @@ def attached(raw: bytes, boundary: bytes) -> bytes:
             + base64.b64encode(raw) + b'\r\n--' + boundary + b'--\r\n')
 
 
-@pytest.mark.parametrize("setting,value,diagnostic", [
-    ("max_expanded_bytes", 256, "expanded-byte"),
-    ("max_child_messages", 1, "count limit"),
-    ("max_parts", 1, "part limit"),
+@pytest.mark.parametrize("processor,setting,value,diagnostic", [
+    ("mime", "max_expanded_bytes", 256, "expanded-byte"),
+    ("mime", "max_child_messages", 1, "count limit"),
+    ("mime", "max_parts", 1, "part limit"),
+    ("mime", "max_depth", 1, "depth limit"),
+    ("attached-message", "max_depth", 1, "depth limit"),
 ])
-def test_root_budget_failure_and_retry(tmp_path: Path, setting: str, value: int, diagnostic: str) -> None:
+def test_root_budget_failure_and_retry(tmp_path: Path, processor: str, setting: str, value: int, diagnostic: str) -> None:
     """Nested children share a preflight budget; a failed rank publishes none."""
     raw = attached(attached(HEADER + b"\r\nleaf", b"inner"), b"outer")
     archive, source = ingest(tmp_path, raw, "--defer-content")
-    configure(archive, "mime", {setting: value})
+    configure(archive, processor, {setting: value})
     failed = subprocess.run([sys.executable, "-m", "mailarchiver", "--archive", str(archive),
                              "process"], capture_output=True, text=True, check=False, timeout=30)
     assert failed.returncode != 0 and diagnostic in failed.stderr
     with sqlite3.connect(archive / "archive.sqlite3") as database:
-        assert database.execute("SELECT count(*) FROM messages").fetchone() == (1,)
+        assert database.execute("SELECT count(*) FROM messages").fetchone() == ((2,) if processor == "attached-message" else (1,))
     with sqlite3.connect(archive / "processing.sqlite3") as database:
         assert database.execute("SELECT count(*) FROM jobs WHERE status='failed'").fetchone()[0] > 0
     assert source.read_bytes() == raw and not verify_archive(archive)
-    configure(archive, "mime", {})
+    assert unfinished_work(archive).incomplete and unfinished_work(archive).failed
+    configure(archive, processor, {})
     cli(archive, "process")
     with sqlite3.connect(archive / "archive.sqlite3") as database:
         assert database.execute("SELECT count(*) FROM messages").fetchone() == (3,)

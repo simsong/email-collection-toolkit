@@ -771,6 +771,12 @@ the existing `schema_info` version check does not implement those safeguards.
 
 ### CLI processor framework
 
+MIME depth (default 40, `plugins.mime.max_depth`), attached-message depth
+(default 20, `plugins.attached-message.max_depth`), and text size limits
+(`max_text_bytes` on each text plugin) leave failed, retryable jobs. The GUI
+offers continuation for these failures; increasing the configured limit and
+resuming reprocesses the retained source. Limits never mark truncated work complete.
+
 `MimeLimits` and a traversal-local `MimeBudget` charge all split/decoded output
 before writing. A root MIME traversal visits nested attached messages before
 releasing any child emissions, so budgets cover the complete tree without

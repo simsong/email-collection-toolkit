@@ -193,15 +193,20 @@ def test_cli_infected_undated_message_quarantines_before_metadata(tmp_path: Path
 
 @pytest.mark.parametrize("content_type,processor", [("text/html", "html-text"), ("text/rtf", "rtf-text"), ("text/plain", "text-index")])
 def test_cli_attachment_text_bound_preserves_bytes(tmp_path: Path, content_type: str, processor: str) -> None:
-    """Over-limit derived HTML/RTF/text is explicitly skipped without losing the attachment."""
+    """Over-limit extraction remains failed and can resume after raising the limit."""
     raw = HEADER + (f'Content-Type: {content_type}\r\nContent-Disposition: attachment; filename="large.txt"\r\n\r\n' + "x" * 128 + "\r\n").encode()
     archive, _source = ingest(tmp_path, raw, "--defer-content")
     configure(archive, processor, {"max_text_bytes": 32})
-    cli(archive, "process")
+    failed = subprocess.run([sys.executable, "-m", "mailarchiver", "--archive", str(archive), "process"],
+                            capture_output=True, text=True, check=False, timeout=30)
+    assert failed.returncode != 0 and "original content retained" in failed.stderr
     with sqlite3.connect(archive / "processing.sqlite3") as db:
         assert db.execute("SELECT count(*) FROM content_parts").fetchone() == (0,)
-        outcomes = [json.loads(row[0]) for row in db.execute("SELECT result_json FROM invocations WHERE kind=?", (processor,))]
-        assert any(result["outcome"] == "abort-part" and "original content retained" in result["diagnostics"][0] for result in outcomes)
+        assert db.execute("SELECT count(*) FROM jobs WHERE status='failed'").fetchone()[0] > 0
+    configure(archive, processor, {"max_text_bytes": 1024})
+    cli(archive, "process")
+    with sqlite3.connect(archive / "processing.sqlite3") as db:
+        assert db.execute("SELECT count(*) FROM content_parts").fetchone() == (1,)
     assert mailbox_message_bytes(mbox_directory(archive) / "2024-Archive1.mbox") == [raw]
     assert not verify_archive(archive)
 

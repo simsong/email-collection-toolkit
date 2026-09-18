@@ -8,6 +8,8 @@ import subprocess
 from datetime import UTC, datetime
 from email.utils import getaddresses
 
+from pydantic import BaseModel, ConfigDict, Field
+
 from striprtf.striprtf import rtf_to_text
 
 from ..encoding import decode_text
@@ -15,7 +17,7 @@ from ..message import MetadataDefect, ParsedMessage, decoded_header, decoded_mes
 from ..search import html_text, suggested_addresses
 from .api import Emission, Handoff, ProcessingObject, ProcessingResult, PromotedMessage
 from .contracts import AddressEvidence, Filing, HeaderMetadata, MimeInventory, ScanEvidence, TextContent
-from .mime import MimeLimits, extract_parts, read_headers
+from .mime import ExtractionLimitError, MimeLimits, extract_parts, read_headers
 
 SIGNATURE_LINES = "signature_lines"
 EMAIL = re.compile(r"[A-Za-z0-9.!#$%&'*+/=?^_`{|}~-]+@[A-Za-z0-9](?:[A-Za-z0-9.-]*[A-Za-z0-9])?")
@@ -31,20 +33,19 @@ def text_limit(item: ProcessingObject) -> int:
     return limit
 
 
-def bounded_text(item: ProcessingObject) -> bytes | ProcessingResult:
+def bounded_text(item: ProcessingObject) -> bytes:
     limit = text_limit(item)
     with item.content_ref.open() as source:
         data = source.read(limit + 1)
     item.check_cancelled()
     if len(data) > limit:
-        return ProcessingResult(outcome="abort-part", diagnostics=(f"derived text exceeds {limit} input bytes; original content retained",))
+        raise ExtractionLimitError(f"derived text exceeds {limit} input bytes; original content retained; raise max_text_bytes and retry")
     return data
 
 
-def bounded_result(item: ProcessingObject, text: str) -> ProcessingResult | None:
+def bounded_result(item: ProcessingObject, text: str) -> None:
     if len(text.encode("utf-8")) > text_limit(item):
-        return ProcessingResult(outcome="abort-part", diagnostics=("derived UTF-8 text exceeds max_text_bytes; original content retained",))
-    return None
+        raise ExtractionLimitError("derived UTF-8 text exceeds max_text_bytes; original content retained; raise limit and retry")
 
 
 def parsed_input(item: ProcessingObject, *, header_only: bool = False) -> ParsedMessage:
@@ -158,8 +159,6 @@ class HtmlProcessor:
         if item.scope == "body" and item.content_metadata.plain_body_exists:
             return ProcessingResult()
         data = bounded_text(item)
-        if isinstance(data, ProcessingResult):
-            return data
         text = html_text(decode_text(data, item.content_metadata.charset).value)
         return synthetic_text(item, text)
 
@@ -169,16 +168,12 @@ class RtfProcessor:
         if item.scope == "body" and (item.content_metadata.plain_body_exists or item.content_metadata.html_body_exists):
             return ProcessingResult()
         data = bounded_text(item)
-        if isinstance(data, ProcessingResult):
-            return data
         text = rtf_to_text(data.decode("latin-1"), errors="replace")
         return synthetic_text(item, text)
 
 
 def synthetic_text(item: ProcessingObject, text: str) -> ProcessingResult:
-    rejected = bounded_result(item, text)
-    if rejected is not None:
-        return rejected
+    bounded_result(item, text)
     return ProcessingResult(emissions=(Emission(content_ref=item.create_content(text.encode("utf-8")),
         content_type="text/plain", part_path=item.part_path, scope=item.scope, synthetic=True,
         metadata=item.content_metadata.model_copy(update={"charset": "utf-8"})),))
@@ -187,10 +182,9 @@ def synthetic_text(item: ProcessingObject, text: str) -> ProcessingResult:
 class TextProcessor:
     def process(self, item: ProcessingObject) -> ProcessingResult:
         data = bounded_text(item)
-        if isinstance(data, ProcessingResult):
-            return data
         text = decode_text(data, item.content_metadata.charset).value
-        return bounded_result(item, text) or ProcessingResult(text=TextContent(text=text))
+        bounded_result(item, text)
+        return ProcessingResult(text=TextContent(text=text))
 
 
 class IdentityProcessor:
@@ -200,8 +194,6 @@ class IdentityProcessor:
         if not isinstance(count, int) or isinstance(count, bool) or not 1 <= count <= 100:
             raise ValueError("signature_lines must be an integer from 1 through 100")
         data = bounded_text(item)
-        if isinstance(data, ProcessingResult):
-            return data
         text = decode_text(data, item.content_metadata.charset).value
         signature = text.rsplit("\n-- \n", 1)[-1] if "\n-- \n" in text else "\n".join(text.splitlines()[-count:])
         evidence: list[AddressEvidence] = []
@@ -216,11 +208,17 @@ class IdentityProcessor:
         return ProcessingResult(evidence=tuple(evidence))
 
 
+class AttachedMessageLimits(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    max_depth: int | None = Field(default=None, gt=0, strict=True)
+
+
 class AttachedMessageProcessor:
     def process(self, item: ProcessingObject) -> ProcessingResult:
         policy = item.application.policy
         if policy is None:
             raise ValueError("attachment processing policy is missing")
-        if item.content_metadata.depth >= policy.max_message_depth:
-            return ProcessingResult(outcome="abort-part", diagnostics=("attached-message depth limit reached; parent bytes retained",))
+        limit = AttachedMessageLimits.model_validate(item.get_my_config()).max_depth or policy.max_message_depth
+        if item.content_metadata.depth >= limit:
+            raise ExtractionLimitError("attached-message depth limit reached; parent retained; raise plugins.attached-message.max_depth and retry")
         return ProcessingResult(promotions=(PromotedMessage(content_ref=item.content_ref, part_path=item.part_path),))

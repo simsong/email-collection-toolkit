@@ -603,6 +603,12 @@ tokens. Inventory sizes and SHA-256 digests apply to 7z members as well as ZIP.
 
 ### Production CLI processor and identity integration
 
+MIME depth (default 40, `plugins.mime.max_depth`), attached-message depth
+(default 20, `plugins.attached-message.max_depth`), and text size limits
+(`max_text_bytes` on each text plugin) leave failed, retryable jobs. The GUI
+offers continuation for these failures; increasing the configured limit and
+resuming reprocesses the retained source. Limits never mark truncated work complete.
+
 Before releasing MIME outputs, bound cumulative intermediate split/decoded
 bytes, multipart children and attached messages across the entire nested tree.
 Configure positive integer limits under `plugins.mime`; defaults are 128 MiB,

@@ -32,6 +32,7 @@ class ExtractionLimitError(RuntimeError):
 class MimeLimits(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
     max_expanded_bytes: int = Field(default=128 * 1024 * 1024, gt=0, strict=True)
+    max_depth: int = Field(default=40, gt=0, strict=True)
     max_parts: int = Field(default=10000, gt=0, strict=True)
     max_child_messages: int = Field(default=1000, gt=0, strict=True)
 
@@ -167,8 +168,7 @@ def _children(source: BinaryIO, boundary: bytes, workspace: Path, check: Callabl
     return children
 
 
-def extract_parts(path: Path, workspace: Path, *, max_depth: int = 40,
-                  cancelled: Callable[[], None] | None = None, limits: MimeLimits = MimeLimits()) -> MimeParts:
+def extract_parts(path: Path, workspace: Path, *, cancelled: Callable[[], None] | None = None, limits: MimeLimits = MimeLimits()) -> MimeParts:
     result = MimeParts(parts=[], attachments=[], diagnostics=[])
     budget = MimeBudget(limits=limits)
     next_part = 0
@@ -182,9 +182,8 @@ def extract_parts(path: Path, workspace: Path, *, max_depth: int = 40,
         check()
         part_id = next_part
         next_part += 1
-        if len(part_path) > max_depth:
-            result.diagnostics.append(f"MIME depth limit reached at {part_path}")
-            return
+        if len(part_path) > limits.max_depth:
+            raise ExtractionLimitError("MIME depth limit reached; parent retained; raise plugins.mime.max_depth and retry")
         with current.open("rb") as source:
             headers = read_headers(source)
             body_offset = source.tell()

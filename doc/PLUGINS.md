@@ -436,10 +436,15 @@ including repeated representations; this conservative bound can exceed the
 final leaf-payload total. Part counts include multipart children, not just
 attached emails. A limit raises a failed, retryable job before child publication;
 raise the relevant setting and continue processing. Quoted-printable decoding
-also uses bounded chunks. Existing depth-limit retry semantics are addressed
-separately below.
+also uses bounded chunks. Depth limits also leave failed jobs.
 
 ### Persistent work, identity evidence and manual decisions
+
+MIME depth (default 40, `plugins.mime.max_depth`), attached-message depth
+(default 20, `plugins.attached-message.max_depth`), and text size limits
+(`max_text_bytes` on each text plugin) leave failed, retryable jobs. The GUI
+offers continuation for these failures; increasing the configured limit and
+resuming reprocesses the retained source. Limits never mark truncated work complete.
 
 Persist job phase, message/part identity, plugin kind/version, relevant
 configuration fingerprint, input digest, attempts, status and diagnostics.
@@ -491,8 +496,7 @@ message bounds; body versus attachment selection; HTML-before-RTF fallback;
 synthetic content exclusion from canonical mail; durable manual edits; and
 accurate statistics. Use fixtures and the existing on-demand ClamAV EICAR test.
 The processing framework and GUI integration are implemented and tested.
-Remaining implementation gaps in this contract are retryable depth-limit
-diagnostics, invalid attached-message decoding, typed
+Remaining implementation gaps in this contract are invalid attached-message decoding, typed
 scanner failure/version evidence, separate signature/header counts, complete
 About inventory, and timeout/empty-sample statistics. Exact API fields and
 cancellation states must also be reconciled with the public models. These gaps

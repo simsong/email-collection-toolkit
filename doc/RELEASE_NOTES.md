@@ -4,6 +4,9 @@
 
 ## Unreleased
 
+* Keep depth/text-limit failures visible as incomplete work; allow configured
+  depth limits and resume after raising them without losing original bytes.
+
 * Bound cumulative MIME split/decoded bytes, parts and child messages before
   publishing a nested tree. Make limits configurable under `plugins.mime` and
   preserve failed work for retry; stream quoted-printable decoding in chunks.
