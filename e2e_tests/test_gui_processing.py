@@ -63,6 +63,55 @@ def test_incomplete_dialog_resumes_content_without_sources(tmp_path: Path, page:
         api.close()
 
 
+def test_selector_tiles_roles_dates_and_preserved_terms(tmp_path: Path, page: Page) -> None:
+    """Real completion bridge supports every tile, name lookup and date normalization."""
+    from mailarchiver.gui_app import GuiApi
+    from tests.test_search_completion import completion_archive
+
+    api = GuiApi(completion_archive(tmp_path))
+    expose(page, api, SEARCH_BRIDGE_METHODS)
+    try:
+        page.goto((GUI_DIRECTORY / "index.html").as_uri())
+        page.locator("#processing-later").click()
+        search = page.locator("#search")
+        search.fill("si")
+        expect(page.locator("#search-suggestions")).to_be_hidden()
+        search.fill("simson")
+        expect(page.locator(".suggestion-option").first).to_contain_text("any:")
+        page.locator(".suggestion-option").first.click()
+        tile = page.locator(".search-chip")
+        expect(tile.locator("select option")).to_have_text(["Any: (2)", "From: (1)", "To: (1)", "Cc: (1)"])
+        expect(page.locator(".result-subject")).to_have_count(2)
+        for role in ("from", "to", "cc"):
+            tile.locator("select").select_option(role)
+            expect(page.locator(".result-subject")).to_have_count(1)
+        tile.locator("button").click()
+        search.fill("bcc:hidden")
+        expect(page.locator(".suggestion-option").first).to_contain_text("bcc:")
+        search.press("ArrowDown")
+        search.press("Enter")
+        expect(tile.locator("select")).to_have_value("bcc")
+        expect(page.locator(".result-subject")).to_have_count(1)
+        tile.locator("button").click()
+        search.fill("January 5, 2020")
+        dates = page.locator(".suggestion-option").filter(has=page.locator(".suggestion-icon", has_text="date:"))
+        dates.click()
+        expect(tile.locator("select")).to_have_value("date")
+        expect(tile.locator(".search-chip-label")).to_have_text("2020-01-05")
+        expect(page.locator(".result-subject")).to_have_count(3)
+        for role in ("before", "after"):
+            tile.locator("select").select_option(role)
+            expect(page.locator(".result-subject")).to_have_count(0)
+        tile.locator("button").click()
+        search.fill("subject:Simson from:simson")
+        expect(page.locator(".suggestion-option").first).to_contain_text("from:")
+        page.locator(".suggestion-option").first.click()
+        expect(search).to_have_value("subject:Simson")
+        expect(page.locator(".result-subject")).to_have_count(1)
+    finally:
+        api.close()
+
+
 def test_archive_name_picker_saves_filtered_merge_and_rename(tmp_path: Path, page: Page) -> None:
     """Filters and real drag edits preserve hidden addresses, distinct counts and database state."""
     archive = build_deferred_archive(tmp_path)
@@ -140,7 +189,8 @@ def test_sender_selector_cannot_become_a_subject_filter(tmp_path: Path, page: Pa
         expect(page.locator("#search-suggestions")).to_be_visible()
         search.press("ArrowDown")
         search.fill("from:simsong")
-        expect(page.locator("#search-suggestions")).not_to_be_visible()
+        expect(page.locator("#search-suggestions")).to_be_visible()
+        expect(page.locator(".suggestion-icon")).to_have_text(["from:", "from:"])
         search.press("Enter")
         expect(page.locator(".result-subject")).to_have_text(["Sender match"])
         expect(search).to_have_value("from:simsong")

@@ -96,6 +96,13 @@ def main() -> None:
                         expect(preview).to_contain_text("Hello Sam")
                     assert page.locator("#error").is_hidden(), page.locator("#error").inner_text()
                     page.screenshot(path=str(OUTPUT / "search-interface.png"))
+                    previews = ROOT / ".tmp/gui-previews"
+                    previews.mkdir(parents=True, exist_ok=True)
+                    for name, query in (("completion-name", "from:Alex"), ("completion-date", "May 1, 2024")):
+                        page.locator("#search").fill(query)
+                        expect(page.locator(".suggestion-option").first).to_be_visible()
+                        expect(page.locator(".suggestion-label").first).to_contain_text("Alex" if name.endswith("name") else "May 1, 2024")
+                        page.screenshot(path=str(previews / f"{name}.png"))
                     page.close()
                     page = browser.new_page(viewport={WIDTH: 1440, HEIGHT: 960}, device_scale_factor=1)
                     bridge(page, IngestWindowApi(archive), ("history", "antivirus", "can_import_directory"))
@@ -158,6 +165,9 @@ def capture_site() -> None:
                 expect(image).to_be_visible()
                 page.wait_for_function("Array.from(document.images).filter(i => i.src.includes('interface.png')).every(i => i.complete && i.naturalWidth > 0)")
                 page.screenshot(path=str(previews / f"{name}.png"))
+            page.goto(base + "advanced/")
+            page.locator("#date-handling").scroll_into_view_if_needed()
+            page.screenshot(path=str(previews / "advanced-dates.png"))
         finally:
             browser.close()
 

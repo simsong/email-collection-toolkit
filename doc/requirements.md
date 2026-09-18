@@ -722,9 +722,9 @@ through an explicit user action. See
 `search.sqlite3` is a separate, disposable SQLite FTS5 database.  It indexes
 normal Sent and Archive message SHA-256, normalized headers, `text/plain` body text when present,
 otherwise rendered `text/html`, otherwise safe single-part message text.  It
-also maintains a replaceable trigram index for email-address substring
-completion; ordinary mapping rows provide deduplicated message counts and
-last-seen dates. Display
+also maintains a replaceable trigram index and address metadata for legacy
+index consumers. Completion uses catalog header roles and live identity names,
+so it does not depend on content indexing. Display
 names are retained as suggestion metadata but are not trigram-indexed. Subject
 completion reads the canonical subject column and requires no second copy.
 It parses XML-looking content declared as `text/html` with the same forgiving HTML
@@ -1007,9 +1007,7 @@ lists the About, search, and Ingests windows and brings a selected window forwar
 accepts ordinary full-text terms plus `any:ADDRESS`, `from:ADDRESS`,
 role-specific `to:ADDRESS`, `cc:ADDRESS`, and `bcc:ADDRESS`, `subject:TEXT`,
 `date:YYYY-MM-DD`, `before:YYYY-MM-DD`, and
-`after:YYYY-MM-DD` filters, intersecting every supplied term. `date:` selects
-the specified UTC calendar day; `before:` and `after:` exclude the specified
-day. Results default to ten
+`after:YYYY-MM-DD` filters, intersecting every supplied term. Date selectors use the worldwide calendar-date interval described below. Results default to ten
 one-line headers, prefixed by the stable `messages.message_pk`; `--limit 0`
 prints all matches.  Supplying one such number prints the original RFC 5322
 message bytes from canonical MBOX storage.  The current implementation finds
@@ -1050,18 +1048,57 @@ SQL builders, bind their unchanged parameters to `EXPLAIN QUERY PLAN`, and
 check filtering searches rather than accepting any mention of an index. Execute
 the same statements to verify results and bound work on sparse large fixtures.
 
-After three characters and a 120-millisecond debounce, the GUI suggests at most
-20 matching addresses and 20 matching subjects with deduplicated message
-counts. Explicit selectors such as `from:simsong` bypass autocomplete and remain
-unchanged search queries; typing a new query immediately dismisses old suggestions.
-Stale responses are discarded. Addresses rank by message count, then
-most recent message date. Email-address substrings use the disposable
-trigram accelerator; display-name and subject substring matching do not. Selecting an
-address creates a removable filter whose menu scopes it to Any, From, To, Cc,
-or Bcc; recipient roles are the original RFC header roles retained at ingest.
-Selecting a subject creates a removable subject filter. The native window title
+After three characters of the completion value (excluding its selector prefix)
+and a 120-millisecond debounce, the GUI searches Any, Subject, and recognized
+Date values. One Any lookup matches email substrings, original header names,
+and current authoritative names, then derives From/To/Cc/Bcc choices and distinct
+message counts from the matching header occurrences. It must work before content
+processing finishes. Only one matching role defaults to that role; several
+matching roles default to Any. Explicit selectors constrain completion to that
+tag. A tile's tag menu shows the matching roles, including Any, with counts;
+date tiles offer Date/Before/After. Retain existing query terms when accepting
+a completion. Discard stale responses and immediately retire previous choices.
+Limit individual address and subject suggestions to 20 each, alongside aggregate
+substring and date choices. Address choices rank by distinct message count then
+recency; roles retain original RFC header semantics. No zero-match address role
+is offered. Invalid dates do not produce date choices. Removing a tile reruns
+search with the remaining filters. The native window title
 contains the active archive path and total deduplicated searchable-message
 count.
+
+### Worldwide date search
+
+CLI and GUI date selectors shall cover a date anywhere across UTC+14 through
+UTC−12, independent of the computer's timezone. For calendar date D, let
+`start = midnight(D, UTC) − 14 hours` and
+`end = midnight(D + 1 day, UTC) + 12 hours`. The interval is 50 hours:
+
+| Selector | Required predicate on the resolved message timestamp |
+| --- | --- |
+| `date:D` | `start <= date_utc < end` |
+| `before:D` | `date_utc < start` |
+| `after:D` | `date_utc >= end` |
+
+For `date:2020-01-05`, the interval begins at `2020-01-04T10:00:00Z`
+and ends, exclusively, at `2020-01-06T12:00:00Z`. A message sent in Boston
+at 10 p.m. on January 5, 2020 (`2020-01-06T03:00:00Z`) is included.
+This deliberately broad interval can also include messages whose sender-local
+date is January 4 or January 6. Adjacent date searches overlap by 26 hours;
+their counts must not be added as if they were disjoint daily totals.
+This is not a single calendar day in UTC−12: UTC−12 supplies the closing
+boundary, while UTC+14 supplies the opening boundary.
+
+Recognize ISO 8601 calendar dates (`2020-01-05`), month/day/four-digit-year
+dates (`1/5/2020`), and English month-name dates (`January 5, 2020`), normalizing
+them to the same calendar date. Quoted selector values support spaces, such as
+`date:"January 5, 2020"`. Invalid dates must not produce date suggestions.
+Compute UTC bounds once and bind indexed range predicates; do not change stored
+timestamps, original message headers, date-source selection, or archive routing.
+Tests must exercise both exact boundaries, all three input formats, leap days,
+year rollover, the Boston example, and overlap between adjacent dates.
+
+### Message viewing
+
 Selecting a result shows it beside the list; double-clicking opens an
 independent message window whose message pane scrolls through the complete
 message, attachments, and source-location evidence. The result list can sort by date, subject, or

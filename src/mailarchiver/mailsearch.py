@@ -11,7 +11,6 @@ import sqlite3
 import sys
 import textwrap
 from datetime import date as CalendarDate
-from datetime import timedelta
 from email import policy
 from email.message import Message
 from email.parser import BytesParser
@@ -26,6 +25,7 @@ from .mailbox_tree import MailboxSelection
 from .mbox import MboxLocation, read_verified_location
 from .message import decoded_header
 from .search import SEARCH_CATEGORIES, decoded_part, html_text, is_attachment
+from .search_selectors import SELECTORS, SearchStatement, prepare_names, selector_for
 
 DEFAULT_LIMIT = 10
 RECENT_FTS_SCAN_LIMIT = 10_000
@@ -36,6 +36,7 @@ RESET = "\033[0m"
 class SearchTerms(BaseModel):
     """Structured selectors and free-text terms accepted by mailsearch."""
 
+    address_names: bool = False
     any_address: list[str] = Field(default_factory=list)
     to: list[str] = Field(default_factory=list)
     from_: list[str] = Field(default_factory=list)
@@ -56,11 +57,6 @@ class MessageHeader(BaseModel):
     date_utc: str
     attachment_count: int = 0
     attached_message: bool = False
-
-
-class SearchStatement(BaseModel):
-    sql: str
-    parameters: list[str | int]
 
 
 class SearchHeaderPage(BaseModel):
@@ -84,17 +80,15 @@ def parse_terms(tokens: list[str]) -> SearchTerms:
     for token in tokens:
         key, separator, value = token.partition(":")
         key = key.lower()
-        if separator and key in {"any", "to", "from", "cc", "bcc", "subject", "date", "before", "after"}:
+        if separator and (spec := selector_for(key)) is not None:
             if not value:
                 raise ValueError(f"{key}: requires a value")
-            if key in {"date", "before", "after"}:
-                try:
-                    getattr(terms, key).append(CalendarDate.fromisoformat(value))
-                except ValueError as error:
-                    raise ValueError(f"{key}: requires a YYYY-MM-DD date") from error
-            else:
-                field = {"any": "any_address", "from": "from_"}.get(key, key)
-                getattr(terms, field).append(value.casefold())
+            normalized = spec.recognize(value)
+            if normalized is None:
+                raise ValueError(f"{key}: requires a valid date (YYYY-MM-DD, m/d/yyyy, or Month day, year)")
+            getattr(terms, spec.field).append(
+                CalendarDate.fromisoformat(normalized) if spec.family == "date" else normalized
+            )
         else:
             terms.text.append(token)
     return terms
@@ -102,10 +96,6 @@ def parse_terms(tokens: list[str]) -> SearchTerms:
 
 def fts_query(words: list[str]) -> str:
     return " AND ".join(f'"{word.replace(chr(34), "")}"' for word in words)
-
-
-def contains(value: str) -> str:
-    return "%" + value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%"
 
 
 def parse_query(query: str) -> SearchTerms:
@@ -126,50 +116,11 @@ def _search_predicate(
 ) -> SearchStatement:
     clauses = ["m.category IN (?, ?)"]
     parameters: list[str | int] = list(SEARCH_CATEGORIES)
-    for address in terms.any_address:
-        pattern = contains(address)
-        clauses.append(
-            "m.message_pk IN (WITH matching AS MATERIALIZED ("
-            "SELECT address_pk FROM email_addresses WHERE lower(address) LIKE ? ESCAPE '\\') "
-            "SELECT sent.message_pk FROM matching "
-            "CROSS JOIN messages sent INDEXED BY messages_sender_address_pk "
-            "ON sent.sender_address_pk = matching.address_pk UNION "
-            "SELECT r.message_pk FROM matching "
-            "CROSS JOIN recipients r INDEXED BY recipients_address_pk "
-            "ON r.address_pk = matching.address_pk)"
-        )
-        parameters.append(pattern)
-    for role, addresses in (("to", terms.to), ("cc", terms.cc), ("bcc", terms.bcc)):
-        for address in addresses:
-            clauses.append(
-                "m.message_pk IN (SELECT r.message_pk FROM email_addresses a "
-                "CROSS JOIN recipients r INDEXED BY recipients_address_pk "
-                "ON r.address_pk = a.address_pk "
-                "WHERE lower(a.address) LIKE ? ESCAPE '\\' AND r.role = ?)"
-            )
-            parameters.extend((contains(address), role))
-    for address in terms.from_:
-        clauses.append(
-            "m.sender_address_pk IN (SELECT address_pk FROM email_addresses "
-            "WHERE lower(address) LIKE ? ESCAPE '\\')"
-        )
-        parameters.append(contains(address))
-    for subject in terms.subject:
-        clauses.append(
-            "m.message_pk IN (SELECT subject_match.message_pk "
-            "FROM messages subject_match INDEXED BY messages_subject_message "
-            "WHERE lower(subject_match.subject) LIKE ? ESCAPE '\\')"
-        )
-        parameters.append(contains(subject))
-    for selected_date in terms.date:
-        clauses.append("m.date_utc >= ? AND m.date_utc < ?")
-        parameters.extend((selected_date.isoformat() + "T00:00:00+00:00", (selected_date + timedelta(days=1)).isoformat() + "T00:00:00+00:00"))
-    for selected_date in terms.before:
-        clauses.append("m.date_utc < ?")
-        parameters.append(selected_date.isoformat() + "T00:00:00+00:00")
-    for selected_date in terms.after:
-        clauses.append("m.date_utc >= ?")
-        parameters.append((selected_date + timedelta(days=1)).isoformat() + "T00:00:00+00:00")
+    for spec in SELECTORS:
+        for value in getattr(terms, spec.field):
+            predicate = spec.sql(spec.tag, str(value), terms.address_names)
+            clauses.append(predicate.sql)
+            parameters.extend(predicate.parameters)
     if terms.text and include_text:
         if search_attachments:
             for term in terms.text:
@@ -426,6 +377,8 @@ def search_header_page(
     database = sqlite3.connect(f"file:{catalog_path}?mode=ro", uri=True)
     try:
         database.execute("ATTACH DATABASE ? AS search", (f"file:{search_path}?mode=ro",))
+        prepare_names(database, archive)
+        terms = terms.model_copy(update={"address_names": True})
         fields = ("message_pk", "recipients", "sender", "subject", "date_utc", "attachment_count")
         recent_eligible = _is_plain_recent_text_search(
             terms, limit, sort_by, direction, search_attachments, mailbox_selections
@@ -467,6 +420,8 @@ def search_result_count(
     database = sqlite3.connect(f"file:{catalog_path}?mode=ro", uri=True)
     try:
         database.execute("ATTACH DATABASE ? AS search", (f"file:{search_path}?mode=ro",))
+        prepare_names(database, archive)
+        terms = terms.model_copy(update={"address_names": True})
         statement = _count_statement(terms, search_attachments, mailbox_selections, maximum)
         return int(database.execute(statement.sql, statement.parameters).fetchone()[0])
     finally:
@@ -577,9 +532,9 @@ def search_epilog() -> str:
         ("cc:ADDRESS", "Cc recipient address"),
         ("bcc:ADDRESS", "Bcc recipient address"),
         ("subject:TEXT", "subject text"),
-        ("date:YYYY-MM-DD", "messages on that UTC calendar day"),
-        ("before:YYYY-MM-DD", "messages before that UTC calendar day"),
-        ("after:YYYY-MM-DD", "messages after that UTC calendar day"),
+        ("date:YYYY-MM-DD", "messages during that worldwide calendar date"),
+        ("before:YYYY-MM-DD", "messages before that date begins anywhere"),
+        ("after:YYYY-MM-DD", "messages after that date ends everywhere"),
     )
     selector_lines = [textwrap.fill(f"  {key:<21} {description}", width=width, subsequent_indent=" " * 23) for key, description in selectors]
     examples = (

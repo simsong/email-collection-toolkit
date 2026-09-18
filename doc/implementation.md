@@ -690,10 +690,24 @@ Rollover, date sorting/repacking, complete recipient metadata, `verify`, richer
 text extraction, Eudora, working IMAP cache directories, live
 IMAP, Gmail, redaction, and research-oriented metadata remain planned work. The delivered
 `mailsearch` command reads both databases without writing:
-it applies `to:`/`from:`/`subject:` catalog filters, UTC calendar-day
+it applies `to:`/`from:`/`subject:` catalog filters, worldwide calendar-date
 `date:`/`before:`/`after:` filters, and ANDed FTS5 terms; it prints stable
 `message_pk` header lines and reads a numbered message directly from its
 catalogued MBOX byte location, validating its SHA-256 before output.
+
+Date search uses a worldwide calendar-date interval. Normalize ISO calendar dates, `m/d/yyyy`, and English
+`Month day, year` values through the shared selector recognizer. For date D,
+compute `start = midnight(D, UTC) - 14 hours` and
+`end = midnight(D + 1 day, UTC) + 12 hours`. Compile `date:` as
+`m.date_utc >= ? AND m.date_utc < ?`, `before:` as `m.date_utc < ?` using start,
+and `after:` as `m.date_utc >= ?` using end. Bind normalized UTC strings in the
+existing catalog format (`+00:00`), preserving indexed comparisons for counts
+and every sort order. No archive rewrite or schema change is needed.
+These 50-hour windows intentionally overlap by 26 hours on adjacent dates.
+The shared CLI/GUI parser, suggestion recognizer, help text, and boundary/SQL-plan
+tests use these same definitions.
+The website's Advanced date-handling section records the exact user-facing
+semantics.
 
 
 GUI `SearchPage.error` carries query-parser feedback; the bridge does not save
@@ -1679,8 +1693,11 @@ excluded. An external-content trigram FTS5 table covers unique normalized email
 addresses. Its aggregate source table retains one display name, a deduplicated
 message count, and a last-seen date, while a SHA-256 mapping table retains the
 per-message date for exact count and recency updates and replacement.
-Display-name matches scan that bounded aggregate table;
-subject matches scan the canonical subject column rather than creating
+The live completion path resolves catalog addresses against header/authority
+names from processing.sqlite3, with this legacy display-name table as an additional
+source. It derives roles and distinct message counts through catalog sender and
+recipient indexes, without requiring content processing. Subject matches scan
+the canonical subject column rather than creating
 a second subject store. Ordinary `message_metadata.sha256` is the indexed lookup key for the
 corresponding FTS row IDs; updates and recovery delete FTS rows by row ID rather
 than filtering the virtual tables on their unindexed SHA-256 columns. The
@@ -2583,9 +2600,18 @@ and included in runtime license bundles because its wheel omits them.
 
 Matcher rows use 2pt vertical cell padding and compact disclosure controls, with
 black matrix text and darker supporting labels. `scheduleSuggestions` dismisses
-stale choices immediately and bypasses autocomplete for explicit query selectors,
-so `from:simsong` reaches the shared parser unchanged instead of becoming a
-subject filter. Headless regression coverage distinguishes sender and subject matches.
+stale choices immediately. `search_selectors.py` defines typed selector entries
+with recognizer/normalizer, tag, label, family, model field, and parameterized
+SQL builder. The parser and search predicates dispatch through that registry.
+`search_completion.py` recognizes the active selector, preserves preceding terms,
+and begins work only after three value characters. A materialized Any query
+resolves names/addresses once and groups observed header roles, distinct message
+counts, and recency. It returns bounded address choices plus aggregate roles;
+Subject and recognized Date values use the shared predicates. Read-only attached
+identity data supplies current canonical names and recorded aliases; a temporary
+name view avoids persistent schema changes or rebuilding content indexes.
+Generic GUI tiles consume typed tags and choices, including dates. Headless tests
+exercise tag menus, explicit selectors, compound terms, and date normalization.
 
 GUI jobs distinguish ingest from content-only processing. Quit confirms only
 active ingest, then a background waiter closes pywebview windows after workers

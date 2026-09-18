@@ -99,8 +99,8 @@
     searchInput.value = "beth";
     searchInput.dispatchEvent(new Event("input", {bubbles: true}));
     await waitFor(
-      () => !document.getElementById("search-suggestions").hidden && [...document.querySelectorAll(".suggestion-heading")].some(item => item.textContent === "Addresses"),
-      "typing opens grouped address and subject completions",
+      () => !document.getElementById("search-suggestions").hidden && [...document.querySelectorAll(".suggestion-icon")].some(item => item.textContent === "any:"),
+      "typing opens tagged address and subject completions",
     );
     const bethAddress = [...document.querySelectorAll(".suggestion-option")]
       .find(item => item.textContent.includes("beth@example.org"));
@@ -109,15 +109,13 @@
     bethAddress.dispatchEvent(new MouseEvent("mousedown", {bubbles: true, cancelable: true}));
     await waitFor(() => document.querySelectorAll(".search-chip").length === 1 && rows().length === 2, "address completion creates an Any filter chip");
     const role = document.querySelector(".search-chip select");
-    assert([...role.options].map(option => option.textContent).join(",") === "Any,From,To,Cc,Bcc", "address chip offers all recipient-role menus");
+    assert([...role.options].map(option => option.value).join(",") === "any,from,cc", "address chip offers only matching recipient-role menus");
     role.value = "from"; role.dispatchEvent(new Event("change", {bubbles: true}));
     await waitFor(() => rows().length === 1, "From menu scopes the selected address");
-    role.value = "to"; role.dispatchEvent(new Event("change", {bubbles: true}));
-    await waitFor(() => rows().length === 0, "To menu excludes non-To occurrences");
+    assert(![...role.options].some(option => option.value === "to"), "To is absent without matching To occurrences");
     role.value = "cc"; role.dispatchEvent(new Event("change", {bubbles: true}));
     await waitFor(() => rows().length === 1, "Cc menu uses preserved recipient roles");
-    role.value = "bcc"; role.dispatchEvent(new Event("change", {bubbles: true}));
-    await waitFor(() => rows().length === 0, "Bcc menu uses preserved recipient roles");
+    assert(![...role.options].some(option => option.value === "bcc"), "Bcc is absent without matching Bcc occurrences");
     role.value = "any"; role.dispatchEvent(new Event("change", {bubbles: true}));
     await waitFor(() => rows().length === 2, "Any menu restores sender-or-recipient matching");
     document.querySelector(".search-chip-remove").click();

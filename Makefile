@@ -341,7 +341,7 @@ test-name-resolution:
 	uv run pytest -q tests/test_name_resolution_benchmark.py tests/test_name_matcher_research.py
 
 test-gui:
-	uv run pytest -q tests/test_gui_service.py
+	uv run pytest -q tests/test_gui_service.py tests/test_search_completion.py
 
 test-provenance:
 	uv run pytest -q tests/test_catalog.py tests/test_sources.py

@@ -759,7 +759,7 @@ function quotedSearchValue(value) {
 
 function effectiveQuery() {
   const filters = state.searchFilters.map(filter => {
-    const selector = filter.kind === "address" ? filter.role : "subject";
+    const selector = filter.tag;
     return `${selector}:${quotedSearchValue(filter.value)}`;
   });
   const text = elements.search.value.trim();
@@ -771,8 +771,7 @@ function scheduleSuggestions() {
   // Retire visible and in-flight suggestions before accepting a different query.
   closeSuggestions();
   const query = elements.search.value.trim();
-  // Explicit query syntax belongs to the search parser, never a subject chip.
-  if (query.length < SUGGESTION_MINIMUM || /(?:^|\s)["']?(?:any|from|to|cc|bcc|subject|date|before|after):/i.test(query)) return;
+  if (query.length < SUGGESTION_MINIMUM) return;
   const request = ++state.suggestionRequest;
   state.suggestionTimer = window.setTimeout(() => loadSuggestions(query, request), SUGGESTION_DELAY_MS);
 }
@@ -787,9 +786,6 @@ function renderSuggestions(suggestions) {
   state.suggestionItems = [];
   state.suggestionIndex = -1;
   const contents = [];
-  const heading = label => {
-    const item = document.createElement("div"); item.className = "suggestion-heading"; item.textContent = label; return item;
-  };
   const option = (icon, label, count, accept) => {
     const button = document.createElement("button");
     button.type = "button";
@@ -808,18 +804,11 @@ function renderSuggestions(suggestions) {
     state.suggestionItems.push({element: button, accept});
     return button;
   };
-  if (suggestions.addresses.length) {
-    contents.push(heading("Addresses"));
-    for (const address of suggestions.addresses) {
-      const label = address.display_name ? `${address.display_name} — ${address.address}` : address.address;
-      contents.push(option("◎", label, address.message_count, () => addAddressFilter(address)));
-    }
+  for (const item of suggestions.items) {
+    contents.push(option(item.tag + ":", item.label, item.message_count,
+      () => addSearchFilter(item, suggestions.prefix)));
   }
-  contents.push(heading("Subjects"));
-  contents.push(option("✉", `Subject contains “${suggestions.query}”`, null, () => addSubjectFilter(suggestions.query)));
-  for (const subject of suggestions.subjects) {
-    contents.push(option("✉", subject.subject, subject.message_count, () => addSubjectFilter(subject.subject)));
-  }
+  if (!contents.length) { closeSuggestions(); return; }
   elements["search-suggestions"].replaceChildren(...contents);
   elements["search-suggestions"].hidden = false;
   elements.search.setAttribute("aria-expanded", "true");
@@ -868,20 +857,9 @@ function closeSuggestions() {
   elements.search?.setAttribute("aria-expanded", "false");
 }
 
-function addAddressFilter(suggestion) {
-  state.searchFilters.push({
-    kind: "address", value: suggestion.address, label: suggestion.display_name || suggestion.address, role: "any",
-  });
-  elements.search.value = "";
-  closeSuggestions();
-  renderSearchFilters();
-  elements.search.focus();
-  runSearch();
-}
-
-function addSubjectFilter(subject) {
-  state.searchFilters.push({kind: "subject", value: subject, label: subject});
-  elements.search.value = "";
+function addSearchFilter(item, prefix) {
+  state.searchFilters.push(item);
+  elements.search.value = prefix;
   closeSuggestions();
   renderSearchFilters();
   elements.search.focus();
@@ -889,26 +867,26 @@ function addSubjectFilter(subject) {
 }
 
 function renderSearchFilters() {
-  const roleOptions = [["any", "Any"], ["from", "From"], ["to", "To"], ["cc", "Cc"], ["bcc", "Bcc"]];
   const chips = state.searchFilters.map((filter, index) => {
     const chip = document.createElement("span"); chip.className = "search-chip";
-    if (filter.kind === "address") {
-      const role = document.createElement("select");
-      role.setAttribute("aria-label", `Address role for ${filter.value}`);
-      role.append(...roleOptions.map(([value, label]) => {
-        const option = document.createElement("option"); option.value = value; option.textContent = label; return option;
-      }));
-      role.value = filter.role;
-      role.addEventListener("change", () => { filter.role = role.value; runSearch(); });
-      chip.append(role);
-    }
+    const tag = document.createElement("select");
+    tag.setAttribute("aria-label", `Search type for ${filter.value}`);
+    tag.append(...filter.choices.map(choice => {
+      const option = document.createElement("option");
+      option.value = choice.tag;
+      option.textContent = `${choice.label}: (${choice.message_count.toLocaleString()})`;
+      return option;
+    }));
+    tag.value = filter.tag;
+    tag.addEventListener("change", () => { filter.tag = tag.value; runSearch(); });
+    chip.append(tag);
     const label = document.createElement("span");
     label.className = "search-chip-label";
-    label.textContent = filter.kind === "subject" ? `Subject: ${filter.label}` : filter.label;
+    label.textContent = filter.value;
     label.title = filter.value;
     const remove = document.createElement("button");
     remove.type = "button"; remove.className = "search-chip-remove"; remove.textContent = "×";
-    remove.setAttribute("aria-label", `Remove ${filter.label} filter`);
+    remove.setAttribute("aria-label", `Remove ${filter.value} filter`);
     remove.addEventListener("click", () => {
       state.searchFilters.splice(index, 1); renderSearchFilters(); runSearch(); elements.search.focus();
     });

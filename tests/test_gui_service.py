@@ -553,13 +553,14 @@ def test_gui_suggestions_use_trigram_substrings_and_deduplicated_message_counts(
 
     suggestions = search_suggestions(archive, "beth")
 
-    assert [(item.address, item.display_name, item.message_count, item.last_seen) for item in suggestions.addresses] == [
-        ("beth@example.org", "Beth Rosenberg", 2, "2024-01-02T00:00:00+00:00")
+    assert [(item.value, item.tag, item.message_count) for item in suggestions.items if item.tag != "subject"] == [
+        ("beth", "from", 2), ("beth@example.org", "from", 2)
     ]
-    assert [(item.subject, item.message_count) for item in suggestions.subjects] == [
-        ("Flight for ELISABETH", 1)
+    assert search_suggestions(archive, "Rosenberg").items[0].value == "Rosenberg"
+    assert [(item.value, item.message_count) for item in suggestions.items if item.tag == "subject"] == [
+        ("beth", 1), ("Flight for ELISABETH", 1)
     ]
-    assert search_suggestions(archive, "be").addresses == []
+    assert search_suggestions(archive, "be").items == []
     assert searchable_message_count(archive) == 4
 
 
@@ -580,9 +581,14 @@ def test_gui_address_suggestions_break_frequency_ties_by_recency(tmp_path: Path)
     finally:
         search.close()
 
-    assert [item.address for item in search_suggestions(archive, "match").addresses] == [
-        "newer-match@example.org",
-        "older-match@example.org",
+    with create_catalog(archive / "archive.sqlite3") as catalog:
+        for number, (address, seen) in enumerate((("older-match@example.org", "2024-01-01"),
+                                                  ("newer-match@example.org", "2025-01-01"))):
+            sender = address_pk(catalog, address)
+            catalog.execute("INSERT INTO messages(message_id_normalized,sha256,sender_address_pk,subject,date_utc,date_source,category) "
+                            "VALUES(?,?,?,'',?,'date','Archive')", (f"rank-{number}", f"rank-{number}", sender, seen))
+    assert [item.value for item in search_suggestions(archive, "match").items if item.tag == "from"] == [
+        "match", "newer-match@example.org", "older-match@example.org",
     ]
 
 
@@ -1006,7 +1012,7 @@ def test_original_mailbox_count_and_search_queries_use_provenance_indexes(tmp_pa
     ("from:", "from: requires a value"),
     ("To:", "to: requires a value"),
     ('subject:"unfinished', "search has an unclosed quote"),
-    ("date:yesterday", "date: requires a YYYY-MM-DD date"),
+    ("date:yesterday", "date: requires a valid date (YYYY-MM-DD, m/d/yyyy, or Month day, year)"),
 ])
 def test_gui_search_syntax_errors_are_results(tmp_path: Path, query: str, error: str) -> None:
     """Requirement: invalid GUI queries return feedback without a bridge exception."""

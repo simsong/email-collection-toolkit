@@ -518,10 +518,10 @@ program. A search therefore covers the collection's complete time span. Recent
 messages receive no preference beyond an explicitly selected date sort, and an
 archivist never has to ask the application to check older years.
 
-After three characters, the search box suggests matching addresses and
-subjects. Each suggestion shows the number of deduplicated messages in which
-it occurs. Address matching includes display names and email addresses, though
-only email-address substrings have a dedicated accelerator. Subject matching
+After three value characters, the search box suggests matching names, addresses,
+subjects, and recognized dates. Suggestions show distinct message counts. Names
+include original header names and current authoritative names; address matching
+and role counts work before content processing finishes. Subject matching
 finds the characters anywhere in the subject, so `beth` also finds `ELISABETH`.
 Use the arrow keys and Return, or click a suggestion.
 
@@ -546,9 +546,23 @@ Useful search forms include:
 | `cc:bob@example.org` | a Cc recipient contains this value |
 | `bcc:bob@example.org` | a Bcc recipient contains this value |
 | `subject:"annual report"` | subject contains this phrase |
-| `date:2024-03-15` | message date is this UTC calendar day |
-| `before:2024-01-01` | message is earlier than this date |
-| `after:2024-01-01` | message is later than this date |
+| `date:2024-03-15` | message timestamp falls within this worldwide calendar date |
+| `before:2024-01-01` | message is before this date begins anywhere |
+| `after:2024-01-01` | message is after this date ends everywhere |
+
+Date selectors cover a 50-hour window from midnight in UTC+14 through the end
+of the date in UTC−12. Adjacent daily searches overlap by 26 hours. For example,
+`date:2020-01-05` includes `2020-01-04T10:00:00Z` up to, but not including,
+`2020-01-06T12:00:00Z`; it includes January 5 at 10 p.m. in Boston.
+`before:` selects timestamps before the opening boundary; `after:` selects
+timestamps at or after the closing boundary. Stored UTC timestamps are unchanged.
+Dates accept ISO calendar dates, `m/d/yyyy`, and English month names; quote
+multiword values, as in `date:"January 5, 2020"`.
+
+Address selectors match original header names and current authoritative names
+as well as email substrings. Completion starts after three value characters,
+including after an explicit prefix. Tiles offer only matching address roles,
+defaulting to Any when several roles match. Date tiles offer Date/Before/After.
 
 All supplied terms must match. Use the sort controls above the result list to
 sort the complete matching set by date, subject, or sender. The application

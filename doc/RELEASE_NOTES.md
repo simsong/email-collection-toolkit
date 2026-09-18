@@ -4,13 +4,19 @@
 
 ## Unreleased
 
+* Implement a shared selector registry for parsing, SQL, and GUI completions.
+  Match header and authoritative names before content processing, derive matching
+  roles from one Any lookup, and support generic role/date tiles after three value
+  characters. Use 50-hour worldwide date windows in CLI and GUI with ISO, slash,
+  and month-name dates; document boundaries and overlapping daily results.
+
 * Distinguish active ingest from background content work on quit. Stop content
   without an ingest warning, keep the event loop alive through checkpointing,
   and handle Ctrl-C through the orderly GUI shutdown path.
 
 * Tighten matcher rows and darken text, remove the archive-identities badge,
   and label the resume action Continue Processing. Keep explicit search selectors
-  such as `from:simsong` out of subject autocomplete.
+  such as `from:simsong` scoped to their requested field in autocomplete.
 
 * Connect the desktop GUI to resumable processor work, saved ingest policy,
   archive-backed name/institution pickers and immediate manual edits. Show
