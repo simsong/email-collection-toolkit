@@ -890,6 +890,14 @@ are not in the current release.
 
 ## Configuration
 
+Archive `config.yaml` accepts `mbox_max_bytes`, a positive integer byte limit
+for each numbered MBOX part. The default is 4026531840 (3.75 GiB). For a small
+test archive, set `mbox_max_bytes: 20480` for 20 KiB rollover. The importer
+starts a new part before a nonempty part would reach the limit, including
+MBOX framing and quoting. A single oversized message occupies its own part
+without being split. Changing the limit affects future appends, not existing
+files, and applies to both CLI and GUI import and attached-message processing.
+
 The planned top-level `archive.yaml` belongs to one archive and contains that
 archive's FILE, LOCAL FOLDER, and IMAP source definitions. It contains local
 paths and account names but no passwords or tokens. Source credentials remain

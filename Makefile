@@ -520,6 +520,10 @@ test-processors: ruff
 test-cli-processors: ruff pst-importer
 	uv run --locked pytest -q tests/test_cli_processing.py
 
+.PHONY: test-rollover
+test-rollover: ruff
+	uv run --locked pytest -q tests/test_rollover.py tests/test_publication.py tests/test_mboxrd.py
+
 # PST corpus acquisition is opt-in; ordinary checks never contact corpus servers.
 PST_DOWNLOAD_ARGS ?=
 pst-download: pst-downloader

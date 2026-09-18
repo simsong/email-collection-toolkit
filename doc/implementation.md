@@ -1815,8 +1815,16 @@ The packaged YAML supplies both the prefix byte budget and preamble line limit.
 Writers produce an envelope `From ` line plus mboxrd-escaped message bytes under
 `data/mbox/`.
 They track the byte offset and byte length of each complete record.  Output
-currently uses the first numbered file for each year/category; the required
-3.75 GiB rollover selection remains planned. The directory contains no nested
+uses the highest numbered part for each year/category. Under the existing writer
+lease, the publisher selects a new part when the exact framed record would bring
+a nonempty part to or above `config.yaml`'s positive `mbox_max_bytes` limit
+(default 4026531840). The publication journal records the selected part before
+append; normal rollback removes an uncommitted newly created part. Oversized
+individual records remain whole in their own parts. This applies equally to
+Sent, Archive, INFECTED and attached-message publication. `make test-rollover`
+checks 20 KiB rollover with four 6 KiB records, restart/deduplication, framing
+boundaries, oversized records and orphan recovery without large test files.
+The directory contains no nested
 per-message files.
 For any original message lacking a final line break, standard MBOX contributes
 one before its record separator. Direct retrieval considers the stored form and

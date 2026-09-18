@@ -64,9 +64,11 @@ from .mbox import (
     PublicationRecovery,
     add_message,
     clear_publication_journal,
+    frame_message,
     journal_publication,
     read_verified_location,
     recover_publication,
+    rollover_destination,
 )
 from .message import ParsedMessage
 from .processing.contracts import MailboxReference, ProcessingPolicy, SourceMetadata
@@ -1125,6 +1127,8 @@ def run_ingest(
 
 
 def _run_ingest(request: IngestRequest, writer_lease: WriterLease, outcome: IngestOutcome, terminal: bool, stop_event: threading.Event | None = None) -> None:
+    from .archive_config import load_archive_config
+    mbox_max_bytes = load_archive_config(request.archive).mbox_max_bytes
     options = DocumentOptions(request.archive)
     owners = request.owner_rules if request.owner_rules is not None else options.defaults()
     if request.owner_names_file is not None:
@@ -1581,7 +1585,10 @@ def _run_ingest(request: IngestRequest, writer_lease: WriterLease, outcome: Inge
     def archive_scanned(candidate: PendingScan, target: MailboxReference) -> int:
         raw, parsed = candidate.source.raw, candidate.parsed
         category = target.category
-        destination = target.path
+        framed = frame_message(raw, envelope=candidate.source.mbox_envelope,
+                               fallback_date=datetime.fromisoformat(parsed.date_utc),
+                               sender=parsed.sender, earliest_year=request.earliest_year)
+        destination = rollover_destination(target.path, framed, mbox_max_bytes)
         file_existed = destination.exists()
         publication = PendingPublication(
             filename=destination.name,

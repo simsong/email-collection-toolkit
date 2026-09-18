@@ -108,7 +108,13 @@ directory, and a `data/mbox/` payload directory.
   MAILER-DAEMON. Never rewrite a present envelope to conform to these rules.
 * Normal mail is partitioned by resolved message year and category:
   `{YEAR}-Sent1.mbox` and `{YEAR}-Archive1.mbox`.
-* A file rolls over before it reaches 3.75 GiB.  Later parts are named
+* A nonempty file rolls over before its next record reaches the configured
+  `mbox_max_bytes` limit in archive `config.yaml` (default 3.75 GiB, 4026531840
+  bytes). The limit includes envelopes, mboxrd quoting and record separators.
+  A single record at or above the limit is preserved whole in its own part;
+  the next record starts a new part. No message is split or discarded.
+  Tests use four synthetic 6 KiB messages and a 20 KiB limit: three records
+  in part 1 and the fourth in part 2. Later parts are named
   `{YEAR}-Sent2.mbox`, `{YEAR}-Sent3.mbox`, `{YEAR}-Archive2.mbox`, etc.
 * Messages detected as infected are instead placed in `INFECTED1.mbox`, with
   the same numeric rollover rule if needed.  They are never discarded or

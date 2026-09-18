@@ -4,6 +4,10 @@
 
 ## Unreleased
 
+* Add configurable MBOX rollover (`mbox_max_bytes` in archive `config.yaml`,
+  default 3.75 GiB), counting physical framing bytes and preserving oversized
+  messages whole. Validate with 20 KiB parts, restart and publication recovery.
+
 * Implement a shared selector registry for parsing, SQL, and GUI completions.
   Match header and authoritative names before content processing, derive matching
   roles from one Any lookup, and support generic role/date tiles after three value
