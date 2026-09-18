@@ -17,6 +17,7 @@ class AddressRow(BaseModel):
     first_use: str | None
     last_use: str | None
     messages: int
+    signature_messages: int = 0
 
 
 class OrganizationRow(BaseModel):
@@ -49,7 +50,8 @@ def addresses(database: sqlite3.Connection, filters: IdentityFilter) -> list[Add
     start = filters.start.isoformat() if filters.start else None
     end = filters.end.isoformat() if filters.end else None
     rows = database.execute("""SELECT a.address_id,a.address,p.person_id,p.canonical_name,
-        min(m.seen_at),max(m.seen_at),count(DISTINCT m.message_id)
+        min(m.seen_at),max(m.seen_at),count(DISTINCT CASE WHEN m.kind='header' THEN m.message_id END),
+        count(DISTINCT CASE WHEN m.kind='signature' THEN m.message_id END)
         FROM addresses a JOIN person_addresses USING(address_id) JOIN persons p USING(person_id)
         LEFT JOIN message_addresses m ON m.address_id=a.address_id
         WHERE instr(lower(p.canonical_name),lower(?))>0 AND instr(lower(a.mailbox),lower(?))>0
@@ -57,7 +59,7 @@ def addresses(database: sqlite3.Connection, filters: IdentityFilter) -> list[Add
         AND (? IS NULL OR date(m.seen_at)<=?) GROUP BY a.address_id ORDER BY lower(p.canonical_name),a.address""",
         (filters.name, filters.mailbox, filters.domain, start, start, end, end))
     return [AddressRow(address_id=row[0], address=row[1], person_id=row[2], canonical_name=row[3],
-                       first_use=row[4], last_use=row[5], messages=row[6]) for row in rows]
+                       first_use=row[4], last_use=row[5], messages=row[6], signature_messages=row[7]) for row in rows]
 
 
 def organizations(database: sqlite3.Connection, filters: IdentityFilter) -> list[OrganizationRow]:

@@ -4,6 +4,9 @@
 
 ## Unreleased
 
+* Separate header-message counts from signature occurrences in identity queries
+  and both live pickers, including filtered, deduplicated group totals.
+
 * Retain typed scanner errors/unscannable outcomes and engine/signature versions
   with invocation history; block filing while preserving retryable input.
 

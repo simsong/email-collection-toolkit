@@ -100,6 +100,7 @@ class PickerGroup(BaseModel):
     first_use: str | None = None
     last_use: str | None = None
     messages: int = 0
+    signature_messages: int = 0
 
 
 class PickerPage(BaseModel):
@@ -130,7 +131,9 @@ def picker_page(archive: Path, kind: Literal["name", "institution"], filters: Id
                 continue
             start = filters.start.isoformat() if filters.start else None
             end = filters.end.isoformat() if filters.end else None
-            group.first_use, group.last_use, group.messages = database.execute(f"""SELECT min(seen_at),max(seen_at),count(DISTINCT message_id)
+            group.first_use, group.last_use, group.messages, group.signature_messages = database.execute(f"""SELECT min(seen_at),max(seen_at),
+                count(DISTINCT CASE WHEN kind='header' THEN message_id END),
+                count(DISTINCT CASE WHEN kind='signature' THEN message_id END)
                 FROM message_addresses WHERE address_id IN ({','.join('?' for _ in ids)})
                 AND (? IS NULL OR date(seen_at)>=?) AND (? IS NULL OR date(seen_at)<=?)""", (*ids, start, start, end, end)).fetchone()
     return page

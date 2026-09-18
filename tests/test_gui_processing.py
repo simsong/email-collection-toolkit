@@ -21,7 +21,7 @@ CHILD = (b"From: Child <child@sub.example.ac.uk>\r\nTo: owner@example.test\r\n"
          b"Message-ID: <gui-child@example.test>\r\nDate: Wed, 03 Jan 2024 12:00:00 +0000\r\n"
          b"Subject: GUI child\r\n\r\nchildtoken\r\n")
 RAW = HEADER + (b'Content-Type: multipart/mixed; boundary="mix"\r\n\r\n'
-    b'--mix\r\nContent-Type: text/plain\r\n\r\nparenttoken\r\n-- \r\nsignature@dept.example.ac.uk\r\n'
+    b'--mix\r\nContent-Type: text/plain\r\n\r\nparenttoken\r\n-- \r\nsignature@dept.example.ac.uk\r\nsender@lab.example.ac.uk\r\nsignature@dept.example.ac.uk\r\n'
     b'--mix\r\nContent-Type: message/rfc822\r\nContent-Disposition: attachment; filename="child.eml"\r\n\r\n'
     + CHILD + b'\r\n--mix--\r\n')
 
@@ -85,6 +85,8 @@ def test_picker_edits_filters_unique_counts_and_replay(tmp_path: Path) -> None:
     page = PickerPage.model_validate(picker.query({"domain": "example.ac.uk"}))
     sender = next(group for group in page.groups if group.label == "Sender")
     signature = next(group for group in page.groups if group.addresses[0].address.startswith("signature@"))
+    assert signature.messages == 0 and signature.signature_messages == 1
+    assert sender.messages == 1 and sender.signature_messages == 1
     with WriterLease.acquire(archive, str(archive), "test", "locked", "test"):
         with pytest.raises(ArchiveBusyError):
             picker.update({"operation": "rename-person", "subject": sender.id, "name": "Should not save"})
@@ -92,7 +94,8 @@ def test_picker_edits_filters_unique_counts_and_replay(tmp_path: Path) -> None:
     picker.update({"operation": "merge-person", "subject": signature.id, "target": sender.id})
     filtered = PickerPage.model_validate(picker.query({"name": "Canonical", "start": "2024-01-02", "end": "2024-01-02"}))
     assert len(filtered.groups) == 1 and len(filtered.groups[0].addresses) == 2
-    assert filtered.groups[0].messages == 1  # Both addresses occur in the same message.
+    assert filtered.groups[0].messages == 1
+    assert filtered.groups[0].signature_messages == 1  # Channels count independently after merging.
     assert not PickerPage.model_validate(picker.query({"start": "2025-01-01"})).groups
     with pytest.raises(ValueError, match="start date"):
         picker.query({"start": "2025-01-01", "end": "2024-01-01"})

@@ -79,3 +79,7 @@ footer { display: flex; justify-content: space-between; padding: 12px 24px 0; fo
 .archive-picker #canonical-name { max-width: 200px; }
 
 .filters input::placeholder { color: #555; opacity: 1; }
+
+.archive-picker .identity-column { width: 48%; }
+.archive-picker .count-column { width: 12%; }
+.archive-picker td:not(:first-child) { white-space: nowrap; }

@@ -603,6 +603,14 @@ tokens. Inventory sizes and SHA-256 digests apply to 7z members as well as ZIP.
 
 ### Production CLI processor and identity integration
 
+Identity address/group counts keep header and signature channels separate:
+`messages` counts distinct messages containing the address in headers;
+`signature_messages` counts distinct signature-bearing messages. The pickers
+display Messages and Signatures columns. Dates cover either evidence channel,
+and date filters apply to both counts. Group counts deduplicate within each
+channel across all visible member addresses.
+
+
 Scanner invocations persist typed clean/infected/not-scanned/unscannable/scanner-error
 results with diagnostics and engine/signature versions (NULL if unavailable).
 Errors and reported encryption/size-limit heuristics block filing and retain

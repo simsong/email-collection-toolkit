@@ -66,7 +66,8 @@ def test_cli_deferred_content_resume_and_manual_evidence(tmp_path: Path) -> None
     cli(archive, "process")
     assert json.loads(cli(archive, "processing-status").stdout)["pending"] == 0
     entries = json.loads(cli(archive, "identities", "addresses", "--domain", "example.ac.uk", "--start", "2024-01-02", "--end", "2024-01-02").stdout)
-    assert len(entries) == 2 and all(entry["messages"] == 1 for entry in entries)
+    assert len(entries) == 2
+    assert sorted((entry["messages"], entry["signature_messages"]) for entry in entries) == [(0, 1), (1, 0)]
     assert json.loads(cli(archive, "identities", "addresses", "--start", "2025-01-01").stdout) == []
     sender = next(entry for entry in entries if entry["canonical_name"] == "Manual Sender")
     other = next(entry for entry in entries if entry["address"].startswith("other@"))

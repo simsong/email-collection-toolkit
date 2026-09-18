@@ -440,6 +440,14 @@ also uses bounded chunks. Depth limits also leave failed jobs.
 
 ### Persistent work, identity evidence and manual decisions
 
+Identity address/group counts keep header and signature channels separate:
+`messages` counts distinct messages containing the address in headers;
+`signature_messages` counts distinct signature-bearing messages. The pickers
+display Messages and Signatures columns. Dates cover either evidence channel,
+and date filters apply to both counts. Group counts deduplicate within each
+channel across all visible member addresses.
+
+
 Scanner invocations persist typed clean/infected/not-scanned/unscannable/scanner-error
 results with diagnostics and engine/signature versions (NULL if unavailable).
 Errors and reported encryption/size-limit heuristics block filing and retain
@@ -510,7 +518,7 @@ message bounds; body versus attachment selection; HTML-before-RTF fallback;
 synthetic content exclusion from canonical mail; durable manual edits; and
 accurate statistics. Use fixtures and the existing on-demand ClamAV EICAR test.
 The processing framework and GUI integration are implemented and tested.
-Remaining implementation gaps in this contract are separate signature/header counts, complete
+Remaining implementation gaps in this contract are complete
 About inventory, and timeout/empty-sample statistics. Exact API fields and
 cancellation states must also be reconciled with the public models. These gaps
 are not claims that the entire framework remains unimplemented.

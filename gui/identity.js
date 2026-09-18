@@ -4,13 +4,14 @@
 class ArchiveGroup extends MatcherGroup {
   constructor(row) {
     super(String(row.id), row.label, row.addresses.map(address => ({id: String(address.address_id), email: address.address,
-      firstUse: address.first_use?.slice(0, 10) || "", lastUse: address.last_use?.slice(0, 10) || "", messages: address.messages})));
+      firstUse: address.first_use?.slice(0, 10) || "", lastUse: address.last_use?.slice(0, 10) || "", messages: address.messages, signatureMessages: address.signature_messages || 0})));
     this.rowData = row;
   }
   copy() { return new ArchiveGroup(this.rowData); }
   get firstUse() { return this.rowData.first_use?.slice(0, 10) || ""; }
   get lastUse() { return this.rowData.last_use?.slice(0, 10) || ""; }
   get messages() { return this.rowData.messages; }
+  get signatureMessages() { return this.rowData.signature_messages || 0; }
 }
 
 // Both real pickers inherit the prototype's disclosure, sorting, selection and drag controls.
@@ -89,6 +90,7 @@ function archivePicker(Base) {
     }
     row(group, address = null) {
       const row = super.row(group, address);
+      this.cell(row, (address || group).signatureMessages.toLocaleString("en-US"), "number");
       if (this.kind === "institution") row.draggable = false;
       return row;
     }
