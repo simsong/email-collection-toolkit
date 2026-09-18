@@ -71,7 +71,7 @@ as a plain-text body. Synthetic representations are processing inputs, not new
 canonical mail or MIME parts added to the original message.
 
 Attached emails are first-class child messages with durable paths back to their
-parent message and MIME part. Viewer controls for those paths are planned. They start
+parent message and MIME part. The viewer displays those paths and the attachment tag. They start
 independent jobs at message processing, bypassing ingest and another antivirus
 scan. The child retains its parent's scan provenance. The handoff uses shared
 deduplication/publication services to establish the child record and content

@@ -126,8 +126,8 @@ inventory, scan, identity evidence and child-message promotion results are typed
 The MIME extractor declares `emits_mime_parts = true` to dispatch normalized
 actual MIME labels; it cannot emit framework-only labels through that permission.
 Attached RFC 822 messages use inherited scan provenance, shared deduplication,
-parent/MIME-path occurrences and the persisted attachment tag. Viewer/tag-editor
-and incomplete-work dialog wiring remain the GUI phase.
+parent/MIME-path occurrences and the persisted attachment tag. The viewer and
+incomplete-work dialog are integrated; the general tag editor remains future work.
 
 The source/file acquisition interfaces remain the adapters before raw-message
 dispatch. Their `PluginContext` exposes the same namespace configuration reads
@@ -210,7 +210,8 @@ work. The registry fingerprint covers manifests and local Python code, including
 
 The same graphic appears on the [website plugin page](../website/content/plugins.md).
 This section describes the complete target architecture. The CLI framework above
-implements production processing; the GUI controls remain planned.
+implements production processing and GUI resume/picker controls. Remaining
+contract gaps are identified below rather than implied by the diagram.
 
 Source/container acquisition, including its file-parser subtree, supplies raw
 messages to three processing pipelines:
@@ -244,7 +245,8 @@ same type run. Required cross-type outputs must also precede their consumers.
 ClamAV rank 1 and filing/handoff rank 2 are ingest ranks; MIME extraction belongs
 to content processing. Abort scopes are part, message, and import. Scanner timeouts default to 60 seconds and are configurable in TOML.
 Invocation statistics include count, total time, shortest, longest, average,
-errors, and timeouts. The CLI lists registered plugins by subscribed type; About integration is planned.
+errors, and timeouts. The CLI and About list registered processors by subscribed type. About does not
+yet include source/file acquisition plugins or processor versions.
 
 Publication uses a framework service selecting year/role, including the
 INFECTED destination, and preserving transactions, locking, byte fidelity and
@@ -292,7 +294,7 @@ assignments are durable, not disposable search-index data.
 
 ### Registration and manifest contract
 
-The processor API is a planned versioned extension of the existing trusted
+The implemented processor API is a versioned extension of the existing trusted
 Python plugin system, not a new package installer. Existing source/file API v1
 manifests remain supported through adapters. The new processor manifest uses
 API version 2 and a `processors/<kind>/plugin.toml` directory beneath packaged
@@ -477,13 +479,18 @@ handoff; content-only resume; attachment deduplication and provenance; nested
 message bounds; body versus attachment selection; HTML-before-RTF fallback;
 synthetic content exclusion from canonical mail; durable manual edits; and
 accurate statistics. Use fixtures and the existing on-demand ClamAV EICAR test.
-The diagram and this contract specify intended behavior, not evidence that
-these acceptance checks or the new processor implementation already exist.
+The processing framework and GUI integration are implemented and tested.
+Remaining implementation gaps in this contract are cumulative MIME expansion
+budgets, retryable limit diagnostics, invalid attached-message decoding, typed
+scanner failure/version evidence, separate signature/header counts, complete
+About inventory, and timeout/empty-sample statistics. Exact API fields and
+cancellation states must also be reconciled with the public models. These gaps
+are not claims that the entire framework remains unimplemented.
 
 ## Implemented ingest plugins
 
-Email Collection Toolkit currently implements only the two ingest plug-in architectures
-described below. They are deliberately separate from the planned geography data
+Before the API v2 processor trees, Email Collection Toolkit implements the two
+API v1 acquisition layers described below. They are deliberately separate from the planned geography data
 and visualization extension points; an installed ingest plug-in cannot register
 a graphical menu or render a visualization.
 
@@ -660,10 +667,13 @@ difference from a filename-only interface keeps the framework-selected source
 identity, provenance, estimates, and integrity boundary attached to the work,
 and lets the same scheduler handle local files and virtual provider containers.
 
-The packaged file parsers are:
+The packaged file parsers are (PST/OST details and limits are in
+[PST_IMPORTER.md](PST_IMPORTER.md)):
 
 | Kind | Recognition | Behavior |
 |---|---|---|
+| `pst` | PST header classification | Rust extraction; optional redundant in-process libpff pass |
+| `ost` | OST header classification | In-process libpff cache extraction |
 | `emlx` | `.emlx` suffix | Reads the declared RFC 5322 length; rejects partial EMLX |
 | `babyl` | case-insensitive `BABYL OPTIONS:` signature | Streams Emacs RMAIL Babyl records, including extensionless files |
 | `mbox` | initial `From ` separator | Streams MBOX records with numeric offsets and safe append resume |

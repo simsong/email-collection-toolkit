@@ -2,6 +2,18 @@
 
 # Mail archive normalizer requirements
 
+## Manual state and documentation status
+
+The archive has three operational databases: `archive.sqlite3` (catalog and
+source observations), `search.sqlite3` (disposable search), and
+`processing.sqlite3` (queues, evidence, identities, affiliations and tags).
+Manual identity/tag decisions are durable user data, not reproducible from mail.
+Back up the entire archive, including databases and `config.yaml`.
+Current source code includes CLI and GUI processor integration and local PST/OST
+adapters. Research plans and historical release inventories are not promises
+of shipped features; authoritative matching, the tag editor, remote ingestion,
+geography and compiled-platform trials remain future work.
+
 ## Recovered offline diagnostic boundaries
 
 ClamAV health and message-scan subprocesses must have hard deadlines and remove
@@ -450,7 +462,8 @@ mailbox destinations. Dedicated EICAR tests also verify infected routing.
   elapsed time instead of a stale source-file status. A newly started daemon is
   ready only after the configured scanner health probe succeeds, not merely when
   its socket appears. Every scanner health-check subprocess has a five-second
-  caller-enforced deadline, and every message scan has a five-minute deadline.
+  caller-enforced deadline, and production message scans use the processor TOML deadline (60 seconds by default).
+  The legacy standalone scanner service retains its five-minute default.
   A missing, non-executable, or otherwise unlaunchable health-check helper
   means the scanner is unavailable, not a missing mail source or a clean scan.
   Execution failures must abort startup before removing an existing daemon
@@ -850,7 +863,7 @@ credentials.
 An `ArchiveDocument` represents one archive. Opening validates the directory
 and the versioned layout and SQLite readable state of both databases without
 creating or modifying anything. A missing or invalid saved archive is removed
-from recent preferences and reported in the persistent About window. The document
+from recent preferences and reported in About status and stderr; About remains hidden until requested. The document
 retains the user's absolute display path and also uses a canonical,
 filesystem device/inode pair as its process-local identity. Windows opened through
 aliases of the same archive share the document's ingest state, child windows,
@@ -1460,11 +1473,10 @@ and retain the current explicit-path CLI instructions.
   rather than silently omitting them. The current backend decision, fixture
   matrix, and format limitations are maintained in
   [ON_DISK_MAIL_FORMATS.md](ON_DISK_MAIL_FORMATS.md).
-  **Planned beta gate:** implement standalone ingest executables accepting a
+  The implemented Rust PST helper is a standalone ingest executable accepting a
   filename and emitting mboxrd to stdout, with diagnostics on stderr, as
-  specified in [PST_DUAL_READER.md](PST_DUAL_READER.md). Start with a qualified
-  adapter around Microsoft's Rust PST library; allow another implementation
-  as a separate pass. Each emitted record carries `X-Imported-URI`,
+  specified in [PST_DUAL_READER.md](PST_DUAL_READER.md). Use Microsoft's Rust PST library and optionally run an independent
+  in-process libpff pass with Redundant PST Import. Each emitted record carries `X-Imported-URI`,
   `X-Importer-Name` and `X-Importer-Version`. These fields are included in h2.
   Existing h3 includes selected headers AND the encoded MIME body; it is a
   comparison control, not permission to discard conflicting variants. The
@@ -1472,9 +1484,9 @@ and retain the current explicit-path CLI instructions.
   Preserve failures and partial-run provenance; a successful empty stream is
   not proof that an arbitrary PST was fully recovered. Qualify OST separately.
   Microsoft 365 has no platform-neutral Takeout equivalent. Outlook PST export
-  on Windows and OLM export from legacy Outlook for Mac are recognized future
-  acquisition paths, but PST, OST, OLM, Graph, and Exchange Online IMAP are not
-  current end-user sources. `doc/M365.md` must keep that boundary explicit.
+  on Windows is an acquisition path; OLM export from legacy Outlook for Mac
+  requires a future reader. The current checkout imports PST and OST with the qualified backends
+  described below. OLM, Graph and Exchange Online IMAP remain unavailable. `doc/M365.md` must keep that boundary explicit.
 * Eudora ingest recognizes mailbox files together with their table-of-contents,
   attachment, and embedded-content conventions. It records which companion
   files were present and never treats an absent or stale index as proof that a

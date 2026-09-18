@@ -2,10 +2,23 @@
 
 # Mail archive normalizer implementation
 
+## Manual state and documentation status
+
+The archive has three operational databases: `archive.sqlite3` (catalog and
+source observations), `search.sqlite3` (disposable search), and
+`processing.sqlite3` (queues, evidence, identities, affiliations and tags).
+Manual identity/tag decisions are durable user data, not reproducible from mail.
+Back up the entire archive, including databases and `config.yaml`.
+Current source code includes CLI and GUI processor integration and local PST/OST
+adapters. Research plans and historical release inventories are not promises
+of shipped features; authoritative matching, the tag editor, remote ingestion,
+geography and compiled-platform trials remain future work.
+
 ## Recovered tool safety and validation
 
-ClamAV health probes have a five-second deadline and message scans a five-minute
-deadline. Probe timeout means unavailable; a helper execution error raises
+ClamAV health probes have a five-second deadline. Production plugin scans use
+the TOML deadline (60 seconds by default); the legacy scanner service retains
+its five-minute default. Probe timeout means unavailable; a helper execution error raises
 `ClamScannerStartupError` before socket removal or daemon launch and releases
 the startup lock. Scan timeout fails import and removes temporary plaintext. Typed unscannable/scanner-error
 outcomes remain planned.
@@ -2226,8 +2239,10 @@ configured public repository ref, runs the same Make target, uploads status and
 logs plus any report and ZIP under a run-specific S3 prefix, and shuts down from
 an EXIT trap. There is no SSH ingress or persistent worker fleet.
 
-## Planned source adapters and derivatives
+## Source adapters and planned derivatives
 
+PST/OST adapters are implemented with the limits documented in PST_IMPORTER.md.
+Eudora and general working-cache adapters remain planned.
 PST/OST, Eudora, and working IMAP caches are local read-only adapters, not
 remote-source modes. Each adapter produces a typed source record containing
 the available RFC 5322 bytes, source-native identity and folder context,

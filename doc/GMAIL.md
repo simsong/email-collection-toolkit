@@ -176,8 +176,7 @@ Known consumer domains need no DNS lookup; transient DNS and token-refresh
 transport failures are disclosed as errors rather than negative detection or
 fresh consent. Credentials are stored only after the profile matches.
 
-A whole Apple Mail cache containing `.partial.emlx` files cannot currently be
-ingested: discovery rejects those files and stops the run. Only a separately
-staged copy containing complete supported records is an available local-file
-bridge. Do not modify the source cache to prepare that copy; the comparator is
-read-only and does not imply whole-cache ingest support.
+Directory import reports and skips `.partial.emlx` records and imports complete
+supported messages. Direct selection of a partial record is rejected. Detached
+content is not reconstructed, so this remains best-effort cache recovery rather
+than complete provider acquisition.

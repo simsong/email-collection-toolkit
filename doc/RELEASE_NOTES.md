@@ -4,6 +4,13 @@
 
 ## Unreleased
 
+* Reconcile stale search, owner-rule, PST/OST, Apple Mail, processor GUI and
+  packaging descriptions; distinguish manual identity data from disposable
+  indexes, and mark historical planning inventories explicitly.
+
+Earlier bullets record the implementation sequence; a historical “planned”
+statement does not supersede a newer implementation entry above it.
+
 * Add configurable MBOX rollover (`mbox_max_bytes` in archive `config.yaml`,
   default 3.75 GiB), counting physical framing bytes and preserving oversized
   messages whole. Validate with 20 KiB parts, restart and publication recovery.

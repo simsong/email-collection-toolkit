@@ -42,8 +42,10 @@ old record has no original-header block, its visible headers are used instead.
 RMAIL labels and redundant visible headers remain only in the source Babyl
 container and are not email content.
 
-Outlook PST and OST files and direct Gmail, Microsoft 365, and live IMAP
-connections are planned but are not yet supported. Complete local Apple Mail
+This checkout also imports PST using the Rust helper and OST through in-process
+libpff; see [PST_IMPORTER.md](PST_IMPORTER.md) for build requirements, qualified
+formats, and reconstruction/cache limits. Direct Gmail, Microsoft 365, and live
+IMAP connections remain planned. Complete local Apple Mail
 cache records from those providers can be imported now.
 The code has inactive integration points for Gmail, IMAP, Microsoft Exchange,
 and standard input containing NUL-separated messages; these are not CLI ingest
@@ -153,9 +155,10 @@ completeness claim matters.
 ## Import Microsoft 365
 
 Microsoft has no platform-neutral Takeout equivalent. Outlook can export PST
-on Windows or OLM from legacy Outlook for Mac, but Email Collection Toolkit does not yet
-ingest those formats and its Microsoft authorization adapter is only a stub.
-There is currently no complete Microsoft 365 export workflow supported by Email Collection Toolkit. See [M365.md](M365.md) for the end-user status and developer design.
+on Windows or OLM from legacy Outlook for Mac. This checkout imports PST and
+extracts OST caches; OLM and live Microsoft authorization/ingest remain unavailable.
+PST export completeness depends on what Outlook downloaded, and an OST cache
+must never be described as a complete server export. See [M365.md](M365.md) for the end-user status and developer design.
 
 Apple Mail can export selected mailboxes as MBOX, and Email Collection Toolkit can read
 complete messages from an Apple Mail cache. A cache can be incomplete, however;
@@ -169,8 +172,9 @@ messages for Gmail, Microsoft 365/Exchange Online, Outlook.com, and ordinary
 IMAP accounts that have already been synchronized to this Mac. Quit Mail if
 practical, set **Download Attachments** to **All**, allow synchronization to
 finish, and export selected mailboxes as MBOX or stage a separate copy containing
-only complete supported messages. Do not ingest the whole `~/Library/Mail` tree
-when it contains `.partial.emlx` files: discovery rejects them and stops the run.
+only complete supported messages. Directory import reports and skips
+`.partial.emlx` records while retaining complete records; direct selection of a
+partial record fails. Neither behavior establishes cache completeness.
 The invoking terminal may require Full Disk Access. Never alter the source cache
 to prepare the staged copy.
 

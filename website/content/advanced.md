@@ -221,8 +221,10 @@ observations refer to one message.
 
 The canonical archive uses standard MBOX plus BagIt and Mailbag metadata.
 `h1` hashes each complete MBOX, `h2` hashes each recovered raw message, and
-`h3` supports semantic reconciliation. SQLite catalogs and search indexes are
-derived and rebuildable. Run `make verify ARCHIVE=/path/to/archive` after
+`h3` supports semantic reconciliation. Search indexes and automatic evidence are rebuildable. Preserve
+`processing.sqlite3`: manual names, identity decisions, affiliations and tags
+cannot be reconstructed from the original messages. Back up the entire archive,
+including operational databases and configuration. Run `make verify ARCHIVE=/path/to/archive` after
 ingest or transfer; verification is read-only.
 
 The [user manual](https://github.com/simsong/email-collection-toolkit/blob/main/doc/USER_MANUAL.md)

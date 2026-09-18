@@ -57,7 +57,9 @@ estate.
 ## What is not yet available
 
 Current releases do not connect directly to Gmail or Microsoft 365 accounts.
-They also do not read PST or OST files, import Mailbag packages, transfer files
+Local PST and OST readers are available in the development checkout; installed
+helper packaging and format qualification are separate requirements. The program
+does not import Mailbag packages, transfer files
 to ePADD automatically, redact messages, or produce a complete finding aid.
 
 The pages below link to project reports and other digital-preservation
