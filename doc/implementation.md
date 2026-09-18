@@ -20,8 +20,8 @@ ClamAV health probes have a five-second deadline. Production plugin scans use
 the TOML deadline (60 seconds by default); the legacy scanner service retains
 its five-minute default. Probe timeout means unavailable; a helper execution error raises
 `ClamScannerStartupError` before socket removal or daemon launch and releases
-the startup lock. Scan timeout fails import and removes temporary plaintext. Typed unscannable/scanner-error
-outcomes remain planned.
+the startup lock. Scan timeout fails import and removes temporary plaintext. Typed unscannable/scanner-error outcomes and available engine/signature
+versions are retained in processing invocation history.
 
 `make h3-ambiguous-review ARGS='--apple-mail SOURCE --archive ARCHIVE --output REVIEW'`
 writes hash-verified ambiguous classes to a new private directory outside both
@@ -770,6 +770,14 @@ the existing `schema_info` version check does not implement those safeguards.
 `mbox_generations` are written as part of each message publication.
 
 ### CLI processor framework
+
+Scanner invocations persist typed clean/infected/not-scanned/unscannable/scanner-error
+results with diagnostics and engine/signature versions (NULL if unavailable).
+Errors and reported encryption/size-limit heuristics block filing and retain
+raw input for retry. Version queries are cached per daemon configuration;
+which unscannable conditions are reported depends on the daemon configuration.
+Failed invocations may publish scan evidence only, never content or filing.
+
 
 Attached-message promotion requires valid transfer decoding. Invalid base64
 (including padding/trailing data), invalid quoted-printable escapes, and unknown
@@ -2382,9 +2390,8 @@ duplicate source trees, interruption recovery, and infected routing. The EICAR
 signature is assembled from fragments only in a temporary test source and that
 file is deleted immediately after ingest; the repository contains only a safe
 message template. Tests assert message identities and bytes, not only record
-counts. Rollover and typed
-unscannable/scanner-error outcomes remain uncovered because those behaviors are
-not implemented. The separately runnable `make test-e2e` target starts a fresh
+counts. Small synthetic rollover fixtures and recorded scanner-failure routing tests
+cover those paths; EICAR checks actual scanner version evidence. The separately runnable `make test-e2e` target starts a fresh
 CLI ingest with the real configured on-demand `clamd`, includes a source message
 without a final newline, requires checkpoint publication, and invokes the
 installed standard-library-only verifier under isolated Python.

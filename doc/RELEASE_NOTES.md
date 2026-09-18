@@ -4,6 +4,9 @@
 
 ## Unreleased
 
+* Retain typed scanner errors/unscannable outcomes and engine/signature versions
+  with invocation history; block filing while preserving retryable input.
+
 * Prevent malformed attached-message transfer encodings from becoming canonical
   child messages; retain the original parent with failed extraction diagnostics.
 

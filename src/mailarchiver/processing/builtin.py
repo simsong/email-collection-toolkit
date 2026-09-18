@@ -6,6 +6,7 @@ import hashlib
 import re
 import subprocess
 from datetime import UTC, datetime
+from functools import lru_cache
 from email.utils import getaddresses
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -16,7 +17,7 @@ from ..encoding import decode_text
 from ..message import MetadataDefect, ParsedMessage, decoded_header, decoded_message_header, parse_message
 from ..search import html_text, suggested_addresses
 from .api import Emission, Handoff, ProcessingObject, ProcessingResult, PromotedMessage
-from .contracts import AddressEvidence, Filing, HeaderMetadata, MimeInventory, ScanEvidence, TextContent
+from .contracts import AddressEvidence, Filing, HeaderMetadata, MimeInventory, ScanEvidence, ScanFailure, ScanStatus, TextContent
 from .mime import ExtractionLimitError, MimeLimits, extract_parts, read_headers
 
 SIGNATURE_LINES = "signature_lines"
@@ -80,14 +81,46 @@ class ClamAVProcessor:
             return ProcessingResult(scan=ScanEvidence(status="not-scanned", detail="explicit import policy"))
         if policy.scanner_configuration is None:
             raise ValueError("on-demand scanner is not ready")
-        result = subprocess.run([policy.scanner_executable, f"--config-file={policy.scanner_configuration}",
-            "--stream", str(item.message_ref.path)], capture_output=True, check=False, timeout=item.remaining_seconds)
-        if result.returncode not in (0, 1):
-            raise RuntimeError(result.stderr.decode("utf-8", "replace") or f"clamdscan exit {result.returncode}")
-        if result.returncode == 1:
-            return ProcessingResult(outcome="abort-message", scan=ScanEvidence(status="infected"),
+        versions = ScanEvidence(status="not-scanned")
+        try:
+            versions = scanner_versions(policy.scanner_executable, str(policy.scanner_configuration))
+            result = subprocess.run([policy.scanner_executable, f"--config-file={policy.scanner_configuration}",
+                "--stream", str(item.message_ref.path)], capture_output=True, check=False, timeout=item.remaining_seconds)
+        except (OSError, subprocess.TimeoutExpired, TimeoutError) as error:
+            raise ScanFailure(ScanEvidence(status="scanner-error", detail=f"{type(error).__name__}: {error}",
+                                           engine_version=versions.engine_version, signature_version=versions.signature_version)) from error
+        evidence = scan_result(result.returncode, result.stdout, result.stderr, versions)
+        if evidence.status in ("scanner-error", "unscannable"):
+            raise ScanFailure(evidence)
+        if evidence.status == "infected":
+            return ProcessingResult(outcome="abort-message", scan=evidence,
                 filing=Filing(parsed=quarantine_metadata(item), mailbox=item.archive.mailbox("INFECTED", None)))
-        return ProcessingResult(scan=ScanEvidence(status="clean"))
+        return ProcessingResult(scan=evidence)
+
+
+@lru_cache(maxsize=16)
+def scanner_versions(executable: str, configuration: str) -> ScanEvidence:
+    """Read daemon version once per run's configuration; unknown stays explicit."""
+    try:
+        result = subprocess.run([executable, f"--config-file={configuration}", "--version"],
+                                capture_output=True, check=False, timeout=5)
+        match = re.search(r"ClamAV ([^/\s]+)/([^/\s]+)", result.stdout.decode("utf-8", "replace"))
+        if result.returncode == 0 and match:
+            return ScanEvidence(status="not-scanned", engine_version=match[1], signature_version=match[2])
+    except (OSError, subprocess.TimeoutExpired):
+        pass
+    return ScanEvidence(status="not-scanned")
+
+
+def scan_result(returncode: int, stdout: bytes, stderr: bytes, versions: ScanEvidence) -> ScanEvidence:
+    """Interpret actual scanner responses; heuristic limits are not clean scans."""
+    detail = (stdout + b"\n" + stderr).decode("utf-8", "replace").strip()[-4096:]
+    status: ScanStatus = "clean" if returncode == 0 else "infected" if returncode == 1 else "scanner-error"
+    detections = re.findall(r": (.+) FOUND(?:\r?\n|$)", stdout.decode("utf-8", "replace"))
+    if returncode == 1 and detections and all(name.startswith(("Heuristics.Limits.Exceeded", "Heuristics.Encrypted")) for name in detections):
+        status = "unscannable"
+    return ScanEvidence(status=status, detail=detail or f"clamdscan exit {returncode}",
+                        engine_version=versions.engine_version, signature_version=versions.signature_version)
 
 
 def quarantine_metadata(item: ProcessingObject) -> ParsedMessage:

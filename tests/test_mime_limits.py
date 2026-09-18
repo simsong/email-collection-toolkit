@@ -75,3 +75,44 @@ def test_invalid_attached_transfer_never_promoted(tmp_path: Path, encoding: str,
         assert database.execute("SELECT count(*) FROM messages").fetchone() == (1,)
     assert unfinished_work(archive).failed
     assert source.read_bytes() == raw and not verify_archive(archive)
+
+
+@pytest.mark.parametrize("code,status", [
+    ('from mailarchiver.processing.builtin import ClamAVProcessor\n'
+     'policy = item.application.policy.model_copy(update={"scan_policy": "clamav", "scanner_executable": "/no-such-clamdscan", "scanner_configuration": item.content_ref.path})\n'
+     'return ClamAVProcessor().process(item.model_copy(update={"application": item.application.model_copy(update={"policy": policy})}))', "scanner-error"),
+    ('from mailarchiver.processing.contracts import ScanFailure, ScanEvidence\n'
+     'raise ScanFailure(ScanEvidence(status="unscannable", detail="recorded scanner size-limit response", engine_version="1.4", signature_version="42"))', "unscannable"),
+])
+def test_scan_failure_evidence_blocks_filing(tmp_path: Path, code: str, status: str) -> None:
+    """Typed failure publication retains evidence and raw input, never releasing filing."""
+    from tests.test_processing import plugin
+    plugin(tmp_path / "plugins", "test-scan", code, rank=1)
+    source = tmp_path / "message.eml"
+    raw = HEADER + b"\r\noriginal"
+    source.write_bytes(raw)
+    owners = tmp_path / "owners.txt"
+    owners.write_text("owner@example.test\n")
+    archive = tmp_path / "archive"
+    result = subprocess.run([sys.executable, "-m", "mailarchiver", "--archive", str(archive), "ingest",
+        "--no-scan", "--owner-names-file", str(owners), "--plugin-dir", str(tmp_path / "plugins"), str(source)],
+        capture_output=True, text=True, check=False, timeout=30)
+    assert result.returncode != 0
+    with sqlite3.connect(archive / "processing.sqlite3") as database:
+        assert database.execute("SELECT scan_status FROM message_state").fetchone() == (status,)
+        assert database.execute("SELECT count(*) FROM invocations WHERE kind='file-message'").fetchone() == (0,)
+        assert database.execute("SELECT json_extract(result_json,'$.scan.status') FROM invocations WHERE status='failed'").fetchone() == (status,)
+        assert Path(database.execute("SELECT content_path FROM messages").fetchone()[0]).read_bytes() == raw
+    assert source.read_bytes() == raw
+
+
+def test_scan_outcome_classification() -> None:
+    """Recorded scanner responses distinguish limits, errors and actual positive detection."""
+    from mailarchiver.processing.builtin import scan_result
+    from mailarchiver.processing.contracts import ScanEvidence
+    versions = ScanEvidence(status="not-scanned", engine_version="1.4", signature_version="42")
+    assert scan_result(0, b"file: OK", b"", versions).status == "clean"
+    assert scan_result(2, b"", b"connection failed", versions).status == "scanner-error"
+    assert scan_result(1, b"file: Heuristics.Limits.Exceeded.MaxFileSize FOUND\n", b"", versions).status == "unscannable"
+    mixed = b"file: Heuristics.Encrypted.Zip FOUND\nfile: Win.TestVirus FOUND\n"
+    assert scan_result(1, mixed, b"", versions).status == "infected"

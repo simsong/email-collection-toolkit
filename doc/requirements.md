@@ -603,6 +603,14 @@ tokens. Inventory sizes and SHA-256 digests apply to 7z members as well as ZIP.
 
 ### Production CLI processor and identity integration
 
+Scanner invocations persist typed clean/infected/not-scanned/unscannable/scanner-error
+results with diagnostics and engine/signature versions (NULL if unavailable).
+Errors and reported encryption/size-limit heuristics block filing and retain
+raw input for retry. Version queries are cached per daemon configuration;
+which unscannable conditions are reported depends on the daemon configuration.
+Failed invocations may publish scan evidence only, never content or filing.
+
+
 Attached-message promotion requires valid transfer decoding. Invalid base64
 (including padding/trailing data), invalid quoted-printable escapes, and unknown
 encodings leave failed extraction and retain the parent, without publishing a

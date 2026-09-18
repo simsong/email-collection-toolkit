@@ -16,7 +16,7 @@ from ..plugin_configuration import ConfigScope, ConfigValues, ConfigWrite, Plugi
 from ..layout import mbox_path
 from .contracts import (
     AddressEvidence, ContentMetadata, Filing, HeaderMetadata, MailboxReference,
-    MimeInventory, ProcessingPolicy, ScanEvidence, SourceMetadata, TextContent,
+    MimeInventory, ProcessingPolicy, ScanEvidence, ScanFailure, SourceMetadata, TextContent,
 )
 
 Pipeline = Literal["ingest", "message", "content"]
@@ -192,7 +192,8 @@ class InvocationResponse(Model):
 
     @classmethod
     def failure(cls, error: Exception) -> InvocationResponse:
-        response = cls(error=f"{type(error).__name__}: {error}")
+        response = cls(error=f"{type(error).__name__}: {error}",
+                       result=ProcessingResult(scan=error.evidence) if isinstance(error, ScanFailure) else None)
         response._cause = error
         return response
 

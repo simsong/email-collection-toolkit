@@ -86,6 +86,18 @@ class MimeInventory(Contract):
     attachments: tuple[IndexedAttachment, ...] = ()
 
 
+ScanStatus = Literal["clean", "infected", "not-scanned", "unscannable", "scanner-error"]
+
+
 class ScanEvidence(Contract):
-    status: Literal["clean", "infected", "not-scanned"]
+    status: ScanStatus
     detail: str = ""
+    engine_version: str | None = None
+    signature_version: str | None = None
+
+
+class ScanFailure(RuntimeError):
+    """Typed failure evidence retained without publishing scanner side effects."""
+    def __init__(self, evidence: ScanEvidence) -> None:
+        super().__init__(evidence.detail)
+        self.evidence = evidence

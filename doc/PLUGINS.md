@@ -440,6 +440,14 @@ also uses bounded chunks. Depth limits also leave failed jobs.
 
 ### Persistent work, identity evidence and manual decisions
 
+Scanner invocations persist typed clean/infected/not-scanned/unscannable/scanner-error
+results with diagnostics and engine/signature versions (NULL if unavailable).
+Errors and reported encryption/size-limit heuristics block filing and retain
+raw input for retry. Version queries are cached per daemon configuration;
+which unscannable conditions are reported depends on the daemon configuration.
+Failed invocations may publish scan evidence only, never content or filing.
+
+
 Attached-message promotion requires valid transfer decoding. Invalid base64
 (including padding/trailing data), invalid quoted-printable escapes, and unknown
 encodings leave failed extraction and retain the parent, without publishing a
@@ -502,8 +510,7 @@ message bounds; body versus attachment selection; HTML-before-RTF fallback;
 synthetic content exclusion from canonical mail; durable manual edits; and
 accurate statistics. Use fixtures and the existing on-demand ClamAV EICAR test.
 The processing framework and GUI integration are implemented and tested.
-Remaining implementation gaps in this contract are typed
-scanner failure/version evidence, separate signature/header counts, complete
+Remaining implementation gaps in this contract are separate signature/header counts, complete
 About inventory, and timeout/empty-sample statistics. Exact API fields and
 cancellation states must also be reconciled with the public models. These gaps
 are not claims that the entire framework remains unimplemented.

@@ -185,6 +185,8 @@ def test_cli_infected_undated_message_quarantines_before_metadata(tmp_path: Path
     with sqlite3.connect(archive / "processing.sqlite3") as db:
         assert db.execute("SELECT kind,status FROM invocations").fetchall() == [("clamav", "completed")]
         assert db.execute("SELECT scan_status FROM message_state").fetchone() == ("infected",)
+        evidence = json.loads(db.execute("SELECT result_json FROM invocations").fetchone()[0])["scan"]
+        assert evidence["engine_version"] and evidence["signature_version"] and "FOUND" in evidence["detail"]
     with sqlite3.connect(archive / "search.sqlite3") as db:
         assert db.execute("SELECT count(*) FROM message_fts").fetchone() == (0,)
     assert source.read_bytes() == raw
