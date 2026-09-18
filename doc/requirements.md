@@ -1314,7 +1314,10 @@ the command fails before reading or writing an archive.
 
 The Python GUI identifies itself as **Email Collection Toolkit** and uses the
 source-controlled rainbow-envelope icon in its native application identity.
-Current application development and pull-request CI are macOS-only. All jobs
+Current application development and all GitHub workflow jobs are macOS-only.
+Release CI runs headless `make dmg`; visible native release testing is an
+explicit local `make check-release` action. Website and release-assembly jobs
+also use macOS, including architecture-matched, checksum-verified Zola. All jobs
 in the continuous-integration workflow must use macOS runners; Windows and Linux
 validation are outside the current scope.
 The required continuous-integration gate exercises the archive lifecycle and
@@ -1816,7 +1819,7 @@ Ordinary `make dmg`, `make dmg-signed`, and `make test-dmg` must run only the
 headless mounted self-test, without opening GUI test windows. `make check-release`
 must additionally run the visible native self-test on the built DMG; `DMG=path`
 selects an existing image instead of rebuilding. GitHub release assembly must
-require `make check-release` before uploading the DMG.
+require headless `make dmg` validation before uploading the DMG.
 Both paths must mount read-only, verify the bundle seal, and detach the volume
 even on test failure. Tests use disposable fixtures and
 preferences, never the last real archive. They exercise no-ClamAV ingest,

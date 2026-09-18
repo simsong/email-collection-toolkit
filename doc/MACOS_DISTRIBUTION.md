@@ -67,7 +67,9 @@ overrides. They do not open GUI test windows.
 
 `make check-release` builds and validates a DMG with both headless and GUI tests.
 Use `make check-release DMG=/absolute/path/to/image.dmg` to validate an existing
-build instead. The GitHub release workflow requires this target on `macos-15`.
+build instead. This is an explicitly requested local, interactive validation.
+The GitHub release workflow uses headless `make dmg` on `macos-15`;
+its mounted installed-app self-test runs without opening native windows.
 It announces the GUI self-test before opening synthetic About, search, Ingests,
 and source-picker windows. These windows close automatically. A GUI worker
 that remains after the five-second shutdown grace period fails the build with

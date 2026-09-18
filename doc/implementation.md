@@ -2,6 +2,13 @@
 
 # Mail archive normalizer implementation
 
+## CI and release validation
+
+All workflow jobs use macos-15. Release packaging invokes make dmg, which
+mounts the candidate and runs its headless installed-app self-test. Native GUI
+release checks remain an explicit local make check-release action. Pages uses
+the same pinned Darwin Zola binaries/checksums as application CI.
+
 ## Manual state and documentation status
 
 The archive has three operational databases: `archive.sqlite3` (catalog and
@@ -2015,7 +2022,7 @@ Missing either secret emits `::warning::` and produces `*_UNSIGNED.dmg`; invalid
 configured credentials fail. An explicit `--signing-identity` overrides secrets;
 `-` emits a distinct warning identifying that deliberate unsigned override.
 The release workflow builds the DMG on `macos-15`, passes secrets only to
-`make check-release`, and waits for the tested artifact before assembling the source and
+`make dmg`, and waits for the headless-tested artifact before assembling the source and
 DMG checksums into a draft release. Assembly checks out the Mac job's verified
 commit and checks that the tag still names that commit. Before project commands,
 the Mac job imports the administrator's `RELEASE_SIGNING_PUBLIC_KEYS` variable

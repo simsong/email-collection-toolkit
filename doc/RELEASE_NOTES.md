@@ -4,6 +4,9 @@
 
 ## Unreleased
 
+* Keep release CI headless and all workflow jobs on macOS; retain explicit local
+  native-GUI release validation and verified Darwin website tooling.
+
 * Expose stable processing job IDs and align API documentation with concrete
   provenance fields, cancellation methods and durable states.
 

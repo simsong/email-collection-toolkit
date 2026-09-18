@@ -19,7 +19,7 @@ jobs:
   assemble:
     name: Assemble draft release
     needs: macos
-    runs-on: ubuntu-latest
+    runs-on: macos-15
     permissions:
       contents: write
     steps:
@@ -62,7 +62,7 @@ jobs:
           name: macos-dmg
           path: dist
       - name: Write checksums
-        run: (cd dist && sha256sum *.tar.gz *.dmg > SHA256SUMS)
+        run: (cd dist && shasum -a 256 *.tar.gz *.dmg > SHA256SUMS)
       - name: Create draft release
         env:
           GH_TOKEN: ${{ github.token }}
@@ -128,12 +128,12 @@ jobs:
         # GitHub supplies GITHUB_ACTIONS and RUNNER_ENVIRONMENT to every step:
         # https://docs.github.com/en/actions/reference/workflows-and-actions/variables#default-environment-variables
         run: make test-signing
-      - name: Build DMG and validate release including native GUI
+      - name: Build DMG and validate its headless installed self-test
         if: ${{ runner.environment == 'github-hosted' }}
         env:
           APPLE_CERTIFICATE_P12_BASE64: ${{ secrets.APPLE_CERTIFICATE_P12_BASE64 }}
           APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
-        run: make check-release
+        run: make dmg
       - name: Upload tested DMG
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
