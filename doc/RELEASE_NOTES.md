@@ -4,6 +4,10 @@
 
 ## Unreleased
 
+* Recover interrupted development PST corpus downloads using OS cache locks,
+  prompt Ctrl+C cancellation, and verified reuse of completed downloads.
+  Preserve older artifacts lacking receipts before retrying their download.
+
 * Adopt GPLv3 distribution terms, with additional licenses available.
 * Implement a direct-library antivirus prototype with concurrent scans,
   infected-only antivirus headers from Rust PST, explicit definition

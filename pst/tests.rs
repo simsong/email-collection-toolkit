@@ -320,3 +320,57 @@ fn supplied_inventory_plan_and_dry_run_have_no_side_effects() {
     assert!(kind("https://user:password@example.com/mail.pst").is_err());
     assert!(kind("http://example.com/mail.pst").is_err());
 }
+
+#[test]
+/// Recover both sides of interrupted artifact/receipt publication without losing old evidence.
+fn incomplete_publication_is_preserved_and_retried() {
+    let dir = tempfile::tempdir().unwrap();
+    let first = pst();
+    let mut second = first.clone();
+    second.push(1);
+    let server = Server::new(BTreeMap::from([
+        ("/a.pst".into(), first.clone()),
+        ("/b.pst".into(), second.clone()),
+    ]));
+    let first_url = format!("{}/a.pst", server.url);
+    let second_url = format!("{}/b.pst", server.url);
+    inventory(
+        dir.path(),
+        &serde_json::json!({"fixtures": [fixture(&first_url, &first), fixture(&second_url, &second)]}),
+    );
+    let downloads = dir.path().join("cache/downloads");
+    let orphan_folder = downloads.join(sha256_hex(first_url.as_bytes()));
+    fs::create_dir_all(&orphan_folder).unwrap();
+    fs::write(
+        orphan_folder.join("source.pst"),
+        b"old interrupted evidence",
+    )
+    .unwrap();
+    let receipt_folder = downloads.join(sha256_hex(second_url.as_bytes()));
+    fs::create_dir_all(&receipt_folder).unwrap();
+    atomic_json(
+        &receipt_folder.join("receipt.json"),
+        &Receipt {
+            url: second_url.clone(),
+            final_url: second_url,
+            sha256: sha256_hex(&second),
+            size: second.len() as u64,
+        },
+    )
+    .unwrap();
+    assert!(run(args(dir.path())).unwrap());
+    assert_eq!(server.hits.load(Ordering::Relaxed), 2);
+    let orphan = fs::read_dir(&orphan_folder)
+        .unwrap()
+        .map(|entry| entry.unwrap().path())
+        .find(|path| path.is_dir())
+        .unwrap();
+    assert_eq!(
+        fs::read(orphan.join("source.pst")).unwrap(),
+        b"old interrupted evidence"
+    );
+    assert_eq!(fs::read(orphan_folder.join("source.pst")).unwrap(), first);
+    assert_eq!(fs::read(receipt_folder.join("source.pst")).unwrap(), second);
+    assert!(run(args(dir.path())).unwrap());
+    assert_eq!(server.hits.load(Ordering::Relaxed), 2);
+}

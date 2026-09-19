@@ -2625,6 +2625,12 @@ The fixture server explicitly puts accepted sockets into blocking mode with a
 read timeout. A real split-header regression checks that packet gaps cannot
 produce a premature response, as observed in a failing local macOS run.
 The downloader does not invoke the PST importer or canonical archive engine.
+The cache uses OS file locks with a persistent guard inode to prevent unlink
+races. Ctrl+C cancels async HTTP waits and removes the diagnostic lock; forced
+death releases OS ownership for the next invocation. Publish receipts before
+artifacts, preserve legacy unreceipted artifacts, and verify completed downloads
+before reuse. Real subprocess tests cover Ctrl+C, forced termination, competing
+writers, stale locks, and reuse without redownloading completed files.
 
 ## In-process libpff reader and redundant PST testing
 

@@ -2052,6 +2052,10 @@ artifacts and URL/member provenance, deduplicate only byte-identical content,
 and verify cache reuse without replacing corrupt evidence. Download/extraction
 is bounded and streaming; failures remain visible and prevent success while
 later sources can proceed. Dry-run and ordinary tests must not download corpora.
+Ctrl+C must cancel pending HTTP waits, release the cache's OS lock, and exit 130.
+After process death, a rerun acquires the released lock and reuses verified
+downloads. Preserve any older artifact missing its receipt before downloading
+it again. These development-download rules do not add automatic API ingest restart.
 
 CLI `ingest --defer-content`, `process`, `processing-status`, `processors` and
 `identities` shall exercise the production framework without GUI popups. Header
