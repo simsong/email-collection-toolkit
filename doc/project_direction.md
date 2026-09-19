@@ -2,6 +2,12 @@
 
 # Project direction
 
+> Historical research/planning snapshot. Current development and application CI
+> are macOS-only. For implemented behavior use `requirements.md`,
+> `implementation.md`, and the current feature-specific guides; older
+> backend/platform priorities and inventories below may be superseded.
+
+
 ## Positioning
 
 `mailarchiver` should be an email preservation and corpus-building system, not

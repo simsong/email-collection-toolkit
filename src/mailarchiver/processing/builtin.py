@@ -4,9 +4,10 @@ from __future__ import annotations
 
 import hashlib
 import re
-import subprocess
 from datetime import UTC, datetime
 from email.utils import getaddresses
+
+from pydantic import BaseModel, ConfigDict, Field
 
 from striprtf.striprtf import rtf_to_text
 
@@ -14,8 +15,9 @@ from ..encoding import decode_text
 from ..message import MetadataDefect, ParsedMessage, decoded_header, decoded_message_header, parse_message
 from ..search import html_text, suggested_addresses
 from .api import Emission, Handoff, ProcessingObject, ProcessingResult, PromotedMessage
-from .contracts import AddressEvidence, Filing, HeaderMetadata, MimeInventory, ScanEvidence, TextContent
-from .mime import extract_parts, read_headers
+from .contracts import AddressEvidence, Filing, HeaderMetadata, MimeInventory, ScanEvidence, ScanFailure, ScanStatus, TextContent
+from ..scan_evidence import DETECTION_HEADER, ENGINE_HEADER, DEFINITIONS_HEADER
+from .mime import ExtractionLimitError, MimeLimits, extract_parts, read_headers
 
 SIGNATURE_LINES = "signature_lines"
 EMAIL = re.compile(r"[A-Za-z0-9.!#$%&'*+/=?^_`{|}~-]+@[A-Za-z0-9](?:[A-Za-z0-9.-]*[A-Za-z0-9])?")
@@ -31,20 +33,19 @@ def text_limit(item: ProcessingObject) -> int:
     return limit
 
 
-def bounded_text(item: ProcessingObject) -> bytes | ProcessingResult:
+def bounded_text(item: ProcessingObject) -> bytes:
     limit = text_limit(item)
     with item.content_ref.open() as source:
         data = source.read(limit + 1)
     item.check_cancelled()
     if len(data) > limit:
-        return ProcessingResult(outcome="abort-part", diagnostics=(f"derived text exceeds {limit} input bytes; original content retained",))
+        raise ExtractionLimitError(f"derived text exceeds {limit} input bytes; original content retained; raise max_text_bytes and retry")
     return data
 
 
-def bounded_result(item: ProcessingObject, text: str) -> ProcessingResult | None:
+def bounded_result(item: ProcessingObject, text: str) -> None:
     if len(text.encode("utf-8")) > text_limit(item):
-        return ProcessingResult(outcome="abort-part", diagnostics=("derived UTF-8 text exceeds max_text_bytes; original content retained",))
-    return None
+        raise ExtractionLimitError("derived UTF-8 text exceeds max_text_bytes; original content retained; raise limit and retry")
 
 
 def parsed_input(item: ProcessingObject, *, header_only: bool = False) -> ParsedMessage:
@@ -77,16 +78,36 @@ class ClamAVProcessor:
             raise ValueError("scanner policy is missing")
         if policy.scan_policy == "not-scanned":
             return ProcessingResult(scan=ScanEvidence(status="not-scanned", detail="explicit import policy"))
-        if policy.scanner_configuration is None:
-            raise ValueError("on-demand scanner is not ready")
-        result = subprocess.run([policy.scanner_executable, f"--config-file={policy.scanner_configuration}",
-            "--stream", str(item.message_ref.path)], capture_output=True, check=False, timeout=item.remaining_seconds)
-        if result.returncode not in (0, 1):
-            raise RuntimeError(result.stderr.decode("utf-8", "replace") or f"clamdscan exit {result.returncode}")
-        if result.returncode == 1:
-            return ProcessingResult(outcome="abort-message", scan=ScanEvidence(status="infected"),
+        from ..scanner import scan_message
+        metadata = item.source_metadata
+        if metadata and metadata.scan_responsibility == "producer":
+            with item.message_ref.open() as source:
+                headers = read_headers(source)
+            detection = str(headers.get(DETECTION_HEADER, ""))
+            evidence = ScanEvidence(status="infected", detail=detection,
+                engine_version=headers.get(ENGINE_HEADER), signature_version=headers.get(DEFINITIONS_HEADER)) if detection else ScanEvidence(status="clean")
+        elif metadata and metadata.scan_evidence is not None:
+            evidence = metadata.scan_evidence
+        else:
+            evidence = scan_message(policy.scanner_session, item.message_ref.path, item.remaining_seconds)
+        if evidence.status in ("scanner-error", "unscannable"):
+            raise ScanFailure(evidence)
+        if evidence.status == "infected":
+            return ProcessingResult(outcome="abort-message", scan=evidence,
                 filing=Filing(parsed=quarantine_metadata(item), mailbox=item.archive.mailbox("INFECTED", None)))
-        return ProcessingResult(scan=ScanEvidence(status="clean"))
+        return ProcessingResult(scan=evidence)
+
+
+
+def scan_result(returncode: int, stdout: bytes, stderr: bytes, versions: ScanEvidence) -> ScanEvidence:
+    """Interpret actual scanner responses; heuristic limits are not clean scans."""
+    detail = (stdout + b"\n" + stderr).decode("utf-8", "replace").strip()[-4096:]
+    status: ScanStatus = "clean" if returncode == 0 else "infected" if returncode == 1 else "scanner-error"
+    detections = re.findall(r": (.+) FOUND(?:\r?\n|$)", stdout.decode("utf-8", "replace"))
+    if returncode == 1 and detections and all(name.startswith(("Heuristics.Limits.Exceeded", "Heuristics.Encrypted")) for name in detections):
+        status = "unscannable"
+    return ScanEvidence(status=status, detail=detail or f"clamdscan exit {returncode}",
+                        engine_version=versions.engine_version, signature_version=versions.signature_version)
 
 
 def quarantine_metadata(item: ProcessingObject) -> ParsedMessage:
@@ -141,7 +162,8 @@ class MimeProcessor:
         workspace = item.application.workspace
         if workspace is None:
             raise ValueError("MIME processor requires an output workspace")
-        result = extract_parts(item.message_ref.path, workspace, cancelled=item.check_cancelled)
+        result = extract_parts(item.message_ref.path, workspace, cancelled=item.check_cancelled,
+                               limits=MimeLimits.model_validate(item.get_my_config()))
         plain = any(part.scope == "body" and part.content_type == "text/plain" for part in result.parts)
         html = any(part.scope == "body" and part.content_type == "text/html" for part in result.parts)
         return ProcessingResult(mime=MimeInventory(attachments=tuple(result.attachments)),
@@ -157,8 +179,6 @@ class HtmlProcessor:
         if item.scope == "body" and item.content_metadata.plain_body_exists:
             return ProcessingResult()
         data = bounded_text(item)
-        if isinstance(data, ProcessingResult):
-            return data
         text = html_text(decode_text(data, item.content_metadata.charset).value)
         return synthetic_text(item, text)
 
@@ -168,16 +188,12 @@ class RtfProcessor:
         if item.scope == "body" and (item.content_metadata.plain_body_exists or item.content_metadata.html_body_exists):
             return ProcessingResult()
         data = bounded_text(item)
-        if isinstance(data, ProcessingResult):
-            return data
         text = rtf_to_text(data.decode("latin-1"), errors="replace")
         return synthetic_text(item, text)
 
 
 def synthetic_text(item: ProcessingObject, text: str) -> ProcessingResult:
-    rejected = bounded_result(item, text)
-    if rejected is not None:
-        return rejected
+    bounded_result(item, text)
     return ProcessingResult(emissions=(Emission(content_ref=item.create_content(text.encode("utf-8")),
         content_type="text/plain", part_path=item.part_path, scope=item.scope, synthetic=True,
         metadata=item.content_metadata.model_copy(update={"charset": "utf-8"})),))
@@ -186,10 +202,9 @@ def synthetic_text(item: ProcessingObject, text: str) -> ProcessingResult:
 class TextProcessor:
     def process(self, item: ProcessingObject) -> ProcessingResult:
         data = bounded_text(item)
-        if isinstance(data, ProcessingResult):
-            return data
         text = decode_text(data, item.content_metadata.charset).value
-        return bounded_result(item, text) or ProcessingResult(text=TextContent(text=text))
+        bounded_result(item, text)
+        return ProcessingResult(text=TextContent(text=text))
 
 
 class IdentityProcessor:
@@ -199,8 +214,6 @@ class IdentityProcessor:
         if not isinstance(count, int) or isinstance(count, bool) or not 1 <= count <= 100:
             raise ValueError("signature_lines must be an integer from 1 through 100")
         data = bounded_text(item)
-        if isinstance(data, ProcessingResult):
-            return data
         text = decode_text(data, item.content_metadata.charset).value
         signature = text.rsplit("\n-- \n", 1)[-1] if "\n-- \n" in text else "\n".join(text.splitlines()[-count:])
         evidence: list[AddressEvidence] = []
@@ -215,11 +228,17 @@ class IdentityProcessor:
         return ProcessingResult(evidence=tuple(evidence))
 
 
+class AttachedMessageLimits(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    max_depth: int | None = Field(default=None, gt=0, strict=True)
+
+
 class AttachedMessageProcessor:
     def process(self, item: ProcessingObject) -> ProcessingResult:
         policy = item.application.policy
         if policy is None:
             raise ValueError("attachment processing policy is missing")
-        if item.content_metadata.depth >= policy.max_message_depth:
-            return ProcessingResult(outcome="abort-part", diagnostics=("attached-message depth limit reached; parent bytes retained",))
+        limit = AttachedMessageLimits.model_validate(item.get_my_config()).max_depth or policy.max_message_depth
+        if item.content_metadata.depth >= limit:
+            raise ExtractionLimitError("attached-message depth limit reached; parent retained; raise plugins.attached-message.max_depth and retry")
         return ProcessingResult(promotions=(PromotedMessage(content_ref=item.content_ref, part_path=item.part_path),))

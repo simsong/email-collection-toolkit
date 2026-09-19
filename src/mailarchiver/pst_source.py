@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import hashlib
+import os
 import shutil
+import sys
 import subprocess
 import tempfile
 from collections.abc import Iterator
@@ -12,6 +14,7 @@ from urllib.parse import urlsplit
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from .clamav_definitions import LIBRARY_ENV, DATABASE_ENV, CERTIFICATES_ENV, library_path, selected_definitions, certificates_path
 from .plugin_api import FileProbe, MailContainer, MailObject, PluginContext, ProgressEvent
 from .sources import LocalSourcePlugin, MboxFileParser
 
@@ -56,6 +59,7 @@ def validate_record(raw: bytes) -> None:
         raise ValueError("invalid MCT importer URI or incomplete header block")
 
 
+
 class PstFileParser:
     kind = "pst"
 
@@ -96,7 +100,8 @@ class PstFileParser:
         if self.context.archive is None:
             raise ValueError("PST extraction requires an archive workspace")
         settings = PstSettings.model_validate(self.context.get_my_config())
-        executable = settings.executable or shutil.which("pst-importer")
+        bundled = Path(getattr(sys, "_MEIPASS", "")) / "importers/pst-importer"
+        executable = settings.executable or (str(bundled) if getattr(sys, "frozen", False) else shutil.which("pst-importer"))
         if executable is None:
             candidate = Path(__file__).resolve().parents[2] / "target" / "release" / "pst-importer"
             if candidate.is_file():
@@ -112,10 +117,18 @@ class PstFileParser:
         diagnostics_path = workspace / "stderr.txt"
         receipt = ImportReceipt(executable=program, executable_sha256=file_hash(program),
                                 source=source.path, source_sha256=file_hash(source.path))
+        environment = os.environ.copy()
+        environment.pop("MAILARCHIVER_SCAN", None)
+        if self.context.scan_policy == "clamav":
+            environment["MAILARCHIVER_SCAN"] = "1"
+            environment[LIBRARY_ENV] = str(library_path())
+            environment[DATABASE_ENV] = str(selected_definitions().directory)
+            if certs := certificates_path():
+                environment[CERTIFICATES_ENV] = str(certs)
         completed = False
         try:
             with output_path.open("wb") as output, diagnostics_path.open("wb") as diagnostics:
-                with subprocess.Popen([str(program), "--", str(source.path)], stdout=output, stderr=diagnostics) as process:
+                with subprocess.Popen([str(program), "--", str(source.path)], stdout=output, stderr=diagnostics, env=environment) as process:
                     try:
                         import time
                         deadline = time.monotonic() + settings.timeout_seconds
@@ -146,7 +159,8 @@ class PstFileParser:
                     if resume_cursor is None or previous.source_offset >= int(resume_cursor):
                         yield MailObject(source=container.source, work_id=container.work_id,
                             cursor=str(previous.source_offset), raw=previous.raw, mbox_envelope=previous.mbox_envelope,
-                            completed_messages=receipt.emitted)
+                            completed_messages=receipt.emitted,
+                            scan_responsibility="producer")
                 previous = record
             if receipt.exit_code != 0:
                 raise RuntimeError(f"PST extraction incomplete (exit {receipt.exit_code}); evidence retained at {workspace}")
@@ -156,7 +170,8 @@ class PstFileParser:
                 if resume_cursor is None or previous.source_offset >= int(resume_cursor):
                     yield MailObject(source=container.source, work_id=container.work_id,
                         cursor=str(previous.source_offset), raw=previous.raw, mbox_envelope=previous.mbox_envelope,
-                        completed_messages=receipt.emitted)
+                        completed_messages=receipt.emitted,
+                        scan_responsibility="producer")
             if file_hash(source.path) != receipt.source_sha256:
                 raise ValueError("PST source changed during extraction")
             completed = True

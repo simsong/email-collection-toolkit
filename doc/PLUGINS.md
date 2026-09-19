@@ -45,9 +45,9 @@ host. `item.check_cancelled()` checks cancellation and the manifest deadline;
 loops must cooperate. The POSIX main-thread harness also uses an alarm. A late
 result is rejected before configuration, queue or catalog publication. Arbitrary
 native code that ignores deadlines cannot be force-stopped safely in process;
-this interface is not a security sandbox. ClamAV uses its existing on-demand
-native service and a bounded command invocation; the Python ClamAV plugin itself
-runs in process. No persistent service is installed or enabled.
+this interface is not a security sandbox. The Python ClamAV plugin consumes
+producer headers or calls the shared libclamav engine in an app-owned temporary
+worker. No persistent service is installed or enabled.
 
 The fresh processing.sqlite3 schema is packaged separately under
 processing/sql/V2__processing.sql; it does not enter the production catalog
@@ -126,8 +126,8 @@ inventory, scan, identity evidence and child-message promotion results are typed
 The MIME extractor declares `emits_mime_parts = true` to dispatch normalized
 actual MIME labels; it cannot emit framework-only labels through that permission.
 Attached RFC 822 messages use inherited scan provenance, shared deduplication,
-parent/MIME-path occurrences and the persisted attachment tag. Viewer/tag-editor
-and incomplete-work dialog wiring remain the GUI phase.
+parent/MIME-path occurrences and the persisted attachment tag. The viewer and
+incomplete-work dialog are integrated; the general tag editor remains future work.
 
 The source/file acquisition interfaces remain the adapters before raw-message
 dispatch. Their `PluginContext` exposes the same namespace configuration reads
@@ -210,7 +210,8 @@ work. The registry fingerprint covers manifests and local Python code, including
 
 The same graphic appears on the [website plugin page](../website/content/plugins.md).
 This section describes the complete target architecture. The CLI framework above
-implements production processing; the GUI controls remain planned.
+implements production processing and GUI resume/picker controls. Remaining
+contract gaps are identified below rather than implied by the diagram.
 
 Source/container acquisition, including its file-parser subtree, supplies raw
 messages to three processing pipelines:
@@ -244,7 +245,8 @@ same type run. Required cross-type outputs must also precede their consumers.
 ClamAV rank 1 and filing/handoff rank 2 are ingest ranks; MIME extraction belongs
 to content processing. Abort scopes are part, message, and import. Scanner timeouts default to 60 seconds and are configurable in TOML.
 Invocation statistics include count, total time, shortest, longest, average,
-errors, and timeouts. The CLI lists registered plugins by subscribed type; About integration is planned.
+errors, and timeouts. The CLI and About list registered processors by subscribed type. About does not
+yet include source/file acquisition plugins or processor versions.
 
 Publication uses a framework service selecting year/role, including the
 INFECTED destination, and preserving transactions, locking, byte fidelity and
@@ -272,7 +274,12 @@ attached. Child-byte recovery and resource-limit behavior are specified below.
 The viewer shows origin paths; the attachment tag initially has a 5% gray background.
 
 On archive opening, unfinished work prompts **Incomplete work**, with checked
-**Continue ingest** and **Continue content processing** choices. No persistent
+**Continue ingest** and **Continue content processing** choices. The desktop bridge
+uses the shared `IngestRequest` service, saved owner/scanner/plugin settings and
+writer lease. The **Names and addresses** and **Institutions** controls query the
+processor database; manual name/address decisions commit immediately and survive
+replay. Institution membership is domain-based. About lists processor manifests
+by subscribed MIME type. Authoritative matching is not yet connected. No persistent
 “do not ask again” option suppresses unfinished work. Selecting only content processing runs eligible already-ingested messages even
 when ingest remains incomplete; required message-metadata processing precedes
 their content jobs. Selecting both completes ingest before deferred content
@@ -287,7 +294,7 @@ assignments are durable, not disposable search-index data.
 
 ### Registration and manifest contract
 
-The processor API is a planned versioned extension of the existing trusted
+The implemented processor API is a versioned extension of the existing trusted
 Python plugin system, not a new package installer. Existing source/file API v1
 manifests remain supported through adapters. The new processor manifest uses
 API version 2 and a `processors/<kind>/plugin.toml` directory beneath packaged
@@ -329,20 +336,21 @@ rules remain applicable. Trusted Python plugins are not sandboxed.
 Each processor implements the conceptual interface
 `process(item: ProcessingObject) -> ProcessingResult`. Both models and all
 nested data records are typed Pydantic structures; arbitrary dictionaries are
-not the internal API. The CLI framework implements the core classes; service capabilities and the
-remaining provenance/deadline fields are added with production integration.
+not the internal API. CLI and GUI processing use these concrete public fields
+and methods.
 
 | Processing object field | Contract |
 |---|---|
 | `application` | Application/service context; no GUI-thread assumption |
 | `archive` | Current archive and its controlled mailbox/catalog services |
-| `job_id`, `pipeline` | Durable job identity and current pipeline |
+| `job_id`, `pipeline` | Durable positive job ID during dispatch (None before enqueue); current pipeline |
 | `message_ref` | Whole raw-message reference, all headers and content accessible |
 | `content_ref`, `content_type` | Current immutable stream/reference and dispatch type |
 | `part_path`, `scope` | Stable MIME-part path and local body/attachment scope |
-| `provenance` | Source occurrence, parent message/path, and scan provenance |
+| `source_metadata`, `parent_message_id`, `part_path`, `scan_provenance` | Typed source occurrence and parent/scan provenance |
+| `content_metadata` | Charset, filename, MIME part ID, body alternatives and depth |
 | `synthetic`, `producer` | Derived status and generating plugin/version |
-| `cancellation`, `deadline` | Framework cancellation and invocation deadline |
+| `check_cancelled()`, `remaining_seconds` | Check cancellation/deadline; remaining invocation time for bounded native calls |
 
 References support bounded streaming; emitting an object does not require
 copying a message or attachment into memory. Application/service handles are
@@ -352,10 +360,10 @@ parse lazily; creating the raw object must not MIME-parse before ClamAV.
 
 Dispatch uses normalized MIME types without parameters; charset and other MIME
 parameters remain in typed content metadata. Framework types are explicitly
-namespaced: `application/x-mailarchiver-raw-message`,
-`application/x-mailarchiver-message-headers`, and
-`application/x-mailarchiver-identity-evidence`. Actual parts retain their MIME
-types, including `message/rfc822`. These framework labels are internal types,
+namespaced: `application/x-mailarchiver-raw-message` is currently dispatched.
+Header metadata and identity evidence are typed result fields, not separately
+emitted framework types. Actual parts retain their MIME types, including
+`message/rfc822`. These framework labels are internal types,
 not headers added to canonical messages.
 
 A result contains emitted processing objects, typed diagnostics, and one
@@ -421,11 +429,65 @@ it does not delete or truncate parent mail. Exact limits are implementation
 configuration, not changes to content identity. Job identity and ancestry
 checks prevent endlessly rediscovering the same child occurrence.
 
+`plugins.mime` settings are positive integer `max_expanded_bytes` (134217728),
+`max_parts` (10000), and `max_child_messages` (1000). Before releasing any
+outputs, MIME extraction traverses the complete nested-message tree with one
+budget. Expanded bytes count all intermediate split/decoded bytes written,
+including repeated representations; this conservative bound can exceed the
+final leaf-payload total. Part counts include multipart children, not just
+attached emails. A limit raises a failed, retryable job before child publication;
+raise the relevant setting and continue processing. Quoted-printable decoding
+also uses bounded chunks. Depth limits also leave failed jobs.
+
 ### Persistent work, identity evidence and manual decisions
+
+Processor reports count completed/failed attempts across archive history,
+including explicit fail-import results. They show errors and typed timeout
+counts; unfinished running attempts are not zero-duration samples. No-invocation
+timings display n/a. Failed invocation JSON stores the typed response, including
+its timeout flag and any scan evidence; successful JSON remains a ProcessingResult.
+Legacy failure records without a timeout flag retain error counts only.
+
+
+About lists processor versions by subscribed type and source/file acquisition
+plugins by role and version. Both inventories include the archive's saved extra
+plugin directories; acquisition discovery validates manifests without invoking
+plugin factories during status refresh.
+
+
+Identity address/group counts keep header and signature channels separate:
+`messages` counts distinct messages containing the address in headers;
+`signature_messages` counts distinct signature-bearing messages. The pickers
+display Messages and Signatures columns. Dates cover either evidence channel,
+and date filters apply to both counts. Group counts deduplicate within each
+channel across all visible member addresses.
+
+
+Scanner invocations persist typed clean/infected/not-scanned/unscannable/scanner-error
+results with diagnostics and engine/signature versions (NULL if unavailable).
+Errors and reported encryption/size-limit heuristics block filing and retain
+raw input for retry. Version queries are cached per daemon configuration;
+which unscannable conditions are reported depends on the daemon configuration.
+Failed invocations may publish scan evidence only, never content or filing.
+
+
+Attached-message promotion requires valid transfer decoding. Invalid base64
+(including padding/trailing data), invalid quoted-printable escapes, and unknown
+encodings leave failed extraction and retain the parent, without publishing a
+child. Ordinary non-message MIME parts retain best-effort decode fallback.
+
+
+MIME depth (default 40, `plugins.mime.max_depth`), attached-message depth
+(default 20, `plugins.attached-message.max_depth`), and text size limits
+(`max_text_bytes` on each text plugin) leave failed, retryable jobs. The GUI
+offers continuation for these failures; increasing the configured limit and
+resuming reprocesses the retained source. Limits never mark truncated work complete.
 
 Persist job phase, message/part identity, plugin kind/version, relevant
 configuration fingerprint, input digest, attempts, status and diagnostics.
-Statuses distinguish pending, running, completed, aborted, failed and cancelled.
+Job statuses are pending, running, completed, aborted and failed. Cancellation
+records an interrupted invocation and leaves the job resumable; it is not a
+separate terminal job state.
 On restart, abandoned running jobs become retryable; successful unchanged work
 is skipped. A plugin/version/configuration change invalidates its derived work
 and dependent outputs without rewriting canonical messages or manual decisions.
@@ -472,13 +534,14 @@ handoff; content-only resume; attachment deduplication and provenance; nested
 message bounds; body versus attachment selection; HTML-before-RTF fallback;
 synthetic content exclusion from canonical mail; durable manual edits; and
 accurate statistics. Use fixtures and the existing on-demand ClamAV EICAR test.
-The diagram and this contract specify intended behavior, not evidence that
-these acceptance checks or the new processor implementation already exist.
+The processing framework and GUI integration are implemented and tested.
+The public object table and cancellation state names above describe the
+implemented API; a retry retains its job ID while a derived job gets a new ID.
 
 ## Implemented ingest plugins
 
-Email Collection Toolkit currently implements only the two ingest plug-in architectures
-described below. They are deliberately separate from the planned geography data
+Before the API v2 processor trees, Email Collection Toolkit implements the two
+API v1 acquisition layers described below. They are deliberately separate from the planned geography data
 and visualization extension points; an installed ingest plug-in cannot register
 a graphical menu or render a visualization.
 
@@ -655,10 +718,13 @@ difference from a filename-only interface keeps the framework-selected source
 identity, provenance, estimates, and integrity boundary attached to the work,
 and lets the same scheduler handle local files and virtual provider containers.
 
-The packaged file parsers are:
+The packaged file parsers are (PST/OST details and limits are in
+[PST_IMPORTER.md](PST_IMPORTER.md)):
 
 | Kind | Recognition | Behavior |
 |---|---|---|
+| `pst` | PST header classification | Rust extraction; optional redundant the external libpff converter pass |
+| `ost` | OST header classification | External libpff converter for cache extraction |
 | `emlx` | `.emlx` suffix | Reads the declared RFC 5322 length; rejects partial EMLX |
 | `babyl` | case-insensitive `BABYL OPTIONS:` signature | Streams Emacs RMAIL Babyl records, including extensionless files |
 | `mbox` | initial `From ` separator | Streams MBOX records with numeric offsets and safe append resume |
@@ -842,7 +908,7 @@ stores it in container metadata and integrity evidence under
 even when file bytes match. This supports turning on the developer-only
 [Redundant PST Import](PST_IMPORTER.md#redundant-pst-import-testing-option) option
 after a Rust-only import. Other file parsers retain source-only checkpoints.
-OST uses the in-process `ost`/libpff file plugin and an Outlook cache relationship.
+OST uses the `ost` file plugin to invoke the external libpff converter and retains an Outlook cache relationship.
 Its receipts distinguish extracted cache contents from server completeness.
 
 ## Planned geography data providers
@@ -871,3 +937,22 @@ source-mail mutation, or unrestricted archive writes. The API version,
 manifest shape, database capability boundary, canvas lifecycle, and export
 contract remain to be designed in [issue #81](https://github.com/simsong/email-collection-toolkit/issues/81).
 Until then, no visualization plug-in directory or manifest is supported.
+
+## Antivirus evidence at the acquisition boundary
+
+An API producer scans its messages and sets `MailObject.scan_responsibility="producer"`.
+Only infected messages receive these RFC headers before emission:
+
+```
+X-ClamAV-Detection: Eicar-Test-Signature
+X-ClamAV-Engine-Version: 1.5.4
+X-ClamAV-Definitions-Version: main:63,daily:28127,bytecode:339
+```
+
+Python reads the detection header and files the emitted bytes in INFECTED.
+Clean messages carry none of these headers. No host rescan, scan receipt,
+per-message hash, or database write is required from the producer. Python owns
+message hashing and deduplication. Errors are reported for operator action;
+re-import the stream and let ordinary deduplication handle repeated messages.
+There is no automatic API restart. Explicit `--no-scan` bypasses scan handling.
+Ordinary file imports continue to use host scanning.

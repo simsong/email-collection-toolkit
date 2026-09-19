@@ -463,3 +463,18 @@ def test_symlinked_plugin_directory_cannot_escape_configured_root(tmp_path: Path
         load_plugins([trusted])
 
     assert not marker.exists()
+
+
+def test_manifest_inventory_does_not_import_acquisition_code(tmp_path: Path) -> None:
+    """About uses validated discovery without executing plugin code on each refresh."""
+    from mailarchiver.plugin_loader import discover_manifests
+    directory = tmp_path / "files" / "inventory"
+    directory.mkdir(parents=True)
+    (directory / "plugin.toml").write_text(
+        'api_version=1\nplugin_type="file"\nkind="inventory"\nname="Inventory"\n'
+        'implementation_version="7"\nentrypoint="plugin:create_plugin"\n')
+    (directory / "plugin.py").write_text('raise RuntimeError("About must not import this module")\n')
+    manifest = next(item for item in discover_manifests((tmp_path,)) if item.kind == "inventory")
+    assert manifest.implementation_version == "7" and manifest.plugin_type == "file"
+    with pytest.raises(PluginDiscoveryError):
+        load_plugins((tmp_path,))

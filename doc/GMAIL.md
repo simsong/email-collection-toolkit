@@ -163,21 +163,11 @@ References:
 Local MBOX ingestion is implemented and byte-preserving. Automatic Takeout
 creation and download, direct Takeout ZIP ingestion, structured
 `X-Gmail-Labels` indexing, and live Gmail API acquisition are not implemented.
-The `mailarchiver-auth` command exercises the proposed shared-client
-authorization boundary but does not ingest Gmail.
+The Google authorization prototype and dependencies have been removed. Live
+Google ingestion will be reimplemented when needed. There is no account
+registration or authorization command in the current application.
 
-## Current acquisition boundaries
-
-No release Desktop OAuth client is bundled yet. The shared-client end-user
-flow remains deferred until a maintainer supplies and validates that public
-configuration in release artifacts. Current authorization requires a developer
-client override. Installing that override validates and writes the same bytes.
-Known consumer domains need no DNS lookup; transient DNS and token-refresh
-transport failures are disclosed as errors rather than negative detection or
-fresh consent. Credentials are stored only after the profile matches.
-
-A whole Apple Mail cache containing `.partial.emlx` files cannot currently be
-ingested: discovery rejects those files and stops the run. Only a separately
-staged copy containing complete supported records is an available local-file
-bridge. Do not modify the source cache to prepare that copy; the comparator is
-read-only and does not imply whole-cache ingest support.
+Directory import reports and skips `.partial.emlx` records and imports complete
+supported messages. Direct selection of a partial record is rejected. Detached
+content is not reconstructed, so this remains best-effort cache recovery rather
+than complete provider acquisition.

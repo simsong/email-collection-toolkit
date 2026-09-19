@@ -66,7 +66,7 @@ def snapshot(archive: Path, path: Path) -> ContentReference:
 
 
 def enqueue(database: sqlite3.Connection, item: ProcessingObject, registry_hash: str, parent_job_id: int | None = None) -> None:
-    payload = item.model_dump_json()
+    payload = item.model_copy(update={"job_id": None}).model_dump_json()
     identity = hashlib.sha256((registry_hash + payload + str(parent_job_id)).encode()).hexdigest()
     database.execute("INSERT OR IGNORE INTO jobs(identity,item_json,registry_hash,parent_job_id,status) VALUES(?,?,?,?,'pending')",
                      (identity, payload, registry_hash, parent_job_id))
@@ -89,11 +89,13 @@ def submit(database: sqlite3.Connection, archive: Path, source: Path, registry_h
 def report(database: sqlite3.Connection, kinds: tuple[str, ...]) -> RunReport:
     stats: list[PluginStatistics] = []
     for kind in kinds:
-        count, total, minimum, maximum, errors = database.execute(
+        count, total, minimum, maximum, errors, timeouts = database.execute(
             "SELECT count(*),coalesce(sum(elapsed),0),min(elapsed),max(elapsed),"
-            "coalesce(sum(status='failed'),0) FROM invocations WHERE kind=?", (kind,)).fetchone()
+            "coalesce(sum(status='failed' OR json_extract(result_json,'$.outcome')='fail-import'),0),"
+            "coalesce(sum(json_extract(result_json,'$.timed_out')=1),0) "
+            "FROM invocations WHERE kind=? AND status<>'running'", (kind,)).fetchone()
         stats.append(PluginStatistics(kind=kind, invocations=count, total=total, shortest=minimum,
-                                      longest=maximum, average=total / count if count else None, errors=errors))
+                                      longest=maximum, average=total / count if count else None, errors=errors, timeouts=timeouts))
     def job_count(status: str) -> int:
         return database.execute("SELECT count(*) FROM jobs WHERE status=?", (status,)).fetchone()[0]
     return RunReport(completed=job_count("completed"), pending=job_count("pending") + job_count("running"),

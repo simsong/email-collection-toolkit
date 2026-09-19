@@ -389,6 +389,14 @@ def test_about_window_displays_version_disk_and_warnings(tmp_path: Path, page: P
     page.wait_for_function("document.getElementById('version').textContent.startsWith('Version ')")
     assert "available on" in page.locator("#disk").inner_text()
     assert "invalid" in page.locator("#notices").inner_text()
+    expect(page.locator("#processors")).to_contain_text("clamav")
+    expect(page.locator("#processors")).to_contain_text("text/plain")
+    inventory = application.about_status()
+    for processor in inventory.processors:
+        expect(page.locator("#processors")).to_contain_text(f"{processor.name} ({processor.kind}) version {processor.implementation_version}")
+    for plugin in inventory.acquisition_plugins:
+        expect(page.locator("#acquisition-plugins")).to_contain_text(f"{plugin.name} ({plugin.kind}) version {plugin.implementation_version}")
+    assert {plugin.plugin_type for plugin in inventory.acquisition_plugins} == {"source", "file"}
 
 
 def test_gui_import_uses_typed_ingest_service_without_a_subprocess(tmp_path: Path) -> None:

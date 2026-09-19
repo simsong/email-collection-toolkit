@@ -42,8 +42,10 @@ old record has no original-header block, its visible headers are used instead.
 RMAIL labels and redundant visible headers remain only in the source Babyl
 container and are not email content.
 
-Outlook PST and OST files and direct Gmail, Microsoft 365, and live IMAP
-connections are planned but are not yet supported. Complete local Apple Mail
+This checkout also imports PST using the Rust helper and OST through the external
+libpff converter; see [PST_IMPORTER.md](PST_IMPORTER.md) for build requirements, qualified
+formats, and reconstruction/cache limits. Direct Gmail, Microsoft 365, and live
+IMAP connections remain planned. Complete local Apple Mail
 cache records from those providers can be imported now.
 The code has inactive integration points for Gmail, IMAP, Microsoft Exchange,
 and standard input containing NUL-separated messages; these are not CLI ingest
@@ -140,9 +142,8 @@ beneath one directory, and ingest that directory as the local source. See
 developer discussion of Gmail API, OAuth, IMAP, verification, and security
 assessment requirements.
 
-Live Gmail authorization is a developer preview for an unimplemented future
-adapter. End users should not run `mailarchiver-auth` or create a Google Cloud
-project for ordinary Takeout ingestion.
+Live Gmail authorization is unavailable; its prototype has been removed.
+Use Takeout for Gmail acquisition.
 
 As an interim incremental path, add the Gmail account to Apple Mail, configure
 it to download attachments, allow the wanted mailboxes to synchronize, and
@@ -153,9 +154,10 @@ completeness claim matters.
 ## Import Microsoft 365
 
 Microsoft has no platform-neutral Takeout equivalent. Outlook can export PST
-on Windows or OLM from legacy Outlook for Mac, but Email Collection Toolkit does not yet
-ingest those formats and its Microsoft authorization adapter is only a stub.
-There is currently no complete Microsoft 365 export workflow supported by Email Collection Toolkit. See [M365.md](M365.md) for the end-user status and developer design.
+on Windows or OLM from legacy Outlook for Mac. This checkout imports PST and
+extracts OST caches; OLM and live Microsoft authorization/ingest remain unavailable.
+PST export completeness depends on what Outlook downloaded, and an OST cache
+must never be described as a complete server export. See [M365.md](M365.md) for the end-user status and developer design.
 
 Apple Mail can export selected mailboxes as MBOX, and Email Collection Toolkit can read
 complete messages from an Apple Mail cache. A cache can be incomplete, however;
@@ -169,8 +171,9 @@ messages for Gmail, Microsoft 365/Exchange Online, Outlook.com, and ordinary
 IMAP accounts that have already been synchronized to this Mac. Quit Mail if
 practical, set **Download Attachments** to **All**, allow synchronization to
 finish, and export selected mailboxes as MBOX or stage a separate copy containing
-only complete supported messages. Do not ingest the whole `~/Library/Mail` tree
-when it contains `.partial.emlx` files: discovery rejects them and stops the run.
+only complete supported messages. Directory import reports and skips
+`.partial.emlx` records while retaining complete records; direct selection of a
+partial record fails. Neither behavior establishes cache completeness.
 The invoking terminal may require Full Disk Access. Never alter the source cache
 to prepare the staged copy.
 
@@ -518,10 +521,10 @@ program. A search therefore covers the collection's complete time span. Recent
 messages receive no preference beyond an explicitly selected date sort, and an
 archivist never has to ask the application to check older years.
 
-After three characters, the search box suggests matching addresses and
-subjects. Each suggestion shows the number of deduplicated messages in which
-it occurs. Address matching includes display names and email addresses, though
-only email-address substrings have a dedicated accelerator. Subject matching
+After three value characters, the search box suggests matching names, addresses,
+subjects, and recognized dates. Suggestions show distinct message counts. Names
+include original header names and current authoritative names; address matching
+and role counts work before content processing finishes. Subject matching
 finds the characters anywhere in the subject, so `beth` also finds `ELISABETH`.
 Use the arrow keys and Return, or click a suggestion.
 
@@ -546,9 +549,23 @@ Useful search forms include:
 | `cc:bob@example.org` | a Cc recipient contains this value |
 | `bcc:bob@example.org` | a Bcc recipient contains this value |
 | `subject:"annual report"` | subject contains this phrase |
-| `date:2024-03-15` | message date is this UTC calendar day |
-| `before:2024-01-01` | message is earlier than this date |
-| `after:2024-01-01` | message is later than this date |
+| `date:2024-03-15` | message timestamp falls within this worldwide calendar date |
+| `before:2024-01-01` | message is before this date begins anywhere |
+| `after:2024-01-01` | message is after this date ends everywhere |
+
+Date selectors cover a 50-hour window from midnight in UTC+14 through the end
+of the date in UTC−12. Adjacent daily searches overlap by 26 hours. For example,
+`date:2020-01-05` includes `2020-01-04T10:00:00Z` up to, but not including,
+`2020-01-06T12:00:00Z`; it includes January 5 at 10 p.m. in Boston.
+`before:` selects timestamps before the opening boundary; `after:` selects
+timestamps at or after the closing boundary. Stored UTC timestamps are unchanged.
+Dates accept ISO calendar dates, `m/d/yyyy`, and English month names; quote
+multiword values, as in `date:"January 5, 2020"`.
+
+Address selectors match original header names and current authoritative names
+as well as email substrings. Completion starts after three value characters,
+including after an explicit prefix. Tiles offer only matching address roles,
+defaulting to Any when several roles match. Date tiles offer Date/Before/After.
 
 All supplied terms must match. Use the sort controls above the result list to
 sort the complete matching set by date, subject, or sender. The application
@@ -875,6 +892,14 @@ of your installed data. These features are documented design commitments and
 are not in the current release.
 
 ## Configuration
+
+Archive `config.yaml` accepts `mbox_max_bytes`, a positive integer byte limit
+for each numbered MBOX part. The default is 4026531840 (3.75 GiB). For a small
+test archive, set `mbox_max_bytes: 20480` for 20 KiB rollover. The importer
+starts a new part before a nonempty part would reach the limit, including
+MBOX framing and quoting. A single oversized message occupies its own part
+without being split. Changing the limit affects future appends, not existing
+files, and applies to both CLI and GUI import and attached-message processing.
 
 The planned top-level `archive.yaml` belongs to one archive and contains that
 archive's FILE, LOCAL FOLDER, and IMAP source definitions. It contains local

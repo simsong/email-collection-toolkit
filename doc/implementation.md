@@ -2,13 +2,56 @@
 
 # Mail archive normalizer implementation
 
+## Embedded antivirus migration status
+
+[PR #124](EMBEDDED_CLAMAV.md) uses libclamav directly from Python and Rust.
+The Python session shares one compiled engine across concurrent native threads
+in a temporary worker process. Source workers scan before the publication lock,
+and Python records results in the existing processing database. Rust adds
+X-ClamAV-Detection, X-ClamAV-Engine-Version, and X-ClamAV-Definitions-Version
+only to infected messages. Python reads those headers to quarantine the emitted
+RFC message without rescanning. Clean API messages have no scan provenance.
+Per-message hashing and deduplication belong to Python; there are no scan receipts
+or additional database schema. Operators handle failures by re-importing.
+
+About displays definition dates and an amber recommendation after three calendar
+months, with explicit FreshClam refresh into immutable per-user generations.
+Failed updates cannot replace active definitions. Project-owned Python, Rust,
+tools, documentation, and website code use GPL-2.0-only, with additional licenses
+available. The independent libpff converter uses GPLv3. ClamAV uses GPLv2;
+the remaining Apache-2.0 ftfy dependency needs compatibility resolution
+(see THIRD_PARTY_NOTICES.md).
+`make freshclam` updates ignored etc/clamdb, seeding it from
+an installed database if available. The DMG bundles this copy, the engine and
+FreshClam; release CI refreshes the definitions first. Its mounted self-test runs
+real clean/EICAR scans using the bundled definitions. Application releases refresh
+bundled definitions at least quarterly.
+
+## CI and release validation
+
+All workflow jobs use macos-15. Release packaging invokes make dmg, which
+mounts the candidate and runs its headless installed-app self-test. Native GUI
+release checks remain an explicit local make check-release action. Pages uses
+the same pinned Darwin Zola binaries/checksums as application CI.
+
+## Manual state and documentation status
+
+The archive has three operational databases: `archive.sqlite3` (catalog and
+source observations), `search.sqlite3` (disposable search), and
+`processing.sqlite3` (queues, evidence, identities, affiliations and tags).
+Manual identity/tag decisions are durable user data, not reproducible from mail.
+Back up the entire archive, including databases and `config.yaml`.
+Current source code includes CLI and GUI processor integration and local PST/OST
+adapters. Research plans and historical release inventories are not promises
+of shipped features; authoritative matching, the tag editor, remote ingestion,
+geography and compiled-platform trials remain future work.
+
 ## Recovered tool safety and validation
 
-ClamAV health probes have a five-second deadline and message scans a five-minute
-deadline. Probe timeout means unavailable; a helper execution error raises
-`ClamScannerStartupError` before socket removal or daemon launch and releases
-the startup lock. Scan timeout fails import and removes temporary plaintext. Typed unscannable/scanner-error
-outcomes remain planned.
+Native initialization has a 120-second deadline; production scans retain a
+60-second deadline. A stuck/crashed native worker fails pending scans and is
+reaped. Owned extraction/message temporaries are removed. Scan threads persist
+typed evidence directly, and processor invocation history retains it too.
 
 `make h3-ambiguous-review ARGS='--apple-mail SOURCE --archive ARCHIVE --output REVIEW'`
 writes hash-verified ambiguous classes to a new private directory outside both
@@ -363,7 +406,7 @@ Cross-importer duplicate suppression requires a separate explicit policy and
 must not silently discard differences in bodies or attachments.
 
 PST and OST share the same storage-format family. The adapter and pinned crate
-enforce PST client magic. The separate `ost` file plugin uses in-process libpff
+enforce PST client magic. The separate `ost` file plugin invokes the external libpff converter
 and recognizes OST client magic before considering extensions. Genuine Unicode
 OST fixture tests exercise recovered mail and incomplete embedded MAPI items.
 The detailed distinction and reader limits are in
@@ -533,7 +576,12 @@ shows active and peak concurrency, sanitized plug-in phases, per-worker
 checking/ingesting/scanning/publishing/checkpointing/idle state, streaming
 source byte or provider-message progress, and completion percentage, and reports processed/total source-file plus
 archived/previously-seen/autosave/source-metadata/infected, unrecognized-file,
-and unchanged-container counts. Control-C commits completed work, closes the
+and unchanged-container counts. Control-C prints and flushes
+`**Interrupted. Shutting down…**` before worker-pool shutdown waits; the outer
+ingest handler also announces interruptions during preflight. The reporter emits
+the notice once and starts subsequent dashboard frames below it. Real-SIGINT
+tests hold a worker blocked until the acknowledgement is observed.
+Control-C commits completed work, closes the
 temporary scanner, publishes a BagIt/Mailbag checkpoint, reports a controlled interruption, and
 prints the partial-run archive report before returning 130.  An `ENOSPC` append is truncated back to the prior MBOX size where
 possible and reports a controlled nonzero stop.  Acceptance coverage includes
@@ -676,19 +724,31 @@ scanner clients. A single publisher lock serializes duplicate admission,
 observations, SQLite transactions, publication-journal updates, MBOX appends,
 and FTS writes; it does not surround source-integrity generator execution.
 One plug-in instance is shared across workers and must be reentrant. A discovery failure or stable-inventory mismatch occurs before
-ClamAV and message publication; unstable providers use their single captured
-worklist. The parser rejects nonpositive worker counts before starting an ingest. A spawned
-daemon must pass `clamdscan --ping` after its socket appears before any message
-scan is submitted.
+scanner initialization and message publication; unstable providers use their single captured
+worklist. The parser rejects nonpositive worker counts before starting an ingest. Native definition compilation must succeed before a host scan is submitted.
 
 Rollover, date sorting/repacking, complete recipient metadata, `verify`, richer
 text extraction, Eudora, working IMAP cache directories, live
 IMAP, Gmail, redaction, and research-oriented metadata remain planned work. The delivered
 `mailsearch` command reads both databases without writing:
-it applies `to:`/`from:`/`subject:` catalog filters, UTC calendar-day
+it applies `to:`/`from:`/`subject:` catalog filters, worldwide calendar-date
 `date:`/`before:`/`after:` filters, and ANDed FTS5 terms; it prints stable
 `message_pk` header lines and reads a numbered message directly from its
 catalogued MBOX byte location, validating its SHA-256 before output.
+
+Date search uses a worldwide calendar-date interval. Normalize ISO calendar dates, `m/d/yyyy`, and English
+`Month day, year` values through the shared selector recognizer. For date D,
+compute `start = midnight(D, UTC) - 14 hours` and
+`end = midnight(D + 1 day, UTC) + 12 hours`. Compile `date:` as
+`m.date_utc >= ? AND m.date_utc < ?`, `before:` as `m.date_utc < ?` using start,
+and `after:` as `m.date_utc >= ?` using end. Bind normalized UTC strings in the
+existing catalog format (`+00:00`), preserving indexed comparisons for counts
+and every sort order. No archive rewrite or schema change is needed.
+These 50-hour windows intentionally overlap by 26 hours on adjacent dates.
+The shared CLI/GUI parser, suggestion recognizer, help text, and boundary/SQL-plan
+tests use these same definitions.
+The website's Advanced date-handling section records the exact user-facing
+semantics.
 
 
 GUI `SearchPage.error` carries query-parser feedback; the bridge does not save
@@ -739,6 +799,64 @@ the existing `schema_info` version check does not implement those safeguards.
 
 ### CLI processor framework
 
+During dispatch, ProcessingObject.job_id exposes the durable SQLite job ID;
+retries retain it and new emissions/handoffs receive their own IDs. Provenance
+uses source_metadata, parent_message_id, part_path and scan_provenance. Plugins
+use check_cancelled() and remaining_seconds; cancellation leaves resumable work
+within pending/running/failed statuses rather than inventing a cancelled state.
+
+
+Processor reports count completed/failed attempts across archive history,
+including explicit fail-import results. They show errors and typed timeout
+counts; unfinished running attempts are not zero-duration samples. No-invocation
+timings display n/a. Failed invocation JSON stores the typed response, including
+its timeout flag and any scan evidence; successful JSON remains a ProcessingResult.
+Legacy failure records without a timeout flag retain error counts only.
+
+
+About lists processor versions by subscribed type and source/file acquisition
+plugins by role and version. Both inventories include the archive's saved extra
+plugin directories; acquisition discovery validates manifests without invoking
+plugin factories during status refresh.
+
+
+Identity address/group counts keep header and signature channels separate:
+`messages` counts distinct messages containing the address in headers;
+`signature_messages` counts distinct signature-bearing messages. The pickers
+display Messages and Signatures columns. Dates cover either evidence channel,
+and date filters apply to both counts. Group counts deduplicate within each
+channel across all visible member addresses.
+
+
+Scanner invocations persist typed clean/infected/not-scanned/unscannable/scanner-error
+results with diagnostics and engine/signature versions (NULL if unavailable).
+Errors and reported encryption/size-limit heuristics block filing and retain
+raw input for retry. Version queries are cached per daemon configuration;
+which unscannable conditions are reported depends on the daemon configuration.
+Failed invocations may publish scan evidence only, never content or filing.
+
+
+Attached-message promotion requires valid transfer decoding. Invalid base64
+(including padding/trailing data), invalid quoted-printable escapes, and unknown
+encodings leave failed extraction and retain the parent, without publishing a
+child. Ordinary non-message MIME parts retain best-effort decode fallback.
+
+
+MIME depth (default 40, `plugins.mime.max_depth`), attached-message depth
+(default 20, `plugins.attached-message.max_depth`), and text size limits
+(`max_text_bytes` on each text plugin) leave failed, retryable jobs. The GUI
+offers continuation for these failures; increasing the configured limit and
+resuming reprocesses the retained source. Limits never mark truncated work complete.
+
+`MimeLimits` and a traversal-local `MimeBudget` charge all split/decoded output
+before writing. A root MIME traversal visits nested attached messages before
+releasing any child emissions, so budgets cover the complete tree without
+per-message resets bypassing the root limit. Part and attached-message counts
+are checked before creating/decoding further children. Limit exceptions make
+the job retryable; per-invocation temporary files are cleaned. Quoted-printable
+decoding preserves incomplete escapes across bounded chunks. `make test-mime-limits`
+uses actual CLI archives to check failure, preservation and configuration retry.
+
 The processing package implements API v2 manifests, typed objects/results,
 in-process execution and a serial rank-barrier dispatcher. Make processor
 provides init, plugins, submit, run, status and explicit reprocess commands.
@@ -777,8 +895,8 @@ tails with source/executable hashes and diagnostics under `processing-pst`.
 `make test-processors` runs lint/types and substantive framework tests;
 `make test-cli-processors` validates production pipelines, deferred resume,
 HTML/RTF selection, child byte preservation, identity edits and PST extraction.
-No native windows or private archives are used. GUI picker, incomplete-work
-prompt and attachment-style display wiring remain follow-up work.
+No native windows or private archives are used. Desktop processor integration is
+validated separately by `make test-gui-processing`.
 
 On a positive ClamAV result, best-effort header metadata cannot prevent filing.
 If parsing fails, quarantine records the raw digest as identity, labels its
@@ -837,7 +955,31 @@ parent scan provenance; the handoff uses shared deduplication/publication
 services to establish their records and durable content references.
 The graphic is a shared SVG in `website/static/images/processor-dag.svg`.
 The CLI dispatcher, production extraction, attachment promotion and identity/tag
-persistence are implemented. GUI control and display wiring remain subsequent work.
+persistence are implemented. `gui_processing.py` supplies read-only status and
+identity queries plus writer-leased manual edits. `GuiApi.resume_processing`
+builds an `IngestRequest` from saved policy and starts the existing GUI import
+thread; it never starts a Python plugin subprocess. Ingest saves resolved owner
+rules and plugin/config paths in `processing_settings` before message processing.
+Run history preserves unfinished source roots across later rootless content runs.
+Content-only work reuses archived objects, and read-only access never creates a
+missing processing database. Unsupported/missing saved policy reports an error.
+
+`processing.js` shows the two checked resume options on opening and provides an
+explicit **Continue Processing** action. `identity.html` and `identity.js` subclass the shared
+matcher widgets with database queries, distinct per-group counts and immediate
+manual writes. Name moves and separation update manual address assignments;
+institutions retain domain-based membership and permit name edits. Prototype
+undo/reset are not exposed for persisted edits. Authoritative matching remains
+unconnected and disabled. About groups the registered processor manifests by
+subscribed type. `gui_provenance.py` reads attachment tags and parent occurrences;
+search rows show the gray tag and the viewer links to each parent and MIME path.
+A parent outside the current search results opens in the viewer without trying
+to select or scroll to an absent result row.
+`make website-preview-screenshots` builds the website and renders its homepage,
+Searching and Importing pages using local assets into `.tmp/website-previews`.
+The headless tests use real bridges, queues and SQLite databases, including edits
+surviving replay, competing writers, content resume without source files, and
+attached-message navigation. Native macOS window behavior remains an opt-in check.
 
 The standalone `make matcher-prototype` opens independent name and institution
 windows through a temporary `LoopbackAssetServer` and pywebview. Use
@@ -1138,7 +1280,7 @@ thread at exit. Cancel (also Escape) waits for its bridge reply thread to finish
 application using the existing stop/checkpoint policy. `request_quit` first calls
 `prepare_quit` under the same application lock used to publish import jobs: a
 job-free decision sets `_quitting` before new jobs can register; otherwise it
-confirms, stops jobs, and waits for completion. A deterministic native regression
+confirms active ingest, stops jobs, and waits on a background thread. An opt-in native regression
 publishes a real leased job immediately before that decision and verifies the
 confirmation, stop signal, lease retention, completion, and application exit.
 Picker selection and the Cancel action do not persist setup paths or write
@@ -1650,8 +1792,11 @@ excluded. An external-content trigram FTS5 table covers unique normalized email
 addresses. Its aggregate source table retains one display name, a deduplicated
 message count, and a last-seen date, while a SHA-256 mapping table retains the
 per-message date for exact count and recency updates and replacement.
-Display-name matches scan that bounded aggregate table;
-subject matches scan the canonical subject column rather than creating
+The live completion path resolves catalog addresses against header/authority
+names from processing.sqlite3, with this legacy display-name table as an additional
+source. It derives roles and distinct message counts through catalog sender and
+recipient indexes, without requiring content processing. Subject matches scan
+the canonical subject column rather than creating
 a second subject store. Ordinary `message_metadata.sha256` is the indexed lookup key for the
 corresponding FTS row IDs; updates and recovery delete FTS rows by row ID rather
 than filtering the virtual tables on their unindexed SHA-256 columns. The
@@ -1769,8 +1914,16 @@ The packaged YAML supplies both the prefix byte budget and preamble line limit.
 Writers produce an envelope `From ` line plus mboxrd-escaped message bytes under
 `data/mbox/`.
 They track the byte offset and byte length of each complete record.  Output
-currently uses the first numbered file for each year/category; the required
-3.75 GiB rollover selection remains planned. The directory contains no nested
+uses the highest numbered part for each year/category. Under the existing writer
+lease, the publisher selects a new part when the exact framed record would bring
+a nonempty part to or above `config.yaml`'s positive `mbox_max_bytes` limit
+(default 4026531840). The publication journal records the selected part before
+append; normal rollback removes an uncommitted newly created part. Oversized
+individual records remain whole in their own parts. This applies equally to
+Sent, Archive, INFECTED and attached-message publication. `make test-rollover`
+checks 20 KiB rollover with four 6 KiB records, restart/deduplication, framing
+boundaries, oversized records and orphan recovery without large test files.
+The directory contains no nested
 per-message files.
 For any original message lacking a final line break, standard MBOX contributes
 one before its record separator. Direct retrieval considers the stored form and
@@ -1818,7 +1971,7 @@ Import confirmations use a 560-point-wide selectable AppKit accessory label,
 keeping archive/source/owner paths readable without changing default or Cancel
 actions. `make test-packaging` checks real alert layout and both button sets
 without showing a modal dialog.
-The download action opens only ClamAV's official page. About reports configuration
+The download action opens the application's release page. About reports configuration
 presence separately from readiness, which remains an ingest preflight check.
 `make test-packaging` exercises missing-scanner failure, explicit opt-out,
 durable evidence, source immutability, and isolated headless diagnostics.
@@ -1890,7 +2043,7 @@ Missing either secret emits `::warning::` and produces `*_UNSIGNED.dmg`; invalid
 configured credentials fail. An explicit `--signing-identity` overrides secrets;
 `-` emits a distinct warning identifying that deliberate unsigned override.
 The release workflow builds the DMG on `macos-15`, passes secrets only to
-`make check-release`, and waits for the tested artifact before assembling the source and
+`make dmg`, and waits for the headless-tested artifact before assembling the source and
 DMG checksums into a draft release. Assembly checks out the Mac job's verified
 commit and checks that the tag still names that commit. Both jobs validate the
 tag reference, checked-out commit, annotation, and project version before
@@ -1908,7 +2061,8 @@ Mac release trial; pure policy tests do not establish those properties.
 `scripts/desktop_entry.py` dispatches normal GUI launch, `--cli`, `--self-test`,
 and `--self-test-gui`. Frozen GUI resources use PyInstaller's bundle root;
 the verifier's actual `.py` source is explicitly bundled for archive installation.
-The Cocoa document delegate extends rather than replaces pywebview's quit guards.
+The Cocoa document delegate routes quit through the shared stop/checkpoint policy
+and closes pywebview windows only after processing workers finish.
 
 `scripts/dmg_layout.py` uses build-only `dmgbuild` to write the Finder `.DS_Store`
 and background into the image without changing global Finder preferences.
@@ -1951,44 +2105,15 @@ A compiled-library regression proves that an alternate self install name
 passes while a real unresolved import still fails. See [MACOS_DISTRIBUTION.md](MACOS_DISTRIBUTION.md)
 for commands, limitations, and Apple's renewal/notarization steps.
 
-### Existing scanner configuration
+### Embedded scanner configuration
 
-Pull-request CI runs one `macos-15` job for `make check`, distribution and website
-validation. Separate Rust/lint jobs are omitted because `make check` includes them. It installs ClamAV through Homebrew into the disposable runner,
-uses a private temporary signature/configuration/socket directory and starts
-the daemon only on demand. Website validation selects the pinned, SHA-256-checked
-Zola macOS binary for the runner architecture. Poppler is installed for the PDF
-ground-truth test. Native GUI checks remain disabled. Ingest telemetry tests
-check monotonic worker peaks within the CPU/source-file limit; reaching exactly
-four concurrent workers is not required on smaller runners or faster scheduling.
+MAILARCHIVER_CLAMAV_LIBRARY and MAILARCHIVER_CLAMAV_DATABASE select explicit
+development resources. MAILARCHIVER_CLAMAV_CERTIFICATES selects signature trust
+material, MAILARCHIVER_FRESHCLAM the updater, and MAILARCHIVER_CLAMAV_UPDATES a
+private update root. Frozen resource resolution uses the bundle rather than
+Homebrew. Bundle assembly and CI provisioning still require migration; see
+EMBEDDED_CLAMAV.md. Legacy MAILARCHIVER_CLAMD settings are ignored.
 
-Homebrew installed these commands:
-
-```text
-/opt/homebrew/bin/clamscan
-/opt/homebrew/bin/clamdscan
-/opt/homebrew/bin/freshclam
-/opt/homebrew/sbin/clamd
-```
-
-`clamd` is the normal on-demand scanner: it loads the signature database once
-and accepts scans through `/private/tmp/clamd.sock`; the archiver starts it
-for a run when needed and stops it after the run unless an operator has
-already started it. Before starting an owned daemon, the archiver creates a
-unique mode-`0700` runtime directory beside the configured file, pre-creates
-and verifies a mode-`0600` log, and derives a private configuration without
-`LogFile`, `LogSyslog`, or `PidFile`. The owned foreground subprocess needs no
-PID file, and its output goes to the private log for startup diagnostics. The
-configured file itself supplies an advisory interprocess lock held for the
-complete lifetime of an owned daemon, preventing archiver runs from racing its
-configured `LocalSocket` without creating a persistent lock artifact. A healthy
-external daemon is reused and left running. Shutdown removes only owned runtime
-files. `clamscan` remains a diagnostic fallback. Neither an
-on-access scanner, a login service, nor a scheduled scan is enabled.  Run
-`freshclam` only when an operator explicitly wants new signatures.
-`MAILARCHIVER_CLAMD`, `MAILARCHIVER_CLAMDSCAN`, `MAILARCHIVER_CLAMD_CONFIG`,
-and `MAILARCHIVER_CLAMD_SOCKET` override the macOS Homebrew defaults for a
-separately configured local environment such as CI.
 
 Current MIME traversal uses the standard-library parser without explicit size,
 recursion, time, or decompression limits. Plain text and rendered HTML are
@@ -2053,54 +2178,15 @@ deletes canonical mail or defeats message-level deduplication. This terminology
 is distinct from `refresh-index`, which reads canonical MBOX and replaces only
 derived search data.
 
-The implemented `mailarchiver-auth` console entry point is separate from the
-reserved remote-source adapters. It parses and normalizes one account using a
-strict Pydantic model, recognizes well-known consumer domains, and otherwise
-performs bounded DNS MX and `autodiscover.<domain>` CNAME queries. Only Google
-mail hosts and Microsoft `mail.protection.outlook.com` or Autodiscover targets
-are affirmative evidence; gateways such as Proofpoint remain inconclusive by
-themselves. `--gmail` bypasses DNS with recorded override evidence, while
-`--detect-only` makes no external changes beyond public DNS lookup. Microsoft
-365 detection currently stops with `Microsoft Office not yet implemented.`
+The Google authorization prototype, mailarchiver-auth entry point, client
+registration workflow, and its Google/Requests/keyring/DNS dependencies were
+removed. Future live ingestion will be reimplemented; current Gmail acquisition
+uses Takeout or complete local Apple Mail cache files. Historical registration
+illustrations are retained as assets but are no longer an executable workflow.
 
-For Gmail, `existing_client_secrets` first accepts an account-specific developer
-override and otherwise reads the release-wide `gmail_client.json` beside the
-package module. `MAILARCHIVER_GMAIL_CLIENT_JSON` supplies a development or
-packaging override. Pydantic rejects Web-client or malformed JSON as well as
-non-Google client IDs, OAuth endpoints, and redirects. A release without either
-client fails without opening Cloud registration. Refresh tokens are serialized
-only into the platform keyring service `mailarchiver.gmail.oauth`; they are not
-written to an archive or fallback token file. An existing token is refreshed
-when possible. Otherwise `google-auth-oauthlib` opens an installed-app loopback
-flow with PKCE, a five minute timeout, a login hint for the requested account,
-and only `gmail.readonly`. A typed `users.getProfile` response must match the
-requested address before the token is retained.
-
-The maintainer-only `--register-client` command generates an account-neutral
-project ID. With `gcloud`, it authenticates the named account and creates the project without
-activating that account or altering the default project, and enables
-`gmail.googleapis.com`; all mutations follow a terminal confirmation. The
-unsupported Google Auth Platform operations are explicit user handoffs to
-project-qualified Branding, Audience, Scope, and Client pages. The final
-Desktop-client download is discovered only in the standard Downloads directory
-after that handoff or is selected by path. There is no browser DOM automation
-or credential scraping. The validated download is atomically installed with
-user-only modes and its path is printed so the maintainer can package it as
-`src/mailarchiver/gmail_client.json`. `--client-secrets` instead installs an
-account-specific developer override.
-
-`doc/GMAIL.md` is the canonical provider document: its END USER section makes
-Takeout MBOX the current path, while its DEVELOPER section records the API,
-OAuth, verification, security-assessment, and IMAP decisions. The user manual
-and Zola `gmail-authorization` page lead with Takeout rather than an
-unimplemented live adapter. The separate `OAUTH_CLIENT_REGISTRATION.md` and
-Zola `oauth-client-registration` maintainer pages retain the experimental
-one-time numbered registration workflow. Nine 1800-pixel-wide screenshots live
-under
-`website/static/images/gmail-authorization`; the Markdown guide references that
-single asset set rather than duplicating it. The website checker requires both
-pages, the navigation link, a generic maintainer address, and all nine PNG
-assets.
+`public_suffix.py` replaces tldextract with an offline ICANN rule reader using
+its previous unchanged PSL snapshot (2025-04-07, MPL-2.0). It applies wildcard,
+exception, longest-suffix and IDNA rules without Requests or network access.
 
 `doc/M365.md` likewise separates the unsupported end-user boundary from the
 developer design. It records Outlook PST and legacy-Mac OLM as the nearest
@@ -2172,8 +2258,10 @@ configured public repository ref, runs the same Make target, uploads status and
 logs plus any report and ZIP under a run-specific S3 prefix, and shuts down from
 an EXIT trap. There is no SSH ingress or persistent worker fleet.
 
-## Planned source adapters and derivatives
+## Source adapters and planned derivatives
 
+PST/OST adapters are implemented with the limits documented in PST_IMPORTER.md.
+Eudora and general working-cache adapters remain planned.
 PST/OST, Eudora, and working IMAP caches are local read-only adapters, not
 remote-source modes. Each adapter produces a typed source record containing
 the available RFC 5322 bytes, source-native identity and folder context,
@@ -2212,9 +2300,9 @@ provenance reports can declare how they were produced.
 explicit project-owned, comment-safe policy without rewriting anything.
 `make copyright-check` runs it as part of `make check`. The exclusions protect
 canonical mail and test fixtures, binary/data files, the generated release
-index, the vendored Tabulator tree, and the separately MIT-licensed website
-theme. Upstream CC-BY-SA artwork and generated shared-workflow wrappers are
-also excluded; Python stubs and JavaScript modules receive native comments.
+index, the vendored Tabulator tree, and the website theme (which carries its
+own project license file). Upstream CC-BY-SA artwork and generated shared-workflow
+wrappers are also excluded; Python stubs and JavaScript modules receive native comments.
 Missing notices produce a warning listing the affected paths and exit status 0,
 so `make check` and source builds continue. Checker execution failures still
 propagate normally. `make test-copyright` exercises the ownership boundaries and
@@ -2225,9 +2313,10 @@ Make target runs with both missing and complete notices.
 distribution and follows evaluated PEP 508 runtime requirements, rather than
 inventorying the development environment wholesale. It records typed package,
 version, license, and complete-license-file paths; rejects missing license
-evidence, GPL/AGPL packages, and development-only packages in the runtime
+evidence and development-only packages in the runtime
 closure; and can copy exact license files plus a JSON inventory into a binary
-staging directory. `make runtime-license-check` is a CI and release gate.
+staging directory. This does not establish license compatibility.
+`make runtime-license-check` is a CI and release gate.
 `make runtime-license-bundle LICENSE_OUTPUT=PATH` is the packaging interface;
 it creates a complete notices directory containing the project and third-party
 notices, typed inventory, and collected license files. The current macOS builder
@@ -2243,13 +2332,13 @@ for stored Tabulator and website-theme code in source distributions.
 before antivirus confirmation and verifies the saved rules after a synthetic
 import. Setup reuses File Import's current revision-checked owner-rule workflow.
 
-The Cocoa termination delegate confirms an active-import quit and returns
-`NSTerminateLater`, keeping the event loop alive while `IngestJob.stop` requests
-cooperative cancellation. The shared service checks this event during discovery,
+The Cocoa termination delegate confirms active ingest, then returns
+`NSTerminateCancel` while a background waiter arranges orderly window closure.
+The event loop stays alive while `IngestJob.stop` requests cooperative cancellation. The shared service checks this event during discovery,
 scanner startup, and worker status refresh; ordinary worker failures remain
 distinct from cancellation. It follows the existing interrupted-run checkpoint
-and lease-release path. A completion event allows Cocoa termination only after
-the GUI worker finishes. No automatic resume is promised: File → Import safely
+and lease-release path. Completion events and worker joins allow pywebview window closure only after
+the GUI workers finish, including their final callbacks. The incomplete-work prompt offers resumption; File → Import also safely
 retries the same source. `make test-application` tests partial publication,
 interrupted status, verification, duplicate-free restart, and multi-document stop.
 
@@ -2292,9 +2381,8 @@ duplicate source trees, interruption recovery, and infected routing. The EICAR
 signature is assembled from fragments only in a temporary test source and that
 file is deleted immediately after ingest; the repository contains only a safe
 message template. Tests assert message identities and bytes, not only record
-counts. Rollover and typed
-unscannable/scanner-error outcomes remain uncovered because those behaviors are
-not implemented. The separately runnable `make test-e2e` target starts a fresh
+counts. Small synthetic rollover fixtures and recorded scanner-failure routing tests
+cover those paths; EICAR checks actual scanner version evidence. The separately runnable `make test-e2e` target starts a fresh
 CLI ingest with the real configured on-demand `clamd`, includes a source message
 without a final newline, requires checkpoint publication, and invokes the
 installed standard-library-only verifier under isolated Python.
@@ -2502,11 +2590,18 @@ The fixture server explicitly puts accepted sockets into blocking mode with a
 read timeout. A real split-header regression checks that packet gaps cannot
 produce a premature response, as observed in a failing local macOS run.
 The downloader does not invoke the PST importer or canonical archive engine.
+The cache uses OS file locks with a persistent guard inode to prevent unlink
+races. Ctrl+C cancels async HTTP waits and removes the diagnostic lock; forced
+death releases OS ownership for the next invocation. Publish receipts before
+artifacts, preserve legacy unreceipted artifacts, and verify completed downloads
+before reuse. Real subprocess tests cover Ctrl+C, forced termination, competing
+writers, stale locks, and reuse without redownloading completed files.
 
-## In-process libpff reader and redundant PST testing
+## External libpff converter and redundant PST testing
 
-`pff_source.py` loads `pypff` from pinned `libpff-python==20231205`. The `ost`
-file plugin uses read-only file objects, labels the source as an Outlook cache,
+`pff_source.py` invokes the independent `converters/pff` executable. Only that
+GPLv3 program loads `pypff` from pinned `libpff-python==20231205`; the GPLv2 host
+never imports it. The converter uses read-only file objects, labels the source as an Outlook cache,
 walks normal folders with cycle/depth controls, and streams base64 attachment
 chunks into a bounded per-message MIME buffer. Headers and Unicode text are
 reconstructed; original transport-header text is retained as a separate evidence
@@ -2527,13 +2622,25 @@ proof of original wire headers or all server contents.
 process ID, content type, counts, completion, and fatal failure details;
 `diagnostics.jsonl` streams bounded per-item descriptions. Sources are rehashed
 before success. `plugins.ost` settings are `timeout_seconds` (60),
-`max_message_bytes` (64 MiB), and `max_folder_depth` (64). Deadline checks happen
-between native calls/chunks; a blocking native call can exceed the cooperative
-deadline, and libpff allocates each body before its output size can be checked.
-There is no new subprocess or background service.
+`max_message_bytes` (64 MiB), `max_folder_depth` (64), `executable`,
+`max_output_bytes` (1 GiB), and `max_diagnostics_bytes` (64 MiB). The host kills
+and reaps a child that exceeds the deadline or output bounds. Native body
+allocations occur in that separate process before reconstructed-output checks.
+Exit 3 reports incomplete source items with fully written emitted records; other
+nonzero exits retain evidence without admitting potentially truncated output.
+
+`make pff-converter` installs the separately locked converter environment;
+`make pff-converter-bundle` builds its standalone executable for the DMG.
+The bundle excludes pypff from the main application and includes the independent
+converter, its source and notices. For scanned imports, the host first invokes
+the external converter and then `mcti-scan`, a separate GPLv2 Rust executable
+using libclamav. That producer-side stage emits infected-only headers. The host
+consumes its output without rescanning or adding clean-message provenance.
+No process loads both libpff and libclamav. Neither executable writes the archive
+or computes canonical message hashes.
 
 `PstSettings.redundant_import` defaults false. With `plugins.pst.redundant_import`
-true, the existing Rust generator and libpff generator execute sequentially,
+true, the external Rust generator and libpff converter execute sequentially,
 retain independent receipts, and aggregate failures after attempting both readers.
 Rust offsets retain their existing cursors; libpff cursors use `libpff:<node>`.
 Canonical identity/SHA-256 deduplication is unchanged. Importer annotations and
@@ -2549,5 +2656,28 @@ non-Outlook parsers retain their source-only checkpoint behavior.
 `make test-pff` uses the real Aspose Unicode/version-23 OST and existing PST
 fixtures, with CLI archive creation, content resume, search, and canonical fixity
 verification. Compressed/version-36 OST is not yet fixture-qualified. The native
-extension is a runtime dependency; its complete LGPL/GPL license texts are retained
-and included in runtime license bundles because its wheel omits them.
+extension is a dependency only of the standalone converter. Its complete
+LGPL/GPL license texts are retained with that converter because its wheel omits them.
+
+Matcher rows use 2pt vertical cell padding and compact disclosure controls, with
+black matrix text and darker supporting labels. `scheduleSuggestions` dismisses
+stale choices immediately. `search_selectors.py` defines typed selector entries
+with recognizer/normalizer, tag, label, family, model field, and parameterized
+SQL builder. The parser and search predicates dispatch through that registry.
+`search_completion.py` recognizes the active selector, preserves preceding terms,
+and begins work only after three value characters. A materialized Any query
+resolves names/addresses once and groups observed header roles, distinct message
+counts, and recency. It returns bounded address choices plus aggregate roles;
+Subject and recognized Date values use the shared predicates. Read-only attached
+identity data supplies current canonical names and recorded aliases; a temporary
+name view avoids persistent schema changes or rebuilding content indexes.
+Generic GUI tiles consume typed tags and choices, including dates. Headless tests
+exercise tag menus, explicit selectors, compound terms, and date normalization.
+
+GUI jobs distinguish ingest from content-only processing. Quit confirms only
+active ingest, then a background waiter closes pywebview windows after workers
+checkpoint. The Cocoa delegate returns Cancel while that orderly close runs,
+avoiding Cocoa termination before Python workers finish. Final import refreshes
+are suppressed during shutdown. SIGINT requests the same stop without a dialog.
+Headless regressions cancel a real cooperative processor and verify retained
+pending work; deferred-but-unstarted jobs never become active merely on quit.

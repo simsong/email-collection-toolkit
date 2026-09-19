@@ -31,22 +31,33 @@ whole archive.
 | `cc:sam@example.org` | A matching Cc recipient |
 | `bcc:sam@example.org` | A matching Bcc recipient |
 | `subject:"annual report"` | A phrase in the subject |
-| `date:2024-05-01` | Messages on that UTC calendar day |
-| `before:2024-05-01` | Messages earlier than that date |
-| `after:2024-05-01` | Messages later than that date |
+| `date:2024-05-01` | Messages during that worldwide calendar date |
+| `before:2024-05-01` | Messages before that date begins anywhere |
+| `after:2024-05-01` | Messages after that date ends everywhere |
 | `from:alex subject:exhibition after:2024-01-01` | Messages matching all three filters |
 
 Address and subject selectors match text within the corresponding fields.
 Invalid search syntax is shown as an inline error so you can correct the query.
 
+Date searches cover a 50-hour worldwide window, including late-evening messages
+whose UTC timestamp falls on the following day. Adjacent date searches overlap.
+See [Date handling](@/advanced.md#date-handling) for boundaries and examples.
+
 ## Suggestions and search filters
 
-After three characters, the search box suggests addresses and subjects with
-message counts. Use the arrow keys and Return, or click a suggestion.
-An address becomes a removable filter whose menu selects **Any**, **From**,
-**To**, **Cc**, or **Bcc**. Subject suggestions become **Subject** filters.
-Click **×** to remove a filter, or press Delete in an empty input to remove
-the last one.
+After three characters of a value, the search box suggests matching addresses,
+names, subjects, and recognized dates with message counts. It matches original
+header names and saved authoritative names even before content processing finishes.
+Use arrow keys and Return, or click a suggestion. An explicit prefix such as
+`from:simson` restricts suggestions to that field.
+
+An address/name match defaults to its only matching role, or **Any** if several
+roles match. Click the tile's tag to choose among matching **From**, **To**,
+**Cc**, and **Bcc** roles. **Any** counts each message once across roles.
+Date tiles offer **Date**, **Before**, and **After**. Dates accept `2020-01-05`,
+`1/5/2020`, or `January 5, 2020`; selecting one normalizes it to ISO format.
+Quote multiword values in a typed query: `date:"January 5, 2020"`.
+Click **×** to remove a filter, or press Delete in an empty input field.
 
 ## Sort and read results
 

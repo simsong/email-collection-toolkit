@@ -29,3 +29,6 @@ about his work on [his personal website](https://simson.net/), or visit
   application changes, separate from website updates.
 
 Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved.
+
+Email Collection Toolkit is distributed under GNU GPL version 2 only. Additional
+licenses are available from the copyright holder.

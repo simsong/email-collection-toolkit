@@ -2,6 +2,12 @@
 
 # v1.0.0 alpha scope review
 
+> Historical research/planning snapshot. Current development and application CI
+> are macOS-only. For implemented behavior use `requirements.md`,
+> `implementation.md`, and the current feature-specific guides; older
+> backend/platform priorities and inventories below may be superseded.
+
+
 Review date: 2026-09-07. This is release planning, not implementation or release
 certification. No version tag or release binary has been published by this task.
 

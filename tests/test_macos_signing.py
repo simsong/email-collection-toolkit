@@ -139,12 +139,12 @@ def test_release_waits_for_exact_dmg_before_checksumming() -> None:
     assert assembly[STEPS][0][WITH][REF] == "${{ needs.macos.outputs.commit }}"
     steps = assembly[STEPS]
     download = next(i for i, step in enumerate(steps) if "actions/download-artifact@" in step.get(USES, ""))
-    checksum = next(i for i, step in enumerate(steps) if "sha256sum" in step.get(RUN, ""))
+    checksum = next(i for i, step in enumerate(steps) if "shasum -a 256" in step.get(RUN, ""))
     assert download < checksum
     assert steps[download][WITH][NAME] == "macos-dmg"
     assert "*.dmg" in steps[checksum][RUN]
     secret_steps = [step for step in macos[STEPS] if CERTIFICATE_SECRET in step.get(ENV, {})]
-    assert len(secret_steps) == 1 and secret_steps[0][RUN] == "make check-release"
+    assert len(secret_steps) == 1 and secret_steps[0][RUN] == "make dmg"
     assert PASSWORD_SECRET in secret_steps[0][ENV]
     assert macos[RUNS_ON] == "macos-15"
     assert secret_steps[0][CONDITION] == "${{ runner.environment == 'github-hosted' }}"

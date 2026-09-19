@@ -20,6 +20,8 @@ from urllib.parse import urlparse
 from bs4 import BeautifulSoup
 from pydantic import BaseModel, Field
 
+from .search_completion import search_suggestions as search_suggestions
+from .gui_provenance import AttachedOrigin, attached_messages, attached_origins
 from .encoding import decode_text
 from .mailbox_tree import MailboxSelection
 from .mailsearch import (
@@ -78,24 +80,6 @@ class SearchCount(BaseModel):
     immediate_limit: int = IMMEDIATE_SEARCH_LIMIT
 
 
-class AddressSuggestion(BaseModel):
-    address: str
-    display_name: str
-    message_count: int
-    last_seen: str
-
-
-class SubjectSuggestion(BaseModel):
-    subject: str
-    message_count: int
-
-
-class SearchSuggestions(BaseModel):
-    query: str
-    addresses: list[AddressSuggestion]
-    subjects: list[SubjectSuggestion]
-
-
 class MessagePreview(BaseModel):
     message_pk: int
     preview: str
@@ -146,6 +130,7 @@ class DateAdjustment(BaseModel):
 
 
 class MessageView(BaseModel):
+    attached_origins: list[AttachedOrigin] = Field(default_factory=list)
     message_pk: int
     subject: str
     date_source: str
@@ -201,8 +186,12 @@ def search_page(
         SortDirection(direction), search_attachments, selections, find_older=True,
         complete_sort=True,
     )
+    results = page.results[:limit] if limit else page.results
+    tagged = attached_messages(archive, [row.message_pk for row in results])
+    for row in results:
+        row.attached_message = row.message_pk in tagged
     return SearchPage(
-        results=page.results[:limit] if limit else page.results,
+        results=results,
         offset=offset,
         highlight_terms=_highlight_terms(terms),
         has_more=bool(limit and len(page.results) > limit),
@@ -240,46 +229,6 @@ def _highlight_terms(terms: SearchTerms) -> list[str]:
             seen.add(folded)
             values.append(value)
     return values
-
-
-def search_suggestions(archive: Path, query: str, limit: int = 20) -> SearchSuggestions:
-    """Return ranked completions; only email substrings use a derived accelerator."""
-    value = " ".join(query.split()).strip()
-    if not 1 <= limit <= 50:
-        raise ValueError("suggestion limit must be between 1 and 50")
-    if len(value) < 3:
-        return SearchSuggestions(query=value, addresses=[], subjects=[])
-    match = f'"{value.replace(chr(34), chr(34) * 2)}"'
-    database = sqlite3.connect(f"file:{archive / 'archive.sqlite3'}?mode=ro", uri=True)
-    try:
-        database.execute("ATTACH DATABASE ? AS search", (f"file:{archive / 'search.sqlite3'}?mode=ro",))
-        address_rows = database.execute(
-            "WITH matching(suggestion_pk) AS ("
-            "SELECT rowid FROM search.address_suggestion_fts WHERE address_suggestion_fts MATCH ? "
-            "UNION SELECT suggestion_pk FROM search.address_suggestions "
-            "WHERE instr(lower(display_name), lower(?)) > 0) "
-            "SELECT suggestions.address, suggestions.display_name, suggestions.message_count, suggestions.last_seen "
-            "FROM matching JOIN search.address_suggestions suggestions USING (suggestion_pk) "
-            "ORDER BY suggestions.message_count DESC, suggestions.last_seen DESC, "
-            "lower(suggestions.address) LIMIT ?",
-            (match, value, limit),
-        )
-        subject_rows = database.execute(
-            "SELECT subject, count(*) AS message_count FROM messages "
-            "WHERE category IN (?, ?) AND subject <> '' AND instr(lower(subject), lower(?)) > 0 "
-            "GROUP BY subject ORDER BY message_count DESC, lower(subject) LIMIT ?",
-            (*SEARCH_CATEGORIES, value, limit),
-        )
-        return SearchSuggestions(
-            query=value,
-            addresses=[
-                AddressSuggestion(address=address, display_name=name, message_count=count, last_seen=last_seen)
-                for address, name, count, last_seen in address_rows
-            ],
-            subjects=[SubjectSuggestion(subject=subject, message_count=count) for subject, count in subject_rows],
-        )
-    finally:
-        database.close()
 
 
 def searchable_message_count(archive: Path) -> int:
@@ -382,6 +331,7 @@ def describe_message(archive: Path, message_pk: int) -> MessageView:
             archive_routing_utc=date_utc,
         )
     return MessageView(
+        attached_origins=attached_origins(archive, message_pk),
         message_pk=message_pk,
         subject=decoded_message_header(raw, message, "Subject") or "(no subject)",
         date_source=date_source,

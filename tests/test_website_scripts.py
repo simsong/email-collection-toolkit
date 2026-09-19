@@ -11,7 +11,8 @@ from yaml import safe_load
 
 from scripts.check_website import validate_config, validate_png
 
-ZOLA_SHA256 = "54d1a347781b2f32330914fcc02def81c7e3ddb6111b36d1cc89c06557aed1de"
+ZOLA_SHA256_ARM64 = "303b8e1f3251a6250e47f811eda143316f653c22201faa66777d48ac499c0ee3"
+ZOLA_SHA256_X86_64 = "e79edcba2e8d03d22065c9cb8fa2e3abf07b823ef17f00abdc060188dceabba7"
 WORKFLOW_ON = "on"
 RELEASE = "release"
 TYPES = "types"
@@ -32,8 +33,10 @@ def test_pages_workflow_pins_and_checks_the_zola_archive() -> None:
     workflow = Path(__file__).parents[1] / ".github/workflows/pages.yml"
     text = workflow.read_text(encoding="utf-8")
 
-    assert f"ZOLA_SHA256: {ZOLA_SHA256}" in text
-    assert "sha256sum --check" in text
+    assert f"ZOLA_SHA256_ARM64: {ZOLA_SHA256_ARM64}" in text
+    assert f"ZOLA_SHA256_X86_64: {ZOLA_SHA256_X86_64}" in text
+    assert "shasum -a 256 --check" in text
+    assert "apple-darwin.tar.gz" in text
     configuration = safe_load(text)
     # PyYAML's YAML 1.1 resolver treats an unquoted "on" key as boolean True.
     triggers = configuration.get(WORKFLOW_ON, configuration.get(True))
@@ -50,7 +53,9 @@ def test_ci_builds_distributions_and_site_and_retains_browser_traces() -> None:
     assert "name: Upload Playwright failure traces" in text
     assert "path: test-results" in text
     configuration = safe_load(text)
-    assert all(job[RUNS_ON] == "macos-15" for job in configuration[JOBS].values())
+    for definition in workflow.parent.glob("*.yml"):
+        configuration = safe_load(definition.read_text())
+        assert all(job[RUNS_ON] == "macos-15" for job in configuration[JOBS].values()), definition
 
 
 def test_release_workflow_validates_built_distributions() -> None:
@@ -59,6 +64,7 @@ def test_release_workflow_validates_built_distributions() -> None:
     text = workflow.read_text(encoding="utf-8")
 
     assert "run: make distribution-check" in text
+    assert "run: make dmg" in text and "run: make check-release" not in text
     gates = (
         "name: Verify release commit",
         "name: Verify annotated tag and project version",

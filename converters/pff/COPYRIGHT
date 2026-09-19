@@ -1,0 +1,6 @@
+Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved.
+
+This independent PST/OST converter is distributed under GNU GPL version 3 only,
+compatible with the LGPLv3 libpff library it loads. Additional licenses are
+available from the copyright holder. See LICENSE and libpff-LGPL.txt.
+It does not import the GPLv2 mailarchiver application or load libclamav.

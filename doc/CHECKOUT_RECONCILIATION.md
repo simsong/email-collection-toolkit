@@ -2,6 +2,26 @@
 
 # Historical checkout reconciliation — 2026-09-08
 
+## Consolidation into PR #124 — 2026-09-18
+
+The owner authorized reviewing all remaining checkouts, retaining useful work in
+the root checkout, and deleting the others. The reviewed dispositions are:
+
+| Checkout | Disposition |
+|---|---|
+| `dual-pst-spec` | Retain corpus-downloader OS locking, Ctrl+C cancellation, interrupted-publication recovery, and subprocess tests. Preserve newer 7z inventory validation and split-request tests. The separate pypff exporter is superseded by the integrated libpff reader; omit its old dependency/CI changes and optional newline-conversion interface. |
+| `owner-import-rules` | Address-book export targets, requirements, implementation notes, and release planning are already present in the root checkout. No additional implementation to retain. |
+| `pr107-conflicts` | The pending merge predates merged commit `c0fc070`. Its differences lack later envelope-validation, bounded-diagnostic, documentation and regression-test fixes; keep the newer root versions. |
+| `remove-release-signer-gate` | PR #125 is merged into `origin/main`; merge that release policy into #124. |
+
+Retain downloaded PST data at ignored `var/pst/` in the root checkout and old
+diagnostic artifacts under `.tmp/retired-checkout-artifacts/`. Corpus data is
+not source code, is not committed, and is not ingested by this cleanup.
+Downloader recovery is tested with temporary local HTTP servers and real child
+processes through `make rust-check` and `make test-pst-downloader`.
+
+## Original reconciliation record
+
 Base: `origin/main` at `a4e98bd7cc58c036692582fe7c69196b0f7561e2`
 (merged PR #94). Delivery branch: `codex/reconcile-checkouts`.
 

@@ -7,7 +7,7 @@ description = "Existing source and file plugins, and the proposed ranked mailbox
 Production CLI import uses source/file adapters followed by API v2 ingest,
 message and content pipelines. Python plugins run through the interface in the
 host interpreter; the Rust PST importer is an external executable. The diagram
-shows those pipelines and the planned GUI controls.
+shows those pipelines and their GUI controls.
 [![Proposed container, message, and content processing DAGs, with ranked scanning, MIME dispatch, transactional publication, and resumable handoffs](../images/processor-dag.svg)](../images/processor-dag.svg)
 
 Open the graphic for a larger view. The file-parser layer is a subtree of local
@@ -40,7 +40,7 @@ in the second pipeline.
 The TOML settings declare rank, body/attachment/both scope, and scanner
 timeout (60 seconds by default). End-of-run statistics report each plugin's
 invocation count, total time, shortest, longest, and average invocation.
-About will list registered plugins by subscribed type.
+About lists registered processors by subscribed type, pipeline, rank, scope and timeout.
 
 API v2 processors can call `item.get_my_config()` for their own configuration
 dictionary, with archive settings overriding installation settings recursively.
@@ -53,7 +53,7 @@ for layer reads, paths, conflict handling and failure semantics.
 
 ## Incomplete work
 
-The planned GUI integration will show **Incomplete work** with two
+Opening an archive with unfinished work shows **Incomplete work** with two
 initially checked choices: **Continue ingest** and **Continue content
 processing**. Confirmed work resumes from durable checkpoints. Unchecking both
 opens the archive without starting either job. The dialog returns on the next
@@ -71,7 +71,7 @@ as a plain-text body. Synthetic representations are processing inputs, not new
 canonical mail or MIME parts added to the original message.
 
 Attached emails are first-class child messages with durable paths back to their
-parent message and MIME part. Viewer controls for those paths are planned. They start
+parent message and MIME part. The viewer displays those paths and the attachment tag. They start
 independent jobs at message processing, bypassing ingest and another antivirus
 scan. The child retains its parent's scan provenance. The handoff uses shared
 deduplication/publication services to establish the child record and content

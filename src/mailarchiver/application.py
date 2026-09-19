@@ -112,6 +112,7 @@ class IngestJob(BaseModel):
 
     operation_id: str
     owner_window_id: str
+    kind: Literal["ingest", "content"] = "ingest"
     stop: Event = Field(default_factory=Event, exclude=True)
     finished: Event = Field(default_factory=Event, exclude=True)
 

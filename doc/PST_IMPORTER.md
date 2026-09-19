@@ -76,7 +76,7 @@ and libpff's
 [PST/OST format documentation](https://github.com/libyal/libpff/blob/main/documentation/Personal%20Folder%20File%20%28PFF%29%20format.asciidoc).
 
 The Rust adapter and pinned `outlook-pst` crate require PST client magic. The
-Python host routes OST to the in-process `pypff` binding from
+Python host routes OST to the separate `pff-converter` executable using
 `libpff-python==20231205`. Renaming a file does not change its internal format:
 `SO` selects libpff, while `SM` remains PST even with an `.ost` suffix.
 
@@ -88,13 +88,13 @@ retained and flagged; diagnostics make the run incomplete. Compressed/version-36
 OST is not yet fixture-qualified. Cache extraction never establishes completeness
 of the corresponding server mailbox.
 
-Libpff runs in the importing Python process and reads sources without write
-handles. It retains deterministic reconstructed MIME, folder/node provenance,
+Libpff runs in the independent converter process and reads sources without write
+handles. Build/install it with `make pff-converter`; the DMG bundles a standalone copy. It retains deterministic reconstructed MIME, folder/node provenance,
 by-value and OLE attachments, decompressed RTF, and original transport-header
 text. Missing transport headers use available MAPI properties, including display
 recipient names that may lack SMTP addresses. Native body reads allocate before
-output limits are checked; deadlines are cooperative between native calls, not
-hard process termination. Per-run receipts and streamed diagnostics are under
+output limits are checked. The host enforces a hard process deadline and bounds
+output and diagnostics, killing and reaping an overdue child. Per-run receipts and streamed diagnostics are under
 `processing-libpff/`. Unsupported embedded/external attachment methods retain a
 flagged parent and produce an incomplete result; external references are not fetched.
 

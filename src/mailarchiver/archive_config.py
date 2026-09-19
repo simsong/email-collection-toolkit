@@ -16,6 +16,7 @@ from pydantic import BaseModel, ConfigDict, Field, JsonValue
 from yaml import YAMLError, safe_dump, safe_load
 
 from .owner_rules import OwnerRules
+from .mbox import DEFAULT_MBOX_MAX_BYTES
 
 ARCHIVE_CONFIG_FILENAME = "config.yaml"
 
@@ -27,6 +28,7 @@ class ArchiveConfig(BaseModel):
     version: Literal[1, 2] = 2
     last_import_directory: Path | None = None
     owner: OwnerRules | None = None
+    mbox_max_bytes: int = Field(default=DEFAULT_MBOX_MAX_BYTES, gt=0, strict=True)
     plugins: dict[str, dict[str, JsonValue]] = Field(default_factory=dict)
 
 

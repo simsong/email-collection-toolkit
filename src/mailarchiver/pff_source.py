@@ -1,44 +1,35 @@
 # Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved.
-"""Read-only, in-process libpff extraction of cached Outlook mail and PSTs."""
+"""Run the independent libpff converter; never import its native reader in the host."""
 from __future__ import annotations
 
-import base64
 import hashlib
-import io
 import os
+import shutil
+import subprocess
+import sys
 import tempfile
 import time
-from collections.abc import Iterator
-from email import policy
-from email.message import EmailMessage, Message
-from email.parser import Parser
-from email.utils import format_datetime, formataddr
+from collections.abc import Generator, Iterator
 from pathlib import Path
-from typing import BinaryIO
 
-import pypff
 from pydantic import BaseModel, ConfigDict, Field
 
+from .clamav_definitions import LIBRARY_ENV, DATABASE_ENV, CERTIFICATES_ENV, library_path, selected_definitions, certificates_path
 from .plugin_api import FileProbe, MailContainer, MailObject, PluginContext, ProgressEvent
+from .pst_source import file_hash, validate_record
+from .sources import LocalSourcePlugin, MboxFileParser
 
-# MAPI property identifiers, not offsets into a particular PST/OST version.
-MESSAGE_CLASS = 0x001A
-HAS_ATTACH = 0x0E1B
-MESSAGE_FLAGS = 0x0E07
-DISPLAY_TO, DISPLAY_CC, DISPLAY_BCC = 0x0E04, 0x0E03, 0x0E02
-SENDER_EMAIL, INTERNET_MESSAGE_ID = 0x5D01, 0x1035
-SENDER_ADDRESS_TYPE, SENDER_ADDRESS = 0x0C1E, 0x0C1F
-ATTACH_METHOD, ATTACH_FILENAME, ATTACH_SHORT_FILENAME = 0x3705, 0x3707, 0x3704
-ATTACH_MIME, ATTACH_CONTENT_ID = 0x370E, 0x3712
-EXCLUDED_HEADERS = frozenset({"content-type", "content-transfer-encoding", "content-length", "mime-version",
-                               "x-imported-uri", "x-importer-name", "x-importer-version"})
+ROOT = Path(__file__).resolve().parents[2]
 
 
 class PffSettings(BaseModel):
     model_config = ConfigDict(extra="forbid")
+    executable: str | None = None
     timeout_seconds: float = Field(default=60, gt=0, allow_inf_nan=False)
     max_message_bytes: int = Field(default=64 * 1024 * 1024, gt=0)
     max_folder_depth: int = Field(default=64, gt=0)
+    max_output_bytes: int = Field(default=1024 * 1024 * 1024, gt=0)
+    max_diagnostics_bytes: int = Field(default=64 * 1024 * 1024, gt=0)
 
 
 class PffReceipt(BaseModel):
@@ -57,169 +48,56 @@ class PffReceipt(BaseModel):
     reconstructed_mime: bool = True
 
 
-class PffDiagnostic(BaseModel):
-    folder: tuple[str, ...]
-    item: int | None = None
-    detail: str
+def executable(name: str, configured: str | None = None) -> Path:
+    suffix = ".exe" if os.name == "nt" else ""
+    if configured:
+        return Path(configured).resolve(strict=True)
+    if getattr(sys, "frozen", False):
+        base = Path(getattr(sys, "_MEIPASS")) / "importers"
+        candidate = base / "pff-converter" / (name + suffix) if name == "pff-converter" else base / (name + suffix)
+    elif name == "pff-converter":
+        candidate = ROOT / "converters/pff/.venv" / ("Scripts" if os.name == "nt" else "bin") / (name + suffix)
+    else:
+        candidate = ROOT / "target/release" / (name + suffix)
+    if candidate.is_file():
+        return candidate.resolve()
+    if found := shutil.which(name):
+        return Path(found).resolve()
+    raise FileNotFoundError(f"{name} unavailable; run make {name} or configure plugins.ost.executable")
 
 
-class _Rendered(BaseModel):
-    raw: bytes
-    problems: tuple[str, ...]
-
-
-def _property(item: pypff.item, identifier: int) -> pypff.record_entry | None:
-    if item.number_of_record_sets:
-        record = item.get_record_set(0)
-        for index in range(record.number_of_entries):
-            entry = record.get_entry(index)
-            if entry.entry_type == identifier:
-                return entry
-    return None
-
-
-def _string(item: pypff.item, identifier: int) -> str | None:
-    entry = _property(item, identifier)
-    return None if entry is None else entry.data_as_string
-
-
-def _integer(item: pypff.item, identifier: int) -> int | None:
-    entry = _property(item, identifier)
-    return None if entry is None else entry.data_as_integer
-
-
-def _safe(value: str) -> str:
-    return " ".join(value.splitlines()).strip()
-
-
-def is_mail_class(value: str) -> bool:
-    """Skip only recognized non-mail classes; unknown classes must remain incomplete."""
-    value = value.upper()
-    for prefix in ("IPM.NOTE", "REPORT.IPM.NOTE", "IPM.SCHEDULE.MEETING"):
-        if value == prefix or value.startswith(prefix + "."):
-            return True
-    for prefix in ("IPM.CONTACT", "IPM.DISTLIST", "IPM.APPOINTMENT", "IPM.TASK", "IPM.ACTIVITY",
-                   "IPM.STICKYNOTE", "IPM.CONFIGURATION", "IPM.MICROSOFT.SCHEDULEDATA.FREEBUSY"):
-        if value == prefix or value.startswith(prefix + "."):
-            return False
-    raise ValueError(f"unsupported MAPI message class: {value}")
-
-
-def _sender(message: pypff.message) -> str | None:
-    address = _string(message, SENDER_EMAIL)
-    if not address and (_string(message, SENDER_ADDRESS_TYPE) or "").upper() == "SMTP":
-        address = _string(message, SENDER_ADDRESS)
-    return formataddr((_safe(message.sender_name or ""), _safe(address))) if address else message.sender_name
-
-
-class _MimeWriter:
-    """Bound output per message and stream native attachment reads in base64 chunks."""
-
-    def __init__(self, settings: PffSettings, deadline: float) -> None:
-        self.settings = settings
-        self.deadline = deadline
-        self.output = io.BytesIO()
-
-    def write(self, data: bytes) -> None:
-        if time.monotonic() >= self.deadline:
-            raise TimeoutError("libpff extraction deadline exceeded")
-        if self.output.tell() + len(data) > self.settings.max_message_bytes:
-            raise ValueError("libpff reconstructed message exceeds max_message_bytes")
-        self.output.write(data)
-
-    def part(self, mime_type: str, stream: BinaryIO | pypff.attachment, *, filename: str | None = None,
-             content_id: str | None = None) -> None:
-        header = EmailMessage(policy=policy.SMTP)
-        header["Content-Type"] = mime_type
-        header["Content-Transfer-Encoding"] = "base64"
-        if filename:
-            header.add_header("Content-Disposition", "attachment", filename=_safe(filename))
-        if content_id:
-            header["Content-ID"] = _safe(content_id)
-        self.write(header.as_bytes())
-        size = 0
-        while True:
-            chunk = stream.read_buffer(57 * 1024) if isinstance(stream, pypff.attachment) else stream.read(57 * 1024)
-            if not chunk:
-                break
-            size += len(chunk)
-            self.write(base64.encodebytes(chunk).replace(b"\n", b"\r\n"))
-        if isinstance(stream, pypff.attachment) and size != stream.size:
-            raise ValueError(f"libpff attachment length mismatch: expected {stream.size}, read {size}")
-
-
-def _render(message: pypff.message, uri: str, folder: tuple[str, ...], writer: _MimeWriter) -> _Rendered:
-    """Reconstruct deterministically; do not represent MAPI reconstruction as source RFC bytes."""
-    headers = Message(policy=policy.compat32.clone(linesep="\r\n"))
-    headers["X-Mailarchiver-Folder"] = _safe("/".join(folder))
-    transport = message.transport_headers or ""
-    parsed = Parser(policy=policy.compat32).parsestr(transport, headersonly=True)
-    for name, value in parsed.raw_items():
-        if name.lower() not in EXCLUDED_HEADERS:
-            # Original header text is also retained as evidence, including malformed fields.
-            headers[name] = _safe(value)
-    for name, value in (("Subject", message.subject), ("From", _sender(message)),
-                        ("To", _string(message, DISPLAY_TO)), ("Cc", _string(message, DISPLAY_CC)),
-                        ("Bcc", _string(message, DISPLAY_BCC)), ("Message-ID", _string(message, INTERNET_MESSAGE_ID))):
-        if name not in headers and value:
-            headers[name] = _safe(value)
-    if "Date" not in headers:
-        date = message.client_submit_time or message.delivery_time
-        if date:
-            headers["Date"] = format_datetime(date)
-    boundary = "mailarchiver-libpff-" + hashlib.sha256(uri.encode()).hexdigest()
-    headers["MIME-Version"] = "1.0"
-    headers.set_type("multipart/mixed")
-    headers.set_boundary(boundary)
-    # The importer contract requires these three ASCII fields first and unfolded.
-    writer.write(f"X-Imported-URI: {uri}\r\nX-Importer-Name: libpff\r\nX-Importer-Version: {pypff.get_version()}\r\n".encode("ascii"))
-    writer.write(headers.as_bytes().split(b"\r\n\r\n", 1)[0] + b"\r\n\r\n")
-    separator = f"--{boundary}\r\n".encode()
-    bodies = 0
-    for mime_type, data in (("text/plain; charset=utf-8", message.plain_text_body),
-                            ("text/html", message.html_body), ("application/rtf", message.rtf_body)):
-        if data:
-            bodies += 1
-            writer.write(separator)
-            writer.part(mime_type, io.BytesIO(data))
-    if not bodies:
-        writer.write(separator)
-        writer.part("text/plain; charset=utf-8", io.BytesIO())
-    flag = _property(message, HAS_ATTACH)
-    # libpff 20231205 can raise looking up the absent table on attachment-free messages.
-    flags = _integer(message, MESSAGE_FLAGS)
-    has_attachments = flag.data_as_boolean if flag is not None else flags is None or bool(flags & 0x10)
-    count = message.number_of_attachments if has_attachments else 0
-    problems: list[str] = []
-    for index in range(count):
-        position = writer.output.tell()
-        try:
-            attachment = message.get_attachment(index)
-            method = _integer(attachment, ATTACH_METHOD)
-            if method not in (1, 6):
-                raise ValueError(f"libpff Python binding cannot reconstruct attachment method {method} at index {index}")
-            if attachment.size > writer.settings.max_message_bytes:
-                raise ValueError("libpff attachment exceeds max_message_bytes")
-            writer.write(separator)
-            writer.part(_safe(_string(attachment, ATTACH_MIME) or "application/octet-stream"), attachment,
-                        filename=_string(attachment, ATTACH_FILENAME) or _string(attachment, ATTACH_SHORT_FILENAME) or f"attachment-{index}",
-                        content_id=_string(attachment, ATTACH_CONTENT_ID))
-        except TimeoutError:
-            raise
-        except (OSError, ValueError) as error:
-            writer.output.seek(position)
-            writer.output.truncate()
-            problems.append(str(error)[:4096])
-    if transport:
-        writer.write(separator)
-        writer.part("text/plain; charset=utf-8", io.BytesIO(transport.encode("utf-8")), filename="original-transport-headers.txt")
-    writer.write(f"--{boundary}--\r\n".encode())
-    raw = writer.output.getvalue()
-    if problems:
-        raw = raw.replace(b"\r\n\r\n", b"\r\nX-Mailarchiver-Extraction-Incomplete: attachments; see libpff receipt\r\n\r\n", 1)
-        if len(raw) > writer.settings.max_message_bytes:
-            raise ValueError("libpff reconstructed message exceeds max_message_bytes")
-    return _Rendered(raw=raw, problems=tuple(problems))
+def run_converter(command: list[str], output: Path, diagnostics: Path, settings: PffSettings,
+                  work_id: str, environment: dict[str, str], evidence: tuple[Path, ...] = ()) -> Generator[ProgressEvent, None, int]:
+    """Bound a child process and its files, including when it dies or the iterator closes."""
+    limits = ((output, settings.max_output_bytes), (diagnostics, settings.max_diagnostics_bytes),
+              *((path, settings.max_diagnostics_bytes) for path in evidence))
+    try:
+        with output.open("wb") as stdout, diagnostics.open("wb") as stderr:
+            with subprocess.Popen(command, stdout=stdout, stderr=stderr, env=environment) as process:
+                try:
+                    deadline = time.monotonic() + settings.timeout_seconds
+                    while process.poll() is None:
+                        if time.monotonic() >= deadline:
+                            raise TimeoutError("libpff extraction timeout")
+                        if any(path.exists() and path.stat().st_size > limit for path, limit in limits):
+                            raise ValueError("libpff converter output limit exceeded")
+                        yield ProgressEvent(work_id=work_id, phase="extracting Outlook", completed=output.stat().st_size, unit="bytes")
+                        try:
+                            process.wait(timeout=0.05)
+                        except subprocess.TimeoutExpired:
+                            pass
+                finally:
+                    if process.poll() is None:
+                        process.kill()
+                        process.wait()
+        if any(path.exists() and path.stat().st_size > limit for path, limit in limits):
+            raise ValueError("libpff converter output limit exceeded")
+        return process.returncode
+    finally:
+        for path, limit in limits:
+            if path.exists() and path.stat().st_size > limit:
+                with path.open("r+b") as retained:
+                    retained.truncate(limit)
 
 
 class PffFileParser:
@@ -235,87 +113,64 @@ class PffFileParser:
 
     def configuration_fingerprint(self) -> str:
         settings = PffSettings.model_validate(self.context.get_my_config())
-        return hashlib.sha256(("libpff-v1:" + pypff.get_version() + settings.model_dump_json()).encode()).hexdigest()
+        return hashlib.sha256(("libpff-external-v1:" + settings.model_dump_json()).encode()).hexdigest()
 
     def messages(self, container: MailContainer, resume_cursor: str | None) -> Iterator[MailObject | ProgressEvent]:
-        # PFF node traversal restarts after interruption; the host's canonical dedup is authoritative.
-        del resume_cursor
-        from .sources import LocalSourcePlugin
-        from .pst_source import file_hash
-
+        del resume_cursor  # Re-import and let the host's canonical deduplication handle repeats.
         if self.context.archive is None:
             raise ValueError("libpff extraction requires an archive workspace")
-        source = LocalSourcePlugin.source_file(container)
         settings = PffSettings.model_validate(self.context.get_my_config())
+        program = executable("pff-converter", settings.executable)
+        source = LocalSourcePlugin.source_file(container)
         root = self.context.archive / "processing-libpff"
         root.mkdir(exist_ok=True)
         workspace = Path(tempfile.mkdtemp(dir=root))
-        receipt = PffReceipt(source=source.path, source_sha256=file_hash(source.path),
-                             libpff_version=pypff.get_version(), process_id=os.getpid())
-        deadline = time.monotonic() + settings.timeout_seconds
-        store = pypff.file()
-        opened = False
+        receipt_path = workspace / "receipt.json"
+        diagnostics = workspace / "diagnostics.jsonl"
+        output = workspace / "output.mboxrd"
+        initial_hash = file_hash(source.path)
+        environment = os.environ.copy()
+        environment.pop("MAILARCHIVER_SCAN", None)
         try:
-            with source.path.open("rb") as original, (workspace / "diagnostics.jsonl").open("w") as diagnostics:
-                store.open_file_object(original, "r")
-                opened = True
-                receipt.content_type = store.content_type
-                first = store.root_folder
-                if first is None:
-                    raise ValueError("libpff source has no root folder")
-                pending: list[tuple[pypff.folder, tuple[str, ...]]] = [(first, ())]
-                visited: set[int] = set()
-                while pending:
-                    folder, parent = pending.pop()
-                    path = (*parent, folder.name or "Root")
-                    if time.monotonic() >= deadline:
-                        raise TimeoutError("libpff extraction deadline exceeded")
-                    if len(path) > settings.max_folder_depth or folder.identifier in visited:
-                        raise ValueError("libpff folder depth limit or cycle")
-                    visited.add(folder.identifier)
-                    if folder.identifier & 31 == 3:  # Search folders reference messages held elsewhere.
-                        continue
-                    receipt.folders += 1
-                    for index in range(folder.number_of_sub_messages):
-                        if time.monotonic() >= deadline:
-                            raise TimeoutError("libpff extraction deadline exceeded")
-                        receipt.encountered += 1
-                        node = None
-                        try:
-                            message = folder.get_sub_message(index)
-                            node = message.identifier
-                            message_class = _string(message, MESSAGE_CLASS) or "IPM.Note"
-                            if not is_mail_class(message_class):
-                                receipt.non_mail += 1
-                                continue
-                            uri = f"{source.path.as_uri()}#libpff/{node}"
-                            rendered = _render(message, uri, path, _MimeWriter(settings, deadline))
-                        except TimeoutError:
-                            raise
-                        except (OSError, ValueError) as error:
-                            receipt.errors += 1
-                            diagnostics.write(PffDiagnostic(folder=path, item=node, detail=str(error)[:4096]).model_dump_json() + "\n")
-                            continue
-                        if rendered.problems:
-                            receipt.errors += 1
-                            for detail in rendered.problems:
-                                diagnostics.write(PffDiagnostic(folder=path, item=node, detail=detail).model_dump_json() + "\n")
-                        receipt.emitted += 1
-                        yield MailObject(work_id=container.work_id, source=container.source, cursor=f"libpff:{node}",
-                                         raw=rendered.raw, completed_messages=receipt.emitted)
-                    for index in reversed(range(folder.number_of_sub_folders)):
-                        pending.append((folder.get_sub_folder(index), path))
-                if file_hash(source.path) != receipt.source_sha256:
-                    raise ValueError("libpff source changed during extraction")
-                if receipt.errors:
-                    raise RuntimeError(f"libpff extraction incomplete ({receipt.errors} items); evidence retained at {workspace}")
-                receipt.complete = True
+            code = yield from run_converter([str(program), "--receipt", str(receipt_path),
+                "--diagnostics", str(diagnostics), "--timeout-seconds", str(settings.timeout_seconds),
+                "--max-message-bytes", str(settings.max_message_bytes),
+                "--max-folder-depth", str(settings.max_folder_depth), "--", str(source.path)],
+                output, workspace / "stderr.txt", settings, container.work_id, environment, (receipt_path, diagnostics))
+            if code not in (0, 3):
+                raise RuntimeError(f"libpff extraction incomplete (exit {code}); evidence at {workspace}")
+            receipt = PffReceipt.model_validate_json(receipt_path.read_text())
+            if receipt.source_sha256 != initial_hash or file_hash(source.path) != initial_hash:
+                raise ValueError("libpff source changed during extraction")
+            if self.context.scan_policy == "clamav":
+                environment["MAILARCHIVER_SCAN"] = "1"
+                environment[LIBRARY_ENV] = str(library_path())
+                environment[DATABASE_ENV] = str(selected_definitions().directory)
+                if certs := certificates_path():
+                    environment[CERTIFICATES_ENV] = str(certs)
+                scanned = workspace / "scanned.mboxrd"
+                scan_code = yield from run_converter([str(executable("mcti-scan")), str(output)], scanned,
+                    workspace / "scanner-stderr.txt", settings, container.work_id, environment)
+                if scan_code:
+                    raise RuntimeError(f"libpff producer scan failed (exit {scan_code}); evidence at {workspace}")
+                output = scanned
+            extracted = source.model_copy(update={"path": output, "byte_length": output.stat().st_size, "kind": "mbox"})
+            count = 0
+            for record in MboxFileParser().messages(extracted):
+                validate_record(record.raw)
+                count += 1
+                uri = record.raw.split(b"\n", 1)[0].decode("ascii").strip()
+                node = uri.rsplit("#libpff/", 1)[-1]
+                yield MailObject(work_id=container.work_id, source=container.source, cursor=f"libpff:{node}",
+                    raw=record.raw, completed_messages=count, scan_responsibility="producer")
+            if count != receipt.emitted:
+                raise RuntimeError("libpff converter record count mismatch")
+            if code or not receipt.complete:
+                raise RuntimeError(f"libpff extraction incomplete; evidence at {workspace}")
+            output.unlink()
+            (workspace / "output.mboxrd").unlink(missing_ok=True)
         except Exception as error:
-            receipt.failure = str(error)[:4096]
+            if not receipt_path.exists():
+                receipt_path.write_text(PffReceipt(source=source.path, source_sha256=initial_hash,
+                    libpff_version="unknown", process_id=0, failure=str(error)[:4096]).model_dump_json())
             raise
-        finally:
-            try:
-                if opened:
-                    store.close()
-            finally:
-                (workspace / "receipt.json").write_text(receipt.model_dump_json())

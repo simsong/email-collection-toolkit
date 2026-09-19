@@ -45,6 +45,7 @@ class PendingPublication(BaseModel):
 
 PUBLICATION_JOURNAL = ".mailarchiver-pending.json"
 MAX_AMBIGUOUS_FROM_LINES = 12
+DEFAULT_MBOX_MAX_BYTES = 15 * 1024**3 // 4
 
 
 class PublicationRecovery(str, Enum):
@@ -149,12 +150,12 @@ def synthetic_envelope(
     return f"From {safe_sender} {weekday} {month} {date.day:2d} {date:%H:%M:%S %Y}\n".encode("ascii")
 
 
-def add_message(
-    box: mailbox.mbox, path: Path, raw: bytes, *, envelope: bytes | None = None,
+def frame_message(
+    raw: bytes, *, envelope: bytes | None = None,
     fallback_date: datetime | None = None, sender: str = "MAILER-DAEMON",
     earliest_year: int = 1900,
-) -> MboxLocation:
-    prior_size = path.stat().st_size if path.exists() else 0
+) -> bytes:
+    """Prepare the exact envelope and quoted payload used by the MBOX writer."""
     if envelope is None:
         if raw.startswith(b"From "):
             first, separator, payload = raw.partition(b"\n")
@@ -163,6 +164,37 @@ def add_message(
             framed = synthetic_envelope(raw, fallback_date, sender, earliest_year) + quote(raw)
     else:
         framed = envelope + quote(raw)
+    return framed
+
+
+def rollover_destination(first: Path, framed: bytes, maximum: int) -> Path:
+    """Select the newest numbered part under the publisher's writer lease.
+
+    A single oversized record gets its own part; never split or discard mail.
+    Count the writer-added terminal LF and the trailing record separator too.
+    """
+    if maximum <= 0 or not first.name.endswith("1.mbox"):
+        raise ValueError("rollover requires a positive byte limit and a part-1 mailbox")
+    prefix = first.name[:-len("1.mbox")]
+    parts = [int(path.stem[len(prefix):]) for path in first.parent.glob(f"{prefix}*.mbox")
+             if path.stem[len(prefix):].isdigit()]
+    number = max(parts, default=1)
+    destination = first.with_name(f"{prefix}{number}.mbox")
+    size = destination.stat().st_size if destination.exists() else 0
+    added = len(framed) + (0 if framed.endswith(b"\n") else 1) + 1
+    if size and size + added >= maximum:
+        destination = first.with_name(f"{prefix}{number + 1}.mbox")
+    return destination
+
+
+def add_message(
+    box: mailbox.mbox, path: Path, raw: bytes, *, envelope: bytes | None = None,
+    fallback_date: datetime | None = None, sender: str = "MAILER-DAEMON",
+    earliest_year: int = 1900,
+) -> MboxLocation:
+    prior_size = path.stat().st_size if path.exists() else 0
+    framed = frame_message(raw, envelope=envelope, fallback_date=fallback_date,
+                           sender=sender, earliest_year=earliest_year)
     if shutil.disk_usage(path.parent).free < len(framed) + 1024 * 1024:
         raise DiskFullError(f"insufficient free space before writing {path}")
     try:

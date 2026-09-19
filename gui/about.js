@@ -18,6 +18,7 @@ async function initialize() {
   if (initialized) return;
   initialized = true;
   window.clearInterval(bridgeTimer);
+  byId("update-definitions").addEventListener("click", updateDefinitions);
   await refresh();
   window.setInterval(refresh, 1000);
 }
@@ -38,6 +39,29 @@ function render(status) {
   byId("disk").textContent = `${formatBytes(status.disk_free_bytes)} available on ${status.disk_path}`;
   byId("internet").textContent = status.internet.detail;
   if (byId("antivirus")) byId("antivirus").textContent = status.antivirus?.detail || "Unknown";
+  const av = status.antivirus;
+  byId("definitions").textContent = av?.definition_date
+    ? `${new Date(av.definition_date).toLocaleDateString()} · ${av.age_days} days old · ${av.definition_source} · ${av.definition_version}`
+    : "Unavailable";
+  byId("definition-warning").hidden = !av?.warning;
+  byId("definition-warning").textContent = av?.warning || "";
+  const types = [...new Set((status.processors || []).flatMap(plugin => plugin.subscribes))].sort();
+  byId("processors").replaceChildren(...types.map(type => {
+    const group = document.createElement("div");
+    const heading = document.createElement("strong"); heading.textContent = type;
+    group.append(heading);
+    for (const plugin of status.processors.filter(plugin => plugin.subscribes.includes(type))) {
+      const line = document.createElement("p");
+      line.textContent = `${plugin.name} (${plugin.kind}) version ${plugin.implementation_version} — ${plugin.pipeline}, rank ${plugin.rank}, ${plugin.scope}, timeout ${plugin.timeout_seconds}s`;
+      group.append(line);
+    }
+    return group;
+  }));
+  byId("acquisition-plugins").replaceChildren(...(status.acquisition_plugins || []).map(plugin => {
+    const line = document.createElement("p");
+    line.textContent = `${plugin.name} (${plugin.kind}) version ${plugin.implementation_version} — ${plugin.plugin_type} acquisition`;
+    return line;
+  }));
   const activity = status.ingests.length ? status.ingests.map(activityCard) : [empty("No saved archive is open.")];
   byId("activity").replaceChildren(...activity);
   const notices = status.notices.length ? [...status.notices].reverse().map(noticeCard) : [empty("No messages.")];
@@ -94,4 +118,20 @@ function showError(message) {
   const error = byId("error");
   error.textContent = message;
   error.hidden = false;
+}
+
+async function updateDefinitions() {
+  const button = byId("update-definitions");
+  const message = byId("definition-update-status");
+  button.disabled = true;
+  message.textContent = "Downloading and verifying virus definitions…";
+  try {
+    const result = await window.pywebview.api.update_definitions();
+    message.textContent = `Definitions updated (${result.versions}). New imports will use them.`;
+    await refresh();
+  } catch (error) {
+    message.textContent = `Update failed: ${String(error?.message || error)}. Existing definitions were retained.`;
+  } finally {
+    button.disabled = false;
+  }
 }

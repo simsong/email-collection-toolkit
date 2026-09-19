@@ -3,6 +3,7 @@
 //! MCT Importer API 1.0. Validation discards input; it never publishes an archive.
 //! Requirements and limits: doc/MCT_IMPORTER_API.md.
 
+pub mod antivirus;
 pub mod pst;
 
 use base64::{engine::general_purpose::STANDARD, Engine};

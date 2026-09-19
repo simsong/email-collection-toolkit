@@ -8,7 +8,6 @@ from __future__ import annotations
 import argparse
 import json
 import platform
-import re
 import shutil
 from importlib.metadata import Distribution, PackageNotFoundError, distribution
 from pathlib import Path
@@ -27,8 +26,7 @@ METADATA_VERSION = "Version"
 DEV_ONLY_DISTRIBUTIONS = frozenset({"astroid", "playwright", "pylint", "pytest", "pytest-playwright"})
 LICENSE_BASENAMES = ("copying", "copyright", "license", "notice")
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
-NOTICE_FILES = ("COPYRIGHT", "THIRD_PARTY_NOTICES.md")
-LIBPFF_LICENSE = REPOSITORY_ROOT / "licenses/libpff-LGPL.txt"
+NOTICE_FILES = ("COPYRIGHT", "LICENSE", "THIRD_PARTY_NOTICES.md", "licenses/publicsuffix-MPL-2.0.txt")
 PROXY_TOOLS_LICENSE = REPOSITORY_ROOT / "licenses/proxy_tools-BSD.txt"
 
 
@@ -128,8 +126,6 @@ def inventory() -> LicenseInventory:
             license_fallback=(
                 "repository:licenses/proxy_tools-BSD.txt"
                 if canonicalize_name(item.metadata[METADATA_NAME]) == "proxy-tools"
-                else "repository:licenses/libpff-LGPL.txt"
-                if canonicalize_name(item.metadata[METADATA_NAME]) == "libpff-python"
                 else f"shared:{pyobjc_provider}"
                 if canonicalize_name(item.metadata[METADATA_NAME]).startswith("pyobjc-")
                 and not license_files(item)
@@ -148,7 +144,7 @@ def inventory() -> LicenseInventory:
 
 
 def audit_errors(result: LicenseInventory) -> tuple[str, ...]:
-    """Reject missing license evidence, strong copyleft, and dev-only leakage."""
+    """Reject missing license evidence and development-only runtime leakage."""
     errors: list[str] = []
     for record in result.distributions:
         normalized_name = canonicalize_name(record.name)
@@ -156,8 +152,6 @@ def audit_errors(result: LicenseInventory) -> tuple[str, ...]:
             errors.append(f"development dependency is in the runtime closure: {record.name}")
         if record.license == "UNKNOWN":
             errors.append(f"runtime license is unknown: {record.name}")
-        if re.search(r"(?<!L)GPL", record.license.upper()):
-            errors.append(f"GPL/AGPL runtime license is not approved: {record.name} ({record.license})")
         if not record.license_files and not record.license_fallback:
             errors.append(f"runtime distribution has no complete license file: {record.name}")
     return tuple(errors)
@@ -169,7 +163,9 @@ def write_bundle(result: LicenseInventory, output: Path) -> None:
         raise ValueError(f"license output directory is not empty: {output}")
     output.mkdir(parents=True, exist_ok=True)
     for filename in NOTICE_FILES:
-        shutil.copyfile(REPOSITORY_ROOT / filename, output / filename)
+        target = output / filename
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(REPOSITORY_ROOT / filename, target)
     (output / "runtime-license-inventory.json").write_text(
         json.dumps(result.model_dump(mode="json"), indent=2, sort_keys=True) + "\n",
         encoding="utf-8",
@@ -182,9 +178,6 @@ def write_bundle(result: LicenseInventory, output: Path) -> None:
             source = Path(str(item.locate_file(filename)))
             target = package_dir / f"{index:02d}-{source.name}"
             shutil.copyfile(source, target)
-    pff_dir = output / "libpff-python"
-    pff_dir.mkdir(exist_ok=True)
-    shutil.copyfile(LIBPFF_LICENSE, pff_dir / LIBPFF_LICENSE.name)
     proxy_dir = output / "proxy-tools"
     proxy_dir.mkdir(exist_ok=True)
     shutil.copyfile(PROXY_TOOLS_LICENSE, proxy_dir / PROXY_TOOLS_LICENSE.name)
@@ -205,7 +198,7 @@ def main() -> int:
     if args.output:
         write_bundle(result, args.output)
         print(f"Wrote runtime license bundle to {args.output}")
-    print(f"Audited {len(result.distributions)} runtime distributions; no GPL/AGPL dependency found.")
+    print(f"Audited {len(result.distributions)} runtime distributions; license evidence and runtime scope checks passed.")
     return 0
 
 

@@ -759,7 +759,7 @@ function quotedSearchValue(value) {
 
 function effectiveQuery() {
   const filters = state.searchFilters.map(filter => {
-    const selector = filter.kind === "address" ? filter.role : "subject";
+    const selector = filter.tag;
     return `${selector}:${quotedSearchValue(filter.value)}`;
   });
   const text = elements.search.value.trim();
@@ -768,9 +768,10 @@ function effectiveQuery() {
 }
 
 function scheduleSuggestions() {
-  window.clearTimeout(state.suggestionTimer);
+  // Retire visible and in-flight suggestions before accepting a different query.
+  closeSuggestions();
   const query = elements.search.value.trim();
-  if (query.length < SUGGESTION_MINIMUM) { closeSuggestions(); return; }
+  if (query.length < SUGGESTION_MINIMUM) return;
   const request = ++state.suggestionRequest;
   state.suggestionTimer = window.setTimeout(() => loadSuggestions(query, request), SUGGESTION_DELAY_MS);
 }
@@ -785,9 +786,6 @@ function renderSuggestions(suggestions) {
   state.suggestionItems = [];
   state.suggestionIndex = -1;
   const contents = [];
-  const heading = label => {
-    const item = document.createElement("div"); item.className = "suggestion-heading"; item.textContent = label; return item;
-  };
   const option = (icon, label, count, accept) => {
     const button = document.createElement("button");
     button.type = "button";
@@ -806,18 +804,11 @@ function renderSuggestions(suggestions) {
     state.suggestionItems.push({element: button, accept});
     return button;
   };
-  if (suggestions.addresses.length) {
-    contents.push(heading("Addresses"));
-    for (const address of suggestions.addresses) {
-      const label = address.display_name ? `${address.display_name} — ${address.address}` : address.address;
-      contents.push(option("◎", label, address.message_count, () => addAddressFilter(address)));
-    }
+  for (const item of suggestions.items) {
+    contents.push(option(item.tag + ":", item.label, item.message_count,
+      () => addSearchFilter(item, suggestions.prefix)));
   }
-  contents.push(heading("Subjects"));
-  contents.push(option("✉", `Subject contains “${suggestions.query}”`, null, () => addSubjectFilter(suggestions.query)));
-  for (const subject of suggestions.subjects) {
-    contents.push(option("✉", subject.subject, subject.message_count, () => addSubjectFilter(subject.subject)));
-  }
+  if (!contents.length) { closeSuggestions(); return; }
   elements["search-suggestions"].replaceChildren(...contents);
   elements["search-suggestions"].hidden = false;
   elements.search.setAttribute("aria-expanded", "true");
@@ -866,20 +857,9 @@ function closeSuggestions() {
   elements.search?.setAttribute("aria-expanded", "false");
 }
 
-function addAddressFilter(suggestion) {
-  state.searchFilters.push({
-    kind: "address", value: suggestion.address, label: suggestion.display_name || suggestion.address, role: "any",
-  });
-  elements.search.value = "";
-  closeSuggestions();
-  renderSearchFilters();
-  elements.search.focus();
-  runSearch();
-}
-
-function addSubjectFilter(subject) {
-  state.searchFilters.push({kind: "subject", value: subject, label: subject});
-  elements.search.value = "";
+function addSearchFilter(item, prefix) {
+  state.searchFilters.push(item);
+  elements.search.value = prefix;
   closeSuggestions();
   renderSearchFilters();
   elements.search.focus();
@@ -887,26 +867,26 @@ function addSubjectFilter(subject) {
 }
 
 function renderSearchFilters() {
-  const roleOptions = [["any", "Any"], ["from", "From"], ["to", "To"], ["cc", "Cc"], ["bcc", "Bcc"]];
   const chips = state.searchFilters.map((filter, index) => {
     const chip = document.createElement("span"); chip.className = "search-chip";
-    if (filter.kind === "address") {
-      const role = document.createElement("select");
-      role.setAttribute("aria-label", `Address role for ${filter.value}`);
-      role.append(...roleOptions.map(([value, label]) => {
-        const option = document.createElement("option"); option.value = value; option.textContent = label; return option;
-      }));
-      role.value = filter.role;
-      role.addEventListener("change", () => { filter.role = role.value; runSearch(); });
-      chip.append(role);
-    }
+    const tag = document.createElement("select");
+    tag.setAttribute("aria-label", `Search type for ${filter.value}`);
+    tag.append(...filter.choices.map(choice => {
+      const option = document.createElement("option");
+      option.value = choice.tag;
+      option.textContent = `${choice.label}: (${choice.message_count.toLocaleString()})`;
+      return option;
+    }));
+    tag.value = filter.tag;
+    tag.addEventListener("change", () => { filter.tag = tag.value; runSearch(); });
+    chip.append(tag);
     const label = document.createElement("span");
     label.className = "search-chip-label";
-    label.textContent = filter.kind === "subject" ? `Subject: ${filter.label}` : filter.label;
+    label.textContent = filter.value;
     label.title = filter.value;
     const remove = document.createElement("button");
     remove.type = "button"; remove.className = "search-chip-remove"; remove.textContent = "×";
-    remove.setAttribute("aria-label", `Remove ${filter.label} filter`);
+    remove.setAttribute("aria-label", `Remove ${filter.value} filter`);
     remove.addEventListener("click", () => {
       state.searchFilters.splice(index, 1); renderSearchFilters(); runSearch(); elements.search.focus();
     });
@@ -1128,7 +1108,7 @@ function resultCardFormatter(cell) {
   const result = cell.getRow().getData();
   queueResultPreview(result.message_pk, state.searchRequest);
   const card = document.createElement("div");
-  card.className = "result";
+  card.className = result.attached_message ? "result attached-message" : "result";
   card.id = `message-result-${result.message_pk}`;
   card.dataset.messagePk = result.message_pk;
   card.draggable = state.fileDragSupported;
@@ -1147,6 +1127,10 @@ function resultCardFormatter(cell) {
   paperclip.setAttribute("aria-label", paperclip.title);
   paperclip.hidden = result.attachment_count === 0;
   subjectLine.append(subject, paperclip);
+  if (result.attached_message) {
+    const tag = document.createElement("span"); tag.className = "attachment-tag"; tag.textContent = "attachment";
+    subjectLine.append(tag);
+  }
   const line = document.createElement("div");
   line.className = "result-line";
   const sender = document.createElement("span");
@@ -1270,9 +1254,15 @@ async function selectMessage(messagePk) {
   }
   state.messageFindIndex = -1;
   state.resultTable?.deselectRow();
-  state.resultTable?.selectRow(messagePk);
+  if (result && state.resultTable?.getRow(messagePk)) {
+    state.resultTable.selectRow(messagePk);
+    void state.resultTable.scrollToRow(messagePk, "middle", false).catch(error => {
+      if (state.selectionRequest === messagePk && state.results.includes(result)) {
+        showError(`Could not scroll to the selected result: ${error?.message || error}`);
+      }
+    });
+  }
   updateMessageFileWell();
-  void state.resultTable?.scrollToRow(messagePk, "middle", false);
   elements["message-content"].hidden = false;
   const adjustment = view.date_adjustment;
   const banner = elements["computed-date-banner"];
@@ -1314,6 +1304,14 @@ function renderLocations(view) {
     }
     nodes.push(term, detail);
   };
+  for (const origin of view.attached_origins || []) {
+    addLocation("Attached message", `MIME path ${origin.part_path.join(".")} in parent ${origin.parent_message_id}`);
+    if (origin.parent_message_pk) {
+      const link = document.createElement("button"); link.type = "button"; link.textContent = "Open parent message";
+      link.addEventListener("click", () => selectMessage(origin.parent_message_pk));
+      nodes.at(-1).append(link);
+    }
+  }
   if (view.archive_path) addLocation("Archive mailbox", view.archive_path);
   view.source_locations.forEach((source, index) => {
     const origin = source.preferred ? `Preferred source (${source.origin})` : source.origin;

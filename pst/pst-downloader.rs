@@ -3,7 +3,7 @@
 //! Corpus acquisition contract: pst/README.md. Does not import or rewrite mail.
 use anyhow::{bail, ensure, Context, Result};
 use clap::{Parser, ValueEnum};
-use reqwest::{blocking::Client, redirect::Policy, Url};
+use reqwest::{redirect::Policy, Client, Url};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::{
@@ -11,9 +11,71 @@ use std::{
     fs::{self, File},
     io::{Read, Seek, Write},
     path::{Path, PathBuf},
+    sync::atomic::{AtomicBool, Ordering},
     time::Duration,
 };
 use tempfile::NamedTempFile;
+
+static INTERRUPTED: AtomicBool = AtomicBool::new(false);
+
+/// Stop buffered work at a cancellation boundary so temporary files unwind normally.
+fn check_interrupted() -> Result<()> {
+    ensure!(
+        !INTERRUPTED.load(Ordering::Relaxed),
+        "interrupted; rerun to finish remaining downloads"
+    );
+    Ok(())
+}
+
+struct CacheLock {
+    path: PathBuf,
+    lock: Option<File>,
+    // Keep a stable inode locked while the removable lock is opened or deleted.
+    // Otherwise another process could lock an unlinked inode and become a second writer.
+    _guard: File,
+}
+
+impl CacheLock {
+    /// Acquire OS locks, taking over any leftover diagnostic file from a dead process.
+    fn acquire(root: &Path) -> Result<Self> {
+        let open = |path: &Path| -> Result<File> {
+            Ok(fs::OpenOptions::new()
+                .read(true)
+                .write(true)
+                .create(true)
+                .truncate(false)
+                .open(path)?)
+        };
+        let guard = open(&root.join(".download.guard"))?;
+        guard
+            .try_lock()
+            .context("cache is locked by another downloader")?;
+        let path = root.join(".download.lock");
+        let lock = open(&path)?;
+        lock.try_lock()
+            .context("cache is locked by another downloader")?;
+        let mut lease = Self {
+            path,
+            lock: Some(lock),
+            _guard: guard,
+        };
+        let file = lease.lock.as_mut().expect("new lock handle");
+        file.set_len(0)?;
+        writeln!(file, "pid={}", std::process::id())?;
+        Ok(lease)
+    }
+}
+
+impl Drop for CacheLock {
+    /// Remove the diagnostic lock before releasing the stable guard, including on Ctrl+C.
+    fn drop(&mut self) {
+        // Close before unlinking for Windows; the guard still excludes all new writers.
+        drop(self.lock.take());
+        if let Err(error) = fs::remove_file(&self.path) {
+            eprintln!("WARNING: could not remove {}: {error}", self.path.display());
+        }
+    }
+}
 
 #[derive(Clone, Copy, Debug, Default, ValueEnum, PartialEq)]
 enum Scope {
@@ -301,6 +363,7 @@ fn copy_bounded(reader: &mut dyn Read, out: &mut dyn Write, limit: u64) -> Resul
     let mut size = 0u64;
     let mut buffer = [0u8; 65536];
     loop {
+        check_interrupted()?;
         let bytes_read = reader.read(&mut buffer)?;
         if bytes_read == 0 {
             break;
@@ -345,6 +408,7 @@ fn check_file(
     let mut size = 0u64;
     let mut buffer = [0u8; 65536];
     loop {
+        check_interrupted()?;
         let bytes_read = file.read(&mut buffer)?;
         if bytes_read == 0 {
             break;
@@ -405,7 +469,12 @@ fn install(
 }
 
 /// Reuse a verified artifact or download and validate it before caching.
-fn acquire(job: &Job, args: &Args, client: &Client) -> Result<PathBuf> {
+fn acquire(
+    job: &Job,
+    args: &Args,
+    client: &Client,
+    runtime: &tokio::runtime::Runtime,
+) -> Result<PathBuf> {
     let folder = args
         .output
         .join("downloads")
@@ -417,10 +486,26 @@ fn acquire(job: &Job, args: &Args, client: &Client) -> Result<PathBuf> {
         Kind::SevenZip => "source.7z",
     });
     let receipt_path = folder.join("receipt.json");
+    if path.exists() && !receipt_path.exists() {
+        // Older versions published the artifact before its receipt. Preserve ambiguous
+        // crash evidence and retry automatically instead of requiring manual cleanup.
+        let orphan = tempfile::Builder::new()
+            .prefix("unreceipted-")
+            .tempdir_in(&folder)?
+            .keep();
+        fs::rename(
+            &path,
+            orphan.join(path.file_name().context("artifact has no filename")?),
+        )?;
+        eprintln!(
+            "Preserved unreceipted artifact in {}; retrying",
+            orphan.display()
+        );
+    }
     if path.exists() {
-        let receipt: Receipt = serde_json::from_reader(File::open(&receipt_path).context(
-            "cached artifact lacks receipt; preserve it and move it aside before retrying",
-        )?)?;
+        let receipt: Receipt = serde_json::from_reader(
+            File::open(&receipt_path).context("cannot read cached artifact receipt")?,
+        )?;
         ensure!(receipt.url == job.url, "cached receipt URL mismatch");
         check_file(
             &path,
@@ -446,24 +531,15 @@ fn acquire(job: &Job, args: &Args, client: &Client) -> Result<PathBuf> {
             "inventory size exceeds download limit"
         );
     }
-    let mut response = client.get(&job.url).send()?.error_for_status()?;
-    ensure!(
-        response.status() == reqwest::StatusCode::OK,
-        "expected complete HTTP 200 response, got {}",
-        response.status()
-    );
-    if let Some(length) = response.content_length() {
-        ensure!(
-            length <= args.max_download_bytes,
-            "HTTP length exceeds limit"
-        );
-    }
-    let final_url = response.url().to_string();
     let mut tmp = NamedTempFile::new_in(&folder)?;
-    // These test fixtures are small enough that a separate hashing pass is inexpensive.
-    // Hash the completed file during validation instead of also hashing the download.
-    // Keep I/O buffered because the inventory also includes larger Enron archives.
-    copy_bounded(&mut response, &mut tmp, args.max_download_bytes)?;
+    let final_url = runtime.block_on(async {
+        tokio::select! {
+            result = transfer(job, args, client, &mut tmp) => result,
+            result = wait_for_interrupt() => result,
+        }
+    })?;
+    // Small fixtures make this separate hashing pass inexpensive. Larger Enron
+    // archives still use buffered I/O; no entire download is held in memory.
     let (sha256, size) = check_file(
         tmp.path(),
         job.expected_sha256.as_deref(),
@@ -484,17 +560,64 @@ fn acquire(job: &Job, args: &Args, client: &Client) -> Result<PathBuf> {
             "response is not the expected archive type"
         );
     }
-    install(tmp, &path, &sha256, size)?;
+    // Publish the receipt first: a crash may leave a receipt without an artifact,
+    // which is safe to redownload. Never expose an artifact without its fixity data.
     atomic_json(
         &receipt_path,
         &Receipt {
             url: job.url.clone(),
             final_url,
-            sha256,
+            sha256: sha256.clone(),
             size,
         },
     )?;
+    install(tmp, &path, &sha256, size)?;
     Ok(path)
+}
+
+/// Cancel pending connection, response-header or body waits without waiting for HTTP timeout.
+async fn wait_for_interrupt() -> Result<String> {
+    loop {
+        check_interrupted()?;
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+}
+
+/// Copy one complete HTTP response to a bounded temporary file; validation hashes it later.
+async fn transfer(
+    job: &Job,
+    args: &Args,
+    client: &Client,
+    tmp: &mut NamedTempFile,
+) -> Result<String> {
+    check_interrupted()?;
+    let mut response = client.get(&job.url).send().await?.error_for_status()?;
+    ensure!(
+        response.status() == reqwest::StatusCode::OK,
+        "expected complete HTTP 200 response, got {}",
+        response.status()
+    );
+    if let Some(length) = response.content_length() {
+        ensure!(
+            length <= args.max_download_bytes,
+            "HTTP length exceeds limit"
+        );
+    }
+    let final_url = response.url().to_string();
+    let mut size = 0u64;
+    while let Some(chunk) = response.chunk().await? {
+        check_interrupted()?;
+        size = size
+            .checked_add(chunk.len() as u64)
+            .context("byte count overflow")?;
+        ensure!(
+            size <= args.max_download_bytes,
+            "byte limit exceeded ({})",
+            args.max_download_bytes
+        );
+        tmp.write_all(&chunk)?;
+    }
+    Ok(final_url)
 }
 
 struct ExpectedPst<'a> {
@@ -571,6 +694,7 @@ fn extract(job: &Job, path: &Path, args: &Args, report: &mut Report) -> Result<(
         Kind::Zip => {
             let mut archive = zip::ZipArchive::new(File::open(path)?)?;
             for index in 0..archive.len() {
+                check_interrupted()?;
                 let mut member = archive.by_index(index)?;
                 let name = member.name().to_owned();
                 safe_member(&name)?;
@@ -616,6 +740,7 @@ fn extract(job: &Job, path: &Path, args: &Args, report: &mut Report) -> Result<(
                 sevenz_rust::SevenZReader::open(path, sevenz_rust::Password::empty())?;
             archive.for_each_entries(|member, reader| {
                 (|| -> Result<bool> {
+                    check_interrupted()?;
                     safe_member(member.name())?;
                     ensure!(
                         !member.has_windows_attributes || member.windows_attributes & 0x400 == 0,
@@ -696,12 +821,11 @@ fn run(args: Args) -> Result<bool> {
         return Ok(true);
     }
     fs::create_dir_all(args.output.join("objects"))?;
-    let lock_path = args.output.join(".download.lock");
-    let lock = fs::OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .open(&lock_path)
-        .context("cache is locked; inspect stale .download.lock before removing it")?;
+    let _lock = CacheLock::acquire(&args.output)?;
+    check_interrupted()?;
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()?;
     let result = (|| -> Result<bool> {
         fs::create_dir_all(args.output.join("reports"))?;
         let (report_file, report_path) = tempfile::Builder::new()
@@ -724,6 +848,7 @@ fn run(args: Args) -> Result<bool> {
             .build()?;
         let mut report = Report::default();
         for (index, job) in jobs.iter().enumerate() {
+            check_interrupted()?;
             eprintln!("[{}/{}] {}", index + 1, jobs.len(), job.url);
             let result = (|| -> Result<()> {
                 if let Some(expected_sha256) = &job.expected_sha256 {
@@ -749,7 +874,7 @@ fn run(args: Args) -> Result<bool> {
                         return Ok(());
                     }
                 }
-                let path = acquire(job, &args, &client)?;
+                let path = acquire(job, &args, &client, &runtime)?;
                 extract(job, &path, &args, &mut report)
             })();
             match result {
@@ -764,6 +889,7 @@ fn run(args: Args) -> Result<bool> {
             }
             atomic_json(&report_path, &report)?;
             atomic_json(&args.output.join("download-report.json"), &report)?;
+            check_interrupted()?;
         }
         atomic_json(&report_path, &report)?;
         atomic_json(&args.output.join("download-report.json"), &report)?;
@@ -775,14 +901,27 @@ fn run(args: Args) -> Result<bool> {
         );
         Ok(report.failures.is_empty())
     })();
-    drop(lock);
-    fs::remove_file(lock_path)?;
+    // A cancelled resolver may still be inside the OS; do not wait for its blocking
+    // worker during shutdown. All cache writes run synchronously on this thread.
+    runtime.shutdown_background();
     result
 }
 
 /// Parse CLI arguments and translate download results into process exit status.
 fn main() -> std::process::ExitCode {
-    match run(Args::parse()) {
+    let args = Args::parse();
+    if let Err(error) = ctrlc::set_handler(|| {
+        INTERRUPTED.store(true, Ordering::Relaxed);
+    }) {
+        eprintln!("pst-downloader: could not install Ctrl+C handler: {error}");
+        return std::process::ExitCode::FAILURE;
+    }
+    let result = run(args);
+    if INTERRUPTED.load(Ordering::Relaxed) {
+        eprintln!("pst-downloader: interrupted; verified downloads retained; rerun to finish");
+        return std::process::ExitCode::from(130);
+    }
+    match result {
         Ok(true) => std::process::ExitCode::SUCCESS,
         Ok(false) => std::process::ExitCode::FAILURE,
         Err(error) => {

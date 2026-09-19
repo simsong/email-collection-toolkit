@@ -8,6 +8,7 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from ..scan_evidence import ScanEvidence as ScanEvidence, ScanFailure as ScanFailure, ScanStatus as ScanStatus
 from ..message import ParsedMessage
 from ..owner_rules import OwnerRules
 from ..plugin_api import MailObject, SourceReference
@@ -24,6 +25,8 @@ class ProcessingPolicy(Contract):
     earliest_year: int = 1900
     index_attachments: bool = False
     scan_policy: Literal["clamav", "not-scanned"] = "clamav"
+    scanner_session: str | None = Field(default=None, exclude=True)
+    # Legacy saved policies remain readable; these fields are no longer executed.
     scanner_configuration: Path | None = None
     scanner_executable: str = "clamdscan"
     max_message_depth: int = Field(default=20, ge=1)
@@ -39,6 +42,8 @@ class SourceMetadata(Contract):
     source_date: datetime | None = None
     envelope_hex: str | None = None
     normalization: MboxNormalization | None = None
+    scan_evidence: ScanEvidence | None = None
+    scan_responsibility: Literal["host", "producer"] = "host"
 
     def mail_object(self, raw: bytes) -> MailObject:
         return MailObject(source=self.source, work_id=self.work_id, cursor=self.cursor, raw=raw,
@@ -84,8 +89,3 @@ class AddressEvidence(Contract):
 
 class MimeInventory(Contract):
     attachments: tuple[IndexedAttachment, ...] = ()
-
-
-class ScanEvidence(Contract):
-    status: Literal["clean", "infected", "not-scanned"]
-    detail: str = ""

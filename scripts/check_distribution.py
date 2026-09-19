@@ -23,6 +23,7 @@ REQUIRED_PACKAGE_MEMBERS = (
     "mailarchiver/plugins/files/pst/plugin.toml",
     "mailarchiver/plugins/files/ost/plugin.toml",
     "mailarchiver/pff_source.py",
+    "mailarchiver/public_suffix_list.dat",
     "mailarchiver/plugins/processors/clamav/plugin.toml",
     "mailarchiver/plugins/processors/mime/plugin.toml",
     "mailarchiver/plugins/processors/identity-evidence/plugin.toml",
@@ -32,7 +33,6 @@ REQUIRED_PACKAGE_MEMBERS = (
     "mailarchiver/sql/V1__search.sql",
 )
 SMOKE_COMMANDS = (
-    ("mailarchiver-auth", ("--help",), 0),
     ("mailarchiver-compare-apple-mail", ("--help",), 0),
     ("mailarchiver-h3-review", ("--help",), 0),
     ("mailarchiver", ("--help",), 0),
@@ -90,6 +90,14 @@ def install_and_smoke(uv: str, artifact: Path, root: Path) -> None:
             )
 
     # Exercise resource lookup from the installed artifact, outside the checkout.
+    subprocess.run([str(python), "-I", "-c",
+        "from importlib.util import find_spec; "
+        "from mailarchiver.plugin_loader import load_plugins; load_plugins(); "
+        "from mailarchiver.public_suffix import registrable_domain; "
+        "assert registrable_domain('mail.example.co.uk') == 'example.co.uk'; "
+        "assert all(find_spec(name) is None for name in "
+        "('pypff', 'google_auth_oauthlib', 'requests', 'requests_file', 'tldextract'))"],
+        check=True, cwd=root, capture_output=True, text=True, timeout=30)
     archive = environment / "framework-fixture"
     for command in ("init", "status"):
         subprocess.run(

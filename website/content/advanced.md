@@ -1,6 +1,6 @@
 +++
 title = "Advanced"
-description = "Identity, repeatable ingest, Apple Mail cache recovery, MBOX envelope repair, failure diagnostics, comparison, and integrity details."
+description = "Date handling, identity, repeatable ingest, Apple Mail cache recovery, MBOX envelope repair, failure diagnostics, comparison, and integrity details."
 +++
 <!-- Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved. -->
 
@@ -11,6 +11,47 @@ and working mail-client caches.
 
 See the [plugin system and proposed processor DAGs](@/plugins.md) for source,
 message-ingest, and deferred content-processing boundaries.
+
+## Date handling
+
+CLI and GUI date searches use the same worldwide calendar-date boundaries.
+
+When you search for January 5, you should find messages sent late on January 5
+even when their UTC timestamp falls on January 6. For example, 10 p.m. in Boston
+on January 5, 2020 is 03:00 UTC on January 6.
+
+A date search covers the entire period during which that date occurs
+anywhere across UTC+14 through UTC−12. It starts when the date begins in UTC+14
+and ends when it finishes in UTC−12, the Anywhere on Earth (AoE) closing
+boundary. This is a **50-hour window**, rather than one 24-hour day in UTC−12
+or in the computer's timezone.
+
+| Search | UTC timestamps included |
+| --- | --- |
+| `date:2020-01-05` | January 4 at 10:00, inclusive, through January 6 at 12:00, exclusive |
+| `before:2020-01-05` | Earlier than January 4 at 10:00 |
+| `after:2020-01-05` | January 6 at 12:00 or later |
+
+The Boston message is included in the January 5 search. The wider window can
+also include messages dated January 4 or January 6 in the sender's timezone.
+That is intentional: the search includes every instant that could be January 5
+somewhere within those offsets. It does not require the sender's own calendar
+date to be January 5.
+
+**Adjacent date searches overlap by 26 hours.** A message may therefore appear
+in searches for neighboring dates. Do not add those result counts to calculate
+a unique total. `before:` excludes the entire selected worldwide window;
+`after:` begins only once that window has ended.
+
+The date recognizer accepts `2020-01-05`, `1/5/2020`, and
+`January 5, 2020` as the same date. Use quotes around a multiword selector value,
+for example `date:"January 5, 2020"`. Slash dates use month/day/year with a
+four-digit year. Invalid calendar dates do not produce date suggestions.
+
+These rules change search boundaries only. The archive continues to store
+resolved timestamps in UTC and preserve original message headers. Existing
+date-recovery rules and mailbox filing are unchanged; no archive rebuild is
+needed for the new search boundaries.
 
 ## Planned compiled desktop experience
 
@@ -180,8 +221,10 @@ observations refer to one message.
 
 The canonical archive uses standard MBOX plus BagIt and Mailbag metadata.
 `h1` hashes each complete MBOX, `h2` hashes each recovered raw message, and
-`h3` supports semantic reconciliation. SQLite catalogs and search indexes are
-derived and rebuildable. Run `make verify ARCHIVE=/path/to/archive` after
+`h3` supports semantic reconciliation. Search indexes and automatic evidence are rebuildable. Preserve
+`processing.sqlite3`: manual names, identity decisions, affiliations and tags
+cannot be reconstructed from the original messages. Back up the entire archive,
+including operational databases and configuration. Run `make verify ARCHIVE=/path/to/archive` after
 ingest or transfer; verification is read-only.
 
 The [user manual](https://github.com/simsong/email-collection-toolkit/blob/main/doc/USER_MANUAL.md)

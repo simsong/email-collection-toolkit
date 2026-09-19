@@ -2,9 +2,21 @@
 
 # Mail archive normalizer requirements
 
+## Manual state and documentation status
+
+The archive has three operational databases: `archive.sqlite3` (catalog and
+source observations), `search.sqlite3` (disposable search), and
+`processing.sqlite3` (queues, evidence, identities, affiliations and tags).
+Manual identity/tag decisions are durable user data, not reproducible from mail.
+Back up the entire archive, including databases and `config.yaml`.
+Current source code includes CLI and GUI processor integration and local PST/OST
+adapters. Research plans and historical release inventories are not promises
+of shipped features; authoritative matching, the tag editor, remote ingestion,
+geography and compiled-platform trials remain future work.
+
 ## Recovered offline diagnostic boundaries
 
-ClamAV health and message-scan subprocesses must have hard deadlines and remove
+ClamAV initialization and native scanning must have hard deadlines and remove
 temporary plaintext even on timeout. Known incomplete EMLX records must be
 reported without blocking complete messages in a directory import, while direct
 selection fails explicitly.
@@ -108,7 +120,13 @@ directory, and a `data/mbox/` payload directory.
   MAILER-DAEMON. Never rewrite a present envelope to conform to these rules.
 * Normal mail is partitioned by resolved message year and category:
   `{YEAR}-Sent1.mbox` and `{YEAR}-Archive1.mbox`.
-* A file rolls over before it reaches 3.75 GiB.  Later parts are named
+* A nonempty file rolls over before its next record reaches the configured
+  `mbox_max_bytes` limit in archive `config.yaml` (default 3.75 GiB, 4026531840
+  bytes). The limit includes envelopes, mboxrd quoting and record separators.
+  A single record at or above the limit is preserved whole in its own part;
+  the next record starts a new part. No message is split or discarded.
+  Tests use four synthetic 6 KiB messages and a 20 KiB limit: three records
+  in part 1 and the fourth in part 2. Later parts are named
   `{YEAR}-Sent2.mbox`, `{YEAR}-Sent3.mbox`, `{YEAR}-Archive2.mbox`, etc.
 * Messages detected as infected are instead placed in `INFECTED1.mbox`, with
   the same numeric rollover rule if needed.  They are never discarded or
@@ -270,9 +288,9 @@ in an actual message body.
 ## Deduplication and provenance
 
 On macOS, Command-Q during an active import must offer Cancel or Stop Import
-and Quit. Explain that quitting stops imports, that restarting requires File →
-Import with the same source, and that already archived messages are not imported
-twice. Cancel leaves imports running. Confirmed quit stops all active imports
+and Quit. Explain that quitting stops imports, that **Continue Processing**
+resumes saved work (or File → Import retries the source), and that already
+archived messages are not imported twice. Cancel leaves imports running. Confirmed quit stops all active imports
 cooperatively, disallows new imports, and waits for checkpointing and writer-lease
 release before terminating. Window-close restrictions during ingest remain intact.
 
@@ -392,25 +410,37 @@ mailbox destinations. Dedicated EICAR tests also verify infected routing.
 
 ## Malware handling
 
+**PR #124 migration:** direct libclamav scanning replaces daemon/CLI scanning.
+[Embedded antivirus](EMBEDDED_CLAMAV.md) defines concurrent shared-engine scans,
+infected-only API headers, macOS/Windows storage,
+and definition updates. About shows daily definitions' publication date/age and
+a yellow recommendation after three calendar months. Releases must refresh
+bundled definitions at least quarterly. GPL-2.0-only application licensing matches
+ClamAV's license version; other dependency compatibility remains pending as
+recorded in THIRD_PARTY_NOTICES.md.
+
 * Each new message is streamed to ClamAV unless the user explicitly chooses
   an unscanned import. Missing or failed scanning must never silently mean clean.
   The CLI requires exactly one of `--clamav` or `--no-scan`; the latter records
   `not-scanned` in run status and an antivirus metadata defect on each new message.
   Earlier run status without this field is unknown, not presumed scanned.
   Repeat imports do not retroactively scan previously archived messages.
-* The `--clamav` switch starts one
-  foreground `clamd` on the main ingest thread when the configured local socket
-  is not healthy, waits for a successful health probe before starting mailfile
-  workers, reuses a healthy existing daemon without stopping it, and never
-  enables on-access or scheduled scanning. A daemon started by mailarchiver
-  must capture its output in a verified, mode-`0600` log in a unique
-  mode-`0700` per-run directory and remove the installed configuration's
-  `LogFile`, `LogSyslog`, and `PidFile`; the owned foreground subprocess needs
-  no PID file. Mailarchiver-owned daemons sharing one configured `LocalSocket`
-  must be serialized by an advisory lock held for the daemon's complete
-  lifetime. A healthy external daemon is reused without holding that lock or
-  stopping or unlinking its socket. Owned private files are removed after the
-  daemon stops.
+* Host ingestion shares one compiled engine across native scan threads.
+  A temporary app-owned worker provides startup/scan deadlines; it exposes no
+  persistent service or socket. Python records scan results through the existing
+  processing database. Source workers scan outside
+  the publication lock; canonical MBOX publication stays serialized.
+* API producers perform antivirus scanning themselves. Only infected messages
+  carry `X-ClamAV-Detection`, `X-ClamAV-Engine-Version`, and
+  `X-ClamAV-Definitions-Version` headers. Python reads the detection header to
+  route the emitted message to INFECTED without rescanning. Clean messages have
+  no antivirus provenance. Python alone hashes messages and deduplicates them;
+  emitters need no per-message hashes, database access, or scan receipts.
+  Failures are reported to the operator, who can re-import using normal deduplication;
+  the API does not automatically restart an interrupted import.
+* Development definitions live in ignored `etc/clamdb/`. `make freshclam` seeds
+  that directory from an installed database when available, then refreshes it.
+  The DMG bundles that project copy; release CI runs `make freshclam` before building.
 * `ingest --workers N` controls the number of source containers ingested
   simultaneously. Its default is the detected CPU count capped at eight, and
   `N` must be positive. Each worker reads and parses its mailfile and submits
@@ -441,17 +471,15 @@ mailbox destinations. Dedicated EICAR tests also verify infected routing.
   driver prints each queued path and reason once.
   While the main thread waits for ClamAV to load virus definitions, every
   refresh explicitly identifies that wait and shows its increasing startup
-  elapsed time instead of a stale source-file status. A newly started daemon is
-  ready only after the configured scanner health probe succeeds, not merely when
-  its socket appears. Every scanner health-check subprocess has a five-second
-  caller-enforced deadline, and every message scan has a five-minute deadline.
-  A missing, non-executable, or otherwise unlaunchable health-check helper
-  means the scanner is unavailable, not a missing mail source or a clean scan.
-  Execution failures must abort startup before removing an existing daemon
-  socket or launching a new daemon, and release the startup lock.
-  A timeout is a scanner failure, never a clean or infected result, and plaintext
-  temporary message bytes are removed after every outcome.
-* Control-C is a graceful stop: close scanner and MBOX resources, commit
+  elapsed time instead of a stale source-file status. Readiness requires
+  successful native initialization and definition compilation; library load
+  failure is an antivirus error, not a missing mail source. Startup has a
+  120-second deadline and production scans have a 60-second deadline. A timeout
+  is a scanner failure, never a clean or infected result. Owned plaintext
+  temporaries are removed after worker shutdown.
+* Control-C immediately prints and flushes `**Interrupted. Shutting down…**`
+  before waiting for workers or beginning cleanup. Print it once and preserve
+  it across terminal dashboard redraws. It is a graceful stop: close scanner and MBOX resources, commit
   completed messages and observations, publish a complete BagIt/Mailbag
   checkpoint, report interruption,
   print the standard archive report for the completed partial run, and return
@@ -564,8 +592,7 @@ schemas; its creation must neither alter an existing catalog nor weaken its
 schema validation. CLI cancellation must finish the active invocation and release the
 writer lease and permit recovery without repeating completed invocations.
 The framework harness uses copied fixture bytes and raw-digest identity;
-production deduplication and import now use the same dispatcher. GUI picker and
-incomplete-work dialog integration follow separately.
+production deduplication and import now use the same dispatcher. GUI pickers and the incomplete-work dialog shall use the same durable queues and identity tables.
 
 Each processor shall receive its own configuration dictionary, identified by
 its stable manifest kind. Archive settings override installation settings;
@@ -583,11 +610,66 @@ tokens. Inventory sizes and SHA-256 digests apply to 7z members as well as ZIP.
 
 ### Production CLI processor and identity integration
 
+During dispatch, ProcessingObject.job_id exposes the durable SQLite job ID;
+retries retain it and new emissions/handoffs receive their own IDs. Provenance
+uses source_metadata, parent_message_id, part_path and scan_provenance. Plugins
+use check_cancelled() and remaining_seconds; cancellation leaves resumable work
+within pending/running/failed statuses rather than inventing a cancelled state.
+
+
+Processor reports count completed/failed attempts across archive history,
+including explicit fail-import results. They show errors and typed timeout
+counts; unfinished running attempts are not zero-duration samples. No-invocation
+timings display n/a. Failed invocation JSON stores the typed response, including
+its timeout flag and any scan evidence; successful JSON remains a ProcessingResult.
+Legacy failure records without a timeout flag retain error counts only.
+
+
+About lists processor versions by subscribed type and source/file acquisition
+plugins by role and version. Both inventories include the archive's saved extra
+plugin directories; acquisition discovery validates manifests without invoking
+plugin factories during status refresh.
+
+
+Identity address/group counts keep header and signature channels separate:
+`messages` counts distinct messages containing the address in headers;
+`signature_messages` counts distinct signature-bearing messages. The pickers
+display Messages and Signatures columns. Dates cover either evidence channel,
+and date filters apply to both counts. Group counts deduplicate within each
+channel across all visible member addresses.
+
+
+Scanner invocations persist typed clean/infected/not-scanned/unscannable/scanner-error
+results with diagnostics and engine/signature versions (NULL if unavailable).
+Errors and reported encryption/size-limit heuristics block filing and retain
+raw input for retry. Version queries are cached per daemon configuration;
+which unscannable conditions are reported depends on the daemon configuration.
+Failed invocations may publish scan evidence only, never content or filing.
+
+
+Attached-message promotion requires valid transfer decoding. Invalid base64
+(including padding/trailing data), invalid quoted-printable escapes, and unknown
+encodings leave failed extraction and retain the parent, without publishing a
+child. Ordinary non-message MIME parts retain best-effort decode fallback.
+
+
+MIME depth (default 40, `plugins.mime.max_depth`), attached-message depth
+(default 20, `plugins.attached-message.max_depth`), and text size limits
+(`max_text_bytes` on each text plugin) leave failed, retryable jobs. The GUI
+offers continuation for these failures; increasing the configured limit and
+resuming reprocesses the retained source. Limits never mark truncated work complete.
+
+Before releasing MIME outputs, bound cumulative intermediate split/decoded
+bytes, multipart children and attached messages across the entire nested tree.
+Configure positive integer limits under `plugins.mime`; defaults are 128 MiB,
+10000 parts and 1000 attached messages. Limit failures retain the canonical
+parent and a retryable failed job. Decoders must bound reads as well as writes.
+Synthetic fixtures test cumulative nested limits, retry and QP chunk boundaries.
+
 The proposed ranked publish/subscribe processor DAGs, handoff plugins,
 incomplete-work prompt, scanner timeout/statistics, synthetic-part provenance,
 and first-class attached-message handling are specified in
-[PLUGINS.md](PLUGINS.md#proposed-ranked-processing-graphs). CLI processing is
-implemented; the incomplete-work dialog and viewer/tag styling remain GUI work. Manual decisions must survive reruns. Attached messages must retain
+[PLUGINS.md](PLUGINS.md#proposed-ranked-processing-graphs). CLI and GUI processing shall use the same services, writer lease, and saved import policy. Manual decisions must survive reruns. Attached messages must retain
 parent paths and an attachment tag, initially displayed with a 5% gray background.
 The future SQLite-backed tag editor is tracked in issue #119; nullable style
 attributes mean no change. The three pipelines are ingest (ClamAV then filing/handoff), message processing
@@ -600,6 +682,38 @@ the filing plugin may read what it needs after scanning. Discovered child
 messages return directly to message processing without another antivirus scan,
 retaining parent scan provenance and using shared deduplication/publication
 services for the child record and content reference.
+
+### Desktop processor integration
+
+Opening an archive with pending, failed, or interrupted processing shall show
+**Incomplete work**, with **Continue ingest** and **Continue content processing**
+checked. Later, or clearing both choices, opens it without starting work; the
+prompt returns on the next opening until work finishes. Source traversal resumes
+from its original roots; rootless content runs must not hide interrupted imports.
+Content-only processing must work without the source being available. Missing
+saved policy requires an explicit File → Import instead of guessing scan settings.
+Background processing must retain the GUI's stop/quit and single-writer safeguards.
+Pending work alone must not trigger a quit warning. Content-only jobs stop and
+checkpoint on quit without an ingest warning. Active ingest still requires stop
+confirmation. Quit must not block the Cocoa event loop while waiting for workers;
+workers must skip final UI refresh during shutdown. Ctrl-C requests the same
+orderly shutdown without a confirmation dialog.
+
+Matcher matrix cells use two-point vertical padding, black text and column
+headings, and dark supporting text. Live pickers have no Archive identities badge.
+The main-window resume action is labeled **Continue Processing**.
+
+Archive-backed name and institution windows shall show header and signature
+addresses, date-filtered statistics, and distinct message counts per group. Name
+moves, separation and renames save immediately under the writer lease. Institution
+membership follows parent domains; institution names can be edited. The synthetic
+prototype retains its session-only undo; live edits are durable and do not expose
+that prototype reset/undo. Authoritative matching remains disabled until its
+production algorithm is connected. About lists registered processors by input
+MIME type, with pipeline, rank, scope and timeout. Attached message rows show an
+attachment tag on a 5% gray background; the viewer shows the parent and MIME path.
+`make test-gui-processing` exercises these services and shipped pages headlessly
+against actual synthetic archives, without native windows or mocked services.
 
 ### Synthetic matcher window prototype
 
@@ -690,9 +804,9 @@ through an explicit user action. See
 `search.sqlite3` is a separate, disposable SQLite FTS5 database.  It indexes
 normal Sent and Archive message SHA-256, normalized headers, `text/plain` body text when present,
 otherwise rendered `text/html`, otherwise safe single-part message text.  It
-also maintains a replaceable trigram index for email-address substring
-completion; ordinary mapping rows provide deduplicated message counts and
-last-seen dates. Display
+also maintains a replaceable trigram index and address metadata for legacy
+index consumers. Completion uses catalog header roles and live identity names,
+so it does not depend on content indexing. Display
 names are retained as suggestion metadata but are not trigram-indexed. Subject
 completion reads the canonical subject column and requires no second copy.
 It parses XML-looking content declared as `text/html` with the same forgiving HTML
@@ -812,7 +926,7 @@ credentials.
 An `ArchiveDocument` represents one archive. Opening validates the directory
 and the versioned layout and SQLite readable state of both databases without
 creating or modifying anything. A missing or invalid saved archive is removed
-from recent preferences and reported in the persistent About window. The document
+from recent preferences and reported in About status and stderr; About remains hidden until requested. The document
 retains the user's absolute display path and also uses a canonical,
 filesystem device/inode pair as its process-local identity. Windows opened through
 aliases of the same archive share the document's ingest state, child windows,
@@ -899,14 +1013,14 @@ and operational status state, and refuses to overwrite an existing archive or
 nonempty invalid directory. **File → Import…** collects one or more supported
 local files or directories, owner names, explicit final
 confirmation, and starts the same typed ingest service used by the CLI on a
-worker thread. ClamAV is optional and separately installed. Missing executable
+worker thread. ClamAV has an explicit opt-out; the DMG bundles the engine and
+project definitions, while development uses a local library and `etc/clamdb/`. Missing library
 or configuration files produce a warning banner in the Ingests window and
 macOS source picker. Final confirmation defaults to Cancel and offers
-Import Without Scanning or Install ClamAV; the latter opens the official
-download page, without installing software or starting a persistent service.
+Import Without Scanning or Install ClamAV; the latter opens the application
+release page, without installing software or starting a persistent service.
 Configured scanners must pass the existing startup check; errors stop import,
-never silently switch to unscanned mode. About displays scanner configuration
-availability, and import history retains a visible unscanned warning.
+never silently switch to unscanned mode. About displays scanner and definition availability, date, age and refresh status, and import history retains a visible unscanned warning.
 The Ingests window provides **Import Directory…**, bound to its own archive even
 when another archive is active. It opens the source picker directly, then
 uses the same owner-names setup, confirmation, and writer lease as File Import.
@@ -975,9 +1089,7 @@ lists the About, search, and Ingests windows and brings a selected window forwar
 accepts ordinary full-text terms plus `any:ADDRESS`, `from:ADDRESS`,
 role-specific `to:ADDRESS`, `cc:ADDRESS`, and `bcc:ADDRESS`, `subject:TEXT`,
 `date:YYYY-MM-DD`, `before:YYYY-MM-DD`, and
-`after:YYYY-MM-DD` filters, intersecting every supplied term. `date:` selects
-the specified UTC calendar day; `before:` and `after:` exclude the specified
-day. Results default to ten
+`after:YYYY-MM-DD` filters, intersecting every supplied term. Date selectors use the worldwide calendar-date interval described below. Results default to ten
 one-line headers, prefixed by the stable `messages.message_pk`; `--limit 0`
 prints all matches.  Supplying one such number prints the original RFC 5322
 message bytes from canonical MBOX storage.  The current implementation finds
@@ -1018,16 +1130,57 @@ SQL builders, bind their unchanged parameters to `EXPLAIN QUERY PLAN`, and
 check filtering searches rather than accepting any mention of an index. Execute
 the same statements to verify results and bound work on sparse large fixtures.
 
-After three characters and a 120-millisecond debounce, the GUI suggests at most
-20 matching addresses and 20 matching subjects with deduplicated message
-counts. Stale responses are discarded. Addresses rank by message count, then
-most recent message date. Email-address substrings use the disposable
-trigram accelerator; display-name and subject substring matching do not. Selecting an
-address creates a removable filter whose menu scopes it to Any, From, To, Cc,
-or Bcc; recipient roles are the original RFC header roles retained at ingest.
-Selecting a subject creates a removable subject filter. The native window title
+After three characters of the completion value (excluding its selector prefix)
+and a 120-millisecond debounce, the GUI searches Any, Subject, and recognized
+Date values. One Any lookup matches email substrings, original header names,
+and current authoritative names, then derives From/To/Cc/Bcc choices and distinct
+message counts from the matching header occurrences. It must work before content
+processing finishes. Only one matching role defaults to that role; several
+matching roles default to Any. Explicit selectors constrain completion to that
+tag. A tile's tag menu shows the matching roles, including Any, with counts;
+date tiles offer Date/Before/After. Retain existing query terms when accepting
+a completion. Discard stale responses and immediately retire previous choices.
+Limit individual address and subject suggestions to 20 each, alongside aggregate
+substring and date choices. Address choices rank by distinct message count then
+recency; roles retain original RFC header semantics. No zero-match address role
+is offered. Invalid dates do not produce date choices. Removing a tile reruns
+search with the remaining filters. The native window title
 contains the active archive path and total deduplicated searchable-message
 count.
+
+### Worldwide date search
+
+CLI and GUI date selectors shall cover a date anywhere across UTC+14 through
+UTC−12, independent of the computer's timezone. For calendar date D, let
+`start = midnight(D, UTC) − 14 hours` and
+`end = midnight(D + 1 day, UTC) + 12 hours`. The interval is 50 hours:
+
+| Selector | Required predicate on the resolved message timestamp |
+| --- | --- |
+| `date:D` | `start <= date_utc < end` |
+| `before:D` | `date_utc < start` |
+| `after:D` | `date_utc >= end` |
+
+For `date:2020-01-05`, the interval begins at `2020-01-04T10:00:00Z`
+and ends, exclusively, at `2020-01-06T12:00:00Z`. A message sent in Boston
+at 10 p.m. on January 5, 2020 (`2020-01-06T03:00:00Z`) is included.
+This deliberately broad interval can also include messages whose sender-local
+date is January 4 or January 6. Adjacent date searches overlap by 26 hours;
+their counts must not be added as if they were disjoint daily totals.
+This is not a single calendar day in UTC−12: UTC−12 supplies the closing
+boundary, while UTC+14 supplies the opening boundary.
+
+Recognize ISO 8601 calendar dates (`2020-01-05`), month/day/four-digit-year
+dates (`1/5/2020`), and English month-name dates (`January 5, 2020`), normalizing
+them to the same calendar date. Quoted selector values support spaces, such as
+`date:"January 5, 2020"`. Invalid dates must not produce date suggestions.
+Compute UTC bounds once and bind indexed range predicates; do not change stored
+timestamps, original message headers, date-source selection, or archive routing.
+Tests must exercise both exact boundaries, all three input formats, leap days,
+year rollover, the Boston example, and overlap between adjacent dates.
+
+### Message viewing
+
 Selecting a result shows it beside the list; double-clicking opens an
 independent message window whose message pane scrolls through the complete
 message, attachments, and source-location evidence. The result list can sort by date, subject, or
@@ -1168,7 +1321,10 @@ the command fails before reading or writing an archive.
 
 The Python GUI identifies itself as **Email Collection Toolkit** and uses the
 source-controlled rainbow-envelope icon in its native application identity.
-Current application development and pull-request CI are macOS-only. All jobs
+Current application development and all GitHub workflow jobs are macOS-only.
+Release CI runs headless `make dmg`; visible native release testing is an
+explicit local `make check-release` action. Website and release-assembly jobs
+also use macOS, including architecture-matched, checksum-verified Zola. All jobs
 in the continuous-integration workflow must use macOS runners; Windows and Linux
 validation are outside the current scope.
 The required continuous-integration gate exercises the archive lifecycle and
@@ -1236,47 +1392,12 @@ entry points. Tag/version validation must not install the project itself.
 
 ## Remote account authorization
 
-`mailarchiver-auth ACCOUNT` authorizes a remote account independently of an
-archive or ingest run. It accepts exactly one mailbox address and detects
-consumer Gmail directly, Google Workspace from provider-specific MX records,
-and Microsoft 365 from provider-specific MX or Autodiscover records. Detection
-is bounded and explainable. An inconclusive result fails closed and identifies
-the `--gmail` override; it does not guess from generic gateways or unrelated
-domain-verification records. `--detect-only` reports the evidence without
-authorizing or changing external state. Microsoft 365 authorization is a
-recognized but unavailable stub.
-
-Gmail authorization requests only `gmail.readonly`, opens Google's installed
-application flow in the system browser, and verifies the returned Gmail profile
-against the command-line account before retaining the token. The refresh token
-is stored under that account in the operating-system credential store, never in
-the archive, client configuration, terminal output, logs, fixtures, or reports.
-A release provides one public Google Desktop-client configuration registered by
-the Email Collection Toolkit maintainer. End users do not create Cloud projects, configure
-consent, obtain client IDs, or supply client files. A build without that
-configuration fails with a distributor-facing error; it must not route an end
-user into registration. Account-specific `--client-secrets` remains a developer
-override. The downloaded configuration is Pydantic-validated and restricted to
-Google client IDs, OAuth endpoints, and loopback redirects.
-
-`--register-client` is the explicit one-time maintainer workflow. It uses an
-installed Google Cloud CLI to authenticate the named owner account, then creates
-one project and enables only the Gmail API after explicit confirmation. It does
-not change the CLI's active account or default project. Without that CLI, it
-opens project creation and Gmail API pages and asks for the resulting project
-ID. Because Google has no supported general API for External consent-screen and
-Desktop-client creation, setup opens project-scoped Branding, Audience, Data
-Access, and Client pages in order and imports Google's download. It must not
-scrape a browser profile, capture a Google password, or automate the Console
-DOM.
-
-The project and Desktop client registration persist. In Google's Testing state,
-listed test users reauthorize after seven days; the maintainer does not
-re-register the program. In production, users need not be individually listed.
-An unverified personal-use app warns users and is limited to 100 new users until
-verification. The end-user manual and website explain this distinction with
-generic account examples. Separate maintainer help pages contain the illustrated
-one-time registration procedure and tell readers to use their own account.
+Google account authorization and its CLI are removed. Live Google ingestion is
+not planned for the current release and will be reimplemented when needed.
+Google Takeout MBOX and complete local Apple Mail cache messages remain supported.
+Do not ship Google authentication libraries or Requests in the application's
+runtime dependency closure. Any future HTTP clients should use the standard
+library unless another dependency is explicitly approved.
 
 ## Per-archive sources and import modes
 
@@ -1383,11 +1504,10 @@ and retain the current explicit-path CLI instructions.
   rather than silently omitting them. The current backend decision, fixture
   matrix, and format limitations are maintained in
   [ON_DISK_MAIL_FORMATS.md](ON_DISK_MAIL_FORMATS.md).
-  **Planned beta gate:** implement standalone ingest executables accepting a
+  The implemented Rust PST helper is a standalone ingest executable accepting a
   filename and emitting mboxrd to stdout, with diagnostics on stderr, as
-  specified in [PST_DUAL_READER.md](PST_DUAL_READER.md). Start with a qualified
-  adapter around Microsoft's Rust PST library; allow another implementation
-  as a separate pass. Each emitted record carries `X-Imported-URI`,
+  specified in [PST_DUAL_READER.md](PST_DUAL_READER.md). Use Microsoft's Rust PST library and optionally run an independent
+  external libpff converter pass with Redundant PST Import. Each emitted record carries `X-Imported-URI`,
   `X-Importer-Name` and `X-Importer-Version`. These fields are included in h2.
   Existing h3 includes selected headers AND the encoded MIME body; it is a
   comparison control, not permission to discard conflicting variants. The
@@ -1395,9 +1515,9 @@ and retain the current explicit-path CLI instructions.
   Preserve failures and partial-run provenance; a successful empty stream is
   not proof that an arbitrary PST was fully recovered. Qualify OST separately.
   Microsoft 365 has no platform-neutral Takeout equivalent. Outlook PST export
-  on Windows and OLM export from legacy Outlook for Mac are recognized future
-  acquisition paths, but PST, OST, OLM, Graph, and Exchange Online IMAP are not
-  current end-user sources. `doc/M365.md` must keep that boundary explicit.
+  on Windows is an acquisition path; OLM export from legacy Outlook for Mac
+  requires a future reader. The current checkout imports PST and OST with the qualified backends
+  described below. OLM, Graph and Exchange Online IMAP remain unavailable. `doc/M365.md` must keep that boundary explicit.
 * Eudora ingest recognizes mailbox files together with their table-of-contents,
   attachment, and embedded-content conventions. It records which companion
   files were present and never treats an absent or stale index as proof that a
@@ -1584,8 +1704,8 @@ The CLI archive host is implemented; cross-importer h3 duplicate suppression
 remains planned.
 PST and OST share a storage-format family, but OST support must be qualified
 against genuine fixtures and internal header/version/compression variants, not
-inferred from a changed extension or relaxed signature check. Use in-process
-libpff for OST; report cache extraction
+inferred from a changed extension or relaxed signature check. Use the external
+libpff converter for OST; report cache extraction
 completeness separately from server-mailbox completeness. See
 [PST/OST scope and current limits](PST_IMPORTER.md#relationship-between-pst-and-ost).
 
@@ -1671,7 +1791,7 @@ Ordinary `make dmg`, `make dmg-signed`, and `make test-dmg` must run only the
 headless mounted self-test, without opening GUI test windows. `make check-release`
 must additionally run the visible native self-test on the built DMG; `DMG=path`
 selects an existing image instead of rebuilding. GitHub release assembly must
-require `make check-release` before uploading the DMG.
+require headless `make dmg` validation before uploading the DMG.
 Both paths must mount read-only, verify the bundle seal, and detach the volume
 even on test failure. Tests use disposable fixtures and
 preferences, never the last real archive. They exercise no-ClamAV ingest,
@@ -1742,13 +1862,18 @@ must not make remote requests without explicit authorization.
 * Existing contributor, copyright, and license notices are preserved. The
   repository `COPYRIGHT` file limits the project claim to material for which
   the named owner holds copyright; `THIRD_PARTY_NOTICES.md` identifies vendored
-  and separately licensed material.
-* A source or binary distribution includes `COPYRIGHT`,
+  and separately licensed material. All project-owned code, tools, documentation,
+  and the website theme use GPL-2.0-only, with additional licenses available
+  from the copyright holder. The independent libpff converter is GPL-3.0-only
+  to match its LGPLv3 dependency. Third-party license grants remain unchanged.
+* A source or binary distribution includes `LICENSE`, `COPYRIGHT`,
   `THIRD_PARTY_NOTICES.md`, and every license text required by its included
   components. Each platform's binary build audits its exact runtime dependency
-  closure and fails for unknown licenses, GPL/AGPL runtime dependencies, or
-  development/test packages. LGPL dependencies are recorded and redistributed
-  with their required notices and license texts.
+  closure and fails for unknown licenses, missing license texts, or
+  development/test packages. Dependency licenses and required notices are
+  retained. A passing inventory audit is not license compatibility clearance;
+  the remaining Apache-2.0 ftfy compatibility issue is
+  recorded in THIRD_PARTY_NOTICES.md.
 * Copyright ownership and redistribution terms require owner or counsel review
   before public binary release; automated checks are inventory controls, not
   legal advice.
@@ -1898,6 +2023,10 @@ artifacts and URL/member provenance, deduplicate only byte-identical content,
 and verify cache reuse without replacing corrupt evidence. Download/extraction
 is bounded and streaming; failures remain visible and prevent success while
 later sources can proceed. Dry-run and ordinary tests must not download corpora.
+Ctrl+C must cancel pending HTTP waits, release the cache's OS lock, and exit 130.
+After process death, a rerun acquires the released lock and reuses verified
+downloads. Preserve any older artifact missing its receipt before downloading
+it again. These development-download rules do not add automatic API ingest restart.
 
 CLI `ingest --defer-content`, `process`, `processing-status`, `processors` and
 `identities` shall exercise the production framework without GUI popups. Header
@@ -1924,9 +2053,9 @@ providers must retain address evidence without creating automatic institutional
 affiliations. PST timeout/limit receipts must retain the actual reaped exit code,
 observed sizes and truncation flags; both live and post-exit output sizes are checked.
 
-## In-process OST and Redundant PST Import
+## External OST and Redundant PST Import
 
-Read OST through pinned `libpff-python` in the importing Python process, with a
+Read OST through the standalone converter using pinned `libpff-python`, with a
 read-only handle and before/after SHA-256 checks. Route genuine `SO` client magic
 to OST regardless of extension; `SM` files remain PST even when named `.ost`.
 Retain folder/node provenance, receipts, and partial-item diagnostics. OST is a
@@ -1937,11 +2066,15 @@ Never fetch external attachment references. Exclude search folders and non-mail
 objects explicitly; unknown MAPI classes must report incomplete extraction rather
 than silently count as non-mail. Stream attachment reads, verify their declared
 lengths, bound reconstructed message sizes,
-and check cooperative deadlines between native calls; native body allocations
-are not a hard memory-isolation boundary.
+and enforce a host-side process deadline and output/diagnostic limits. Kill and
+reap an overdue converter. The host must never import pypff. The converter owns
+no archive/database state. It emits standard mboxrd; source hashes are permitted,
+but canonical message hashing and deduplication stay in the host. For scanned
+imports, pass the converted stream through the external Rust mcti-scan executable
+before API admission. Only infected messages gain the three ClamAV headers.
 
 The developer-only **Redundant PST Import** option is `plugins.pst.redundant_import`
-(default false). When enabled, run both Microsoft's Rust importer and in-process
+(default false). When enabled, run both Microsoft's Rust importer and external
 libpff on each PST, including after a reader's recoverable failure. Feed both
 outputs to ordinary canonical deduplication without changing its policy. Different
 reconstructions remain variants; exact retries do not multiply canonical content.
@@ -1951,3 +2084,8 @@ option or reader settings change. Keep this option out of the GUI and ordinary C
 help until qualified. `plugins.ost` configures the libpff reader in either mode.
 `make test-pff` exercises a genuine OST fixture, both real PST readers, partial
 results, source fixity, limits, option changes, repeat deduplication, and CLI search.
+
+Organization-domain evidence uses the bundled ICANN Public Suffix List offline,
+including longest-match, wildcard and exception rules, with IDNA normalization.
+Private suffix entries remain excluded, matching the prior tldextract policy.
+No Requests-based fetching or public-suffix network update occurs at runtime.

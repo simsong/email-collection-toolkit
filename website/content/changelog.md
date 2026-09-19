@@ -5,6 +5,15 @@ description = "Changes to the Email Collection Toolkit website, separate from ap
 <!-- Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved. -->
 
 
+## 2026-09-17
+
+- Reconcile local PST/OST support, partial Apple Mail handling, implemented
+  processor GUI controls and backup requirements for manual identity data.
+
+- Document the worldwide date-search window on Advanced, including the
+  Boston example, Before/After boundaries, accepted date formats, and overlapping
+  daily results. Link from Searching and describe role-aware name and date completion.
+
 ## 2026-09-16
 
 - Add the plugin-system page and a graphic of the proposed container, message,

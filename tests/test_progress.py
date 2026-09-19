@@ -5,7 +5,13 @@
 from __future__ import annotations
 
 import queue
+import os
 import re
+import select
+import signal
+import subprocess
+import sys
+import textwrap
 import threading
 import time
 import traceback
@@ -332,6 +338,73 @@ def test_file_worker_pool_preserves_deferred_discovery_traceback() -> None:
     frames = traceback.extract_tb(raised.value.__traceback__)
     assert any(frame.name == "failing_discovery" for frame in frames)
     assert stop.is_set()
+
+
+def test_interrupt_notice_precedes_worker_shutdown(tmp_path: Path) -> None:
+    """Real SIGINT acknowledges immediately, even while a worker cannot yet finish."""
+    release = tmp_path / "release-worker"
+    script = textwrap.dedent("""
+        import sys, threading, time
+        from pathlib import Path
+        from mailarchiver.__main__ import ProgressReporter, run_file_workers
+
+        release = Path(sys.argv[1])
+        progress = ProgressReporter()
+        def worker(_item):
+            print('worker-ready', flush=True)
+            deadline = time.monotonic() + 15
+            while not release.exists():
+                if time.monotonic() > deadline:
+                    raise TimeoutError('test worker was not released')
+                time.sleep(0.01)
+        try:
+            run_file_workers([0], 1, worker, threading.Event(), progress.refresh,
+                             on_interrupt=progress.announce_interrupt)
+        except KeyboardInterrupt:
+            progress.announce_interrupt()
+            print('cleanup complete', flush=True)
+            raise SystemExit(130)
+    """)
+    process = subprocess.Popen([sys.executable, "-c", script, str(release)], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    assert process.stdout is not None and process.stderr is not None
+    try:
+        assert select.select([process.stdout], [], [], 10)[0], "worker did not start"
+        assert process.stdout.readline() == b"worker-ready\n"
+        process.send_signal(signal.SIGINT)
+        deadline = time.monotonic() + 2
+        received = b""
+        while b"**Interrupted. Shutting down" not in received:
+            remaining = deadline - time.monotonic()
+            assert remaining > 0 and select.select([process.stderr], [], [], remaining)[0], "no immediate interrupt acknowledgement"
+            chunk = os.read(process.stderr.fileno(), 8192)
+            assert chunk, "process exited without acknowledging interruption"
+            received += chunk
+        assert process.poll() is None, "worker must still be blocked when the notice arrives"
+        release.touch()
+        stdout, stderr = process.communicate(timeout=10)
+        assert process.returncode == 130
+        assert b"cleanup complete" in stdout
+        assert (received + stderr).count(b"**Interrupted. Shutting down") == 1
+    finally:
+        release.touch()
+        if process.poll() is None:
+            process.kill()
+        process.wait(timeout=10)
+
+
+def test_interrupt_notice_survives_dashboard_redraw(capsys: pytest.CaptureFixture[str]) -> None:
+    """The first shutdown refresh must start below the notice instead of rewinding over it."""
+    progress = ProgressReporter()
+    progress.tty = True
+    progress.start()
+    capsys.readouterr()
+    progress.announce_interrupt()
+    progress.announce_interrupt()
+    progress.refresh()
+    output = capsys.readouterr().err
+    assert output.count("**Interrupted. Shutting down…**") == 1
+    assert "[shutting down]" in output
+    assert not re.search(r"\x1b\[\d+A", output)
 
 
 def test_numbered_worker_rows_are_main_rendered_without_wrapping(capsys: pytest.CaptureFixture[str]) -> None:

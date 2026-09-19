@@ -14,6 +14,7 @@ import sys
 import tomllib
 from collections.abc import Iterable
 from pathlib import Path
+from typing import Literal
 from types import ModuleType
 
 from pydantic import BaseModel, ConfigDict, ValidationError
@@ -47,19 +48,10 @@ def builtin_plugin_directory() -> Path:
 
 
 def load_plugins(extra_dirs: Iterable[Path] = (), *, archive: Path | None = None,
-                 installation_config: Path | None = None) -> PluginRegistry:
+                 installation_config: Path | None = None, scan_policy: Literal["clamav", "not-scanned"] = "not-scanned") -> PluginRegistry:
     """Validate, load, and freeze built-in and explicitly trusted plug-ins."""
-    builtin = builtin_plugin_directory().resolve()
-    roots: list[tuple[Path, bool]] = [(builtin, True)]
-    seen_roots = {builtin}
-    for path in extra_dirs:
-        resolved = Path(path).resolve()
-        if resolved not in seen_roots:
-            roots.append((resolved, False))
-            seen_roots.add(resolved)
-
-    candidates = _validated_candidates(roots)
-    context = PluginContext(archive=archive, installation_config=installation_config)
+    candidates = _candidates(extra_dirs)
+    context = PluginContext(archive=archive, installation_config=installation_config, scan_policy=scan_policy)
     files = tuple(_load(candidate, context) for candidate in candidates if candidate.manifest.plugin_type == "file")
     context = context.model_copy(update={"files": files})
     sources = tuple(
@@ -69,6 +61,24 @@ def load_plugins(extra_dirs: Iterable[Path] = (), *, archive: Path | None = None
         sources=sources,
         files=files,
     )
+
+
+def discover_manifests(extra_dirs: Iterable[Path] = ()) -> tuple[PluginManifest, ...]:
+    """Read the same validated inventory without executing acquisition factories."""
+    return tuple(candidate.manifest for candidate in _candidates(extra_dirs))
+
+
+def _candidates(extra_dirs: Iterable[Path]) -> tuple[_Candidate, ...]:
+    builtin = builtin_plugin_directory().resolve()
+    roots: list[tuple[Path, bool]] = [(builtin, True)]
+    seen_roots = {builtin}
+    for path in extra_dirs:
+        resolved = Path(path).resolve()
+        if resolved not in seen_roots:
+            roots.append((resolved, False))
+            seen_roots.add(resolved)
+
+    return _validated_candidates(roots)
 
 
 def _validated_candidates(roots: list[tuple[Path, bool]]) -> tuple[_Candidate, ...]:
