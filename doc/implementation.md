@@ -16,9 +16,11 @@ or additional database schema. Operators handle failures by re-importing.
 
 About displays definition dates and an amber recommendation after three calendar
 months, with explicit FreshClam refresh into immutable per-user generations.
-Failed updates cannot replace active definitions. The application is GPLv3,
-with additional licenses available. ClamAV's GPLv2-only distribution boundary
-remains unresolved. `make freshclam` updates ignored etc/clamdb, seeding it from
+Failed updates cannot replace active definitions. Project-owned Python, Rust,
+tools, documentation, and website code use GPL-2.0-only, with additional licenses
+available. ClamAV uses the same GPL version; LGPLv3 and Apache-2.0 dependency
+compatibility remains unresolved (see THIRD_PARTY_NOTICES.md).
+`make freshclam` updates ignored etc/clamdb, seeding it from
 an installed database if available. The DMG bundles this copy, the engine and
 FreshClam; release CI refreshes the definitions first. Its mounted self-test runs
 real clean/EICAR scans using the bundled definitions. Application releases refresh
@@ -2336,9 +2338,9 @@ provenance reports can declare how they were produced.
 explicit project-owned, comment-safe policy without rewriting anything.
 `make copyright-check` runs it as part of `make check`. The exclusions protect
 canonical mail and test fixtures, binary/data files, the generated release
-index, the vendored Tabulator tree, and the separately MIT-licensed website
-theme. Upstream CC-BY-SA artwork and generated shared-workflow wrappers are
-also excluded; Python stubs and JavaScript modules receive native comments.
+index, the vendored Tabulator tree, and the website theme (which carries its
+own project license file). Upstream CC-BY-SA artwork and generated shared-workflow
+wrappers are also excluded; Python stubs and JavaScript modules receive native comments.
 Missing notices produce a warning listing the affected paths and exit status 0,
 so `make check` and source builds continue. Checker execution failures still
 propagate normally. `make test-copyright` exercises the ownership boundaries and
@@ -2349,9 +2351,10 @@ Make target runs with both missing and complete notices.
 distribution and follows evaluated PEP 508 runtime requirements, rather than
 inventorying the development environment wholesale. It records typed package,
 version, license, and complete-license-file paths; rejects missing license
-evidence, GPL/AGPL packages, and development-only packages in the runtime
+evidence and development-only packages in the runtime
 closure; and can copy exact license files plus a JSON inventory into a binary
-staging directory. `make runtime-license-check` is a CI and release gate.
+staging directory. This does not establish license compatibility.
+`make runtime-license-check` is a CI and release gate.
 `make runtime-license-bundle LICENSE_OUTPUT=PATH` is the packaging interface;
 it creates a complete notices directory containing the project and third-party
 notices, typed inventory, and collected license files. The current macOS builder

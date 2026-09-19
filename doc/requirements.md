@@ -415,8 +415,9 @@ mailbox destinations. Dedicated EICAR tests also verify infected routing.
 infected-only API headers, macOS/Windows storage,
 and definition updates. About shows daily definitions' publication date/age and
 a yellow recommendation after three calendar months. Releases must refresh
-bundled definitions at least quarterly. GPLv3 application licensing is adopted;
-ClamAV's GPLv2-only distribution boundary remains pending.
+bundled definitions at least quarterly. GPL-2.0-only application licensing matches
+ClamAV's license version; other dependency compatibility remains pending as
+recorded in THIRD_PARTY_NOTICES.md.
 
 * Each new message is streamed to ClamAV unless the user explicitly chooses
   an unscanned import. Missing or failed scanning must never silently mean clean.
@@ -1896,13 +1897,17 @@ must not make remote requests without explicit authorization.
 * Existing contributor, copyright, and license notices are preserved. The
   repository `COPYRIGHT` file limits the project claim to material for which
   the named owner holds copyright; `THIRD_PARTY_NOTICES.md` identifies vendored
-  and separately licensed material.
-* A source or binary distribution includes `COPYRIGHT`,
+  and separately licensed material. All project-owned code, tools, documentation,
+  and the website theme use GPL-2.0-only, with additional licenses available
+  from the copyright holder. Third-party license grants remain unchanged.
+* A source or binary distribution includes `LICENSE`, `COPYRIGHT`,
   `THIRD_PARTY_NOTICES.md`, and every license text required by its included
   components. Each platform's binary build audits its exact runtime dependency
-  closure and fails for unknown licenses, GPL/AGPL runtime dependencies, or
-  development/test packages. LGPL dependencies are recorded and redistributed
-  with their required notices and license texts.
+  closure and fails for unknown licenses, missing license texts, or
+  development/test packages. Dependency licenses and required notices are
+  retained. A passing inventory audit is not license compatibility clearance;
+  the currently identified LGPLv3 and Apache-2.0 compatibility issues are
+  recorded in THIRD_PARTY_NOTICES.md.
 * Copyright ownership and redistribution terms require owner or counsel review
   before public binary release; automated checks are inventory controls, not
   legal advice.

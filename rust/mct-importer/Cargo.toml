@@ -5,6 +5,7 @@ name = "mct-importer"
 version = "1.0.0"
 edition = "2021"
 publish = false
+license = "GPL-2.0-only"
 
 [dependencies]
 outlook-pst = "=1.2.0"

@@ -8,7 +8,8 @@
   prompt Ctrl+C cancellation, and verified reuse of completed downloads.
   Preserve older artifacts lacking receipts before retrying their download.
 
-* Adopt GPLv3 distribution terms, with additional licenses available.
+* Adopt GPL-2.0-only terms for all project-owned code, Rust tools, and the website
+  theme, with additional licenses available. Preserve third-party license terms.
 * Implement a direct-library antivirus prototype with concurrent scans,
   infected-only antivirus headers from Rust PST, explicit definition
   refresh, and About date/age reporting. Display an amber recommendation after
@@ -16,7 +17,9 @@
   message hashes and deduplication; API producers need no scan receipts or database.
   `make freshclam` updates ignored `etc/clamdb/`, seeded from installed definitions.
   Release CI refreshes this copy and the DMG bundles it with the engine/updater.
-  Distribution still awaits the ClamAV GPLv2-only licensing decision.
+  The license version now matches ClamAV. Public distribution still requires
+  resolving the LGPLv3/Apache-2.0 dependency compatibility issues recorded in
+  THIRD_PARTY_NOTICES.md and completing native dependency notices/source coverage.
   See [status and remaining validation](EMBEDDED_CLAMAV.md).
 * Preserve existing Cargo dependency versions when adding workspace dependencies
   through make rust-lock.

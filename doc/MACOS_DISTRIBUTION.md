@@ -123,7 +123,8 @@ self-test checks real clean/EICAR scans and native dependency paths.
 User-requested definition updates go to
 `~/Library/Application Support/Email Collection Toolkit/clamav/`.
 Windows uses `%LOCALAPPDATA%\Email Collection Toolkit\clamav\`.
-The ClamAV distribution-license decision remains unresolved; see
+The project uses GPL-2.0-only, matching ClamAV's license version. Other dependency
+license compatibility and source/notice collection remain unresolved; see
 [embedded antivirus](EMBEDDED_CLAMAV.md).
 
 Missing executables/configuration produce an **Antivirus unavailable** banner.

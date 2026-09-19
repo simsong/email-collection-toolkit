@@ -5,6 +5,7 @@ name = "pst-downloader"
 version = "1.0.0"
 edition = "2021"
 publish = false
+license = "GPL-2.0-only"
 
 [[bin]]
 name = "pst-downloader"

@@ -550,7 +550,7 @@ Interested in email preservation? Check out:
 
 ## Copyright and licenses
 
-Email Collection Toolkit is distributed under the [GNU GPL version 3](LICENSE).
+Email Collection Toolkit is distributed under the [GNU GPL version 2 only](LICENSE).
 Additional licenses are available from the copyright holder.
 
 Original project material is covered by [COPYRIGHT](COPYRIGHT). Vendored and

@@ -4,19 +4,21 @@
 
 Status: local changes for PR #124. Python/Rust library scanning, infected-only
 API headers, definition refresh, About freshness reporting, and DMG bundling
-are implemented. Distribution licensing remains unresolved; see below.
+are implemented. Project-owned code is GPL-2.0-only; dependency distribution
+compatibility remains unresolved; see below.
 
 ## Licensing and distribution
 
-The application is distributed under GPLv3, with additional licenses available
-from the copyright holder; see COPYRIGHT and LICENSE. The runtime audit permits
-GPL dependencies while retaining dependency and notice checks.
+The application and project-owned tools and website are GPL-2.0-only, with
+additional licenses available from the copyright holder; see COPYRIGHT and
+LICENSE. The runtime audit permits GPL dependencies while retaining dependency
+and notice checks.
 
-The installed ClamAV 1.5.4 header grants GPLv2 only, and
-[upstream tracks GPLv3 dual licensing](https://github.com/Cisco-Talos/clamav/issues/1337)
-as a separate request. GPLv3 application licensing does not by itself resolve
-direct-link distribution. A separately GPLv2-compatible native helper or
-suitable upstream permission is needed before distributing this prototype.
+The installed ClamAV 1.5.4 header grants GPLv2 only, matching the application
+license version. The remaining dependency compatibility issues include
+LGPLv3 libpff-python and Apache-2.0 Python packages; see
+[THIRD_PARTY_NOTICES.md](../THIRD_PARTY_NOTICES.md). Changing project-owned
+code's license does not change those upstream terms or clear the full bundle.
 Preserve the exact native dependency licenses, notices and corresponding
 source arrangements. Do not describe the prototype as approved for release.
 
