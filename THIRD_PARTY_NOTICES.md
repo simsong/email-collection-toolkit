@@ -4,7 +4,7 @@
 
 Email Collection Toolkit retains the notices and license terms of material that is not
 covered by the repository's `COPYRIGHT` notice. A packaged application must
-include this file, `COPYRIGHT`, and the complete license texts collected from
+include this file, `COPYRIGHT`, `LICENSE` (GPLv3), and the complete license texts collected from
 the exact runtime environment used to build that application.
 
 ## Material stored in this repository
@@ -45,8 +45,12 @@ Run `make runtime-license-check` in each platform's production build
 environment. Run `make runtime-license-bundle LICENSE_OUTPUT=PATH` to create a
 ready-to-package notices directory containing `COPYRIGHT`, this file, a
 machine-readable inventory, and complete license files for the exact runtime
-closure. The audit rejects unknown licenses, GPL/AGPL runtime packages, and
-development packages in that closure. Platform-specific dependencies mean that
+closure. The audit rejects unknown licenses, missing license texts, and
+development packages in that closure. It does not establish compatibility of
+every third-party license; review the exact release dependency closure against
+the application's GPLv3 terms. Additional application licenses are available
+from the copyright holder and do not replace third-party terms.
+Platform-specific dependencies mean that
 a macOS audit cannot stand in for the required Windows audit, or vice versa.
 
 This inventory is an engineering control, not legal advice. The copyright

@@ -5,7 +5,9 @@ name = "mailarchiver"
 version = "0.1.0.dev2"
 description = "Personal MBOX archive normalizer"
 requires-python = ">=3.12"
+license = "GPL-3.0-only"
 license-files = [
+    "LICENSE",
     "COPYRIGHT",
     "THIRD_PARTY_NOTICES.md",
     "gui/vendor/tabulator/LICENSE",

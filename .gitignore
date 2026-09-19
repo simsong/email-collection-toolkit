@@ -22,3 +22,5 @@ validation/samconfig.toml
 *.cer
 
 /var/pst/
+
+/etc/clamdb/

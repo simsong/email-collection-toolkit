@@ -21,3 +21,6 @@ dd { margin: 0; overflow-wrap: anywhere; }
 .notice.information { border-left: 4px solid #3984c6; }
 .empty, .detail, #version, #copyright { color: var(--muted); }
 #error { position: fixed; left: 20px; right: 20px; bottom: 20px; padding: 10px; border-radius: 7px; color: white; background: #a22; }
+
+.definition-warning { color: #241b00; background: #ffdf70; border: 1px solid #ac8000; border-radius: 7px; padding: 10px; }
+button { font: inherit; padding: 6px 10px; margin-top: 10px; }

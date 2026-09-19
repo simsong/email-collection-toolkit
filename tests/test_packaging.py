@@ -17,7 +17,6 @@ import pytest
 from mailarchiver.ingest_status import read_ingest_history
 from mailarchiver.self_test import SelfTestReport
 from mailarchiver.standalone_verify import verify_archive
-from mailarchiver.scanner import clamav_prefix
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -55,17 +54,6 @@ def test_import_confirmation_has_wide_selectable_body(buttons: tuple[str, ...]) 
     assert alert.buttons()[0].keyEquivalent() == ("\x1b" if buttons[0] == "Cancel" else "\r")
 
 
-def test_scanner_discovery_requires_both_programs(tmp_path: Path) -> None:
-    """A partially installed prefix must not hide a complete separate installation."""
-    incomplete, complete = tmp_path / "incomplete", tmp_path / "complete"
-    for prefix in (incomplete, complete):
-        (prefix / "sbin").mkdir(parents=True)
-        (prefix / "sbin/clamd").touch()
-    (complete / "bin").mkdir()
-    (complete / "bin/clamdscan").touch()
-    assert clamav_prefix((incomplete, complete)) == complete
-
-
 def test_headless_self_test_without_scanner_or_display(tmp_path: Path) -> None:
     """No user archive, saved preference, native window, or installed antivirus is required."""
     report_path = tmp_path / "report.json"
@@ -87,9 +75,7 @@ def test_scanner_failure_never_silently_imports_unscanned(tmp_path: Path) -> Non
     source.write_bytes(raw)
     owners = tmp_path / "owners.txt"
     owners.write_text("sender@example.net\n", encoding="utf-8")
-    environment = {**os.environ, "MAILARCHIVER_CLAMD_CONFIG": str(tmp_path / "absent.conf"),
-                   "MAILARCHIVER_CLAMD": str(tmp_path / "missing"),
-                   "MAILARCHIVER_CLAMDSCAN": str(tmp_path / "missing")}
+    environment = {**os.environ, "MAILARCHIVER_CLAMAV_LIBRARY": str(tmp_path / "missing")}
     archive = tmp_path / "test.mailarchive"
     command = [sys.executable, str(ROOT / "scripts/desktop_entry.py"), "--cli", "--archive", str(archive),
                "ingest", str(source), "--owner-names-file", str(owners)]

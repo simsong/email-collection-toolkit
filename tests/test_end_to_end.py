@@ -14,7 +14,6 @@ import signal
 import sqlite3
 import subprocess
 import sys
-import tempfile
 from collections import Counter
 from pathlib import Path
 from shutil import copy, copytree
@@ -37,9 +36,7 @@ from mailarchiver.source_volume import METADATA_CURRENT_MOUNT_PATH
 from mailarchiver.standalone_verify import semantic_bytes
 
 TEST_DATA = Path(__file__).parent / "data"
-CLAMD_ENV = "MAILARCHIVER_CLAMD"
-CLAMD_CONFIG_ENV = "MAILARCHIVER_CLAMD_CONFIG"
-CLAMD_SOCKET_ENV = "MAILARCHIVER_CLAMD_SOCKET"
+LIBRARY_ENV = "MAILARCHIVER_CLAMAV_LIBRARY"
 
 
 def emlx_message_bytes(path: Path) -> bytes:
@@ -1176,8 +1173,7 @@ def test_clamav_startup_failure_prevents_worker_activity(tmp_path: Path) -> None
     owner_names = Path(__file__).parent / "fixtures" / "owner-names.txt"
     missing_clamd = tmp_path / "missing-clamd"
     environment = os.environ.copy()
-    environment[CLAMD_ENV] = str(missing_clamd)
-    environment[CLAMD_SOCKET_ENV] = str(tmp_path / "clamd.sock")
+    environment[LIBRARY_ENV] = str(missing_clamd)
 
     result = subprocess.run(
         [
@@ -1199,7 +1195,8 @@ def test_clamav_startup_failure_prevents_worker_activity(tmp_path: Path) -> None
     )
 
     assert result.returncode == 1
-    assert f"ClamAV startup failed: cannot start {missing_clamd}" in result.stderr
+    assert "ClamAV startup failed:" in result.stderr
+    assert str(missing_clamd) in result.stderr
     assert "processed=0 active_workers=0 peak_workers=0" in result.stderr
     assert "Traceback" not in result.stderr
     assert not list(mbox_directory(archive).glob("*.mbox"))
@@ -1212,78 +1209,19 @@ def test_clamav_startup_failure_prevents_worker_activity(tmp_path: Path) -> None
         catalog.close()
 
 
-def test_clamav_start_failure_reports_daemon_diagnostics(tmp_path: Path) -> None:
-    """Regression: daemon startup output is retained and reported without a traceback."""
+def test_embedded_scanner_ignores_absent_daemon_configuration(tmp_path: Path) -> None:
+    """Offline library scanning requires no daemon executable, socket or configuration."""
     source = tmp_path / "source.eml"
-    source.write_bytes(b"Message-ID: <clamd-diagnostic@example>\n\nbody\n")
+    raw = b"Message-ID: <embedded@example>\nDate: Thu, 1 Feb 2024 12:00:00 +0000\n\nbody\n"
+    source.write_bytes(raw)
     archive = tmp_path / "archive"
-    owner_names = Path(__file__).parent / "fixtures" / "owner-names.txt"
-    failed_clamd = tmp_path / "failed-clamd"
-    failed_clamd.write_text(
-        "#!/bin/sh\nprintf 'deliberate clamd diagnostic\\n' >&2\nexit 23\n", encoding="utf-8"
-    )
-    failed_clamd.chmod(0o700)
+    owners = Path(__file__).parent / "fixtures/owner-names.txt"
     environment = os.environ.copy()
-    environment[CLAMD_ENV] = str(failed_clamd)
-    environment[CLAMD_SOCKET_ENV] = str(tmp_path / "clamd.sock")
-
-    result = run_ingest(source, archive, owner_names, environment=environment)
-
-    assert result.returncode == 1
-    assert "clamd exited with status 23: deliberate clamd diagnostic" in result.stderr
-    assert "Traceback" not in result.stderr
-
-
-def test_clamav_start_uses_private_runtime_instead_of_configured_files(tmp_path: Path) -> None:
-    """Regression: stale configured log and PID paths cannot break an owned daemon."""
-    source = tmp_path / "source.eml"
-    source.write_bytes(
-        b"Message-ID: <private-clamd-log@example>\n"
-        b"Date: Thu, 1 Feb 2024 12:00:00 +0000\n\nbody\n"
-    )
-    archive = tmp_path / "archive"
-    owner_names = Path(__file__).parent / "fixtures" / "owner-names.txt"
-    configured_socket = Path(os.environ.get(CLAMD_SOCKET_ENV, "/private/tmp/clamd.sock"))
-    configured_path = Path(
-        os.environ.get(CLAMD_CONFIG_ENV, "/opt/homebrew/etc/clamav/clamd.conf")
-    )
-    with tempfile.TemporaryDirectory(
-        prefix="mailarchiver-clamd-test-", dir=configured_path.parent
-    ) as test_runtime_name:
-        test_runtime = Path(test_runtime_name)
-        blocked_log = test_runtime / "configured-clamd.log"
-        blocked_log.touch(mode=0o000)
-        configured_pid = test_runtime / "configured-clamd.pid"
-        configuration_path = test_runtime / "clamd.conf"
-        base_configuration = configured_path.read_text(encoding="utf-8")
-        configured_directives = (
-            ("LocalSocket", configured_socket),
-            ("PidFile", configured_pid),
-            ("LogFile", blocked_log),
-        )
-        directive_names = {directive for directive, _value in configured_directives}
-        lines = [
-            line
-            for line in base_configuration.splitlines()
-            if not line.strip()
-            or line.lstrip().startswith("#")
-            or line.split(maxsplit=1)[0] not in directive_names
-        ]
-        lines.extend(f"{directive} {value}" for directive, value in configured_directives)
-        base_configuration = "\n".join(lines) + "\n"
-        configuration_path.write_text(base_configuration, encoding="utf-8")
-        environment = os.environ.copy()
-        environment[CLAMD_CONFIG_ENV] = str(configuration_path)
-        environment[CLAMD_SOCKET_ENV] = str(configured_socket)
-
-        result = run_ingest(source, archive, owner_names, environment=environment)
-
-        assert_success(result)
-        assert blocked_log.stat().st_mode & 0o777 == 0
-        assert blocked_log.stat().st_size == 0
-        assert not configured_pid.exists()
-        assert not configured_socket.exists()
-        assert not list(test_runtime.glob("mailarchiver-clamd-*"))
+    environment.update(MAILARCHIVER_CLAMD=str(tmp_path / "missing-daemon"),
+                       MAILARCHIVER_CLAMDSCAN=str(tmp_path / "missing-client"),
+                       MAILARCHIVER_CLAMD_CONFIG=str(tmp_path / "missing-config"))
+    assert_success(run_ingest(source, archive, owners, environment=environment))
+    assert source.read_bytes() == raw
 
 
 @pytest.mark.parametrize("empty_partial", [False, True])

@@ -45,9 +45,9 @@ host. `item.check_cancelled()` checks cancellation and the manifest deadline;
 loops must cooperate. The POSIX main-thread harness also uses an alarm. A late
 result is rejected before configuration, queue or catalog publication. Arbitrary
 native code that ignores deadlines cannot be force-stopped safely in process;
-this interface is not a security sandbox. ClamAV uses its existing on-demand
-native service and a bounded command invocation; the Python ClamAV plugin itself
-runs in process. No persistent service is installed or enabled.
+this interface is not a security sandbox. The Python ClamAV plugin consumes
+producer headers or calls the shared libclamav engine in an app-owned temporary
+worker. No persistent service is installed or enabled.
 
 The fresh processing.sqlite3 schema is packaged separately under
 processing/sql/V2__processing.sql; it does not enter the production catalog
@@ -937,3 +937,22 @@ source-mail mutation, or unrestricted archive writes. The API version,
 manifest shape, database capability boundary, canvas lifecycle, and export
 contract remain to be designed in [issue #81](https://github.com/simsong/email-collection-toolkit/issues/81).
 Until then, no visualization plug-in directory or manifest is supported.
+
+## Antivirus evidence at the acquisition boundary
+
+An API producer scans its messages and sets `MailObject.scan_responsibility="producer"`.
+Only infected messages receive these RFC headers before emission:
+
+```
+X-ClamAV-Detection: Eicar-Test-Signature
+X-ClamAV-Engine-Version: 1.5.4
+X-ClamAV-Definitions-Version: main:63,daily:28127,bytecode:339
+```
+
+Python reads the detection header and files the emitted bytes in INFECTED.
+Clean messages carry none of these headers. No host rescan, scan receipt,
+per-message hash, or database write is required from the producer. Python owns
+message hashing and deduplication. Errors are reported for operator action;
+re-import the stream and let ordinary deduplication handle repeated messages.
+There is no automatic API restart. Explicit `--no-scan` bypasses scan handling.
+Ordinary file imports continue to use host scanning.

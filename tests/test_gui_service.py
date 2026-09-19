@@ -12,6 +12,7 @@ import sqlite3
 import sys
 import time
 import zipfile
+from importlib.metadata import version
 from webview.menu import MenuAction
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
@@ -426,7 +427,7 @@ def test_gui_application_metadata_names_the_product() -> None:
     metadata = application_metadata()
 
     assert metadata.name == "Email Collection Toolkit"
-    assert metadata.version == "0.1.0.dev1"
+    assert metadata.version == version("mailarchiver")
     assert metadata.copyright == "Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved."
 
 

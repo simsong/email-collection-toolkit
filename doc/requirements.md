@@ -16,7 +16,7 @@ geography and compiled-platform trials remain future work.
 
 ## Recovered offline diagnostic boundaries
 
-ClamAV health and message-scan subprocesses must have hard deadlines and remove
+ClamAV initialization and native scanning must have hard deadlines and remove
 temporary plaintext even on timeout. Known incomplete EMLX records must be
 reported without blocking complete messages in a directory import, while direct
 selection fails explicitly.
@@ -410,25 +410,36 @@ mailbox destinations. Dedicated EICAR tests also verify infected routing.
 
 ## Malware handling
 
+**PR #124 migration:** direct libclamav scanning replaces daemon/CLI scanning.
+[Embedded antivirus](EMBEDDED_CLAMAV.md) defines concurrent shared-engine scans,
+infected-only API headers, macOS/Windows storage,
+and definition updates. About shows daily definitions' publication date/age and
+a yellow recommendation after three calendar months. Releases must refresh
+bundled definitions at least quarterly. GPLv3 application licensing is adopted;
+ClamAV's GPLv2-only distribution boundary remains pending.
+
 * Each new message is streamed to ClamAV unless the user explicitly chooses
   an unscanned import. Missing or failed scanning must never silently mean clean.
   The CLI requires exactly one of `--clamav` or `--no-scan`; the latter records
   `not-scanned` in run status and an antivirus metadata defect on each new message.
   Earlier run status without this field is unknown, not presumed scanned.
   Repeat imports do not retroactively scan previously archived messages.
-* The `--clamav` switch starts one
-  foreground `clamd` on the main ingest thread when the configured local socket
-  is not healthy, waits for a successful health probe before starting mailfile
-  workers, reuses a healthy existing daemon without stopping it, and never
-  enables on-access or scheduled scanning. A daemon started by mailarchiver
-  must capture its output in a verified, mode-`0600` log in a unique
-  mode-`0700` per-run directory and remove the installed configuration's
-  `LogFile`, `LogSyslog`, and `PidFile`; the owned foreground subprocess needs
-  no PID file. Mailarchiver-owned daemons sharing one configured `LocalSocket`
-  must be serialized by an advisory lock held for the daemon's complete
-  lifetime. A healthy external daemon is reused without holding that lock or
-  stopping or unlinking its socket. Owned private files are removed after the
-  daemon stops.
+* Host ingestion shares one compiled engine across native scan threads.
+  A temporary app-owned worker provides startup/scan deadlines; it exposes no
+  persistent service or socket. Python records scan results through the existing
+  processing database. Source workers scan outside
+  the publication lock; canonical MBOX publication stays serialized.
+* API producers perform antivirus scanning themselves. Only infected messages
+  carry `X-ClamAV-Detection`, `X-ClamAV-Engine-Version`, and
+  `X-ClamAV-Definitions-Version` headers. Python reads the detection header to
+  route the emitted message to INFECTED without rescanning. Clean messages have
+  no antivirus provenance. Python alone hashes messages and deduplicates them;
+  emitters need no per-message hashes, database access, or scan receipts.
+  Failures are reported to the operator, who can re-import using normal deduplication;
+  the API does not automatically restart an interrupted import.
+* Development definitions live in ignored `etc/clamdb/`. `make freshclam` seeds
+  that directory from an installed database when available, then refreshes it.
+  The DMG bundles that project copy; release CI runs `make freshclam` before building.
 * `ingest --workers N` controls the number of source containers ingested
   simultaneously. Its default is the detected CPU count capped at eight, and
   `N` must be positive. Each worker reads and parses its mailfile and submits
@@ -459,17 +470,12 @@ mailbox destinations. Dedicated EICAR tests also verify infected routing.
   driver prints each queued path and reason once.
   While the main thread waits for ClamAV to load virus definitions, every
   refresh explicitly identifies that wait and shows its increasing startup
-  elapsed time instead of a stale source-file status. A newly started daemon is
-  ready only after the configured scanner health probe succeeds, not merely when
-  its socket appears. Every scanner health-check subprocess has a five-second
-  caller-enforced deadline, and production message scans use the processor TOML deadline (60 seconds by default).
-  The legacy standalone scanner service retains its five-minute default.
-  A missing, non-executable, or otherwise unlaunchable health-check helper
-  means the scanner is unavailable, not a missing mail source or a clean scan.
-  Execution failures must abort startup before removing an existing daemon
-  socket or launching a new daemon, and release the startup lock.
-  A timeout is a scanner failure, never a clean or infected result, and plaintext
-  temporary message bytes are removed after every outcome.
+  elapsed time instead of a stale source-file status. Readiness requires
+  successful native initialization and definition compilation; library load
+  failure is an antivirus error, not a missing mail source. Startup has a
+  120-second deadline and production scans have a 60-second deadline. A timeout
+  is a scanner failure, never a clean or infected result. Owned plaintext
+  temporaries are removed after worker shutdown.
 * Control-C immediately prints and flushes `**Interrupted. Shutting down…**`
   before waiting for workers or beginning cleanup. Print it once and preserve
   it across terminal dashboard redraws. It is a graceful stop: close scanner and MBOX resources, commit
@@ -1006,14 +1012,14 @@ and operational status state, and refuses to overwrite an existing archive or
 nonempty invalid directory. **File → Import…** collects one or more supported
 local files or directories, owner names, explicit final
 confirmation, and starts the same typed ingest service used by the CLI on a
-worker thread. ClamAV is optional and separately installed. Missing executable
+worker thread. ClamAV has an explicit opt-out; the DMG bundles the engine and
+project definitions, while development uses a local library and `etc/clamdb/`. Missing library
 or configuration files produce a warning banner in the Ingests window and
 macOS source picker. Final confirmation defaults to Cancel and offers
-Import Without Scanning or Install ClamAV; the latter opens the official
-download page, without installing software or starting a persistent service.
+Import Without Scanning or Install ClamAV; the latter opens the application
+release page, without installing software or starting a persistent service.
 Configured scanners must pass the existing startup check; errors stop import,
-never silently switch to unscanned mode. About displays scanner configuration
-availability, and import history retains a visible unscanned warning.
+never silently switch to unscanned mode. About displays scanner and definition availability, date, age and refresh status, and import history retains a visible unscanned warning.
 The Ingests window provides **Import Directory…**, bound to its own archive even
 when another archive is active. It opens the source picker directly, then
 uses the same owner-names setup, confirmation, and writer lease as File Import.

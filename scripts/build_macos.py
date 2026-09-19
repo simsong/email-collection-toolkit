@@ -18,6 +18,7 @@ from importlib.metadata import distribution, version
 from pathlib import Path
 
 from mailarchiver.self_test import SelfTestReport
+from mailarchiver.clamav_definitions import DEVELOPMENT_DATABASE, certificates_path, library_path, read_definitions, updater_path
 from packaging.requirements import Requirement
 from packaging.utils import canonicalize_name
 
@@ -228,6 +229,24 @@ def verify_dependencies(app: Path) -> None:
     print(f"Verified {len(checked)} bundled Mach-O files: no external non-system library paths")
 
 
+def clamav_bundle_arguments(work: Path) -> list[str]:
+    """Bundle the project's definitions and the native engine/updater with their dependencies."""
+    definitions = read_definitions(DEVELOPMENT_DATABASE, "development")
+    staging = work / "clamav-definitions"
+    staging.mkdir()
+    for path in definitions.directory.iterdir():
+        if path.is_file() and path.suffix in (".cvd", ".cld", ".sign"):
+            shutil.copyfile(path, staging / path.name)
+    arguments = ["--add-data", f"{staging}:clamav/definitions"]
+    for binary in (library_path(), updater_path()):
+        if not binary.is_file():
+            raise FileNotFoundError(f"Install ClamAV before building: {binary}")
+        arguments.extend(("--add-binary", f"{binary}:clamav"))
+    if certs := certificates_path():
+        arguments.extend(("--add-data", f"{certs}:clamav/certs"))
+    return arguments
+
+
 def build(signing_identity: str, *, gui: bool = False) -> Path:
     output = ROOT / "dist"
     output.mkdir(exist_ok=True)
@@ -257,6 +276,8 @@ def build(signing_identity: str, *, gui: bool = False) -> Path:
                     target.parent.mkdir(parents=True, exist_ok=True)
                     shutil.copyfile(str(package.locate_file(entry)), target)
         app_icon = icon(work)
+        plugins = work / "plugins"
+        shutil.copytree(ROOT / "src/mailarchiver/plugins", plugins, ignore=shutil.ignore_patterns("__pycache__"))
         command = [sys.executable, "-m", "PyInstaller", "--noconfirm", "--windowed", "--onedir",
                    "--name", APP_NAME, "--osx-bundle-identifier", IDENTIFIER,
                    "--target-arch", platform.machine(), "--codesign-identity", signing_identity,
@@ -264,10 +285,16 @@ def build(signing_identity: str, *, gui: bool = False) -> Path:
                    "--workpath", str(work / "work"), "--specpath", str(work),
                    "--copy-metadata", "mailarchiver", "--collect-data", "mailarchiver",
                    "--collect-data", "webview", "--hidden-import", "webview.platforms.cocoa",
+                   "--collect-data", "tldextract",
                    "--hidden-import", "mailarchiver.sources", "--hidden-import", "mailarchiver.source_stubs",
+                   "--hidden-import", "mailarchiver.pst_source", "--hidden-import", "mailarchiver.pff_source",
+                   "--hidden-import", "mailarchiver.processing.builtin",
+                   "--add-data", f"{plugins}:mailarchiver/plugins",
                    "--add-data", f"{ROOT / 'gui'}:gui",
                    "--add-data", f"{ROOT / 'src/mailarchiver/standalone_verify.py'}:mailarchiver",
                    "--add-data", f"{notices}:Third Party Notices",
+                   *clamav_bundle_arguments(work),
+                   "--add-binary", f"{ROOT / 'target/release/pst-importer'}:importers",
                    str(ROOT / "scripts/desktop_entry.py")]
         environment = {key: value for key, value in os.environ.items()
                        if key not in (CERTIFICATE_SECRET, PASSWORD_SECRET) and not key.startswith("PYTHON")}

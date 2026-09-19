@@ -587,13 +587,20 @@ class IdentityPickerApi:
 
 
 class AboutApi:
-    """Read-only bridge for persistent application health and activity."""
+    """Application health and explicitly requested definition refresh."""
 
     def __init__(self, application: "PyWebViewApplication") -> None:
         self._application = application
 
     def status(self) -> dict[str, Any]:
         return self._application.about_status().model_dump(mode="json")
+
+    def update_definitions(self) -> dict[str, Any]:
+        from .clamav_update import refresh_definitions
+        result = refresh_definitions()
+        self._application.add_notice("information", f"Virus definitions updated: {result.versions}")
+        return result.model_dump(mode="json")
+
 
 
 class DocumentOptionsApi:
@@ -1358,7 +1365,7 @@ class PyWebViewApplication:
         window = webview.create_window(
             f"About {APPLICATION_NAME}",
             self.asset_url("about.html"),
-            js_api=WindowBridge(self._about_api, ("status",)),
+            js_api=WindowBridge(self._about_api, ("status", "update_definitions")),
             width=620,
             height=620,
             hidden=hidden,

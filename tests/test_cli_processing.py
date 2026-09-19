@@ -143,7 +143,8 @@ def test_cli_attached_message_is_deduplicated_first_class_message(tmp_path: Path
     assert not verify_archive(archive)
 
 
-def test_cli_pst_partial_import_preserves_evidence_and_valid_records(tmp_path: Path) -> None:
+@pytest.mark.parametrize("scan_flag", ["--no-scan", "--clamav"])
+def test_cli_pst_partial_import_preserves_evidence_and_valid_records(tmp_path: Path, scan_flag: str) -> None:
     """Real Rust importer partial failure retains its tail and files prior complete records once."""
     fixture = Path(__file__).resolve().parents[1] / "rust/mct-importer/tests/fixtures/mail.pst"
     source = tmp_path / "mail.pst"
@@ -152,12 +153,18 @@ def test_cli_pst_partial_import_preserves_evidence_and_valid_records(tmp_path: P
     owners.write_text("owner@example.test\n")
     archive = tmp_path / "archive"
     command = [sys.executable, "-m", "mailarchiver", "--archive", str(archive), "ingest",
-               "--no-scan", "--owner-names-file", str(owners), str(source)]
+               scan_flag, "--owner-names-file", str(owners), str(source)]
     for _attempt in range(2):
         result = subprocess.run(command, capture_output=True, text=True, check=False, timeout=60)
         assert result.returncode != 0 and "PST extraction incomplete" in result.stderr
         with sqlite3.connect(archive / "archive.sqlite3") as db:
             assert db.execute("SELECT count(*) FROM messages").fetchone() == (11,)
+    if scan_flag == "--clamav":
+        with sqlite3.connect(archive / "processing.sqlite3") as db:
+            assert db.execute("SELECT count(*) FROM message_state WHERE scan_status='clean'").fetchone() == (11,)
+            for (payload,) in db.execute("SELECT result_json FROM invocations WHERE kind='clamav'"):
+                scan = json.loads(payload)["scan"]
+                assert scan["engine_version"] is None and scan["signature_version"] is None
     receipts = list((archive / "processing-pst").glob("*/receipt.json"))
     assert len(receipts) == 2
     for path in receipts:
@@ -187,7 +194,7 @@ def test_cli_infected_undated_message_quarantines_before_metadata(tmp_path: Path
         assert db.execute("SELECT kind,status FROM invocations").fetchall() == [("clamav", "completed")]
         assert db.execute("SELECT scan_status FROM message_state").fetchone() == ("infected",)
         evidence = json.loads(db.execute("SELECT result_json FROM invocations").fetchone()[0])["scan"]
-        assert evidence["engine_version"] and evidence["signature_version"] and "FOUND" in evidence["detail"]
+        assert evidence["engine_version"] and evidence["signature_version"] and "Eicar" in evidence["detail"]
     with sqlite3.connect(archive / "search.sqlite3") as db:
         assert db.execute("SELECT count(*) FROM message_fts").fetchone() == (0,)
     assert source.read_bytes() == raw

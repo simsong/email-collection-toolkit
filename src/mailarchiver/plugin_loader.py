@@ -14,6 +14,7 @@ import sys
 import tomllib
 from collections.abc import Iterable
 from pathlib import Path
+from typing import Literal
 from types import ModuleType
 
 from pydantic import BaseModel, ConfigDict, ValidationError
@@ -47,10 +48,10 @@ def builtin_plugin_directory() -> Path:
 
 
 def load_plugins(extra_dirs: Iterable[Path] = (), *, archive: Path | None = None,
-                 installation_config: Path | None = None) -> PluginRegistry:
+                 installation_config: Path | None = None, scan_policy: Literal["clamav", "not-scanned"] = "not-scanned") -> PluginRegistry:
     """Validate, load, and freeze built-in and explicitly trusted plug-ins."""
     candidates = _candidates(extra_dirs)
-    context = PluginContext(archive=archive, installation_config=installation_config)
+    context = PluginContext(archive=archive, installation_config=installation_config, scan_policy=scan_policy)
     files = tuple(_load(candidate, context) for candidate in candidates if candidate.manifest.plugin_type == "file")
     context = context.model_copy(update={"files": files})
     sources = tuple(

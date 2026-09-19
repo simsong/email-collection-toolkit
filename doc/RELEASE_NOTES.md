@@ -4,6 +4,19 @@
 
 ## Unreleased
 
+* Adopt GPLv3 distribution terms, with additional licenses available.
+* Implement a direct-library antivirus prototype with concurrent scans,
+  infected-only antivirus headers from Rust PST, explicit definition
+  refresh, and About date/age reporting. Display an amber recommendation after
+  three calendar months and adopt quarterly application releases. Python owns
+  message hashes and deduplication; API producers need no scan receipts or database.
+  `make freshclam` updates ignored `etc/clamdb/`, seeded from installed definitions.
+  Release CI refreshes this copy and the DMG bundles it with the engine/updater.
+  Distribution still awaits the ClamAV GPLv2-only licensing decision.
+  See [status and remaining validation](EMBEDDED_CLAMAV.md).
+* Preserve existing Cargo dependency versions when adding workspace dependencies
+  through make rust-lock.
+
 * Keep release CI headless and all workflow jobs on macOS; retain explicit local
   native-GUI release validation and verified Darwin website tooling.
 

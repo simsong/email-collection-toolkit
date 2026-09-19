@@ -56,7 +56,7 @@ rust-toolchain:
 	$(CARGO) --version
 
 rust-lock:
-	$(CARGO_RUN) generate-lockfile
+	$(CARGO_RUN) update --workspace
 
 rust-fmt:
 	$(CARGO_RUN) fmt --all
@@ -125,6 +125,7 @@ check:
 	$(MAKE) lint
 	$(MAKE) types
 	$(MAKE) rust-check
+	$(MAKE) test-clamav-rust
 	$(MAKE) copyright-check
 	$(MAKE) runtime-license-check
 	$(MAKE) test
@@ -154,7 +155,7 @@ syntax-check:
 	uv run python -m compileall -q src scripts tests e2e_tests
 
 .PHONY: dmg dmg-signed list-signatures check-release test-dmg preview-dmg self-test self-test-gui test-packaging
-dmg: ruff syntax-check
+dmg: ruff syntax-check pst-importer
 	uv run --group packaging python scripts/build_macos.py $(ARGS)
 
 # Use the first valid Developer ID Application identity in the Keychain search list.
@@ -556,3 +557,25 @@ website-preview-screenshots: website-build-check
 test-plugin-inventory: ruff
 	uv run --locked pytest -q tests/test_plugin_loader.py
 	uv run --locked pytest -q --browser chromium e2e_tests/test_ingest_verify.py -k about_window_displays
+
+.PHONY: test-clamav clamav-update freshclam
+test-clamav:
+	uv run --locked pytest -q tests/test_scanner.py tests/test_clamav_definitions.py
+
+clamav-update:
+	uv run --locked python -m mailarchiver.clamav_update $(ARGS)
+
+.PHONY: test-clamav-gui
+test-clamav-gui:
+	uv run --locked pytest -q --browser chromium e2e_tests/test_clamav_about.py
+
+freshclam:
+	uv run --locked python -m mailarchiver.clamav_update --development
+
+.PHONY: test-clamav-rust
+test-clamav-rust:
+	MAILARCHIVER_SCAN=1 \
+	MAILARCHIVER_CLAMAV_LIBRARY="$$(uv run --locked python -c 'from mailarchiver.clamav_definitions import library_path; print(library_path())')" \
+	MAILARCHIVER_CLAMAV_DATABASE="$(CURDIR)/etc/clamdb" \
+	MAILARCHIVER_CLAMAV_CERTIFICATES="$$(uv run --locked python -c 'from mailarchiver.clamav_definitions import certificates_path; print(certificates_path() or "")')" \
+	$(CARGO_RUN) test --locked -p mct-importer --lib -- --include-ignored

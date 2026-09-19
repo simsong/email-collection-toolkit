@@ -17,6 +17,7 @@ import signal
 import sqlite3
 import sys
 import threading
+import tempfile
 import time
 from collections import Counter, deque
 from collections.abc import Callable, Iterable
@@ -32,6 +33,7 @@ from uuid import uuid4
 from pydantic import BaseModel, Field
 from tabulate import tabulate
 
+from .scan_evidence import ScanFailure
 from .archive_integrity import MailbagArchiveIntegrityControls
 from .archive_path import add_archive_argument, require_archive
 from .contacts import contacts, load_owner_addresses, print_contacts
@@ -1135,7 +1137,7 @@ def _run_ingest(request: IngestRequest, writer_lease: WriterLease, outcome: Inge
         owners = OwnerRules(include=read_owner_names(request.owner_names_file), exclude=owners.exclude)
     if not owners.include:
         raise ValueError("Set owner include rules in config.yaml or supply --owner-names-file before importing.")
-    plugins = load_plugins(request.plugin_dir, archive=request.archive, installation_config=request.installation_config)
+    plugins = load_plugins(request.plugin_dir, archive=request.archive, installation_config=request.installation_config, scan_policy=request.scan_policy)
     source_specs = [SourceSpec(locator=str(Path(root).resolve()) if Path(root).exists() else root) for root in request.roots]
     selected_sources: list[tuple[SourceSpec, LoadedPlugin]] = []
     selected_source_keys: set[tuple[str, str, str | None]] = set()
@@ -1742,12 +1744,30 @@ def _run_ingest(request: IngestRequest, writer_lease: WriterLease, outcome: Inge
                     raise RuntimeError("processor host is not initialized")
                 progress.record_worker("processing", source.source.display_name,
                                        source.completed_bytes or 0, source.total_bytes or 0)
+                evidence = None
+                if request.scan_policy == "clamav" and source.scan_responsibility == "host":
+                    digest = hashlib.sha256(raw).hexdigest()
+                    with publication_lock:
+                        archived = catalog.execute("SELECT 1 FROM messages WHERE sha256=?", (digest,)).fetchone() is not None
+                    if not archived:
+                        if scanner is None:
+                            raise RuntimeError("embedded scanner is not ready")
+                        progress.record_worker("scanning", source.source.display_name,
+                                               source.completed_bytes or 0, source.total_bytes or 0)
+                        with tempfile.TemporaryDirectory(prefix="scan-", dir=archive) as temporary:
+                            scan_path = Path(temporary) / "message.eml"
+                            scan_path.write_bytes(raw)
+                            try:
+                                evidence = scanner.scan(scan_path)
+                            except ScanFailure as error:
+                                evidence = error.evidence
                 metadata = SourceMetadata(source=source.source, source_file_pk=source_file_pk,
                     work_id=source.work_id, cursor=source.cursor,
                     source_path=source_file.path if source_file is not None else None,
                     prior_date=prior_date, source_date=source.source_date_utc,
                     envelope_hex=None if source.mbox_envelope is None else source.mbox_envelope.hex(),
-                    normalization=source.mbox_normalization)
+                    normalization=source.mbox_normalization, scan_evidence=evidence,
+                    scan_responsibility=source.scan_responsibility)
                 with publication_lock:
                     try:
                         decision = pipeline.ingest(source, metadata)
@@ -1893,15 +1913,14 @@ def _run_ingest(request: IngestRequest, writer_lease: WriterLease, outcome: Inge
         check_interrupted()
         if request.scan_policy == "clamav" and request.continue_ingest:
             progress.set_phase(CLAMAV_START_PHASE)
-            scanner = ClamScanner(refresh_import)
+            scanner = ClamScanner(refresh_import, workers=request.workers)
             scanner.__enter__()
         elif request.continue_ingest:
             print("WARNING: importing without antivirus scanning; messages are NOT scanned or certified clean.", file=sys.stderr)
         pipeline = ProductionPipeline(archive, catalog, search, ProcessingPolicy(
             owners=owners, earliest_year=request.earliest_year, index_attachments=request.index_attachments,
             scan_policy=request.scan_policy,
-            scanner_configuration=scanner.configuration_path if scanner is not None else None,
-            scanner_executable=scanner.clamdscan if scanner is not None else "clamdscan"),
+            scanner_session=scanner.session if scanner is not None else None),
             publish_processed, plugin_dirs=tuple(request.plugin_dir), installation_config=request.installation_config,
             cancelled=check_processor_cancelled)
         with pipeline.database:

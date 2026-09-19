@@ -109,14 +109,22 @@ archive CLI with `--cli`, without a separately installed Python:
 
 ## Optional antivirus
 
-ClamAV is not bundled or installed automatically. The import-window button
-opens the [official downloads page](https://www.clamav.net/downloads). Users
-must install and configure it and obtain virus definitions; the official
-package alone does not include a working scanner configuration. See
-[ClamAV setup](https://docs.clamav.net/manual/Installing.html) and
-[signature updates](https://docs.clamav.net/manual/Usage/SignatureManagement.html).
-The app detects standard ARM/Intel Homebrew and official macOS installation
-paths at launch; environment overrides remain available. Restart after setup.
+The [embedded antivirus migration planned for PR #124](EMBEDDED_CLAMAV.md)
+will replace this setup with a bundled library and offline definitions, with
+updates under Application Support and refreshed app releases at least quarterly.
+The DMG bundles libclamav, FreshClam, and the definitions in `etc/clamdb/`.
+Install ClamAV for development, then run `make freshclam`: it seeds the ignored
+project directory from an installed database (normally
+`/opt/homebrew/var/lib/clamav/` on Apple Silicon Homebrew) and updates that copy.
+`make dmg` uses those local definitions; release CI runs `make freshclam` first.
+The installed app needs no Homebrew installation or resident daemon. Its mounted
+self-test checks real clean/EICAR scans and native dependency paths.
+
+User-requested definition updates go to
+`~/Library/Application Support/Email Collection Toolkit/clamav/`.
+Windows uses `%LOCALAPPDATA%\Email Collection Toolkit\clamav\`.
+The ClamAV distribution-license decision remains unresolved; see
+[embedded antivirus](EMBEDDED_CLAMAV.md).
 
 Missing executables/configuration produce an **Antivirus unavailable** banner.
 The import confirmation defaults to Cancel; **Import Without Scanning** is an

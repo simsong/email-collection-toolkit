@@ -4,9 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import re
-import subprocess
 from datetime import UTC, datetime
-from functools import lru_cache
 from email.utils import getaddresses
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -18,6 +16,7 @@ from ..message import MetadataDefect, ParsedMessage, decoded_header, decoded_mes
 from ..search import html_text, suggested_addresses
 from .api import Emission, Handoff, ProcessingObject, ProcessingResult, PromotedMessage
 from .contracts import AddressEvidence, Filing, HeaderMetadata, MimeInventory, ScanEvidence, ScanFailure, ScanStatus, TextContent
+from ..scan_evidence import DETECTION_HEADER, ENGINE_HEADER, DEFINITIONS_HEADER
 from .mime import ExtractionLimitError, MimeLimits, extract_parts, read_headers
 
 SIGNATURE_LINES = "signature_lines"
@@ -79,17 +78,18 @@ class ClamAVProcessor:
             raise ValueError("scanner policy is missing")
         if policy.scan_policy == "not-scanned":
             return ProcessingResult(scan=ScanEvidence(status="not-scanned", detail="explicit import policy"))
-        if policy.scanner_configuration is None:
-            raise ValueError("on-demand scanner is not ready")
-        versions = ScanEvidence(status="not-scanned")
-        try:
-            versions = scanner_versions(policy.scanner_executable, str(policy.scanner_configuration))
-            result = subprocess.run([policy.scanner_executable, f"--config-file={policy.scanner_configuration}",
-                "--stream", str(item.message_ref.path)], capture_output=True, check=False, timeout=item.remaining_seconds)
-        except (OSError, subprocess.TimeoutExpired, TimeoutError) as error:
-            raise ScanFailure(ScanEvidence(status="scanner-error", detail=f"{type(error).__name__}: {error}",
-                                           engine_version=versions.engine_version, signature_version=versions.signature_version)) from error
-        evidence = scan_result(result.returncode, result.stdout, result.stderr, versions)
+        from ..scanner import scan_message
+        metadata = item.source_metadata
+        if metadata and metadata.scan_responsibility == "producer":
+            with item.message_ref.open() as source:
+                headers = read_headers(source)
+            detection = str(headers.get(DETECTION_HEADER, ""))
+            evidence = ScanEvidence(status="infected", detail=detection,
+                engine_version=headers.get(ENGINE_HEADER), signature_version=headers.get(DEFINITIONS_HEADER)) if detection else ScanEvidence(status="clean")
+        elif metadata and metadata.scan_evidence is not None:
+            evidence = metadata.scan_evidence
+        else:
+            evidence = scan_message(policy.scanner_session, item.message_ref.path, item.remaining_seconds)
         if evidence.status in ("scanner-error", "unscannable"):
             raise ScanFailure(evidence)
         if evidence.status == "infected":
@@ -97,19 +97,6 @@ class ClamAVProcessor:
                 filing=Filing(parsed=quarantine_metadata(item), mailbox=item.archive.mailbox("INFECTED", None)))
         return ProcessingResult(scan=evidence)
 
-
-@lru_cache(maxsize=16)
-def scanner_versions(executable: str, configuration: str) -> ScanEvidence:
-    """Read daemon version once per run's configuration; unknown stays explicit."""
-    try:
-        result = subprocess.run([executable, f"--config-file={configuration}", "--version"],
-                                capture_output=True, check=False, timeout=5)
-        match = re.search(r"ClamAV ([^/\s]+)/([^/\s]+)", result.stdout.decode("utf-8", "replace"))
-        if result.returncode == 0 and match:
-            return ScanEvidence(status="not-scanned", engine_version=match[1], signature_version=match[2])
-    except (OSError, subprocess.TimeoutExpired):
-        pass
-    return ScanEvidence(status="not-scanned")
 
 
 def scan_result(returncode: int, stdout: bytes, stderr: bytes, versions: ScanEvidence) -> ScanEvidence:

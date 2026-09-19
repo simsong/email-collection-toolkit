@@ -2,6 +2,28 @@
 
 # Mail archive normalizer implementation
 
+## Embedded antivirus migration status
+
+[PR #124](EMBEDDED_CLAMAV.md) uses libclamav directly from Python and Rust.
+The Python session shares one compiled engine across concurrent native threads
+in a temporary worker process. Source workers scan before the publication lock,
+and Python records results in the existing processing database. Rust adds
+X-ClamAV-Detection, X-ClamAV-Engine-Version, and X-ClamAV-Definitions-Version
+only to infected messages. Python reads those headers to quarantine the emitted
+RFC message without rescanning. Clean API messages have no scan provenance.
+Per-message hashing and deduplication belong to Python; there are no scan receipts
+or additional database schema. Operators handle failures by re-importing.
+
+About displays definition dates and an amber recommendation after three calendar
+months, with explicit FreshClam refresh into immutable per-user generations.
+Failed updates cannot replace active definitions. The application is GPLv3,
+with additional licenses available. ClamAV's GPLv2-only distribution boundary
+remains unresolved. `make freshclam` updates ignored etc/clamdb, seeding it from
+an installed database if available. The DMG bundles this copy, the engine and
+FreshClam; release CI refreshes the definitions first. Its mounted self-test runs
+real clean/EICAR scans using the bundled definitions. Application releases refresh
+bundled definitions at least quarterly.
+
 ## CI and release validation
 
 All workflow jobs use macos-15. Release packaging invokes make dmg, which
@@ -23,12 +45,10 @@ geography and compiled-platform trials remain future work.
 
 ## Recovered tool safety and validation
 
-ClamAV health probes have a five-second deadline. Production plugin scans use
-the TOML deadline (60 seconds by default); the legacy scanner service retains
-its five-minute default. Probe timeout means unavailable; a helper execution error raises
-`ClamScannerStartupError` before socket removal or daemon launch and releases
-the startup lock. Scan timeout fails import and removes temporary plaintext. Typed unscannable/scanner-error outcomes and available engine/signature
-versions are retained in processing invocation history.
+Native initialization has a 120-second deadline; production scans retain a
+60-second deadline. A stuck/crashed native worker fails pending scans and is
+reaped. Owned extraction/message temporaries are removed. Scan threads persist
+typed evidence directly, and processor invocation history retains it too.
 
 `make h3-ambiguous-review ARGS='--apple-mail SOURCE --archive ARCHIVE --output REVIEW'`
 writes hash-verified ambiguous classes to a new private directory outside both
@@ -701,10 +721,8 @@ scanner clients. A single publisher lock serializes duplicate admission,
 observations, SQLite transactions, publication-journal updates, MBOX appends,
 and FTS writes; it does not surround source-integrity generator execution.
 One plug-in instance is shared across workers and must be reentrant. A discovery failure or stable-inventory mismatch occurs before
-ClamAV and message publication; unstable providers use their single captured
-worklist. The parser rejects nonpositive worker counts before starting an ingest. A spawned
-daemon must pass `clamdscan --ping` after its socket appears before any message
-scan is submitted.
+scanner initialization and message publication; unstable providers use their single captured
+worklist. The parser rejects nonpositive worker counts before starting an ingest. Native definition compilation must succeed before a host scan is submitted.
 
 Rollover, date sorting/repacking, complete recipient metadata, `verify`, richer
 text extraction, Eudora, working IMAP cache directories, live
@@ -1950,7 +1968,7 @@ Import confirmations use a 560-point-wide selectable AppKit accessory label,
 keeping archive/source/owner paths readable without changing default or Cancel
 actions. `make test-packaging` checks real alert layout and both button sets
 without showing a modal dialog.
-The download action opens only ClamAV's official page. About reports configuration
+The download action opens the application's release page. About reports configuration
 presence separately from readiness, which remains an ingest preflight check.
 `make test-packaging` exercises missing-scanner failure, explicit opt-out,
 durable evidence, source immutability, and isolated headless diagnostics.
@@ -2083,44 +2101,15 @@ A compiled-library regression proves that an alternate self install name
 passes while a real unresolved import still fails. See [MACOS_DISTRIBUTION.md](MACOS_DISTRIBUTION.md)
 for commands, limitations, and Apple's renewal/notarization steps.
 
-### Existing scanner configuration
+### Embedded scanner configuration
 
-Pull-request CI runs one `macos-15` job for `make check`, distribution and website
-validation. Separate Rust/lint jobs are omitted because `make check` includes them. It installs ClamAV through Homebrew into the disposable runner,
-uses a private temporary signature/configuration/socket directory and starts
-the daemon only on demand. Website validation selects the pinned, SHA-256-checked
-Zola macOS binary for the runner architecture. Poppler is installed for the PDF
-ground-truth test. Native GUI checks remain disabled. Ingest telemetry tests
-check monotonic worker peaks within the CPU/source-file limit; reaching exactly
-four concurrent workers is not required on smaller runners or faster scheduling.
+MAILARCHIVER_CLAMAV_LIBRARY and MAILARCHIVER_CLAMAV_DATABASE select explicit
+development resources. MAILARCHIVER_CLAMAV_CERTIFICATES selects signature trust
+material, MAILARCHIVER_FRESHCLAM the updater, and MAILARCHIVER_CLAMAV_UPDATES a
+private update root. Frozen resource resolution uses the bundle rather than
+Homebrew. Bundle assembly and CI provisioning still require migration; see
+EMBEDDED_CLAMAV.md. Legacy MAILARCHIVER_CLAMD settings are ignored.
 
-Homebrew installed these commands:
-
-```text
-/opt/homebrew/bin/clamscan
-/opt/homebrew/bin/clamdscan
-/opt/homebrew/bin/freshclam
-/opt/homebrew/sbin/clamd
-```
-
-`clamd` is the normal on-demand scanner: it loads the signature database once
-and accepts scans through `/private/tmp/clamd.sock`; the archiver starts it
-for a run when needed and stops it after the run unless an operator has
-already started it. Before starting an owned daemon, the archiver creates a
-unique mode-`0700` runtime directory beside the configured file, pre-creates
-and verifies a mode-`0600` log, and derives a private configuration without
-`LogFile`, `LogSyslog`, or `PidFile`. The owned foreground subprocess needs no
-PID file, and its output goes to the private log for startup diagnostics. The
-configured file itself supplies an advisory interprocess lock held for the
-complete lifetime of an owned daemon, preventing archiver runs from racing its
-configured `LocalSocket` without creating a persistent lock artifact. A healthy
-external daemon is reused and left running. Shutdown removes only owned runtime
-files. `clamscan` remains a diagnostic fallback. Neither an
-on-access scanner, a login service, nor a scheduled scan is enabled.  Run
-`freshclam` only when an operator explicitly wants new signatures.
-`MAILARCHIVER_CLAMD`, `MAILARCHIVER_CLAMDSCAN`, `MAILARCHIVER_CLAMD_CONFIG`,
-and `MAILARCHIVER_CLAMD_SOCKET` override the macOS Homebrew defaults for a
-separately configured local environment such as CI.
 
 Current MIME traversal uses the standard-library parser without explicit size,
 recursion, time, or decompression limits. Plain text and rendered HTML are
