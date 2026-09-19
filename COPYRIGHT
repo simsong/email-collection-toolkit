@@ -7,5 +7,8 @@ of warranty. This covers the Python application, Rust tools, scripts, tests,
 documentation, and website, including the Envelope Rainbow theme.
 Additional licenses are available from the copyright holder.
 
+The independent converter in converters/pff is separately licensed under GPLv3
+to support its LGPLv3 libpff dependency; see converters/pff/COPYRIGHT.
+
 Third-party material retains its own copyright notices and license terms.
 See THIRD_PARTY_NOTICES.md.

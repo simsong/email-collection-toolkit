@@ -15,8 +15,9 @@ LICENSE. The runtime audit permits GPL dependencies while retaining dependency
 and notice checks.
 
 The installed ClamAV 1.5.4 header grants GPLv2 only, matching the application
-license version. The remaining dependency compatibility issues include
-LGPLv3 libpff-python and Apache-2.0 Python packages; see
+license version. Libpff runs in a separate GPLv3 converter and sends standard
+mboxrd to the independent GPLv2 Rust scanner before API admission. The remaining
+application dependency compatibility issue is Apache-2.0 ftfy; see
 [THIRD_PARTY_NOTICES.md](../THIRD_PARTY_NOTICES.md). Changing project-owned
 code's license does not change those upstream terms or clear the full bundle.
 Preserve the exact native dependency licenses, notices and corresponding

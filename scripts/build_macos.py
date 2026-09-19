@@ -85,6 +85,11 @@ def configure_bundle(app: Path, signing_identity: str) -> None:
         plistlib.dump(info, handle)
     # PyInstaller signs every nested binary; refresh the outer seal after metadata changes.
     options = [] if signing_identity == "-" else ["--options", "runtime", "--timestamp"]
+    # Collected executables can inherit hardened-runtime flags while being re-signed.
+    # An ad-hoc child has no Team ID and must not enforce Team-ID library validation.
+    converter = app / "Contents/Frameworks/importers/pff-converter/pff-converter"
+    child_options = ["--options", "0"] if signing_identity == "-" else options
+    run("/usr/bin/codesign", "--force", "--sign", signing_identity, *child_options, converter)
     run("/usr/bin/codesign", "--force", "--sign", signing_identity, *options, app)
     run("/usr/bin/codesign", "--verify", "--deep", "--strict", app)
 
@@ -135,6 +140,26 @@ def test_image(dmg: Path, *, gui: bool = False) -> None:
                        if key not in (CERTIFICATE_SECRET, PASSWORD_SECRET)
                        and not key.startswith(("PYTHON", "DYLD_", "MAILARCHIVER", "MAIL_ARCHIVE"))}
         environment["PATH"] = "/usr/bin:/bin:/usr/sbin:/sbin"
+        converter = app / "Contents/Resources/importers/pff-converter/pff-converter"
+        with tempfile.TemporaryDirectory(prefix="pff-mounted-test-") as temporary:
+            receipt = Path(temporary) / "receipt.json"
+            run(converter, "--receipt", receipt, "--", ROOT / "rust/mct-importer/tests/fixtures/empty.pst",
+                cwd=temporary, env=environment, timeout=60)
+            from mailarchiver.pff_source import PffReceipt
+            converted = PffReceipt.model_validate_json(receipt.read_text())
+            if not converted.complete or converted.emitted:
+                raise RuntimeError("mounted standalone converter failed the empty PST fixture")
+            archive = Path(temporary) / "archive"
+            archive.mkdir()
+            (archive / "config.yaml").write_text("plugins:\n  pst:\n    redundant_import: true\n")
+            owners = Path(temporary) / "owners.txt"
+            owners.write_text("fixture@example.test\n")
+            run(executable, "--cli", "--archive", archive, "ingest", "--no-scan",
+                "--owner-names-file", owners, "--defer-content",
+                ROOT / "rust/mct-importer/tests/fixtures/empty.pst", cwd=temporary, env=environment, timeout=90)
+            receipts = list(archive.glob("processing-libpff/*/receipt.json"))
+            if len(receipts) != 1 or not PffReceipt.model_validate_json(receipts[0].read_text()).complete:
+                raise RuntimeError("mounted application did not complete external libpff import")
         for mode in (("self-test", "self-test-gui") if gui else ("self-test",)):
             detail = "opens and closes synthetic test windows" if mode == "self-test-gui" else "no windows"
             print(f"Running mounted {mode} ({detail}); waiting for the test process to exit.", flush=True)
@@ -275,6 +300,8 @@ def build(signing_identity: str, *, gui: bool = False) -> Path:
                     target = notices / str(entry)
                     target.parent.mkdir(parents=True, exist_ok=True)
                     shutil.copyfile(str(package.locate_file(entry)), target)
+        shutil.copytree(ROOT / "converters/pff", notices / "pff-converter",
+                        ignore=shutil.ignore_patterns(".venv", "__pycache__", "*.egg-info", ".pytest_cache"))
         app_icon = icon(work)
         plugins = work / "plugins"
         shutil.copytree(ROOT / "src/mailarchiver/plugins", plugins, ignore=shutil.ignore_patterns("__pycache__"))
@@ -285,9 +312,9 @@ def build(signing_identity: str, *, gui: bool = False) -> Path:
                    "--workpath", str(work / "work"), "--specpath", str(work),
                    "--copy-metadata", "mailarchiver", "--collect-data", "mailarchiver",
                    "--collect-data", "webview", "--hidden-import", "webview.platforms.cocoa",
-                   "--collect-data", "tldextract",
                    "--hidden-import", "mailarchiver.sources", "--hidden-import", "mailarchiver.source_stubs",
                    "--hidden-import", "mailarchiver.pst_source", "--hidden-import", "mailarchiver.pff_source",
+                   "--exclude-module", "pypff",
                    "--hidden-import", "mailarchiver.processing.builtin",
                    "--add-data", f"{plugins}:mailarchiver/plugins",
                    "--add-data", f"{ROOT / 'gui'}:gui",
@@ -295,6 +322,8 @@ def build(signing_identity: str, *, gui: bool = False) -> Path:
                    "--add-data", f"{notices}:Third Party Notices",
                    *clamav_bundle_arguments(work),
                    "--add-binary", f"{ROOT / 'target/release/pst-importer'}:importers",
+                   "--add-binary", f"{ROOT / 'target/release/mcti-scan'}:importers",
+                   "--add-data", f"{ROOT / 'target/pff-converter'}:importers/pff-converter",
                    str(ROOT / "scripts/desktop_entry.py")]
         environment = {key: value for key, value in os.environ.items()
                        if key not in (CERTIFICATE_SECRET, PASSWORD_SECRET) and not key.startswith("PYTHON")}

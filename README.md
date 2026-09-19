@@ -86,7 +86,7 @@ integrity tags are the portable durable record.
 This is the initial local-ingest implementation, not yet the complete email
 archiving system. It currently ingests local MBOX, Emacs RMAIL Babyl, EML,
 Maildir, complete Apple Mail `.emlx` messages, Outlook PST through the Rust reader,
-and OST through in-process libpff. Both Outlook readers report partial extraction
+and OST through the external libpff converter. Both Outlook readers report partial extraction
 and preserve reconstruction evidence; see [reader limits](doc/PST_IMPORTER.md).
 Eudora, working IMAP cache directories, Gmail, live IMAP, redaction, richer
 research data and sorting/repacking remain planned; see
@@ -291,10 +291,9 @@ cross-source messages remain one canonical record with multiple observations.
 Use `make compare-apple-mail` to reconcile the default Apple Mail cache with
 `~/mail-archive` by raw and semantic message hashes without changing either.
 
-`uv run mailarchiver-auth ACCOUNT` is a developer preview for the planned live
-Gmail adapter. It detects Google Workspace and Microsoft 365 from public
-provider records, but it does not ingest mail and Microsoft 365 authorization
-remains unavailable.
+The Google authorization prototype has been removed. Live Google ingestion will
+be reimplemented when needed; no Google authentication or Requests packages are
+required by the application.
 
 The archive directory is a native BagIt/Mailbag package containing:
 
@@ -558,3 +557,6 @@ separately licensed components are identified in
 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md). Release builds must run
 `make runtime-license-check` on every target platform and include the complete
 license bundle produced by `make runtime-license-bundle LICENSE_OUTPUT=PATH`.
+
+Development PST/OST imports require `make pst-importer mcti-scan pff-converter`.
+The DMG bundles these executables; the host never loads libpff.

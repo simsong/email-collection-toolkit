@@ -42,8 +42,8 @@ old record has no original-header block, its visible headers are used instead.
 RMAIL labels and redundant visible headers remain only in the source Babyl
 container and are not email content.
 
-This checkout also imports PST using the Rust helper and OST through in-process
-libpff; see [PST_IMPORTER.md](PST_IMPORTER.md) for build requirements, qualified
+This checkout also imports PST using the Rust helper and OST through the external
+libpff converter; see [PST_IMPORTER.md](PST_IMPORTER.md) for build requirements, qualified
 formats, and reconstruction/cache limits. Direct Gmail, Microsoft 365, and live
 IMAP connections remain planned. Complete local Apple Mail
 cache records from those providers can be imported now.
@@ -142,9 +142,8 @@ beneath one directory, and ingest that directory as the local source. See
 developer discussion of Gmail API, OAuth, IMAP, verification, and security
 assessment requirements.
 
-Live Gmail authorization is a developer preview for an unimplemented future
-adapter. End users should not run `mailarchiver-auth` or create a Google Cloud
-project for ordinary Takeout ingestion.
+Live Gmail authorization is unavailable; its prototype has been removed.
+Use Takeout for Gmail acquisition.
 
 As an interim incremental path, add the Gmail account to Apple Mail, configure
 it to download attachments, allow the wanted mailboxes to synchronize, and

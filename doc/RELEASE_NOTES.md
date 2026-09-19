@@ -4,6 +4,13 @@
 
 ## Unreleased
 
+* Remove the Google authorization prototype and its dependencies. Remove Requests
+  from the application runtime and replace tldextract with offline PSL matching.
+* Always import PST/OST through external executables. Package the libpff converter
+  independently under GPLv3, with source-preserving extraction, hard host timeouts,
+  bounded diagnostics, and a separate Rust/libclamav scan stage before API admission.
+  The main application remains GPLv2 and does not load libpff.
+
 * Recover interrupted development PST corpus downloads using OS cache locks,
   prompt Ctrl+C cancellation, and verified reuse of completed downloads.
   Preserve older artifacts lacking receipts before retrying their download.
@@ -18,7 +25,7 @@
   `make freshclam` updates ignored `etc/clamdb/`, seeded from installed definitions.
   Release CI refreshes this copy and the DMG bundles it with the engine/updater.
   The license version now matches ClamAV. Public distribution still requires
-  resolving the LGPLv3/Apache-2.0 dependency compatibility issues recorded in
+  resolving the remaining Apache-2.0 ftfy compatibility issue recorded in
   THIRD_PARTY_NOTICES.md and completing native dependency notices/source coverage.
   See [status and remaining validation](EMBEDDED_CLAMAV.md).
 * Preserve existing Cargo dependency versions when adding workspace dependencies
@@ -88,7 +95,7 @@ statement does not supersede a newer implementation entry above it.
   the release-signing public-key variable and GitHub tag-signature checks while
   retaining commit consistency checks and optional Apple app/DMG signing.
 
-* Add in-process libpff OST extraction with genuine cache-fixture coverage,
+* Add libpff OST extraction (now an external converter) with genuine cache-fixture coverage,
   source fixity, streamed attachments, and explicit partial-import diagnostics.
   Add the default-off developer configuration option **Redundant PST Import**
   to run Rust and libpff through existing deduplication. Changed reader settings

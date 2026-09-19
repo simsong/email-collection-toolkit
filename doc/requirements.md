@@ -1392,47 +1392,12 @@ entry points. Tag/version validation must not install the project itself.
 
 ## Remote account authorization
 
-`mailarchiver-auth ACCOUNT` authorizes a remote account independently of an
-archive or ingest run. It accepts exactly one mailbox address and detects
-consumer Gmail directly, Google Workspace from provider-specific MX records,
-and Microsoft 365 from provider-specific MX or Autodiscover records. Detection
-is bounded and explainable. An inconclusive result fails closed and identifies
-the `--gmail` override; it does not guess from generic gateways or unrelated
-domain-verification records. `--detect-only` reports the evidence without
-authorizing or changing external state. Microsoft 365 authorization is a
-recognized but unavailable stub.
-
-Gmail authorization requests only `gmail.readonly`, opens Google's installed
-application flow in the system browser, and verifies the returned Gmail profile
-against the command-line account before retaining the token. The refresh token
-is stored under that account in the operating-system credential store, never in
-the archive, client configuration, terminal output, logs, fixtures, or reports.
-A release provides one public Google Desktop-client configuration registered by
-the Email Collection Toolkit maintainer. End users do not create Cloud projects, configure
-consent, obtain client IDs, or supply client files. A build without that
-configuration fails with a distributor-facing error; it must not route an end
-user into registration. Account-specific `--client-secrets` remains a developer
-override. The downloaded configuration is Pydantic-validated and restricted to
-Google client IDs, OAuth endpoints, and loopback redirects.
-
-`--register-client` is the explicit one-time maintainer workflow. It uses an
-installed Google Cloud CLI to authenticate the named owner account, then creates
-one project and enables only the Gmail API after explicit confirmation. It does
-not change the CLI's active account or default project. Without that CLI, it
-opens project creation and Gmail API pages and asks for the resulting project
-ID. Because Google has no supported general API for External consent-screen and
-Desktop-client creation, setup opens project-scoped Branding, Audience, Data
-Access, and Client pages in order and imports Google's download. It must not
-scrape a browser profile, capture a Google password, or automate the Console
-DOM.
-
-The project and Desktop client registration persist. In Google's Testing state,
-listed test users reauthorize after seven days; the maintainer does not
-re-register the program. In production, users need not be individually listed.
-An unverified personal-use app warns users and is limited to 100 new users until
-verification. The end-user manual and website explain this distinction with
-generic account examples. Separate maintainer help pages contain the illustrated
-one-time registration procedure and tell readers to use their own account.
+Google account authorization and its CLI are removed. Live Google ingestion is
+not planned for the current release and will be reimplemented when needed.
+Google Takeout MBOX and complete local Apple Mail cache messages remain supported.
+Do not ship Google authentication libraries or Requests in the application's
+runtime dependency closure. Any future HTTP clients should use the standard
+library unless another dependency is explicitly approved.
 
 ## Per-archive sources and import modes
 
@@ -1542,7 +1507,7 @@ and retain the current explicit-path CLI instructions.
   The implemented Rust PST helper is a standalone ingest executable accepting a
   filename and emitting mboxrd to stdout, with diagnostics on stderr, as
   specified in [PST_DUAL_READER.md](PST_DUAL_READER.md). Use Microsoft's Rust PST library and optionally run an independent
-  in-process libpff pass with Redundant PST Import. Each emitted record carries `X-Imported-URI`,
+  external libpff converter pass with Redundant PST Import. Each emitted record carries `X-Imported-URI`,
   `X-Importer-Name` and `X-Importer-Version`. These fields are included in h2.
   Existing h3 includes selected headers AND the encoded MIME body; it is a
   comparison control, not permission to discard conflicting variants. The
@@ -1739,8 +1704,8 @@ The CLI archive host is implemented; cross-importer h3 duplicate suppression
 remains planned.
 PST and OST share a storage-format family, but OST support must be qualified
 against genuine fixtures and internal header/version/compression variants, not
-inferred from a changed extension or relaxed signature check. Use in-process
-libpff for OST; report cache extraction
+inferred from a changed extension or relaxed signature check. Use the external
+libpff converter for OST; report cache extraction
 completeness separately from server-mailbox completeness. See
 [PST/OST scope and current limits](PST_IMPORTER.md#relationship-between-pst-and-ost).
 
@@ -1899,14 +1864,15 @@ must not make remote requests without explicit authorization.
   the named owner holds copyright; `THIRD_PARTY_NOTICES.md` identifies vendored
   and separately licensed material. All project-owned code, tools, documentation,
   and the website theme use GPL-2.0-only, with additional licenses available
-  from the copyright holder. Third-party license grants remain unchanged.
+  from the copyright holder. The independent libpff converter is GPL-3.0-only
+  to match its LGPLv3 dependency. Third-party license grants remain unchanged.
 * A source or binary distribution includes `LICENSE`, `COPYRIGHT`,
   `THIRD_PARTY_NOTICES.md`, and every license text required by its included
   components. Each platform's binary build audits its exact runtime dependency
   closure and fails for unknown licenses, missing license texts, or
   development/test packages. Dependency licenses and required notices are
   retained. A passing inventory audit is not license compatibility clearance;
-  the currently identified LGPLv3 and Apache-2.0 compatibility issues are
+  the remaining Apache-2.0 ftfy compatibility issue is
   recorded in THIRD_PARTY_NOTICES.md.
 * Copyright ownership and redistribution terms require owner or counsel review
   before public binary release; automated checks are inventory controls, not
@@ -2087,9 +2053,9 @@ providers must retain address evidence without creating automatic institutional
 affiliations. PST timeout/limit receipts must retain the actual reaped exit code,
 observed sizes and truncation flags; both live and post-exit output sizes are checked.
 
-## In-process OST and Redundant PST Import
+## External OST and Redundant PST Import
 
-Read OST through pinned `libpff-python` in the importing Python process, with a
+Read OST through the standalone converter using pinned `libpff-python`, with a
 read-only handle and before/after SHA-256 checks. Route genuine `SO` client magic
 to OST regardless of extension; `SM` files remain PST even when named `.ost`.
 Retain folder/node provenance, receipts, and partial-item diagnostics. OST is a
@@ -2100,11 +2066,15 @@ Never fetch external attachment references. Exclude search folders and non-mail
 objects explicitly; unknown MAPI classes must report incomplete extraction rather
 than silently count as non-mail. Stream attachment reads, verify their declared
 lengths, bound reconstructed message sizes,
-and check cooperative deadlines between native calls; native body allocations
-are not a hard memory-isolation boundary.
+and enforce a host-side process deadline and output/diagnostic limits. Kill and
+reap an overdue converter. The host must never import pypff. The converter owns
+no archive/database state. It emits standard mboxrd; source hashes are permitted,
+but canonical message hashing and deduplication stay in the host. For scanned
+imports, pass the converted stream through the external Rust mcti-scan executable
+before API admission. Only infected messages gain the three ClamAV headers.
 
 The developer-only **Redundant PST Import** option is `plugins.pst.redundant_import`
-(default false). When enabled, run both Microsoft's Rust importer and in-process
+(default false). When enabled, run both Microsoft's Rust importer and external
 libpff on each PST, including after a reader's recoverable failure. Feed both
 outputs to ordinary canonical deduplication without changing its policy. Different
 reconstructions remain variants; exact retries do not multiply canonical content.
@@ -2114,3 +2084,8 @@ option or reader settings change. Keep this option out of the GUI and ordinary C
 help until qualified. `plugins.ost` configures the libpff reader in either mode.
 `make test-pff` exercises a genuine OST fixture, both real PST readers, partial
 results, source fixity, limits, option changes, repeat deduplication, and CLI search.
+
+Organization-domain evidence uses the bundled ICANN Public Suffix List offline,
+including longest-match, wildcard and exception rules, with IDNA normalization.
+Private suffix entries remain excluded, matching the prior tldextract policy.
+No Requests-based fetching or public-suffix network update occurs at runtime.

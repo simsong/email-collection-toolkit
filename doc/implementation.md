@@ -18,8 +18,9 @@ About displays definition dates and an amber recommendation after three calendar
 months, with explicit FreshClam refresh into immutable per-user generations.
 Failed updates cannot replace active definitions. Project-owned Python, Rust,
 tools, documentation, and website code use GPL-2.0-only, with additional licenses
-available. ClamAV uses the same GPL version; LGPLv3 and Apache-2.0 dependency
-compatibility remains unresolved (see THIRD_PARTY_NOTICES.md).
+available. The independent libpff converter uses GPLv3. ClamAV uses GPLv2;
+the remaining Apache-2.0 ftfy dependency needs compatibility resolution
+(see THIRD_PARTY_NOTICES.md).
 `make freshclam` updates ignored etc/clamdb, seeding it from
 an installed database if available. The DMG bundles this copy, the engine and
 FreshClam; release CI refreshes the definitions first. Its mounted self-test runs
@@ -405,7 +406,7 @@ Cross-importer duplicate suppression requires a separate explicit policy and
 must not silently discard differences in bodies or attachments.
 
 PST and OST share the same storage-format family. The adapter and pinned crate
-enforce PST client magic. The separate `ost` file plugin uses in-process libpff
+enforce PST client magic. The separate `ost` file plugin invokes the external libpff converter
 and recognizes OST client magic before considering extensions. Genuine Unicode
 OST fixture tests exercise recovered mail and incomplete embedded MAPI items.
 The detailed distinction and reader limits are in
@@ -2177,54 +2178,15 @@ deletes canonical mail or defeats message-level deduplication. This terminology
 is distinct from `refresh-index`, which reads canonical MBOX and replaces only
 derived search data.
 
-The implemented `mailarchiver-auth` console entry point is separate from the
-reserved remote-source adapters. It parses and normalizes one account using a
-strict Pydantic model, recognizes well-known consumer domains, and otherwise
-performs bounded DNS MX and `autodiscover.<domain>` CNAME queries. Only Google
-mail hosts and Microsoft `mail.protection.outlook.com` or Autodiscover targets
-are affirmative evidence; gateways such as Proofpoint remain inconclusive by
-themselves. `--gmail` bypasses DNS with recorded override evidence, while
-`--detect-only` makes no external changes beyond public DNS lookup. Microsoft
-365 detection currently stops with `Microsoft Office not yet implemented.`
+The Google authorization prototype, mailarchiver-auth entry point, client
+registration workflow, and its Google/Requests/keyring/DNS dependencies were
+removed. Future live ingestion will be reimplemented; current Gmail acquisition
+uses Takeout or complete local Apple Mail cache files. Historical registration
+illustrations are retained as assets but are no longer an executable workflow.
 
-For Gmail, `existing_client_secrets` first accepts an account-specific developer
-override and otherwise reads the release-wide `gmail_client.json` beside the
-package module. `MAILARCHIVER_GMAIL_CLIENT_JSON` supplies a development or
-packaging override. Pydantic rejects Web-client or malformed JSON as well as
-non-Google client IDs, OAuth endpoints, and redirects. A release without either
-client fails without opening Cloud registration. Refresh tokens are serialized
-only into the platform keyring service `mailarchiver.gmail.oauth`; they are not
-written to an archive or fallback token file. An existing token is refreshed
-when possible. Otherwise `google-auth-oauthlib` opens an installed-app loopback
-flow with PKCE, a five minute timeout, a login hint for the requested account,
-and only `gmail.readonly`. A typed `users.getProfile` response must match the
-requested address before the token is retained.
-
-The maintainer-only `--register-client` command generates an account-neutral
-project ID. With `gcloud`, it authenticates the named account and creates the project without
-activating that account or altering the default project, and enables
-`gmail.googleapis.com`; all mutations follow a terminal confirmation. The
-unsupported Google Auth Platform operations are explicit user handoffs to
-project-qualified Branding, Audience, Scope, and Client pages. The final
-Desktop-client download is discovered only in the standard Downloads directory
-after that handoff or is selected by path. There is no browser DOM automation
-or credential scraping. The validated download is atomically installed with
-user-only modes and its path is printed so the maintainer can package it as
-`src/mailarchiver/gmail_client.json`. `--client-secrets` instead installs an
-account-specific developer override.
-
-`doc/GMAIL.md` is the canonical provider document: its END USER section makes
-Takeout MBOX the current path, while its DEVELOPER section records the API,
-OAuth, verification, security-assessment, and IMAP decisions. The user manual
-and Zola `gmail-authorization` page lead with Takeout rather than an
-unimplemented live adapter. The separate `OAUTH_CLIENT_REGISTRATION.md` and
-Zola `oauth-client-registration` maintainer pages retain the experimental
-one-time numbered registration workflow. Nine 1800-pixel-wide screenshots live
-under
-`website/static/images/gmail-authorization`; the Markdown guide references that
-single asset set rather than duplicating it. The website checker requires both
-pages, the navigation link, a generic maintainer address, and all nine PNG
-assets.
+`public_suffix.py` replaces tldextract with an offline ICANN rule reader using
+its previous unchanged PSL snapshot (2025-04-07, MPL-2.0). It applies wildcard,
+exception, longest-suffix and IDNA rules without Requests or network access.
 
 `doc/M365.md` likewise separates the unsupported end-user boundary from the
 developer design. It records Outlook PST and legacy-Mac OLM as the nearest
@@ -2635,10 +2597,11 @@ artifacts, preserve legacy unreceipted artifacts, and verify completed downloads
 before reuse. Real subprocess tests cover Ctrl+C, forced termination, competing
 writers, stale locks, and reuse without redownloading completed files.
 
-## In-process libpff reader and redundant PST testing
+## External libpff converter and redundant PST testing
 
-`pff_source.py` loads `pypff` from pinned `libpff-python==20231205`. The `ost`
-file plugin uses read-only file objects, labels the source as an Outlook cache,
+`pff_source.py` invokes the independent `converters/pff` executable. Only that
+GPLv3 program loads `pypff` from pinned `libpff-python==20231205`; the GPLv2 host
+never imports it. The converter uses read-only file objects, labels the source as an Outlook cache,
 walks normal folders with cycle/depth controls, and streams base64 attachment
 chunks into a bounded per-message MIME buffer. Headers and Unicode text are
 reconstructed; original transport-header text is retained as a separate evidence
@@ -2659,13 +2622,25 @@ proof of original wire headers or all server contents.
 process ID, content type, counts, completion, and fatal failure details;
 `diagnostics.jsonl` streams bounded per-item descriptions. Sources are rehashed
 before success. `plugins.ost` settings are `timeout_seconds` (60),
-`max_message_bytes` (64 MiB), and `max_folder_depth` (64). Deadline checks happen
-between native calls/chunks; a blocking native call can exceed the cooperative
-deadline, and libpff allocates each body before its output size can be checked.
-There is no new subprocess or background service.
+`max_message_bytes` (64 MiB), `max_folder_depth` (64), `executable`,
+`max_output_bytes` (1 GiB), and `max_diagnostics_bytes` (64 MiB). The host kills
+and reaps a child that exceeds the deadline or output bounds. Native body
+allocations occur in that separate process before reconstructed-output checks.
+Exit 3 reports incomplete source items with fully written emitted records; other
+nonzero exits retain evidence without admitting potentially truncated output.
+
+`make pff-converter` installs the separately locked converter environment;
+`make pff-converter-bundle` builds its standalone executable for the DMG.
+The bundle excludes pypff from the main application and includes the independent
+converter, its source and notices. For scanned imports, the host first invokes
+the external converter and then `mcti-scan`, a separate GPLv2 Rust executable
+using libclamav. That producer-side stage emits infected-only headers. The host
+consumes its output without rescanning or adding clean-message provenance.
+No process loads both libpff and libclamav. Neither executable writes the archive
+or computes canonical message hashes.
 
 `PstSettings.redundant_import` defaults false. With `plugins.pst.redundant_import`
-true, the existing Rust generator and libpff generator execute sequentially,
+true, the external Rust generator and libpff converter execute sequentially,
 retain independent receipts, and aggregate failures after attempting both readers.
 Rust offsets retain their existing cursors; libpff cursors use `libpff:<node>`.
 Canonical identity/SHA-256 deduplication is unchanged. Importer annotations and
@@ -2681,8 +2656,8 @@ non-Outlook parsers retain their source-only checkpoint behavior.
 `make test-pff` uses the real Aspose Unicode/version-23 OST and existing PST
 fixtures, with CLI archive creation, content resume, search, and canonical fixity
 verification. Compressed/version-36 OST is not yet fixture-qualified. The native
-extension is a runtime dependency; its complete LGPL/GPL license texts are retained
-and included in runtime license bundles because its wheel omits them.
+extension is a dependency only of the standalone converter. Its complete
+LGPL/GPL license texts are retained with that converter because its wheel omits them.
 
 Matcher rows use 2pt vertical cell padding and compact disclosure controls, with
 black matrix text and darker supporting labels. `scheduleSuggestions` dismisses
