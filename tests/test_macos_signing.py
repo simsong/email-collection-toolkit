@@ -6,7 +6,6 @@ import base64
 import os
 import subprocess
 import sys
-import tempfile
 from pathlib import Path
 
 import pytest
@@ -23,9 +22,8 @@ IDENTITY_LINE = f'  1) {FINGERPRINT} "Developer ID Application: Fixture (ABCDEFG
 JOBS, STEPS, NEEDS, WITH, REF, ENV, USES, RUN = "jobs", "steps", "needs", "with", "ref", "env", "uses", "run"
 ASSEMBLE, MACOS, PATH, NAME = "assemble", "macos", "path", "name"
 RUNS_ON, CONDITION = "runs-on", "if"
-RELEASE_TAG, RELEASE_KEYS = "RELEASE_TAG", "RELEASE_SIGNING_PUBLIC_KEYS"
-GNUPGHOME = "GNUPGHOME"
-TRUST_STEP = "Verify trusted tag signer"
+RELEASE_TAG, GITHUB_OUTPUT = "RELEASE_TAG", "GITHUB_OUTPUT"
+COMMIT_STEP = "Verify release commit"
 
 
 @pytest.mark.parametrize("certificate,password", [("", ""), ("encoded", ""), ("", "password"), (" \n", "password")])
@@ -150,50 +148,50 @@ def test_release_waits_for_exact_dmg_before_checksumming() -> None:
     assert PASSWORD_SECRET in secret_steps[0][ENV]
     assert macos[RUNS_ON] == "macos-15"
     assert secret_steps[0][CONDITION] == "${{ runner.environment == 'github-hosted' }}"
-    trust = next(step for step in macos[STEPS] if step[NAME] == TRUST_STEP)
-    assert trust[ENV][RELEASE_KEYS] == "${{ vars.RELEASE_SIGNING_PUBLIC_KEYS }}"
-    assert macos[STEPS].index(trust) < next(i for i, step in enumerate(macos[STEPS])
-                                          if step.get(RUN, "").startswith("make "))
+    for job in (assembly, macos):
+        names = [step[NAME] for step in job[STEPS]]
+        assert names.index(COMMIT_STEP) < names.index("Verify annotated tag and project version") < names.index("Install dependencies")
     uploads = [step[WITH][PATH] for step in macos[STEPS] if "actions/upload-artifact@" in step.get(USES, "")]
     assert uploads == ["dist/*.dmg", "dist/*.json"]
 
 
-def test_release_signer_allowlist_checks_real_signatures(tmp_path: Path) -> None:
-    """Release trust: accept an allowed signer, reject another valid signer and missing keys."""
-    # Keep gpg-agent's Unix socket path below macOS's limit (pytest paths are long).
-    keyring = tempfile.TemporaryDirectory(prefix="release-keys-")
-    environment = {**os.environ, GNUPGHOME: keyring.name}
-
+@pytest.mark.parametrize("tag,annotated,move_head,accepted", [
+    ("v1.2.3", True, False, True),
+    ("v1.2.3", False, False, False),
+    ("v1.2.4", True, False, False),
+    ("v1.2.3", True, True, False),
+])
+def test_release_accepts_unsigned_annotated_tags_and_checks_commit_and_version(
+    tmp_path: Path, tag: str, annotated: bool, move_head: bool, accepted: bool,
+) -> None:
+    """Release delivery: no signing keys are needed; annotation, version and commit must match."""
     def run(*args: str) -> str:
-        result = subprocess.run(args, cwd=tmp_path, env=environment, check=False,
+        result = subprocess.run(args, cwd=tmp_path, check=False,
                                 capture_output=True, text=True)
         assert result.returncode == 0, result.stderr
         return result.stdout
 
-    try:
-        for signer in ("trusted@example.invalid", "untrusted@example.invalid"):
-            run("gpg", "--batch", "--pinentry-mode", "loopback", "--passphrase", "",
-                "--quick-generate-key", signer, "ed25519", "sign", "0")
-        public_key = run("gpg", "--armor", "--export", "<trusted@example.invalid>")
-        run("git", "init")
-        run("git", "-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid",
-            "-c", "commit.gpgsign=false", "commit", "--allow-empty", "-m", "fixture")
-        for name, signer in (("trusted", "trusted@example.invalid"), ("untrusted", "untrusted@example.invalid")):
-            run("git", "-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid",
-                "-c", "gpg.format=openpgp", "-c", "gpg.program=gpg", "tag", "-s", "-u", f"<{signer}>",
-                name, "-m", "fixture")
-        run("git", "-c", "tag.gpgsign=false", "tag", "lightweight")
-        workflow = safe_load((Path(__file__).parents[1] / ".github/workflows/release.yml").read_text())
-        command = next(step[RUN] for step in workflow[JOBS][MACOS][STEPS] if step[NAME] == TRUST_STEP)
-        for tag, keys, accepted in (("trusted", public_key, True), ("untrusted", public_key, False),
-                                    ("trusted", "", False), ("trusted", "invalid key", False),
-                                    ("lightweight", public_key, False)):
-            result = subprocess.run(["bash", "-e", "-o", "pipefail", "-c", command], cwd=tmp_path,
-                                    env={**environment, RELEASE_TAG: tag, RELEASE_KEYS: keys},
+    git = ("git", "-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid",
+           "-c", "commit.gpgsign=false", "-c", "tag.gpgsign=false")
+    run(*git, "init")
+    run(*git, "commit", "--allow-empty", "-m", "fixture")
+    run(*git, "tag", *(["-a", tag, "-m", "fixture"] if annotated else [tag]))
+    if move_head:
+        run(*git, "commit", "--allow-empty", "-m", "different release commit")
+    (tmp_path / "pyproject.toml").write_text('[project]\nversion = "1.2.3"\n')
+    root = Path(__file__).parents[1]
+    workflow = safe_load((root / ".github/workflows/release.yml").read_text())
+    for job in (MACOS, ASSEMBLE):
+        output = tmp_path / f"{job}-output"
+        command = next(step[RUN] for step in workflow[JOBS][job][STEPS] if step[NAME] == COMMIT_STEP)
+        result = subprocess.run(["bash", "-e", "-o", "pipefail", "-c", command], cwd=tmp_path,
+                                env={**os.environ, RELEASE_TAG: tag, GITHUB_OUTPUT: str(output)},
+                                capture_output=True, text=True, check=False)
+        assert (result.returncode == 0) == (not move_head), result.stderr
+        if result.returncode == 0:
+            if job == MACOS:
+                assert output.read_text() == f"commit={run('git', 'rev-parse', 'HEAD').strip()}\n"
+            result = subprocess.run([sys.executable, str(root / "scripts/release_tag.py"),
+                                     "--tag", tag, "--require-annotated"], cwd=tmp_path,
                                     capture_output=True, text=True, check=False)
-            assert (result.returncode == 0) == accepted, result.stderr
-    finally:
-        try:
-            run("gpgconf", "--kill", "gpg-agent")
-        finally:
-            keyring.cleanup()
+        assert (result.returncode == 0) == accepted, result.stderr

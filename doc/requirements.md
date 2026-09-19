@@ -1811,11 +1811,11 @@ restore the prior keychain search list on completion or failure. Explicit local
 Explicit unsigned output must identify the override rather than report missing
 credentials. Reject automatic PKCS#12 import on local and self-hosted runners:
 `security` password arguments remain visible to other processes in the job.
-Before project commands or Apple secrets are used, verify the release tag's
-OpenPGP signature against only the public keys configured by administrators in
-`RELEASE_SIGNING_PUBLIC_KEYS`, without automatic key retrieval. Missing/invalid
-keys or an unlisted signer must fail. Administrators must protect the workflow
-and release tags separately; a modified workflow could remove this gate.
+Release builds triggered by `v*` tags must accept unsigned annotated tags without
+configured release-signing public keys or GitHub signature verification. Before
+installing project dependencies or using Apple secrets, require the tag to match
+the project version and the checked-out commit. Lightweight tags must fail.
+Administrators control release-tag creation and workflow changes through repository permissions.
 Release assembly must include the tested DMG from the same commit as the source
 archive and checksum the final image. Signing is not notarization: neither
 build is automatically notarized, and no Gatekeeper bypass is performed. The archive extension is declared

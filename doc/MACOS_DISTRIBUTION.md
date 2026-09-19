@@ -157,8 +157,8 @@ the `.p12` and configuring these GitHub Actions repository secrets. The release
 workflow passes them to the macOS build and includes the resulting DMG and
 checksum in the draft release. The release tag must contain this workflow and
 builder; dispatching an older tag does not retrofit the new builder. Release
-verification also requires the administrator's `RELEASE_SIGNING_PUBLIC_KEYS`
-repository variable. Automatic imports are rejected locally and on self-hosted
+tags must be annotated and match the project version; Git-tag signatures and
+release-signing public keys are not required. Automatic imports are rejected locally and on self-hosted
 runners because `security` password arguments remain visible to other processes;
 use an existing keychain identity for local signing.
 

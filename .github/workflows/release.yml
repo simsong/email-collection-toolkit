@@ -8,7 +8,7 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: Existing signed annotated tag, for example v1.2.3.
+        description: Existing annotated tag, for example v1.2.3.
         required: true
         type: string
 
@@ -34,13 +34,11 @@ jobs:
           python-version: "3.12"
       - name: Set up uv
         uses: astral-sh/setup-uv@v10.0.1
-      - name: Verify tag signature
+      - name: Verify release commit
         env:
-          GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
         run: |
-          tag_object="$(git rev-parse "refs/tags/$RELEASE_TAG")"
-          test "$(gh api "repos/$GITHUB_REPOSITORY/git/tags/$tag_object" --jq '.verification.verified')" = true
+          git check-ref-format "refs/tags/$RELEASE_TAG"
           test "$(git rev-parse HEAD)" = "$(git rev-parse "refs/tags/$RELEASE_TAG^{commit}")"
       - name: Verify annotated tag and project version
         env:
@@ -89,33 +87,18 @@ jobs:
           ref: ${{ inputs.tag || github.ref_name }}
           fetch-depth: 0
           persist-credentials: false
-      # The allowlist comes from repository settings, never from the release tag.
-      - name: Verify trusted tag signer
-        env:
-          RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
-          RELEASE_SIGNING_PUBLIC_KEYS: ${{ vars.RELEASE_SIGNING_PUBLIC_KEYS }}
-        run: |
-          test -n "$RELEASE_SIGNING_PUBLIC_KEYS" || { echo 'Configure RELEASE_SIGNING_PUBLIC_KEYS before releasing'; exit 1; }
-          git check-ref-format "refs/tags/$RELEASE_TAG"
-          export GNUPGHOME="$(mktemp -d)"
-          trap 'rm -rf "$GNUPGHOME"' EXIT
-          printf '%s\n' 'no-auto-key-retrieve' 'auto-key-locate clear' > "$GNUPGHOME/gpg.conf"
-          printf '%s\n' "$RELEASE_SIGNING_PUBLIC_KEYS" | gpg --batch --import
-          git -c gpg.format=openpgp -c gpg.program=gpg verify-tag "refs/tags/$RELEASE_TAG"
       - name: Set up Python
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.12"
       - name: Set up uv
         uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
-      - name: Verify tag signature
+      - name: Verify release commit
         id: release
         env:
-          GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
         run: |
-          tag_object="$(git rev-parse "refs/tags/$RELEASE_TAG")"
-          test "$(gh api "repos/$GITHUB_REPOSITORY/git/tags/$tag_object" --jq '.verification.verified')" = true
+          git check-ref-format "refs/tags/$RELEASE_TAG"
           test "$(git rev-parse HEAD)" = "$(git rev-parse "refs/tags/$RELEASE_TAG^{commit}")"
           echo "commit=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
       - name: Verify annotated tag and project version
