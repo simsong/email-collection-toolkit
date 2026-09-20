@@ -4,6 +4,34 @@
 
 ## Unreleased
 
+* Preload the PST Contacts email directory across the full folder hierarchy,
+  including all three named email slots and Exchange address-book EntryID aliases.
+  Use explicit, unambiguous mappings for sender and recipient address repair;
+  preserve original addresses and mapping evidence. Report incomplete scans.
+
+* Expand Exchange sender identities using unambiguous SMTP mappings stored
+  in the same PST. Preserve the original DN and mapping provenance, and retain
+  native identities when mappings are missing or conflict.
+
+* Preserve native Exchange sender identities with an explicit `EX` address-type
+  marker instead of rejecting them as SMTP addresses. Decode PST subjects and
+  emit readable UTF-8 headers; retain header syntax and injection checks.
+
+* Include completed reconstructed header blocks in PST `--only-invalid`
+  diagnostic output, retaining invalid header values for inspection.
+
+* Support Windows-1256 PST bodies, retaining their bytes and declaring the
+  correct MIME charset instead of rejecting code page 1256.
+
+* Silently exclude PST meeting requests/responses as non-mail. Label reader
+  failures as library errors. Add `pst-importer --only-invalid` (Makefile
+  `ARGS=--only-invalid`) to inspect failed items' available headers/body evidence
+  in diagnostic mboxrd records while retaining nonzero extraction status.
+
+* Validate `PST` before building for `make pst-import` and `make pst-smoke`.
+  Missing input now produces usage guidance instead of an empty-filename
+  extraction error; invalid paths produce a readable-file diagnostic on stderr.
+
 * Remove the Google authorization prototype and its dependencies. Remove Requests
   from the application runtime and replace tldextract with offline PSL matching.
 * Always import PST/OST through external executables. Package the libpff converter

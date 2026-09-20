@@ -397,8 +397,53 @@ filename-to-stdout-mboxrd interface. The standalone [PST adapter](PST_IMPORTER.m
 uses Microsoft's `outlook-pst` 1.2.0 through read-only `read_from` handles,
 traverses the IPM subtree and validates each bounded temporary record before
 streaming it. It reconstructs MIME and retains attachment/transport evidence;
-source fixity checks and partial-run errors prevent false success. Another
-implementation can run as a second pass. The CLI adapter invokes the executable,
+source fixity checks and partial-run errors prevent false success.
+An initial read-only traversal of normal contents from the PST root collects
+Contacts throughout the folder hierarchy before emitting mail. It caches all
+populated Email1/Email2/Email3 slots using PSETID_Address's store-specific named
+property IDs. Slot address/original-display-name properties supply explicit
+DN/SMTP pairs; validated Exchange Address Book EntryIDs supply DN aliases for
+SMTP contacts. Search folders, associated configuration objects and orphan carving are excluded.
+The traversal also collects explicit DN/SMTP pairs from sender
+(`0x0C1F`/`0x5D01`), represented-sender (`0x0065`/`0x5D02`), and recipient-table
+(`0x3003`/`0x39FE`) properties. It retains contact addresses and the identity map,
+not message bodies or photos. Stderr reports contact/slot/mapping/conflict and
+unreadable-object counts. Lookup failures outside mail extraction also prevent
+success; failures encountered in both passes are counted once.
+Case-insensitive DN matches resolve only when SMTP evidence is unambiguous.
+Resolved `From` uses the SMTP address and available sender display name;
+`X-PST-Original-Sender` retains the DN and `X-PST-Sender-Resolution` identifies
+the evidence item/property. Missing or conflicting mappings leave Exchange
+sender values unchanged in `From`, with `X-PST-Sender-Address-Type: EX`.
+The same map supplies missing SMTP addresses for reconstructed To/Cc/Bcc rows,
+with `X-PST-Original-Recipient` and `X-PST-Recipient-Resolution` evidence.
+Existing From/To/Cc/Bcc/Sender/Reply-To/Resent-*/Return-Path fields resolve whole
+native values or angle-bracket addresses outside quoted names/comments;
+`X-PST-Original-Address` and `X-PST-Address-Resolution` retain substitution evidence.
+Existing SMTP addresses and the attached original transport headers stay intact.
+The archive validator recognizes this marked
+native identity instead of requiring SMTP syntax. Ordinary mailbox validation
+remains in place. Subjects lose only the MAPI marker and prefix-length character;
+their textual prefixes remain. They are decoded and emitted as readable UTF-8 with
+whitespace folding; only unbroken words over 900 bytes use encoded-word folding.
+Header values permit valid UTF-8, while field names and provenance remain ASCII;
+control bytes, malformed UTF-8 and oversized lines still fail validation.
+MAPI Internet code page 1256 maps to MIME `windows-1256`; plain and HTML body
+bytes are base64-encoded unchanged. Unicode properties still emit UTF-8.
+Meeting classes are counted as non-mail without per-item diagnostics. Typed
+PST, messaging, LTP, and NDB failures are labeled `LIBRARY ERROR (outlook-pst 1.2.0)`.
+The `--only-invalid` option runs the same reconstruction/validation but emits
+only diagnostic envelopes for readable failed items. It spools each envelope
+within the existing record limit; selected MAPI headers/body properties are
+base64 attachments, with Unicode buffers stored as UTF-16LE and String8/binary
+buffers unchanged. Synthetic envelope headers and an `X-PST-Diagnostic` marker
+distinguish these from recovered mail. Valid mail is suppressed; unreadable
+items have stderr evidence only. A `reconstructed-headers.txt` attachment retains
+the completed header block from the failed reconstruction spool verbatim,
+excluding its mbox envelope. It is not an original transport-header property.
+`invalid-exported` counts diagnostic records,
+separately from normal `emitted` messages; extraction errors still return nonzero.
+Another implementation can run as a second pass. The CLI adapter invokes the executable,
 decodes its mboxrd output and sends recovered messages through the ingest
 pipeline for hashing, scanning and publication. H3 already includes
 the encoded body; its top-level header selection excludes importer annotations.
@@ -421,7 +466,11 @@ The Cargo workspace now contains `rust/mct-importer`: the Rust library,
 `pst-importer`, `mdti-validator` and `mcti-generator` implement/test
 [MCT Importer API 1.0](MCT_IMPORTER_API.md). `make rust-programs` or each named
 binary target produces release executables under `target/release`; Windows adds
-`.exe`. `make rust-check` runs rustfmt, Clippy with warnings fatal, and Rust
+`.exe`. `pst-import` and `pst-smoke` share a `pst-input-check` prerequisite
+that checks the exported `PST` value for a readable regular file. Builds run
+only after this check, including under parallel make, and their output goes to
+stderr. `pst-import` leaves stdout exclusively for extracted mboxrd.
+`make rust-check` runs rustfmt, Clippy with warnings fatal, and Rust
 tests including real process pipelines. `make check` includes this stage after
 Python type checks and before pytest. Cargo.lock pins dependencies. The validator
 uses bounded byte reads, one mboxrd decode, mailparse header/address parsing,

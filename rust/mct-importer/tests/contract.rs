@@ -21,6 +21,78 @@ fn check(data: &[u8]) -> (Report, Vec<String>) {
 }
 
 #[test]
+fn native_exchange_senders_require_a_marker_and_valid_structure() {
+    // doc/MCT_IMPORTER_API.md: preserve marked Exchange identities without
+    // accepting arbitrary non-mailbox From values or losing strict SMTP checks.
+    let original = String::from_utf8(stream(1)).unwrap();
+    let dn = "/O=Example/OU=Exchange Group (TEST)/CN=Recipients/CN=Sender";
+    for value in [dn.to_owned(), dn.to_ascii_lowercase()] {
+        let marked = original.replace(
+            "From: MCT Generator <generator@example.invalid>",
+            &format!("From: {value}\r\nX-PST-Sender-Address-Type: EX"),
+        );
+        assert_eq!(check(marked.as_bytes()).0.complete, 1);
+        assert_eq!(
+            check(
+                marked
+                    .replace(
+                        "X-PST-Sender-Address-Type: EX",
+                        "X-PST-Sender-Address-Type: SMTP"
+                    )
+                    .as_bytes()
+            )
+            .0
+            .complete,
+            0
+        );
+        assert_eq!(
+            check(
+                marked
+                    .replace("X-PST-Sender-Address-Type: EX\r\n", "")
+                    .as_bytes()
+            )
+            .0
+            .complete,
+            0
+        );
+    }
+    for bad in [
+        "missing-address",
+        "/O=Example/OU=Group/CN=",
+        "/O=Example/CN=Sender",
+        "/O=Example/OU=Group/CN=Sender/garbage",
+    ] {
+        let invalid = original.replace(
+            "From: MCT Generator <generator@example.invalid>",
+            &format!("From: {bad}\r\nX-PST-Sender-Address-Type: EX"),
+        );
+        assert_eq!(check(invalid.as_bytes()).0.complete, 0, "{bad}");
+    }
+}
+
+#[test]
+fn utf8_subjects_are_valid_but_invalid_bytes_and_field_names_are_not() {
+    // doc/MCT_IMPORTER_API.md: UTF-8 values are allowed; malformed encoding,
+    // control injection and non-ASCII field names remain invalid.
+    let original = String::from_utf8(stream(1)).unwrap();
+    let valid = original.replace(
+        "Subject: MCT test message 1",
+        "Subject: I can’t get in — سلام",
+    );
+    assert_eq!(check(valid.as_bytes()).0.complete, 1);
+    assert_eq!(
+        check(valid.replace("Subject:", "Sübject:").as_bytes())
+            .0
+            .complete,
+        0
+    );
+    let mut invalid = valid.into_bytes();
+    let start = invalid.iter().position(|byte| *byte > 127).unwrap();
+    invalid[start] = 0xff;
+    assert_eq!(check(&invalid).0.complete, 0);
+}
+
+#[test]
 fn generator_has_real_rfc_headers_mime_counter_and_reversible_quotes() {
     let data = stream(3);
     assert_eq!(check(&data).0.complete, 3);

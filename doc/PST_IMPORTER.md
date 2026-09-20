@@ -18,18 +18,56 @@ executable, not Rust or Outlook. The locked dependency uses no JVM or C PST libr
 make rust-programs        # all three tools
 make pst-importer        # only target/release/pst-importer (.exe on Windows)
 make test-pst            # actual PST and process regression tests
+make pst-import PST='/path/archive.pst'  # emit mail directly to stdout
 make pst-import PST='/path/archive.pst' > recovered.mboxrd
 make pst-smoke PST='/path/archive.pst'  # pipe into the discard-only validator
 ```
 
 `pst-import` sends build chatter to stderr, leaving stdout exclusively for mail.
-The command itself accepts `pst-importer [--] FILENAME`, plus `--help`,
+Supply `PST` as shown (or export it in the environment). Both run targets reject
+an omitted/empty value or a path that is not a readable file before building.
+For a test using the checked-in public fixture:
+
+```sh
+make pst-import PST='rust/mct-importer/tests/fixtures/mail.pst'
+```
+
+This fixture emits 12 messages to stdout but intentionally returns nonzero for
+two known attachment-reader failures; that partial result is expected. Use
+`rust/mct-importer/tests/fixtures/empty.pst` for a successful zero-message test.
+
+The command itself accepts `pst-importer [--only-invalid] [--] FILENAME`, plus `--help`,
 `--version` (including the Microsoft crate version), and `--api-version`.
 Use a byte-preserving shell pipeline and observe the producer's exit status.
 Exit 0 means traversal completed within the stated scope, 1 means incomplete
 extraction or I/O failure, and 2 means invalid invocation. Make also returns
 nonzero when the producer fails; its numerical exit code differs from the helper's.
 No real canonical archive is opened or modified by this program.
+
+To inspect failed messages without exporting successful mail:
+
+```sh
+make pst-import PST='/path/archive.pst' ARGS=--only-invalid > invalid.mboxrd
+```
+
+This emits **diagnostic records, not recovered mail**. Each has synthetic
+From/Date/Subject headers, `X-PST-Diagnostic: invalid-message`, source item URI,
+the failure reason, sender/subject/code-page details, and available original
+transport-header, sender, subject, plain/HTML/RTF body properties as attachments.
+Unicode buffers use UTF-16LE; String8/binary buffers retain their bytes without
+guessing an encoding. Original attachments and unmapped properties remain in
+the source PST. Items the library cannot open have stderr diagnostics only.
+If reconstruction completed its header block, `reconstructed-headers.txt`
+contains those exact headers, including rejected values. These are generated
+headers, distinct from any original `transport-headers` property and from the
+synthetic diagnostic envelope.
+The `invalid-exported` count is separate from normal `emitted` mail, and detected
+extraction failures still return nonzero. Never ingest these diagnostic wrappers
+as if they were successfully recovered messages.
+
+Meeting requests and responses (`IPM.Schedule.Meeting` and subclasses) are
+silently counted as non-mail and excluded. They do not cause warnings or errors.
+Underlying PST reader failures are labeled `LIBRARY ERROR (outlook-pst 1.2.0)`.
 
 ## Source safety and traversal
 
@@ -141,7 +179,7 @@ wire-message fixity. H3 already covers selected headers and the encoded body;
 no h4 is introduced. Independent exporters may produce different h3 values.
 
 * Preserve decoded Unicode text as UTF-8; retain String8/binary body bytes with
-  a known charset (UTF-8, Windows-1252, ASCII or ISO-8859-1). Unknown non-ASCII
+  a known charset (UTF-8, Windows-1252, Windows-1256, ASCII or ISO-8859-1). Unknown non-ASCII
   code pages and invalid Unicode fail instead of being replaced lossily.
 * Emit text and HTML as MIME alternatives when both exist. Retain compressed
   RTF bytes as `body.rtf-compressed`; RTF decompression/rendering is not implemented.
@@ -155,6 +193,36 @@ no h4 is introduced. Independent exporters may produce different h3 values.
   Copy non-content transport fields, including inherited importer annotations.
   Reconstruct Subject, Date, From and Message-ID; use SMTP recipient-table
   addresses where corresponding transport recipient headers are absent.
+* Decode Subject encoded-words and emit readable UTF-8 text (RFC 6532), including
+  ordinary ASCII without unnecessary base64. Fold at whitespace; unusually long
+  unbroken words use encoded-word folding to preserve their text within line limits.
+  Remove the leading marker and prefix-length character according to
+  [MS-PST subject metadata](https://learn.microsoft.com/en-us/openspecs/office_file_formats/ms-pst/5959edb3-3fb0-4e35-a0dc-c043cd888fdd),
+  preserving the complete textual prefix (`Re:`, `Fw:`, etc.) and subject.
+* Before emitting mail, scan normal contents throughout the entire folder
+  hierarchy, including nested Contacts and folders outside IPM. Cache all populated
+  contact email slots in memory, without retaining bodies or photos. Resolve
+  Email1/Email2/Email3 through PSETID_Address and the store's named-property map.
+  Use explicit address/SMTP pairs from the corresponding
+  [contact email properties](https://learn.microsoft.com/en-us/openspecs/exchange_server_protocols/ms-oxprops/2e73fa51-c757-4ce8-8b0c-a70fbd6ee444)
+  and DN aliases from validated
+  [Exchange address-book EntryIDs](https://learn.microsoft.com/en-us/openspecs/exchange_server_protocols/ms-oxcdata/b00b2824-8434-4294-a0e7-b4e336489ccc).
+  Supplement them with sender/represented-sender properties and recipient tables
+  elsewhere in the same PST. Match DNs case-insensitively; require unambiguous
+  SMTP evidence and keep the source sender display name when available.
+  Preserve the DN in `X-PST-Original-Sender` and identify the evidence item/property
+  in `X-PST-Sender-Resolution`. Missing or conflicting mappings retain the native
+  DN in `From` with `X-PST-Sender-Address-Type: EX`, which the archive validator
+  accepts. No network directory lookup or address guessing is performed.
+  Reconstructed To/Cc/Bcc also use this lookup, with original-recipient and
+  resolution headers. Existing sender, recipient, reply, resent and return-path
+  fields resolve whole native values or angle-bracket addresses; names/comments
+  are not searched for substitutions. Original transport-header bytes remain
+  attached. Unresolved recipients without usable SMTP evidence still fail visibly.
+  Stderr reports contact, email-slot, mapping, conflict and unreadable counts.
+  Unreadable lookup objects prevent success, counted once if mail extraction also
+  encounters them. Search folders, associated configuration objects and orphan carving remain
+  outside the contact scan.
 * Missing Date uses submission/delivery FILETIME, then an explicit epoch
   placeholder; missing From uses `unknown@invalid.invalid`. These are generated
   values, not inferred historical facts. Malformed optional Message-ID values
@@ -199,5 +267,5 @@ that every object in an arbitrary PST can be recovered.
 
 The single macOS CI job builds/tests this helper through the Cargo workspace and
 exercises its Python CLI integration through `make check`. Installer behavior, ANSI inputs,
-RTF-only mail, embedded attachments, Exchange address resolution, encrypted mail
+RTF-only mail, embedded attachments, broader Exchange/contact variants, encrypted mail
 semantics, large files and damaged-store recovery require additional qualification.

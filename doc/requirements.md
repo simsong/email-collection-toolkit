@@ -1686,6 +1686,10 @@ helper. Packaged end users need the helper executable, not a Rust compiler.
 `make rust-programs` builds `mdti-validator`, `mcti-generator` and `pst-importer`; each has its
 own same-named Makefile build target. Keep a committed Cargo lockfile and run
 Rust formatting, Clippy and tests through Makefile targets, including `make check`.
+`make pst-import PST='/path/archive.pst'` emits only mboxrd on stdout and
+diagnostics on stderr. Both `pst-import` and `pst-smoke` must reject an omitted,
+empty, missing, unreadable, or non-file PST path before building or extracting,
+with an actionable diagnostic on stderr and no stdout output.
 The validator warns before consuming stdin that all input is discarded, reports
 validation errors on stderr, and reports valid complete message counts after
 EOF. It never imports mail or creates archive files. The generator accepts an
@@ -1697,8 +1701,42 @@ The standalone [PST importer](PST_IMPORTER.md) uses Microsoft's pinned
 `outlook-pst` crate through its explicit read-only reader API. Emit validated
 mboxrd records with stable node-ID URIs, exact by-value attachment data,
 reconstruction evidence and source SHA-256 checks. Continue after recoverable
-item failures but return nonzero for any incomplete extraction. Exercise real
-PST fixtures, decoded body/attachment evidence, partial-run accounting, read-only
+item failures but return nonzero for any incomplete extraction.
+Before emitting mail, scan normal contents throughout the entire PST folder
+hierarchy for Contacts, including nested folders and folders outside the IPM
+mail subtree. Retain all populated contact email slots in memory, not bodies
+or photos. Resolve all three email slots through the store's named-property map
+using PSETID_Address and their LIDs; never treat LIDs as fixed property IDs.
+Resolve Exchange legacy distinguished-name addresses using unambiguous DN/SMTP
+pairs from contacts, sender, represented-sender, or recipient properties in the
+same PST. Contact address-book EntryIDs can supply explicit DN aliases.
+Match DNs case-insensitively; do not guess addresses or resolve conflicting pairs.
+Retain the original DN and the mapping's source item/property in generated headers.
+Apply the directory to From and reconstructed To/Cc/Bcc, and to entire native
+addresses or angle-bracket addresses in existing sender/recipient, reply,
+resent and return-path headers. Never substitute text inside display names or
+comments. Preserve existing SMTP addresses and original transport-header bytes.
+Report address-book scan counts and failures; unreadable lookup objects prevent
+success, with failures also encountered during mail extraction counted once.
+Otherwise retain native `EX` identities without rejecting readable messages.
+Mark these with `X-PST-Sender-Address-Type: EX`; the archive stream validator
+must accept that explicit representation while rejecting malformed identities.
+Decode subject encoded-words and emit readable UTF-8 Subject values. Remove
+MAPI's leading marker and prefix-length character, retaining textual prefixes
+such as `Re:` and `Fw:`. Preserve safe folding and reject header injection.
+For MAPI Internet code page 1256, retain the original String8/binary body bytes
+and declare `charset=windows-1256` in the reconstructed MIME part.
+Meeting requests and responses (`IPM.Schedule.Meeting` and subclasses) are
+silently excluded, counted as non-mail, and never cause a warning or error.
+Identify underlying PST reader failures explicitly as library errors.
+`--only-invalid` shall emit diagnostic mboxrd records only for failed items whose
+message properties can be read. Preserve available transport headers and body
+property bytes, label synthetic diagnostic headers, and retain failure status.
+When reconstruction reached the header/body separator, also retain the exact
+reconstructed header block, including invalid values and folding, separately
+from original transport headers and diagnostic envelope headers.
+Unreadable items remain library errors without invented message content.
+Exercise real PST fixtures, decoded body/attachment evidence, partial-run accounting, read-only
 source preservation, changed sources and producer/consumer failures.
 The CLI archive host is implemented; cross-importer h3 duplicate suppression
 remains planned.

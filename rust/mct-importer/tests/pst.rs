@@ -22,6 +22,56 @@ fn run(path: &Path) -> std::process::Output {
         .output()
         .unwrap()
 }
+
+#[test]
+fn make_rejects_invalid_pst_before_building() {
+    // doc/requirements.md: PST run targets reject invalid paths without stdout
+    // or starting a build, including when parallel make is requested.
+    let directory = tempfile::tempdir().unwrap();
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    for target in ["pst-import", "pst-smoke"] {
+        for (input, diagnostic) in [
+            (None, "usage: make pst-import PST="),
+            (Some(String::new()), "usage: make pst-import PST="),
+            (
+                Some(
+                    directory
+                        .path()
+                        .join("missing file.pst")
+                        .display()
+                        .to_string(),
+                ),
+                "PST must be a readable file:",
+            ),
+            (
+                Some(directory.path().display().to_string()),
+                "PST must be a readable file:",
+            ),
+        ] {
+            let mut command = Command::new("make");
+            command
+                .current_dir(&root)
+                .env_remove("PST")
+                .env_remove("MAKEFLAGS")
+                .env_remove("MFLAGS")
+                .args(["--no-print-directory", "-j2", target])
+                .arg(format!(
+                    "RUST_TARGET_DIR={}",
+                    directory.path().join("target").display()
+                ));
+            if let Some(input) = input {
+                command.arg(format!("PST={input}"));
+            }
+            let result = command.output().unwrap();
+            assert!(!result.status.success());
+            assert!(result.stdout.is_empty());
+            let stderr = String::from_utf8_lossy(&result.stderr);
+            assert!(stderr.contains(diagnostic), "{target}: {stderr}");
+            assert!(!directory.path().join("target").exists());
+        }
+    }
+}
+
 fn records(stream: &[u8]) -> Vec<Vec<u8>> {
     let mut messages: Vec<Vec<u8>> = Vec::new();
     for line in stream.split_inclusive(|b| *b == b'\n') {
@@ -68,6 +118,7 @@ fn actual_pst_preserves_bodies_attachments_and_reports_partial_extraction() {
         "{diagnostics}"
     );
     assert!(diagnostics.contains("item=2097316: Missing PidTagAttachMethod"));
+    assert!(diagnostics.contains("LIBRARY ERROR (outlook-pst 1.2.0) item=2097316:"));
     assert!(!diagnostics.contains("ERROR item=2097476"));
     assert_eq!(before, fs::read(&source).unwrap());
     assert_eq!(result.stdout, run(&source).stdout);
@@ -234,6 +285,80 @@ fn empty_read_only_pst_succeeds_and_bad_inputs_emit_no_mail() {
             .code(),
         Some(2)
     );
+}
+
+#[test]
+fn invalid_only_exports_failed_items_as_diagnostic_evidence() {
+    // doc/PST_IMPORTER.md: only-invalid excludes valid mail and keeps real
+    // failure status, source fixity, item provenance, and available body evidence.
+    let source = fixture("mail.pst");
+    let before = fs::read(&source).unwrap();
+    let result = Command::new(env!("CARGO_BIN_EXE_pst-importer"))
+        .args(["--only-invalid", "--"])
+        .arg(&source)
+        .output()
+        .unwrap();
+    assert_eq!(result.status.code(), Some(1));
+    assert_eq!(before, fs::read(&source).unwrap());
+    let diagnostics = String::from_utf8(result.stderr).unwrap();
+    assert!(diagnostics.contains("encountered=16 emitted=0 non-mail=2 errors=2"));
+    assert!(diagnostics.contains("invalid-exported=2;"));
+    let messages = records(&result.stdout);
+    assert_eq!(messages.len(), 2);
+    for (bytes, item) in messages.iter().zip([2097316, 2097540]) {
+        let mail = mailparse::parse_mail(bytes).unwrap();
+        assert_eq!(
+            mail.headers.get_first_value("X-PST-Diagnostic").as_deref(),
+            Some("invalid-message")
+        );
+        assert!(mail
+            .headers
+            .get_first_value("X-Imported-URI")
+            .unwrap()
+            .ends_with(&format!("#item={item}")));
+        let summary = mail.subparts[0].get_body().unwrap();
+        let headers = mail
+            .subparts
+            .iter()
+            .find(|part| {
+                part.get_content_disposition()
+                    .params
+                    .get("filename")
+                    .is_some_and(|name| name == "reconstructed-headers.txt")
+            })
+            .unwrap()
+            .get_body_raw()
+            .unwrap();
+        assert!(headers.starts_with(b"X-Imported-URI:"));
+        assert!(headers.ends_with(b"\r\n\r\n"));
+        assert!(!String::from_utf8_lossy(&headers).contains("X-PST-Diagnostic:"));
+        assert!(summary.contains("LIBRARY ERROR (outlook-pst 1.2.0): Missing PidTagAttachMethod"));
+        assert!(mail
+            .subparts
+            .iter()
+            .any(|part| !part.get_body_raw().unwrap().is_empty()
+                && part
+                    .get_content_disposition()
+                    .params
+                    .get("filename")
+                    .is_some_and(|name| name == "body")));
+    }
+    let mut failures = Vec::new();
+    let validation = mct_importer::validate(
+        &mut result.stdout.as_slice(),
+        mct_importer::DEFAULT_MAX_MESSAGE_BYTES,
+        |e| failures.push(e),
+    )
+    .unwrap();
+    assert_eq!(validation.complete, 2);
+    assert!(failures.is_empty(), "{failures:?}");
+    let empty = Command::new(env!("CARGO_BIN_EXE_pst-importer"))
+        .arg("--only-invalid")
+        .arg(fixture("empty.pst"))
+        .output()
+        .unwrap();
+    assert!(empty.status.success());
+    assert!(empty.stdout.is_empty());
 }
 
 #[test]

@@ -7,7 +7,7 @@ fn main() -> ExitCode {
     if args.len() == 1 {
         match args[0].to_str() {
             Some("--help" | "-h") => {
-                println!("Usage: pst-importer [--] FILENAME\nRead a PST without modification and emit MCT Importer API 1.0 mboxrd on stdout.\nDiagnostics and completion counts go to stderr; nonzero status means incomplete extraction.");
+                println!("Usage: pst-importer [--only-invalid] [--] FILENAME\nRead a PST without modification and emit MCT Importer API 1.0 mboxrd on stdout.\n--only-invalid: emit diagnostic mboxrd records with available headers/body properties for failed items only, not recovered mail.\nDiagnostics and completion counts go to stderr; nonzero status means incomplete extraction.");
                 return ExitCode::SUCCESS;
             }
             Some("--version") => {
@@ -24,17 +24,22 @@ fn main() -> ExitCode {
             _ => {}
         }
     }
+    let only_invalid = args.first().is_some_and(|a| a == "--only-invalid");
+    if only_invalid {
+        args.remove(0);
+    }
     if args.first().is_some_and(|a| a == "--") {
         args.remove(0);
     }
-    if args.len() != 1 {
-        eprintln!("Usage: pst-importer [--] FILENAME");
+    if args.len() != 1 || args[0].is_empty() {
+        eprintln!("Usage: pst-importer [--only-invalid] [--] FILENAME");
         return ExitCode::from(2);
     }
-    match mct_importer::pst::import(
+    match mct_importer::pst::import_selected(
         Path::new(&args[0]),
         &mut io::BufWriter::new(io::stdout().lock()),
         &mut io::stderr().lock(),
+        only_invalid,
     ) {
         Ok(report) if report.errors == 0 => ExitCode::SUCCESS,
         Ok(_) => ExitCode::FAILURE,
