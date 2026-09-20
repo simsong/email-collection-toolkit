@@ -17,6 +17,7 @@ class AddressRow(BaseModel):
     first_use: str | None
     last_use: str | None
     messages: int
+    signature_messages: int = 0
 
 
 class OrganizationRow(BaseModel):
@@ -35,7 +36,7 @@ class IdentityFilter(BaseModel):
 
 
 class ManualDecision(BaseModel):
-    operation: Literal["rename-person", "merge-person", "rename-organization", "affiliate"]
+    operation: Literal["rename-person", "merge-person", "rename-organization", "affiliate", "move-address", "separate-address"]
     subject: int = Field(gt=0)
     target: int | None = Field(default=None, gt=0)
     name: str | None = None
@@ -49,7 +50,8 @@ def addresses(database: sqlite3.Connection, filters: IdentityFilter) -> list[Add
     start = filters.start.isoformat() if filters.start else None
     end = filters.end.isoformat() if filters.end else None
     rows = database.execute("""SELECT a.address_id,a.address,p.person_id,p.canonical_name,
-        min(m.seen_at),max(m.seen_at),count(DISTINCT m.message_id)
+        min(m.seen_at),max(m.seen_at),count(DISTINCT CASE WHEN m.kind='header' THEN m.message_id END),
+        count(DISTINCT CASE WHEN m.kind='signature' THEN m.message_id END)
         FROM addresses a JOIN person_addresses USING(address_id) JOIN persons p USING(person_id)
         LEFT JOIN message_addresses m ON m.address_id=a.address_id
         WHERE instr(lower(p.canonical_name),lower(?))>0 AND instr(lower(a.mailbox),lower(?))>0
@@ -57,7 +59,7 @@ def addresses(database: sqlite3.Connection, filters: IdentityFilter) -> list[Add
         AND (? IS NULL OR date(m.seen_at)<=?) GROUP BY a.address_id ORDER BY lower(p.canonical_name),a.address""",
         (filters.name, filters.mailbox, filters.domain, start, start, end, end))
     return [AddressRow(address_id=row[0], address=row[1], person_id=row[2], canonical_name=row[3],
-                       first_use=row[4], last_use=row[5], messages=row[6]) for row in rows]
+                       first_use=row[4], last_use=row[5], messages=row[6], signature_messages=row[7]) for row in rows]
 
 
 def organizations(database: sqlite3.Connection, filters: IdentityFilter) -> list[OrganizationRow]:
@@ -75,12 +77,21 @@ def edit(database: sqlite3.Connection, decision: ManualDecision) -> None:
     """Caller holds the writer lease; every accepted edit and audit record commit together."""
     if decision.start and decision.end and decision.start > decision.end:
         raise ValueError("start date must not follow end date")
-    table = "organizations" if decision.operation == "rename-organization" else "persons"
-    key = "organization_id" if table == "organizations" else "person_id"
+    table = ("organizations" if decision.operation == "rename-organization" else
+             "addresses" if decision.operation in ("move-address", "separate-address") else "persons")
+    key = {"organizations": "organization_id", "addresses": "address_id", "persons": "person_id"}[table]
     if database.execute(f"SELECT 1 FROM {table} WHERE {key}=?", (decision.subject,)).fetchone() is None:
         raise ValueError("unknown manual decision subject")
     with database:
-        if decision.operation.startswith("rename-"):
+        if decision.operation in ("move-address", "separate-address"):
+            target = decision.target
+            if decision.operation == "separate-address":
+                address = database.execute("SELECT address FROM addresses WHERE address_id=?", (decision.subject,)).fetchone()[0]
+                target = database.execute("INSERT INTO persons(canonical_name,manual) VALUES(?,1)", (address,)).lastrowid
+            elif database.execute("SELECT 1 FROM persons WHERE person_id=?", (target,)).fetchone() is None:
+                raise ValueError("move requires an existing target person")
+            database.execute("UPDATE person_addresses SET person_id=?,manual=1 WHERE address_id=?", (target, decision.subject))
+        elif decision.operation.startswith("rename-"):
             if not decision.name or not decision.name.strip():
                 raise ValueError("a nonempty name is required")
             column = "name" if table == "organizations" else "canonical_name"

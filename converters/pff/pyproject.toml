@@ -1,0 +1,35 @@
+# Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved.
+[project]
+name = "pff-converter"
+version = "1.0.0"
+description = "Read-only standalone PST/OST to MCT mboxrd converter"
+requires-python = ">=3.12"
+license = "GPL-3.0-only"
+license-files = ["LICENSE", "COPYRIGHT", "libpff-LGPL.txt"]
+dependencies = ["libpff-python==20231205", "pydantic>=2.13.4"]
+
+[project.scripts]
+pff-converter = "pff_converter.cli:main"
+
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[dependency-groups]
+dev = [
+    "pytest>=8",
+    "pyinstaller>=6.22,<7",
+    "pylint>=4.0.8",
+    "pyright>=1.1.414",
+]
+
+[tool.uv]
+package = true
+
+[tool.pyright]
+include = ["src", "tests", "entry.py"]
+extraPaths = ["src"]
+stubPath = "../../typings"
+venvPath = "."
+venv = ".venv"
+typeCheckingMode = "standard"

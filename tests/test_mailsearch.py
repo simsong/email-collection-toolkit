@@ -37,6 +37,7 @@ from mailarchiver.mailsearch import (
 )
 from mailarchiver.mbox import add_message
 from mailarchiver.search import index_message
+from mailarchiver.search_selectors import prepare_names
 
 
 def add_catalogued_message(archive: Path, message_pk: int, raw: bytes) -> None:
@@ -450,12 +451,21 @@ def test_mailsearch_help_describes_syntax() -> None:
     assert max(map(len, result.stdout.splitlines())) <= 78
 
 
-def test_mailsearch_date_bounds_are_strict_calendar_days(tmp_path: Path) -> None:
-    """Requirement: date, before, and after use documented UTC calendar-day boundaries."""
+def test_mailsearch_date_bounds_cover_worldwide_days(tmp_path: Path) -> None:
+    """Requirement: date, before, and after use documented worldwide calendar-day boundaries."""
     archive, _ = make_archive(tmp_path)
     assert run_search("--archive", str(archive), "before:2024-01-03").stdout == ""
     assert run_search("--archive", str(archive), "after:2024-01-03").stdout == ""
-    assert run_search("--archive", str(archive), "after:2024-01-02").stdout.startswith("1 to:")
+    assert run_search("--archive", str(archive), "after:2024-01-01").stdout.startswith("1 to:")
+
+
+@pytest.mark.parametrize("value", ["2024-01-03", "1/3/2024", "January 3, 2024"])
+def test_cli_date_spellings(tmp_path: Path, value: str) -> None:
+    """CLI accepts the same worldwide calendar dates as GUI selectors."""
+    archive, _ = make_archive(tmp_path)
+    result = run_search("--archive", str(archive), f"date:{value}")
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.startswith("1 to:")
 
 
 def test_mailsearch_formats_dynamic_numbers_and_terminal_subjects() -> None:
@@ -570,7 +580,8 @@ def test_search_primitives_use_filter_indexes(sparse_search_archive: Path, case:
     archive = sparse_search_archive
     with sqlite3.connect(f"file:{archive / 'archive.sqlite3'}?mode=ro", uri=True) as catalog:
         catalog.execute("ATTACH DATABASE ? AS search", (f"file:{archive / 'search.sqlite3'}?mode=ro",))
-        terms = parse_query(case.query)
+        prepare_names(catalog, archive)
+        terms = parse_query(case.query).model_copy(update={"address_names": True})
         statements = [
             _search_statement(terms, 10, sort_by=sort_by, direction=direction,
                               search_attachments=case.attachments, mailbox_selections=case.selections)

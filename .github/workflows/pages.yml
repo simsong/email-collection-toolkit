@@ -24,7 +24,7 @@ concurrency:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: macos-15
     steps:
       - name: Checkout
         uses: actions/checkout@v5
@@ -35,11 +35,17 @@ jobs:
       - name: Install Zola
         env:
           ZOLA_VERSION: 0.23.4
-          ZOLA_SHA256: 54d1a347781b2f32330914fcc02def81c7e3ddb6111b36d1cc89c06557aed1de
+          ZOLA_SHA256_ARM64: 303b8e1f3251a6250e47f811eda143316f653c22201faa66777d48ac499c0ee3
+          ZOLA_SHA256_X86_64: e79edcba2e8d03d22065c9cb8fa2e3abf07b823ef17f00abdc060188dceabba7
         run: |
+          case "$(uname -m)" in
+            arm64) zola_arch=aarch64; zola_sha256="$ZOLA_SHA256_ARM64" ;;
+            x86_64) zola_arch=x86_64; zola_sha256="$ZOLA_SHA256_X86_64" ;;
+            *) echo 'Unsupported macOS architecture'; exit 1 ;;
+          esac
           curl --fail --location --output "$RUNNER_TEMP/zola.tar.gz" \
-            "https://github.com/getzola/zola/releases/download/v${ZOLA_VERSION}/zola-v${ZOLA_VERSION}-x86_64-unknown-linux-gnu.tar.gz"
-          printf '%s  %s\n' "$ZOLA_SHA256" "$RUNNER_TEMP/zola.tar.gz" | sha256sum --check -
+            "https://github.com/getzola/zola/releases/download/v${ZOLA_VERSION}/zola-v${ZOLA_VERSION}-${zola_arch}-apple-darwin.tar.gz"
+          printf '%s  %s\n' "$zola_sha256" "$RUNNER_TEMP/zola.tar.gz" | shasum -a 256 --check -
           mkdir "$RUNNER_TEMP/zola"
           tar -xzf "$RUNNER_TEMP/zola.tar.gz" -C "$RUNNER_TEMP/zola"
           echo "$RUNNER_TEMP/zola" >> "$GITHUB_PATH"
@@ -59,7 +65,7 @@ jobs:
 
   deploy:
     needs: build
-    runs-on: ubuntu-latest
+    runs-on: macos-15
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}

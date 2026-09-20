@@ -4,15 +4,17 @@
 
 from __future__ import annotations
 
+import argparse
 import json
+import tomllib
 from email.message import EmailMessage
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
-from playwright.sync_api import Page, expect, sync_playwright
+from playwright.sync_api import Page, Route, expect, sync_playwright
 
 from mailarchiver.__main__ import IngestRequest, run_ingest
-from mailarchiver.gui_app import GuiApi, IngestWindowApi, OwnerRulesPrompt
+from mailarchiver.gui_app import GuiApi, IdentityPickerApi, IngestWindowApi, OwnerRulesPrompt
 from mailarchiver.owner_rules import OwnerRules
 
 ROOT = Path(__file__).parents[1]
@@ -94,6 +96,13 @@ def main() -> None:
                         expect(preview).to_contain_text("Hello Sam")
                     assert page.locator("#error").is_hidden(), page.locator("#error").inner_text()
                     page.screenshot(path=str(OUTPUT / "search-interface.png"))
+                    previews = ROOT / ".tmp/gui-previews"
+                    previews.mkdir(parents=True, exist_ok=True)
+                    for name, query in (("completion-name", "from:Alex"), ("completion-date", "May 1, 2024")):
+                        page.locator("#search").fill(query)
+                        expect(page.locator(".suggestion-option").first).to_be_visible()
+                        expect(page.locator(".suggestion-label").first).to_contain_text("Alex" if name.endswith("name") else "May 1, 2024")
+                        page.screenshot(path=str(previews / f"{name}.png"))
                     page.close()
                     page = browser.new_page(viewport={WIDTH: 1440, HEIGHT: 960}, device_scale_factor=1)
                     bridge(page, IngestWindowApi(archive), ("history", "antivirus", "can_import_directory"))
@@ -108,11 +117,65 @@ def main() -> None:
                     expect(page.locator("#owner-exclude")).to_have_value("sam@shared.example.org")
                     expect(page.locator("#save")).to_be_enabled()
                     page.screenshot(path=str(OUTPUT / "owner-rules-interface.png"))
+                    page.close()
+                    previews = ROOT / ".tmp/gui-previews"
+                    previews.mkdir(parents=True, exist_ok=True)
+                    for kind in ("name", "institution"):
+                        page = browser.new_page(viewport={WIDTH: 1100, HEIGHT: 750}, device_scale_factor=1)
+                        bridge(page, IdentityPickerApi(archive, kind), ("query", "update"))
+                        page.goto((ROOT / "gui/identity.html").as_uri() + f"?kind={kind}")
+                        expect(page.locator("tr.group").first).to_be_visible()
+                        page.screenshot(path=str(previews / f"{kind}.png"))
+                        page.close()
                 finally:
                     browser.close()
         finally:
             api.close()
 
 
+def capture_site() -> None:
+    """Inspect the locally built homepage and documentation with local assets only."""
+    site = ROOT / ".tmp/website-check"
+    previews = ROOT / ".tmp/website-previews"
+    previews.mkdir(parents=True, exist_ok=True)
+    base = tomllib.loads((ROOT / "website/config.toml").read_text())["base_url"]
+
+    def local_asset(route: Route) -> None:
+        if not route.request.url.startswith(base):
+            route.abort()
+            return
+        path = (site / route.request.url.removeprefix(base)).resolve()
+        if path.is_dir():
+            path /= "index.html"
+        if not path.is_relative_to(site.resolve()) or not path.is_file():
+            route.abort()
+            return
+        route.fulfill(path=path)
+
+    with sync_playwright() as playwright:
+        browser = playwright.chromium.launch()
+        try:
+            page = browser.new_page(viewport={WIDTH: 1440, HEIGHT: 1100})
+            page.route("**/*", local_asset)
+            for name, suffix in (("home", ""), ("searching", "searching/"), ("importing", "importing/")):
+                page.goto(base + suffix)
+                filename = "importing-interface.png" if name == "importing" else "search-interface.png"
+                image = page.locator(f'img[src*="{filename}"]').first
+                image.scroll_into_view_if_needed()
+                expect(image).to_be_visible()
+                page.wait_for_function("Array.from(document.images).filter(i => i.src.includes('interface.png')).every(i => i.complete && i.naturalWidth > 0)")
+                page.screenshot(path=str(previews / f"{name}.png"))
+            page.goto(base + "advanced/")
+            page.locator("#date-handling").scroll_into_view_if_needed()
+            page.screenshot(path=str(previews / "advanced-dates.png"))
+        finally:
+            browser.close()
+
+
 if __name__ == "__main__":
-    main()
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--site-only", action="store_true")
+    if parser.parse_args().site_only:
+        capture_site()
+    else:
+        main()

@@ -90,7 +90,12 @@ def test_gui_stop_checkpoints_partial_import_and_reimport_has_no_duplicates(tmp_
         partial = catalog.execute("SELECT COUNT(*) FROM messages").fetchone()[0]
     assert 0 < partial < len(digests)
     assert (archive / "owner-names-detected.txt").read_text(encoding="utf-8") == "sender@example.test\n"
-    run_ingest(request)
+    from mailarchiver.gui_processing import resume_request, unfinished_work
+    assert unfinished_work(archive).source_roots == [str(source)]
+    recovered_request = resume_request(archive, True, True)
+    assert recovered_request.roots == [str(source)]
+    run_ingest(recovered_request)
+    assert not unfinished_work(archive).incomplete
     with sqlite3.connect(archive / "archive.sqlite3") as catalog:
         rows = catalog.execute("SELECT sha256 FROM messages").fetchall()
     assert len(rows) == len(digests) and {row[0] for row in rows} == digests

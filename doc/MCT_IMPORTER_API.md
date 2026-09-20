@@ -16,7 +16,7 @@ This change was developed with Rust 1.98.1. Other compiler versions have not
 been qualified locally. `Cargo.lock` pins dependencies for repeatable builds.
 This adds no Rust dependency to existing Python-only local-mail importing.
 Packaged PST importing will require its compiled Rust helper, not a Rust
-compiler installed by the end user. The standalone helper is implemented; installers do not yet bundle it.
+compiler installed by the end user. The macOS DMG bundles the helper.
 
 ```sh
 make rust-toolchain       # show compiler and Cargo versions
@@ -92,6 +92,29 @@ MIME-Version, Content-Type and Content-Transfer-Encoding. It uses CRLF RFC
 headers and one 7bit text/plain part, with a 1-based counter and From-like lines
 that exercise reversible quoting. Counts are unsigned 64-bit integers; zero
 emits nothing. Output is deterministic, including identifiers on repeated runs.
+
+## Antivirus headers
+
+The producer scans the RFC message before emission. Only infected messages add
+these headers after the three importer headers:
+
+```text
+X-ClamAV-Detection: Eicar-Test-Signature
+X-ClamAV-Engine-Version: 1.5.4
+X-ClamAV-Definitions-Version: main:63,daily:28127,bytecode:339
+```
+
+Clean messages add no antivirus provenance. The Python host reads the detection
+header and routes the emitted bytes to INFECTED, without rescanning. Python owns
+message hashing and deduplication; emitters need no per-message hashes, scan
+receipts, or database connection. The operator handles failures by re-importing;
+the API adds no automatic restart. Explicit unscanned imports bypass this handling.
+
+The PST host enables native scanning with `MAILARCHIVER_SCAN=1` and passes
+`MAILARCHIVER_CLAMAV_LIBRARY`, `MAILARCHIVER_CLAMAV_DATABASE`, and the optional
+`MAILARCHIVER_CLAMAV_CERTIFICATES` directory. Standalone invocations without the
+scan flag retain their unscanned behavior. `make test-clamav-rust` exercises
+real clean/EICAR records and verifies the emitted headers and unchanged body.
 
 ## Validator behavior
 

@@ -4,11 +4,98 @@
 
 ## Unreleased
 
+* Remove the Google authorization prototype and its dependencies. Remove Requests
+  from the application runtime and replace tldextract with offline PSL matching.
+* Always import PST/OST through external executables. Package the libpff converter
+  independently under GPLv3, with source-preserving extraction, hard host timeouts,
+  bounded diagnostics, and a separate Rust/libclamav scan stage before API admission.
+  The main application remains GPLv2 and does not load libpff.
+
+* Recover interrupted development PST corpus downloads using OS cache locks,
+  prompt Ctrl+C cancellation, and verified reuse of completed downloads.
+  Preserve older artifacts lacking receipts before retrying their download.
+
+* Adopt GPL-2.0-only terms for all project-owned code, Rust tools, and the website
+  theme, with additional licenses available. Preserve third-party license terms.
+* Implement a direct-library antivirus prototype with concurrent scans,
+  infected-only antivirus headers from Rust PST, explicit definition
+  refresh, and About date/age reporting. Display an amber recommendation after
+  three calendar months and adopt quarterly application releases. Python owns
+  message hashes and deduplication; API producers need no scan receipts or database.
+  `make freshclam` updates ignored `etc/clamdb/`, seeded from installed definitions.
+  Release CI refreshes this copy and the DMG bundles it with the engine/updater.
+  The license version now matches ClamAV. Public distribution still requires
+  resolving the remaining Apache-2.0 ftfy compatibility issue recorded in
+  THIRD_PARTY_NOTICES.md and completing native dependency notices/source coverage.
+  See [status and remaining validation](EMBEDDED_CLAMAV.md).
+* Preserve existing Cargo dependency versions when adding workspace dependencies
+  through make rust-lock.
+
+* Keep release CI headless and all workflow jobs on macOS; retain explicit local
+  native-GUI release validation and verified Darwin website tooling.
+
+* Expose stable processing job IDs and align API documentation with concrete
+  provenance fields, cancellation methods and durable states.
+
+* Report typed timeout/error counts and n/a for unobserved plugin timings; exclude
+  unfinished invocations from duration statistics.
+
+* Show all registered acquisition plugins and processor versions in About.
+
+* Separate header-message counts from signature occurrences in identity queries
+  and both live pickers, including filtered, deduplicated group totals.
+
+* Retain typed scanner errors/unscannable outcomes and engine/signature versions
+  with invocation history; block filing while preserving retryable input.
+
+* Prevent malformed attached-message transfer encodings from becoming canonical
+  child messages; retain the original parent with failed extraction diagnostics.
+
+* Keep depth/text-limit failures visible as incomplete work; allow configured
+  depth limits and resume after raising them without losing original bytes.
+
+* Bound cumulative MIME split/decoded bytes, parts and child messages before
+  publishing a nested tree. Make limits configurable under `plugins.mime` and
+  preserve failed work for retry; stream quoted-printable decoding in chunks.
+
+* Reconcile stale search, owner-rule, PST/OST, Apple Mail, processor GUI and
+  packaging descriptions; distinguish manual identity data from disposable
+  indexes, and mark historical planning inventories explicitly.
+
+Earlier bullets record the implementation sequence; a historical “planned”
+statement does not supersede a newer implementation entry above it.
+
+* Add configurable MBOX rollover (`mbox_max_bytes` in archive `config.yaml`,
+  default 3.75 GiB), counting physical framing bytes and preserving oversized
+  messages whole. Validate with 20 KiB parts, restart and publication recovery.
+
+* Implement a shared selector registry for parsing, SQL, and GUI completions.
+  Match header and authoritative names before content processing, derive matching
+  roles from one Any lookup, and support generic role/date tiles after three value
+  characters. Use 50-hour worldwide date windows in CLI and GUI with ISO, slash,
+  and month-name dates; document boundaries and overlapping daily results.
+
+* Distinguish active ingest from background content work on quit. Stop content
+  without an ingest warning, keep the event loop alive through checkpointing,
+  and handle Ctrl-C through the orderly GUI shutdown path.
+
+* Tighten matcher rows and darken text, remove the archive-identities badge,
+  and label the resume action Continue Processing. Keep explicit search selectors
+  such as `from:simsong` scoped to their requested field in autocomplete.
+
+* Connect the desktop GUI to resumable processor work, saved ingest policy,
+  archive-backed name/institution pickers and immediate manual edits. Show
+  registered processors in About and attached-message tags and parent paths.
+  Exercise the shipped pages against real archives in headless browser tests.
+
+* Immediately acknowledge Ctrl-C during CLI ingestion before waiting for workers
+  and archive cleanup, preserving the notice across dashboard redraws.
+
 * Accept unsigned annotated release tags matching the project version. Remove
   the release-signing public-key variable and GitHub tag-signature checks while
   retaining commit consistency checks and optional Apple app/DMG signing.
 
-* Add in-process libpff OST extraction with genuine cache-fixture coverage,
+* Add libpff OST extraction (now an external converter) with genuine cache-fixture coverage,
   source fixity, streamed attachments, and explicit partial-import diagnostics.
   Add the default-off developer configuration option **Redundant PST Import**
   to run Rust and libpff through existing deduplication. Changed reader settings
@@ -30,7 +117,7 @@
   first-class attached messages with deduplication and durable parent/tag data.
   Integrate the external Rust PST importer, retaining partial-run evidence.
   No Python plugin worker subprocesses are used; plugin deadlines are cooperative
-  with bounded I/O and late-result rejection. GUI integration remains follow-up.
+  with bounded I/O and late-result rejection.
 
 * Preflight and journal configuration writes across a complete processor rank;
   recover interrupted publication before plugin reads. Record missing/unreadable

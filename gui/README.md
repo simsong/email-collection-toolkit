@@ -42,7 +42,7 @@ for the next import. **File → Document Options…** edits those same lists.
 Changes affect future imports; `owner-names-detected.txt` reports matching
 archived senders after exclusions. Legacy source owner files only seed the
 first dialog when YAML owner settings are absent.
-The always-present About window reports version, disk, network, warnings, and
+The About window, hidden until explicitly opened from the application menu, reports version, disk, network, warnings, and
 ingest activity. GUI assets are served only over the application's
 nonce-authenticated loopback server; Python calls still use the native bridge.
 

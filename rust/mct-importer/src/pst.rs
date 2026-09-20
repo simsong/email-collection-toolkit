@@ -136,6 +136,7 @@ pub fn import(
     output: &mut impl Write,
     diagnostics: &mut impl Write,
 ) -> Result<ImportReport> {
+    let scanner = crate::antivirus::Scanner::from_environment()?;
     let path = path.canonicalize().context("resolve source filename")?;
     let mut source = File::open(&path).context("open source read-only")?;
     ensure!(source.metadata()?.is_file(), "source is not a regular file");
@@ -212,8 +213,11 @@ pub fn import(
                             failures.join("; ")
                         );
                         spool.rewind()?;
-                        // A failed record has not touched stdout; successful records are streamed.
-                        io::copy(&mut spool, output).context("write stdout")?;
+                        if let Some(scanner) = &scanner {
+                            scanner.write_record(&mut spool, output)?;
+                        } else {
+                            io::copy(&mut spool, output).context("write stdout")?;
+                        }
                         Ok(true)
                     })();
                     match item_result {

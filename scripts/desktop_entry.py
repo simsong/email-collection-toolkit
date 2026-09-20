@@ -5,11 +5,13 @@
 Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved.
 """
 
+import multiprocessing
 import sys
 
 
 def main() -> int:
     """Keep headless diagnostics independent of Cocoa and user preferences."""
+    multiprocessing.freeze_support()
     if "--self-test" in sys.argv or "--self-test-gui" in sys.argv:
         from mailarchiver.self_test import main as test_main
         return test_main()

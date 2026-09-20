@@ -39,20 +39,20 @@ button { min-height: 28px; }
 .search-filters { display: flex; align-items: center; gap: 4px; padding-left: 4px; }
 #search { flex: 1; min-width: 90px; height: 29px; padding: 5px 10px; border: 0; outline: 0; background: transparent; }
 .search-chip { display: inline-flex; align-items: stretch; height: 24px; border: 1px solid var(--border); border-radius: 5px; overflow: hidden; background: var(--surface); white-space: nowrap; }
-.search-chip select { max-width: 72px; border: 0; border-right: 1px solid var(--border); border-radius: 0; background: color-mix(in srgb, CanvasText 8%, Canvas); font-size: 11px; font-weight: 650; text-transform: uppercase; }
+.search-chip select { max-width: 130px; border: 0; border-right: 1px solid var(--border); border-radius: 0; background: color-mix(in srgb, CanvasText 8%, Canvas); font-size: 11px; font-weight: 650; text-transform: uppercase; }
 .search-chip-label { display: flex; align-items: center; max-width: 230px; padding: 0 5px 0 7px; overflow: hidden; text-overflow: ellipsis; }
 .search-chip-remove { min-height: 0; width: 21px; padding: 0; border: 0; color: var(--muted); background: transparent; font-size: 15px; }
 .search-suggestions { position: absolute; z-index: 20; top: calc(100% + 5px); left: 0; right: 0; max-height: min(520px, 70vh); overflow: auto; padding: 7px; border: 1px solid var(--border); border-radius: 9px; background: Canvas; box-shadow: 0 12px 36px #0005; }
 .suggestion-heading { padding: 6px 8px 4px; color: var(--muted); font-size: 12px; font-weight: 650; }
-.suggestion-option { display: grid; grid-template-columns: 22px minmax(0, 1fr) auto; align-items: center; gap: 5px; width: 100%; min-height: 34px; padding: 5px 8px; border: 0; border-radius: 6px; text-align: left; background: transparent; }
+.suggestion-option { display: grid; grid-template-columns: 5em minmax(0, 1fr) auto; align-items: center; gap: 5px; width: 100%; min-height: 34px; padding: 5px 8px; border: 0; border-radius: 6px; text-align: left; background: transparent; }
 .suggestion-option:hover, .suggestion-option.active { background: var(--selection); }
-.suggestion-icon { color: var(--muted); font-size: 16px; text-align: center; }
+.suggestion-icon { color: CanvasText; font-size: 13px; font-weight: 650; text-align: left; }
 .suggestion-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .suggestion-count { color: var(--muted); font-variant-numeric: tabular-nums; }
 .suggestion-empty { padding: 10px 8px; color: var(--muted); }
 .attachment-search { display: flex; align-items: center; gap: 5px; white-space: nowrap; }
 
-.workspace { display: grid; grid-template-columns: minmax(0, var(--results-width, 38%)) 7px minmax(0, 1fr); height: calc(100% - 78px); }
+.workspace { display: grid; grid-template-columns: minmax(0, var(--results-width, 38%)) 7px minmax(0, 1fr); height: calc(100% - 114px); }
 .workspace.tree-visible { grid-template-columns: min(30%, max(235px, 20%)) minmax(0, var(--results-width, 31%)) 7px minmax(0, 1fr); }
 .message-splitter { cursor: col-resize; touch-action: none; background: var(--surface); border-inline: 1px solid var(--border); }
 .message-splitter:hover, .message-splitter:focus-visible { background: var(--selection); }
@@ -175,7 +175,7 @@ dialog h2 { margin: 0 0 16px; font-size: 18px; }
 .filter-set-row { display: grid; grid-template-columns: 1fr auto auto; gap: 6px; margin: 7px 0; }
 .link-destination { max-height: 12em; overflow: auto; overflow-wrap: anywhere; color: var(--muted); font: 12px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace; }
 
-body.standalone .toolbar, body.standalone .results, body.standalone .mailbox-browser, body.standalone .message-splitter, body.standalone .ingest-status-line { display: none; }
+body.standalone .archive-tools, body.standalone .toolbar, body.standalone .results, body.standalone .mailbox-browser, body.standalone .message-splitter, body.standalone .ingest-status-line { display: none; }
 body.standalone .workspace { display: block; height: 100%; }
 body.standalone .message { height: 100%; overflow: auto; }
 
@@ -187,3 +187,10 @@ body.standalone .message { height: 100%; overflow: auto; }
   #message-well { display: block; padding: 0; }
   .html-frame { min-height: 0; height: auto; }
 }
+
+.archive-tools { height: 36px; display: flex; gap: 8px; padding: 4px 12px; }
+#processing-dialog { max-width: 540px; }
+#processing-error { color: #b00020; }
+
+.result.attached-message, .attachment-tag { background-color: #f2f2f2; }
+.attachment-tag { font-size: 11px; padding: 2px 4px; }

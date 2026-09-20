@@ -1,10 +1,10 @@
 # Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved.
 
-.PHONY: auth-detect-live benchmark-name-resolution check compare-apple-mail data-quality-audit data-quality-babyl-audit data-quality-summary extract-pdf-mail fixture-bagit fixture-e2e gui gui-smoke website-build-check website-check release-tag-check
+.PHONY: benchmark-name-resolution check compare-apple-mail data-quality-audit data-quality-babyl-audit data-quality-summary extract-pdf-mail fixture-bagit fixture-e2e gui gui-smoke website-build-check website-check release-tag-check
 .PHONY: install-linux install-mac install-test-browser install-tika ocr-analyze ocr-experiment ocr-inventory ocr-profile ocr-run pylint run search summary-smoke test test-bagit test-data-quality
 .PHONY: test-application test-e2e test-encoding test-gui test-headers test-mailsearch test-native-gui test-native-html-find test-pdf-mail test-plugins test-progress test-provenance test-refresh-index test-tika test-website validation-aws-start validation-aws-start-all
 
-.PHONY: test-apple-mail-compare test-auth
+.PHONY: test-apple-mail-compare
 .PHONY: validation-fetch validation-list validation-prepare validation-run validation-run-all validation-sam-build validation-sam-deploy validation-sam-validate validation-test verify
 
 .PHONY: addressbook-export test-addressbook-export
@@ -44,11 +44,11 @@ RUST_EXE_SUFFIX := $(if $(filter Windows_NT,$(OS)),.exe,)
 RUST_TARGET_DIR ?= $(CURDIR)/target
 CARGO_RUN = $(CARGO) --config 'build.target-dir="$(RUST_TARGET_DIR)"'
 
-.PHONY: test-pst pst-import pst-smoke rust-programs mdti-validator mcti-generator pst-importer pst-downloader pst-download pst-download-plan test-pst-downloader rust-toolchain rust-lock rust-fmt rust-check test-rust rust-smoke
+.PHONY: test-pst pst-import pst-smoke rust-programs mdti-validator mcti-generator pst-importer mcti-scan pst-downloader pst-download pst-download-plan test-pst-downloader rust-toolchain rust-lock rust-fmt rust-check test-rust rust-smoke
 rust-programs:
 	$(CARGO_RUN) build --locked --release --workspace --bins
 
-mdti-validator mcti-generator pst-importer pst-downloader:
+mdti-validator mcti-generator pst-importer pst-downloader mcti-scan:
 	$(CARGO_RUN) build --locked --release --bin $@
 
 rust-toolchain:
@@ -56,7 +56,7 @@ rust-toolchain:
 	$(CARGO) --version
 
 rust-lock:
-	$(CARGO_RUN) generate-lockfile
+	$(CARGO_RUN) update --workspace
 
 rust-fmt:
 	$(CARGO_RUN) fmt --all
@@ -125,6 +125,7 @@ check:
 	$(MAKE) lint
 	$(MAKE) types
 	$(MAKE) rust-check
+	$(MAKE) test-clamav-rust
 	$(MAKE) copyright-check
 	$(MAKE) runtime-license-check
 	$(MAKE) test
@@ -145,16 +146,18 @@ types:
 
 ty:
 	uv run --locked ty check --error-on-warning
+	uv run --locked ty check converters/pff/src converters/pff/tests converters/pff/entry.py --error-on-warning
 
 pyright:
 	uv run --locked pyright --warnings
+	uv run --locked --project converters/pff pyright --project converters/pff --warnings
 
 .PHONY: syntax-check
 syntax-check:
 	uv run python -m compileall -q src scripts tests e2e_tests
 
 .PHONY: dmg dmg-signed list-signatures check-release test-dmg preview-dmg self-test self-test-gui test-packaging
-dmg: ruff syntax-check
+dmg: ruff syntax-check pst-importer mcti-scan pff-converter-bundle
 	uv run --group packaging python scripts/build_macos.py $(ARGS)
 
 # Use the first valid Developer ID Application identity in the Keychain search list.
@@ -166,7 +169,7 @@ dmg-signed:
 list-signatures:
 	/usr/bin/security find-identity -v -p codesigning
 
-check-release: ruff syntax-check
+check-release: ruff syntax-check $(if $(DMG),,pst-importer mcti-scan pff-converter-bundle)
 	uv run --group packaging python scripts/build_macos.py --check-release $(if $(DMG),--test-dmg "$(DMG)") $(ARGS)
 
 test-dmg:
@@ -199,11 +202,6 @@ test-signing: ruff
 	uv run --locked ty check scripts/macos_signing.py scripts/build_macos.py tests/test_macos_signing.py --error-on-warning
 	uv run --locked pyright scripts/macos_signing.py scripts/build_macos.py tests/test_macos_signing.py --warnings
 	uv run --locked pytest -q tests/test_macos_signing.py tests/test_website_scripts.py
-
-auth-detect-live:
-	uv run mailarchiver-auth --detect-only simsong@gmail.com
-	uv run mailarchiver-auth --detect-only simsong@basistech.com
-	uv run mailarchiver-auth --detect-only sgarfinkel@fas.harvard.edu
 
 compare-apple-mail:
 	uv run mailarchiver-compare-apple-mail --apple-mail "$(HOME)/Library/Mail" --archive "$(HOME)/mail-archive" $(ARGS)
@@ -239,6 +237,7 @@ extract-pdf-mail:
 
 pylint:
 	uv run --locked pylint src tests e2e_tests scripts
+	uv run --locked --project converters/pff pylint --rcfile=pyproject.toml converters/pff/src converters/pff/tests converters/pff/entry.py
 
 run:
 	uv run mailarchiver $(ARGS)
@@ -292,7 +291,7 @@ release-tag-check:
 	@test -n "$(GITHUB_REF_NAME)" || { echo 'usage: make release-tag-check GITHUB_REF_NAME=v1.2.3'; exit 2; }
 	uv run --no-project --python '>=3.12' python scripts/release_tag.py --tag "$(GITHUB_REF_NAME)" $(ARGS)
 
-test: pst-importer
+test: pst-importer mcti-scan pff-converter test-pff-converter
 	uv run pytest -q
 
 .PHONY: test-corpus-import update-corpus-expectations
@@ -307,9 +306,6 @@ test-application:
 
 test-apple-mail-compare:
 	uv run pytest -q tests/test_apple_mail_compare.py
-
-test-auth:
-	uv run pytest -q tests/test_auth.py
 
 test-e2e:
 	uv run pytest -q --browser chromium --tracing=retain-on-failure e2e_tests
@@ -341,7 +337,7 @@ test-name-resolution:
 	uv run pytest -q tests/test_name_resolution_benchmark.py tests/test_name_matcher_research.py
 
 test-gui:
-	uv run pytest -q tests/test_gui_service.py
+	uv run pytest -q tests/test_gui_service.py tests/test_search_completion.py
 
 test-provenance:
 	uv run pytest -q tests/test_catalog.py tests/test_sources.py
@@ -354,6 +350,10 @@ test-headers:
 
 test-progress:
 	uv run pytest -q tests/test_progress.py tests/test_sources.py
+
+.PHONY: test-interrupt
+test-interrupt:
+	uv run --locked pytest -q tests/test_progress.py tests/test_end_to_end.py::test_interrupt_stops_cleanly
 
 test-tika:
 	uv run pytest -q tests/test_tika.py
@@ -516,6 +516,14 @@ test-processors: ruff
 test-cli-processors: ruff pst-importer
 	uv run --locked pytest -q tests/test_cli_processing.py
 
+.PHONY: test-rollover
+test-rollover: ruff
+	uv run --locked pytest -q tests/test_rollover.py tests/test_publication.py tests/test_mboxrd.py
+
+.PHONY: test-mime-limits
+test-mime-limits: ruff
+	uv run --locked pytest -q tests/test_mime_limits.py tests/test_cli_processing.py tests/test_gui_processing.py
+
 # PST corpus acquisition is opt-in; ordinary checks never contact corpus servers.
 PST_DOWNLOAD_ARGS ?=
 pst-download: pst-downloader
@@ -528,5 +536,54 @@ test-pst-downloader:
 	$(CARGO_RUN) test --locked -p pst-downloader
 
 .PHONY: test-pff
-test-pff: pst-importer
+test-pff: pst-importer mcti-scan pff-converter test-pff-converter
 	uv run --locked pytest -q tests/test_pff_source.py tests/test_cli_processing.py tests/test_plugin_loader.py tests/test_source_integrity.py
+
+.PHONY: test-gui-processing
+test-gui-processing: ruff
+	uv run --locked pytest -q tests/test_gui_processing.py
+	uv run --locked pytest -q --browser chromium e2e_tests/test_gui_processing.py
+
+.PHONY: website-preview-screenshots
+website-preview-screenshots: website-build-check
+	uv run --group dev python -m scripts.website_screenshots --site-only
+
+.PHONY: test-plugin-inventory
+test-plugin-inventory: ruff
+	uv run --locked pytest -q tests/test_plugin_loader.py
+	uv run --locked pytest -q --browser chromium e2e_tests/test_ingest_verify.py -k about_window_displays
+
+.PHONY: test-clamav clamav-update freshclam
+test-clamav:
+	uv run --locked pytest -q tests/test_scanner.py tests/test_clamav_definitions.py
+
+clamav-update:
+	uv run --locked python -m mailarchiver.clamav_update $(ARGS)
+
+.PHONY: test-clamav-gui
+test-clamav-gui:
+	uv run --locked pytest -q --browser chromium e2e_tests/test_clamav_about.py
+
+freshclam:
+	uv run --locked python -m mailarchiver.clamav_update --development
+
+.PHONY: test-clamav-rust
+test-clamav-rust:
+	MAILARCHIVER_SCAN=1 \
+	MAILARCHIVER_CLAMAV_LIBRARY="$$(uv run --locked python -c 'from mailarchiver.clamav_definitions import library_path; print(library_path())')" \
+	MAILARCHIVER_CLAMAV_DATABASE="$(CURDIR)/etc/clamdb" \
+	MAILARCHIVER_CLAMAV_CERTIFICATES="$$(uv run --locked python -c 'from mailarchiver.clamav_definitions import certificates_path; print(certificates_path() or "")')" \
+	$(CARGO_RUN) test --locked -p mct-importer --lib -- --include-ignored
+
+.PHONY: pff-converter pff-converter-lock pff-converter-bundle test-pff-converter
+pff-converter-lock:
+	uv lock --project converters/pff
+
+pff-converter:
+	uv sync --locked --project converters/pff
+
+pff-converter-bundle: pff-converter
+	uv run --locked --project converters/pff pyinstaller --noconfirm --onedir --name pff-converter --recursive-copy-metadata pff-converter --distpath "$(CURDIR)/target" --workpath "$(CURDIR)/.tmp/pff-build" --specpath "$(CURDIR)/.tmp" converters/pff/entry.py
+
+test-pff-converter: pff-converter
+	uv run --locked --project converters/pff pytest -q converters/pff/tests

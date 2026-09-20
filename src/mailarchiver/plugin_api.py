@@ -134,6 +134,7 @@ class MailObject(FrozenModel):
     completed_bytes: int | None = Field(default=None, ge=0)
     total_bytes: int | None = Field(default=None, ge=0)
     exclusion_reason: str | None = None
+    scan_responsibility: Literal["host", "producer"] = "host"
 
     @field_validator("mbox_envelope")
     @classmethod
@@ -271,6 +272,7 @@ class PluginContext(FrozenModel):
     archive: Path | None = None
     installation_config: Path | None = None
     plugin_name: str | None = None
+    scan_policy: Literal["clamav", "not-scanned"] = "not-scanned"
 
     def get_my_config(self, *, scope: ReadScope = "effective") -> ConfigValues:
         from .plugin_configuration import read_plugin_configuration

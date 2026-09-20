@@ -156,7 +156,7 @@ def validate_result(plugin: PluginSpec, item: ProcessingObject, result: Processi
 
 def _checkpoint(database: sqlite3.Connection, job_id: int, plugin: PluginSpec, item: ProcessingObject,
                 installation_config: Path | None, cancelled: Callable[[], None] | None,
-                failures: list[Exception]) -> ProcessingResult | None:
+                failures: list[Exception], services: ProcessorServices | None) -> ProcessingResult | None:
     previous = database.execute(
         "SELECT result_json FROM invocations WHERE job_id=? AND kind=? AND status='completed' ORDER BY invocation_id DESC LIMIT 1",
         (job_id, plugin.manifest.kind)).fetchone()
@@ -185,8 +185,10 @@ def _checkpoint(database: sqlite3.Connection, job_id: int, plugin: PluginSpec, i
     with database:
         database.execute("UPDATE invocations SET status=?,elapsed=?,result_json=?,error=? WHERE invocation_id=?",
                          ("completed" if success else "failed", elapsed,
-                          response.result.model_dump_json() if success and response.result else None,
+                          response.result.model_dump_json() if success and response.result else response.model_dump_json(),
                           response.error, invocation_id))
+        if not success and response.result is not None and response.result.scan is not None and services is not None:
+            services.publish(database, job_id, item, plugin, ProcessingResult(scan=response.result.scan))
     return response.result if success else None
 
 
@@ -245,7 +247,7 @@ def run(database: sqlite3.Connection, plugins: tuple[PluginSpec, ...], *, retry:
         if row is None:
             break
         job_id, payload = row
-        item = ProcessingObject.model_validate_json(payload)
+        item = ProcessingObject.model_validate_json(payload).model_copy(update={"job_id": job_id})
         if services is not None:
             item = services.prepare(item)
         recover_config_transaction(item.archive.path)
@@ -269,7 +271,7 @@ def run(database: sqlite3.Connection, plugins: tuple[PluginSpec, ...], *, retry:
             results: list[tuple[PluginSpec, ProcessingResult]] = []
             failed = False
             for plugin in (p for p in selected if p.manifest.rank == rank):
-                result = _checkpoint(database, job_id, plugin, item, installation_config, cancelled, failures)
+                result = _checkpoint(database, job_id, plugin, item, installation_config, cancelled, failures, services)
                 if result is None:
                     failed = True
                 else:

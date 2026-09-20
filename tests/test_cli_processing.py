@@ -66,7 +66,8 @@ def test_cli_deferred_content_resume_and_manual_evidence(tmp_path: Path) -> None
     cli(archive, "process")
     assert json.loads(cli(archive, "processing-status").stdout)["pending"] == 0
     entries = json.loads(cli(archive, "identities", "addresses", "--domain", "example.ac.uk", "--start", "2024-01-02", "--end", "2024-01-02").stdout)
-    assert len(entries) == 2 and all(entry["messages"] == 1 for entry in entries)
+    assert len(entries) == 2
+    assert sorted((entry["messages"], entry["signature_messages"]) for entry in entries) == [(0, 1), (1, 0)]
     assert json.loads(cli(archive, "identities", "addresses", "--start", "2025-01-01").stdout) == []
     sender = next(entry for entry in entries if entry["canonical_name"] == "Manual Sender")
     other = next(entry for entry in entries if entry["address"].startswith("other@"))
@@ -142,7 +143,8 @@ def test_cli_attached_message_is_deduplicated_first_class_message(tmp_path: Path
     assert not verify_archive(archive)
 
 
-def test_cli_pst_partial_import_preserves_evidence_and_valid_records(tmp_path: Path) -> None:
+@pytest.mark.parametrize("scan_flag", ["--no-scan", "--clamav"])
+def test_cli_pst_partial_import_preserves_evidence_and_valid_records(tmp_path: Path, scan_flag: str) -> None:
     """Real Rust importer partial failure retains its tail and files prior complete records once."""
     fixture = Path(__file__).resolve().parents[1] / "rust/mct-importer/tests/fixtures/mail.pst"
     source = tmp_path / "mail.pst"
@@ -151,12 +153,18 @@ def test_cli_pst_partial_import_preserves_evidence_and_valid_records(tmp_path: P
     owners.write_text("owner@example.test\n")
     archive = tmp_path / "archive"
     command = [sys.executable, "-m", "mailarchiver", "--archive", str(archive), "ingest",
-               "--no-scan", "--owner-names-file", str(owners), str(source)]
+               scan_flag, "--owner-names-file", str(owners), str(source)]
     for _attempt in range(2):
         result = subprocess.run(command, capture_output=True, text=True, check=False, timeout=60)
         assert result.returncode != 0 and "PST extraction incomplete" in result.stderr
         with sqlite3.connect(archive / "archive.sqlite3") as db:
             assert db.execute("SELECT count(*) FROM messages").fetchone() == (11,)
+    if scan_flag == "--clamav":
+        with sqlite3.connect(archive / "processing.sqlite3") as db:
+            assert db.execute("SELECT count(*) FROM message_state WHERE scan_status='clean'").fetchone() == (11,)
+            for (payload,) in db.execute("SELECT result_json FROM invocations WHERE kind='clamav'"):
+                scan = json.loads(payload)["scan"]
+                assert scan["engine_version"] is None and scan["signature_version"] is None
     receipts = list((archive / "processing-pst").glob("*/receipt.json"))
     assert len(receipts) == 2
     for path in receipts:
@@ -185,6 +193,8 @@ def test_cli_infected_undated_message_quarantines_before_metadata(tmp_path: Path
     with sqlite3.connect(archive / "processing.sqlite3") as db:
         assert db.execute("SELECT kind,status FROM invocations").fetchall() == [("clamav", "completed")]
         assert db.execute("SELECT scan_status FROM message_state").fetchone() == ("infected",)
+        evidence = json.loads(db.execute("SELECT result_json FROM invocations").fetchone()[0])["scan"]
+        assert evidence["engine_version"] and evidence["signature_version"] and "Eicar" in evidence["detail"]
     with sqlite3.connect(archive / "search.sqlite3") as db:
         assert db.execute("SELECT count(*) FROM message_fts").fetchone() == (0,)
     assert source.read_bytes() == raw
@@ -193,15 +203,20 @@ def test_cli_infected_undated_message_quarantines_before_metadata(tmp_path: Path
 
 @pytest.mark.parametrize("content_type,processor", [("text/html", "html-text"), ("text/rtf", "rtf-text"), ("text/plain", "text-index")])
 def test_cli_attachment_text_bound_preserves_bytes(tmp_path: Path, content_type: str, processor: str) -> None:
-    """Over-limit derived HTML/RTF/text is explicitly skipped without losing the attachment."""
+    """Over-limit extraction remains failed and can resume after raising the limit."""
     raw = HEADER + (f'Content-Type: {content_type}\r\nContent-Disposition: attachment; filename="large.txt"\r\n\r\n' + "x" * 128 + "\r\n").encode()
     archive, _source = ingest(tmp_path, raw, "--defer-content")
     configure(archive, processor, {"max_text_bytes": 32})
-    cli(archive, "process")
+    failed = subprocess.run([sys.executable, "-m", "mailarchiver", "--archive", str(archive), "process"],
+                            capture_output=True, text=True, check=False, timeout=30)
+    assert failed.returncode != 0 and "original content retained" in failed.stderr
     with sqlite3.connect(archive / "processing.sqlite3") as db:
         assert db.execute("SELECT count(*) FROM content_parts").fetchone() == (0,)
-        outcomes = [json.loads(row[0]) for row in db.execute("SELECT result_json FROM invocations WHERE kind=?", (processor,))]
-        assert any(result["outcome"] == "abort-part" and "original content retained" in result["diagnostics"][0] for result in outcomes)
+        assert db.execute("SELECT count(*) FROM jobs WHERE status='failed'").fetchone()[0] > 0
+    configure(archive, processor, {"max_text_bytes": 1024})
+    cli(archive, "process")
+    with sqlite3.connect(archive / "processing.sqlite3") as db:
+        assert db.execute("SELECT count(*) FROM content_parts").fetchone() == (1,)
     assert mailbox_message_bytes(mbox_directory(archive) / "2024-Archive1.mbox") == [raw]
     assert not verify_archive(archive)
 

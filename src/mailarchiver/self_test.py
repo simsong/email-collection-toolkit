@@ -225,11 +225,18 @@ def main() -> int:
     try:
         with tempfile.TemporaryDirectory(prefix="mailarchiver-self-test-") as temporary:
             directory = Path(temporary)
+            if report.frozen:
+                from .clamav_definitions import UPDATE_ENV, selected_definitions
+                from .clamav_update import validate_definitions
+                os.environ[UPDATE_ENV] = str(directory / "clamav-updates")
+                definitions = selected_definitions()
+                if definitions.source != "bundled":
+                    raise AssertionError("installed app did not use bundled virus definitions")
+                validate_definitions(definitions)
+                report.checks.append("bundled offline ClamAV clean and EICAR scans")
             # Override only this diagnostic process; exercise missing scanner even on developer Macs.
-            from . import scanner  # pylint: disable=import-outside-toplevel
-            scanner.CLAMD = str(directory / "missing-clamd")
-            scanner.CLAMDSCAN = str(directory / "missing-clamdscan")
-            scanner.CLAMD_CONFIG = str(directory / "missing-clamd.conf")
+            from .clamav_definitions import LIBRARY_ENV
+            os.environ[LIBRARY_ENV] = str(directory / "missing-libclamav")
             archive = exercise_core(directory, report)
             if args.self_test_gui:
                 exercise_gui(archive, directory, report)

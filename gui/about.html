@@ -13,7 +13,7 @@
     <main>
       <header>
         <img src="icons/rainbow-post-192.png" alt="" width="96" height="96">
-        <div><h1 id="name">Email Collection Toolkit</h1><p id="version"></p><p id="copyright"></p></div>
+        <div><h1 id="name">Email Collection Toolkit</h1><p id="version"></p><p id="copyright"></p><p>GPLv2 · Additional licenses are available from the copyright holder.</p></div>
       </header>
       <section aria-labelledby="health-heading">
         <h2 id="health-heading">System health</h2>
@@ -21,12 +21,19 @@
           <dt>Free disk space</dt><dd id="disk">Checking…</dd>
           <dt>Internet</dt><dd id="internet">Checking…</dd>
           <dt>Antivirus</dt><dd id="antivirus">Checking…</dd>
+          <dt>Virus definitions</dt><dd id="definitions">Checking…</dd>
         </dl>
+        <p id="definition-warning" class="definition-warning" role="status" hidden></p>
+        <button id="update-definitions" type="button">Update virus definitions</button>
+        <p id="definition-update-status" role="status"></p>
+        <p class="detail">Application releases refresh bundled definitions at least quarterly.</p>
       </section>
       <section aria-labelledby="activity-heading">
         <h2 id="activity-heading">Archive activity</h2>
         <div id="activity"><p class="empty">No saved archive is open.</p></div>
       </section>
+      <section aria-labelledby="plugins-heading"><h2 id="plugins-heading">Registered processors by MIME type</h2><div id="processors"></div></section>
+      <section aria-labelledby="acquisition-heading"><h2 id="acquisition-heading">Source and file acquisition plugins</h2><div id="acquisition-plugins"></div></section>
       <section aria-labelledby="messages-heading">
         <h2 id="messages-heading">Messages and warnings</h2>
         <div id="notices" aria-live="polite"><p class="empty">No messages.</p></div>

@@ -14,7 +14,7 @@ from pathlib import Path
 
 import pytest
 
-from mailarchiver.pff_source import PffReceipt, is_mail_class
+from mailarchiver.pff_source import PffReceipt
 from mailarchiver.plugin_api import MailContainer, MailObject, SourceSpec
 from mailarchiver.plugin_loader import load_plugins
 from mailarchiver.pst_source import ImportReceipt, validate_record
@@ -27,23 +27,83 @@ PST = ROOT / "rust/mct-importer/tests/fixtures/mail.pst"
 EMPTY_PST = ROOT / "rust/mct-importer/tests/fixtures/empty.pst"
 
 
-@pytest.mark.parametrize(("message_class", "expected"), [
-    ("ipm.note.Custom", True), ("REPORT.IPM.Note.NDR", True), ("IPM.Schedule.Meeting.Request", True),
-    ("IPM.Contact", False), ("IPM.Appointment.Custom", False), ("IPM.Microsoft.ScheduleData.FreeBusy", False),
-])
-def test_mapi_mail_class_scope(message_class: str, expected: bool) -> None:
-    """Mail and recognized non-mail families are delimited, case-insensitive class prefixes."""
-    assert is_mail_class(message_class) is expected
+@pytest.mark.skipif(os.name == "nt", reason="POSIX process liveness uses kill(pid, 0)")
+def test_host_kills_and_reaps_stuck_converter(tmp_path: Path) -> None:
+    """A blocked native child cannot outlive the host's extraction deadline."""
+    from mailarchiver.pff_source import PffSettings, run_converter
+    output = tmp_path / "output"
+    command = [sys.executable, "-c", "import os,time; print(os.getpid(), flush=True); time.sleep(60)"]
+    with pytest.raises(TimeoutError):
+        list(run_converter(command, output, tmp_path / "stderr", PffSettings(timeout_seconds=1),
+                           "fixture", os.environ.copy()))
+    pid = int(output.read_text())
+    with pytest.raises(ProcessLookupError):
+        os.kill(pid, 0)
 
 
-@pytest.mark.parametrize("message_class", ["IPM.Noteish", "IPM.Unknown", "IPM.Contacts"])
-def test_unknown_mapi_classes_are_incomplete_not_silently_excluded(message_class: str) -> None:
-    """An unrecognized class may carry mail and must never count as a successful non-mail exclusion."""
-    with pytest.raises(ValueError, match="unsupported MAPI message class"):
-        is_mail_class(message_class)
+def test_host_bounds_fast_converter_output(tmp_path: Path) -> None:
+    """A producer that exits before polling still cannot retain unbounded output."""
+    from mailarchiver.pff_source import PffSettings, run_converter
+    output = tmp_path / "output"
+    command = [sys.executable, "-c", "import sys; sys.stdout.write('x' * 100000)"]
+    with pytest.raises(ValueError, match="output limit"):
+        list(run_converter(command, output, tmp_path / "stderr", PffSettings(max_output_bytes=32),
+                           "fixture", os.environ.copy()))
+    assert output.stat().st_size == 32
 
 
-def test_real_ost_in_process_preserves_cache_and_attachment_bytes(tmp_path: Path) -> None:
+def test_reader_is_not_loaded_in_the_host() -> None:
+    """Loading every built-in plugin must not load or require the libpff extension."""
+    result = subprocess.run([sys.executable, "-c",
+        "from mailarchiver.plugin_loader import load_plugins; load_plugins(); "
+        "import sys, importlib.util; assert 'pypff' not in sys.modules; "
+        "assert importlib.util.find_spec('pypff') is None"], capture_output=True, text=True, check=False)
+    assert result.returncode == 0, result.stderr
+
+
+def test_real_ost_external_scan_stage(tmp_path: Path) -> None:
+    """Both external stages run on a real OST; clean records have no scan provenance headers."""
+    registry = load_plugins(archive=tmp_path, scan_policy="clamav")
+    source = next(item.implementation for item in registry.sources if item.manifest.kind == "file-folder")
+    container = next(item for item in source.discover(SourceSpec(locator=str(OST))) if isinstance(item, MailContainer))
+    records: list[MailObject] = []
+    with pytest.raises(RuntimeError, match="libpff extraction incomplete"):
+        for event in source.messages(container, None):
+            if isinstance(event, MailObject):
+                records.append(event)
+    assert len(records) == 87
+    assert all(item.scan_responsibility == "producer" for item in records)
+    assert all(b"X-ClamAV-Engine-Version:" not in item.raw for item in records)
+    assert list(tmp_path.glob("processing-libpff/*/scanner-stderr.txt"))
+
+
+def test_external_scan_adds_only_infected_headers(tmp_path: Path) -> None:
+    """Real external scanner preserves clean bytes and marks EICAR before API admission."""
+    from mailarchiver.clamav_definitions import library_path, selected_definitions, certificates_path
+    from mailarchiver.clamav_update import EICAR
+    from mailarchiver.pff_source import executable
+    prefix = b"From fixture Thu Jan  1 00:00:00 1970\nX-Imported-URI: file:///fixture\r\nX-Importer-Name: fixture\r\nX-Importer-Version: 1\r\nFrom: fixture@example.test\r\nContent-Type: application/octet-stream\r\n\r\n"
+    clean = prefix + b"ordinary body\r\n>From quoted body line\r\n\n"
+    infected = prefix + EICAR + b"\r\n\n"
+    path = tmp_path / "input.mboxrd"
+    path.write_bytes(clean + infected)
+    environment = {**os.environ, "MAILARCHIVER_SCAN": "1",
+        "MAILARCHIVER_CLAMAV_LIBRARY": str(library_path()),
+        "MAILARCHIVER_CLAMAV_DATABASE": str(selected_definitions().directory)}
+    if certs := certificates_path():
+        environment["MAILARCHIVER_CLAMAV_CERTIFICATES"] = str(certs)
+    result = subprocess.run([str(executable("mcti-scan")), str(path)], env=environment,
+                            capture_output=True, check=False, timeout=60)
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.startswith(clean)
+    assert result.stdout.count(b"X-ClamAV-Detection:") == 1
+    assert result.stdout.count(b"X-ClamAV-Engine-Version:") == 1
+    assert result.stdout.count(b"X-ClamAV-Definitions-Version:") == 1
+    assert result.stdout.endswith(EICAR + b"\r\n\n")
+    assert path.read_bytes() == clean + infected
+
+
+def test_real_ost_external_preserves_cache_and_attachment_bytes(tmp_path: Path) -> None:
     """Genuine SO/version-23 OST emits stable MIME, marks unavailable embedded MSGs and keeps source fixity."""
     fixture = tmp_path / "cache with spaces.ost"
     shutil.copyfile(OST, fixture)
@@ -87,7 +147,7 @@ def test_real_ost_in_process_preserves_cache_and_attachment_bytes(tmp_path: Path
     assert len(incomplete) == 1 and "Undeliverable" in str(incomplete[0]["Subject"])
     for path in tmp_path.glob("processing-libpff/*/receipt.json"):
         receipt = PffReceipt.model_validate_json(path.read_text())
-        assert receipt.process_id == os.getpid()
+        assert receipt.process_id != os.getpid() and receipt.process_id > 0
         assert (receipt.encountered, receipt.emitted, receipt.non_mail, receipt.errors) == (92, 87, 5, 1)
         assert not receipt.complete and receipt.content_type == 111
         assert receipt.source_sha256 == hashlib.sha256(before).hexdigest()

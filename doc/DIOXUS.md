@@ -2,6 +2,12 @@
 
 # Compiled desktop UI: Dioxus and Tauri trials
 
+> Historical research/planning snapshot. Current development and application CI
+> are macOS-only. For implemented behavior use `requirements.md`,
+> `implementation.md`, and the current feature-specific guides; older
+> backend/platform priorities and inventories below may be superseded.
+
+
 Plan: 2026-09-10. Trial **Dioxus Desktop and Tauri** before choosing the
 compiled desktop framework. The trial scope below is proposed; neither trial
 has been implemented or evaluated. Ingest, MIME processing, search, SQLite,

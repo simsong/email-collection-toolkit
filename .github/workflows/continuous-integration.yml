@@ -33,48 +33,10 @@ jobs:
       - name: Install ClamAV and PDF tools
         run: |
           brew install clamav poppler
-          scanner_prefix="$(brew --prefix clamav)"
-          scanner_runtime="$(mktemp -d /tmp/mct-ci-clamav.XXXXXX)"
-          mkdir "$scanner_runtime/database"
-          printf '%s\n' \
-            "DatabaseDirectory $scanner_runtime/database" \
-            'DatabaseMirror database.clamav.net' \
-            > "$scanner_runtime/freshclam.conf"
-          "$scanner_prefix/bin/freshclam" --config-file="$scanner_runtime/freshclam.conf"
-          {
-            echo "MAILARCHIVER_CLAMD=$scanner_prefix/sbin/clamd"
-            echo "MAILARCHIVER_CLAMDSCAN=$scanner_prefix/bin/clamdscan"
-            echo "MAILARCHIVER_CLAMD_CONFIG=$scanner_runtime/clamd.conf"
-            echo "MAILARCHIVER_CLAMD_SOCKET=$scanner_runtime/clamd.sock"
-          } >> "${GITHUB_ENV}"
-          printf '%s\n' \
-            "DatabaseDirectory $scanner_runtime/database" \
-            "LocalSocket $scanner_runtime/clamd.sock" \
-            > "$scanner_runtime/clamd.conf"
-      - name: Smoke-test on-demand ClamAV
-        shell: bash
-        run: |
-          "$MAILARCHIVER_CLAMD" --foreground --config-file="$MAILARCHIVER_CLAMD_CONFIG" &
-          clamd_pid=$!
-          trap 'kill "$clamd_pid" 2>/dev/null || true' EXIT
-          for attempt in {1..120}; do
-            if [[ -S "$MAILARCHIVER_CLAMD_SOCKET" ]]; then
-              break
-            fi
-            if ! kill -0 "$clamd_pid" 2>/dev/null; then
-              wait "$clamd_pid"
-              exit 1
-            fi
-            sleep 1
-          done
-          test -S "$MAILARCHIVER_CLAMD_SOCKET"
-          "$MAILARCHIVER_CLAMDSCAN" --config-file="$MAILARCHIVER_CLAMD_CONFIG" --ping=10
-          kill "$clamd_pid"
-          wait "$clamd_pid"
-          trap - EXIT
-          rm -f "$MAILARCHIVER_CLAMD_SOCKET"
       - name: Install dependencies
         run: uv sync --locked --all-groups
+      - name: Refresh project virus definitions
+        run: make freshclam
       - name: Install headless test browser
         run: make install-test-browser PLAYWRIGHT_INSTALL_ARGS="chromium"
       - name: Archive and Chromium GUI tests

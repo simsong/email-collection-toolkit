@@ -12,7 +12,7 @@ from pathlib import Path
 from uuid import uuid4
 
 from pydantic import BaseModel
-from tldextract import TLDExtract
+from ..public_suffix import registrable_domain
 
 from ..catalog import address_pk
 from ..message import ParsedMessage, parse_message
@@ -29,7 +29,6 @@ from .registry import fingerprint, load_processors
 from .runtime import run
 from .store import DATABASE, connect, enqueue, report, snapshot
 
-DOMAIN = TLDExtract(cache_dir=None, suffix_list_urls=())
 Publisher = Callable[[MailObject, ParsedMessage, MailboxReference, int], int]
 PROVIDER_DOMAINS = "provider_domains"
 PUBLIC_PROVIDERS = frozenset({"gmail.com", "googlemail.com", "outlook.com", "hotmail.com", "live.com", "msn.com",
@@ -245,7 +244,7 @@ class ProductionPipeline:
                 self.database.execute("INSERT INTO person_addresses VALUES(?,?,0)", (address_id, person_id))
             if entry.name:
                 self.database.execute("INSERT OR IGNORE INTO person_aliases VALUES(?,?)", (person_id, entry.name))
-            parent_domain = DOMAIN(domain).top_domain_under_public_suffix or ".".join(domain.split(".")[-2:])
+            parent_domain = registrable_domain(domain)
             if parent_domain in self.provider_domains:
                 self.database.execute("INSERT INTO organization_domains VALUES(?,NULL,1) ON CONFLICT(domain) DO UPDATE SET provider=1", (parent_domain,))
             organization = self.database.execute("SELECT organization_id,provider FROM organization_domains WHERE domain=?", (parent_domain,)).fetchone()

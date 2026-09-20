@@ -1,5 +1,7 @@
+# Copyright (c) 2026 Simson L. Garfinkel
+
 name = "envelope-rainbow"
 description = "A light Email Collection Toolkit theme built around rainbow curves and stacked envelopes."
-license = "MIT"
+license = "GPL-2.0-only"
 homepage = "https://github.com/simsong/email-collection-toolkit"
 min_version = "0.20.0"

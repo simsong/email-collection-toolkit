@@ -15,7 +15,8 @@ _NOTE --- THIS PROGRAM IS UNDER ACTIVE DEVELOPMENT. DO NOT USE OPERATIONALLY UNT
 
 For the macOS drag-to-Applications build, run `make dmg`. Python and GUI
 dependencies are bundled; ClamAV is optional. The target mounts its DMG and
-runs headless and visible native self-tests before publishing the local artifact.
+runs headless self-tests before publishing the local artifact. Visible native
+validation is an explicit local `make check-release` operation.
 See [macOS distribution](doc/MACOS_DISTRIBUTION.md) for installation, test commands,
 architecture limits, and Developer ID renewal/signing instructions.
 
@@ -76,18 +77,19 @@ recreatable and must never silently replace or rewrite canonical mail.
 For each year it creates two logical archives: one for messages sent by the
 archive owner and one for messages received. They begin as
 `{YEAR}-Sent1.mbox` and `{YEAR}-Archive1.mbox`; additional numbered filenames
-are reserved for the planned rollover support. Messages are never rewritten just
-to make them easier to search: the SQLite databases and user interfaces are
-derived data, while the BagIt payload, Mailbag metadata, and versioned
+are used when appending would reach `config.yaml`'s `mbox_max_bytes` limit
+(default 3.75 GiB; use 20480 for a 20 KiB synthetic test). Messages are never rewritten just
+to make them easier to search: search indexes and automatic evidence are derived data. Manual identity
+decisions and tags in `processing.sqlite3` require backup, while the BagIt payload, Mailbag metadata, and versioned
 integrity tags are the portable durable record.
 
 This is the initial local-ingest implementation, not yet the complete email
 archiving system. It currently ingests local MBOX, Emacs RMAIL Babyl, EML,
 Maildir, complete Apple Mail `.emlx` messages, Outlook PST through the Rust reader,
-and OST through in-process libpff. Both Outlook readers report partial extraction
+and OST through the external libpff converter. Both Outlook readers report partial extraction
 and preserve reconstruction evidence; see [reader limits](doc/PST_IMPORTER.md).
 Eudora, working IMAP cache directories, Gmail, live IMAP, redaction, richer
-research data, sorting/repacking, and rollover remain planned; see
+research data and sorting/repacking remain planned; see
 [doc/implementation.md](doc/implementation.md).
 The [archivist-facing user manual](doc/USER_MANUAL.md) gives step-by-step
 instructions for ingest, verification, and search.
@@ -108,7 +110,7 @@ The [data-quality audit](doc/DATA_QUALITY_AUDIT.md) documents the read-only
 diagnostic scripts used to investigate implausible dates, missing senders, and
 previously unsupported Babyl sources. Its generated mail and metadata evidence
 is private and deliberately excluded from Git.
-The [current source-code audit](doc/source-code-audit.md) distinguishes completed
+The [historical August source-code audit](doc/source-code-audit.md) distinguishes completed
 tightening from the remaining architectural gaps.
 The [competitive analysis](doc/competitive_analysis.md) explains how this
 combination differs from preservation, migration, search, forensic, and
@@ -215,7 +217,7 @@ ClamAV. Replace the paths with your source directory and a new archive location;
 
 ```sh
 export MAIL_ARCHIVE_DIR="/path/to/new-archive"
-make run ARGS='ingest --owner-names-file owner-names.txt --clamav "/path/to/source-directory"'
+make run ARGS='ingest --owner-names-file owner-names.txt --clamav "/path/to/email-source-root-directory"'
 make search ARGS='subject:invoice after:2024-01-01'
 make search ARGS='--limit 0 from:alice@example.com'
 ```
@@ -251,8 +253,10 @@ inventory. It spools only typed container metadata to a temporary work
 snapshot. Every ordinary file that no parser recognizes is printed once with
 its path and reason.
 
-Messages are classified as `Sent` when their parsed `From:` address contains a
-case-insensitive token in `owner-names.txt`; they go to the year's
+Messages are classified as `Sent` when their parsed `From:` address matches
+an owner include rule and no exclude rule. Rules use case-insensitive whole-mailbox
+exact/glob matching; archive `config.yaml` supplies the defaults and a legacy
+`owner-names.txt` file can supply include rules. They go to the year's
 `{YEAR}-Sent1.mbox` series. Other clean messages go to the year's
 `{YEAR}-Archive1.mbox` series. `X-Apple-Auto-Saved` messages are logged but not
 copied.
@@ -287,10 +291,9 @@ cross-source messages remain one canonical record with multiple observations.
 Use `make compare-apple-mail` to reconcile the default Apple Mail cache with
 `~/mail-archive` by raw and semantic message hashes without changing either.
 
-`uv run mailarchiver-auth ACCOUNT` is a developer preview for the planned live
-Gmail adapter. It detects Google Workspace and Microsoft 365 from public
-provider records, but it does not ingest mail and Microsoft 365 authorization
-remains unavailable.
+The Google authorization prototype has been removed. Live Google ingestion will
+be reimplemented when needed; no Google authentication or Requests packages are
+required by the application.
 
 The archive directory is a native BagIt/Mailbag package containing:
 
@@ -320,8 +323,10 @@ make verify ARCHIVE=/path/to/mail-archive
 ```
 
 `bag-info.txt` explicitly records that MBOX framing adds a final LF when a
-source message lacks one. No archival `X-` header is inserted; the original
-source-byte SHA-256 disambiguates the stored and recovered representations.
+source message lacks one. The original source-byte SHA-256 disambiguates stored and recovered newline
+representations. Narrow double-envelope normalization can add literal `X-From:`;
+PST/OST reconstruction adds importer provenance headers. These explicit
+transformations are documented in [integrity controls](doc/INTEGRITY_CONTROLS.md).
 
 The default index contains normalized headers and message body text only:
 `text/plain` when available, otherwise rendered `text/html`.  It excludes
@@ -417,9 +422,10 @@ search client can include attachments explicitly.
 
 `mailsearch` is a read-only search command.  Ordinary words search indexed
 headers and body text. `to:` filters recipient addresses, `from:` filters
-senders, and `subject:` filters subjects. `date:YYYY-MM-DD` selects a UTC
-calendar day, while `before:` and `after:` select strictly earlier or later
-mail. Supplied terms are combined with AND. The default is ten results;
+senders, and `subject:` filters subjects. `date:YYYY-MM-DD` selects the 50-hour worldwide calendar-date window
+from midnight in UTC+14 to the next midnight in UTC−12. `before:` ends before
+that window starts; `after:` starts when it ends. Adjacent date windows overlap
+by 26 hours. See the [date handling guide](https://simsong.github.io/email-collection-toolkit/advanced/#date-handling). Supplied terms are combined with AND. The default is ten results;
 `--limit 0` prints every match.  Each result starts with its stable message
 number, which can be supplied alone to print the original message. Numbers
 align to the widest returned value; interactive terminals render subjects in
@@ -470,11 +476,11 @@ Click it to open the separate ingest-history and worker-detail window. The same
 window is available from **Window → Ingests**; choosing it again brings the
 existing window to the front.
 
-The About window is present throughout the run and shows the installed version,
+The About window is hidden at startup and opens from the application menu. It shows the installed version,
 free disk space, Internet reachability, startup warnings, and ingest activity.
 Use **File → New** to select and initialize a new or empty `.mailarchive`
-destination, **File → Import…** to choose local mail sources and an owner-names
-file, and **Window** to bring any application window forward. Import uses a
+destination, **File → Import…** to choose local mail sources and edit owner include/exclude
+rules, and **Window** to bring any application window forward. Import uses a
 cross-process writer lock; its owning search window cannot close until the run
 finishes, while other search windows remain usable.
 
@@ -532,10 +538,25 @@ WKWebView HTML finder highlighting and scrolling.
 Regenerate the committed safe corpus after an
 intentional fixture change with `make fixture-e2e`.
 
+## Other Resources
+Interested in email preservation? Check out:
+
+* [Digital Preservation Coalition](https://www.dpconline.org/) established in 2002 as a collaboration between a number of agencies   operating in the UK and Ireland, building a welcoming and inclusive global community, working together to bring about a sustainable future for our digital assets.
+* [code{4{lib](https://code4lib.org/) a volunteer-driven collective of hackers, designers, architects, curators, catalogers, artists and instigators from around the world, who largely work for and with libraries, archives and museums on technology “stuff.”
+* [DigiPres.org](https://www.digipres.org/) a gateway to all of the wonderful community-owned and community-oriented resources dedicated to digital preservation!
+* [The Digital Library Federation](https://www.diglib.org/), a community of practitioners who advance research, learning, social justice, and the public good through the creative design and wise application of digital library technologies.
+
+
 ## Copyright and licenses
+
+Email Collection Toolkit is distributed under the [GNU GPL version 2 only](LICENSE).
+Additional licenses are available from the copyright holder.
 
 Original project material is covered by [COPYRIGHT](COPYRIGHT). Vendored and
 separately licensed components are identified in
 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md). Release builds must run
 `make runtime-license-check` on every target platform and include the complete
 license bundle produced by `make runtime-license-bundle LICENSE_OUTPUT=PATH`.
+
+Development PST/OST imports require `make pst-importer mcti-scan pff-converter`.
+The DMG bundles these executables; the host never loads libpff.
