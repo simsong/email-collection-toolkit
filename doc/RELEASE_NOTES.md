@@ -4,6 +4,10 @@
 
 ## Unreleased
 
+* Use the shared `#item=<node-id>` PST provenance URI in Rust and libpff
+  output. The libpff converter now omits incomplete items with diagnostics,
+  matching the Rust importer rather than emitting a partial parent record.
+
 * Align Rust and libpff PST reconstruction for primary headers and mboxrd
   separators. Both now support stable `--offset`/`--limit` item ranges,
   validate Message-IDs, preserve unknown-code-page bytes with a Windows-1252

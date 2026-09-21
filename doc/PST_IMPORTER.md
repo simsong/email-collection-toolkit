@@ -129,8 +129,8 @@ Python host routes OST to the separate `pff-converter` executable using
 `SO` selects libpff, while `SM` remains PST even with an `.ost` suffix.
 
 `make test-pff` exercises a genuine Unicode/version-23 OST from the public,
-MIT-licensed Aspose examples. It contains 92 normal-folder objects: 87 mail
-records and 5 excluded non-mail items. One mail record has an embedded MAPI
+MIT-licensed Aspose examples. It contains 92 normal-folder objects: 80 mail
+records and 11 excluded non-mail items. One mail record has an embedded MAPI
 attachment that this Python binding cannot reconstruct. That item is omitted and
 diagnostics make the run incomplete. Compressed/version-36 OST is not yet
 fixture-qualified. Cache extraction never establishes completeness of the

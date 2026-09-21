@@ -414,6 +414,8 @@ Both serializers copy safe transport fields directly instead of allowing a MIME
 library to RFC 2047-encode ASCII punctuation. MIME parameter and attachment
 serialization uses the shared unquoted charset, Content-ID, disposition, and
 RFC 2231 filename forms.
+Their item provenance URI uses the common `#item=<numeric-node-id>` fragment;
+the producer identity remains in `X-Importer-Name` and `X-Importer-Version`.
 An initial read-only traversal of normal contents from the PST root collects
 Contacts throughout the folder hierarchy before emitting mail. It caches all
 populated Email1/Email2/Email3 slots using PSETID_Address's store-specific named
@@ -2672,8 +2674,8 @@ chunks into a bounded per-message MIME buffer. Headers and Unicode text are
 reconstructed; original transport-header text is retained as a separate evidence
 part. libpff supplies decompressed RTF. By-value and OLE attachment streams are
 retained. The Python binding does not expose embedded MAPI message reconstruction:
-its parent is retained with `X-Mailarchiver-Extraction-Incomplete`, node/folder
-diagnostics, and a nonzero import result. Non-mail classes and search folders are
+that item is omitted with node/folder diagnostics and a nonzero import result.
+Non-mail classes and search folders are
 excluded, with item/folder counts in receipts. No deleted-record carving occurs.
 Missing transport headers use available MAPI display recipients; these may contain
 names rather than resolved SMTP addresses. Sender reconstruction retains the name
@@ -2707,7 +2709,7 @@ or computes canonical message hashes.
 `PstSettings.redundant_import` defaults false. With `plugins.pst.redundant_import`
 true, the external Rust generator and libpff converter execute sequentially,
 retain independent receipts, and aggregate failures after attempting both readers.
-Rust offsets retain their existing cursors; libpff cursors use `libpff:<node>`.
+Rust and libpff cursors both use `item:<node>`.
 Canonical identity/SHA-256 deduplication is unchanged. Importer annotations and
 MIME differences can prevent cross-reader collapse, intentionally retaining those
 variants; repeat imports of the same reconstruction deduplicate normally.

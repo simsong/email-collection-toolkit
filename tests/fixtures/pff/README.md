@@ -10,9 +10,9 @@ Unmodified upstream example, MIT license in `ASPOSE-LICENSE.txt`.
 SHA-256: `5ff8bc133935a03fad8241f271a604e1cc41e36640d6538d6bcc9bd39e6d9866`.
 Size: 4,080,640 bytes. Header client magic `SO`, Unicode version 23.
 
-The libpff test enumerates 92 objects outside search folders: 87 mail records
-and 5 non-mail records. It checks readable parent retention and incomplete
-status for one embedded MAPI attachment, stable reconstruction, source fixity,
+The libpff test enumerates 92 objects outside search folders: 80 mail records
+and 11 non-mail records. It checks incomplete-item diagnostics for one embedded
+MAPI attachment, stable reconstruction, source fixity,
 HTML/RTF and attachments, plus CLI ingestion/search. This fixture does not
 qualify compressed/version-36 OST or prove server-mailbox completeness.
 

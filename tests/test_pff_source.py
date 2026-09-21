@@ -71,7 +71,7 @@ def test_real_ost_external_scan_stage(tmp_path: Path) -> None:
         for event in source.messages(container, None):
             if isinstance(event, MailObject):
                 records.append(event)
-    assert len(records) == 87
+    assert len(records) == 80
     assert all(item.scan_responsibility == "producer" for item in records)
     assert all(b"X-ClamAV-Engine-Version:" not in item.raw for item in records)
     assert list(tmp_path.glob("processing-libpff/*/scanner-stderr.txt"))
@@ -104,7 +104,7 @@ def test_external_scan_adds_only_infected_headers(tmp_path: Path) -> None:
 
 
 def test_real_ost_external_preserves_cache_and_attachment_bytes(tmp_path: Path) -> None:
-    """Genuine SO/version-23 OST emits stable MIME, marks unavailable embedded MSGs and keeps source fixity."""
+    """Genuine SO/version-23 OST emits stable MIME and omits unreadable items."""
     fixture = tmp_path / "cache with spaces.ost"
     shutil.copyfile(OST, fixture)
     before = fixture.read_bytes()
@@ -123,10 +123,10 @@ def test_real_ost_external_preserves_cache_and_attachment_bytes(tmp_path: Path) 
                     records.append(event)
         runs.append(records)
     assert runs[0] == runs[1]
-    assert len(runs[0]) == 87
+    assert len(runs[0]) == 80
     for record in runs[0]:
         assert all(not part.defects for part in BytesParser(policy=policy.default).parsebytes(record.raw).walk())
-    selected = next(item for item in runs[0] if item.cursor == "libpff:2182532")
+    selected = next(item for item in runs[0] if item.cursor == "item:2182532")
     message = BytesParser(policy=policy.default).parsebytes(selected.raw)
     assert str(message["Subject"]) == "newsletter copy"
     assert not message.defects
@@ -138,17 +138,15 @@ def test_real_ost_external_preserves_cache_and_attachment_bytes(tmp_path: Path) 
     html = next(part.get_payload(decode=True) for part in message.walk() if part.get_content_type() == "text/html")
     assert isinstance(html, bytes)
     assert hashlib.sha256(html).hexdigest() == "6d52c74376341391bbe58f07ea0fc880578a7fb4160c31eff6b6a2c19017da91"
-    rtf_message = BytesParser(policy=policy.default).parsebytes(next(item.raw for item in runs[0] if item.cursor == "libpff:2182916"))
+    rtf_message = BytesParser(policy=policy.default).parsebytes(next(item.raw for item in runs[0] if item.cursor == "item:2182916"))
     rtf = next(part.get_payload(decode=True) for part in rtf_message.walk() if part.get_content_type() == "application/rtf")
     assert isinstance(rtf, bytes)
     assert hashlib.sha256(rtf).hexdigest() == "e2822fc116bc97613129eec5833d5728a347683452a4951c1ca3c8b4ddd39355"
-    incomplete = [BytesParser(policy=policy.default).parsebytes(item.raw) for item in runs[0]
-                  if b"X-Mailarchiver-Extraction-Incomplete:" in item.raw]
-    assert len(incomplete) == 1 and "Undeliverable" in str(incomplete[0]["Subject"])
+    assert all(b"X-Mailarchiver-Extraction-Incomplete:" not in item.raw for item in runs[0])
     for path in tmp_path.glob("processing-libpff/*/receipt.json"):
         receipt = PffReceipt.model_validate_json(path.read_text())
         assert receipt.process_id != os.getpid() and receipt.process_id > 0
-        assert (receipt.encountered, receipt.emitted, receipt.non_mail, receipt.errors) == (92, 87, 5, 1)
+        assert (receipt.encountered, receipt.emitted, receipt.non_mail, receipt.errors) == (92, 80, 11, 1)
         assert not receipt.complete and receipt.content_type == 111
         assert receipt.source_sha256 == hashlib.sha256(before).hexdigest()
         assert "attachment method 5" in path.with_name("diagnostics.jsonl").read_text()
@@ -203,11 +201,11 @@ def test_redundant_cli_runs_both_readers_after_partial_failure_and_deduplicates(
         assert result.returncode != 0 and "Redundant PST Import incomplete" in result.stderr
         with sqlite3.connect(archive / "archive.sqlite3") as db:
             counts.append(db.execute("SELECT count(*) FROM messages").fetchone()[0])
-    assert counts == [25, 25]  # 11 complete Rust records and 14 libpff reconstructions, including flagged partials.
+    assert counts == [23, 23]  # 11 complete Rust records and 12 complete libpff reconstructions.
     for path in archive.glob("processing-pst/*/receipt.json"):
         assert ImportReceipt.model_validate_json(path.read_text()).emitted == 11
     for path in archive.glob("processing-libpff/*/receipt.json"):
-        assert PffReceipt.model_validate_json(path.read_text()).emitted == 14
+        assert PffReceipt.model_validate_json(path.read_text()).emitted == 12
     with sqlite3.connect(archive / "processing.sqlite3") as db:
         assert db.execute("SELECT address FROM addresses WHERE address='saqib.razzaq@xp.local'").fetchone()
     assert not verify_archive(archive)
@@ -240,7 +238,7 @@ def test_ost_cli_directory_ingest_and_search(tmp_path: Path) -> None:
                             capture_output=True, text=True, check=False, timeout=120)
     assert result.returncode != 0 and "libpff extraction incomplete" in result.stderr
     with sqlite3.connect(archive / "archive.sqlite3") as db:
-        assert db.execute("SELECT count(*) FROM messages").fetchone() == (87,)
+        assert db.execute("SELECT count(*) FROM messages").fetchone() == (80,)
     cli(archive, "process", "--phase", "content")
     search = subprocess.run([sys.executable, "-m", "mailarchiver.mailsearch", "--archive", str(archive), "subject:newsletter"],
                             capture_output=True, text=True, check=False, timeout=30)

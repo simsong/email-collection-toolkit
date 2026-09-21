@@ -1717,6 +1717,8 @@ Both retain non-content transport headers as readable, safely folded UTF-8
 fields without RFC 2047 re-encoding. Reconstructed MIME text charsets are
 unquoted, and attachments use matching Content-ID, disposition, and RFC 2231
 filename forms.
+Both identify a PST node in `X-Imported-URI` with the shared
+`#item=<numeric-node-id>` fragment.
 Before emitting mail, scan normal contents throughout the entire PST folder
 hierarchy for Contacts, including nested folders and folders outside the IPM
 mail subtree. Retain all populated contact email slots in memory, not bodies
@@ -2113,9 +2115,9 @@ Read OST through the standalone converter using pinned `libpff-python`, with a
 read-only handle and before/after SHA-256 checks. Route genuine `SO` client magic
 to OST regardless of extension; `SM` files remain PST even when named `.ost`.
 Retain folder/node provenance, receipts, and partial-item diagnostics. OST is a
-cache: extraction does not establish server-mailbox completeness. Preserve
-readable parent content when an embedded MAPI message cannot be reconstructed;
-flag the parent and fail the run as incomplete, retaining source references.
+cache: extraction does not establish server-mailbox completeness. Omit an item
+when an embedded MAPI message cannot be reconstructed; fail the run as
+incomplete while retaining its source reference and diagnostic.
 Never fetch external attachment references. Exclude search folders and non-mail
 objects explicitly; unknown MAPI classes must report incomplete extraction rather
 than silently count as non-mail. Stream attachment reads, verify their declared

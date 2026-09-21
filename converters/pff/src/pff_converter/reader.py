@@ -411,7 +411,7 @@ def convert(source: Path, output: BinaryIO, diagnostics: TextIO, settings: PffSe
                         if not is_mail_class(message_class):
                             receipt.non_mail += 1
                             continue
-                        uri = f"{source.as_uri()}#libpff/{node}"
+                        uri = f"{source.as_uri()}#item={node}"
                         rendered = _render(message, uri, path, node, _MimeWriter(settings, deadline))
                     except TimeoutError:
                         raise
