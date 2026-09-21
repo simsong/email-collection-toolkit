@@ -360,10 +360,18 @@ fn exchange_directory(pst: &PstStore) -> ExchangeDirectory {
 pub struct ImportReport {
     pub folders: u64,
     pub encountered: u64,
+    pub selected: u64,
     pub emitted: u64,
     pub non_mail: u64,
     pub errors: u64,
     pub invalid_exported: u64,
+}
+
+/// Stable traversal selection over normal-content items, before class filtering.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct ImportSelection {
+    pub offset: u64,
+    pub limit: Option<u64>,
 }
 
 fn excluded_class(class: &str) -> bool {
@@ -487,7 +495,7 @@ pub fn import(
     output: &mut impl Write,
     diagnostics: &mut impl Write,
 ) -> Result<ImportReport> {
-    import_selected(path, output, diagnostics, false)
+    import_selected(path, output, diagnostics, false, ImportSelection::default())
 }
 
 /// Diagnostic mode exports available properties of failed items, never valid mail.
@@ -496,6 +504,7 @@ pub fn import_selected(
     output: &mut impl Write,
     diagnostics: &mut impl Write,
     only_invalid: bool,
+    selection: ImportSelection,
 ) -> Result<ImportReport> {
     let scanner = crate::antivirus::Scanner::from_environment()?;
     let path = path.canonicalize().context("resolve source filename")?;
@@ -514,6 +523,7 @@ pub fn import_selected(
     let mut visited = HashSet::new();
     let mut messages = HashSet::new();
     let mut report = ImportReport::default();
+    let mut selection_complete = false;
     while let Some((node, depth)) = pending.pop() {
         let folder_result = (|| -> Result<()> {
             ensure!(depth <= MAX_DEPTH, "folder nesting exceeds {MAX_DEPTH}");
@@ -522,11 +532,24 @@ pub fn import_selected(
             let folder = pst.store().open_folder(&entry)?;
             report.folders += 1;
             if let Some(table) = folder.contents_table() {
+                let mut items: Vec<_> =
+                    table.rows_matrix().map(|row| u32::from(row.id())).collect();
+                items.sort_unstable();
                 let mut rows = 0;
-                for row in table.rows_matrix() {
+                for item in items {
+                    if selection
+                        .limit
+                        .is_some_and(|limit| report.selected >= limit)
+                    {
+                        selection_complete = true;
+                        break;
+                    }
                     rows += 1;
-                    let item = u32::from(row.id());
                     report.encountered += 1;
+                    if report.encountered <= selection.offset {
+                        continue;
+                    }
+                    report.selected += 1;
                     uri.set_fragment(Some(&format!("item={item}")));
                     let mut loaded = None;
                     let mut reconstructed = None;
@@ -539,6 +562,8 @@ pub fn import_selected(
                         }
                         if !class.eq_ignore_ascii_case("IPM.Note")
                             && !class.to_ascii_lowercase().starts_with("ipm.note.")
+                            && !class.eq_ignore_ascii_case("REPORT.IPM.Note")
+                            && !class.to_ascii_lowercase().starts_with("report.ipm.note.")
                         {
                             bail!("unsupported message class {class:?}");
                         }
@@ -612,6 +637,9 @@ pub fn import_selected(
                         }
                     }
                 }
+                if selection_complete {
+                    return Ok(());
+                }
                 ensure!(
                     folder.properties().content_count()? == rows,
                     "folder count differs from contents table; completeness unknown"
@@ -623,8 +651,11 @@ pub fn import_selected(
                 );
             }
             if let Some(table) = folder.hierarchy_table() {
-                for row in table.rows_matrix() {
-                    pending.push((u32::from(row.id()), depth + 1));
+                let mut children: Vec<_> =
+                    table.rows_matrix().map(|row| u32::from(row.id())).collect();
+                children.sort_unstable();
+                for child in children.into_iter().rev() {
+                    pending.push((child, depth + 1));
                 }
             } else {
                 ensure!(
@@ -649,6 +680,9 @@ pub fn import_selected(
                 error_kind(&error)
             )?;
         }
+        if selection_complete {
+            break;
+        }
     }
     // Main-pass failures were already reported. Surface remaining lookup failures,
     // including contacts outside the IPM mail subtree, without double counting.
@@ -669,7 +703,7 @@ pub fn import_selected(
         report.errors += 1;
         writeln!(diagnostics, "ERROR source changed during extraction")?;
     }
-    writeln!(diagnostics, "folders={} encountered={} emitted={} non-mail={} errors={}; scope=IPM normal contents; MIME reconstructed", report.folders, report.encountered, report.emitted, report.non_mail, report.errors)?;
+    writeln!(diagnostics, "folders={} encountered={} selected={} emitted={} non-mail={} errors={}; scope=IPM normal contents; MIME reconstructed", report.folders, report.encountered, report.selected, report.emitted, report.non_mail, report.errors)?;
     if only_invalid {
         writeln!(
             diagnostics,
@@ -806,7 +840,9 @@ fn text(value: Option<&PropertyValue>) -> Result<Option<String>> {
                 .context("non-UTF-8 MAPI String8 metadata is not yet supported")?
                 .to_owned(),
         ),
-        _ => bail!("unexpected MAPI string property type"),
+        // Optional MAPI string fields can have a non-text value in an otherwise
+        // readable item. Leave that field absent and retain the source PST.
+        _ => None,
     })
 }
 fn raw(value: &PropertyValue) -> Result<Cow<'_, [u8]>> {
@@ -894,6 +930,14 @@ fn base64_part(
     content_id: Option<&str>,
     bytes: &[u8],
 ) -> Result<()> {
+    let media = if media
+        .get(.."multipart/".len())
+        .is_some_and(|prefix| prefix.eq_ignore_ascii_case("multipart/"))
+    {
+        "application/octet-stream"
+    } else {
+        media
+    };
     write!(
         out,
         "--{boundary}\r\nContent-Type: {media}\r\nContent-Transfer-Encoding: base64\r\n"
@@ -947,7 +991,10 @@ fn byte_charset(codepage: Option<&PropertyValue>, bytes: &[u8]) -> Result<&'stat
         Some(PropertyValue::Integer32(20127)) => Ok("us-ascii"),
         Some(PropertyValue::Integer32(28591)) => Ok("iso-8859-1"),
         _ if bytes.is_ascii() => Ok("us-ascii"),
-        _ => bail!("unknown body code page; refusing to mislabel bytes"),
+        // PST code-page metadata is absent or unreliable in real Outlook exports.
+        // Keep String8 bytes unchanged and use the Windows ANSI default rather
+        // than dropping otherwise readable mail.
+        _ => Ok("windows-1252"),
     }
 }
 fn message_date(message: &dyn Message) -> Result<DateTime<FixedOffset>> {
@@ -1662,7 +1709,28 @@ mod tests {
         let part = mailparse::parse_mail(&output[b"--test-boundary\r\n".len()..]).unwrap();
         assert_eq!(part.get_body_raw().unwrap(), bytes);
         assert_eq!(part.get_body().unwrap(), "سلام");
-        assert!(byte_charset(Some(&PropertyValue::Integer32(99999)), bytes).is_err());
+        assert_eq!(
+            byte_charset(Some(&PropertyValue::Integer32(99999)), bytes).unwrap(),
+            "windows-1252"
+        );
+        assert_eq!(text(Some(&PropertyValue::Integer32(1))).unwrap(), None);
+    }
+
+    #[test]
+    fn multipart_attachment_type_is_retained_as_an_opaque_attachment() {
+        // doc/PST_IMPORTER.md: a base64 attachment cannot itself claim to be a MIME container.
+        let mut output = Vec::new();
+        base64_part(
+            &mut output,
+            "test-boundary",
+            "multipart/signed",
+            Some("signed.eml"),
+            None,
+            b"opaque",
+        )
+        .unwrap();
+        let part = mailparse::parse_mail(&output[b"--test-boundary\r\n".len()..]).unwrap();
+        assert_eq!(part.ctype.mimetype, "application/octet-stream");
     }
 
     #[test]
@@ -1679,6 +1747,7 @@ mod tests {
         for class in [
             "IPM.Note",
             "IPM.Note.Custom",
+            "REPORT.IPM.Note.NDR",
             "IPM.Schedule.Meetingish",
             "unknown",
         ] {

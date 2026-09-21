@@ -402,6 +402,14 @@ Each record resolves its timestamp once: a valid transport `Date:` header, then
 MAPI submit time, then delivery time, then the Unix epoch. That value supplies
 both the reconstructed RFC `Date:` header and the UTC ctime-form mboxrd
 delimiter, so their instants cannot diverge.
+The Rust and libpff commands apply the same reconstruction rules to primary
+headers: normalized source-or-MAPI dates and senders, decoded subjects, and
+validated Message-IDs. Both accept `--offset` and `--limit`, traverse folder
+and message node IDs in ascending order, and stop once the requested
+normal-content range is selected. Unknown non-ASCII String8 body code pages
+retain their bytes with a Windows-1252 fallback declaration. Attachments labeled
+`multipart/*` are opaque base64 attachments, so the enclosing MIME part uses
+`application/octet-stream` rather than an invalid encoded multipart container.
 An initial read-only traversal of normal contents from the PST root collects
 Contacts throughout the folder hierarchy before emitting mail. It caches all
 populated Email1/Email2/Email3 slots using PSETID_Address's store-specific named

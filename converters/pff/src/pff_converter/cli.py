@@ -16,6 +16,8 @@ def main() -> int:
     parser.add_argument("--timeout-seconds", type=float, default=60)
     parser.add_argument("--max-message-bytes", type=int, default=64 * 1024 * 1024)
     parser.add_argument("--max-folder-depth", type=int, default=64)
+    parser.add_argument("--offset", type=int, default=0)
+    parser.add_argument("--limit", type=int)
     args = parser.parse_args()
     try:
         source = args.source.resolve(strict=True)
@@ -24,7 +26,8 @@ def main() -> int:
             raise ValueError("receipt and diagnostics must be distinct from the source and each other")
         settings = PffSettings(timeout_seconds=args.timeout_seconds,
                                max_message_bytes=args.max_message_bytes,
-                               max_folder_depth=args.max_folder_depth)
+                               max_folder_depth=args.max_folder_depth,
+                               offset=args.offset, limit=args.limit)
         with args.diagnostics.open("w") if args.diagnostics else nullcontext(sys.stderr) as diagnostics:
             receipt = convert(source, sys.stdout.buffer, diagnostics, settings)
         if args.receipt:

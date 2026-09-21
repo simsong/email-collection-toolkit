@@ -131,7 +131,7 @@ fn actual_pst_preserves_bodies_attachments_and_reports_partial_extraction() {
         "source-sha256=b11f87c5658a18adfbab2fe3de6ae359c6f65fc8bd6b3e45ac93d2da41ec13c3"
     ));
     assert!(
-        diagnostics.contains("encountered=16 emitted=12 non-mail=2 errors=2"),
+        diagnostics.contains("encountered=16 selected=16 emitted=12 non-mail=2 errors=2"),
         "{diagnostics}"
     );
     assert!(diagnostics.contains("item=2097316: Missing PidTagAttachMethod"));
@@ -327,21 +327,19 @@ fn invalid_only_exports_failed_items_as_diagnostic_evidence() {
     assert_eq!(result.status.code(), Some(1));
     assert_eq!(before, fs::read(&source).unwrap());
     let diagnostics = String::from_utf8(result.stderr).unwrap();
-    assert!(diagnostics.contains("encountered=16 emitted=0 non-mail=2 errors=2"));
+    assert!(diagnostics.contains("encountered=16 selected=16 emitted=0 non-mail=2 errors=2"));
     assert!(diagnostics.contains("invalid-exported=2;"));
     let messages = records(&result.stdout);
     assert_eq!(messages.len(), 2);
-    for (bytes, item) in messages.iter().zip([2097316, 2097540]) {
+    let mut items = Vec::new();
+    for bytes in &messages {
         let mail = mailparse::parse_mail(bytes).unwrap();
         assert_eq!(
             mail.headers.get_first_value("X-PST-Diagnostic").as_deref(),
             Some("invalid-message")
         );
-        assert!(mail
-            .headers
-            .get_first_value("X-Imported-URI")
-            .unwrap()
-            .ends_with(&format!("#item={item}")));
+        let uri = mail.headers.get_first_value("X-Imported-URI").unwrap();
+        items.push(uri.rsplit('=').next().unwrap().parse::<u32>().unwrap());
         let summary = mail.subparts[0].get_body().unwrap();
         let headers = mail
             .subparts
@@ -369,6 +367,8 @@ fn invalid_only_exports_failed_items_as_diagnostic_evidence() {
                     .get("filename")
                     .is_some_and(|name| name == "body")));
     }
+    items.sort_unstable();
+    assert_eq!(items, [2097316, 2097540]);
     let mut failures = Vec::new();
     let validation = mct_importer::validate(
         &mut result.stdout.as_slice(),
@@ -385,6 +385,29 @@ fn invalid_only_exports_failed_items_as_diagnostic_evidence() {
         .unwrap();
     assert!(empty.status.success());
     assert!(empty.stdout.is_empty());
+}
+
+#[test]
+fn stable_limit_and_offset_select_encountered_pst_items() {
+    // doc/PST_IMPORTER.md: range selection is stable and bounds traversal work.
+    let source = fixture("mail.pst");
+    let run = |offset| {
+        Command::new(env!("CARGO_BIN_EXE_pst-importer"))
+            .args(["--offset", offset, "--limit", "4", "--"])
+            .arg(&source)
+            .output()
+            .unwrap()
+    };
+    let first = run("0");
+    let repeated = run("0");
+    assert_eq!(first.stdout, repeated.stdout);
+    assert_eq!(first.status, repeated.status);
+    assert!(String::from_utf8_lossy(&first.stderr).contains("encountered=4 selected=4"));
+    assert!(records(&first.stdout).len() <= 4);
+    let offset = run("4");
+    assert!(String::from_utf8_lossy(&offset.stderr).contains("encountered=8 selected=4"));
+    assert_ne!(first.stdout, offset.stdout);
+    assert!(records(&offset.stdout).len() <= 4);
 }
 
 #[test]

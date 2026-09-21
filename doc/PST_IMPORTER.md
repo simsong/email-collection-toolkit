@@ -21,6 +21,7 @@ make test-pst            # actual PST and process regression tests
 make pst-import PST='/path/archive.pst'  # emit mail directly to stdout
 make pst-import PST='/path/archive.pst' > recovered.mboxrd
 make pst-smoke PST='/path/archive.pst'  # pipe into the discard-only validator
+target/release/pst-importer --offset 100 --limit 100 -- /path/archive.pst
 ```
 
 `pst-import` sends build chatter to stderr, leaving stdout exclusively for mail.
@@ -36,8 +37,13 @@ This fixture emits 12 messages to stdout but intentionally returns nonzero for
 two known attachment-reader failures; that partial result is expected. Use
 `rust/mct-importer/tests/fixtures/empty.pst` for a successful zero-message test.
 
-The command itself accepts `pst-importer [--only-invalid] [--] FILENAME`, plus `--help`,
-`--version` (including the Microsoft crate version), and `--api-version`.
+The command itself accepts
+`pst-importer [--only-invalid] [--offset N] [--limit N] [--] FILENAME`, plus
+`--help`, `--version` (including the Microsoft crate version), and
+`--api-version`.
+Both PST exporters select a stable ascending-node-ID range of normal-content
+items before mail-class filtering and stop after the requested limit. Their
+diagnostics distinguish encountered from selected items.
 Use a byte-preserving shell pipeline and observe the producer's exit status.
 Exit 0 means traversal completed within the stated scope, 1 means incomplete
 extraction or I/O failure, and 2 means invalid invocation. Make also returns
@@ -125,10 +131,10 @@ Python host routes OST to the separate `pff-converter` executable using
 `make test-pff` exercises a genuine Unicode/version-23 OST from the public,
 MIT-licensed Aspose examples. It contains 92 normal-folder objects: 87 mail
 records and 5 excluded non-mail items. One mail record has an embedded MAPI
-attachment that this Python binding cannot reconstruct. Its readable parent is
-retained and flagged; diagnostics make the run incomplete. Compressed/version-36
-OST is not yet fixture-qualified. Cache extraction never establishes completeness
-of the corresponding server mailbox.
+attachment that this Python binding cannot reconstruct. That item is omitted and
+diagnostics make the run incomplete. Compressed/version-36 OST is not yet
+fixture-qualified. Cache extraction never establishes completeness of the
+corresponding server mailbox.
 
 Libpff runs in the independent converter process and reads sources without write
 handles. Build/install it with `make pff-converter`; the DMG bundles a standalone copy. It retains deterministic reconstructed MIME, folder/node provenance,
@@ -136,9 +142,10 @@ by-value and OLE attachments, decompressed RTF, and original transport-header
 text. Missing transport headers use available MAPI properties, including display
 recipient names that may lack SMTP addresses. Native body reads allocate before
 output limits are checked. The host enforces a hard process deadline and bounds
-output and diagnostics, killing and reaping an overdue child. Per-run receipts and streamed diagnostics are under
-`processing-libpff/`. Unsupported embedded/external attachment methods retain a
-flagged parent and produce an incomplete result; external references are not fetched.
+output and diagnostics, killing and reaping an overdue child. Per-run receipts
+and streamed diagnostics are under `processing-libpff/`. Unsupported
+embedded/external attachment methods omit that item and produce an incomplete
+result; external references are not fetched.
 
 ## Redundant PST Import (testing option)
 
@@ -183,8 +190,9 @@ wire-message fixity. H3 already covers selected headers and the encoded body;
 no h4 is introduced. Independent exporters may produce different h3 values.
 
 * Preserve decoded Unicode text as UTF-8; retain String8/binary body bytes with
-  a known charset (UTF-8, Windows-1252, Windows-1256, ASCII or ISO-8859-1). Unknown non-ASCII
-  code pages and invalid Unicode fail instead of being replaced lossily.
+  a known charset (UTF-8, Windows-1252, Windows-1256, ASCII or ISO-8859-1).
+  Unknown non-ASCII code pages retain their bytes with Windows-1252 as the
+  fallback declaration; invalid Unicode still fails.
 * Emit text and HTML as MIME alternatives when both exist. Retain compressed
   RTF bytes as `body.rtf-compressed`; RTF decompression/rendering is not implemented.
 * Preserve by-value attachment bytes using base64, MIME type, Content-ID when
@@ -229,8 +237,10 @@ no h4 is introduced. Independent exporters may produce different h3 values.
   outside the contact scan.
 * Missing Date uses submission/delivery FILETIME, then an explicit epoch
   placeholder; missing From uses `unknown@invalid.invalid`. These are generated
-  values, not inferred historical facts. Malformed optional Message-ID values
-  are retained as `original-message-id.txt` instead of an invalid RFC header.
+  values, not inferred historical facts. Both exporters normalize these primary
+  fields identically and validate Message-IDs before emitting them. Malformed
+  optional Message-ID values are retained as `original-message-id.txt` instead
+  of an invalid RFC header.
   Original transport evidence remains available. Other metadata that cannot
   satisfy the API profile prevents that record from being emitted.
 

@@ -8,10 +8,12 @@ import io
 import os
 import re
 import time
+from datetime import datetime, timezone
+from email.header import decode_header, make_header
 from email import policy
 from email.message import EmailMessage, Message
 from email.parser import Parser
-from email.utils import format_datetime, formataddr
+from email.utils import parsedate_to_datetime
 from pathlib import Path
 from typing import BinaryIO, TextIO
 
@@ -26,6 +28,7 @@ MESSAGE_FLAGS = 0x0E07
 DISPLAY_TO, DISPLAY_CC, DISPLAY_BCC = 0x0E04, 0x0E03, 0x0E02
 SENDER_EMAIL, INTERNET_MESSAGE_ID = 0x5D01, 0x1035
 SENDER_ADDRESS_TYPE, SENDER_ADDRESS = 0x0C1E, 0x0C1F
+INTERNET_CPID = 0x3FDE
 ATTACH_METHOD, ATTACH_FILENAME, ATTACH_SHORT_FILENAME = 0x3705, 0x3707, 0x3704
 ATTACH_MIME, ATTACH_CONTENT_ID = 0x370E, 0x3712
 EXCLUDED_HEADERS = frozenset({"content-type", "content-transfer-encoding", "content-length", "mime-version",
@@ -37,6 +40,8 @@ class PffSettings(BaseModel):
     timeout_seconds: float = Field(default=60, gt=0, allow_inf_nan=False)
     max_message_bytes: int = Field(default=64 * 1024 * 1024, gt=0)
     max_folder_depth: int = Field(default=64, gt=0)
+    offset: int = Field(default=0, ge=0)
+    limit: int | None = Field(default=None, ge=0)
 
 
 class PffReceipt(BaseModel):
@@ -47,6 +52,7 @@ class PffReceipt(BaseModel):
     content_type: int | None = None
     folders: int = 0
     encountered: int = 0
+    selected: int = 0
     emitted: int = 0
     non_mail: int = 0
     errors: int = 0
@@ -64,6 +70,7 @@ class PffDiagnostic(BaseModel):
 class _Rendered(BaseModel):
     raw: bytes
     problems: tuple[str, ...]
+    date: datetime
 
 
 def _property(item: pypff.item, identifier: int) -> pypff.record_entry | None:
@@ -90,14 +97,87 @@ def _safe(value: str) -> str:
     return " ".join(value.splitlines()).strip()
 
 
+def normalized_header(value: str) -> str:
+    """Match the Rust reconstruction's unfolded, whitespace-normalized fields."""
+    return " ".join(value.split())
+
+
+def message_id_valid(value: str) -> bool:
+    if not (value.isascii() and value.startswith("<") and value.endswith(">")):
+        return False
+    value = value[1:-1]
+    return (value.count("@") == 1 and all(value.partition("@")[index] for index in (0, 2))
+            and all(not (character.isspace() or ord(character) < 32 or character in "<>")
+                    for character in value))
+
+
+def normalized_subject(value: str) -> str:
+    if value.startswith("\x01"):
+        if len(value) < 2:
+            raise ValueError("missing PST subject prefix length")
+        value = value[2:]
+    if any(character != "\t" and ord(character) < 32 for character in value):
+        raise ValueError("control character in Subject")
+    decoded = str(make_header(decode_header(value)))
+    if any(character != "\t" and ord(character) < 32 for character in decoded):
+        raise ValueError("decoded control character in Subject")
+    return decoded
+
+
+def message_date(message: pypff.message, headers: Message) -> datetime:
+    source = headers.get("Date")
+    if source:
+        try:
+            date = parsedate_to_datetime(source)
+            return date.replace(tzinfo=timezone.utc) if date.tzinfo is None else date
+        except (TypeError, ValueError):
+            pass
+    date = message.client_submit_time or message.delivery_time
+    if date:
+        return date.replace(tzinfo=timezone.utc) if date.tzinfo is None else date
+    return datetime.fromtimestamp(0, timezone.utc)
+
+
+def mbox_date(date: datetime) -> str:
+    date = date.astimezone(timezone.utc)
+    weekdays = ("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
+    months = ("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")
+    return f"{weekdays[date.weekday()]} {months[date.month - 1]} {date.day:2d} {date:%H:%M:%S} {date.year:04d}"
+
+
+def body_charset(codepage: int | None, body: bytes) -> str:
+    if codepage == 65001:
+        return "utf-8"
+    if codepage == 1252:
+        return "windows-1252"
+    if codepage == 1256:
+        return "windows-1256"
+    if codepage == 20127:
+        return "us-ascii"
+    if codepage == 28591:
+        return "iso-8859-1"
+    return "us-ascii" if body.isascii() else "windows-1252"
+
+
+def rfc2822_date(date: datetime) -> str:
+    offset = date.utcoffset() or timezone.utc.utcoffset(None)
+    seconds = int(offset.total_seconds())
+    sign = "+" if seconds >= 0 else "-"
+    hours, minutes = divmod(abs(seconds) // 60, 60)
+    weekdays = ("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
+    months = ("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")
+    return f"{weekdays[date.weekday()]}, {date.day} {months[date.month - 1]} {date:%Y %H:%M:%S} {sign}{hours:02d}{minutes:02d}"
+
+
 def is_mail_class(value: str) -> bool:
     """Skip only recognized non-mail classes; unknown classes must remain incomplete."""
     value = value.upper()
-    for prefix in ("IPM.NOTE", "REPORT.IPM.NOTE", "IPM.SCHEDULE.MEETING"):
+    for prefix in ("IPM.NOTE", "REPORT.IPM.NOTE"):
         if value == prefix or value.startswith(prefix + "."):
             return True
     for prefix in ("IPM.CONTACT", "IPM.DISTLIST", "IPM.APPOINTMENT", "IPM.TASK", "IPM.ACTIVITY",
-                   "IPM.STICKYNOTE", "IPM.CONFIGURATION", "IPM.MICROSOFT.SCHEDULEDATA.FREEBUSY"):
+                   "IPM.STICKYNOTE", "IPM.SCHEDULE.MEETING", "IPM.CONFIGURATION",
+                   "IPM.MICROSOFT.SCHEDULEDATA.FREEBUSY"):
         if value == prefix or value.startswith(prefix + "."):
             return False
     raise ValueError(f"unsupported MAPI message class: {value}")
@@ -107,7 +187,16 @@ def _sender(message: pypff.message) -> str | None:
     address = _string(message, SENDER_EMAIL)
     if not address and (_string(message, SENDER_ADDRESS_TYPE) or "").upper() == "SMTP":
         address = _string(message, SENDER_ADDRESS)
-    return formataddr((_safe(message.sender_name or ""), _safe(address))) if address else message.sender_name
+    return _safe(address) if address else "unknown@invalid.invalid"
+
+
+def normalized_primary_headers(raw: bytes, values: dict[str, str]) -> bytes:
+    """Avoid email-package policy refolding for fields shared with Rust."""
+    head, marker, body = raw.partition(b"\r\n\r\n")
+    for name, value in values.items():
+        pattern = rb"(?m)^" + re.escape(name.encode("ascii")) + rb":[^\r\n]*(?:\r\n[ \t][^\r\n]*)*"
+        head = re.sub(pattern, f"{name}: {value}".encode("utf-8"), head)
+    return head + marker + body
 
 
 class _MimeWriter:
@@ -128,7 +217,7 @@ class _MimeWriter:
     def part(self, mime_type: str, stream: BinaryIO | pypff.attachment, *, filename: str | None = None,
              content_id: str | None = None) -> None:
         header = EmailMessage(policy=policy.SMTP)
-        header["Content-Type"] = mime_type
+        header["Content-Type"] = "application/octet-stream" if mime_type.lower().startswith("multipart/") else mime_type
         header["Content-Transfer-Encoding"] = "base64"
         if filename:
             header.add_header("Content-Disposition", "attachment", filename=_safe(filename))
@@ -146,26 +235,39 @@ class _MimeWriter:
             raise ValueError(f"libpff attachment length mismatch: expected {stream.size}, read {size}")
 
 
-def _render(message: pypff.message, uri: str, folder: tuple[str, ...], writer: _MimeWriter) -> _Rendered:
+def _render(message: pypff.message, uri: str, folder: tuple[str, ...], item: int,
+            writer: _MimeWriter) -> _Rendered:
     """Reconstruct deterministically; do not represent MAPI reconstruction as source RFC bytes."""
-    headers = Message(policy=policy.compat32.clone(linesep="\r\n"))
+    headers = Message(policy=policy.SMTPUTF8.clone(linesep="\r\n"))
     headers["X-Mailarchiver-Folder"] = _safe("/".join(folder))
     transport = message.transport_headers or ""
     parsed = Parser(policy=policy.compat32).parsestr(transport, headersonly=True)
+    date = message_date(message, parsed)
+    primary = {
+        "Date": rfc2822_date(date),
+        "From": normalized_header(parsed.get("From") or _sender(message) or "unknown@invalid.invalid"),
+    }
+    headers["Date"] = primary["Date"]
+    headers["From"] = primary["From"]
+    subject = message.subject
+    if subject is None:
+        subject = parsed.get("Subject")
+    if subject is not None:
+        primary["Subject"] = normalized_subject(subject)
+        headers["Subject"] = primary["Subject"]
+    original_id = parsed.get("Message-ID") or _string(message, INTERNET_MESSAGE_ID)
+    if original_id and message_id_valid(normalized_header(original_id)):
+        primary["Message-ID"] = normalized_header(original_id)
+        headers["Message-ID"] = primary["Message-ID"]
     for name, value in parsed.raw_items():
-        if name.lower() not in EXCLUDED_HEADERS:
+        if name.lower() not in EXCLUDED_HEADERS and name.lower() not in {"date", "from", "subject", "message-id"}:
             # Original header text is also retained as evidence, including malformed fields.
             headers[name] = _safe(value)
-    for name, value in (("Subject", message.subject), ("From", _sender(message)),
-                        ("To", _string(message, DISPLAY_TO)), ("Cc", _string(message, DISPLAY_CC)),
-                        ("Bcc", _string(message, DISPLAY_BCC)), ("Message-ID", _string(message, INTERNET_MESSAGE_ID))):
+    for name, value in (("To", _string(message, DISPLAY_TO)), ("Cc", _string(message, DISPLAY_CC)),
+                        ("Bcc", _string(message, DISPLAY_BCC))):
         if name not in headers and value:
             headers[name] = _safe(value)
-    if "Date" not in headers:
-        date = message.client_submit_time or message.delivery_time
-        if date:
-            headers["Date"] = format_datetime(date)
-    boundary = "mailarchiver-libpff-" + hashlib.sha256(uri.encode()).hexdigest()
+    boundary = f"=_mct_pst_{item:08x}"
     headers["MIME-Version"] = "1.0"
     headers.set_type("multipart/mixed")
     headers.set_boundary(boundary)
@@ -174,11 +276,14 @@ def _render(message: pypff.message, uri: str, folder: tuple[str, ...], writer: _
     writer.write(headers.as_bytes().split(b"\r\n\r\n", 1)[0] + b"\r\n\r\n")
     separator = f"--{boundary}\r\n".encode()
     bodies = 0
-    for mime_type, data in (("text/plain; charset=utf-8", message.plain_text_body),
-                            ("text/html", message.html_body), ("application/rtf", message.rtf_body)):
+    codepage = _integer(message, INTERNET_CPID)
+    for mime_type, data in (("text/plain", message.plain_text_body), ("text/html", message.html_body),
+                            ("application/rtf", message.rtf_body)):
         if data:
             bodies += 1
             writer.write(separator)
+            if mime_type.startswith("text/"):
+                mime_type = f"{mime_type}; charset={body_charset(codepage, data)}"
             writer.part(mime_type, io.BytesIO(data))
     if not bodies:
         writer.write(separator)
@@ -212,12 +317,12 @@ def _render(message: pypff.message, uri: str, folder: tuple[str, ...], writer: _
         writer.write(separator)
         writer.part("text/plain; charset=utf-8", io.BytesIO(transport.encode("utf-8")), filename="original-transport-headers.txt")
     writer.write(f"--{boundary}--\r\n".encode())
-    raw = writer.output.getvalue()
+    raw = normalized_primary_headers(writer.output.getvalue(), primary)
     if problems:
         raw = raw.replace(b"\r\n\r\n", b"\r\nX-Mailarchiver-Extraction-Incomplete: attachments; see libpff receipt\r\n\r\n", 1)
         if len(raw) > writer.settings.max_message_bytes:
             raise ValueError("libpff reconstructed message exceeds max_message_bytes")
-    return _Rendered(raw=raw, problems=tuple(problems))
+    return _Rendered(raw=raw, problems=tuple(problems), date=date)
 
 
 def file_hash(path: Path) -> str:
@@ -225,8 +330,8 @@ def file_hash(path: Path) -> str:
         return hashlib.file_digest(source, "sha256").hexdigest()
 
 
-def write_record(raw: bytes, output: BinaryIO) -> None:
-    output.write(b"From pff-converter Thu Jan  1 00:00:00 1970\n")
+def write_record(raw: bytes, date: datetime, output: BinaryIO) -> None:
+    output.write(f"From pff-converter {mbox_date(date)}\n".encode("ascii"))
     output.write(re.sub(br"(?m)^(>*From )", br">\1", raw))
     output.write(b"\n")
     output.flush()
@@ -248,7 +353,8 @@ def convert(source: Path, output: BinaryIO, diagnostics: TextIO, settings: PffSe
                 raise ValueError("libpff source has no root folder")
             pending: list[tuple[pypff.folder, tuple[str, ...]]] = [(first, ())]
             visited: set[int] = set()
-            while pending:
+            selection_complete = False
+            while pending and not selection_complete:
                 folder, parent = pending.pop()
                 path = (*parent, folder.name or "Root")
                 if time.monotonic() >= deadline:
@@ -259,20 +365,27 @@ def convert(source: Path, output: BinaryIO, diagnostics: TextIO, settings: PffSe
                 if folder.identifier & 31 == 3:  # Search folders reference messages held elsewhere.
                     continue
                 receipt.folders += 1
-                for index in range(folder.number_of_sub_messages):
+                messages = [folder.get_sub_message(index) for index in range(folder.number_of_sub_messages)]
+                messages.sort(key=lambda message: message.identifier)
+                for message in messages:
+                    if settings.limit is not None and receipt.selected >= settings.limit:
+                        selection_complete = True
+                        break
                     if time.monotonic() >= deadline:
                         raise TimeoutError("libpff extraction deadline exceeded")
                     receipt.encountered += 1
+                    if receipt.encountered <= settings.offset:
+                        continue
+                    receipt.selected += 1
                     node = None
                     try:
-                        message = folder.get_sub_message(index)
                         node = message.identifier
                         message_class = _string(message, MESSAGE_CLASS) or "IPM.Note"
                         if not is_mail_class(message_class):
                             receipt.non_mail += 1
                             continue
                         uri = f"{source.as_uri()}#libpff/{node}"
-                        rendered = _render(message, uri, path, _MimeWriter(settings, deadline))
+                        rendered = _render(message, uri, path, node, _MimeWriter(settings, deadline))
                     except TimeoutError:
                         raise
                     except (OSError, ValueError) as error:
@@ -283,10 +396,12 @@ def convert(source: Path, output: BinaryIO, diagnostics: TextIO, settings: PffSe
                         receipt.errors += 1
                         for detail in rendered.problems:
                             diagnostics.write(PffDiagnostic(folder=path, item=node, detail=detail).model_dump_json() + "\n")
-                    write_record(rendered.raw, output)
+                        continue
+                    write_record(rendered.raw, rendered.date, output)
                     receipt.emitted += 1
-                for index in reversed(range(folder.number_of_sub_folders)):
-                    pending.append((folder.get_sub_folder(index), path))
+                children = [folder.get_sub_folder(index) for index in range(folder.number_of_sub_folders)]
+                children.sort(key=lambda child: child.identifier, reverse=True)
+                pending.extend((child, path) for child in children)
             if file_hash(source) != receipt.source_sha256:
                 raise ValueError("libpff source changed during extraction")
             if receipt.errors:

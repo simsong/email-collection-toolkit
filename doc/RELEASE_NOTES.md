@@ -4,6 +4,11 @@
 
 ## Unreleased
 
+* Align Rust and libpff PST reconstruction for primary headers and mboxrd
+  separators. Both now support stable `--offset`/`--limit` item ranges,
+  validate Message-IDs, preserve unknown-code-page bytes with a Windows-1252
+  fallback, and avoid invalid base64-encoded multipart attachment containers.
+
 * Use the PST message timestamp for the synthetic mboxrd `From pst-importer`
   delimiter. It now shares the reconstructed `Date:` timestamp, preferring a
   valid transport date and then MAPI submit/delivery times before the epoch.

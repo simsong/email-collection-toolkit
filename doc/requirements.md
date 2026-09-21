@@ -1706,6 +1706,13 @@ Use one resolved timestamp for the reconstructed RFC `Date:` header and the
 synthetic mboxrd `From pst-importer` delimiter: a valid transport `Date:` first,
 then MAPI submit (`0x0039`) or delivery (`0x0E06`) time, then the Unix epoch.
 Format the delimiter in UTC using the English ctime form.
+Both PST exporters accept `--offset N` and `--limit N` for a stable range of
+normal-content items before class filtering. They traverse folders and item
+node IDs in ascending numeric order, stop after the requested range, and report
+both encountered and selected counts. Their reconstructed `Date:`, `From:`,
+Subject, and Message-ID fields use the same normalization policy; invalid
+Message-IDs are omitted. Unknown non-ASCII MAPI body code pages retain their
+bytes and use the Windows-1252 fallback charset.
 Before emitting mail, scan normal contents throughout the entire PST folder
 hierarchy for Contacts, including nested folders and folders outside the IPM
 mail subtree. Retain all populated contact email slots in memory, not bodies
@@ -1729,9 +1736,10 @@ Decode subject encoded-words and emit readable UTF-8 Subject values. Remove
 MAPI's leading marker and prefix-length character, retaining textual prefixes
 such as `Re:` and `Fw:`. Preserve safe folding and reject header injection.
 For MAPI Internet code page 1256, retain the original String8/binary body bytes
-and declare `charset=windows-1256` in the reconstructed MIME part.
+and declare `charset=windows-1256` in the reconstructed MIME part. Unknown non-ASCII code pages retain their bytes and use `charset=windows-1252`.
 Meeting requests and responses (`IPM.Schedule.Meeting` and subclasses) are
 silently excluded, counted as non-mail, and never cause a warning or error.
+Delivery reports (`REPORT.IPM.Note` and subclasses) are ordinary imported mail.
 Identify underlying PST reader failures explicitly as library errors.
 `--only-invalid` shall emit diagnostic mboxrd records only for failed items whose
 message properties can be read. Preserve available transport headers and body
