@@ -1735,8 +1735,9 @@ resent and return-path headers. Never substitute text inside display names or
 comments. Preserve existing SMTP addresses and original transport-header bytes.
 Report address-book scan counts and failures; unreadable lookup objects prevent
 success, with failures also encountered during mail extraction counted once.
-Otherwise retain native `EX` identities without rejecting readable messages.
-Mark these with `X-PST-Sender-Address-Type: EX`; the archive stream validator
+Otherwise retain native `EX` identities, bare or in an angle address with their
+source display name, without rejecting readable messages. Mark these with
+`X-PST-Sender-Address-Type: EX`; the archive stream validator
 must accept that explicit representation while rejecting malformed identities.
 Decode subject encoded-words and emit readable UTF-8 Subject values. Remove
 MAPI's leading marker and prefix-length character, retaining textual prefixes

@@ -26,7 +26,11 @@ fn native_exchange_senders_require_a_marker_and_valid_structure() {
     // accepting arbitrary non-mailbox From values or losing strict SMTP checks.
     let original = String::from_utf8(stream(1)).unwrap();
     let dn = "/O=Example/OU=Exchange Group (TEST)/CN=Recipients/CN=Sender";
-    for value in [dn.to_owned(), dn.to_ascii_lowercase()] {
+    for value in [
+        dn.to_owned(),
+        dn.to_ascii_lowercase(),
+        format!("Simson Garfinkel <{dn}>"),
+    ] {
         let marked = original.replace(
             "From: MCT Generator <generator@example.invalid>",
             &format!("From: {value}\r\nX-PST-Sender-Address-Type: EX"),
@@ -61,6 +65,7 @@ fn native_exchange_senders_require_a_marker_and_valid_structure() {
         "/O=Example/OU=Group/CN=",
         "/O=Example/CN=Sender",
         "/O=Example/OU=Group/CN=Sender/garbage",
+        "Simson Garfinkel </O=Example/OU=Group/CN=>",
     ] {
         let invalid = original.replace(
             "From: MCT Generator <generator@example.invalid>",

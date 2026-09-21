@@ -4,6 +4,10 @@
 
 ## Unreleased
 
+* Reject or fold overlong generated libpff headers, retain per-item libpff
+  retrieval failures in diagnostics, and preserve unresolved Exchange DNs in
+  display-name angle addresses with their explicit `EX` marker.
+
 * Make the Microsoft Rust adapter the sole PST importer. Remove the redundant
   PST-reader setting and document libpff as the separately configured OST reader.
 

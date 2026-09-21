@@ -53,3 +53,12 @@ def test_mime_parts_and_copied_headers_are_not_rfc2047_reencoded() -> None:
     assert transport_fields("X-Test: \r\n value\r\n") == [("X-Test", " \r\n value")]
     transport_header(writer, "X-Test", " \r\n value")
     assert writer.output.getvalue().endswith(b"X-Test: \r\n value\r\n")
+
+
+def test_generated_headers_fold_or_reject_before_the_mct_line_limit() -> None:
+    """Generated PST headers retain readable whitespace and never emit an overlong line."""
+    writer = _MimeWriter(PffSettings(), time.monotonic() + 1)
+    header(writer, "Subject", "word " * 300)
+    assert max(map(len, writer.output.getvalue().split(b"\r\n"))) <= 998
+    with pytest.raises(ValueError, match="unbreakable"):
+        header(writer, "Subject", "x" * 999)

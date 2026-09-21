@@ -224,6 +224,22 @@ pub(crate) fn exchange_dn_valid(value: &str) -> bool {
     })
 }
 
+pub(crate) fn exchange_from_valid(value: &str) -> bool {
+    if exchange_dn_valid(value) {
+        return true;
+    }
+    let Some((display, native)) = value.rsplit_once('<') else {
+        return false;
+    };
+    let Some(native) = native.strip_suffix('>') else {
+        return false;
+    };
+    !display.trim().is_empty()
+        && !display.contains(['<', '>'])
+        && !display.chars().any(char::is_control)
+        && exchange_dn_valid(native)
+}
+
 fn validate_headers(raw: &[u8]) -> Result<(), String> {
     let mut bytes = 0;
     let mut have_header = false;
@@ -266,7 +282,7 @@ fn validate_origin(headers: &[MailHeader<'_>]) -> Result<(), String> {
         .map_err(|_| "invalid Date".to_owned())?;
     let from_value = one(headers, "From")?;
     let from = headers.get_first_header("From").ok_or("missing From")?;
-    let from_count = if exchange_dn_valid(&from_value)
+    let from_count = if exchange_from_valid(&from_value)
         && one(headers, PST_SENDER_ADDRESS_TYPE).is_ok_and(|value| value.eq_ignore_ascii_case("EX"))
     {
         1

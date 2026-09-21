@@ -263,10 +263,17 @@ fn exchange_directory(pst: &PstStore) -> ExchangeDirectory {
                     }
                 };
                 let message = message.message();
-                if message.properties().message_class().is_ok_and(|class| {
-                    class.eq_ignore_ascii_case("IPM.Contact")
-                        || class.to_ascii_lowercase().starts_with("ipm.contact.")
-                }) {
+                let contact = match message.properties().message_class() {
+                    Ok(class) => {
+                        class.eq_ignore_ascii_case("IPM.Contact")
+                            || class.to_ascii_lowercase().starts_with("ipm.contact.")
+                    }
+                    Err(error) => {
+                        directory.failures.insert(item, error.into());
+                        continue;
+                    }
+                };
+                if contact {
                     if let Err(error) = directory.read_contact(
                         item,
                         &ids,
@@ -1087,7 +1094,7 @@ fn render(
         "invalid or unsupported From address"
     );
     write!(out, "From: {from}\r\n")?;
-    if crate::exchange_dn_valid(&from) {
+    if crate::exchange_from_valid(&from) {
         writeln!(out, "{}: EX\r", crate::PST_SENDER_ADDRESS_TYPE)?;
     }
     if let Some(subject) = text(props.get(SUBJECT))?.or_else(|| headers.get_first_value("Subject"))

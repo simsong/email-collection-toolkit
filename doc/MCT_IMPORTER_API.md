@@ -87,7 +87,8 @@ actually launched separately from claims inside its output.
 Top-level messages require one Date, one From, MIME-Version 1.0 and an explicit
 Content-Type. As an archive-specific extension, a native Exchange legacy
 distinguished name (`/O=.../OU=.../CN=...`, optionally more `/CN=...` components)
-may occupy From when marked `X-PST-Sender-Address-Type: EX`. Preserve the value;
+may occupy From, bare or inside one display-name angle address, when marked
+`X-PST-Sender-Address-Type: EX`. Preserve the value;
 this is an Exchange identity rather than an SMTP mailbox. Names are matched
 case-insensitively; empty components, control bytes and malformed paths fail.
 Multiple From mailboxes require Sender. Message-ID is optional;

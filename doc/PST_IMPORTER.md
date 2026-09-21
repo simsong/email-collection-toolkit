@@ -208,7 +208,8 @@ no h4 is introduced. Independent exporters may produce different h3 values.
   SMTP evidence and keep the source sender display name when available.
   Preserve the DN in `X-PST-Original-Sender` and identify the evidence item/property
   in `X-PST-Sender-Resolution`. Missing or conflicting mappings retain the native
-  DN in `From` with `X-PST-Sender-Address-Type: EX`, which the archive validator
+  DN, bare or inside a source display-name angle address, in `From` with
+  `X-PST-Sender-Address-Type: EX`, which the archive validator
   accepts. No network directory lookup or address guessing is performed.
   Reconstructed To/Cc/Bcc also use this lookup, with original-recipient and
   resolution headers. Existing sender, recipient, reply, resent and return-path

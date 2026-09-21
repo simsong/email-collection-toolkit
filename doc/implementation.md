@@ -432,7 +432,8 @@ Case-insensitive DN matches resolve only when SMTP evidence is unambiguous.
 Resolved `From` uses the SMTP address and available sender display name;
 `X-PST-Original-Sender` retains the DN and `X-PST-Sender-Resolution` identifies
 the evidence item/property. Missing or conflicting mappings leave Exchange
-sender values unchanged in `From`, with `X-PST-Sender-Address-Type: EX`.
+sender values unchanged in `From`, including a source display-name angle address,
+with `X-PST-Sender-Address-Type: EX`.
 The same map supplies missing SMTP addresses for reconstructed To/Cc/Bcc rows,
 with `X-PST-Original-Recipient` and `X-PST-Recipient-Resolution` evidence.
 Existing From/To/Cc/Bcc/Sender/Reply-To/Resent-*/Return-Path fields resolve whole

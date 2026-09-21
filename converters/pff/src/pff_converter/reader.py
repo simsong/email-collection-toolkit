@@ -195,12 +195,29 @@ def header(out: "_MimeWriter", name: str, value: str, separator: str = ": ") -> 
     if (not name.isascii() or not name or any(ord(character) < 33 or ord(character) > 126
                                              or character == ":" for character in name)):
         raise ValueError("invalid header name")
-    if any(character in "\r\n" and not value[index + 1:index + 2].isspace()
-           for index, character in enumerate(value)):
+    if "\r" in value.replace("\r\n", "") or "\n" in value.replace("\r\n", ""):
         raise ValueError("invalid header folding")
     if any(ord(character) < 32 and character not in "\r\n\t" for character in value):
         raise ValueError("control character in header")
-    out.write(f"{name}{separator}{value}\r\n".encode("utf-8"))
+    if "\r\n" in value:
+        lines = value.split("\r\n")
+        if any(not line[:1].isspace() for line in lines[1:]) or any(
+                len((f"{name}{separator}" if index == 0 else "").encode("utf-8")) + len(line.encode("utf-8")) > 998
+                for index, line in enumerate(lines)):
+            raise ValueError("overlong or invalid folded header")
+        out.write(f"{name}{separator}{value}\r\n".encode("utf-8"))
+        return
+    prefix = f"{name}{separator}"
+    while len((prefix + value).encode("utf-8")) > 998:
+        breaks = list(re.finditer(r"[ \t]+", value))
+        split = next((match for match in reversed(breaks)
+                      if len((prefix + value[:match.start()]).encode("utf-8")) <= 998), None)
+        if split is None:
+            raise ValueError("overlong unbreakable header")
+        out.write((prefix + value[:split.start()] + "\r\n").encode("utf-8"))
+        value = value[split.end():]
+        prefix = " "
+    out.write((prefix + value + "\r\n").encode("utf-8"))
 
 
 def transport_fields(value: str) -> list[tuple[str, str]]:
@@ -392,9 +409,15 @@ def convert(source: Path, output: BinaryIO, diagnostics: TextIO, settings: PffSe
                 if folder.identifier & 31 == 3:  # Search folders reference messages held elsewhere.
                     continue
                 receipt.folders += 1
-                messages = [folder.get_sub_message(index) for index in range(folder.number_of_sub_messages)]
-                messages.sort(key=lambda message: message.identifier)
-                for message in messages:
+                messages: list[tuple[int, int]] = []
+                for index in range(folder.number_of_sub_messages):
+                    try:
+                        messages.append((folder.get_sub_message(index).identifier, index))
+                    except (OSError, ValueError) as error:
+                        receipt.errors += 1
+                        diagnostics.write(PffDiagnostic(folder=path, detail=f"read sub-message {index}: {error}"[:4096]).model_dump_json() + "\n")
+                messages.sort()
+                for node, index in messages:
                     if settings.limit is not None and receipt.selected >= settings.limit:
                         selection_complete = True
                         break
@@ -404,9 +427,8 @@ def convert(source: Path, output: BinaryIO, diagnostics: TextIO, settings: PffSe
                     if receipt.encountered <= settings.offset:
                         continue
                     receipt.selected += 1
-                    node = None
                     try:
-                        node = message.identifier
+                        message = folder.get_sub_message(index)
                         message_class = _string(message, MESSAGE_CLASS) or "IPM.Note"
                         if not is_mail_class(message_class):
                             receipt.non_mail += 1
