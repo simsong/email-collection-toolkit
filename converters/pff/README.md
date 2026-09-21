@@ -15,6 +15,10 @@ locked environment. Invoke `converters/pff/.venv/bin/pff-converter -- SOURCE.ost
 readers, source preservation, repeated imports, limits and real antivirus scans.
 
 Optional `--receipt` and `--diagnostics` files retain source/version/count evidence.
+`--offset N` and `--limit N` select a stable ascending-node-ID range of
+normal-content items before mail-class filtering. The converter uses the same
+Date/From/Subject/Message-ID normalization and UTC mboxrd delimiter policy as
+the Rust PST importer.
 Source SHA-256 is recorded; no per-message hashes are computed.
 Exit 0 means complete extraction; exit 3 means all emitted records are complete
 but some source items were incomplete. Other failures must not be treated as

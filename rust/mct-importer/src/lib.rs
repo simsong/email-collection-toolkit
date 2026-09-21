@@ -198,6 +198,48 @@ fn one(headers: &[MailHeader<'_>], name: &str) -> Result<String, String> {
     Ok(values[0].clone())
 }
 
+pub(crate) const PST_SENDER_ADDRESS_TYPE: &str = "X-PST-Sender-Address-Type";
+
+pub(crate) fn exchange_dn_valid(value: &str) -> bool {
+    if !value.is_ascii() || value.bytes().any(|b| b < 32 || b == 127) {
+        return false;
+    }
+    let Some(value) = value.strip_prefix('/') else {
+        return false;
+    };
+    let mut components = value.split('/');
+    for key in ["O", "OU", "CN"] {
+        if !components
+            .next()
+            .and_then(|part| part.split_once('='))
+            .is_some_and(|(name, value)| name.eq_ignore_ascii_case(key) && !value.trim().is_empty())
+        {
+            return false;
+        }
+    }
+    components.all(|part| {
+        part.split_once('=').is_some_and(|(name, value)| {
+            name.eq_ignore_ascii_case("CN") && !value.trim().is_empty()
+        })
+    })
+}
+
+pub(crate) fn exchange_from_valid(value: &str) -> bool {
+    if exchange_dn_valid(value) {
+        return true;
+    }
+    let Some((display, native)) = value.rsplit_once('<') else {
+        return false;
+    };
+    let Some(native) = native.strip_suffix('>') else {
+        return false;
+    };
+    !display.trim().is_empty()
+        && !display.contains(['<', '>'])
+        && !display.chars().any(char::is_control)
+        && exchange_dn_valid(native)
+}
+
 fn validate_headers(raw: &[u8]) -> Result<(), String> {
     let mut bytes = 0;
     let mut have_header = false;
@@ -211,9 +253,10 @@ fn validate_headers(raw: &[u8]) -> Result<(), String> {
             return Err("header size limit exceeded".into());
         }
         if !line.ends_with(b"\n")
+            || std::str::from_utf8(content).is_err()
             || content
                 .iter()
-                .any(|b| !b.is_ascii() || (*b < 32 && *b != b'\t') || *b == 127)
+                .any(|b| (*b < 32 && *b != b'\t') || *b == 127)
         {
             return Err("invalid header byte or line ending".into());
         }
@@ -237,17 +280,25 @@ fn validate_headers(raw: &[u8]) -> Result<(), String> {
 fn validate_origin(headers: &[MailHeader<'_>]) -> Result<(), String> {
     chrono::DateTime::parse_from_rfc2822(&one(headers, "Date")?)
         .map_err(|_| "invalid Date".to_owned())?;
-    one(headers, "From")?;
+    let from_value = one(headers, "From")?;
     let from = headers.get_first_header("From").ok_or("missing From")?;
-    let addresses = mailparse::addrparse_header(from).map_err(|_| "invalid From address list")?;
-    if addresses.is_empty()
-        || addresses
-            .iter()
-            .any(|a| !matches!(a, MailAddr::Single(s) if s.addr.contains('@')))
+    let from_count = if exchange_from_valid(&from_value)
+        && one(headers, PST_SENDER_ADDRESS_TYPE).is_ok_and(|value| value.eq_ignore_ascii_case("EX"))
     {
-        return Err("From must contain mailboxes".into());
-    }
-    if addresses.len() > 1 || headers.get_first_header("Sender").is_some() {
+        1
+    } else {
+        let addresses =
+            mailparse::addrparse_header(from).map_err(|_| "invalid From address list")?;
+        if addresses.is_empty()
+            || addresses
+                .iter()
+                .any(|a| !matches!(a, MailAddr::Single(s) if s.addr.contains('@')))
+        {
+            return Err("From must contain mailboxes".into());
+        }
+        addresses.len()
+    };
+    if from_count > 1 || headers.get_first_header("Sender").is_some() {
         one(headers, "Sender")?;
         let sender = headers.get_first_header("Sender").ok_or("missing Sender")?;
         let parsed = mailparse::addrparse_header(sender).map_err(|_| "invalid Sender")?;

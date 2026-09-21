@@ -1506,8 +1506,8 @@ and retain the current explicit-path CLI instructions.
   [ON_DISK_MAIL_FORMATS.md](ON_DISK_MAIL_FORMATS.md).
   The implemented Rust PST helper is a standalone ingest executable accepting a
   filename and emitting mboxrd to stdout, with diagnostics on stderr, as
-  specified in [PST_DUAL_READER.md](PST_DUAL_READER.md). Use Microsoft's Rust PST library and optionally run an independent
-  external libpff converter pass with Redundant PST Import. Each emitted record carries `X-Imported-URI`,
+  specified in [PST_DUAL_READER.md](PST_DUAL_READER.md). Use Microsoft's Rust PST library for PST; the independent
+  external libpff converter remains the OST reader. Each emitted record carries `X-Imported-URI`,
   `X-Importer-Name` and `X-Importer-Version`. These fields are included in h2.
   Existing h3 includes selected headers AND the encoded MIME body; it is a
   comparison control, not permission to discard conflicting variants. The
@@ -1686,6 +1686,10 @@ helper. Packaged end users need the helper executable, not a Rust compiler.
 `make rust-programs` builds `mdti-validator`, `mcti-generator` and `pst-importer`; each has its
 own same-named Makefile build target. Keep a committed Cargo lockfile and run
 Rust formatting, Clippy and tests through Makefile targets, including `make check`.
+`make pst-import PST='/path/archive.pst'` emits only mboxrd on stdout and
+diagnostics on stderr. Both `pst-import` and `pst-smoke` must reject an omitted,
+empty, missing, unreadable, or non-file PST path before building or extracting,
+with an actionable diagnostic on stderr and no stdout output.
 The validator warns before consuming stdin that all input is discarded, reports
 validation errors on stderr, and reports valid complete message counts after
 EOF. It never imports mail or creates archive files. The generator accepts an
@@ -1697,8 +1701,61 @@ The standalone [PST importer](PST_IMPORTER.md) uses Microsoft's pinned
 `outlook-pst` crate through its explicit read-only reader API. Emit validated
 mboxrd records with stable node-ID URIs, exact by-value attachment data,
 reconstruction evidence and source SHA-256 checks. Continue after recoverable
-item failures but return nonzero for any incomplete extraction. Exercise real
-PST fixtures, decoded body/attachment evidence, partial-run accounting, read-only
+item failures but return nonzero for any incomplete extraction.
+Use one resolved timestamp for the reconstructed RFC `Date:` header and the
+synthetic mboxrd `From pst-importer` delimiter: a valid transport `Date:` first,
+then MAPI submit (`0x0039`) or delivery (`0x0E06`) time, then the Unix epoch.
+Format the delimiter in UTC using the English ctime form.
+Both PST exporters accept `--offset N` and `--limit N` for a stable range of
+normal-content items before class filtering. They traverse folders and item
+node IDs in ascending numeric order, stop after the requested range, and report
+both encountered and selected counts. Their reconstructed `Date:`, `From:`,
+Subject, and Message-ID fields use the same normalization policy; invalid
+Message-IDs are omitted. Unknown non-ASCII MAPI body code pages retain their
+bytes and use the Windows-1252 fallback charset.
+Both retain non-content transport headers as readable, safely folded UTF-8
+fields without RFC 2047 re-encoding. Reconstructed MIME text charsets are
+unquoted, and attachments use matching Content-ID, disposition, and RFC 2231
+filename forms.
+Both identify a PST node in `X-Imported-URI` with the shared
+`#item=<numeric-node-id>` fragment.
+Before emitting mail, scan normal contents throughout the entire PST folder
+hierarchy for Contacts, including nested folders and folders outside the IPM
+mail subtree. Retain all populated contact email slots in memory, not bodies
+or photos. Resolve all three email slots through the store's named-property map
+using PSETID_Address and their LIDs; never treat LIDs as fixed property IDs.
+Resolve Exchange legacy distinguished-name addresses using unambiguous DN/SMTP
+pairs from contacts, sender, represented-sender, or recipient properties in the
+same PST. Contact address-book EntryIDs can supply explicit DN aliases.
+Match DNs case-insensitively; do not guess addresses or resolve conflicting pairs.
+Retain the original DN and the mapping's source item/property in generated headers.
+Apply the directory to From and reconstructed To/Cc/Bcc, and to entire native
+addresses or angle-bracket addresses in existing sender/recipient, reply,
+resent and return-path headers. Never substitute text inside display names or
+comments. Preserve existing SMTP addresses and original transport-header bytes.
+Report address-book scan counts and failures; unreadable lookup objects prevent
+success, with failures also encountered during mail extraction counted once.
+Otherwise retain native `EX` identities, bare or in an angle address with their
+source display name, without rejecting readable messages. Mark these with
+`X-PST-Sender-Address-Type: EX`; the archive stream validator
+must accept that explicit representation while rejecting malformed identities.
+Decode subject encoded-words and emit readable UTF-8 Subject values. Remove
+MAPI's leading marker and prefix-length character, retaining textual prefixes
+such as `Re:` and `Fw:`. Preserve safe folding and reject header injection.
+For MAPI Internet code page 1256, retain the original String8/binary body bytes
+and declare `charset=windows-1256` in the reconstructed MIME part. Unknown non-ASCII code pages retain their bytes and use `charset=windows-1252`.
+Meeting requests and responses (`IPM.Schedule.Meeting` and subclasses) are
+silently excluded, counted as non-mail, and never cause a warning or error.
+Delivery reports (`REPORT.IPM.Note` and subclasses) are ordinary imported mail.
+Identify underlying PST reader failures explicitly as library errors.
+`--only-invalid` shall emit diagnostic mboxrd records only for failed items whose
+message properties can be read. Preserve available transport headers and body
+property bytes, label synthetic diagnostic headers, and retain failure status.
+When reconstruction reached the header/body separator, also retain the exact
+reconstructed header block, including invalid values and folding, separately
+from original transport headers and diagnostic envelope headers.
+Unreadable items remain library errors without invented message content.
+Exercise real PST fixtures, decoded body/attachment evidence, partial-run accounting, read-only
 source preservation, changed sources and producer/consumer failures.
 The CLI archive host is implemented; cross-importer h3 duplicate suppression
 remains planned.
@@ -1714,7 +1771,7 @@ completeness separately from server-mailbox completeness. See
 Reliable PST import and full Windows ingest are required for the planned beta.
 Supported Windows/macOS packages and the planned Linux Snap must bundle their
 selected ingest executables and dependencies without requiring user-installed
-runtimes, compilers or Outlook. A second importer is independently selectable;
+runtimes, compilers or Outlook. The configured PST importer is the Rust helper;
 Java is required only if a Java importer is selected for distribution.
 [PST_DUAL_READER.md](PST_DUAL_READER.md) defines architecture-specific
 packaging, runtime provenance, signing, confinement and installed-fixture gates.
@@ -2053,15 +2110,15 @@ providers must retain address evidence without creating automatic institutional
 affiliations. PST timeout/limit receipts must retain the actual reaped exit code,
 observed sizes and truncation flags; both live and post-exit output sizes are checked.
 
-## External OST and Redundant PST Import
+## External OST import
 
 Read OST through the standalone converter using pinned `libpff-python`, with a
 read-only handle and before/after SHA-256 checks. Route genuine `SO` client magic
 to OST regardless of extension; `SM` files remain PST even when named `.ost`.
 Retain folder/node provenance, receipts, and partial-item diagnostics. OST is a
-cache: extraction does not establish server-mailbox completeness. Preserve
-readable parent content when an embedded MAPI message cannot be reconstructed;
-flag the parent and fail the run as incomplete, retaining source references.
+cache: extraction does not establish server-mailbox completeness. Omit an item
+when an embedded MAPI message cannot be reconstructed; fail the run as
+incomplete while retaining its source reference and diagnostic.
 Never fetch external attachment references. Exclude search folders and non-mail
 objects explicitly; unknown MAPI classes must report incomplete extraction rather
 than silently count as non-mail. Stream attachment reads, verify their declared
@@ -2073,17 +2130,11 @@ but canonical message hashing and deduplication stay in the host. For scanned
 imports, pass the converted stream through the external Rust mcti-scan executable
 before API admission. Only infected messages gain the three ClamAV headers.
 
-The developer-only **Redundant PST Import** option is `plugins.pst.redundant_import`
-(default false). When enabled, run both Microsoft's Rust importer and external
-libpff on each PST, including after a reader's recoverable failure. Feed both
-outputs to ordinary canonical deduplication without changing its policy. Different
-reconstructions remain variants; exact retries do not multiply canonical content.
-Both passes must complete before recording a successful source checkpoint.
-Parser/settings fingerprints must invalidate unchanged-file checkpoints when this
-option or reader settings change. Keep this option out of the GUI and ordinary CLI
-help until qualified. `plugins.ost` configures the libpff reader in either mode.
-`make test-pff` exercises a genuine OST fixture, both real PST readers, partial
-results, source fixity, limits, option changes, repeat deduplication, and CLI search.
+There is no reader-selection UI or PST reader setting. The Rust helper is the
+only PST importer. `plugins.pst` configures only its executable and resource
+limits. `plugins.ost` independently configures the libpff reader for OST.
+`make test-pff` exercises a genuine OST fixture, the Rust PST reader, partial
+results, source fixity, limits, repeat deduplication, and CLI search.
 
 Organization-domain evidence uses the bundled ICANN Public Suffix List offline,
 including longest-match, wildcard and exception rules, with IDNA normalization.

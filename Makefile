@@ -70,14 +70,20 @@ test-rust:
 	$(CARGO_RUN) test --locked --workspace
 
 export PST
-pst-import:
+.PHONY: pst-input-check
+pst-input-check:
+	@test -n "$$PST" || { echo "usage: make pst-import PST='/path/archive.pst' (or make pst-smoke PST=...)" >&2; exit 2; }
+	@test -f "$$PST" -a -r "$$PST" || { printf 'PST must be a readable file: %s\n' "$$PST" >&2; exit 2; }
+
+pst-import: pst-input-check
 	@$(MAKE) --no-print-directory pst-importer >&2
-	@"$(RUST_TARGET_DIR)/release/pst-importer$(RUST_EXE_SUFFIX)" -- "$$PST"
+	@"$(RUST_TARGET_DIR)/release/pst-importer$(RUST_EXE_SUFFIX)" $(ARGS) -- "$$PST"
 
 test-pst:
 	$(CARGO_RUN) test --locked --test pst
 
-pst-smoke: rust-programs
+pst-smoke: pst-input-check
+	@$(MAKE) --no-print-directory rust-programs >&2
 	bash -o pipefail -c '"$(RUST_TARGET_DIR)/release/pst-importer$(RUST_EXE_SUFFIX)" -- "$$PST" | "$(RUST_TARGET_DIR)/release/mdti-validator$(RUST_EXE_SUFFIX)"'
 
 rust-smoke: rust-programs

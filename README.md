@@ -232,9 +232,8 @@ make run ARGS='process --phase content'
 
 Use `--no-scan` in place of `--clamav` only when deliberately opting out of
 antivirus, such as for purpose-made test fixtures. Build the Rust helper with
-`make pst-importer` before importing PST files. OST uses the `libpff-python`
-dependency inside the CLI process. [Redundant PST Import](doc/PST_IMPORTER.md#redundant-pst-import-testing-option)
-is an off-by-default configuration option for developer testing.
+`make pst-importer` before importing PST files. PST always uses the Rust
+`outlook-pst` adapter. OST uses the separate `libpff` converter process.
 
 For example, with the project's supplied owner-token list and a new archive:
 

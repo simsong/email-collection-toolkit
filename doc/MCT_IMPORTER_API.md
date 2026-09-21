@@ -85,7 +85,13 @@ not inferred from `X-Importer-Version`. The host must record the executable
 actually launched separately from claims inside its output.
 
 Top-level messages require one Date, one From, MIME-Version 1.0 and an explicit
-Content-Type. Multiple From mailboxes require Sender. Message-ID is optional;
+Content-Type. As an archive-specific extension, a native Exchange legacy
+distinguished name (`/O=.../OU=.../CN=...`, optionally more `/CN=...` components)
+may occupy From, bare or inside one display-name angle address, when marked
+`X-PST-Sender-Address-Type: EX`. Preserve the value;
+this is an Exchange identity rather than an SMTP mailbox. Names are matched
+case-insensitively; empty components, control bytes and malformed paths fail.
+Multiple From mailboxes require Sender. Message-ID is optional;
 when present it must be a single angle-bracketed address-like identifier. The
 generator supplies Date, From, To, unique-per-counter Message-ID, Subject,
 MIME-Version, Content-Type and Content-Transfer-Encoding. It uses CRLF RFC
@@ -143,7 +149,7 @@ I/O errors. The generator uses 2 for invalid arguments and 1 for output errors,
 including a broken pipe. I/O failures are not normal EOF/completion.
 
 The validator checks framing, required provenance, header field syntax and
-folding, ASCII/control bytes, header line length (998 bytes excluding newline),
+folding, UTF-8/control bytes, ASCII field names/provenance, header line length (998 bytes excluding newline),
 Date/From/Sender parsing, basic Message-ID syntax, MIME version/type and
 transfer encoding. It checks multipart boundaries and closing delimiters,
 recurses into parts and message/rfc822 bodies, and validates base64 and strict
@@ -186,6 +192,7 @@ evidence those hosted jobs have run. Current local qualification is macOS.
 
 The framing rule follows [Library of Congress MBOXRD](https://www.loc.gov/preservation/digital/formats/fdd/fdd000385.shtml).
 Header/body structure follows [RFC 2822](https://www.rfc-editor.org/rfc/rfc2822)
+with UTF-8 header values as described by [RFC 6532](https://www.rfc-editor.org/rfc/rfc6532)
 and MIME [RFC 2045](https://www.rfc-editor.org/rfc/rfc2045) /
 [RFC 2046](https://www.rfc-editor.org/rfc/rfc2046).
 [mailparse](https://docs.rs/mailparse/0.17.0/mailparse/) supplies header/address

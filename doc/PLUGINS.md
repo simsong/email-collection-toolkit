@@ -723,7 +723,7 @@ The packaged file parsers are (PST/OST details and limits are in
 
 | Kind | Recognition | Behavior |
 |---|---|---|
-| `pst` | PST header classification | Rust extraction; optional redundant the external libpff converter pass |
+| `pst` | PST header classification | Rust `outlook-pst` extraction |
 | `ost` | OST header classification | External libpff converter for cache extraction |
 | `emlx` | `.emlx` suffix | Reads the declared RFC 5322 length; rejects partial EMLX |
 | `babyl` | case-insensitive `BABYL OPTIONS:` signature | Streams Emacs RMAIL Babyl records, including extensionless files |
@@ -905,9 +905,7 @@ An optional local file-parser `configuration_fingerprint()` returns a stable
 SHA-256 of the reader version/settings that affect extraction. The local source
 stores it in container metadata and integrity evidence under
 `local-parser-settings-v1`. Missing or changed fingerprints force a fresh read,
-even when file bytes match. This supports turning on the developer-only
-[Redundant PST Import](PST_IMPORTER.md#redundant-pst-import-testing-option) option
-after a Rust-only import. Other file parsers retain source-only checkpoints.
+even when file bytes match. Other file parsers retain source-only checkpoints.
 OST uses the `ost` file plugin to invoke the external libpff converter and retains an Outlook cache relationship.
 Its receipts distinguish extracted cache contents from server completeness.
 

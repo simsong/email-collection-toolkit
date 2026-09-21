@@ -160,8 +160,10 @@ class PffFileParser:
                 validate_record(record.raw)
                 count += 1
                 uri = record.raw.split(b"\n", 1)[0].decode("ascii").strip()
-                node = uri.rsplit("#libpff/", 1)[-1]
-                yield MailObject(work_id=container.work_id, source=container.source, cursor=f"libpff:{node}",
+                node = uri.rsplit("#item=", 1)[-1]
+                if not node.isdecimal():
+                    raise ValueError("libpff converter emitted an invalid PST item URI")
+                yield MailObject(work_id=container.work_id, source=container.source, cursor=f"item:{node}",
                     raw=record.raw, completed_messages=count, scan_responsibility="producer")
             if count != receipt.emitted:
                 raise RuntimeError("libpff converter record count mismatch")
