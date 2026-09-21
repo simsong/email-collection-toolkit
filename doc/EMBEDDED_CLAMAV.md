@@ -16,7 +16,10 @@ and notice checks.
 
 The installed ClamAV 1.5.4 header grants GPLv2 only, matching the application
 license version. Libpff runs in a separate GPLv3 converter and sends standard
-mboxrd to the independent GPLv2 Rust scanner before API admission. The remaining
+mboxrd to the independent GPLv2 Rust scanner before API admission. GPLv3 covers
+our converter code; pypff/libpff retains LGPLv3-or-later without relicensing.
+See the [GPLv2-only versus GPLv2-or-later distinction](../THIRD_PARTY_NOTICES.md#gplv2-and-lgplv3-compatibility).
+The remaining
 application dependency compatibility issue is Apache-2.0 ftfy; see
 [THIRD_PARTY_NOTICES.md](../THIRD_PARTY_NOTICES.md). Changing project-owned
 code's license does not change those upstream terms or clear the full bundle.

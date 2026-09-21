@@ -26,6 +26,27 @@ and attribution in `website/static/images/ATTRIBUTION.md`; their source bytes
 are excluded from project notice insertion. Shared generated workflow files
 are also retained without rewriting their notices.
 
+## GPLv2 and LGPLv3 compatibility
+
+The application is **GPL-2.0-only**, not GPL-2.0-or-later. GNU's
+[license guidance](https://www.gnu.org/licenses/license-list.html#LGPLv3)
+and [compatibility matrix](https://www.gnu.org/licenses/gpl-faq.html#AllCompatibility)
+distinguish these cases: GPLv2-only cannot be combined by linking with LGPLv3;
+GPLv2-or-later can use GPLv3 for the combination. Runtime loading alone does not
+remove this compatibility issue. Changing our code to GPLv2-or-later would not
+change ClamAV's GPLv2-only grant.
+
+**No upstream pypff/libpff relicensing is required by the current design.**
+The [upstream Python bindings](https://github.com/libyal/libpff/blob/main/pypff/pypff.c)
+retain LGPL-3.0-or-later. GPL-3.0-only applies to our converter code in
+`converters/pff`, not to a replacement license for those bindings. The converter
+runs independently and exchanges mboxrd files with the GPLv2 application and
+scanner. This separation is the project's distribution approach; GNU's
+[aggregation guidance](https://www.gnu.org/licenses/gpl-faq.html#MereAggregation)
+considers both communication mechanisms and semantics, so a process boundary
+alone is not blanket compatibility clearance. Each component retains its source,
+notice, and other distribution obligations.
+
 ## Python runtime dependencies
 
 The locked runtime includes permissively licensed packages and the following

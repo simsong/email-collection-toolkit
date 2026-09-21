@@ -4,6 +4,10 @@
 
 ## Unreleased
 
+* Clarify GPLv2-only versus GPLv2-or-later linking compatibility with LGPLv3.
+  The separate converter uses GPLv3 for project-owned code; upstream pypff/libpff
+  remains LGPLv3-or-later and does not require relicensing.
+
 * Reject or fold overlong generated libpff headers, retain per-item libpff
   retrieval failures in diagnostics, and preserve unresolved Exchange DNs in
   display-name angle addresses with their explicit `EX` marker.
@@ -51,6 +55,7 @@
 * Validate `PST` before building for `make pst-import` and `make pst-smoke`.
   Missing input now produces usage guidance instead of an empty-filename
   extraction error; invalid paths produce a readable-file diagnostic on stderr.
+>>>>>>> origin/main
 
 * Remove the Google authorization prototype and its dependencies. Remove Requests
   from the application runtime and replace tldextract with offline PSL matching.

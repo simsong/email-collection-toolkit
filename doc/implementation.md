@@ -18,7 +18,11 @@ About displays definition dates and an amber recommendation after three calendar
 months, with explicit FreshClam refresh into immutable per-user generations.
 Failed updates cannot replace active definitions. Project-owned Python, Rust,
 tools, documentation, and website code use GPL-2.0-only, with additional licenses
-available. The independent libpff converter uses GPLv3. ClamAV uses GPLv2;
+available. The independent converter code uses GPLv3; upstream pypff/libpff
+retains LGPLv3-or-later without relicensing. The host is GPLv2-only, whose linking
+compatibility differs from GPLv2-or-later; see the
+[licensing explanation](../THIRD_PARTY_NOTICES.md#gplv2-and-lgplv3-compatibility).
+ClamAV uses GPLv2;
 the remaining Apache-2.0 ftfy dependency needs compatibility resolution
 (see THIRD_PARTY_NOTICES.md).
 `make freshclam` updates ignored etc/clamdb, seeding it from
