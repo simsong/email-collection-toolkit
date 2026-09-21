@@ -1,5 +1,5 @@
 # Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved.
-"""OST/redundant PST requirements: real readers, cache evidence, bounded failures and exact dedup."""
+"""OST requirements: real reader, cache evidence, bounded failures and exact dedup."""
 from __future__ import annotations
 
 import hashlib
@@ -17,7 +17,7 @@ import pytest
 from mailarchiver.pff_source import PffReceipt
 from mailarchiver.plugin_api import MailContainer, MailObject, SourceSpec
 from mailarchiver.plugin_loader import load_plugins
-from mailarchiver.pst_source import ImportReceipt, validate_record
+from mailarchiver.pst_source import validate_record
 from mailarchiver.standalone_verify import verify_archive
 from tests.test_cli_processing import cli, configure
 
@@ -162,53 +162,6 @@ def test_outlook_header_takes_precedence_over_extension(tmp_path: Path, fixture:
     source = next(item.implementation for item in registry.sources if item.manifest.kind == "file-folder")
     container, = [item for item in source.discover(SourceSpec(locator=str(path))) if isinstance(item, MailContainer)]
     assert container.parser_kind == kind
-
-
-def test_redundant_option_revisits_unchanged_pst_and_defaults_off(tmp_path: Path) -> None:
-    """Enabling a second reader invalidates the checkpoint; an unchanged repeat then skips both."""
-    archive = tmp_path / "archive"
-    fixture = tmp_path / "empty.pst"
-    shutil.copyfile(EMPTY_PST, fixture)
-    owners = tmp_path / "owners.txt"
-    owners.write_text("owner@example.test\n")
-    arguments = ("ingest", "--no-scan", "--owner-names-file", str(owners), str(fixture))
-    cli(archive, *arguments)
-    assert len(list(archive.glob("processing-pst/*/receipt.json"))) == 1
-    assert not (archive / "processing-libpff").exists()
-    configure(archive, "pst", {"redundant_import": True})
-    cli(archive, *arguments)
-    assert len(list(archive.glob("processing-pst/*/receipt.json"))) == 2
-    receipts = list(archive.glob("processing-libpff/*/receipt.json"))
-    assert len(receipts) == 1
-    assert PffReceipt.model_validate_json(receipts[0].read_text()).complete
-    cli(archive, *arguments)
-    assert len(list(archive.glob("processing-pst/*/receipt.json"))) == 2
-    assert len(list(archive.glob("processing-libpff/*/receipt.json"))) == 1
-
-
-def test_redundant_cli_runs_both_readers_after_partial_failure_and_deduplicates(tmp_path: Path) -> None:
-    """A failed Rust pass cannot suppress libpff; retries keep all variants without multiplying content."""
-    archive = tmp_path / "archive"
-    archive.mkdir()
-    configure(archive, "pst", {"redundant_import": True})
-    owners = tmp_path / "owners.txt"
-    owners.write_text("owner@example.test\n")
-    command = [sys.executable, "-m", "mailarchiver", "--archive", str(archive), "ingest", "--no-scan",
-               "--defer-content", "--owner-names-file", str(owners), str(PST)]
-    counts: list[int] = []
-    for _attempt in range(2):
-        result = subprocess.run(command, capture_output=True, text=True, check=False, timeout=90)
-        assert result.returncode != 0 and "Redundant PST Import incomplete" in result.stderr
-        with sqlite3.connect(archive / "archive.sqlite3") as db:
-            counts.append(db.execute("SELECT count(*) FROM messages").fetchone()[0])
-    assert counts == [23, 23]  # 11 complete Rust records and 12 complete libpff reconstructions.
-    for path in archive.glob("processing-pst/*/receipt.json"):
-        assert ImportReceipt.model_validate_json(path.read_text()).emitted == 11
-    for path in archive.glob("processing-libpff/*/receipt.json"):
-        assert PffReceipt.model_validate_json(path.read_text()).emitted == 12
-    with sqlite3.connect(archive / "processing.sqlite3") as db:
-        assert db.execute("SELECT address FROM addresses WHERE address='saqib.razzaq@xp.local'").fetchone()
-    assert not verify_archive(archive)
 
 
 @pytest.mark.parametrize("setting", ["timeout_seconds", "max_message_bytes"])

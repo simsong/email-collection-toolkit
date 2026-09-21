@@ -2664,7 +2664,7 @@ artifacts, preserve legacy unreceipted artifacts, and verify completed downloads
 before reuse. Real subprocess tests cover Ctrl+C, forced termination, competing
 writers, stale locks, and reuse without redownloading completed files.
 
-## External libpff converter and redundant PST testing
+## External libpff converter
 
 `pff_source.py` invokes the independent `converters/pff` executable. Only that
 GPLv3 program loads `pypff` from pinned `libpff-python==20231205`; the GPLv2 host
@@ -2706,19 +2706,14 @@ consumes its output without rescanning or adding clean-message provenance.
 No process loads both libpff and libclamav. Neither executable writes the archive
 or computes canonical message hashes.
 
-`PstSettings.redundant_import` defaults false. With `plugins.pst.redundant_import`
-true, the external Rust generator and libpff converter execute sequentially,
-retain independent receipts, and aggregate failures after attempting both readers.
-Rust and libpff cursors both use `item:<node>`.
-Canonical identity/SHA-256 deduplication is unchanged. Importer annotations and
-MIME differences can prevent cross-reader collapse, intentionally retaining those
-variants; repeat imports of the same reconstruction deduplicate normally.
+PST dispatch has no reader-selection UI or setting: `PstFileParser` always
+invokes the Rust helper. The separate `PffFileParser` handles OST. Both use
+`item:<node>` cursors.
 
 Local container metadata carries an optional parser/settings fingerprint. Local
 integrity controls persist it alongside the source hash under
 `local-parser-settings-v1`; missing or changed fingerprints require a new read.
-This allows enabling redundant import on an already-completed PST. Existing
-non-Outlook parsers retain their source-only checkpoint behavior.
+Existing non-Outlook parsers retain their source-only checkpoint behavior.
 
 `make test-pff` uses the real Aspose Unicode/version-23 OST and existing PST
 fixtures, with CLI archive creation, content resume, search, and canonical fixity

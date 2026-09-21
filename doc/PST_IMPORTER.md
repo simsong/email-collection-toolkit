@@ -147,39 +147,23 @@ and streamed diagnostics are under `processing-libpff/`. Unsupported
 embedded/external attachment methods omit that item and produce an incomplete
 result; external references are not fetched.
 
-## Redundant PST Import (testing option)
+## Reader configuration
 
-**Redundant PST Import** defaults off and is not exposed in GUI controls or
-ordinary CLI help. For developer testing, add this to the archive's `config.yaml`
-(merge into the existing `plugins` mapping):
+PST has one configured importer: the Rust `outlook-pst` helper. There is no UI
+or config option to select a different PST reader. The archive or installation
+`config.yaml` may leave the Rust entry explicit and the separate libpff/OST
+entry commented out until an OST import needs its limits or executable override:
 
 ```yaml
 plugins:
-  pst:
-    redundant_import: true
-  ost:
-    timeout_seconds: 60
-    max_message_bytes: 67108864
-    max_folder_depth: 64
+  pst: {}  # Rust outlook-pst importer (default for PST)
+  # ost: {}  # Python/libpff converter (used only for OST)
 ```
 
-The same namespaces work in installation configuration; archive values override
-them. `plugins.ost` governs libpff for OST and redundant PST passes. Then run the
-usual CLI ingest, for example:
-
-```sh
-make run ARGS='--archive "/path/to/test-archive" ingest --owner-names-file owner-names.txt --no-scan "/path/to/pst-directory"'
-make test-pff
-```
-
-The test command above deliberately opts out of antivirus; use `--clamav` for
-normal ingestion. Both Rust and libpff run for each PST, even if either reports a
-recoverable partial failure. Both outputs go through ordinary archive deduplication.
-Exact reconstructions deduplicate on retry; differences in MIME or annotations
-remain separate variants. This option does not enable the planned h3 suppression.
-Each reader retains its own receipt, and either failure leaves the import incomplete.
-Changing the option or reader settings invalidates the source checkpoint so an
-unchanged PST is reconsidered. Repeating an unchanged successful run skips it.
+`plugins.pst` accepts `executable`, `timeout_seconds`, `max_output_bytes`, and
+`max_diagnostics_bytes`. Uncommenting `plugins.ost` configures the libpff
+converter for OST; it does not select a PST importer. Archive values override
+installation values.
 
 ## Reconstructed MIME and preservation limits
 

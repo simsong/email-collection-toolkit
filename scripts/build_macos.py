@@ -151,15 +151,15 @@ def test_image(dmg: Path, *, gui: bool = False) -> None:
                 raise RuntimeError("mounted standalone converter failed the empty PST fixture")
             archive = Path(temporary) / "archive"
             archive.mkdir()
-            (archive / "config.yaml").write_text("plugins:\n  pst:\n    redundant_import: true\n")
             owners = Path(temporary) / "owners.txt"
             owners.write_text("fixture@example.test\n")
             run(executable, "--cli", "--archive", archive, "ingest", "--no-scan",
                 "--owner-names-file", owners, "--defer-content",
                 ROOT / "rust/mct-importer/tests/fixtures/empty.pst", cwd=temporary, env=environment, timeout=90)
-            receipts = list(archive.glob("processing-libpff/*/receipt.json"))
-            if len(receipts) != 1 or not PffReceipt.model_validate_json(receipts[0].read_text()).complete:
-                raise RuntimeError("mounted application did not complete external libpff import")
+            from mailarchiver.pst_source import ImportReceipt
+            receipts = list(archive.glob("processing-pst/*/receipt.json"))
+            if len(receipts) != 1 or ImportReceipt.model_validate_json(receipts[0].read_text()).emitted:
+                raise RuntimeError("mounted application did not retain Rust PST import evidence")
         for mode in (("self-test", "self-test-gui") if gui else ("self-test",)):
             detail = "opens and closes synthetic test windows" if mode == "self-test-gui" else "no windows"
             print(f"Running mounted {mode} ({detail}); waiting for the test process to exit.", flush=True)

@@ -4,6 +4,9 @@
 
 ## Unreleased
 
+* Make the Microsoft Rust adapter the sole PST importer. Remove the redundant
+  PST-reader setting and document libpff as the separately configured OST reader.
+
 * Use the shared `#item=<node-id>` PST provenance URI in Rust and libpff
   output. The libpff converter now omits incomplete items with diagnostics,
   matching the Rust importer rather than emitting a partial parent record.
@@ -138,9 +141,9 @@ statement does not supersede a newer implementation entry above it.
 
 * Add libpff OST extraction (now an external converter) with genuine cache-fixture coverage,
   source fixity, streamed attachments, and explicit partial-import diagnostics.
-  Add the default-off developer configuration option **Redundant PST Import**
-  to run Rust and libpff through existing deduplication. Changed reader settings
-  invalidate source checkpoints. Document CLI directory ingestion and search.
+  This release also added a now-removed developer configuration option,
+  **Redundant PST Import**, to run Rust and libpff through existing deduplication.
+  Document CLI directory ingestion and search.
 
 * Restrict pull-request CI to macOS, with on-demand Homebrew ClamAV and pinned
   macOS Zola binaries. Keep native GUI tests opt-in.

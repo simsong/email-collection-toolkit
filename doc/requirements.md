@@ -1506,8 +1506,8 @@ and retain the current explicit-path CLI instructions.
   [ON_DISK_MAIL_FORMATS.md](ON_DISK_MAIL_FORMATS.md).
   The implemented Rust PST helper is a standalone ingest executable accepting a
   filename and emitting mboxrd to stdout, with diagnostics on stderr, as
-  specified in [PST_DUAL_READER.md](PST_DUAL_READER.md). Use Microsoft's Rust PST library and optionally run an independent
-  external libpff converter pass with Redundant PST Import. Each emitted record carries `X-Imported-URI`,
+  specified in [PST_DUAL_READER.md](PST_DUAL_READER.md). Use Microsoft's Rust PST library for PST; the independent
+  external libpff converter remains the OST reader. Each emitted record carries `X-Imported-URI`,
   `X-Importer-Name` and `X-Importer-Version`. These fields are included in h2.
   Existing h3 includes selected headers AND the encoded MIME body; it is a
   comparison control, not permission to discard conflicting variants. The
@@ -1770,7 +1770,7 @@ completeness separately from server-mailbox completeness. See
 Reliable PST import and full Windows ingest are required for the planned beta.
 Supported Windows/macOS packages and the planned Linux Snap must bundle their
 selected ingest executables and dependencies without requiring user-installed
-runtimes, compilers or Outlook. A second importer is independently selectable;
+runtimes, compilers or Outlook. The configured PST importer is the Rust helper;
 Java is required only if a Java importer is selected for distribution.
 [PST_DUAL_READER.md](PST_DUAL_READER.md) defines architecture-specific
 packaging, runtime provenance, signing, confinement and installed-fixture gates.
@@ -2109,7 +2109,7 @@ providers must retain address evidence without creating automatic institutional
 affiliations. PST timeout/limit receipts must retain the actual reaped exit code,
 observed sizes and truncation flags; both live and post-exit output sizes are checked.
 
-## External OST and Redundant PST Import
+## External OST import
 
 Read OST through the standalone converter using pinned `libpff-python`, with a
 read-only handle and before/after SHA-256 checks. Route genuine `SO` client magic
@@ -2129,17 +2129,11 @@ but canonical message hashing and deduplication stay in the host. For scanned
 imports, pass the converted stream through the external Rust mcti-scan executable
 before API admission. Only infected messages gain the three ClamAV headers.
 
-The developer-only **Redundant PST Import** option is `plugins.pst.redundant_import`
-(default false). When enabled, run both Microsoft's Rust importer and external
-libpff on each PST, including after a reader's recoverable failure. Feed both
-outputs to ordinary canonical deduplication without changing its policy. Different
-reconstructions remain variants; exact retries do not multiply canonical content.
-Both passes must complete before recording a successful source checkpoint.
-Parser/settings fingerprints must invalidate unchanged-file checkpoints when this
-option or reader settings change. Keep this option out of the GUI and ordinary CLI
-help until qualified. `plugins.ost` configures the libpff reader in either mode.
-`make test-pff` exercises a genuine OST fixture, both real PST readers, partial
-results, source fixity, limits, option changes, repeat deduplication, and CLI search.
+There is no reader-selection UI or PST reader setting. The Rust helper is the
+only PST importer. `plugins.pst` configures only its executable and resource
+limits. `plugins.ost` independently configures the libpff reader for OST.
+`make test-pff` exercises a genuine OST fixture, the Rust PST reader, partial
+results, source fixity, limits, repeat deduplication, and CLI search.
 
 Organization-domain evidence uses the bundled ICANN Public Suffix List offline,
 including longest-match, wildcard and exception rules, with IDNA normalization.
