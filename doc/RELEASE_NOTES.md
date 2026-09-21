@@ -55,7 +55,6 @@
 * Validate `PST` before building for `make pst-import` and `make pst-smoke`.
   Missing input now produces usage guidance instead of an empty-filename
   extraction error; invalid paths produce a readable-file diagnostic on stderr.
->>>>>>> origin/main
 
 * Remove the Google authorization prototype and its dependencies. Remove Requests
   from the application runtime and replace tldextract with offline PSL matching.
