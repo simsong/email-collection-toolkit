@@ -8,6 +8,55 @@
   The separate converter uses GPLv3 for project-owned code; upstream pypff/libpff
   remains LGPLv3-or-later and does not require relicensing.
 
+* Reject or fold overlong generated libpff headers, retain per-item libpff
+  retrieval failures in diagnostics, and preserve unresolved Exchange DNs in
+  display-name angle addresses with their explicit `EX` marker.
+
+* Make the Microsoft Rust adapter the sole PST importer. Remove the redundant
+  PST-reader setting and document libpff as the separately configured OST reader.
+
+* Use the shared `#item=<node-id>` PST provenance URI in Rust and libpff
+  output. The libpff converter now omits incomplete items with diagnostics,
+  matching the Rust importer rather than emitting a partial parent record.
+
+* Align Rust and libpff PST reconstruction for primary headers and mboxrd
+  separators. Both now support stable `--offset`/`--limit` item ranges,
+  validate Message-IDs, preserve unknown-code-page bytes with a Windows-1252
+  fallback, and avoid invalid base64-encoded multipart attachment containers.
+
+* Use the PST message timestamp for the synthetic mboxrd `From pst-importer`
+  delimiter. It now shares the reconstructed `Date:` timestamp, preferring a
+  valid transport date and then MAPI submit/delivery times before the epoch.
+
+* Preload the PST Contacts email directory across the full folder hierarchy,
+  including all three named email slots and Exchange address-book EntryID aliases.
+  Use explicit, unambiguous mappings for sender and recipient address repair;
+  preserve original addresses and mapping evidence. Report incomplete scans.
+
+* Expand Exchange sender identities using unambiguous SMTP mappings stored
+  in the same PST. Preserve the original DN and mapping provenance, and retain
+  native identities when mappings are missing or conflict.
+
+* Preserve native Exchange sender identities with an explicit `EX` address-type
+  marker instead of rejecting them as SMTP addresses. Decode PST subjects and
+  emit readable UTF-8 headers; retain header syntax and injection checks.
+
+* Include completed reconstructed header blocks in PST `--only-invalid`
+  diagnostic output, retaining invalid header values for inspection.
+
+* Support Windows-1256 PST bodies, retaining their bytes and declaring the
+  correct MIME charset instead of rejecting code page 1256.
+
+* Silently exclude PST meeting requests/responses as non-mail. Label reader
+  failures as library errors. Add `pst-importer --only-invalid` (Makefile
+  `ARGS=--only-invalid`) to inspect failed items' available headers/body evidence
+  in diagnostic mboxrd records while retaining nonzero extraction status.
+
+* Validate `PST` before building for `make pst-import` and `make pst-smoke`.
+  Missing input now produces usage guidance instead of an empty-filename
+  extraction error; invalid paths produce a readable-file diagnostic on stderr.
+>>>>>>> origin/main
+
 * Remove the Google authorization prototype and its dependencies. Remove Requests
   from the application runtime and replace tldextract with offline PSL matching.
 * Always import PST/OST through external executables. Package the libpff converter
@@ -101,9 +150,9 @@ statement does not supersede a newer implementation entry above it.
 
 * Add libpff OST extraction (now an external converter) with genuine cache-fixture coverage,
   source fixity, streamed attachments, and explicit partial-import diagnostics.
-  Add the default-off developer configuration option **Redundant PST Import**
-  to run Rust and libpff through existing deduplication. Changed reader settings
-  invalidate source checkpoints. Document CLI directory ingestion and search.
+  This release also added a now-removed developer configuration option,
+  **Redundant PST Import**, to run Rust and libpff through existing deduplication.
+  Document CLI directory ingestion and search.
 
 * Restrict pull-request CI to macOS, with on-demand Homebrew ClamAV and pinned
   macOS Zola binaries. Keep native GUI tests opt-in.

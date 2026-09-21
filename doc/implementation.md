@@ -401,8 +401,72 @@ filename-to-stdout-mboxrd interface. The standalone [PST adapter](PST_IMPORTER.m
 uses Microsoft's `outlook-pst` 1.2.0 through read-only `read_from` handles,
 traverses the IPM subtree and validates each bounded temporary record before
 streaming it. It reconstructs MIME and retains attachment/transport evidence;
-source fixity checks and partial-run errors prevent false success. Another
-implementation can run as a second pass. The CLI adapter invokes the executable,
+source fixity checks and partial-run errors prevent false success.
+Each record resolves its timestamp once: a valid transport `Date:` header, then
+MAPI submit time, then delivery time, then the Unix epoch. That value supplies
+both the reconstructed RFC `Date:` header and the UTC ctime-form mboxrd
+delimiter, so their instants cannot diverge.
+The Rust and libpff commands apply the same reconstruction rules to primary
+headers: normalized source-or-MAPI dates and senders, decoded subjects, and
+validated Message-IDs. Both accept `--offset` and `--limit`, traverse folder
+and message node IDs in ascending order, and stop once the requested
+normal-content range is selected. Unknown non-ASCII String8 body code pages
+retain their bytes with a Windows-1252 fallback declaration. Attachments labeled
+`multipart/*` are opaque base64 attachments, so the enclosing MIME part uses
+`application/octet-stream` rather than an invalid encoded multipart container.
+Both serializers copy safe transport fields directly instead of allowing a MIME
+library to RFC 2047-encode ASCII punctuation. MIME parameter and attachment
+serialization uses the shared unquoted charset, Content-ID, disposition, and
+RFC 2231 filename forms.
+Their item provenance URI uses the common `#item=<numeric-node-id>` fragment;
+the producer identity remains in `X-Importer-Name` and `X-Importer-Version`.
+An initial read-only traversal of normal contents from the PST root collects
+Contacts throughout the folder hierarchy before emitting mail. It caches all
+populated Email1/Email2/Email3 slots using PSETID_Address's store-specific named
+property IDs. Slot address/original-display-name properties supply explicit
+DN/SMTP pairs; validated Exchange Address Book EntryIDs supply DN aliases for
+SMTP contacts. Search folders, associated configuration objects and orphan carving are excluded.
+The traversal also collects explicit DN/SMTP pairs from sender
+(`0x0C1F`/`0x5D01`), represented-sender (`0x0065`/`0x5D02`), and recipient-table
+(`0x3003`/`0x39FE`) properties. It retains contact addresses and the identity map,
+not message bodies or photos. Stderr reports contact/slot/mapping/conflict and
+unreadable-object counts. Lookup failures outside mail extraction also prevent
+success; failures encountered in both passes are counted once.
+Case-insensitive DN matches resolve only when SMTP evidence is unambiguous.
+Resolved `From` uses the SMTP address and available sender display name;
+`X-PST-Original-Sender` retains the DN and `X-PST-Sender-Resolution` identifies
+the evidence item/property. Missing or conflicting mappings leave Exchange
+sender values unchanged in `From`, including a source display-name angle address,
+with `X-PST-Sender-Address-Type: EX`.
+The same map supplies missing SMTP addresses for reconstructed To/Cc/Bcc rows,
+with `X-PST-Original-Recipient` and `X-PST-Recipient-Resolution` evidence.
+Existing From/To/Cc/Bcc/Sender/Reply-To/Resent-*/Return-Path fields resolve whole
+native values or angle-bracket addresses outside quoted names/comments;
+`X-PST-Original-Address` and `X-PST-Address-Resolution` retain substitution evidence.
+Existing SMTP addresses and the attached original transport headers stay intact.
+The archive validator recognizes this marked
+native identity instead of requiring SMTP syntax. Ordinary mailbox validation
+remains in place. Subjects lose only the MAPI marker and prefix-length character;
+their textual prefixes remain. They are decoded and emitted as readable UTF-8 with
+whitespace folding; only unbroken words over 900 bytes use encoded-word folding.
+Header values permit valid UTF-8, while field names and provenance remain ASCII;
+control bytes, malformed UTF-8 and oversized lines still fail validation.
+MAPI Internet code page 1256 maps to MIME `windows-1256`; plain and HTML body
+bytes are base64-encoded unchanged. Unicode properties still emit UTF-8.
+Meeting classes are counted as non-mail without per-item diagnostics. Typed
+PST, messaging, LTP, and NDB failures are labeled `LIBRARY ERROR (outlook-pst 1.2.0)`.
+The `--only-invalid` option runs the same reconstruction/validation but emits
+only diagnostic envelopes for readable failed items. It spools each envelope
+within the existing record limit; selected MAPI headers/body properties are
+base64 attachments, with Unicode buffers stored as UTF-16LE and String8/binary
+buffers unchanged. Synthetic envelope headers and an `X-PST-Diagnostic` marker
+distinguish these from recovered mail. Valid mail is suppressed; unreadable
+items have stderr evidence only. A `reconstructed-headers.txt` attachment retains
+the completed header block from the failed reconstruction spool verbatim,
+excluding its mbox envelope. It is not an original transport-header property.
+`invalid-exported` counts diagnostic records,
+separately from normal `emitted` messages; extraction errors still return nonzero.
+Another implementation can run as a second pass. The CLI adapter invokes the executable,
 decodes its mboxrd output and sends recovered messages through the ingest
 pipeline for hashing, scanning and publication. H3 already includes
 the encoded body; its top-level header selection excludes importer annotations.
@@ -425,7 +489,11 @@ The Cargo workspace now contains `rust/mct-importer`: the Rust library,
 `pst-importer`, `mdti-validator` and `mcti-generator` implement/test
 [MCT Importer API 1.0](MCT_IMPORTER_API.md). `make rust-programs` or each named
 binary target produces release executables under `target/release`; Windows adds
-`.exe`. `make rust-check` runs rustfmt, Clippy with warnings fatal, and Rust
+`.exe`. `pst-import` and `pst-smoke` share a `pst-input-check` prerequisite
+that checks the exported `PST` value for a readable regular file. Builds run
+only after this check, including under parallel make, and their output goes to
+stderr. `pst-import` leaves stdout exclusively for extracted mboxrd.
+`make rust-check` runs rustfmt, Clippy with warnings fatal, and Rust
 tests including real process pipelines. `make check` includes this stage after
 Python type checks and before pytest. Cargo.lock pins dependencies. The validator
 uses bounded byte reads, one mboxrd decode, mailparse header/address parsing,
@@ -2601,7 +2669,7 @@ artifacts, preserve legacy unreceipted artifacts, and verify completed downloads
 before reuse. Real subprocess tests cover Ctrl+C, forced termination, competing
 writers, stale locks, and reuse without redownloading completed files.
 
-## External libpff converter and redundant PST testing
+## External libpff converter
 
 `pff_source.py` invokes the independent `converters/pff` executable. Only that
 GPLv3 program loads `pypff` from pinned `libpff-python==20231205`; the GPLv2 host
@@ -2611,8 +2679,8 @@ chunks into a bounded per-message MIME buffer. Headers and Unicode text are
 reconstructed; original transport-header text is retained as a separate evidence
 part. libpff supplies decompressed RTF. By-value and OLE attachment streams are
 retained. The Python binding does not expose embedded MAPI message reconstruction:
-its parent is retained with `X-Mailarchiver-Extraction-Incomplete`, node/folder
-diagnostics, and a nonzero import result. Non-mail classes and search folders are
+that item is omitted with node/folder diagnostics and a nonzero import result.
+Non-mail classes and search folders are
 excluded, with item/folder counts in receipts. No deleted-record carving occurs.
 Missing transport headers use available MAPI display recipients; these may contain
 names rather than resolved SMTP addresses. Sender reconstruction retains the name
@@ -2643,19 +2711,14 @@ consumes its output without rescanning or adding clean-message provenance.
 No process loads both libpff and libclamav. Neither executable writes the archive
 or computes canonical message hashes.
 
-`PstSettings.redundant_import` defaults false. With `plugins.pst.redundant_import`
-true, the external Rust generator and libpff converter execute sequentially,
-retain independent receipts, and aggregate failures after attempting both readers.
-Rust offsets retain their existing cursors; libpff cursors use `libpff:<node>`.
-Canonical identity/SHA-256 deduplication is unchanged. Importer annotations and
-MIME differences can prevent cross-reader collapse, intentionally retaining those
-variants; repeat imports of the same reconstruction deduplicate normally.
+PST dispatch has no reader-selection UI or setting: `PstFileParser` always
+invokes the Rust helper. The separate `PffFileParser` handles OST. Both use
+`item:<node>` cursors.
 
 Local container metadata carries an optional parser/settings fingerprint. Local
 integrity controls persist it alongside the source hash under
 `local-parser-settings-v1`; missing or changed fingerprints require a new read.
-This allows enabling redundant import on an already-completed PST. Existing
-non-Outlook parsers retain their source-only checkpoint behavior.
+Existing non-Outlook parsers retain their source-only checkpoint behavior.
 
 `make test-pff` uses the real Aspose Unicode/version-23 OST and existing PST
 fixtures, with CLI archive creation, content resume, search, and canonical fixity

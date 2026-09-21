@@ -223,7 +223,7 @@ source lacked that property.
 | Local mailbox | Maildir | Implemented | Treat `cur`/`new` messages as individual source messages. |
 | Apple Mail cache | `.emlx` and `.mbox` package hierarchy | Implemented for complete `.emlx` | Preserve the declared RFC 5322 payload; package metadata is not a message. |
 | Standalone document | Printed-email PDF | Partial/derived | Preserve the PDF separately; extracted messages are explicitly derived and unreviewed until reviewed. |
-| Outlook local store | `.pst` | Rust CLI reader; optional redundant libpff pass | Preserve source file/hash and native provenance; RFC 5322 is reconstructed and partial results reported. |
+| Outlook local store | `.pst` | Rust CLI reader | Preserve source file/hash and native provenance; RFC 5322 is reconstructed and partial results reported. |
 | Outlook cached store | `.ost` | External libpff converter; Unicode/version-23 fixture qualified | Read-only; flag incomplete embedded MAPI attachments; no Exchange access or deleted-record carving. |
 | Outlook Mac archive | `.olm` | Planned, separate | Separate parser and fixture matrix; not PST/OST. |
 | Eudora | mailbox plus TOC/attachment conventions | Planned | Treat companion files as one source package; absence of TOC is not absence of mail. |
