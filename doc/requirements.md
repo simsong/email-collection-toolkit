@@ -1713,6 +1713,10 @@ both encountered and selected counts. Their reconstructed `Date:`, `From:`,
 Subject, and Message-ID fields use the same normalization policy; invalid
 Message-IDs are omitted. Unknown non-ASCII MAPI body code pages retain their
 bytes and use the Windows-1252 fallback charset.
+Both retain non-content transport headers as readable, safely folded UTF-8
+fields without RFC 2047 re-encoding. Reconstructed MIME text charsets are
+unquoted, and attachments use matching Content-ID, disposition, and RFC 2231
+filename forms.
 Before emitting mail, scan normal contents throughout the entire PST folder
 hierarchy for Contacts, including nested folders and folders outside the IPM
 mail subtree. Retain all populated contact email slots in memory, not bodies

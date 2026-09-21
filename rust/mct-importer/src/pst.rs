@@ -1096,7 +1096,8 @@ fn render(
     }
     let original_id = headers
         .get_first_value("Message-ID")
-        .or(text(props.get(MESSAGE_ID))?);
+        .or(text(props.get(MESSAGE_ID))?)
+        .map(|id| id.split_whitespace().collect::<Vec<_>>().join(" "));
     if let Some(id) = original_id
         .as_deref()
         .filter(|id| crate::message_id_valid(id))

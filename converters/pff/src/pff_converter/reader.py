@@ -11,7 +11,7 @@ import time
 from datetime import datetime, timezone
 from email.header import decode_header, make_header
 from email import policy
-from email.message import EmailMessage, Message
+from email.message import Message
 from email.parser import Parser
 from email.utils import parsedate_to_datetime
 from pathlib import Path
@@ -190,13 +190,34 @@ def _sender(message: pypff.message) -> str | None:
     return _safe(address) if address else "unknown@invalid.invalid"
 
 
-def normalized_primary_headers(raw: bytes, values: dict[str, str]) -> bytes:
-    """Avoid email-package policy refolding for fields shared with Rust."""
-    head, marker, body = raw.partition(b"\r\n\r\n")
-    for name, value in values.items():
-        pattern = rb"(?m)^" + re.escape(name.encode("ascii")) + rb":[^\r\n]*(?:\r\n[ \t][^\r\n]*)*"
-        head = re.sub(pattern, f"{name}: {value}".encode("utf-8"), head)
-    return head + marker + body
+def header(out: "_MimeWriter", name: str, value: str, separator: str = ": ") -> None:
+    """Write an unfolded or safely folded UTF-8 header without RFC 2047 rewriting."""
+    if (not name.isascii() or not name or any(ord(character) < 33 or ord(character) > 126
+                                             or character == ":" for character in name)):
+        raise ValueError("invalid header name")
+    if any(character in "\r\n" and not value[index + 1:index + 2].isspace()
+           for index, character in enumerate(value)):
+        raise ValueError("invalid header folding")
+    if any(ord(character) < 32 and character not in "\r\n\t" for character in value):
+        raise ValueError("control character in header")
+    out.write(f"{name}{separator}{value}\r\n".encode("utf-8"))
+
+
+def transport_fields(value: str) -> list[tuple[str, str]]:
+    """Retain physical transport-header folding without email-package rewriting."""
+    fields: list[tuple[str, list[str]]] = []
+    for line in re.split(r"\r\n|\n", value):
+        if line[:1].isspace() and fields:
+            fields[-1][1].append(line)
+        elif ":" in line:
+            name, field_value = line.split(":", 1)
+            fields.append((name, [field_value]))
+    return [(name, "\r\n".join(lines)) for name, lines in fields]
+
+
+def transport_header(out: "_MimeWriter", name: str, value: str) -> None:
+    """Copy a safe source header, including the space following its colon."""
+    header(out, name, value.removeprefix(" "))
 
 
 class _MimeWriter:
@@ -216,14 +237,25 @@ class _MimeWriter:
 
     def part(self, mime_type: str, stream: BinaryIO | pypff.attachment, *, filename: str | None = None,
              content_id: str | None = None) -> None:
-        header = EmailMessage(policy=policy.SMTP)
-        header["Content-Type"] = "application/octet-stream" if mime_type.lower().startswith("multipart/") else mime_type
-        header["Content-Transfer-Encoding"] = "base64"
-        if filename:
-            header.add_header("Content-Disposition", "attachment", filename=_safe(filename))
+        mime_type = "application/octet-stream" if mime_type.lower().startswith("multipart/") else mime_type
+        if "\r" in mime_type or "\n" in mime_type:
+            raise ValueError("invalid attachment media type")
+        self.write(f"Content-Type: {mime_type}\r\nContent-Transfer-Encoding: base64\r\n".encode("ascii"))
         if content_id:
-            header["Content-ID"] = _safe(content_id)
-        self.write(header.as_bytes())
+            if (not content_id.isascii() or any(character in content_id for character in "\r\n<>")
+                    or len(content_id) >= 980):
+                raise ValueError("invalid attachment Content-ID")
+            self.write(f"Content-ID: <{content_id}>\r\n".encode("ascii"))
+        if filename:
+            name = _safe(filename)
+            encoded_name = name.encode("utf-8")
+            self.write(f"Content-Disposition: {'inline' if content_id else 'attachment'};\r\n filename*0*=UTF-8''".encode("ascii"))
+            for index, start in enumerate(range(0, len(encoded_name), 18)):
+                if index:
+                    self.write(f";\r\n filename*{index}*=".encode("ascii"))
+                self.write(b"".join(f"%{byte:02X}".encode("ascii") for byte in encoded_name[start:start + 18]))
+            self.write(b"\r\n")
+        self.write(b"\r\n")
         size = 0
         while True:
             chunk = stream.read_buffer(57 * 1024) if isinstance(stream, pypff.attachment) else stream.read(57 * 1024)
@@ -231,6 +263,7 @@ class _MimeWriter:
                 break
             size += len(chunk)
             self.write(base64.encodebytes(chunk).replace(b"\n", b"\r\n"))
+        self.write(b"\r\n")
         if isinstance(stream, pypff.attachment) and size != stream.size:
             raise ValueError(f"libpff attachment length mismatch: expected {stream.size}, read {size}")
 
@@ -238,8 +271,6 @@ class _MimeWriter:
 def _render(message: pypff.message, uri: str, folder: tuple[str, ...], item: int,
             writer: _MimeWriter) -> _Rendered:
     """Reconstruct deterministically; do not represent MAPI reconstruction as source RFC bytes."""
-    headers = Message(policy=policy.SMTPUTF8.clone(linesep="\r\n"))
-    headers["X-Mailarchiver-Folder"] = _safe("/".join(folder))
     transport = message.transport_headers or ""
     parsed = Parser(policy=policy.compat32).parsestr(transport, headersonly=True)
     date = message_date(message, parsed)
@@ -247,33 +278,29 @@ def _render(message: pypff.message, uri: str, folder: tuple[str, ...], item: int
         "Date": rfc2822_date(date),
         "From": normalized_header(parsed.get("From") or _sender(message) or "unknown@invalid.invalid"),
     }
-    headers["Date"] = primary["Date"]
-    headers["From"] = primary["From"]
     subject = message.subject
     if subject is None:
         subject = parsed.get("Subject")
     if subject is not None:
         primary["Subject"] = normalized_subject(subject)
-        headers["Subject"] = primary["Subject"]
     original_id = parsed.get("Message-ID") or _string(message, INTERNET_MESSAGE_ID)
     if original_id and message_id_valid(normalized_header(original_id)):
         primary["Message-ID"] = normalized_header(original_id)
-        headers["Message-ID"] = primary["Message-ID"]
-    for name, value in parsed.raw_items():
-        if name.lower() not in EXCLUDED_HEADERS and name.lower() not in {"date", "from", "subject", "message-id"}:
-            # Original header text is also retained as evidence, including malformed fields.
-            headers[name] = _safe(value)
+    writer.write(f"X-Imported-URI: {uri}\r\nX-Importer-Name: libpff\r\nX-Importer-Version: {pypff.get_version()}\r\n".encode("ascii"))
+    header(writer, "X-Mailarchiver-Folder", _safe("/".join(folder)))
+    for name in ("Date", "From", "Subject", "Message-ID"):
+        if name in primary:
+            header(writer, name, primary[name])
+    for name, value in transport_fields(transport):
+        lower = name.lower()
+        if lower not in EXCLUDED_HEADERS and lower not in {"date", "from", "subject", "message-id"} and not lower.startswith("content-"):
+            transport_header(writer, name, value)
     for name, value in (("To", _string(message, DISPLAY_TO)), ("Cc", _string(message, DISPLAY_CC)),
                         ("Bcc", _string(message, DISPLAY_BCC))):
-        if name not in headers and value:
-            headers[name] = _safe(value)
+        if parsed.get(name) is None and value:
+            header(writer, name, _safe(value))
     boundary = f"=_mct_pst_{item:08x}"
-    headers["MIME-Version"] = "1.0"
-    headers.set_type("multipart/mixed")
-    headers.set_boundary(boundary)
-    # The importer contract requires these three ASCII fields first and unfolded.
-    writer.write(f"X-Imported-URI: {uri}\r\nX-Importer-Name: libpff\r\nX-Importer-Version: {pypff.get_version()}\r\n".encode("ascii"))
-    writer.write(headers.as_bytes().split(b"\r\n\r\n", 1)[0] + b"\r\n\r\n")
+    writer.write(f"MIME-Version: 1.0\r\nContent-Type: multipart/mixed; boundary=\"{boundary}\"\r\n\r\n".encode("ascii"))
     separator = f"--{boundary}\r\n".encode()
     bodies = 0
     codepage = _integer(message, INTERNET_CPID)
@@ -288,6 +315,9 @@ def _render(message: pypff.message, uri: str, folder: tuple[str, ...], item: int
     if not bodies:
         writer.write(separator)
         writer.part("text/plain; charset=utf-8", io.BytesIO())
+    if transport:
+        writer.write(separator)
+        writer.part("application/octet-stream", io.BytesIO(transport.encode("utf-8")), filename="original-transport-headers.txt")
     flag = _property(message, HAS_ATTACH)
     # libpff 20231205 can raise looking up the absent table on attachment-free messages.
     flags = _integer(message, MESSAGE_FLAGS)
@@ -313,11 +343,8 @@ def _render(message: pypff.message, uri: str, folder: tuple[str, ...], item: int
             writer.output.seek(position)
             writer.output.truncate()
             problems.append(str(error)[:4096])
-    if transport:
-        writer.write(separator)
-        writer.part("text/plain; charset=utf-8", io.BytesIO(transport.encode("utf-8")), filename="original-transport-headers.txt")
     writer.write(f"--{boundary}--\r\n".encode())
-    raw = normalized_primary_headers(writer.output.getvalue(), primary)
+    raw = writer.output.getvalue()
     if problems:
         raw = raw.replace(b"\r\n\r\n", b"\r\nX-Mailarchiver-Extraction-Incomplete: attachments; see libpff receipt\r\n\r\n", 1)
         if len(raw) > writer.settings.max_message_bytes:

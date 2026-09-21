@@ -410,6 +410,10 @@ normal-content range is selected. Unknown non-ASCII String8 body code pages
 retain their bytes with a Windows-1252 fallback declaration. Attachments labeled
 `multipart/*` are opaque base64 attachments, so the enclosing MIME part uses
 `application/octet-stream` rather than an invalid encoded multipart container.
+Both serializers copy safe transport fields directly instead of allowing a MIME
+library to RFC 2047-encode ASCII punctuation. MIME parameter and attachment
+serialization uses the shared unquoted charset, Content-ID, disposition, and
+RFC 2231 filename forms.
 An initial read-only traversal of normal contents from the PST root collects
 Contacts throughout the folder hierarchy before emitting mail. It caches all
 populated Email1/Email2/Email3 slots using PSETID_Address's store-specific named
