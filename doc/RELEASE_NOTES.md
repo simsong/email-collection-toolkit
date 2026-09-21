@@ -4,6 +4,10 @@
 
 ## Unreleased
 
+* Clarify GPLv2-only versus GPLv2-or-later linking compatibility with LGPLv3.
+  The separate converter uses GPLv3 for project-owned code; upstream pypff/libpff
+  remains LGPLv3-or-later and does not require relicensing.
+
 * Remove the Google authorization prototype and its dependencies. Remove Requests
   from the application runtime and replace tldextract with offline PSL matching.
 * Always import PST/OST through external executables. Package the libpff converter

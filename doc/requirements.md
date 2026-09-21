@@ -1865,7 +1865,11 @@ must not make remote requests without explicit authorization.
   and separately licensed material. All project-owned code, tools, documentation,
   and the website theme use GPL-2.0-only, with additional licenses available
   from the copyright holder. The independent libpff converter is GPL-3.0-only
-  to match its LGPLv3 dependency. Third-party license grants remain unchanged.
+  as a compatible license for our converter code. Upstream pypff/libpff remains
+  LGPL-3.0-or-later; no upstream relicensing is required. GPLv2-only and
+  GPLv2-or-later have different linking compatibility; see the
+  [licensing explanation](../THIRD_PARTY_NOTICES.md#gplv2-and-lgplv3-compatibility).
+  Third-party license grants remain unchanged.
 * A source or binary distribution includes `LICENSE`, `COPYRIGHT`,
   `THIRD_PARTY_NOTICES.md`, and every license text required by its included
   components. Each platform's binary build audits its exact runtime dependency

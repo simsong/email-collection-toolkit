@@ -7,6 +7,10 @@ modification and writes MCT Importer API mboxrd to stdout. It does not import
 mailarchiver, load libclamav, hash canonical messages, or access an archive database.
 The archive application consumes this standard output and owns deduplication.
 
+GPLv3 covers our converter code. Upstream pypff/libpff retains its
+LGPL-3.0-or-later license; this design does not require relicensing it. See the
+[GPLv2/LGPLv3 compatibility explanation](../../THIRD_PARTY_NOTICES.md#gplv2-and-lgplv3-compatibility).
+
 From the repository root, run `make pff-converter` to install its separately
 locked environment. Invoke `converters/pff/.venv/bin/pff-converter -- SOURCE.ost`
 (Windows: `converters/pff/.venv/Scripts/pff-converter.exe`).
