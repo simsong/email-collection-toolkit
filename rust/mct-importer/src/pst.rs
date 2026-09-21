@@ -3,7 +3,7 @@
 //! Read-only Microsoft outlook-pst adapter. Requirements: doc/PST_IMPORTER.md.
 use anyhow::{bail, ensure, Context, Result};
 use base64::{engine::general_purpose::STANDARD, Engine};
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, FixedOffset, Utc};
 use outlook_pst::{
     ltp::prop_context::PropertyValue,
     messaging::{
@@ -548,12 +548,14 @@ pub fn import_selected(
                                 inner: spool,
                                 remaining: MAX_RECORD,
                             };
-                            write!(writer, "From pst-importer Thu Jan  1 00:00:00 1970\nX-Imported-URI: {uri}\r\nX-Importer-Name: pst-importer\r\nX-Importer-Version: {}\r\n", env!("CARGO_PKG_VERSION"))?;
+                            let date = message_date(message.message())?;
+                            write!(writer, "From pst-importer {}\nX-Imported-URI: {uri}\r\nX-Importer-Name: pst-importer\r\nX-Importer-Version: {}\r\n", mbox_date(&date), env!("CARGO_PKG_VERSION"))?;
                             render(
                                 message.message(),
                                 Some(message),
                                 item,
                                 &directory,
+                                &date,
                                 &mut writer,
                             )?;
                             writer.write_all(b"\n")?;
@@ -948,11 +950,47 @@ fn byte_charset(codepage: Option<&PropertyValue>, bytes: &[u8]) -> Result<&'stat
         _ => bail!("unknown body code page; refusing to mislabel bytes"),
     }
 }
+fn message_date(message: &dyn Message) -> Result<DateTime<FixedOffset>> {
+    let properties = message.properties();
+    let transport = properties.get(TRANSPORT_HEADERS).map(raw).transpose()?;
+    let original = transport
+        .as_deref()
+        .map(mailparse::parse_headers)
+        .transpose()?;
+    use mailparse::MailHeaderMap;
+    if let Some(date) = original
+        .as_ref()
+        .and_then(|(headers, _)| headers.get_first_value("Date"))
+        .and_then(|value| DateTime::parse_from_rfc2822(&value).ok())
+    {
+        return Ok(date);
+    }
+    for id in [SUBMIT_TIME, DELIVERY_TIME] {
+        if let Some(PropertyValue::Time(time)) = properties.get(id) {
+            if let Some(date) =
+                DateTime::<Utc>::from_timestamp(time.div_euclid(10_000_000) - 11_644_473_600, 0)
+            {
+                return Ok(date.fixed_offset());
+            }
+        }
+    }
+    Ok(DateTime::<Utc>::from_timestamp(0, 0)
+        .expect("Unix epoch is valid")
+        .fixed_offset())
+}
+
+fn mbox_date(date: &DateTime<FixedOffset>) -> String {
+    date.with_timezone(&Utc)
+        .format("%a %b %e %H:%M:%S %Y")
+        .to_string()
+}
+
 fn render(
     message: &dyn Message,
     typed: Option<&PstMessage>,
     item: u32,
     directory: &ExchangeDirectory,
+    date: &DateTime<FixedOffset>,
     out: &mut impl Write,
 ) -> Result<()> {
     let props = message.properties();
@@ -963,27 +1001,7 @@ fn render(
         .transpose()?;
     let headers = original.as_ref().map(|(h, _)| h.as_slice()).unwrap_or(&[]);
     use mailparse::MailHeaderMap;
-    let date = headers
-        .get_first_value("Date")
-        .and_then(|v| {
-            DateTime::parse_from_rfc2822(&v)
-                .ok()
-                .map(|d| d.to_rfc2822())
-        })
-        .or_else(|| {
-            [SUBMIT_TIME, DELIVERY_TIME]
-                .iter()
-                .find_map(|id| match props.get(*id) {
-                    Some(PropertyValue::Time(time)) => DateTime::<Utc>::from_timestamp(
-                        time.div_euclid(10_000_000) - 11_644_473_600,
-                        0,
-                    )
-                    .map(|v| v.to_rfc2822()),
-                    _ => None,
-                })
-        })
-        .unwrap_or_else(|| "Thu, 1 Jan 1970 00:00:00 +0000".into());
-    write!(out, "Date: {date}\r\n")?;
+    write!(out, "Date: {}\r\n", date.to_rfc2822())?;
     let from = headers
         .get_first_header("From")
         .map(|h| {
@@ -1198,7 +1216,8 @@ fn render(
                 // Opaque embedded mail is retained only when fully reconstructable.
                 (5, Some(AttachmentData::Message(embedded))) => {
                     let mut spool = tempfile::tempfile()?;
-                    render(embedded.as_ref(), None, item.wrapping_add(1), directory, &mut LimitedWriter { inner: &mut spool, remaining: MAX_RECORD })?;
+                    let date = message_date(embedded.as_ref())?;
+                    render(embedded.as_ref(), None, item.wrapping_add(1), directory, &date, &mut LimitedWriter { inner: &mut spool, remaining: MAX_RECORD })?;
                     spool.rewind()?;
                     write!(out, "--{boundary}\r\nContent-Type: message/rfc822\r\nContent-Disposition: attachment\r\n\r\n")?;
                     io::copy(&mut spool, out)?;

@@ -4,6 +4,10 @@
 
 ## Unreleased
 
+* Use the PST message timestamp for the synthetic mboxrd `From pst-importer`
+  delimiter. It now shares the reconstructed `Date:` timestamp, preferring a
+  valid transport date and then MAPI submit/delivery times before the epoch.
+
 * Preload the PST Contacts email directory across the full folder hierarchy,
   including all three named email slots and Exchange address-book EntryID aliases.
   Use explicit, unambiguous mappings for sender and recipient address repair;

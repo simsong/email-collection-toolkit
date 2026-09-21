@@ -85,6 +85,10 @@ X-Importer-Version: 1.0.0
 The item selector is the PST node ID, not an extraction ordinal. Stderr records
 the adapter/parser/API versions, source SHA-256, reconstruction notice, failures
 with node IDs, and final folder/encountered/emitted/non-mail/error counts.
+For recovered mail, one timestamp supplies both the RFC `Date:` header and the
+synthetic `From pst-importer` delimiter. The importer uses a valid transport
+`Date:`, then MAPI submit time (`0x0039`), then delivery time (`0x0E06`), then
+the Unix epoch; the delimiter is rendered in UTC using English ctime form.
 Hash the source in chunks before and after extraction; also re-open the pathname
 at completion to detect replacement with different bytes. A change prevents
 success. This is a before/after fixity check, not a filesystem snapshot or a

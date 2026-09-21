@@ -398,6 +398,10 @@ uses Microsoft's `outlook-pst` 1.2.0 through read-only `read_from` handles,
 traverses the IPM subtree and validates each bounded temporary record before
 streaming it. It reconstructs MIME and retains attachment/transport evidence;
 source fixity checks and partial-run errors prevent false success.
+Each record resolves its timestamp once: a valid transport `Date:` header, then
+MAPI submit time, then delivery time, then the Unix epoch. That value supplies
+both the reconstructed RFC `Date:` header and the UTC ctime-form mboxrd
+delimiter, so their instants cannot diverge.
 An initial read-only traversal of normal contents from the PST root collects
 Contacts throughout the folder hierarchy before emitting mail. It caches all
 populated Email1/Email2/Email3 slots using PSETID_Address's store-specific named

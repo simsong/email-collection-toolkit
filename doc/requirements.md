@@ -1702,6 +1702,10 @@ The standalone [PST importer](PST_IMPORTER.md) uses Microsoft's pinned
 mboxrd records with stable node-ID URIs, exact by-value attachment data,
 reconstruction evidence and source SHA-256 checks. Continue after recoverable
 item failures but return nonzero for any incomplete extraction.
+Use one resolved timestamp for the reconstructed RFC `Date:` header and the
+synthetic mboxrd `From pst-importer` delimiter: a valid transport `Date:` first,
+then MAPI submit (`0x0039`) or delivery (`0x0E06`) time, then the Unix epoch.
+Format the delimiter in UTC using the English ctime form.
 Before emitting mail, scan normal contents throughout the entire PST folder
 hierarchy for Contacts, including nested folders and folders outside the IPM
 mail subtree. Retain all populated contact email slots in memory, not bodies

@@ -2,6 +2,7 @@
 
 //! Requirements: doc/PST_IMPORTER.md — real PST extraction, source fixity,
 //! deterministic MIME/attachment recovery, partial runs, and process failures.
+use chrono::{DateTime, NaiveDateTime, Utc};
 use mailparse::{MailHeaderMap, ParsedMail};
 use sha2::{Digest, Sha256};
 use std::{
@@ -92,6 +93,22 @@ fn records(stream: &[u8]) -> Vec<Vec<u8>> {
     }
     messages
 }
+fn envelope_dates(stream: &[u8]) -> Vec<DateTime<Utc>> {
+    stream
+        .split_inclusive(|b| *b == b'\n')
+        .filter_map(|line| {
+            std::str::from_utf8(line)
+                .ok()?
+                .strip_prefix("From pst-importer ")
+                .map(str::trim_end)
+        })
+        .map(|date| {
+            NaiveDateTime::parse_from_str(date, "%a %b %e %H:%M:%S %Y")
+                .unwrap()
+                .and_utc()
+        })
+        .collect()
+}
 fn leaves<'a>(mail: &'a ParsedMail<'a>, result: &mut Vec<&'a ParsedMail<'a>>) {
     if mail.subparts.is_empty() {
         result.push(mail);
@@ -132,9 +149,18 @@ fn actual_pst_preserves_bodies_attachments_and_reports_partial_extraction() {
     assert_eq!(validation.complete, 12);
     assert!(errors.is_empty(), "{errors:?}");
     let messages = records(&result.stdout);
+    let envelope_dates = envelope_dates(&result.stdout);
+    assert_eq!(envelope_dates.len(), messages.len());
     let mut binary_attachments = 0;
-    for bytes in &messages {
+    for (bytes, envelope_date) in messages.iter().zip(envelope_dates) {
         let mail = mailparse::parse_mail(bytes).unwrap();
+        let header_date = mail
+            .headers
+            .get_first_value("Date")
+            .and_then(|date| DateTime::parse_from_rfc2822(&date).ok())
+            .unwrap()
+            .with_timezone(&Utc);
+        assert_eq!(envelope_date, header_date);
         let uri = mail.headers.get_first_value("X-Imported-URI").unwrap();
         let uri = url::Url::parse(&uri).unwrap();
         assert_eq!(
