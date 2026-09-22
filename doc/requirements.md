@@ -1858,7 +1858,7 @@ DMG must never be published as a release. The archive extension is declared in
 the bundle's document-type metadata.
 
 Package metadata and the About window use one canonical PEP 440 version:
-`1.0.0a2` is the current alpha and its annotated Git tag is `v1.0.0a2`.
+`1.0.0a3` is the current alpha and its annotated Git tag is `v1.0.0a3`.
 The release parser rejects noncanonical or unsupported versions; only stable
 `MAJOR.MINOR.PATCH`, alpha `MAJOR.MINOR.PATCHaN`, and beta
 `MAJOR.MINOR.PATCHbN` are accepted. Alpha and beta items use Sparkle's

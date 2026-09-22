@@ -68,7 +68,7 @@ overrides. They do not open GUI test windows.
 `make check-release` builds and validates a DMG with both headless and GUI tests.
 Use `make check-release DMG=/absolute/path/to/image.dmg` to validate an existing
 build instead. This is an explicitly requested local, interactive validation.
-The GitHub release workflow uses headless `make dmg` on `macos-15`;
+The GitHub release workflow uses headless `make dmg` on its hosted macOS runner;
 its mounted installed-app self-test runs without opening native windows.
 It announces the GUI self-test before opening synthetic About, search, Ingests,
 and source-picker windows. These windows close automatically. A GUI worker
@@ -218,7 +218,7 @@ Do not move or reuse an already published tag.
 ```sh
 git switch main
 git pull --ff-only origin main
-release_tag=v1.0.0a2
+release_tag=v1.0.0a3
 make release-tag-check GITHUB_REF_NAME="$release_tag"
 git tag -a "$release_tag" -m "Release $release_tag"
 make release-tag-check GITHUB_REF_NAME="$release_tag" ARGS=--require-annotated
@@ -229,7 +229,7 @@ The tag push starts [the release workflow](../.github/workflows/release.yml)
 for tags beginning with `v`. It checks that the tag is annotated and matches
 the version in that tagged commit; `scripts/release_tag.py` also selects the
 Sparkle preview channel for `aN`/`bN` versions and the release channel for a
-stable version. The `macos-15` build job installs dependencies and ClamAV,
+stable version. The macOS build job installs dependencies and ClamAV,
 then runs `make dmg`, `make notarize-dmg`, and `make test-dmg`.
 These targets call `scripts/build_macos.py` and its `scripts/macos_signing.py`
 helpers to build, Developer ID-sign, notarize, staple, and test the mounted
@@ -241,8 +241,12 @@ Only after signing the feed item does it commit
 `website/static/updates/mac/appcast.xml` to `main`, publish the draft release,
 and explicitly dispatch [the Pages workflow](../.github/workflows/pages.yml)
 from `main`. Pages runs `scripts/update_site_releases.py`, builds the Zola site,
-and deploys it to GitHub Pages. The appcast commit includes `[skip ci]`, so the
-explicit dispatch is needed; a pushed tag alone does not directly deploy Pages.
+and deploys it to GitHub Pages. The appcast commit message includes `[skip ci]`
+in [release.yml](../.github/workflows/release.yml), which skips push-triggered
+Actions. More importantly, the workflow uses `GITHUB_TOKEN` to commit the feed
+and publish the release, so neither event starts another workflow. Its explicit
+`workflow_dispatch` is what starts [Pages](../.github/workflows/pages.yml);
+the tag push alone does not deploy the site.
 If a release step fails before publication, inspect the Actions run and draft
 release rather than assuming the DMG or website is live.
 

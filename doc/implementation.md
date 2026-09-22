@@ -2121,7 +2121,7 @@ The builder signs and verifies the completed DMG before publishing the candidate
 Missing either secret emits `::warning::` and produces `*_UNSIGNED.dmg`; invalid
 configured credentials fail. An explicit `--signing-identity` overrides secrets;
 `-` emits a distinct warning identifying that deliberate unsigned override.
-The release workflow builds the DMG on `macos-15`, passes protected signing and
+The release workflow builds the DMG on its hosted macOS runner, passes protected signing and
 App Store Connect notarization credentials only to its packaging step, submits
 the signed image through `make notarize-dmg`, staples and validates it, and then
 retests the mounted artifact before assembling the source and DMG checksums into
