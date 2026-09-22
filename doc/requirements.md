@@ -1859,7 +1859,9 @@ DMG has a Sparkle Ed25519 archive signature.
 
 `make sparkle-tools` downloads the pinned Sparkle developer archive to the
 ignored project-local `.tools/` directory, verifies its SHA-256 before extraction,
-and refuses an incomplete prior extraction. `make sparkle-keys` invokes the
+and refuses an incomplete prior extraction. The ordinary test suite must not
+require these optional developer tools; release assembly must run the real
+signer test after installing them. `make sparkle-keys` invokes the
 verified `generate_keys` tool locally. The private Ed25519 key remains outside
 Git; it is never an application, Apple-signing, or notarization credential.
 The packaged app contains only its `SUPublicEDKey` and fixed appcast HTTPS URL.

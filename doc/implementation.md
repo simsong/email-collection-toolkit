@@ -2145,6 +2145,9 @@ adds only a post-notarization, Ed25519-signed item.
 the verified developer archive below `.tools/sparkle/`. `make sparkle-keys`
 calls Sparkle's local `generate_keys`; the key generator retains the private
 Ed25519 material in the developer's login Keychain and prints the public key.
+The ordinary test suite skips the real-signer integration when these developer
+tools are absent; `make test-sparkle-signing` installs them and requires that
+integration test to run during release assembly.
 The macOS bundle carries that public key and the fixed Pages appcast URL. The
 appcast writer invokes `sign_update --ed-key-file -` on the final stapled DMG,
 passing the protected exported Sparkle key only on standard input. Sparkle

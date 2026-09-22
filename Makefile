@@ -174,11 +174,11 @@ sparkle-tools:
 	@test -f "$(SPARKLE_ARCHIVE)" || curl --fail --location --output "$(SPARKLE_ARCHIVE)" "$(SPARKLE_URL)"
 	@printf '%s  %s\n' "$(SPARKLE_SHA256)" "$(SPARKLE_ARCHIVE)" | shasum -a 256 -c -
 	@if test -e "$(SPARKLE_DIR)"; then \
-		test -x "$(SPARKLE_DIR)/bin/generate_keys" || { echo "incomplete Sparkle tools directory: $(SPARKLE_DIR)" >&2; exit 1; }; \
+		test -x "$(SPARKLE_DIR)/bin/generate_keys" -a -x "$(SPARKLE_DIR)/bin/sign_update" || { echo "incomplete Sparkle tools directory: $(SPARKLE_DIR)" >&2; exit 1; }; \
 	else \
 		mkdir -p "$(SPARKLE_DIR)"; \
 		tar -xJf "$(SPARKLE_ARCHIVE)" --strip-components=1 -C "$(SPARKLE_DIR)"; \
-		test -x "$(SPARKLE_DIR)/bin/generate_keys"; \
+		test -x "$(SPARKLE_DIR)/bin/generate_keys" -a -x "$(SPARKLE_DIR)/bin/sign_update"; \
 	fi
 
 sparkle-keys: sparkle-tools

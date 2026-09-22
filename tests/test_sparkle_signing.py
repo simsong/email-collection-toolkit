@@ -15,6 +15,8 @@ def test_real_signer_accepts_exported_seed_on_standard_input(tmp_path: Path, mon
     archive = tmp_path / "fixture.dmg"
     archive.write_bytes(b"synthetic Sparkle signing fixture")
     signer = Path(__file__).parents[1] / ".tools/sparkle/2.10.0/bin/sign_update"
+    if not signer.exists():
+        pytest.skip("Sparkle developer tools are not installed; run make test-sparkle-signing")
     monkeypatch.setenv(SPARKLE_PRIVATE_KEY_SECRET, base64.b64encode(bytes(range(32))).decode("ascii"))
 
     result = signed_archive(archive, signer, signing_key())
