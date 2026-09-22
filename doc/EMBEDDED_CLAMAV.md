@@ -19,8 +19,8 @@ license version. Libpff runs in a separate GPLv3 converter and sends standard
 mboxrd to the independent GPLv2 Rust scanner before API admission. GPLv3 covers
 our converter code; pypff/libpff retains LGPLv3-or-later without relicensing.
 See the [GPLv2-only versus GPLv2-or-later distinction](../THIRD_PARTY_NOTICES.md#gplv2-and-lgplv3-compatibility).
-The remaining
-application dependency compatibility issue is Apache-2.0 ftfy; see
+Known application dependency compatibility issues include Apache-2.0 `ftfy`
+and bundled OpenSSL 3 libraries; see
 [THIRD_PARTY_NOTICES.md](../THIRD_PARTY_NOTICES.md). Changing project-owned
 code's license does not change those upstream terms or clear the full bundle.
 Preserve the exact native dependency licenses, notices and corresponding
