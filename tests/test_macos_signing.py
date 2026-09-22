@@ -180,7 +180,7 @@ def test_release_waits_for_exact_dmg_before_checksumming() -> None:
     assert "*.dmg" in steps[checksum][RUN]
     secret_steps = [step for step in macos[STEPS] if CERTIFICATE_SECRET in step.get(ENV, {})]
     assert len(secret_steps) == 1
-    assert secret_steps[0][RUN].splitlines()[0] == "make dmg"
+    assert secret_steps[0][RUN].splitlines()[0] == "make dmg ARGS=--log-dmg-contents"
     assert PASSWORD_SECRET in secret_steps[0][ENV]
     assert {NOTARY_KEY_ID_SECRET, NOTARY_ISSUER_SECRET, NOTARY_PRIVATE_KEY_SECRET} <= set(secret_steps[0][ENV])
     assert "make notarize-dmg" in secret_steps[0][RUN]

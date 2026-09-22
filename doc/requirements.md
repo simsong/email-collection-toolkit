@@ -443,9 +443,10 @@ recorded in THIRD_PARTY_NOTICES.md.
   The DMG bundles that project copy; release CI runs `make freshclam` before building.
   Before running the mounted app self-test, DMG validation records every mounted
   file and symlink in a retained inventory and checks that `libclamav.dylib` is
-  present. A present library rejected by the native loader must report the
-  underlying loader error, not misidentify it as a missing file. A failed
-  self-test never publishes the candidate DMG.
+  present. Release CI also lists every inventory entry in the Actions log before
+  testing the installed app. A present library rejected by the native loader
+  must report the underlying loader error, not misidentify it as a missing
+  file. A failed self-test never publishes the candidate DMG.
 * `ingest --workers N` controls the number of source containers ingested
   simultaneously. Its default is the detected CPU count capped at eight, and
   `N` must be positive. Each worker reads and parses its mailfile and submits

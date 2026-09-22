@@ -21,12 +21,14 @@ from mailarchiver.standalone_verify import verify_archive
 ROOT = Path(__file__).resolve().parents[1]
 
 
-def test_mounted_inventory_retains_av_files_and_links_for_failed_build(tmp_path: Path) -> None:
-    """Release validation must leave a complete mounted-file record before self-test runs."""
+def test_mounted_inventory_retains_av_files_and_logs_each_entry(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Release validation retains and logs every mounted file/link before self-test."""
     scripts = str(ROOT / "scripts")
     sys.path.insert(0, scripts)
     try:
-        from build_macos import ImageContents, record_image_contents
+        from build_macos import ImageContents, ImageEntry, record_image_contents
     finally:
         sys.path.remove(scripts)
     mount = tmp_path / "mounted"
@@ -38,12 +40,16 @@ def test_mounted_inventory_retains_av_files_and_links_for_failed_build(tmp_path:
     definitions.write_bytes(b"definitions")
     (mount / "Applications").symlink_to("/Applications")
     manifest = tmp_path / "reports/fixture.contents.json"
-    record_image_contents(mount, manifest)
+    record_image_contents(mount, manifest, log_entries=True)
     entries = {entry.path: entry for entry in ImageContents.model_validate_json(manifest.read_text()).entries}
     assert set(entries) == {str(library.relative_to(mount)), str(definitions.relative_to(mount)), "Applications"}
     assert entries[str(library.relative_to(mount))].kind == "file"
     assert entries[str(library.relative_to(mount))].size_bytes == len(b"native fixture")
     assert entries["Applications"].kind == "symlink" and entries["Applications"].target == "/Applications"
+    output = capsys.readouterr().out.splitlines()
+    assert len(output) == len(entries) + 1
+    assert output[0].startswith("Recorded 3 mounted DMG files and links:")
+    assert [ImageEntry.model_validate_json(line).path for line in output[1:]] == sorted(entries)
 
 
 @pytest.mark.skipif(sys.platform != "darwin", reason="AppKit renders the macOS installer background")

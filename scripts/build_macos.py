@@ -68,7 +68,7 @@ class ImageContents(BaseModel):
     entries: list[ImageEntry]
 
 
-def record_image_contents(mount: Path, destination: Path) -> None:
+def record_image_contents(mount: Path, destination: Path, *, log_entries: bool = False) -> None:
     """Preserve a relative mounted-file inventory even when a later self-test fails."""
     entries = []
     for path in sorted(mount.rglob("*")):
@@ -80,6 +80,10 @@ def record_image_contents(mount: Path, destination: Path) -> None:
     destination.parent.mkdir(parents=True, exist_ok=True)
     destination.write_text(ImageContents(entries=entries).model_dump_json(indent=2) + "\n", encoding="utf-8")
     print(f"Recorded {len(entries)} mounted DMG files and links: {destination}", flush=True)
+    if log_entries:
+        for entry in entries:
+            print(entry.model_dump_json(exclude_none=True))
+        sys.stdout.flush()
 
 
 def run(*arguments: str | Path, **kwargs) -> subprocess.CompletedProcess:
@@ -166,11 +170,12 @@ def mounted_image(dmg: Path):
                 pass
 
 
-def test_image(dmg: Path, *, gui: bool = False, manifest_path: Path | None = None) -> None:
+def test_image(dmg: Path, *, gui: bool = False, manifest_path: Path | None = None,
+               log_contents: bool = False) -> None:
     """Mount read-only and test the actual bundle outside the source checkout."""
     with mounted_image(dmg) as mount:
         manifest = manifest_path or ROOT / "dist" / f"{dmg.stem}.contents.json"
-        record_image_contents(mount, manifest)
+        record_image_contents(mount, manifest, log_entries=log_contents)
         app = mount / f"{APP_NAME}.app"
         library = app / "Contents/Frameworks/clamav/libclamav.dylib"
         if not library.is_file():
@@ -316,7 +321,7 @@ def clamav_bundle_arguments(work: Path) -> list[str]:
     return arguments
 
 
-def build(signing_identity: str, *, gui: bool = False) -> Path:
+def build(signing_identity: str, *, gui: bool = False, log_contents: bool = False) -> Path:
     output = ROOT / "dist"
     output.mkdir(exist_ok=True)
     work_root = ROOT / ".tmp"
@@ -377,7 +382,8 @@ def build(signing_identity: str, *, gui: bool = False) -> Path:
         candidate = work / "candidate.dmg"
         create_image(app, app_icon, candidate, work)
         # Keep a previous artifact until the requested mounted tests have passed.
-        test_image(candidate, gui=gui, manifest_path=dmg.with_suffix(".contents.json"))
+        test_image(candidate, gui=gui, manifest_path=dmg.with_suffix(".contents.json"),
+                   log_contents=log_contents)
         sign_image(candidate, signing_identity)
         candidate.replace(dmg)
         for mode in (("self-test", "self-test-gui") if gui else ("self-test",)):
@@ -394,6 +400,7 @@ def main() -> None:
     parser.add_argument("--check-release", action="store_true", help="include the visible GUI self-test for release validation")
     parser.add_argument("--preview-dmg", type=Path, help="open the mounted installer in Finder until Return is pressed")
     parser.add_argument("--notarize-dmg", type=Path, help="submit, staple, and validate an existing signed DMG")
+    parser.add_argument("--log-dmg-contents", action="store_true", help="list every mounted file and link before testing")
     parser.add_argument("--signing-identity", help="existing Keychain identity; otherwise import optional signing secrets; '-' forces unsigned")
     args = parser.parse_args()
     if sys.platform != "darwin":
@@ -403,14 +410,15 @@ def main() -> None:
             run("/usr/bin/open", mount)
             input("Inspect the installer in Finder; press Return to eject: ")
     elif args.test_dmg:
-        test_image(args.test_dmg.resolve(strict=True), gui=args.check_release)
+        test_image(args.test_dmg.resolve(strict=True), gui=args.check_release,
+                   log_contents=args.log_dmg_contents)
     elif args.notarize_dmg:
         notarize_image(args.notarize_dmg.resolve(strict=True),
                        NotarizationCredentials.from_environment(os.environ), ROOT / ".tmp")
     else:
         credentials = SigningSecrets.from_environment(os.environ)
         with signing_identity(credentials, ROOT / ".tmp", args.signing_identity) as identity:
-            print(f"Built and tested: {build(identity, gui=args.check_release)}")
+            print(f"Built and tested: {build(identity, gui=args.check_release, log_contents=args.log_dmg_contents)}")
 
 
 if __name__ == "__main__":

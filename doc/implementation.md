@@ -33,7 +33,9 @@ bundled definitions at least quarterly.
 Before signature/dependency checks and the mounted self-test, the DMG validator
 writes `dist/<DMG stem>.contents.json` with relative paths, sizes, and symlink
 targets for every mounted file/link. The release job uploads this inventory with
-its packaging reports even if validation fails. It separately checks for the
+its packaging reports even if validation fails. The release workflow passes
+`--log-dmg-contents` to the builder, which prints every entry after mounting
+and before executing the installed app. It separately checks for the
 bundled `libclamav.dylib`; if present but unloadable, the scanner reports the
 native loader's underlying error (PyInstaller's generic wrapper hides it).
 

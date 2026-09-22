@@ -167,7 +167,7 @@ jobs:
         run: |
           brew install clamav
           make freshclam
-      - name: Build DMG and validate its headless installed self-test
+      - name: Build DMG, list mounted contents, and run headless self-test
         if: ${{ runner.environment == 'github-hosted' }}
         env:
           APPLE_CERTIFICATE_P12_BASE64: ${{ secrets.APPLE_CERTIFICATE_P12_BASE64 }}
@@ -175,8 +175,9 @@ jobs:
           APPLE_NOTARY_KEY_ID: ${{ secrets.APPLE_NOTARY_KEY_ID }}
           APPLE_NOTARY_ISSUER_ID: ${{ secrets.APPLE_NOTARY_ISSUER_ID }}
           APPLE_NOTARY_PRIVATE_KEY_BASE64: ${{ secrets.APPLE_NOTARY_PRIVATE_KEY_BASE64 }}
+        # make dmg mounts the new candidate, logs every file/link, then runs its installed self-test.
         run: |
-          make dmg
+          make dmg ARGS=--log-dmg-contents
           shopt -s nullglob
           dmgs=()
           for candidate in dist/*.dmg; do
