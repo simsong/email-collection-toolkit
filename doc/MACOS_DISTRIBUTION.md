@@ -208,3 +208,61 @@ The mounted local tests do not establish downloaded-file Gatekeeper acceptance.
    `APPLE_NOTARY_PRIVATE_KEY_BASE64` repository secret; neither it nor the
    certificate password is stored in the repository. Follow Apple's
    [notarization workflow](https://developer.apple.com/documentation/security/notarizing-macos-software-before-distribution).
+
+## Publish a tagged macOS release
+
+After the intended version change is merged into `main`, use a clean checkout
+and replace the example tag with `v` plus the exact `pyproject.toml` version.
+Do not move or reuse an already published tag.
+
+```sh
+git switch main
+git pull --ff-only origin main
+release_tag=v1.0.0a2
+make release-tag-check GITHUB_REF_NAME="$release_tag"
+git tag -a "$release_tag" -m "Release $release_tag"
+make release-tag-check GITHUB_REF_NAME="$release_tag" ARGS=--require-annotated
+git push origin "refs/tags/$release_tag"
+```
+
+The tag push starts [the release workflow](../.github/workflows/release.yml)
+for tags beginning with `v`. It checks that the tag is annotated and matches
+the version in that tagged commit; `scripts/release_tag.py` also selects the
+Sparkle preview channel for `aN`/`bN` versions and the release channel for a
+stable version. The `macos-15` build job installs dependencies and ClamAV,
+then runs `make dmg`, `make notarize-dmg`, and `make test-dmg`.
+These targets call `scripts/build_macos.py` and its `scripts/macos_signing.py`
+helpers to build, Developer ID-sign, notarize, staple, and test the mounted
+image. The assemble job validates distributions, builds source archives,
+downloads the tested DMG, and creates a draft GitHub release with SHA-256
+checksums. It uses `make sparkle-tools` and `make update-appcast` to run
+`scripts/update_appcast.py` with Sparkle's `sign_update` on the final DMG.
+Only after signing the feed item does it commit
+`website/static/updates/mac/appcast.xml` to `main`, publish the draft release,
+and explicitly dispatch [the Pages workflow](../.github/workflows/pages.yml)
+from `main`. Pages runs `scripts/update_site_releases.py`, builds the Zola site,
+and deploys it to GitHub Pages. The appcast commit includes `[skip ci]`, so the
+explicit dispatch is needed; a pushed tag alone does not directly deploy Pages.
+If a release step fails before publication, inspect the Actions run and draft
+release rather than assuming the DMG or website is live.
+
+The release workflow accesses these GitHub Actions repository secrets, scoped
+to the steps that need them:
+
+| Step | Secrets | Purpose |
+| --- | --- | --- |
+| Build, sign, and notarize DMG | `APPLE_CERTIFICATE_P12_BASE64`, `APPLE_CERTIFICATE_PASSWORD` | Import the Developer ID Application identity on the hosted runner. |
+| Build, sign, and notarize DMG | `APPLE_NOTARY_KEY_ID`, `APPLE_NOTARY_ISSUER_ID`, `APPLE_NOTARY_PRIVATE_KEY_BASE64` | Authenticate `notarytool` with the App Store Connect API key. |
+| Sign appcast item | `SPARKLE_ED25519_PRIVATE_KEY_BASE64` | Sign the final DMG for Sparkle update verification. |
+
+The assemble job also uses the automatically provided `GITHUB_TOKEN` to create
+and publish the release, update the appcast on `main`, and dispatch Pages; it
+is not an additional repository secret to configure. The Pages workflow uses
+its own token and Pages deployment permissions, not the six release secrets.
+See [certificate management](CERTIFICATE_MANAGEMENT.md) for secret setup.
+
+The website's release-link helper currently recognizes stable `v1.0.0` tags
+and legacy `v1.0.0-beta1` tags, but not the current PEP 440 preview spelling
+(`v1.0.0a2`/`v1.0.0b1`). The Sparkle appcast uses the current spelling; until
+the helper is updated, a successful Pages deployment does not guarantee that
+the site's preview download link points to the new preview release.
