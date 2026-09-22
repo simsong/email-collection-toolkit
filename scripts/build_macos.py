@@ -131,9 +131,13 @@ def configure_bundle(app: Path, signing_identity: str) -> None:
     options = [] if signing_identity == "-" else ["--options", "runtime", "--timestamp"]
     # Collected executables can inherit hardened-runtime flags while being re-signed.
     # An ad-hoc child has no Team ID and must not enforce Team-ID library validation.
-    converter = app / "Contents/Frameworks/importers/pff-converter/pff-converter"
+    children = (
+        app / "Contents/Frameworks/importers/pff-converter/pff-converter",
+        app / "Contents/Frameworks/clamav/freshclam",
+    )
     child_options = ["--options", "0"] if signing_identity == "-" else options
-    run("/usr/bin/codesign", "--force", "--sign", signing_identity, *child_options, converter)
+    for child in children:
+        run("/usr/bin/codesign", "--force", "--sign", signing_identity, *child_options, child)
     run("/usr/bin/codesign", "--force", "--sign", signing_identity, *options, app)
     run("/usr/bin/codesign", "--verify", "--deep", "--strict", app)
 
@@ -189,6 +193,8 @@ def test_image(dmg: Path, *, gui: bool = False, manifest_path: Path | None = Non
         environment = release_safe_environment(
             os.environ, ("PYTHON", "DYLD_", "MAILARCHIVER", "MAIL_ARCHIVE"))
         environment["PATH"] = "/usr/bin:/bin:/usr/sbin:/sbin"
+        run(app / "Contents/Frameworks/clamav/freshclam", "--version",
+            cwd=mount.parent, env=environment, timeout=20)
         converter = app / "Contents/Resources/importers/pff-converter/pff-converter"
         with tempfile.TemporaryDirectory(prefix="pff-mounted-test-") as temporary:
             receipt = Path(temporary) / "receipt.json"
@@ -321,6 +327,41 @@ def clamav_bundle_arguments(work: Path) -> list[str]:
     return arguments
 
 
+def clamav_openssl_sources() -> tuple[Path, Path]:
+    """Find the OpenSSL pair against which the installed ClamAV was linked."""
+    commands = run("/usr/bin/otool", "-l", library_path(), capture_output=True, text=True).stdout
+    dependencies = load_dependencies(commands)
+    names = ("libssl.3.dylib", "libcrypto.3.dylib")
+    sources = []
+    for name in names:
+        matches = [Path(value) for value in dependencies if Path(value).name == name]
+        if len(matches) != 1 or not matches[0].is_absolute() or not matches[0].is_file():
+            raise RuntimeError(f"ClamAV does not have one installed {name} dependency")
+        sources.append(matches[0])
+    if sources[0].resolve().parent != sources[1].resolve().parent:
+        raise RuntimeError("ClamAV's OpenSSL libraries do not come from one installation")
+    return sources[0], sources[1]
+
+
+def bundle_clamav_openssl(app: Path, signing_identity: str) -> None:
+    """Keep ClamAV's OpenSSL ABI instead of PyInstaller's basename-deduplicated pair."""
+    frameworks = app / "Contents/Frameworks"
+    ssl_source, crypto_source = clamav_openssl_sources()
+    ssl = frameworks / ssl_source.name
+    crypto = frameworks / crypto_source.name
+    for source, target in ((ssl_source, ssl), (crypto_source, crypto)):
+        if target.is_symlink():
+            target.unlink()
+        shutil.copy2(source, target)
+    commands = run("/usr/bin/otool", "-l", ssl, capture_output=True, text=True).stdout
+    for dependency in load_dependencies(commands):
+        if Path(dependency).name == crypto.name:
+            run("/usr/bin/install_name_tool", "-change", dependency, f"@loader_path/{crypto.name}", ssl)
+    options = [] if signing_identity == "-" else ["--options", "runtime", "--timestamp"]
+    for library in (crypto, ssl):
+        run("/usr/bin/codesign", "--force", "--sign", signing_identity, *options, library)
+
+
 def build(signing_identity: str, *, gui: bool = False, log_contents: bool = False) -> Path:
     output = ROOT / "dist"
     output.mkdir(exist_ok=True)
@@ -377,6 +418,7 @@ def build(signing_identity: str, *, gui: bool = False, log_contents: bool = Fals
         environment = release_safe_environment(os.environ, ("PYTHON",))
         run(*command, cwd=ROOT, env=environment)
         app = bundle_output / f"{APP_NAME}.app"
+        bundle_clamav_openssl(app, signing_identity)
         configure_bundle(app, signing_identity)
         dmg = output / dmg_filename(version("mailarchiver"), platform.machine(), signing_identity)
         candidate = work / "candidate.dmg"

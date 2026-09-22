@@ -2105,7 +2105,15 @@ docstring fails this check before packaging starts.
 dependencies, creates the app icon from the existing PNG, collects runtime
 resources and dependency notices, declares `.mailarchive` document registration,
 and signs the resulting bundle ad-hoc unless a signing identity was supplied
-or both optional signing secrets are present. `scripts/macos_signing.py` imports
+or both optional signing secrets are present. After PyInstaller collection, the
+builder replaces its deduplicated OpenSSL pair with the two libraries named by
+the installed ClamAV engine, rewrites `libssl` to load the adjacent `libcrypto`,
+and signs both before resealing the app. This avoids an older Python-provided
+`libssl.3.dylib` lacking symbols required by ClamAV; the mounted self-test
+still checks actual native loading. The builder also re-signs `freshclam` as a
+child executable, disabling hardened-runtime Team-ID validation for ad-hoc
+development images. The mounted test launches its `--version` command to
+verify that the updater and its bundled libraries load. `scripts/macos_signing.py` imports
 `APPLE_CERTIFICATE_P12_BASE64` using `APPLE_CERTIFICATE_PASSWORD` into a temporary
 keychain, selects exactly one valid Developer ID Application identity, and
 restores the original keychain search list and deletes the imported key in

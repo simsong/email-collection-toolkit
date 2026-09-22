@@ -76,6 +76,8 @@ that remains after the five-second shutdown grace period fails the build with
 a thread dump; a printed test report alone is not evidence of process exit.
 It verifies the code-signature seal and always attempts to detach the volume.
 It also audits every bundled Mach-O file for external non-system library paths.
+The builder keeps ClamAV's matching OpenSSL libraries when PyInstaller would
+otherwise choose same-named copies from another dependency.
 Ejection retries briefly if macOS still holds the volume; cleanup is nonrecursive
 and never traverses a still-mounted filesystem.
 Only a passing candidate replaces the prior DMG. JSON test reports sit beside

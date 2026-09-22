@@ -125,6 +125,35 @@ def test_scanner_failure_never_silently_imports_unscanned(tmp_path: Path) -> Non
 
 
 @pytest.mark.skipif(sys.platform != "darwin", reason="Mach-O linkage requires Apple's toolchain")
+def test_clamav_bundles_its_matching_openssl_pair(tmp_path: Path) -> None:
+    """Requirement: PyInstaller's OpenSSL choice cannot replace ClamAV's linked ABI."""
+    from mailarchiver.clamav_definitions import library_path
+
+    if not library_path().is_file():
+        pytest.skip("ClamAV is not installed")
+    scripts = str(ROOT / "scripts")
+    sys.path.insert(0, scripts)
+    try:
+        from build_macos import bundle_clamav_openssl, clamav_openssl_sources, load_dependencies
+    finally:
+        sys.path.remove(scripts)
+    ssl_source, crypto_source = clamav_openssl_sources()
+    frameworks = tmp_path / "Fixture.app/Contents/Frameworks"
+    frameworks.mkdir(parents=True)
+    ssl = frameworks / ssl_source.name
+    crypto = frameworks / crypto_source.name
+    ssl.write_bytes(b"older PyInstaller choice")
+    crypto.write_bytes(b"older PyInstaller choice")
+    bundle_clamav_openssl(tmp_path / "Fixture.app", "-")
+    assert crypto.read_bytes() == crypto_source.read_bytes()
+    assert ssl.stat().st_size > len(b"older PyInstaller choice")
+    commands = subprocess.run(["/usr/bin/otool", "-l", str(ssl)], check=True, capture_output=True, text=True).stdout
+    assert f"@loader_path/{crypto.name}" in load_dependencies(commands)
+    for library in (crypto, ssl):
+        subprocess.run(["/usr/bin/codesign", "--verify", "--strict", str(library)], check=True)
+
+
+@pytest.mark.skipif(sys.platform != "darwin", reason="Mach-O linkage requires Apple's toolchain")
 def test_dependency_audit_rejects_external_rpath(tmp_path: Path) -> None:
     """Requirement: an @rpath dependency cannot hide a build-machine LC_RPATH."""
     import shutil

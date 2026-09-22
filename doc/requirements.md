@@ -1856,6 +1856,10 @@ the source archive and checksum the final image. Missing protected signing or
 notarization credentials must fail release assembly; an unsigned development
 DMG must never be published as a release. The archive extension is declared in
 the bundle's document-type metadata.
+The bundled ClamAV engine and updater must load against the matching OpenSSL
+libraries from their ClamAV installation, not an older same-named library
+selected from another Python dependency. The mounted DMG self-test must fail
+when the native scanner or bundled `freshclam` updater cannot load.
 
 Package metadata and the About window use one canonical PEP 440 version:
 `1.0.0a3` is the current alpha and its annotated Git tag is `v1.0.0a3`.

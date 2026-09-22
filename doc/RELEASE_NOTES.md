@@ -4,6 +4,11 @@
 
 ## Unreleased
 
+* Package ClamAV with its matching OpenSSL libraries so the mounted macOS app
+  can load the antivirus engine. Validate that the bundled `freshclam` updater
+  launches. Record mounted DMG contents and report native loader errors when
+  release validation fails.
+
 * Clarify GPLv2-only versus GPLv2-or-later linking compatibility with LGPLv3.
   The separate converter uses GPLv3 for project-owned code; upstream pypff/libpff
   remains LGPLv3-or-later and does not require relicensing.
