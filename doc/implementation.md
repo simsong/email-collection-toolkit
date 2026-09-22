@@ -30,6 +30,12 @@ an installed database if available. The DMG bundles this copy, the engine and
 FreshClam; release CI refreshes the definitions first. Its mounted self-test runs
 real clean/EICAR scans using the bundled definitions. Application releases refresh
 bundled definitions at least quarterly.
+Before signature/dependency checks and the mounted self-test, the DMG validator
+writes `dist/<DMG stem>.contents.json` with relative paths, sizes, and symlink
+targets for every mounted file/link. The release job uploads this inventory with
+its packaging reports even if validation fails. It separately checks for the
+bundled `libclamav.dylib`; if present but unloadable, the scanner reports the
+native loader's underlying error (PyInstaller's generic wrapper hides it).
 
 ## CI and release validation
 

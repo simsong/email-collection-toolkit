@@ -16,11 +16,13 @@ import time
 from contextlib import contextmanager
 from importlib.metadata import distribution, version
 from pathlib import Path
+from typing import Literal
 
 from mailarchiver.self_test import SelfTestReport
 from mailarchiver.clamav_definitions import DEVELOPMENT_DATABASE, certificates_path, library_path, read_definitions, updater_path
 from packaging.requirements import Requirement
 from packaging.utils import canonicalize_name
+from pydantic import BaseModel
 
 from dmg_layout import create_image, verify_layout
 from macos_signing import (
@@ -53,6 +55,31 @@ PLIST_TAGS = "UTTypeTagSpecification"
 PLIST_EXTENSION = "public.filename-extension"
 COPYRIGHT = "Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved."
 MACHO_MAGIC = {bytes.fromhex(value) for value in ("feedface", "cefaedfe", "feedfacf", "cffaedfe", "cafebabe", "bebafeca", "cafebabf", "bfbafeca")}
+
+
+class ImageEntry(BaseModel):
+    path: str
+    kind: Literal["file", "symlink"]
+    size_bytes: int | None = None
+    target: str | None = None
+
+
+class ImageContents(BaseModel):
+    entries: list[ImageEntry]
+
+
+def record_image_contents(mount: Path, destination: Path) -> None:
+    """Preserve a relative mounted-file inventory even when a later self-test fails."""
+    entries = []
+    for path in sorted(mount.rglob("*")):
+        relative = path.relative_to(mount).as_posix()
+        if path.is_symlink():
+            entries.append(ImageEntry(path=relative, kind="symlink", target=os.readlink(path)))
+        elif path.is_file():
+            entries.append(ImageEntry(path=relative, kind="file", size_bytes=path.stat().st_size))
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    destination.write_text(ImageContents(entries=entries).model_dump_json(indent=2) + "\n", encoding="utf-8")
+    print(f"Recorded {len(entries)} mounted DMG files and links: {destination}", flush=True)
 
 
 def run(*arguments: str | Path, **kwargs) -> subprocess.CompletedProcess:
@@ -139,10 +166,15 @@ def mounted_image(dmg: Path):
                 pass
 
 
-def test_image(dmg: Path, *, gui: bool = False) -> None:
+def test_image(dmg: Path, *, gui: bool = False, manifest_path: Path | None = None) -> None:
     """Mount read-only and test the actual bundle outside the source checkout."""
     with mounted_image(dmg) as mount:
+        manifest = manifest_path or ROOT / "dist" / f"{dmg.stem}.contents.json"
+        record_image_contents(mount, manifest)
         app = mount / f"{APP_NAME}.app"
+        library = app / "Contents/Frameworks/clamav/libclamav.dylib"
+        if not library.is_file():
+            raise RuntimeError(f"Bundled ClamAV library is missing: {library}; see {manifest}")
         run("/usr/bin/codesign", "--verify", "--deep", "--strict", app)
         if not (mount / "Applications").is_symlink() or os.readlink(mount / "Applications") != "/Applications":
             raise RuntimeError("DMG is missing its Applications shortcut")
@@ -345,7 +377,7 @@ def build(signing_identity: str, *, gui: bool = False) -> Path:
         candidate = work / "candidate.dmg"
         create_image(app, app_icon, candidate, work)
         # Keep a previous artifact until the requested mounted tests have passed.
-        test_image(candidate, gui=gui)
+        test_image(candidate, gui=gui, manifest_path=dmg.with_suffix(".contents.json"))
         sign_image(candidate, signing_identity)
         candidate.replace(dmg)
         for mode in (("self-test", "self-test-gui") if gui else ("self-test",)):

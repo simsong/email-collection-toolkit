@@ -441,6 +441,11 @@ recorded in THIRD_PARTY_NOTICES.md.
 * Development definitions live in ignored `etc/clamdb/`. `make freshclam` seeds
   that directory from an installed database when available, then refreshes it.
   The DMG bundles that project copy; release CI runs `make freshclam` before building.
+  Before running the mounted app self-test, DMG validation records every mounted
+  file and symlink in a retained inventory and checks that `libclamav.dylib` is
+  present. A present library rejected by the native loader must report the
+  underlying loader error, not misidentify it as a missing file. A failed
+  self-test never publishes the candidate DMG.
 * `ingest --workers N` controls the number of source containers ingested
   simultaneously. Its default is the detected CPU count capped at eight, and
   `N` must be positive. Each worker reads and parses its mailfile and submits

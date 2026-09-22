@@ -18,9 +18,23 @@ CL_SCAN_GENERAL_HEURISTICS = 0x4
 CL_SCAN_HEURISTIC_INCOMPLETE = 0xC4
 
 
+def load_library(library: Path) -> c.CDLL:
+    """Distinguish a missing engine from a present binary rejected by the native loader."""
+    if not library.is_file():
+        raise FileNotFoundError(f"ClamAV library is missing or not a file: {library}")
+    try:
+        return c.CDLL(str(library))
+    except OSError as error:
+        cause = error
+        while cause.__cause__ is not None:
+            cause = cause.__cause__
+        raise OSError(f"ClamAV library is present ({library.stat().st_size} bytes) but cannot be loaded: "
+                      f"{library}: {cause}") from error
+
+
 @lru_cache(maxsize=4)
 def engine_version(library: Path) -> str:
-    native = c.CDLL(str(library))
+    native = load_library(library)
     native.cl_retver.restype = c.c_char_p
     return native.cl_retver().decode("ascii")
 
@@ -34,7 +48,7 @@ class Engine:
     """Own one compiled engine; never turn a native error into a clean verdict."""
 
     def __init__(self, library: Path, definitions: DefinitionSet, temporary_directory: Path) -> None:
-        self.lib = c.CDLL(str(library))
+        self.lib = load_library(library)
         self.definitions = definitions
         self.engine = None
         self.lib.cl_retver.restype = c.c_char_p

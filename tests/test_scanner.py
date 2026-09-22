@@ -4,12 +4,15 @@ from __future__ import annotations
 
 import base64
 import hashlib
+import subprocess
+import sys
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import pytest
 
 from mailarchiver.clamav_update import EICAR
+from mailarchiver.libclamav import load_library
 from mailarchiver.processing.contracts import ScanFailure
 from mailarchiver.scanner import ClamScanner, ClamScannerStartupError, scan_message
 
@@ -42,10 +45,46 @@ def test_library_startup_failure_has_diagnostics_and_no_worker(tmp_path: Path, i
     if invalid_library:
         library.write_bytes(b"invalid native library")
     instance = ClamScanner(library=library)
-    with pytest.raises(ClamScannerStartupError, match="libclamav"):
+    with pytest.raises(ClamScannerStartupError, match="libclamav") as failure:
         instance.__enter__()
+    assert ("present" if invalid_library else "missing or not a file") in str(failure.value)
     assert instance.process is None
     assert instance.connection is None
+
+
+def test_native_loader_distinguishes_missing_from_present_but_unloadable(tmp_path: Path) -> None:
+    """A failed packaged scanner must not misreport every dlopen error as a missing dylib."""
+    library = tmp_path / "libclamav.dylib"
+    with pytest.raises(FileNotFoundError, match="missing or not a file"):
+        load_library(library)
+    library.write_bytes(b"not a dynamic library")
+    with pytest.raises(OSError, match=r"present \(21 bytes\) but cannot be loaded") as failure:
+        load_library(library)
+    assert "libclamav.dylib" in str(failure.value)
+    assert failure.value.__cause__ is not None
+
+
+def test_pyinstaller_loader_reports_its_native_cause(tmp_path: Path) -> None:
+    """The frozen ctypes hook must not hide dlopen's actual failure behind its generic hint."""
+    library = tmp_path / "libclamav.dylib"
+    library.write_bytes(b"not a dynamic library")
+    code = """import sys
+from pathlib import Path
+sys._MEIPASS = sys.argv[1]
+from PyInstaller.loader.pyimod03_ctypes import install
+install()
+from mailarchiver.libclamav import load_library
+try:
+    load_library(Path(sys.argv[2]))
+except OSError as error:
+    print(error)
+else:
+    raise AssertionError('invalid dylib loaded')
+"""
+    result = subprocess.run([sys.executable, "-c", code, str(tmp_path), str(library)],
+                            capture_output=True, text=True, check=True)
+    assert "present (21 bytes) but cannot be loaded" in result.stdout
+    assert "Most likely this dynlib/dll was not found" not in result.stdout
 
 
 def test_startup_deadline_reaps_worker() -> None:
