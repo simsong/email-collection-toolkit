@@ -6,15 +6,40 @@
 from __future__ import annotations
 
 import argparse
-import re
 import subprocess
 import tomllib
 from pathlib import Path
 
+from packaging.version import InvalidVersion, Version
 
-def expected_tag(version: str) -> str:
-    beta = re.fullmatch(r"(\d+\.\d+\.\d+)b(\d+)", version)
-    return f"v{beta.group(1)}-beta{beta.group(2)}" if beta else f"v{version}"
+PREVIEW_CHANNEL = "preview"
+RELEASE_CHANNEL = "release"
+ALPHA = "a"
+BETA = "b"
+PREVIEW_STAGES = {ALPHA, BETA}
+
+
+def release_metadata(version_text: str) -> tuple[str, str, int, str]:
+    """Map one PEP 440 release version to its public tag, track, and Sparkle build."""
+    try:
+        version = Version(version_text)
+    except InvalidVersion as error:
+        raise ValueError(f"invalid PEP 440 version: {version_text}") from error
+    if str(version) != version_text:
+        raise ValueError("release version must use canonical PEP 440 spelling")
+    if version.epoch or len(version.release) != 3 or version.dev or version.post or version.local:
+        raise ValueError("releases must use MAJOR.MINOR.PATCH, optionally followed by aN or bN")
+    major, minor, patch = version.release
+    if any(value > 999 for value in version.release):
+        raise ValueError("release components must be at most 999")
+    base = major * 1_000_000_000 + minor * 1_000_000 + patch * 1_000
+    if version.pre is None:
+        return f"v{version}", RELEASE_CHANNEL, base + 900, str(version)
+    stage, sequence = version.pre
+    if stage not in PREVIEW_STAGES or not 1 <= sequence <= 399:
+        raise ValueError("preview releases must use a1 through a399 or b1 through b399")
+    offset = 100 if stage == ALPHA else 500
+    return f"v{version}", PREVIEW_CHANNEL, base + offset + sequence, str(version)
 
 
 def main() -> int:
@@ -24,7 +49,10 @@ def main() -> int:
     args = parser.parse_args()
     metadata = tomllib.loads(Path("pyproject.toml").read_text(encoding="utf-8"))
     version = metadata["project"]["version"]
-    expected = expected_tag(version)
+    try:
+        expected, channel, sparkle_version, display_version = release_metadata(version)
+    except ValueError as error:
+        parser.error(str(error))
     if args.tag != expected:
         parser.error(f"{args.tag} does not match pyproject version {version}; expected {expected}")
     if args.require_annotated:
@@ -34,7 +62,8 @@ def main() -> int:
         ).stdout.strip()
         if tag_type != "tag":
             parser.error(f"{args.tag} must be an annotated tag")
-    print(f"version={version} tag={args.tag}")
+    print(f"version={version} tag={args.tag} channel={channel} sparkle_version={sparkle_version} "
+          f"display_version={display_version}")
     return 0
 
 

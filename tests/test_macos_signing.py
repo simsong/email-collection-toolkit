@@ -6,6 +6,7 @@ import base64
 import os
 import subprocess
 import sys
+import xml.etree.ElementTree as xml
 from pathlib import Path
 
 import pytest
@@ -13,9 +14,11 @@ from pydantic import SecretStr
 from yaml import safe_load
 
 from scripts.macos_signing import (
-    CERTIFICATE_SECRET, GITHUB_ACTIONS, PASSWORD_SECRET, RUNNER_ENVIRONMENT, SigningSecrets, developer_identity,
-    dmg_filename, security_command, sign_image, signing_identity,
+    CERTIFICATE_SECRET, GITHUB_ACTIONS, NOTARY_ISSUER_SECRET, NOTARY_KEY_ID_SECRET, NOTARY_PRIVATE_KEY_SECRET,
+    PASSWORD_SECRET, RUNNER_ENVIRONMENT, SPARKLE_PRIVATE_KEY_SECRET, NotarizationCredentials, SigningSecrets, developer_identity,
+    dmg_filename, release_safe_environment, security_command, sign_image, signing_identity,
 )
+from scripts.update_appcast import AppcastRelease, SignedArchive, append_item
 
 FINGERPRINT = "0123456789ABCDEF0123456789ABCDEF01234567"
 IDENTITY_LINE = f'  1) {FINGERPRINT} "Developer ID Application: Fixture (ABCDEFGHIJ)"'
@@ -62,6 +65,38 @@ def test_wrapped_base64_preserves_exported_bytes() -> None:
     encoded = base64.encodebytes(original).decode("ascii")
     credentials = SigningSecrets(certificate=SecretStr(encoded), password=SecretStr("p12-password"))
     assert credentials.available and credentials.decode() == original
+
+
+def test_notarization_credentials_require_a_complete_pem_api_key() -> None:
+    """Release notarization rejects incomplete and malformed credentials before tool execution."""
+    credentials = NotarizationCredentials.from_environment({NOTARY_KEY_ID_SECRET: "key"})
+    assert not credentials.available
+    with pytest.raises(RuntimeError, match="requires all protected"):
+        credentials.decoded_private_key()
+    credentials = NotarizationCredentials.from_environment({
+        NOTARY_KEY_ID_SECRET: "key", NOTARY_ISSUER_SECRET: "issuer",
+        NOTARY_PRIVATE_KEY_SECRET: base64.b64encode(b"not a private key").decode(),
+    })
+    with pytest.raises(ValueError, match="not a PEM"):
+        credentials.decoded_private_key()
+    credentials = NotarizationCredentials.from_environment({
+        NOTARY_KEY_ID_SECRET: "key", NOTARY_ISSUER_SECRET: "issuer",
+        NOTARY_PRIVATE_KEY_SECRET: base64.b64encode(b"-----BEGIN PRIVATE KEY-----").decode(),
+    })
+    with pytest.raises(ValueError, match="not a PEM"):
+        credentials.decoded_private_key()
+
+
+def test_release_children_never_receive_signing_or_notarization_credentials() -> None:
+    """PyInstaller and mounted tests must not receive credentials from a release job."""
+    environment = release_safe_environment({
+        CERTIFICATE_SECRET: "certificate", PASSWORD_SECRET: "password",
+        NOTARY_KEY_ID_SECRET: "key", NOTARY_ISSUER_SECRET: "issuer",
+        NOTARY_PRIVATE_KEY_SECRET: "private-key", SPARKLE_PRIVATE_KEY_SECRET: "sparkle-key",
+        "PYTHONPATH": "/build/python",
+        "PATH": "/usr/bin:/bin", "UNRELATED": "retained",
+    }, ("PYTHON",))
+    assert environment == {"PATH": "/usr/bin:/bin", "UNRELATED": "retained"}
 
 
 @pytest.mark.parametrize("output", ["0 valid identities found", IDENTITY_LINE + " (CSSMERR_TP_CERT_EXPIRED)",
@@ -144,8 +179,13 @@ def test_release_waits_for_exact_dmg_before_checksumming() -> None:
     assert steps[download][WITH][NAME] == "macos-dmg"
     assert "*.dmg" in steps[checksum][RUN]
     secret_steps = [step for step in macos[STEPS] if CERTIFICATE_SECRET in step.get(ENV, {})]
-    assert len(secret_steps) == 1 and secret_steps[0][RUN] == "make dmg"
+    assert len(secret_steps) == 1
+    assert secret_steps[0][RUN].splitlines()[0] == "make dmg"
     assert PASSWORD_SECRET in secret_steps[0][ENV]
+    assert {NOTARY_KEY_ID_SECRET, NOTARY_ISSUER_SECRET, NOTARY_PRIVATE_KEY_SECRET} <= set(secret_steps[0][ENV])
+    assert "make notarize-dmg" in secret_steps[0][RUN]
+    assert "-maxdepth" not in secret_steps[0][RUN]
+    assert "for candidate in dist/*.dmg" in secret_steps[0][RUN]
     assert macos[RUNS_ON] == "macos-15"
     assert secret_steps[0][CONDITION] == "${{ runner.environment == 'github-hosted' }}"
     for job in (assembly, macos):
@@ -195,3 +235,47 @@ def test_release_accepts_unsigned_annotated_tags_and_checks_commit_and_version(
                                      "--tag", tag, "--require-annotated"], cwd=tmp_path,
                                     capture_output=True, text=True, check=False)
         assert (result.returncode == 0) == accepted, result.stderr
+
+
+@pytest.mark.parametrize(("version", "tag", "channel", "sparkle_version"), [
+    ("1.0.0a2", "v1.0.0a2", "preview", 1_000_000_102),
+    ("1.0.0b1", "v1.0.0b1", "preview", 1_000_000_501),
+    ("1.0.0", "v1.0.0", "release", 1_000_000_900),
+])
+def test_release_version_maps_to_a_single_public_track(
+    version: str, tag: str, channel: str, sparkle_version: int,
+) -> None:
+    """A release tag maps PEP 440 prereleases to preview and stable versions to release."""
+    from scripts.release_tag import release_metadata
+
+    assert release_metadata(version)[:3] == (tag, channel, sparkle_version)
+
+
+@pytest.mark.parametrize("version", [
+    "not-a-version", "1.0", "1.0.0-alpha.2", "1.0.0a0", "1.0.0a400", "1.0.0rc1", "1.0.0.dev1",
+    "1.0.0+local",
+])
+def test_release_version_rejects_noncanonical_or_unsupported_pep_440_forms(version: str) -> None:
+    """Version policy accepts only canonical stable, alpha, and beta PEP 440 releases."""
+    from scripts.release_tag import release_metadata
+
+    with pytest.raises(ValueError):
+        release_metadata(version)
+
+
+def test_appcast_keeps_preview_items_out_of_the_default_release_track(tmp_path: Path) -> None:
+    """A signed preview archive receives Sparkle's preview channel; stable does not."""
+    appcast = tmp_path / "appcast.xml"
+    appcast.write_text("<rss><channel /></rss>")
+    archive = SignedArchive(signature="signature", length=1)
+    append_item(appcast, AppcastRelease(tag="v1.0.0a2", channel="preview", sparkle_version=100,
+                                        display_version="1.0.0a2", url="https://example.test/alpha.dmg",
+                                        archive=archive))
+    append_item(appcast, AppcastRelease(tag="v1.0.0", channel="release", sparkle_version=900,
+                                        display_version="1.0.0", url="https://example.test/release.dmg",
+                                        archive=archive))
+    tree = xml.parse(appcast)
+    items = tree.findall("channel/item")
+    assert items[0].findtext("guid") == "v1.0.0"
+    assert items[0].find("{http://www.andymatuschak.org/xml-namespaces/sparkle}channel") is None
+    assert items[1].findtext("{http://www.andymatuschak.org/xml-namespaces/sparkle}channel") == "preview"

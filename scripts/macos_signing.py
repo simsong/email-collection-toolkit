@@ -20,6 +20,14 @@ from pydantic import BaseModel, SecretStr
 
 CERTIFICATE_SECRET = "APPLE_CERTIFICATE_P12_BASE64"
 PASSWORD_SECRET = "APPLE_CERTIFICATE_PASSWORD"
+NOTARY_KEY_ID_SECRET = "APPLE_NOTARY_KEY_ID"
+NOTARY_ISSUER_SECRET = "APPLE_NOTARY_ISSUER_ID"
+NOTARY_PRIVATE_KEY_SECRET = "APPLE_NOTARY_PRIVATE_KEY_BASE64"
+SPARKLE_PRIVATE_KEY_SECRET = "SPARKLE_ED25519_PRIVATE_KEY_BASE64"
+PEM_PRIVATE_KEY_BEGIN = b"-----BEGIN PRIVATE KEY-----"
+PEM_PRIVATE_KEY_END = b"-----END PRIVATE KEY-----"
+RELEASE_SECRET_NAMES = (CERTIFICATE_SECRET, PASSWORD_SECRET, NOTARY_KEY_ID_SECRET, NOTARY_ISSUER_SECRET,
+                        NOTARY_PRIVATE_KEY_SECRET, SPARKLE_PRIVATE_KEY_SECRET)
 GITHUB_ACTIONS = "GITHUB_ACTIONS"
 RUNNER_ENVIRONMENT = "RUNNER_ENVIRONMENT"
 EXPLICIT_UNSIGNED_WARNING = (
@@ -61,6 +69,45 @@ class SigningSecrets(BaseModel):
         if not decoded:
             raise ValueError("Signing certificate secret is empty")
         return decoded
+
+
+def release_safe_environment(environment: Mapping[str, str], prefixes: tuple[str, ...]) -> dict[str, str]:
+    """Keep release credentials and build-machine Python paths out of child processes."""
+    return {key: value for key, value in environment.items()
+            if key not in RELEASE_SECRET_NAMES and not key.startswith(prefixes)}
+
+
+class NotarizationCredentials(BaseModel):
+    """App Store Connect API-key material used only while submitting a DMG."""
+
+    key_id: SecretStr = SecretStr("")
+    issuer_id: SecretStr = SecretStr("")
+    private_key: SecretStr = SecretStr("")
+
+    @classmethod
+    def from_environment(cls, environment: Mapping[str, str]) -> NotarizationCredentials:
+        return cls(key_id=SecretStr(environment.get(NOTARY_KEY_ID_SECRET, "")),
+                   issuer_id=SecretStr(environment.get(NOTARY_ISSUER_SECRET, "")),
+                   private_key=SecretStr(environment.get(NOTARY_PRIVATE_KEY_SECRET, "")))
+
+    @property
+    def available(self) -> bool:
+        return all((self.key_id.get_secret_value().strip(), self.issuer_id.get_secret_value().strip(),
+                    self.private_key.get_secret_value().strip()))
+
+    def decoded_private_key(self) -> bytes:
+        """Reject absent or malformed credentials before invoking Apple's tools."""
+        if not self.available:
+            raise RuntimeError("Apple notarization requires all protected App Store Connect API-key secrets")
+        try:
+            encoded = "".join(self.private_key.get_secret_value().split())
+            private_key = base64.b64decode(encoded, validate=True)
+        except (ValueError, binascii.Error):
+            raise ValueError("Apple notarization private-key secret is not valid Base64") from None
+        if not (private_key.startswith(PEM_PRIVATE_KEY_BEGIN)
+                and private_key.rstrip().endswith(PEM_PRIVATE_KEY_END)):
+            raise ValueError("Apple notarization private-key secret is not a PEM private key")
+        return private_key
 
 
 def developer_identity(output: str) -> str:
@@ -141,3 +188,31 @@ def sign_image(image: Path, identity: str) -> None:
     if identity != "-":
         subprocess.run(["/usr/bin/codesign", "--force", "--sign", identity, "--timestamp", str(image)], check=True)
         subprocess.run(["/usr/bin/codesign", "--verify", "--strict", str(image)], check=True)
+
+
+def notarize_image(image: Path, credentials: NotarizationCredentials, work_root: Path) -> None:
+    """Submit a signed DMG, staple Apple's ticket, and require Gatekeeper acceptance."""
+    if not image.is_file() or image.suffix != ".dmg":
+        raise ValueError("Apple notarization requires an existing DMG")
+    private_key = credentials.decoded_private_key()
+    work_root.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(prefix="notary-", dir=work_root) as temporary:
+        key_path = Path(temporary) / f"AuthKey_{credentials.key_id.get_secret_value().strip()}.p8"
+        with key_path.open("xb") as handle:
+            os.chmod(key_path, 0o600)
+            handle.write(private_key)
+        command = ["/usr/bin/xcrun", "notarytool", "submit", str(image), "--key", str(key_path),
+                   "--key-id", credentials.key_id.get_secret_value().strip(), "--issuer",
+                   credentials.issuer_id.get_secret_value().strip(), "--wait"]
+        try:
+            subprocess.run(["/usr/bin/codesign", "--verify", "--strict", str(image)], check=True,
+                           capture_output=True, text=True, timeout=120)
+            subprocess.run(command, check=True, capture_output=True, text=True, timeout=1800)
+            subprocess.run(["/usr/bin/xcrun", "stapler", "staple", str(image)], check=True,
+                           capture_output=True, text=True, timeout=300)
+            subprocess.run(["/usr/bin/xcrun", "stapler", "validate", str(image)], check=True,
+                           capture_output=True, text=True, timeout=120)
+            subprocess.run(["/usr/sbin/spctl", "--assess", "--type", "open", "--verbose=4", str(image)],
+                           check=True, capture_output=True, text=True, timeout=120)
+        except (OSError, subprocess.SubprocessError):
+            raise RuntimeError("Apple notarization, stapling, or Gatekeeper validation failed") from None

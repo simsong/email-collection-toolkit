@@ -113,6 +113,12 @@ TIKA_DOWNLOAD_DIR ?= $(CURDIR)/.tools/tika/downloads
 TIKA_ARCHIVE := $(TIKA_DOWNLOAD_DIR)/tika-app-$(TIKA_VERSION).zip
 TIKA_SHA512 := $(TIKA_ARCHIVE).sha512
 TIKA_URL := https://downloads.apache.org/tika/$(TIKA_VERSION)/tika-app-$(TIKA_VERSION).zip
+SPARKLE_VERSION ?= 2.10.0
+SPARKLE_DIR ?= $(CURDIR)/.tools/sparkle/$(SPARKLE_VERSION)
+SPARKLE_DOWNLOAD_DIR ?= $(CURDIR)/.tools/sparkle/downloads
+SPARKLE_ARCHIVE := $(SPARKLE_DOWNLOAD_DIR)/Sparkle-$(SPARKLE_VERSION).tar.xz
+SPARKLE_URL := https://github.com/sparkle-project/Sparkle/releases/download/$(SPARKLE_VERSION)/Sparkle-$(SPARKLE_VERSION).tar.xz
+SPARKLE_SHA256 := c2bf58aa8387266ac179357b1415d6f2635f044da8be41042af32425dae6da0c
 PLAYWRIGHT_INSTALL_ARGS ?= chromium
 NATIVE_GUI_ARTIFACT_DIR ?= $(CURDIR)/.tmp/native-gui-diagnostics
 AUDIT_OUTPUT ?= $(CURDIR)/.tmp/data-quality-audit
@@ -162,7 +168,29 @@ pyright:
 syntax-check:
 	uv run python -m compileall -q src scripts tests e2e_tests
 
-.PHONY: dmg dmg-signed list-signatures check-release test-dmg preview-dmg self-test self-test-gui test-packaging
+.PHONY: sparkle-tools sparkle-keys
+sparkle-tools:
+	@mkdir -p "$(SPARKLE_DOWNLOAD_DIR)"
+	@test -f "$(SPARKLE_ARCHIVE)" || curl --fail --location --output "$(SPARKLE_ARCHIVE)" "$(SPARKLE_URL)"
+	@printf '%s  %s\n' "$(SPARKLE_SHA256)" "$(SPARKLE_ARCHIVE)" | shasum -a 256 -c -
+	@if test -e "$(SPARKLE_DIR)"; then \
+		test -x "$(SPARKLE_DIR)/bin/generate_keys" -a -x "$(SPARKLE_DIR)/bin/sign_update" || { echo "incomplete Sparkle tools directory: $(SPARKLE_DIR)" >&2; exit 1; }; \
+	else \
+		mkdir -p "$(SPARKLE_DIR)"; \
+		tar -xJf "$(SPARKLE_ARCHIVE)" --strip-components=1 -C "$(SPARKLE_DIR)"; \
+		test -x "$(SPARKLE_DIR)/bin/generate_keys" -a -x "$(SPARKLE_DIR)/bin/sign_update"; \
+	fi
+
+sparkle-keys: sparkle-tools
+	"$(SPARKLE_DIR)/bin/generate_keys"
+
+.PHONY: update-appcast
+update-appcast:
+	@test -n "$(ARCHIVE)" -a -n "$(RELEASE_TAG)" -a -n "$(RELEASE_URL)" || { echo 'usage: make update-appcast ARCHIVE=/path/to/image.dmg RELEASE_TAG=v1.0.0 RELEASE_URL=https://example.invalid/image.dmg'; exit 2; }
+	@test -x "$(SPARKLE_DIR)/bin/sign_update" -a -x .venv/bin/python || { echo 'run make sparkle-tools and uv sync before update-appcast'; exit 2; }
+	.venv/bin/python scripts/update_appcast.py --appcast "$(or $(APPCAST),website/static/updates/mac/appcast.xml)" --archive "$(ARCHIVE)" --tag "$(RELEASE_TAG)" --url "$(RELEASE_URL)" --signer "$(SPARKLE_DIR)/bin/sign_update"
+
+.PHONY: dmg dmg-signed notarize-dmg list-signatures check-release test-dmg preview-dmg self-test self-test-gui test-packaging
 dmg: ruff syntax-check pst-importer mcti-scan pff-converter-bundle
 	uv run --group packaging python scripts/build_macos.py $(ARGS)
 
@@ -171,6 +199,10 @@ dmg-signed: SIGNING_IDENTITY ?= $(shell /usr/bin/security find-identity -v -p co
 dmg-signed:
 	@test -n "$(strip $(SIGNING_IDENTITY))" -a "$(strip $(SIGNING_IDENTITY))" != '-' || { echo 'No Developer ID Application identity selected. Run make list-signatures or set SIGNING_IDENTITY.' >&2; exit 2; }
 	$(MAKE) dmg ARGS='$(ARGS) --signing-identity "$(SIGNING_IDENTITY)"'
+
+notarize-dmg:
+	@test -n "$(DMG)" || { echo 'usage: make notarize-dmg DMG=/path/to/Email-Collection-Toolkit.dmg'; exit 2; }
+	uv run --group packaging python scripts/build_macos.py --notarize-dmg "$(DMG)"
 
 list-signatures:
 	/usr/bin/security find-identity -v -p codesigning
@@ -204,10 +236,14 @@ test-self-test: ruff
 
 .PHONY: test-signing
 test-signing: ruff
-	PYTHONPATH="$(CURDIR)" uv run --locked pylint scripts/macos_signing.py scripts/build_macos.py tests/test_macos_signing.py
-	uv run --locked ty check scripts/macos_signing.py scripts/build_macos.py tests/test_macos_signing.py --error-on-warning
-	uv run --locked pyright scripts/macos_signing.py scripts/build_macos.py tests/test_macos_signing.py --warnings
+	PYTHONPATH="$(CURDIR)" uv run --locked pylint scripts/macos_signing.py scripts/build_macos.py scripts/update_appcast.py tests/test_macos_signing.py
+	uv run --locked ty check scripts/macos_signing.py scripts/build_macos.py scripts/update_appcast.py tests/test_macos_signing.py --error-on-warning
+	uv run --locked pyright scripts/macos_signing.py scripts/build_macos.py scripts/update_appcast.py tests/test_macos_signing.py --warnings
 	uv run --locked pytest -q tests/test_macos_signing.py tests/test_website_scripts.py
+
+.PHONY: test-sparkle-signing
+test-sparkle-signing: sparkle-tools ruff
+	uv run --locked pytest -q tests/test_sparkle_signing.py
 
 compare-apple-mail:
 	uv run mailarchiver-compare-apple-mail --apple-mail "$(HOME)/Library/Mail" --archive "$(HOME)/mail-archive" $(ARGS)
@@ -295,7 +331,7 @@ website-build-check: website-check
 
 release-tag-check:
 	@test -n "$(GITHUB_REF_NAME)" || { echo 'usage: make release-tag-check GITHUB_REF_NAME=v1.2.3'; exit 2; }
-	uv run --no-project --python '>=3.12' python scripts/release_tag.py --tag "$(GITHUB_REF_NAME)" $(ARGS)
+	uv run --no-project --with packaging --python '>=3.12' python scripts/release_tag.py --tag "$(GITHUB_REF_NAME)" $(ARGS)
 
 test: pst-importer mcti-scan pff-converter test-pff-converter
 	uv run pytest -q

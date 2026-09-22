@@ -1513,9 +1513,8 @@ and links to his personal website, GitHub profile, and project repository.
 About links to `changelog.md`, a dated record of website changes distinct from
 application release notes. The 2026-09-07 entry records the storage-format
 wording correction and the new About/changelog pages.
-The release workflow follows the repository's draft-release
-pattern: it requires a version-matching annotated tag, builds a source
-distribution, writes `SHA256SUMS`, and creates a draft GitHub Release.
+The release workflow requires a version-matching annotated tag, builds a source
+distribution, writes `SHA256SUMS`, and publishes a GitHub Release.
 
 Result ordering is a server-side SQL whitelist over date, case-folded subject,
 or case-folded sender with a stable message-number tie break. The Tabulator
@@ -2114,15 +2113,17 @@ The builder signs and verifies the completed DMG before publishing the candidate
 Missing either secret emits `::warning::` and produces `*_UNSIGNED.dmg`; invalid
 configured credentials fail. An explicit `--signing-identity` overrides secrets;
 `-` emits a distinct warning identifying that deliberate unsigned override.
-The release workflow builds the DMG on `macos-15`, passes secrets only to
-`make dmg`, and waits for the headless-tested artifact before assembling the source and
-DMG checksums into a draft release. Assembly checks out the Mac job's verified
+The release workflow builds the DMG on `macos-15`, passes protected signing and
+App Store Connect notarization credentials only to its packaging step, submits
+the signed image through `make notarize-dmg`, staples and validates it, and then
+retests the mounted artifact before assembling the source and DMG checksums into
+a draft release. Missing credentials leave no publishable DMG and fail the
+release job. Assembly checks out the Mac job's verified
 commit and checks that the tag still names that commit. Both jobs validate the
 tag reference, checked-out commit, annotation, and project version before
 installing dependencies. Unsigned annotated tags are accepted without a public-key
 allowlist or GitHub signature verification. Repository permissions control
-workflow changes and release-tag creation. There is
-no automatic notarization. `make test-signing` runs ordered focused lint/type checks and
+workflow changes and release-tag creation. `make test-signing` runs ordered focused lint/type checks and
 regressions for credential selection, malformed input, identity ambiguity,
 unsigned naming/warnings, sanitized errors, shared-runner rejection, and release
 artifact ordering. A real Git fixture executes both workflow commit checks and
@@ -2130,6 +2131,37 @@ the tag/version validator: unsigned annotated tags pass; lightweight tags,
 version mismatches, and a different checked-out commit fail.
 Real Developer ID import/signing and hosted GUI execution require a credentialed
 Mac release trial; pure policy tests do not establish those properties.
+
+Release metadata is parsed with `packaging.version.Version`, rather than a
+home-grown version regular expression. Package metadata and About use its
+canonical spelling unchanged; Git adds only the `v` tag prefix. The supported
+forms are stable `MAJOR.MINOR.PATCH`, alpha `MAJOR.MINOR.PATCHaN`, and beta
+`MAJOR.MINOR.PATCHbN`; the parser rejects every other spelling or form. Alpha
+and beta releases use Sparkle's `preview` channel and stable releases use the
+default channel, with separate monotonically increasing numeric Sparkle build
+values. The fixed website appcast starts empty; the Sparkle publication step
+adds only a post-notarization, Ed25519-signed item.
+`make sparkle-tools` pins Sparkle 2.10.0 and its upstream SHA-256, then places
+the verified developer archive below `.tools/sparkle/`. `make sparkle-keys`
+calls Sparkle's local `generate_keys`; the key generator retains the private
+Ed25519 material in the developer's login Keychain and prints the public key.
+The ordinary test suite skips the real-signer integration when these developer
+tools are absent; `make test-sparkle-signing` installs them and requires that
+integration test to run during release assembly.
+The macOS bundle carries that public key and the fixed Pages appcast URL. The
+appcast writer invokes `sign_update --ed-key-file -` on the final stapled DMG,
+passing the protected exported Sparkle key only on standard input. Sparkle
+2.10 explicitly supports this stdin form. New-format exported seeds decode to
+32 bytes; legacy exports may decode to 64 bytes. Neither the key nor Apple's
+credentials reach PyInstaller or mounted-app test subprocesses.
+The release workflow creates a draft with the signed/notarized DMG, reads the
+existing appcast from `main`, signs and prepends the new item, and commits the
+feed to `main` with `[skip ci]`. It then publishes the draft, marking alpha and
+beta tags as prereleases, and explicitly dispatches Pages from `main`.
+GitHub's workflow token does not trigger a Pages run through its own commit or
+release event; the feed commit alone does not deploy a URL pointing at a draft asset.
+Preview entries have Sparkle's `preview` channel and stable entries remain in
+the default release channel.
 `scripts/desktop_entry.py` dispatches normal GUI launch, `--cli`, `--self-test`,
 and `--self-test-gui`. Frozen GUI resources use PyInstaller's bundle root;
 the verifier's actual `.py` source is explicitly bundled for archive installation.

@@ -24,3 +24,4 @@ validation/samconfig.toml
 /var/pst/
 
 /etc/clamdb/
+.tools/

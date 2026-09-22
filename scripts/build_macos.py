@@ -23,14 +23,23 @@ from packaging.requirements import Requirement
 from packaging.utils import canonicalize_name
 
 from dmg_layout import create_image, verify_layout
-from macos_signing import CERTIFICATE_SECRET, PASSWORD_SECRET, SigningSecrets, dmg_filename, sign_image, signing_identity
+from macos_signing import (
+    NotarizationCredentials, SigningSecrets, dmg_filename, notarize_image, release_safe_environment, sign_image,
+    signing_identity,
+)
+from release_tag import release_metadata
 
 ROOT = Path(__file__).resolve().parents[1]
 APP_NAME = "Email Collection Toolkit"
 IDENTIFIER = "net.simson.mailarchiver"
+SPARKLE_FEED_URL = "https://simsong.github.io/email-collection-toolkit/updates/mac/appcast.xml"
+SPARKLE_PUBLIC_KEY = "qkdXdvt9A3YjGYwpENGrEEBY7kp3hU+TIjhCz/b7cjw="
 PLIST_DOCUMENT_TYPES = "CFBundleDocumentTypes"
 PLIST_EXPORTED_TYPES = "UTExportedTypeDeclarations"
 PLIST_SHORT_VERSION = "CFBundleShortVersionString"
+PLIST_BUILD_VERSION = "CFBundleVersion"
+PLIST_SPARKLE_FEED_URL = "SUFeedURL"
+PLIST_SPARKLE_PUBLIC_KEY = "SUPublicEDKey"
 PLIST_COPYRIGHT = "NSHumanReadableCopyright"
 PLIST_TYPE_NAME = "CFBundleTypeName"
 PLIST_TYPE_ROLE = "CFBundleTypeRole"
@@ -69,7 +78,11 @@ def configure_bundle(app: Path, signing_identity: str) -> None:
     plist = app / "Contents/Info.plist"
     with plist.open("rb") as handle:
         info = plistlib.load(handle)
-    info[PLIST_SHORT_VERSION] = version("mailarchiver")
+    _, _, sparkle_version, display_version = release_metadata(version("mailarchiver"))
+    info[PLIST_SHORT_VERSION] = display_version
+    info[PLIST_BUILD_VERSION] = str(sparkle_version)
+    info[PLIST_SPARKLE_FEED_URL] = SPARKLE_FEED_URL
+    info[PLIST_SPARKLE_PUBLIC_KEY] = SPARKLE_PUBLIC_KEY
     info[PLIST_COPYRIGHT] = COPYRIGHT
     info[PLIST_DOCUMENT_TYPES] = [{
         PLIST_TYPE_NAME: "Mail Archive", PLIST_TYPE_ROLE: "Editor",
@@ -136,9 +149,8 @@ def test_image(dmg: Path, *, gui: bool = False) -> None:
         verify_dependencies(app)
         verify_layout(mount, app.name)
         executable = app / "Contents/MacOS" / APP_NAME
-        environment = {key: value for key, value in os.environ.items()
-                       if key not in (CERTIFICATE_SECRET, PASSWORD_SECRET)
-                       and not key.startswith(("PYTHON", "DYLD_", "MAILARCHIVER", "MAIL_ARCHIVE"))}
+        environment = release_safe_environment(
+            os.environ, ("PYTHON", "DYLD_", "MAILARCHIVER", "MAIL_ARCHIVE"))
         environment["PATH"] = "/usr/bin:/bin:/usr/sbin:/sbin"
         converter = app / "Contents/Resources/importers/pff-converter/pff-converter"
         with tempfile.TemporaryDirectory(prefix="pff-mounted-test-") as temporary:
@@ -325,8 +337,7 @@ def build(signing_identity: str, *, gui: bool = False) -> Path:
                    "--add-binary", f"{ROOT / 'target/release/mcti-scan'}:importers",
                    "--add-data", f"{ROOT / 'target/pff-converter'}:importers/pff-converter",
                    str(ROOT / "scripts/desktop_entry.py")]
-        environment = {key: value for key, value in os.environ.items()
-                       if key not in (CERTIFICATE_SECRET, PASSWORD_SECRET) and not key.startswith("PYTHON")}
+        environment = release_safe_environment(os.environ, ("PYTHON",))
         run(*command, cwd=ROOT, env=environment)
         app = bundle_output / f"{APP_NAME}.app"
         configure_bundle(app, signing_identity)
@@ -350,6 +361,7 @@ def main() -> None:
     parser.add_argument("--test-dmg", type=Path, help="mount and retest an existing DMG")
     parser.add_argument("--check-release", action="store_true", help="include the visible GUI self-test for release validation")
     parser.add_argument("--preview-dmg", type=Path, help="open the mounted installer in Finder until Return is pressed")
+    parser.add_argument("--notarize-dmg", type=Path, help="submit, staple, and validate an existing signed DMG")
     parser.add_argument("--signing-identity", help="existing Keychain identity; otherwise import optional signing secrets; '-' forces unsigned")
     args = parser.parse_args()
     if sys.platform != "darwin":
@@ -360,6 +372,9 @@ def main() -> None:
             input("Inspect the installer in Finder; press Return to eject: ")
     elif args.test_dmg:
         test_image(args.test_dmg.resolve(strict=True), gui=args.check_release)
+    elif args.notarize_dmg:
+        notarize_image(args.notarize_dmg.resolve(strict=True),
+                       NotarizationCredentials.from_environment(os.environ), ROOT / ".tmp")
     else:
         credentials = SigningSecrets.from_environment(os.environ)
         with signing_identity(credentials, ROOT / ".tmp", args.signing_identity) as identity:

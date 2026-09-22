@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved. -->
+<rss version="2.0" xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle">
+  <channel>
+    <title>Email Collection Toolkit updates</title>
+    <link>https://simsong.github.io/email-collection-toolkit/updates/mac/appcast.xml</link>
+    <description>Signed macOS release and preview updates.</description>
+  </channel>
+</rss>
