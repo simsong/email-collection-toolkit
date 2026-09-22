@@ -2132,6 +2132,14 @@ the tag/version validator: unsigned annotated tags pass; lightweight tags,
 version mismatches, and a different checked-out commit fail.
 Real Developer ID import/signing and hosted GUI execution require a credentialed
 Mac release trial; pure policy tests do not establish those properties.
+
+Release metadata is parsed with `packaging.version.Version`, rather than a
+home-grown version regular expression. The supported PEP 440 forms are stable
+`MAJOR.MINOR.PATCH`, alpha `MAJOR.MINOR.PATCHaN`, and beta
+`MAJOR.MINOR.PATCHbN`. The release validator maps alpha and beta to Sparkle's
+`preview` channel and stable releases to the default channel, with monotonically
+increasing numeric Sparkle build values. The fixed website appcast starts empty;
+the Sparkle publication step adds only a post-notarization, Ed25519-signed item.
 `scripts/desktop_entry.py` dispatches normal GUI launch, `--cli`, `--self-test`,
 and `--self-test-gui`. Frozen GUI resources use PyInstaller's bundle root;
 the verifier's actual `.py` source is explicitly bundled for archive installation.

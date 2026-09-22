@@ -299,7 +299,7 @@ website-build-check: website-check
 
 release-tag-check:
 	@test -n "$(GITHUB_REF_NAME)" || { echo 'usage: make release-tag-check GITHUB_REF_NAME=v1.2.3'; exit 2; }
-	uv run --no-project --python '>=3.12' python scripts/release_tag.py --tag "$(GITHUB_REF_NAME)" $(ARGS)
+	uv run --no-project --with packaging --python '>=3.12' python scripts/release_tag.py --tag "$(GITHUB_REF_NAME)" $(ARGS)
 
 test: pst-importer mcti-scan pff-converter test-pff-converter
 	uv run pytest -q

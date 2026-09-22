@@ -76,7 +76,7 @@ def test_release_workflow_validates_built_distributions() -> None:
     # Validate the release commit and version before installing or building.
     assert [text.index(gate) for gate in gates] == sorted(text.index(gate) for gate in gates)
     makefile = (workflow.parents[2] / "Makefile").read_text(encoding="utf-8")
-    assert "uv run --no-project --python '>=3.12' python scripts/release_tag.py" in makefile
+    assert "uv run --no-project --with packaging --python '>=3.12' python scripts/release_tag.py" in makefile
 
 
 def test_zola_config_rejects_accidental_template(tmp_path: Path) -> None:

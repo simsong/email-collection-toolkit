@@ -1848,6 +1848,14 @@ notarization credentials must fail release assembly; an unsigned development
 DMG must never be published as a release. The archive extension is declared in
 the bundle's document-type metadata.
 
+The public release tag is derived from PEP 440 package metadata: `1.0.0a1`
+maps to preview tag `v1.0.0-alpha.1`, `1.0.0b1` maps to preview tag
+`v1.0.0-beta.1`, and `1.0.0` maps to release tag `v1.0.0`. Preview items use
+Sparkle's `preview` channel; stable items use Sparkle's default channel. The
+initial public preview is `v1.0.0-alpha.1`. `appcast.xml` is published at the
+website's fixed HTTPS URL only after its matching notarized DMG has a Sparkle
+Ed25519 archive signature.
+
 Ordinary `make dmg`, `make dmg-signed`, and `make test-dmg` must run only the
 headless mounted self-test, without opening GUI test windows. `make check-release`
 must additionally run the visible native self-test on the built DMG; `DMG=path`

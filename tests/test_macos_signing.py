@@ -213,3 +213,17 @@ def test_release_accepts_unsigned_annotated_tags_and_checks_commit_and_version(
                                      "--tag", tag, "--require-annotated"], cwd=tmp_path,
                                     capture_output=True, text=True, check=False)
         assert (result.returncode == 0) == accepted, result.stderr
+
+
+@pytest.mark.parametrize(("version", "tag", "channel", "sparkle_version"), [
+    ("1.0.0a1", "v1.0.0-alpha.1", "preview", 1_000_000_101),
+    ("1.0.0b1", "v1.0.0-beta.1", "preview", 1_000_000_501),
+    ("1.0.0", "v1.0.0", "release", 1_000_000_900),
+])
+def test_release_version_maps_to_a_single_public_track(
+    version: str, tag: str, channel: str, sparkle_version: int,
+) -> None:
+    """A release tag maps PEP 440 prereleases to preview and stable versions to release."""
+    from scripts.release_tag import release_metadata
+
+    assert release_metadata(version)[:3] == (tag, channel, sparkle_version)

@@ -28,6 +28,7 @@ from macos_signing import (
     PASSWORD_SECRET, NotarizationCredentials, SigningSecrets, dmg_filename, notarize_image, sign_image,
     signing_identity,
 )
+from release_tag import release_metadata
 
 ROOT = Path(__file__).resolve().parents[1]
 APP_NAME = "Email Collection Toolkit"
@@ -35,6 +36,7 @@ IDENTIFIER = "net.simson.mailarchiver"
 PLIST_DOCUMENT_TYPES = "CFBundleDocumentTypes"
 PLIST_EXPORTED_TYPES = "UTExportedTypeDeclarations"
 PLIST_SHORT_VERSION = "CFBundleShortVersionString"
+PLIST_BUILD_VERSION = "CFBundleVersion"
 PLIST_COPYRIGHT = "NSHumanReadableCopyright"
 PLIST_TYPE_NAME = "CFBundleTypeName"
 PLIST_TYPE_ROLE = "CFBundleTypeRole"
@@ -73,7 +75,9 @@ def configure_bundle(app: Path, signing_identity: str) -> None:
     plist = app / "Contents/Info.plist"
     with plist.open("rb") as handle:
         info = plistlib.load(handle)
-    info[PLIST_SHORT_VERSION] = version("mailarchiver")
+    _, _, sparkle_version, display_version = release_metadata(version("mailarchiver"))
+    info[PLIST_SHORT_VERSION] = display_version
+    info[PLIST_BUILD_VERSION] = str(sparkle_version)
     info[PLIST_COPYRIGHT] = COPYRIGHT
     info[PLIST_DOCUMENT_TYPES] = [{
         PLIST_TYPE_NAME: "Mail Archive", PLIST_TYPE_ROLE: "Editor",
