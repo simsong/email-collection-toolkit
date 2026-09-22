@@ -1865,7 +1865,9 @@ Git; it is never an application, Apple-signing, or notarization credential.
 The packaged app contains only its `SUPublicEDKey` and fixed appcast HTTPS URL.
 `SPARKLE_ED25519_PRIVATE_KEY_BASE64` is release-only: `sign_update` receives it
 on standard input after Apple notarization/stapling, never through an argument,
-bundle, or application subprocess environment.
+bundle, or application subprocess environment. The signed DMG remains in a
+draft GitHub release until the feed item is committed to `main`; publishing
+the draft is followed by an explicit GitHub Pages dispatch from `main`.
 
 Ordinary `make dmg`, `make dmg-signed`, and `make test-dmg` must run only the
 headless mounted self-test, without opening GUI test windows. `make check-release`

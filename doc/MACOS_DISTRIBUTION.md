@@ -154,7 +154,7 @@ On an isolated GitHub-hosted runner, `make dmg` and `make check-release` import 
 identity when both
 `APPLE_CERTIFICATE_P12_BASE64` and `APPLE_CERTIFICATE_PASSWORD` are available.
 The [certificate management guide](CERTIFICATE_MANAGEMENT.md) explains exporting
-the `.p12`, App Store Connect API key, and five GitHub Actions repository
+the `.p12`, App Store Connect API key, and six GitHub Actions repository
 secrets. A tagged release additionally requires `APPLE_NOTARY_KEY_ID`,
 `APPLE_NOTARY_ISSUER_ID`, and `APPLE_NOTARY_PRIVATE_KEY_BASE64`, which is the
 Base64 encoding of the complete `.p8` API private-key file. The workflow builds,
@@ -165,6 +165,10 @@ tags must be annotated and match the project version; Git-tag signatures and
 release-signing public keys are not required. Automatic imports are rejected
 locally and on self-hosted runners because `security` password arguments remain
 visible to other processes; use an existing keychain identity for local signing.
+The separate `SPARKLE_ED25519_PRIVATE_KEY_BASE64` secret contains Sparkle's
+already-Base64 exported update key. The release stays draft while its final
+DMG is signed for the appcast. The workflow commits the feed to `main`, then
+publishes the draft and explicitly dispatches GitHub Pages from `main`.
 
 Missing either secret is nonfatal: the build emits an Actions warning, leaves
 the DMG container unsigned, and names it `*_UNSIGNED.dmg`. An explicitly supplied

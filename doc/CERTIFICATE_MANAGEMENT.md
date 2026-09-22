@@ -206,8 +206,11 @@ The release-only packaging step receives five protected repository secrets:
 `APPLE_NOTARY_KEY_ID`, `APPLE_NOTARY_ISSUER_ID`, and
 `APPLE_NOTARY_PRIVATE_KEY_BASE64`. The final value is the Base64 encoding of
 the complete App Store Connect API `.p8` private-key file. The first two sign
-the DMG; the latter three authenticate `notarytool`. The builder removes all
-five from PyInstaller and installed-test child environments. They are not
+the DMG; the latter three authenticate `notarytool`. The separate
+`SPARKLE_ED25519_PRIVATE_KEY_BASE64` secret signs the final DMG for the update
+feed after notarization. Sparkle's exported key text is already Base64; store
+it directly, without encoding it again. The builder removes all six secrets
+from PyInstaller and installed-test child environments. They are not
 needed for PR testing. Anyone who can modify and execute workflows with
 repository secrets could extract them. Restrict release-tag creation and
 workflow changes, review dependencies, and never expose these secrets to
@@ -221,15 +224,17 @@ service-provider conditions in section 1.
 ## 6. Run and verify DMG production
 
 After the implementation is merged, create an annotated release tag containing
-it and matching the project version, or use **Actions → Assemble draft GitHub
+it and matching the project version, or use **Actions → Assemble GitHub
 release → Run workflow** with such an existing tag. Follow the repository's
 release authorization rules; this document does not authorize publishing a
 release or creating a tag. Dispatching an older tag uses its older build code.
 
 The commit and tag/version checks run before project
-dependency installation or packaging. The macOS job builds with `make check-release`, verifies the
-mounted app, and runs its frozen headless and GUI tests. Any packaging, signing,
-or mounted-test failure blocks draft-release assembly. The builder uses the
+dependency installation or packaging. The macOS job builds with `make dmg`, verifies the
+mounted app, and runs its frozen headless test. Any packaging, signing,
+or mounted-test failure blocks draft-release assembly. The draft is published
+only after the Sparkle appcast item is signed and committed to `main`; the
+release job then dispatches Pages from `main`. The builder uses the
 runner's Python architecture; this is not a universal2 build. Hosted GUI and
 real Developer ID signing still need an actual release trial.
 

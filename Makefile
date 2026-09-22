@@ -185,9 +185,10 @@ sparkle-keys: sparkle-tools
 	"$(SPARKLE_DIR)/bin/generate_keys"
 
 .PHONY: update-appcast
-update-appcast: sparkle-tools
+update-appcast:
 	@test -n "$(ARCHIVE)" -a -n "$(RELEASE_TAG)" -a -n "$(RELEASE_URL)" || { echo 'usage: make update-appcast ARCHIVE=/path/to/image.dmg RELEASE_TAG=v1.0.0 RELEASE_URL=https://example.invalid/image.dmg'; exit 2; }
-	uv run python scripts/update_appcast.py --appcast "$(or $(APPCAST),website/static/updates/mac/appcast.xml)" --archive "$(ARCHIVE)" --tag "$(RELEASE_TAG)" --url "$(RELEASE_URL)" --signer "$(SPARKLE_DIR)/bin/sign_update"
+	@test -x "$(SPARKLE_DIR)/bin/sign_update" -a -x .venv/bin/python || { echo 'run make sparkle-tools and uv sync before update-appcast'; exit 2; }
+	.venv/bin/python scripts/update_appcast.py --appcast "$(or $(APPCAST),website/static/updates/mac/appcast.xml)" --archive "$(ARCHIVE)" --tag "$(RELEASE_TAG)" --url "$(RELEASE_URL)" --signer "$(SPARKLE_DIR)/bin/sign_update"
 
 .PHONY: dmg dmg-signed notarize-dmg list-signatures check-release test-dmg preview-dmg self-test self-test-gui test-packaging
 dmg: ruff syntax-check pst-importer mcti-scan pff-converter-bundle
@@ -239,6 +240,10 @@ test-signing: ruff
 	uv run --locked ty check scripts/macos_signing.py scripts/build_macos.py scripts/update_appcast.py tests/test_macos_signing.py --error-on-warning
 	uv run --locked pyright scripts/macos_signing.py scripts/build_macos.py scripts/update_appcast.py tests/test_macos_signing.py --warnings
 	uv run --locked pytest -q tests/test_macos_signing.py tests/test_website_scripts.py
+
+.PHONY: test-sparkle-signing
+test-sparkle-signing: sparkle-tools ruff
+	uv run --locked pytest -q tests/test_sparkle_signing.py
 
 compare-apple-mail:
 	uv run mailarchiver-compare-apple-mail --apple-mail "$(HOME)/Library/Mail" --archive "$(HOME)/mail-archive" $(ARGS)

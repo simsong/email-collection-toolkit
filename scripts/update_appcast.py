@@ -57,7 +57,7 @@ def signing_key() -> SecretStr:
         decoded = base64.b64decode(value.get_secret_value(), validate=True)
     except (ValueError, binascii.Error):
         raise ValueError("Sparkle update-signing secret is not valid Base64") from None
-    if len(decoded) != 64:
+    if len(decoded) not in (32, 64):
         raise ValueError("Sparkle update-signing secret is not an Ed25519 private key")
     return value
 
@@ -65,7 +65,9 @@ def signing_key() -> SecretStr:
 def signed_archive(archive: Path, signer: Path, key: SecretStr) -> SignedArchive:
     """Ask Sparkle to sign the final DMG, passing its private key only on stdin."""
     result = subprocess.run([signer, "--ed-key-file", "-", archive], input=key.get_secret_value(),
-                            capture_output=True, text=True, check=False)
+                            capture_output=True, text=True, check=False,
+                            env={name: value for name, value in os.environ.items()
+                                 if name != SPARKLE_PRIVATE_KEY_SECRET})
     if result.returncode:
         raise RuntimeError("Sparkle archive signing failed")
     try:

@@ -15,7 +15,7 @@ from yaml import safe_load
 
 from scripts.macos_signing import (
     CERTIFICATE_SECRET, GITHUB_ACTIONS, NOTARY_ISSUER_SECRET, NOTARY_KEY_ID_SECRET, NOTARY_PRIVATE_KEY_SECRET,
-    PASSWORD_SECRET, RUNNER_ENVIRONMENT, NotarizationCredentials, SigningSecrets, developer_identity,
+    PASSWORD_SECRET, RUNNER_ENVIRONMENT, SPARKLE_PRIVATE_KEY_SECRET, NotarizationCredentials, SigningSecrets, developer_identity,
     dmg_filename, release_safe_environment, security_command, sign_image, signing_identity,
 )
 from scripts.update_appcast import AppcastRelease, SignedArchive, append_item
@@ -92,7 +92,8 @@ def test_release_children_never_receive_signing_or_notarization_credentials() ->
     environment = release_safe_environment({
         CERTIFICATE_SECRET: "certificate", PASSWORD_SECRET: "password",
         NOTARY_KEY_ID_SECRET: "key", NOTARY_ISSUER_SECRET: "issuer",
-        NOTARY_PRIVATE_KEY_SECRET: "private-key", "PYTHONPATH": "/build/python",
+        NOTARY_PRIVATE_KEY_SECRET: "private-key", SPARKLE_PRIVATE_KEY_SECRET: "sparkle-key",
+        "PYTHONPATH": "/build/python",
         "PATH": "/usr/bin:/bin", "UNRELATED": "retained",
     }, ("PYTHON",))
     assert environment == {"PATH": "/usr/bin:/bin", "UNRELATED": "retained"}

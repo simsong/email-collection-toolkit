@@ -41,6 +41,7 @@ def test_pages_workflow_pins_and_checks_the_zola_archive() -> None:
     # PyYAML's YAML 1.1 resolver treats an unquoted "on" key as boolean True.
     triggers = configuration.get(WORKFLOW_ON, configuration.get(True))
     assert triggers[RELEASE][TYPES] == ["published"]
+    assert configuration[JOBS]["build"]["steps"][0]["with"]["ref"] == "main"
 
 
 def test_ci_builds_distributions_and_site_and_retains_browser_traces() -> None:
@@ -71,18 +72,20 @@ def test_release_workflow_validates_built_distributions() -> None:
         "name: Install dependencies",
         "name: Validate distributions",
         "name: Build source distribution",
-        "name: Create published release",
+        "name: Create draft release",
         "name: Prepare appcast update",
         "name: Sign the final notarized DMG's appcast item",
-        "name: Publish appcast and deploy it",
+        "name: Commit appcast and publish release",
     )
     # Validate the release commit and version before installing or building.
     assert [text.index(gate) for gate in gates] == sorted(text.index(gate) for gate in gates)
     makefile = (workflow.parents[2] / "Makefile").read_text(encoding="utf-8")
     assert "uv run --no-project --with packaging --python '>=3.12' python scripts/release_tag.py" in makefile
     signing_step = text[text.index("name: Sign the final notarized DMG's appcast item"):
-                        text.index("name: Publish appcast and deploy it")]
+                        text.index("name: Commit appcast and publish release")]
     assert "SPARKLE_ED25519_PRIVATE_KEY_BASE64" in signing_step
+    assert text.index("-f branch=main") < text.index("gh release edit")
+    assert "[skip ci]" in text
 
 
 def test_zola_config_rejects_accidental_template(tmp_path: Path) -> None:

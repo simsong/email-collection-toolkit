@@ -2117,7 +2117,7 @@ The release workflow builds the DMG on `macos-15`, passes protected signing and
 App Store Connect notarization credentials only to its packaging step, submits
 the signed image through `make notarize-dmg`, staples and validates it, and then
 retests the mounted artifact before assembling the source and DMG checksums into
-a published release. Missing credentials leave no publishable DMG and fail the
+a draft release. Missing credentials leave no publishable DMG and fail the
 release job. Assembly checks out the Mac job's verified
 commit and checks that the tag still names that commit. Both jobs validate the
 tag reference, checked-out commit, annotation, and project version before
@@ -2147,14 +2147,18 @@ calls Sparkle's local `generate_keys`; the key generator retains the private
 Ed25519 material in the developer's login Keychain and prints the public key.
 The macOS bundle carries that public key and the fixed Pages appcast URL. The
 appcast writer invokes `sign_update --ed-key-file -` on the final stapled DMG,
-passing the protected exported Sparkle key only on standard input.
-The release workflow first publishes the signed/notarized DMG as a GitHub
-release (marking alpha and beta tags as prereleases), then reads the existing
-appcast from `main`, signs and prepends the new item, commits that one feed
-file directly to `main`, and dispatches the Pages deployment. This preserves
-the published release asset as the immutable enclosure URL: preview entries
-have Sparkle's `preview` channel and stable entries remain in the default
-release channel.
+passing the protected exported Sparkle key only on standard input. Sparkle
+2.10 explicitly supports this stdin form. New-format exported seeds decode to
+32 bytes; legacy exports may decode to 64 bytes. Neither the key nor Apple's
+credentials reach PyInstaller or mounted-app test subprocesses.
+The release workflow creates a draft with the signed/notarized DMG, reads the
+existing appcast from `main`, signs and prepends the new item, and commits the
+feed to `main` with `[skip ci]`. It then publishes the draft, marking alpha and
+beta tags as prereleases, and explicitly dispatches Pages from `main`.
+GitHub's workflow token does not trigger a Pages run through its own commit or
+release event; the feed commit alone does not deploy a URL pointing at a draft asset.
+Preview entries have Sparkle's `preview` channel and stable entries remain in
+the default release channel.
 `scripts/desktop_entry.py` dispatches normal GUI launch, `--cli`, `--self-test`,
 and `--self-test-gui`. Frozen GUI resources use PyInstaller's bundle root;
 the verifier's actual `.py` source is explicitly bundled for archive installation.
