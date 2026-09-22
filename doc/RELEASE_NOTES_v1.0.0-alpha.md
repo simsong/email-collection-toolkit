@@ -3,9 +3,10 @@
 # Email Collection Toolkit v1.0.0 alpha — draft release notes
 
 Status: unreleased scope draft, 2026-09-07. The first alpha tag and minimum macOS version are pending.
-Apple Silicon only; early alphas may omit unfinished v1.0.0 milestone features.
-These notes describe the proposed v1.0.0 destination, not a tested release artifact.
-Remove or explicitly defer unfinished features before publishing release notes.
+Apple Silicon only; these notes describe the proposed v1.0.0 destination, not a
+tested release artifact. Remove or explicitly defer unfinished features before
+publishing release notes. The current release roadmap is in
+[V1_0_0_SCOPE.md](V1_0_0_SCOPE.md).
 
 Email Collection Toolkit brings local and remote email together into a searchable personal
 archive on your Apple Silicon Mac. Windows support is planned for v1.1.0.
@@ -33,9 +34,10 @@ archive on your Apple Silicon Mac. Windows support is planned for v1.1.0.
   downloads, credentials in the OS keychain, and resumable UID checkpoints.
   Generic IMAP support does not itself establish Gmail/Microsoft 365 login
   compatibility; provider authentication must be tested and documented.
-- Planned: Outlook PST and OST import with complete item accounting. Report
-  incomplete cache contents and reconstructed MIME explicitly. OST import is
-  limited to content present locally; Outlook for Mac OLM is outside this scope.
+- Recover email from local PST files as deterministic, interoperable MIME while
+  retaining the source PST unchanged. Extract OST caches on a best-effort basis;
+  neither operation asserts that an Outlook cache or export contains every server
+  message. Outlook for Mac OLM is outside this scope.
 - Planned from the latest source-management discussion: save local file,
   local folder, and IMAP sources in per-archive configuration. Import/Refresh
   revisits configured sources and uses the agreed modification-time shortcut
@@ -58,7 +60,7 @@ archive on your Apple Silicon Mac. Windows support is planned for v1.1.0.
   and completeness against the final release. Older pagination tickets must be
   reconciled with the newer virtualized-results design.
 
-## Hide and redact — planned
+## Deferred to v1.2: hide, redact, quarantine, and tags
 
 - Hide/unhide messages reversibly. Ordinary searches omit hidden messages;
   `hidden:` finds them. Show Hidden, Unhide All, and a configurable pink

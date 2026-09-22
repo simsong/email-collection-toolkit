@@ -59,10 +59,9 @@ the stated requirement and report any remaining gap.
 
 ## Tests and validation
 
-At the completion of every Codex turn in this repository, including discussion
-and documentation-only turns, run `make ruff` against the current final source.
-Ruff must pass with zero diagnostics; if it fails or cannot run, report that
-explicitly rather than claiming a clean handoff. Do not suppress rules or ignore
+After any change to source code, run `make ruff` against the current final
+source. Ruff must pass with zero diagnostics; if it fails or cannot run, report
+that explicitly rather than claiming a clean handoff. Do not suppress rules or ignore
 failures to make a build pass. `make check` and `make dmg` must retain Ruff as a required
 prerequisite; Ruff complements rather than replaces tests and Pylint.
 
@@ -84,6 +83,10 @@ distinguish validated behavior from untested assumptions.
 
 Preserve dirty worktrees and unrelated changes. Use project-local linked
 worktrees under `<project-root>/.tmp/` for branch work.
+Never abandon a dirty linked worktree. Before ending work, either publish its
+intended changes, explicitly preserve and report user-owned work, or reconcile
+it against current main. Remove derived exports, build products, and the linked
+worktree once its work is represented in main.
 
 Before starting branch work or creating, updating, or merging a pull request,
 query GitHub for every open pull request in the repository. If any are open,

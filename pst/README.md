@@ -26,9 +26,10 @@ selects the first N distinct URLs in sorted order. `--help` lists all options.
 Do not put private mail or credentials into a tracked inventory.
 
 Corpus downloads are **development-only**. CI/CD, packaging and release checks
-use PST fixtures already in `rust/mct-importer/tests/fixtures/`, including
-`mail.pst`; they do not need any discovered remote PST or a populated `var/pst/`.
-Locked build-dependency installation is separate from corpus acquisition.
+use the public PST fixtures already in `rust/mct-importer/tests/fixtures/`,
+including `mail.pst`; they do not need any discovered remote PST or a populated
+`var/pst/`. Locked build-dependency installation is separate from corpus
+acquisition.
 
 ## Inventory and storage
 

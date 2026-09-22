@@ -2,6 +2,30 @@
 
 # v1.0.0 alpha scope review
 
+## Current release roadmap — 2026-09-21
+
+This section supersedes the historical review below.
+
+* **v1.0** is the full macOS collection system: local email sources, completed
+  PST recovery, best-effort OST extraction, read-only IMAP ingest, search,
+  verification/recovery, a self-contained signed and notarized DMG, bundled
+  scanning, and Sparkle updates.
+* **v1.1** is Windows feature parity with v1.0. It includes native locking,
+  packaging, signing, scanning, document handling, and a Windows-native updater;
+  it adds no new user-facing collection features.
+* **v1.2** adds encrypted quarantine, redaction, tags, and unattended update
+  behavior.
+* **v1.3** adds AI-assisted finding aids and email analysis, including the
+  address-book export work. It does not require an authoritative names index or
+  message timelines.
+* **v2.0** adds social-media ingest.
+
+Sparkle is a macOS framework. The v1.1 updater must provide the equivalent
+Windows behavior with a Windows-native implementation and separate release
+feed. Gmail API, Microsoft Graph, additional legacy-mail formats, and other
+source-specific expansion are post-v1.1 work unless they become necessary to
+meet the v1.0 IMAP acceptance criteria.
+
 > Historical research/planning snapshot. Current development and application CI
 > are macOS-only. For implemented behavior use `requirements.md`,
 > `implementation.md`, and the current feature-specific guides; older
@@ -151,7 +175,7 @@ overlapping issues need scoped acceptance criteria; no issue is closed here.
 | [#69 Add a GUI-only archive creation and import workflow](https://github.com/simsong/email-collection-toolkit/issues/69) | v1.0.0 supporting; reconcile existing work | Local GUI import in #86; extend for promised sources. |
 | [#70 Enforce one archive writer across GUI windows, CLI processes, and application instances](https://github.com/simsong/email-collection-toolkit/issues/70) | v1.0.0 supporting; reconcile existing work | Verify every new archive writer, including redaction. |
 | [#71 Add pluggable antivirus providers for external ClamAV and Windows AMSI](https://github.com/simsong/email-collection-toolkit/issues/71) | v1.0.0 supporting; reconcile existing work | Mac ClamAV now; Windows AMSI/provider work later. |
-| [#72 Add shared PyInstaller resource packaging and desktop release infrastructure](https://github.com/simsong/email-collection-toolkit/issues/72) | v1.0.0 supporting; reconcile existing work | Shared packaging used by Mac; Windows validation later. |
+| [#72 Add shared PyInstaller resource packaging and desktop release infrastructure](https://github.com/simsong/email-collection-toolkit/issues/72) | v1.1.0 | The macOS packaging path exists; the remaining cross-platform acceptance criteria require a clean Windows bundle and native Windows CI. |
 | [#73 Make the pywebview GUI fully functional on Windows](https://github.com/simsong/email-collection-toolkit/issues/73) | v1.1.0 Windows | Historical title; choose the compiled UI after Dioxus/Tauri trials and retain applicable full-ingest/native acceptance criteria. |
 | [#74 Build, sign, notarize, and publish a self-contained macOS app and DMG](https://github.com/simsong/email-collection-toolkit/issues/74) | v1.0.0 core | Local DMG exists; public signed/notarized release unverified. |
 | [#75 Build and Authenticode-sign a self-contained Windows installer](https://github.com/simsong/email-collection-toolkit/issues/75) | v1.1.0 Windows | Outside the initial alpha scope; see issue for detailed acceptance criteria. |

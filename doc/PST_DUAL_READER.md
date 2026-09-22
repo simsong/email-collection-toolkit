@@ -1,12 +1,14 @@
 <!-- Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved. -->
 
-# Ingest executables and independent PST passes
+# PST and OST ingest executables
 
 **Status: updated 2026-09-13.** [MCT Importer API Version 1.0](MCT_IMPORTER_API.md)
 defines the contract, with implemented Rust generator and validator programs.
-The standalone [PST adapter](PST_IMPORTER.md) now uses Microsoft's crate.
-The CLI archive host is implemented; cross-importer h3 duplicate suppression remains planned. See [MBOX_READING.md](MBOX_READING.md) and
-[INTEGRITY_CONTROLS.md](INTEGRITY_CONTROLS.md) for current storage/hash controls.
+The standalone [PST adapter](PST_IMPORTER.md) uses Microsoft's crate and the
+OST adapter uses the separate libpff converter. PST email recovery is complete
+for this project's collection purpose; OST extraction is explicitly best effort.
+See [MBOX_READING.md](MBOX_READING.md) and [INTEGRITY_CONTROLS.md](INTEGRITY_CONTROLS.md)
+for current storage and hash controls.
 
 ## Contract
 
@@ -44,16 +46,19 @@ The receiver removes one mboxrd quote level to obtain `MailObject.raw`, then
 uses the existing Python scanner, observation, catalog and writer path. All
 added fields participate in h2. Publication adds one mboxrd quoting level again.
 Preserve existing MIME bytes when available; do not parse/reserialize simply to
-insert headers. For property-based PST items, the importer constructs MIME and
-records that reconstruction in run provenance.
+insert headers. For property-based PST or OST items, the importer constructs
+recovered MIME and records that construction in run provenance. This is the
+collection format for recovered email; the unchanged PST or OST remains the
+source record.
 
 ## Completion and recovery
 
-Require exit code 0 for a completed traversal and nonzero for incomplete
-extraction, including corrupt subtrees and skipped unsupported mail. Diagnostics
-must report encountered/skipped items; unknown subtree extent is unknown, not
-zero missing messages. Non-mail objects may be reported as such without being
-fabricated into email. An empty successful stream alone is not completeness evidence.
+Require exit code 0 for a completed traversal of the selected email scope and
+nonzero for unreadable mail or incomplete extraction. Calendar, contacts,
+virtual search folders, configuration, and other Outlook administrative objects
+are outside that scope and are not fabricated into email. An OST is best-effort
+cache extraction: a successful run says what was recovered from the cache, not
+what existed in the corresponding server mailbox.
 
 Buffer/spool at most one bounded record at a time, using private temporary
 storage for large messages. Drain stderr concurrently to avoid pipe deadlock.
@@ -64,13 +69,13 @@ separately, record exit status, and permit reruns. EOF is not success.
 Cancellation terminates/reaps the process and retains the last valid checkpoint.
 Detailed diagnostics/run-manifest schemas and size limits remain implementation work.
 
-## Two importers and deduplication
+<a id="other-parser-candidates"></a>
+## Readers and deduplication
 
-Start with a corpus-qualified adapter around Microsoft's
-[outlook-pst-rs](https://github.com/microsoft/outlook-pst-rs). A second executable
-can run as another normal import pass. Concurrent passes are optional and must
-feed the existing coordinated archive writer. The interface requires neither
-two bundled runtimes nor two traversals for every import.
+The PST reader is Microsoft's [outlook-pst-rs](https://github.com/microsoft/outlook-pst-rs).
+The OST reader is the separate libpff converter. They are selected by the
+source's internal format, not its filename extension. The collection does not
+run competing readers for an ordinary import.
 
 Existing dedup uses normalized Message-ID plus h2. Different importer headers
 change h2, so that key retains both annotated variants. H3 already includes
@@ -84,7 +89,7 @@ needed. Preserve every source/importer observation. Enabling h3-based archive
 duplicate suppression remains separate implementation work; these test tools
 do not change current Message-ID-plus-h2 dedup behavior or redefine either hash.
 
-## Why PST export can reconstruct MIME
+## What PST and OST recovery produces
 
 The authoritative Microsoft specifications distinguish:
 
@@ -92,14 +97,11 @@ The authoritative Microsoft specifications distinguish:
 * [MS-OXCMAIL, message bodies](https://learn.microsoft.com/en-us/openspecs/exchange_server_protocols/ms-oxcmail/59290e68-5bc7-4a2c-9824-846db0f365bc): text, HTML and RTF have property representations; MIME writers generate body elements and may preserve or change character encoding.
 * [PidTagMimeSkeleton](https://learn.microsoft.com/en-us/openspecs/exchange_server_protocols/ms-oxcmsg/2dd82209-0184-4321-a5ba-f0a10b8f1ec8): conversion metadata can retain MIME headers and content not converted into MAPI properties. This is not a universal guarantee of an untouched complete original MIME stream.
 
-**Design inference:** reconstructing mail from PST properties may introduce
-different MIME boundaries, encodings, folding or attachment order. The PST file
-itself need not be rewritten for this to happen. Original transport headers do
-not establish original full-MIME bytes. Deterministic output reduces repeat-run
-drift but cannot guarantee identical serialization across independent exporters.
-Retain pre-import EML and expected decoded body/attachment facts for seeded
-Outlook fixtures. Compare exact recovery where claimed and extraction
-completeness separately; reconstructed h2 is not original wire-message fixity.
+Recovered messages can have MIME boundaries, encodings, folding, or attachment
+order chosen by the importer. That is normal for a PST/OST collection workflow:
+the useful result is deterministic, readable, interoperable email with retained
+source provenance. The PST or OST itself is never rewritten and remains available
+when its native Outlook representation matters.
 
 ## Executables and installers
 
@@ -120,38 +122,20 @@ Snap confinement cannot assume arbitrary external executables will work:
 bundled importers are the initial Snap scope. Test actual shipped helpers and
 record their versions/hashes.
 
-Today's macOS builder has no PST importer. Windows/Snap builders and full
-Windows archive-writer/scanner portability remain unfinished. Mboxrd quoting
-alone does not solve Python's Windows newline translation, locking or directory
-fsync. Native byte-preservation tests are a beta gate, not inferred from macOS.
+The macOS builder bundles the selected PST and OST import executables. Windows
+delivery remains v1.1 work: its installer must bundle the equivalent helpers and
+validate native newline handling, locking, cancellation, scanning, and recovery.
 
-## Other parser candidates
+<a id="implementation-sequence-and-acceptance"></a>
+## Validation
 
-The [on-disk inventory](ON_DISK_MAIL_FORMATS.md) records formats and fixtures.
-Libpff and libpst are separate C parser families; java-libpst and XstReader are
-other options. Pypff/libratom and Java converter wrappers do not add independent
-readers. Microsoft's Rust project is a reference implementation, not a claim
-that we are running Outlook's production reader.
+Validation exercises deterministic recovered MIME, attachments, malformed
+properties, source read-only behavior, process failure handling, and the
+installed macOS bundle. PST runs use public upstream fixtures and may use
+user-selected source copies without retaining private mail in the repository.
+OST results are reported as
+best effort, including explicit incompleteness where the cache or reader cannot
+provide a recoverable email item.
 
-Probe the Rust candidate and at least one alternative on the same sources.
-Choose the second backend using recovered-message/body/attachment evidence,
-diagnostics, target builds and exact redistributed licenses. Neither language,
-popularity nor reader agreement proves completeness. ANSI PST, Unicode PST,
-OST and damaged/deleted-item recovery need separate qualification.
-
-## Implementation sequence and acceptance
-
-1. Produce read-only fixtures with original EML and expected body/attachment
-   facts. Pin source hashes and parser revisions.
-2. The Rust generator and validator implement the stream contract. Implement
-   the typed archive host with provenance, binary pipes and failed-tail handling.
-3. Qualify Rust extraction against ANSI/Unicode, attachments, embedded messages,
-   malformed properties and independently known counts. Report unsupported
-   classes/unknown extent. Run an alternative and retain content disagreements.
-4. Define and test h3-based comparison/suppression while retaining h2 variant
-   integrity and all provenance. Do not introduce another content hash.
-5. Validate installed Windows/macOS/Snap artifacts on supported architectures.
-   Compilation or a nonempty stream is insufficient.
-
-No source repair, live-account mutation or real-archive migration is part of
-this design. Tests use synthetic or explicitly authorized copied fixtures.
+Neither reader repairs a source or contacts a live account. Tests use synthetic
+or explicitly authorized copied fixtures.
