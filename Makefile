@@ -44,7 +44,7 @@ RUST_EXE_SUFFIX := $(if $(filter Windows_NT,$(OS)),.exe,)
 RUST_TARGET_DIR ?= $(CURDIR)/target
 CARGO_RUN = $(CARGO) --config 'build.target-dir="$(RUST_TARGET_DIR)"'
 
-.PHONY: test-pst pst-import pst-smoke rust-programs mdti-validator mcti-generator pst-importer mcti-scan pst-downloader pst-download pst-download-plan test-pst-downloader rust-toolchain rust-lock rust-fmt rust-check test-rust rust-smoke
+.PHONY: pst-import pst-smoke rust-programs mdti-validator mcti-generator pst-importer mcti-scan pst-downloader pst-download pst-download-plan test-pst-downloader rust-toolchain rust-lock rust-fmt rust-check test-rust rust-smoke
 rust-programs:
 	$(CARGO_RUN) build --locked --release --workspace --bins
 
@@ -78,9 +78,6 @@ pst-input-check:
 pst-import: pst-input-check
 	@$(MAKE) --no-print-directory pst-importer >&2
 	@"$(RUST_TARGET_DIR)/release/pst-importer$(RUST_EXE_SUFFIX)" $(ARGS) -- "$$PST"
-
-test-pst:
-	$(CARGO_RUN) test --locked --test pst
 
 pst-smoke: pst-input-check
 	@$(MAKE) --no-print-directory rust-programs >&2

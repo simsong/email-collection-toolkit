@@ -108,9 +108,11 @@ fn fixture_server_waits_for_complete_request() {
     assert_eq!(server.hits.load(Ordering::Relaxed), 1);
 }
 
-/// Return the small, checked-in PST used to verify exact downloaded bytes.
+/// Return a minimal PST header for downloader byte-preservation tests.
 fn pst() -> Vec<u8> {
-    include_bytes!("../rust/mct-importer/tests/fixtures/empty.pst").to_vec()
+    let mut bytes = b"!BDN\0\0\0\0SM\x17\0".to_vec();
+    bytes.resize(128, 0);
+    bytes
 }
 
 /// Configure an isolated cache and bounded downloads for a test.

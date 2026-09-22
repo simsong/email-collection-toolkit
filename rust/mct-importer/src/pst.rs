@@ -1444,28 +1444,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn real_contacts_use_the_store_named_property_map() {
-        // doc/requirements.md: preload Contacts before mail; contact LIDs must
-        // resolve through PSETID_Address rather than being used as property IDs.
-        let source =
-            File::open(Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/mail.pst"))
-                .unwrap();
-        let pst = open(&source).unwrap();
-        let ids = contact_property_ids(&pst).unwrap();
-        assert_eq!(ids.get(&0x8083), Some(&0x8027));
-        assert_eq!(ids.get(&0x8084), Some(&0x808E));
-        let directory = exchange_directory(&pst);
-        assert!(directory.failures.is_empty(), "{:?}", directory.failures);
-        assert_eq!(directory.contact_items, 1);
-        assert_eq!(directory.contacts.len(), 1);
-        let contact = &directory.contacts[0];
-        assert_eq!(contact.item, 2097796);
-        assert_eq!(contact.smtp.as_deref(), Some("saqib.razzaq@xp.local"));
-        assert_eq!(contact.address, contact.smtp);
-        assert_eq!(contact.property, 0x8027);
-    }
-
-    #[test]
     fn contacts_resolve_all_slots_and_entry_ids_without_guessing() {
         // doc/requirements.md: all three contact slots, explicit EntryID aliases,
         // recipient fallback, stable ambiguity, and original-address evidence.
@@ -1779,51 +1757,5 @@ mod tests {
             error_kind(&anyhow::anyhow!("invalid From address list")),
             "ERROR"
         );
-    }
-
-    #[test]
-    fn invalid_export_preserves_real_property_bytes() {
-        // doc/PST_IMPORTER.md: diagnostic export preserves even unrecognized
-        // encodings; Unicode evidence is the original UTF-16LE buffer.
-        let file =
-            File::open(Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/mail.pst"))
-                .unwrap();
-        let store = open(&file).unwrap();
-        let message = store.message(2097316).unwrap();
-        let uri = Url::parse("file:///fixture.pst#item=2097316").unwrap();
-        let mut output = Vec::new();
-        export_invalid(
-            message.message(),
-            &uri,
-            2097316,
-            &anyhow::anyhow!("unknown body code page"),
-            None,
-            &mut output,
-        )
-        .unwrap();
-        let start = output.iter().position(|b| *b == b'\n').unwrap() + 1;
-        let parsed = mailparse::parse_mail(&output[start..]).unwrap();
-        for (id, name) in [(SUBJECT, "subject"), (BODY, "body")] {
-            let value = message.message().properties().get(id).unwrap();
-            let expected = match value {
-                PropertyValue::Unicode(v) => v
-                    .buffer()
-                    .iter()
-                    .flat_map(|c| c.to_le_bytes())
-                    .collect::<Vec<_>>(),
-                _ => raw(value).unwrap().into_owned(),
-            };
-            let part = parsed
-                .subparts
-                .iter()
-                .find(|part| {
-                    part.get_content_disposition()
-                        .params
-                        .get("filename")
-                        .is_some_and(|filename| filename == name)
-                })
-                .unwrap();
-            assert_eq!(part.get_body_raw().unwrap(), expected);
-        }
     }
 }

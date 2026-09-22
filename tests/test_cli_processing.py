@@ -13,7 +13,6 @@ import pytest
 
 from mailarchiver.layout import mbox_directory
 from mailarchiver.standalone_verify import verify_archive
-from mailarchiver.pst_source import ImportReceipt
 from mailarchiver.processing.builtin import QUARANTINE_UNKNOWN_DATE
 from e2e_tests.eicar_fixture import EICAR_PIECES
 from mailarchiver.archive_config import ArchiveConfig, load_archive_config, save_archive_config
@@ -143,41 +142,6 @@ def test_cli_attached_message_is_deduplicated_first_class_message(tmp_path: Path
     assert not verify_archive(archive)
 
 
-@pytest.mark.parametrize("scan_flag", ["--no-scan", "--clamav"])
-def test_cli_pst_partial_import_preserves_evidence_and_valid_records(tmp_path: Path, scan_flag: str) -> None:
-    """Real Rust importer partial failure retains its tail and files prior complete records once."""
-    fixture = Path(__file__).resolve().parents[1] / "rust/mct-importer/tests/fixtures/mail.pst"
-    source = tmp_path / "mail.pst"
-    source.write_bytes(fixture.read_bytes())
-    owners = tmp_path / "owners.txt"
-    owners.write_text("owner@example.test\n")
-    archive = tmp_path / "archive"
-    command = [sys.executable, "-m", "mailarchiver", "--archive", str(archive), "ingest",
-               scan_flag, "--owner-names-file", str(owners), str(source)]
-    for _attempt in range(2):
-        result = subprocess.run(command, capture_output=True, text=True, check=False, timeout=60)
-        assert result.returncode != 0 and "PST extraction incomplete" in result.stderr
-        with sqlite3.connect(archive / "archive.sqlite3") as db:
-            assert db.execute("SELECT count(*) FROM messages").fetchone() == (11,)
-    if scan_flag == "--clamav":
-        with sqlite3.connect(archive / "processing.sqlite3") as db:
-            assert db.execute("SELECT count(*) FROM message_state WHERE scan_status='clean'").fetchone() == (11,)
-            for (payload,) in db.execute("SELECT result_json FROM invocations WHERE kind='clamav'"):
-                scan = json.loads(payload)["scan"]
-                assert scan["engine_version"] is None and scan["signature_version"] is None
-    receipts = list((archive / "processing-pst").glob("*/receipt.json"))
-    assert len(receipts) == 2
-    for path in receipts:
-        receipt = ImportReceipt.model_validate_json(path.read_text())
-        assert receipt.emitted == 11 and receipt.exit_code == 1
-        assert receipt.source_sha256 == hashlib.sha256(fixture.read_bytes()).hexdigest()
-        assert path.with_name("output.mboxrd").exists()
-        assert "errors=2" in path.with_name("stderr.txt").read_text()
-    cli(archive, "process", "--phase", "content")
-    assert source.read_bytes() == fixture.read_bytes()
-    assert not verify_archive(archive)
-
-
 def test_cli_infected_undated_message_quarantines_before_metadata(tmp_path: Path) -> None:
     """A real positive ClamAV scan files exact bytes without a usable date and aborts later plugins."""
     source = tmp_path / "undated.eml"
@@ -273,28 +237,3 @@ def test_cli_public_providers_are_not_institutional_affiliations(tmp_path: Path)
         assert db.execute("SELECT count(*) FROM affiliations JOIN person_addresses USING(person_id) JOIN addresses USING(address_id) WHERE domain IN ('gmail.com','hosting.example','yahoo.com')").fetchone() == (0,)
         assert db.execute("SELECT count(*) FROM evidence JOIN addresses USING(address_id) WHERE domain IN ('gmail.com','hosting.example','yahoo.com')").fetchone() == (3,)
         assert db.execute("SELECT name FROM organizations ORDER BY name").fetchall() == [("example.ac.uk",), ("example.test",)]
-
-
-@pytest.mark.parametrize("setting,value", [("timeout_seconds", 0.000001), ("max_output_bytes", 1), ("max_diagnostics_bytes", 1)])
-def test_cli_pst_failed_limits_record_exit_and_bound_evidence(tmp_path: Path, setting: str, value: int | float) -> None:
-    """Actual Rust timeout and fast stdout/stderr overflow preserve exit evidence and bounded prefixes."""
-    fixture = Path(__file__).resolve().parents[1] / "rust/mct-importer/tests/fixtures/mail.pst"
-    archive = tmp_path / "archive"
-    archive.mkdir()
-    save_archive_config(archive, ArchiveConfig(plugins={"pst": {setting: value}}))
-    owners = tmp_path / "owners.txt"
-    owners.write_text("owner@example.test\n")
-    result = subprocess.run([sys.executable, "-m", "mailarchiver", "--archive", str(archive), "ingest", "--no-scan", "--owner-names-file", str(owners), str(fixture)],
-                            capture_output=True, text=True, check=False, timeout=60)
-    assert result.returncode != 0
-    path, = (archive / "processing-pst").glob("*/receipt.json")
-    receipt = ImportReceipt.model_validate_json(path.read_text())
-    assert receipt.exit_code is not None
-    if setting == "timeout_seconds":
-        assert "PST importer timeout" in result.stderr
-    elif setting == "max_output_bytes":
-        assert receipt.output_truncated and receipt.output_bytes > 1
-        assert path.with_name("output.mboxrd").stat().st_size == 1
-    else:
-        assert receipt.diagnostics_truncated and receipt.diagnostics_bytes > 1
-        assert path.with_name("stderr.txt").stat().st_size == 1

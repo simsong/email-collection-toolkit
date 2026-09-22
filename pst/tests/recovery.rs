@@ -154,7 +154,8 @@ impl Drop for Server {
 /// Exercise recovery after real process death; completed bytes must never be downloaded again.
 fn recovery(interrupt: bool) {
     let root = tempfile::tempdir().unwrap();
-    let first = include_bytes!("../../rust/mct-importer/tests/fixtures/empty.pst").to_vec();
+    let mut first = b"!BDN\0\0\0\0SM\x17\0".to_vec();
+    first.resize(128, 0);
     let mut second = first.clone();
     second.push(0); // Distinct hash prevents the first object satisfying both URLs.
     let server = Server::new(first.clone(), second.clone());

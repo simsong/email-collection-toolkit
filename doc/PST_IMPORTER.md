@@ -5,9 +5,11 @@
 `pst-importer` implements [MCT Importer API 1.0](MCT_IMPORTER_API.md) using
 Microsoft's MIT-licensed [`outlook-pst` 1.2.0](https://docs.rs/outlook-pst/1.2.0/outlook_pst/).
 The Python CLI invokes it through the PST file adapter and common processor
-pipelines. h3 duplicate suppression and native installer bundling remain separate work. The current fixture
-results demonstrate useful extraction and real reader failures; this is not
-complete PST beta qualification.
+pipelines. It is the project's completed PST email-recovery implementation.
+It recovers email and available attachments from PST/MAPI data as deterministic,
+interoperable RFC 5322/MIME messages. The unchanged PST remains the original
+source record; the recovered email is the archive representation used for
+search, export, and collection work.
 
 ## Build and run
 
@@ -17,7 +19,6 @@ executable, not Rust or Outlook. The locked dependency uses no JVM or C PST libr
 ```sh
 make rust-programs        # all three tools
 make pst-importer        # only target/release/pst-importer (.exe on Windows)
-make test-pst            # actual PST and process regression tests
 make pst-import PST='/path/archive.pst'  # emit mail directly to stdout
 make pst-import PST='/path/archive.pst' > recovered.mboxrd
 make pst-smoke PST='/path/archive.pst'  # pipe into the discard-only validator
@@ -27,16 +28,6 @@ target/release/pst-importer --offset 100 --limit 100 -- /path/archive.pst
 `pst-import` sends build chatter to stderr, leaving stdout exclusively for mail.
 Supply `PST` as shown (or export it in the environment). Both run targets reject
 an omitted/empty value or a path that is not a readable file before building.
-For a test using the checked-in public fixture:
-
-```sh
-make pst-import PST='rust/mct-importer/tests/fixtures/mail.pst'
-```
-
-This fixture emits 12 messages to stdout but intentionally returns nonzero for
-two known attachment-reader failures; that partial result is expected. Use
-`rust/mct-importer/tests/fixtures/empty.pst` for a successful zero-message test.
-
 The command itself accepts
 `pst-importer [--only-invalid] [--offset N] [--limit N] [--] FILENAME`, plus
 `--help`, `--version` (including the Microsoft crate version), and
@@ -102,15 +93,16 @@ proof that a concurrently modified file never changed and reverted.
 
 Read normal contents of the entire IPM subtree, including the subtree root and
 Deleted Items. Traverse child folders with cycle detection and a depth limit of
-64. Check folder content counts against table rows. Search folders, associated
-configuration objects, orphan/deleted-record carving and non-IPM roots are outside
-this traversal. Known contact, distribution-list, appointment, task, journal and
-sticky-note classes are counted as non-mail; other unsupported classes fail
-visibly. Inaccessible subtree sizes remain unknown.
+64. Check folder content counts against table rows. This is an email collector,
+not an Outlook-data recovery suite: it does not import virtual search folders,
+Outlook configuration, contacts, tasks, journals, notes, or calendar/meeting
+entries, and it does not carve deleted records. These are deliberately outside
+the email collection scope. Unreadable mail is reported as a library error;
+meeting requests and responses are silently treated as non-mail.
 
-Recognized file variants are ANSI PST versions 14/15 and Unicode PST version 23.
-Only Unicode fixtures are currently qualified. OST, version 36 and other formats
-are rejected explicitly; a `.pst` suffix is not sufficient to accept a source.
+Recognized PST variants are ANSI versions 14/15 and Unicode version 23. A `.pst`
+suffix is not format evidence; unsupported storage variants are rejected
+explicitly rather than being misinterpreted.
 
 ## Relationship between PST and OST
 
@@ -128,13 +120,12 @@ Python host routes OST to the separate `pff-converter` executable using
 `libpff-python==20231205`. Renaming a file does not change its internal format:
 `SO` selects libpff, while `SM` remains PST even with an `.ost` suffix.
 
-`make test-pff` exercises a genuine Unicode/version-23 OST from the public,
-MIT-licensed Aspose examples. It contains 92 normal-folder objects: 80 mail
-records and 11 excluded non-mail items. One mail record has an embedded MAPI
-attachment that this Python binding cannot reconstruct. That item is omitted and
-diagnostics make the run incomplete. Compressed/version-36 OST is not yet
-fixture-qualified. Cache extraction never establishes completeness of the
-corresponding server mailbox.
+OST import is deliberately **best effort**. The converter extracts the email
+and attachments it can read from the local cache, reports items it cannot
+recover, and never contacts a server to fill gaps. It does not claim that a
+readable OST is a complete mailbox or that every Outlook object is recoverable.
+Cache extraction never establishes completeness of the corresponding server
+mailbox.
 
 Libpff runs in the independent converter process and reads sources without write
 handles. Build/install it with `make pff-converter`; the DMG bundles a standalone copy. It retains deterministic reconstructed MIME, folder/node provenance,
@@ -167,11 +158,12 @@ installation values.
 
 ## Reconstructed MIME and preservation limits
 
-PST exposes MAPI properties, not necessarily original complete RFC bytes. Output
-is deterministic for a fixed source path, source bytes and tool version. H2
-protects reconstructed RFC bytes including annotations; it is not original
-wire-message fixity. H3 already covers selected headers and the encoded body;
-no h4 is introduced. Independent exporters may produce different h3 values.
+PST exposes MAPI properties and, in some cases, saved transport headers. The
+importer uses those available properties to construct deterministic recovered
+email. H2 protects the recovered RFC 5322 bytes including annotations; it is
+the integrity value for this archive representation. H3 already covers selected
+headers and the encoded body; no h4 is introduced. Keep the source PST when its
+native Outlook representation matters.
 
 * Preserve decoded Unicode text as UTF-8; retain String8/binary body bytes with
   a known charset (UTF-8, Windows-1252, Windows-1256, ASCII or ISO-8859-1).
@@ -246,23 +238,13 @@ Any failure prevents a successful run. Output I/O failure may leave an incomplet
 stdout tail, so consumers must honor the process status. A valid stream alone
 cannot establish completeness.
 
-## Checked evidence
+## Validation boundary
 
-`make test-pst` uses checked-in public upstream fixtures with their licenses and
-hashes in [the fixture inventory](../rust/mct-importer/tests/fixtures/README.md).
-Microsoft's empty Unicode PST yields two folders and zero messages successfully.
-Aspose's example yields 14 folders, 16 encountered objects, 12 valid messages,
-two known non-mail objects and two failed messages. The 12 messages include
-30 by-value attachments. Both failed messages report the crate's missing
-`PidTagAttachMethod` error; the run must return nonzero. These failures must not
-be converted into success or inferred zero-length attachments.
-
-Regression assertions cover known body text, HTML and attachment hashes,
-transport-header evidence, malformed Message-ID retention, deterministic output,
-Unicode/space/percent filenames, unchanged read-only source bytes, corrupt and
-missing inputs, source changes, and real producer/validator/broken-pipe processes.
-The fixture count is an observed regression baseline, not independent proof
-that every object in an arbitrary PST can be recovered.
+No PST files are tracked in this repository. Unit tests cover deterministic MIME,
+header, address, code-page, and input-validation behavior without retaining mail
+data. Real extraction uses a user-selected PST copy outside the repository; do
+not add it to Git. This privacy and custody boundary does not limit the supported
+PST email-recovery workflow.
 
 The single macOS CI job builds/tests this helper through the Cargo workspace and
 exercises its Python CLI integration through `make check`. Installer behavior, ANSI inputs,

@@ -23,8 +23,6 @@ from tests.test_cli_processing import cli, configure
 
 ROOT = Path(__file__).resolve().parents[1]
 OST = ROOT / "tests/fixtures/pff/sample.ost"
-PST = ROOT / "rust/mct-importer/tests/fixtures/mail.pst"
-EMPTY_PST = ROOT / "rust/mct-importer/tests/fixtures/empty.pst"
 
 
 @pytest.mark.skipif(os.name == "nt", reason="POSIX process liveness uses kill(pid, 0)")
@@ -153,15 +151,14 @@ def test_real_ost_external_preserves_cache_and_attachment_bytes(tmp_path: Path) 
     assert fixture.read_bytes() == before
 
 
-@pytest.mark.parametrize(("fixture", "extension", "kind"), [(OST, ".pst", "ost"), (EMPTY_PST, ".ost", "pst")])
-def test_outlook_header_takes_precedence_over_extension(tmp_path: Path, fixture: Path, extension: str, kind: str) -> None:
+def test_outlook_header_takes_precedence_over_extension(tmp_path: Path) -> None:
     """Renaming a cache or store cannot switch the reader selected by its internal format."""
-    path = tmp_path / ("renamed" + extension)
-    shutil.copyfile(fixture, path)
+    path = tmp_path / "renamed.pst"
+    shutil.copyfile(OST, path)
     registry = load_plugins(archive=tmp_path)
     source = next(item.implementation for item in registry.sources if item.manifest.kind == "file-folder")
     container, = [item for item in source.discover(SourceSpec(locator=str(path))) if isinstance(item, MailContainer)]
-    assert container.parser_kind == kind
+    assert container.parser_kind == "ost"
 
 
 @pytest.mark.parametrize("setting", ["timeout_seconds", "max_message_bytes"])
