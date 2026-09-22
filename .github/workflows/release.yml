@@ -1,6 +1,6 @@
 # Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved.
 
-name: Assemble draft GitHub release
+name: Assemble GitHub release
 
 on:
   push:
@@ -74,8 +74,9 @@ jobs:
           RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
         run: |
           prerelease=()
-          case "$RELEASE_TAG" in
-            *-alpha.*|*-beta.*) prerelease=(--prerelease) ;;
+          metadata="$(make release-tag-check GITHUB_REF_NAME="$RELEASE_TAG")"
+          case "$metadata" in
+            *"channel=preview"*) prerelease=(--prerelease) ;;
           esac
           gh release create "$RELEASE_TAG" \
             --repo "$GITHUB_REPOSITORY" \

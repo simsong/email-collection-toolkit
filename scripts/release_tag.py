@@ -16,7 +16,7 @@ PREVIEW_CHANNEL = "preview"
 RELEASE_CHANNEL = "release"
 ALPHA = "a"
 BETA = "b"
-CHANNEL_STAGES = {ALPHA: "alpha", BETA: "beta"}
+PREVIEW_STAGES = {ALPHA, BETA}
 
 
 def release_metadata(version_text: str) -> tuple[str, str, int, str]:
@@ -25,6 +25,8 @@ def release_metadata(version_text: str) -> tuple[str, str, int, str]:
         version = Version(version_text)
     except InvalidVersion as error:
         raise ValueError(f"invalid PEP 440 version: {version_text}") from error
+    if str(version) != version_text:
+        raise ValueError("release version must use canonical PEP 440 spelling")
     if version.epoch or len(version.release) != 3 or version.dev or version.post or version.local:
         raise ValueError("releases must use MAJOR.MINOR.PATCH, optionally followed by aN or bN")
     major, minor, patch = version.release
@@ -34,12 +36,10 @@ def release_metadata(version_text: str) -> tuple[str, str, int, str]:
     if version.pre is None:
         return f"v{version}", RELEASE_CHANNEL, base + 900, str(version)
     stage, sequence = version.pre
-    if stage not in CHANNEL_STAGES or not 1 <= sequence <= 399:
+    if stage not in PREVIEW_STAGES or not 1 <= sequence <= 399:
         raise ValueError("preview releases must use a1 through a399 or b1 through b399")
-    label = CHANNEL_STAGES[stage]
     offset = 100 if stage == ALPHA else 500
-    return f"v{major}.{minor}.{patch}-{label}.{sequence}", PREVIEW_CHANNEL, base + offset + sequence, \
-        f"{major}.{minor}.{patch}-{label}.{sequence}"
+    return f"v{version}", PREVIEW_CHANNEL, base + offset + sequence, str(version)
 
 
 def main() -> int:

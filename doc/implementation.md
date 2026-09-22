@@ -2133,12 +2133,14 @@ Real Developer ID import/signing and hosted GUI execution require a credentialed
 Mac release trial; pure policy tests do not establish those properties.
 
 Release metadata is parsed with `packaging.version.Version`, rather than a
-home-grown version regular expression. The supported PEP 440 forms are stable
-`MAJOR.MINOR.PATCH`, alpha `MAJOR.MINOR.PATCHaN`, and beta
-`MAJOR.MINOR.PATCHbN`. The release validator maps alpha and beta to Sparkle's
-`preview` channel and stable releases to the default channel, with monotonically
-increasing numeric Sparkle build values. The fixed website appcast starts empty;
-the Sparkle publication step adds only a post-notarization, Ed25519-signed item.
+home-grown version regular expression. Package metadata and About use its
+canonical spelling unchanged; Git adds only the `v` tag prefix. The supported
+forms are stable `MAJOR.MINOR.PATCH`, alpha `MAJOR.MINOR.PATCHaN`, and beta
+`MAJOR.MINOR.PATCHbN`; the parser rejects every other spelling or form. Alpha
+and beta releases use Sparkle's `preview` channel and stable releases use the
+default channel, with separate monotonically increasing numeric Sparkle build
+values. The fixed website appcast starts empty; the Sparkle publication step
+adds only a post-notarization, Ed25519-signed item.
 `make sparkle-tools` pins Sparkle 2.10.0 and its upstream SHA-256, then places
 the verified developer archive below `.tools/sparkle/`. `make sparkle-keys`
 calls Sparkle's local `generate_keys`; the key generator retains the private

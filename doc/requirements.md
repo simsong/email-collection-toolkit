@@ -1848,13 +1848,14 @@ notarization credentials must fail release assembly; an unsigned development
 DMG must never be published as a release. The archive extension is declared in
 the bundle's document-type metadata.
 
-The public release tag is derived from PEP 440 package metadata: `1.0.0a1`
-maps to preview tag `v1.0.0-alpha.1`, `1.0.0b1` maps to preview tag
-`v1.0.0-beta.1`, and `1.0.0` maps to release tag `v1.0.0`. Preview items use
-Sparkle's `preview` channel; stable items use Sparkle's default channel. The
-initial public preview is `v1.0.0-alpha.1`. `appcast.xml` is published at the
-website's fixed HTTPS URL only after its matching notarized DMG has a Sparkle
-Ed25519 archive signature.
+Package metadata and the About window use one canonical PEP 440 version:
+`1.0.0a2` is the current alpha and its annotated Git tag is `v1.0.0a2`.
+The release parser rejects noncanonical or unsupported versions; only stable
+`MAJOR.MINOR.PATCH`, alpha `MAJOR.MINOR.PATCHaN`, and beta
+`MAJOR.MINOR.PATCHbN` are accepted. Alpha and beta items use Sparkle's
+`preview` channel; stable items use its default channel. `appcast.xml` is
+published at the website's fixed HTTPS URL only after its matching notarized
+DMG has a Sparkle Ed25519 archive signature.
 
 `make sparkle-tools` downloads the pinned Sparkle developer archive to the
 ignored project-local `.tools/` directory, verifies its SHA-256 before extraction,

@@ -237,8 +237,8 @@ def test_release_accepts_unsigned_annotated_tags_and_checks_commit_and_version(
 
 
 @pytest.mark.parametrize(("version", "tag", "channel", "sparkle_version"), [
-    ("1.0.0a1", "v1.0.0-alpha.1", "preview", 1_000_000_101),
-    ("1.0.0b1", "v1.0.0-beta.1", "preview", 1_000_000_501),
+    ("1.0.0a2", "v1.0.0a2", "preview", 1_000_000_102),
+    ("1.0.0b1", "v1.0.0b1", "preview", 1_000_000_501),
     ("1.0.0", "v1.0.0", "release", 1_000_000_900),
 ])
 def test_release_version_maps_to_a_single_public_track(
@@ -250,13 +250,25 @@ def test_release_version_maps_to_a_single_public_track(
     assert release_metadata(version)[:3] == (tag, channel, sparkle_version)
 
 
+@pytest.mark.parametrize("version", [
+    "not-a-version", "1.0", "1.0.0-alpha.2", "1.0.0a0", "1.0.0a400", "1.0.0rc1", "1.0.0.dev1",
+    "1.0.0+local",
+])
+def test_release_version_rejects_noncanonical_or_unsupported_pep_440_forms(version: str) -> None:
+    """Version policy accepts only canonical stable, alpha, and beta PEP 440 releases."""
+    from scripts.release_tag import release_metadata
+
+    with pytest.raises(ValueError):
+        release_metadata(version)
+
+
 def test_appcast_keeps_preview_items_out_of_the_default_release_track(tmp_path: Path) -> None:
     """A signed preview archive receives Sparkle's preview channel; stable does not."""
     appcast = tmp_path / "appcast.xml"
     appcast.write_text("<rss><channel /></rss>")
     archive = SignedArchive(signature="signature", length=1)
-    append_item(appcast, AppcastRelease(tag="v1.0.0-alpha.1", channel="preview", sparkle_version=100,
-                                        display_version="1.0.0-alpha.1", url="https://example.test/alpha.dmg",
+    append_item(appcast, AppcastRelease(tag="v1.0.0a2", channel="preview", sparkle_version=100,
+                                        display_version="1.0.0a2", url="https://example.test/alpha.dmg",
                                         archive=archive))
     append_item(appcast, AppcastRelease(tag="v1.0.0", channel="release", sparkle_version=900,
                                         display_version="1.0.0", url="https://example.test/release.dmg",
