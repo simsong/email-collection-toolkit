@@ -113,6 +113,12 @@ TIKA_DOWNLOAD_DIR ?= $(CURDIR)/.tools/tika/downloads
 TIKA_ARCHIVE := $(TIKA_DOWNLOAD_DIR)/tika-app-$(TIKA_VERSION).zip
 TIKA_SHA512 := $(TIKA_ARCHIVE).sha512
 TIKA_URL := https://downloads.apache.org/tika/$(TIKA_VERSION)/tika-app-$(TIKA_VERSION).zip
+SPARKLE_VERSION ?= 2.10.0
+SPARKLE_DIR ?= $(CURDIR)/.tools/sparkle/$(SPARKLE_VERSION)
+SPARKLE_DOWNLOAD_DIR ?= $(CURDIR)/.tools/sparkle/downloads
+SPARKLE_ARCHIVE := $(SPARKLE_DOWNLOAD_DIR)/Sparkle-$(SPARKLE_VERSION).tar.xz
+SPARKLE_URL := https://github.com/sparkle-project/Sparkle/releases/download/$(SPARKLE_VERSION)/Sparkle-$(SPARKLE_VERSION).tar.xz
+SPARKLE_SHA256 := c2bf58aa8387266ac179357b1415d6f2635f044da8be41042af32425dae6da0c
 PLAYWRIGHT_INSTALL_ARGS ?= chromium
 NATIVE_GUI_ARTIFACT_DIR ?= $(CURDIR)/.tmp/native-gui-diagnostics
 AUDIT_OUTPUT ?= $(CURDIR)/.tmp/data-quality-audit
@@ -161,6 +167,22 @@ pyright:
 .PHONY: syntax-check
 syntax-check:
 	uv run python -m compileall -q src scripts tests e2e_tests
+
+.PHONY: sparkle-tools sparkle-keys
+sparkle-tools:
+	@mkdir -p "$(SPARKLE_DOWNLOAD_DIR)"
+	@test -f "$(SPARKLE_ARCHIVE)" || curl --fail --location --output "$(SPARKLE_ARCHIVE)" "$(SPARKLE_URL)"
+	@printf '%s  %s\n' "$(SPARKLE_SHA256)" "$(SPARKLE_ARCHIVE)" | shasum -a 256 -c -
+	@if test -e "$(SPARKLE_DIR)"; then \
+		test -x "$(SPARKLE_DIR)/bin/generate_keys" || { echo "incomplete Sparkle tools directory: $(SPARKLE_DIR)" >&2; exit 1; }; \
+	else \
+		mkdir -p "$(SPARKLE_DIR)"; \
+		tar -xJf "$(SPARKLE_ARCHIVE)" --strip-components=1 -C "$(SPARKLE_DIR)"; \
+		test -x "$(SPARKLE_DIR)/bin/generate_keys"; \
+	fi
+
+sparkle-keys: sparkle-tools
+	"$(SPARKLE_DIR)/bin/generate_keys"
 
 .PHONY: dmg dmg-signed notarize-dmg list-signatures check-release test-dmg preview-dmg self-test self-test-gui test-packaging
 dmg: ruff syntax-check pst-importer mcti-scan pff-converter-bundle

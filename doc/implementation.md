@@ -2140,6 +2140,10 @@ home-grown version regular expression. The supported PEP 440 forms are stable
 `preview` channel and stable releases to the default channel, with monotonically
 increasing numeric Sparkle build values. The fixed website appcast starts empty;
 the Sparkle publication step adds only a post-notarization, Ed25519-signed item.
+`make sparkle-tools` pins Sparkle 2.10.0 and its upstream SHA-256, then places
+the verified developer archive below `.tools/sparkle/`. `make sparkle-keys`
+calls Sparkle's local `generate_keys`; the key generator retains the private
+Ed25519 material in the developer's login Keychain and prints the public key.
 `scripts/desktop_entry.py` dispatches normal GUI launch, `--cli`, `--self-test`,
 and `--self-test-gui`. Frozen GUI resources use PyInstaller's bundle root;
 the verifier's actual `.py` source is explicitly bundled for archive installation.

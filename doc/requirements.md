@@ -1856,6 +1856,12 @@ initial public preview is `v1.0.0-alpha.1`. `appcast.xml` is published at the
 website's fixed HTTPS URL only after its matching notarized DMG has a Sparkle
 Ed25519 archive signature.
 
+`make sparkle-tools` downloads the pinned Sparkle developer archive to the
+ignored project-local `.tools/` directory, verifies its SHA-256 before extraction,
+and refuses an incomplete prior extraction. `make sparkle-keys` invokes the
+verified `generate_keys` tool locally. The private Ed25519 key remains outside
+Git; it is never an application, Apple-signing, or notarization credential.
+
 Ordinary `make dmg`, `make dmg-signed`, and `make test-dmg` must run only the
 headless mounted self-test, without opening GUI test windows. `make check-release`
 must additionally run the visible native self-test on the built DMG; `DMG=path`
