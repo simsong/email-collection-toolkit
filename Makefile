@@ -162,7 +162,7 @@ pyright:
 syntax-check:
 	uv run python -m compileall -q src scripts tests e2e_tests
 
-.PHONY: dmg dmg-signed list-signatures check-release test-dmg preview-dmg self-test self-test-gui test-packaging
+.PHONY: dmg dmg-signed notarize-dmg list-signatures check-release test-dmg preview-dmg self-test self-test-gui test-packaging
 dmg: ruff syntax-check pst-importer mcti-scan pff-converter-bundle
 	uv run --group packaging python scripts/build_macos.py $(ARGS)
 
@@ -171,6 +171,10 @@ dmg-signed: SIGNING_IDENTITY ?= $(shell /usr/bin/security find-identity -v -p co
 dmg-signed:
 	@test -n "$(strip $(SIGNING_IDENTITY))" -a "$(strip $(SIGNING_IDENTITY))" != '-' || { echo 'No Developer ID Application identity selected. Run make list-signatures or set SIGNING_IDENTITY.' >&2; exit 2; }
 	$(MAKE) dmg ARGS='$(ARGS) --signing-identity "$(SIGNING_IDENTITY)"'
+
+notarize-dmg:
+	@test -n "$(DMG)" || { echo 'usage: make notarize-dmg DMG=/path/to/Email-Collection-Toolkit.dmg'; exit 2; }
+	uv run --group packaging python scripts/build_macos.py --notarize-dmg "$(DMG)"
 
 list-signatures:
 	/usr/bin/security find-identity -v -p codesigning

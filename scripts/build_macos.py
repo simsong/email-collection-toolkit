@@ -23,7 +23,11 @@ from packaging.requirements import Requirement
 from packaging.utils import canonicalize_name
 
 from dmg_layout import create_image, verify_layout
-from macos_signing import CERTIFICATE_SECRET, PASSWORD_SECRET, SigningSecrets, dmg_filename, sign_image, signing_identity
+from macos_signing import (
+    CERTIFICATE_SECRET, NOTARY_ISSUER_SECRET, NOTARY_KEY_ID_SECRET, NOTARY_PRIVATE_KEY_SECRET,
+    PASSWORD_SECRET, NotarizationCredentials, SigningSecrets, dmg_filename, notarize_image, sign_image,
+    signing_identity,
+)
 
 ROOT = Path(__file__).resolve().parents[1]
 APP_NAME = "Email Collection Toolkit"
@@ -137,7 +141,8 @@ def test_image(dmg: Path, *, gui: bool = False) -> None:
         verify_layout(mount, app.name)
         executable = app / "Contents/MacOS" / APP_NAME
         environment = {key: value for key, value in os.environ.items()
-                       if key not in (CERTIFICATE_SECRET, PASSWORD_SECRET)
+                       if key not in (CERTIFICATE_SECRET, PASSWORD_SECRET, NOTARY_KEY_ID_SECRET,
+                                      NOTARY_ISSUER_SECRET, NOTARY_PRIVATE_KEY_SECRET)
                        and not key.startswith(("PYTHON", "DYLD_", "MAILARCHIVER", "MAIL_ARCHIVE"))}
         environment["PATH"] = "/usr/bin:/bin:/usr/sbin:/sbin"
         converter = app / "Contents/Resources/importers/pff-converter/pff-converter"
@@ -350,6 +355,7 @@ def main() -> None:
     parser.add_argument("--test-dmg", type=Path, help="mount and retest an existing DMG")
     parser.add_argument("--check-release", action="store_true", help="include the visible GUI self-test for release validation")
     parser.add_argument("--preview-dmg", type=Path, help="open the mounted installer in Finder until Return is pressed")
+    parser.add_argument("--notarize-dmg", type=Path, help="submit, staple, and validate an existing signed DMG")
     parser.add_argument("--signing-identity", help="existing Keychain identity; otherwise import optional signing secrets; '-' forces unsigned")
     args = parser.parse_args()
     if sys.platform != "darwin":
@@ -360,6 +366,9 @@ def main() -> None:
             input("Inspect the installer in Finder; press Return to eject: ")
     elif args.test_dmg:
         test_image(args.test_dmg.resolve(strict=True), gui=args.check_release)
+    elif args.notarize_dmg:
+        notarize_image(args.notarize_dmg.resolve(strict=True),
+                       NotarizationCredentials.from_environment(os.environ), ROOT / ".tmp")
     else:
         credentials = SigningSecrets.from_environment(os.environ)
         with signing_identity(credentials, ROOT / ".tmp", args.signing_identity) as identity:

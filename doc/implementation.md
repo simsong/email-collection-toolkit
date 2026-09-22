@@ -2114,15 +2114,17 @@ The builder signs and verifies the completed DMG before publishing the candidate
 Missing either secret emits `::warning::` and produces `*_UNSIGNED.dmg`; invalid
 configured credentials fail. An explicit `--signing-identity` overrides secrets;
 `-` emits a distinct warning identifying that deliberate unsigned override.
-The release workflow builds the DMG on `macos-15`, passes secrets only to
-`make dmg`, and waits for the headless-tested artifact before assembling the source and
-DMG checksums into a draft release. Assembly checks out the Mac job's verified
+The release workflow builds the DMG on `macos-15`, passes protected signing and
+App Store Connect notarization credentials only to its packaging step, submits
+the signed image through `make notarize-dmg`, staples and validates it, and then
+retests the mounted artifact before assembling the source and DMG checksums into
+a draft release. Missing credentials leave no publishable DMG and fail the
+release job. Assembly checks out the Mac job's verified
 commit and checks that the tag still names that commit. Both jobs validate the
 tag reference, checked-out commit, annotation, and project version before
 installing dependencies. Unsigned annotated tags are accepted without a public-key
 allowlist or GitHub signature verification. Repository permissions control
-workflow changes and release-tag creation. There is
-no automatic notarization. `make test-signing` runs ordered focused lint/type checks and
+workflow changes and release-tag creation. `make test-signing` runs ordered focused lint/type checks and
 regressions for credential selection, malformed input, identity ambiguity,
 unsigned naming/warnings, sanitized errors, shared-runner rejection, and release
 artifact ordering. A real Git fixture executes both workflow commit checks and

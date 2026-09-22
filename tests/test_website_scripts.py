@@ -64,7 +64,7 @@ def test_release_workflow_validates_built_distributions() -> None:
     text = workflow.read_text(encoding="utf-8")
 
     assert "run: make distribution-check" in text
-    assert "run: make dmg" in text and "run: make check-release" not in text
+    assert "make dmg" in text and "make notarize-dmg" in text and "run: make check-release" not in text
     gates = (
         "name: Verify release commit",
         "name: Verify annotated tag and project version",

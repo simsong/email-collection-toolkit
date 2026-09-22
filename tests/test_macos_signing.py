@@ -13,7 +13,8 @@ from pydantic import SecretStr
 from yaml import safe_load
 
 from scripts.macos_signing import (
-    CERTIFICATE_SECRET, GITHUB_ACTIONS, PASSWORD_SECRET, RUNNER_ENVIRONMENT, SigningSecrets, developer_identity,
+    CERTIFICATE_SECRET, GITHUB_ACTIONS, NOTARY_ISSUER_SECRET, NOTARY_KEY_ID_SECRET, NOTARY_PRIVATE_KEY_SECRET,
+    PASSWORD_SECRET, RUNNER_ENVIRONMENT, NotarizationCredentials, SigningSecrets, developer_identity,
     dmg_filename, security_command, sign_image, signing_identity,
 )
 
@@ -62,6 +63,20 @@ def test_wrapped_base64_preserves_exported_bytes() -> None:
     encoded = base64.encodebytes(original).decode("ascii")
     credentials = SigningSecrets(certificate=SecretStr(encoded), password=SecretStr("p12-password"))
     assert credentials.available and credentials.decode() == original
+
+
+def test_notarization_credentials_require_a_complete_pem_api_key() -> None:
+    """Release notarization rejects incomplete and malformed credentials before tool execution."""
+    credentials = NotarizationCredentials.from_environment({NOTARY_KEY_ID_SECRET: "key"})
+    assert not credentials.available
+    with pytest.raises(RuntimeError, match="requires all protected"):
+        credentials.decoded_private_key()
+    credentials = NotarizationCredentials.from_environment({
+        NOTARY_KEY_ID_SECRET: "key", NOTARY_ISSUER_SECRET: "issuer",
+        NOTARY_PRIVATE_KEY_SECRET: base64.b64encode(b"not a private key").decode(),
+    })
+    with pytest.raises(ValueError, match="not a PEM"):
+        credentials.decoded_private_key()
 
 
 @pytest.mark.parametrize("output", ["0 valid identities found", IDENTITY_LINE + " (CSSMERR_TP_CERT_EXPIRED)",
@@ -144,8 +159,11 @@ def test_release_waits_for_exact_dmg_before_checksumming() -> None:
     assert steps[download][WITH][NAME] == "macos-dmg"
     assert "*.dmg" in steps[checksum][RUN]
     secret_steps = [step for step in macos[STEPS] if CERTIFICATE_SECRET in step.get(ENV, {})]
-    assert len(secret_steps) == 1 and secret_steps[0][RUN] == "make dmg"
+    assert len(secret_steps) == 1
+    assert secret_steps[0][RUN].splitlines()[0] == "make dmg"
     assert PASSWORD_SECRET in secret_steps[0][ENV]
+    assert {NOTARY_KEY_ID_SECRET, NOTARY_ISSUER_SECRET, NOTARY_PRIVATE_KEY_SECRET} <= set(secret_steps[0][ENV])
+    assert "make notarize-dmg" in secret_steps[0][RUN]
     assert macos[RUNS_ON] == "macos-15"
     assert secret_steps[0][CONDITION] == "${{ runner.environment == 'github-hosted' }}"
     for job in (assembly, macos):

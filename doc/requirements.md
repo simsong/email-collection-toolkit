@@ -1805,7 +1805,10 @@ instructions.
 Application identity in the local Keychain search list, overridable with
 `SIGNING_IDENTITY`. An absent identity or `-` must fail before building.
 `make list-signatures` must list valid local code-signing identities and their
-certificate hashes. These targets do not automate notarization.
+certificate hashes. `make notarize-dmg DMG=...` submits an already Developer ID
+signed DMG with protected App Store Connect API-key credentials, waits for
+acceptance, staples the ticket, and requires Gatekeeper acceptance. It must not
+accept an unsigned image or print credential material.
 The Finder window must present a large app icon on the left and the real
 Applications shortcut on the right, with an arrow and drag-to-install
 instructions in the background. Only those two items are visible; instructions
@@ -1839,10 +1842,11 @@ configured release-signing public keys or GitHub signature verification. Before
 installing project dependencies or using Apple secrets, require the tag to match
 the project version and the checked-out commit. Lightweight tags must fail.
 Administrators control release-tag creation and workflow changes through repository permissions.
-Release assembly must include the tested DMG from the same commit as the source
-archive and checksum the final image. Signing is not notarization: neither
-build is automatically notarized, and no Gatekeeper bypass is performed. The archive extension is declared
-in the bundle's document-type metadata.
+Release assembly must include the tested, notarized DMG from the same commit as
+the source archive and checksum the final image. Missing protected signing or
+notarization credentials must fail release assembly; an unsigned development
+DMG must never be published as a release. The archive extension is declared in
+the bundle's document-type metadata.
 
 Ordinary `make dmg`, `make dmg-signed`, and `make test-dmg` must run only the
 headless mounted self-test, without opening GUI test windows. `make check-release`
