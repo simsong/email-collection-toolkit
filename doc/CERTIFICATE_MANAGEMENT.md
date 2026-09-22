@@ -201,14 +201,20 @@ verification is required. Both jobs check the tag's commit, annotation and
 version before dependency installation. Git-tag signing remains optional and
 independent of Apple app/DMG signing.
 
-Signing credentials are available only to the `Build DMG and validate release including native GUI` step in
-this workflow; they are not needed for PR testing. Anyone who can modify and
-execute workflows with repository secrets could extract them. Restrict release
-tag creation and workflow changes, review dependencies, and never expose these
-secrets to untrusted PR code. The macOS job's actions are pinned to commit SHAs.
+The release-only packaging step receives five protected repository secrets:
+`APPLE_CERTIFICATE_P12_BASE64`, `APPLE_CERTIFICATE_PASSWORD`,
+`APPLE_NOTARY_KEY_ID`, `APPLE_NOTARY_ISSUER_ID`, and
+`APPLE_NOTARY_PRIVATE_KEY_BASE64`. The final value is the Base64 encoding of
+the complete App Store Connect API `.p8` private-key file. The first two sign
+the DMG; the latter three authenticate `notarytool`. The builder removes all
+five from PyInstaller and installed-test child environments. They are not
+needed for PR testing. Anyone who can modify and execute workflows with
+repository secrets could extract them. Restrict release-tag creation and
+workflow changes, review dependencies, and never expose these secrets to
+untrusted PR code. The macOS job's actions are pinned to commit SHAs.
 Repository administrators control workflow changes and release-tag creation;
-this workflow does not configure remote repository protections.
-Do not commit `.p12` exports, put passwords in YAML, or upload keychains as
+this workflow does not configure remote repository protections. Do not commit
+`.p12` or `.p8` exports, put secret values in YAML, or upload keychains as
 artifacts. Repository secret storage is not a substitute for reviewing Apple's
 service-provider conditions in section 1.
 
@@ -229,16 +235,17 @@ real Developer ID signing still need an actual release trial.
 
 | Signing configuration | Expected output |
 | --- | --- |
-| Both secrets present and valid | `Email-Collection-Toolkit-VERSION-ARCH.dmg`, app and container signed |
-| Neither secret present | Warning annotation and `Email-Collection-Toolkit-VERSION-ARCH_UNSIGNED.dmg` |
-| Only one secret present | Same warning and unsigned output; the incomplete pair is ignored |
-| Both present but invalid | Failed build, no newly uploaded release DMG |
+| Both signing secrets present and valid; all notarization secrets valid | Signed, notarized, stapled, Gatekeeper-validated DMG |
+| Signing pair absent for an ordinary local build | Warning annotation and `Email-Collection-Toolkit-VERSION-ARCH_UNSIGNED.dmg` |
+| Incomplete signing pair for an ordinary local build | Same warning and unsigned output |
+| Invalid signing or notarization credentials in a tagged release | Failed release; no DMG is uploaded |
 
 The warning begins `::warning::Developer ID signing skipped` in the build log
 and appears as an Actions warning annotation. Absence of signing credentials
-is intentionally nonfatal. The unsigned app still has its internal ad-hoc seal
-so bundle verification works; `_UNSIGNED` means no trusted Developer ID signature.
-Neither path is automatically notarized.
+is intentionally nonfatal only for an ordinary development build. The unsigned
+app still has its internal ad-hoc seal so bundle verification works; `_UNSIGNED`
+means no trusted Developer ID signature. Tagged release assembly is always
+notarized after signing; it cannot publish an unsigned development DMG.
 
 The release assembly job waits for the tested DMG, downloads the `macos-dmg`
 artifact, checks out the exact verified commit, builds the source distribution,

@@ -15,7 +15,7 @@ from yaml import safe_load
 from scripts.macos_signing import (
     CERTIFICATE_SECRET, GITHUB_ACTIONS, NOTARY_ISSUER_SECRET, NOTARY_KEY_ID_SECRET, NOTARY_PRIVATE_KEY_SECRET,
     PASSWORD_SECRET, RUNNER_ENVIRONMENT, NotarizationCredentials, SigningSecrets, developer_identity,
-    dmg_filename, security_command, sign_image, signing_identity,
+    dmg_filename, release_safe_environment, security_command, sign_image, signing_identity,
 )
 
 FINGERPRINT = "0123456789ABCDEF0123456789ABCDEF01234567"
@@ -77,6 +77,23 @@ def test_notarization_credentials_require_a_complete_pem_api_key() -> None:
     })
     with pytest.raises(ValueError, match="not a PEM"):
         credentials.decoded_private_key()
+    credentials = NotarizationCredentials.from_environment({
+        NOTARY_KEY_ID_SECRET: "key", NOTARY_ISSUER_SECRET: "issuer",
+        NOTARY_PRIVATE_KEY_SECRET: base64.b64encode(b"-----BEGIN PRIVATE KEY-----").decode(),
+    })
+    with pytest.raises(ValueError, match="not a PEM"):
+        credentials.decoded_private_key()
+
+
+def test_release_children_never_receive_signing_or_notarization_credentials() -> None:
+    """PyInstaller and mounted tests must not receive credentials from a release job."""
+    environment = release_safe_environment({
+        CERTIFICATE_SECRET: "certificate", PASSWORD_SECRET: "password",
+        NOTARY_KEY_ID_SECRET: "key", NOTARY_ISSUER_SECRET: "issuer",
+        NOTARY_PRIVATE_KEY_SECRET: "private-key", "PYTHONPATH": "/build/python",
+        "PATH": "/usr/bin:/bin", "UNRELATED": "retained",
+    }, ("PYTHON",))
+    assert environment == {"PATH": "/usr/bin:/bin", "UNRELATED": "retained"}
 
 
 @pytest.mark.parametrize("output", ["0 valid identities found", IDENTITY_LINE + " (CSSMERR_TP_CERT_EXPIRED)",
@@ -164,6 +181,8 @@ def test_release_waits_for_exact_dmg_before_checksumming() -> None:
     assert PASSWORD_SECRET in secret_steps[0][ENV]
     assert {NOTARY_KEY_ID_SECRET, NOTARY_ISSUER_SECRET, NOTARY_PRIVATE_KEY_SECRET} <= set(secret_steps[0][ENV])
     assert "make notarize-dmg" in secret_steps[0][RUN]
+    assert "-maxdepth" not in secret_steps[0][RUN]
+    assert "for candidate in dist/*.dmg" in secret_steps[0][RUN]
     assert macos[RUNS_ON] == "macos-15"
     assert secret_steps[0][CONDITION] == "${{ runner.environment == 'github-hosted' }}"
     for job in (assembly, macos):

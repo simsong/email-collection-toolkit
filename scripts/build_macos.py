@@ -24,8 +24,7 @@ from packaging.utils import canonicalize_name
 
 from dmg_layout import create_image, verify_layout
 from macos_signing import (
-    CERTIFICATE_SECRET, NOTARY_ISSUER_SECRET, NOTARY_KEY_ID_SECRET, NOTARY_PRIVATE_KEY_SECRET,
-    PASSWORD_SECRET, NotarizationCredentials, SigningSecrets, dmg_filename, notarize_image, sign_image,
+    NotarizationCredentials, SigningSecrets, dmg_filename, notarize_image, release_safe_environment, sign_image,
     signing_identity,
 )
 from release_tag import release_metadata
@@ -144,10 +143,8 @@ def test_image(dmg: Path, *, gui: bool = False) -> None:
         verify_dependencies(app)
         verify_layout(mount, app.name)
         executable = app / "Contents/MacOS" / APP_NAME
-        environment = {key: value for key, value in os.environ.items()
-                       if key not in (CERTIFICATE_SECRET, PASSWORD_SECRET, NOTARY_KEY_ID_SECRET,
-                                      NOTARY_ISSUER_SECRET, NOTARY_PRIVATE_KEY_SECRET)
-                       and not key.startswith(("PYTHON", "DYLD_", "MAILARCHIVER", "MAIL_ARCHIVE"))}
+        environment = release_safe_environment(
+            os.environ, ("PYTHON", "DYLD_", "MAILARCHIVER", "MAIL_ARCHIVE"))
         environment["PATH"] = "/usr/bin:/bin:/usr/sbin:/sbin"
         converter = app / "Contents/Resources/importers/pff-converter/pff-converter"
         with tempfile.TemporaryDirectory(prefix="pff-mounted-test-") as temporary:
@@ -334,8 +331,7 @@ def build(signing_identity: str, *, gui: bool = False) -> Path:
                    "--add-binary", f"{ROOT / 'target/release/mcti-scan'}:importers",
                    "--add-data", f"{ROOT / 'target/pff-converter'}:importers/pff-converter",
                    str(ROOT / "scripts/desktop_entry.py")]
-        environment = {key: value for key, value in os.environ.items()
-                       if key not in (CERTIFICATE_SECRET, PASSWORD_SECRET) and not key.startswith("PYTHON")}
+        environment = release_safe_environment(os.environ, ("PYTHON",))
         run(*command, cwd=ROOT, env=environment)
         app = bundle_output / f"{APP_NAME}.app"
         configure_bundle(app, signing_identity)

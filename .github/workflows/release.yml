@@ -127,10 +127,14 @@ jobs:
           APPLE_NOTARY_PRIVATE_KEY_BASE64: ${{ secrets.APPLE_NOTARY_PRIVATE_KEY_BASE64 }}
         run: |
           make dmg
-          dmg="$(find dist -maxdepth 1 -name '*.dmg' ! -name '*_UNSIGNED.dmg' -print -quit)"
-          test -n "$dmg"
-          make notarize-dmg DMG="$dmg"
-          make test-dmg DMG="$dmg"
+          shopt -s nullglob
+          dmgs=()
+          for candidate in dist/*.dmg; do
+            [[ "$candidate" == *_UNSIGNED.dmg ]] || dmgs+=("$candidate")
+          done
+          test "${#dmgs[@]}" -eq 1
+          make notarize-dmg DMG="${dmgs[0]}"
+          make test-dmg DMG="${dmgs[0]}"
       - name: Upload tested DMG
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:

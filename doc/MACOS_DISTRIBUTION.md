@@ -154,22 +154,26 @@ On an isolated GitHub-hosted runner, `make dmg` and `make check-release` import 
 identity when both
 `APPLE_CERTIFICATE_P12_BASE64` and `APPLE_CERTIFICATE_PASSWORD` are available.
 The [certificate management guide](CERTIFICATE_MANAGEMENT.md) explains exporting
-the `.p12` and configuring these GitHub Actions repository secrets. The release
-workflow passes them to the macOS build and includes the resulting DMG and
-checksum in the draft release. The release tag must contain this workflow and
+the `.p12`, App Store Connect API key, and five GitHub Actions repository
+secrets. A tagged release additionally requires `APPLE_NOTARY_KEY_ID`,
+`APPLE_NOTARY_ISSUER_ID`, and `APPLE_NOTARY_PRIVATE_KEY_BASE64`, which is the
+Base64 encoding of the complete `.p8` API private-key file. The workflow builds,
+notarizes, staples, Gatekeeper-validates, and retests the resulting DMG before
+it becomes a release artifact. The release tag must contain this workflow and
 builder; dispatching an older tag does not retrofit the new builder. Release
 tags must be annotated and match the project version; Git-tag signatures and
-release-signing public keys are not required. Automatic imports are rejected locally and on self-hosted
-runners because `security` password arguments remain visible to other processes;
-use an existing keychain identity for local signing.
+release-signing public keys are not required. Automatic imports are rejected
+locally and on self-hosted runners because `security` password arguments remain
+visible to other processes; use an existing keychain identity for local signing.
 
 Missing either secret is nonfatal: the build emits an Actions warning, leaves
 the DMG container unsigned, and names it `*_UNSIGNED.dmg`. An explicitly supplied
 identity takes precedence; `--signing-identity -` forces the unsigned path.
-Both secrets present but invalid is a build failure, not an unsigned fallback.
-The imported private key is deleted and the keychain search list restored when
-the build exits. Signing still requires a separate notarization step before
-claiming normal downloaded-file Gatekeeper acceptance.
+Both signing secrets present but invalid is a build failure, not an unsigned
+fallback. A release with missing or invalid notarization credentials also fails;
+an unsigned development image is never uploaded as a release. The imported
+signing private key and temporary notarization `.p8` file are deleted when their
+steps finish, and the keychain search list is restored.
 
 Without a Developer ID, PyInstaller and `codesign` use **ad-hoc signing** (`-`).
 This makes the bundle internally verifiable; it does not establish trusted
@@ -194,8 +198,9 @@ The mounted local tests do not establish downloaded-file Gatekeeper acceptance.
    make dmg-signed
    ```
 
-4. Before public distribution, submit the DMG with `xcrun notarytool`, inspect
-   the accepted result, and staple the ticket with `xcrun stapler`. Follow
-   Apple's [notarization workflow](https://developer.apple.com/documentation/security/notarizing-macos-software-before-distribution).
-   Credentials are not stored in the repository. The Make target does not yet
-   automate notarization or claim it has been performed.
+4. For a tagged release, GitHub Actions submits the DMG with `notarytool`,
+   staples the accepted ticket, validates it, and requires Gatekeeper
+   acceptance. The API `.p8` file is Base64-encoded into the protected
+   `APPLE_NOTARY_PRIVATE_KEY_BASE64` repository secret; neither it nor the
+   certificate password is stored in the repository. Follow Apple's
+   [notarization workflow](https://developer.apple.com/documentation/security/notarizing-macos-software-before-distribution).

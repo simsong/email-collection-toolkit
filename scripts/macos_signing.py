@@ -23,6 +23,10 @@ PASSWORD_SECRET = "APPLE_CERTIFICATE_PASSWORD"
 NOTARY_KEY_ID_SECRET = "APPLE_NOTARY_KEY_ID"
 NOTARY_ISSUER_SECRET = "APPLE_NOTARY_ISSUER_ID"
 NOTARY_PRIVATE_KEY_SECRET = "APPLE_NOTARY_PRIVATE_KEY_BASE64"
+PEM_PRIVATE_KEY_BEGIN = b"-----BEGIN PRIVATE KEY-----"
+PEM_PRIVATE_KEY_END = b"-----END PRIVATE KEY-----"
+RELEASE_SECRET_NAMES = (CERTIFICATE_SECRET, PASSWORD_SECRET, NOTARY_KEY_ID_SECRET, NOTARY_ISSUER_SECRET,
+                        NOTARY_PRIVATE_KEY_SECRET)
 GITHUB_ACTIONS = "GITHUB_ACTIONS"
 RUNNER_ENVIRONMENT = "RUNNER_ENVIRONMENT"
 EXPLICIT_UNSIGNED_WARNING = (
@@ -66,6 +70,12 @@ class SigningSecrets(BaseModel):
         return decoded
 
 
+def release_safe_environment(environment: Mapping[str, str], prefixes: tuple[str, ...]) -> dict[str, str]:
+    """Keep release credentials and build-machine Python paths out of child processes."""
+    return {key: value for key, value in environment.items()
+            if key not in RELEASE_SECRET_NAMES and not key.startswith(prefixes)}
+
+
 class NotarizationCredentials(BaseModel):
     """App Store Connect API-key material used only while submitting a DMG."""
 
@@ -93,7 +103,8 @@ class NotarizationCredentials(BaseModel):
             private_key = base64.b64decode(encoded, validate=True)
         except (ValueError, binascii.Error):
             raise ValueError("Apple notarization private-key secret is not valid Base64") from None
-        if not private_key.startswith(b"-----BEGIN PRIVATE KEY-----"):
+        if not (private_key.startswith(PEM_PRIVATE_KEY_BEGIN)
+                and private_key.rstrip().endswith(PEM_PRIVATE_KEY_END)):
             raise ValueError("Apple notarization private-key secret is not a PEM private key")
         return private_key
 
