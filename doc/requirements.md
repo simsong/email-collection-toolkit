@@ -1755,15 +1755,18 @@ When reconstruction reached the header/body separator, also retain the exact
 reconstructed header block, including invalid values and folding, separately
 from original transport headers and diagnostic envelope headers.
 Unreadable items remain library errors without invented message content.
-Exercise real PST fixtures, decoded body/attachment evidence, partial-run accounting, read-only
-source preservation, changed sources and producer/consumer failures.
+Exercise deterministic recovered-email construction, decoded body/attachment
+handling, partial-run accounting, read-only-source behavior, changed-source
+detection, and producer/consumer failures with public, licensed PST fixtures.
+PST recovery is complete for the project's email-collection scope; calendar,
+contacts, virtual search folders, configuration, and file carving are not
+collection requirements.
 The CLI archive host is implemented; cross-importer h3 duplicate suppression
 remains planned.
-PST and OST share a storage-format family, but OST support must be qualified
-against genuine fixtures and internal header/version/compression variants, not
-inferred from a changed extension or relaxed signature check. Use the external
-libpff converter for OST; report cache extraction
-completeness separately from server-mailbox completeness. See
+PST and OST share a storage-format family, but OST extraction is explicitly
+best effort. Do not infer a format from a changed extension or relaxed signature
+check. Use the external libpff converter for OST; report what was recovered from
+the cache separately from server-mailbox completeness. See
 [PST/OST scope and current limits](PST_IMPORTER.md#relationship-between-pst-and-ost).
 
 ## Windows development environment
@@ -2099,7 +2102,7 @@ Manual names, address merges and simultaneous dated affiliations survive replay.
 The PST file adapter shall invoke the real Rust importer, retain bounded failed
 output and provenance, withhold its uncertain final record on failure, and never
 mark partial extraction complete. `make test-cli-processors` exercises these
-requirements with minimal RFC 5322 and PST fixtures.
+requirements with minimal RFC 5322 and public PST fixtures.
 
 A positive antivirus verdict must publish to INFECTED even when header/date
 parsing fails. Quarantine may use a clearly labeled unknown-date placeholder for

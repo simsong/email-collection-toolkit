@@ -2675,20 +2675,20 @@ writers, stale locks, and reuse without redownloading completed files.
 GPLv3 program loads `pypff` from pinned `libpff-python==20231205`; the GPLv2 host
 never imports it. The converter uses read-only file objects, labels the source as an Outlook cache,
 walks normal folders with cycle/depth controls, and streams base64 attachment
-chunks into a bounded per-message MIME buffer. Headers and Unicode text are
-reconstructed; original transport-header text is retained as a separate evidence
-part. libpff supplies decompressed RTF. By-value and OLE attachment streams are
-retained. The Python binding does not expose embedded MAPI message reconstruction:
-that item is omitted with node/folder diagnostics and a nonzero import result.
-Non-mail classes and search folders are
-excluded, with item/folder counts in receipts. No deleted-record carving occurs.
+chunks into a bounded per-message MIME buffer. Headers and Unicode text are used
+to construct recovered, interoperable email; original transport-header text is
+retained as a separate evidence part. libpff supplies decompressed RTF. By-value
+and OLE attachment streams are retained. The Python binding does not expose
+embedded MAPI message reconstruction: that item is reported as incomplete rather
+than invented. Non-mail Outlook administrative data and virtual search folders
+are outside the email collection scope. No deleted-record carving occurs.
 Missing transport headers use available MAPI display recipients; these may contain
 names rather than resolved SMTP addresses. Sender reconstruction retains the name
 and an available SMTP property; it does not treat an Exchange DN as an SMTP address.
 Unrecognized MAPI classes report incomplete extraction instead of being silently
 excluded. Native attachment lengths are checked against bytes read.
-This is recorded reconstruction, not
-proof of original wire headers or all server contents.
+This is best-effort recovery from the local OST cache, not a claim about the
+complete server mailbox.
 
 `processing-libpff/<run>/receipt.json` records source SHA-256, libpff version,
 process ID, content type, counts, completion, and fatal failure details;
@@ -2720,9 +2720,10 @@ integrity controls persist it alongside the source hash under
 `local-parser-settings-v1`; missing or changed fingerprints require a new read.
 Existing non-Outlook parsers retain their source-only checkpoint behavior.
 
-`make test-pff` uses the real Aspose Unicode/version-23 OST and existing PST
-fixtures, with CLI archive creation, content resume, search, and canonical fixity
-verification. Compressed/version-36 OST is not yet fixture-qualified. The native
+`make test-pff` uses the real Aspose Unicode/version-23 OST and public PST
+fixtures, with CLI archive creation, content resume, search, and canonical
+fixity verification. OST support is best effort rather than a version-specific
+completeness claim. The native
 extension is a dependency only of the standalone converter. Its complete
 LGPL/GPL license texts are retained with that converter because its wheel omits them.
 
