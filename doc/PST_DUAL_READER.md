@@ -69,6 +69,7 @@ separately, record exit status, and permit reruns. EOF is not success.
 Cancellation terminates/reaps the process and retains the last valid checkpoint.
 Detailed diagnostics/run-manifest schemas and size limits remain implementation work.
 
+<a id="other-parser-candidates"></a>
 ## Readers and deduplication
 
 The PST reader is Microsoft's [outlook-pst-rs](https://github.com/microsoft/outlook-pst-rs).
@@ -125,6 +126,7 @@ The macOS builder bundles the selected PST and OST import executables. Windows
 delivery remains v1.1 work: its installer must bundle the equivalent helpers and
 validate native newline handling, locking, cancellation, scanning, and recovery.
 
+<a id="implementation-sequence-and-acceptance"></a>
 ## Validation
 
 Validation exercises deterministic recovered MIME, attachments, malformed
