@@ -59,7 +59,7 @@ def test_ci_builds_distributions_and_site_and_retains_browser_traces() -> None:
 
 
 def test_release_workflow_validates_built_distributions() -> None:
-    """Requirement: a tag cannot create a draft release without artifact smoke validation."""
+    """Requirement: a tag cannot publish a release without artifact smoke validation."""
     workflow = Path(__file__).parents[1] / ".github/workflows/release.yml"
     text = workflow.read_text(encoding="utf-8")
 
@@ -71,12 +71,18 @@ def test_release_workflow_validates_built_distributions() -> None:
         "name: Install dependencies",
         "name: Validate distributions",
         "name: Build source distribution",
-        "name: Create draft release",
+        "name: Create published release",
+        "name: Prepare appcast update",
+        "name: Sign the final notarized DMG's appcast item",
+        "name: Publish appcast and deploy it",
     )
     # Validate the release commit and version before installing or building.
     assert [text.index(gate) for gate in gates] == sorted(text.index(gate) for gate in gates)
     makefile = (workflow.parents[2] / "Makefile").read_text(encoding="utf-8")
     assert "uv run --no-project --with packaging --python '>=3.12' python scripts/release_tag.py" in makefile
+    signing_step = text[text.index("name: Sign the final notarized DMG's appcast item"):
+                        text.index("name: Publish appcast and deploy it")]
+    assert "SPARKLE_ED25519_PRIVATE_KEY_BASE64" in signing_step
 
 
 def test_zola_config_rejects_accidental_template(tmp_path: Path) -> None:

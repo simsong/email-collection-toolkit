@@ -32,10 +32,14 @@ from release_tag import release_metadata
 ROOT = Path(__file__).resolve().parents[1]
 APP_NAME = "Email Collection Toolkit"
 IDENTIFIER = "net.simson.mailarchiver"
+SPARKLE_FEED_URL = "https://simsong.github.io/email-collection-toolkit/updates/mac/appcast.xml"
+SPARKLE_PUBLIC_KEY = "qkdXdvt9A3YjGYwpENGrEEBY7kp3hU+TIjhCz/b7cjw="
 PLIST_DOCUMENT_TYPES = "CFBundleDocumentTypes"
 PLIST_EXPORTED_TYPES = "UTExportedTypeDeclarations"
 PLIST_SHORT_VERSION = "CFBundleShortVersionString"
 PLIST_BUILD_VERSION = "CFBundleVersion"
+PLIST_SPARKLE_FEED_URL = "SUFeedURL"
+PLIST_SPARKLE_PUBLIC_KEY = "SUPublicEDKey"
 PLIST_COPYRIGHT = "NSHumanReadableCopyright"
 PLIST_TYPE_NAME = "CFBundleTypeName"
 PLIST_TYPE_ROLE = "CFBundleTypeRole"
@@ -77,6 +81,8 @@ def configure_bundle(app: Path, signing_identity: str) -> None:
     _, _, sparkle_version, display_version = release_metadata(version("mailarchiver"))
     info[PLIST_SHORT_VERSION] = display_version
     info[PLIST_BUILD_VERSION] = str(sparkle_version)
+    info[PLIST_SPARKLE_FEED_URL] = SPARKLE_FEED_URL
+    info[PLIST_SPARKLE_PUBLIC_KEY] = SPARKLE_PUBLIC_KEY
     info[PLIST_COPYRIGHT] = COPYRIGHT
     info[PLIST_DOCUMENT_TYPES] = [{
         PLIST_TYPE_NAME: "Mail Archive", PLIST_TYPE_ROLE: "Editor",

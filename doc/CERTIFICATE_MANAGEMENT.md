@@ -71,7 +71,7 @@ signing automatically.
 GitHub supplies a [technical guide for Apple certificates in Actions secrets](https://docs.github.com/en/actions/how-tos/deploy/deploy-to-third-party-platforms/sign-xcode-applications).
 Technical support for the mechanism does not resolve the contractual question.
 An alternative is to build, sign, and notarize on your own Mac and upload only
-the finished DMG and its checksum to the draft release.
+the finished DMG and its checksum to the published GitHub release.
 
 ## 2. Install and verify the local signing identity
 

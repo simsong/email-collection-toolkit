@@ -1513,9 +1513,8 @@ and links to his personal website, GitHub profile, and project repository.
 About links to `changelog.md`, a dated record of website changes distinct from
 application release notes. The 2026-09-07 entry records the storage-format
 wording correction and the new About/changelog pages.
-The release workflow follows the repository's draft-release
-pattern: it requires a version-matching annotated tag, builds a source
-distribution, writes `SHA256SUMS`, and creates a draft GitHub Release.
+The release workflow requires a version-matching annotated tag, builds a source
+distribution, writes `SHA256SUMS`, and publishes a GitHub Release.
 
 Result ordering is a server-side SQL whitelist over date, case-folded subject,
 or case-folded sender with a stable message-number tie break. The Tabulator
@@ -2118,7 +2117,7 @@ The release workflow builds the DMG on `macos-15`, passes protected signing and
 App Store Connect notarization credentials only to its packaging step, submits
 the signed image through `make notarize-dmg`, staples and validates it, and then
 retests the mounted artifact before assembling the source and DMG checksums into
-a draft release. Missing credentials leave no publishable DMG and fail the
+a published release. Missing credentials leave no publishable DMG and fail the
 release job. Assembly checks out the Mac job's verified
 commit and checks that the tag still names that commit. Both jobs validate the
 tag reference, checked-out commit, annotation, and project version before
@@ -2144,6 +2143,16 @@ the Sparkle publication step adds only a post-notarization, Ed25519-signed item.
 the verified developer archive below `.tools/sparkle/`. `make sparkle-keys`
 calls Sparkle's local `generate_keys`; the key generator retains the private
 Ed25519 material in the developer's login Keychain and prints the public key.
+The macOS bundle carries that public key and the fixed Pages appcast URL. The
+appcast writer invokes `sign_update --ed-key-file -` on the final stapled DMG,
+passing the protected exported Sparkle key only on standard input.
+The release workflow first publishes the signed/notarized DMG as a GitHub
+release (marking alpha and beta tags as prereleases), then reads the existing
+appcast from `main`, signs and prepends the new item, commits that one feed
+file directly to `main`, and dispatches the Pages deployment. This preserves
+the published release asset as the immutable enclosure URL: preview entries
+have Sparkle's `preview` channel and stable entries remain in the default
+release channel.
 `scripts/desktop_entry.py` dispatches normal GUI launch, `--cli`, `--self-test`,
 and `--self-test-gui`. Frozen GUI resources use PyInstaller's bundle root;
 the verifier's actual `.py` source is explicitly bundled for archive installation.

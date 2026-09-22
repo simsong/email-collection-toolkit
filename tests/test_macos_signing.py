@@ -6,6 +6,7 @@ import base64
 import os
 import subprocess
 import sys
+import xml.etree.ElementTree as xml
 from pathlib import Path
 
 import pytest
@@ -17,6 +18,7 @@ from scripts.macos_signing import (
     PASSWORD_SECRET, RUNNER_ENVIRONMENT, NotarizationCredentials, SigningSecrets, developer_identity,
     dmg_filename, release_safe_environment, security_command, sign_image, signing_identity,
 )
+from scripts.update_appcast import AppcastRelease, SignedArchive, append_item
 
 FINGERPRINT = "0123456789ABCDEF0123456789ABCDEF01234567"
 IDENTITY_LINE = f'  1) {FINGERPRINT} "Developer ID Application: Fixture (ABCDEFGHIJ)"'
@@ -246,3 +248,21 @@ def test_release_version_maps_to_a_single_public_track(
     from scripts.release_tag import release_metadata
 
     assert release_metadata(version)[:3] == (tag, channel, sparkle_version)
+
+
+def test_appcast_keeps_preview_items_out_of_the_default_release_track(tmp_path: Path) -> None:
+    """A signed preview archive receives Sparkle's preview channel; stable does not."""
+    appcast = tmp_path / "appcast.xml"
+    appcast.write_text("<rss><channel /></rss>")
+    archive = SignedArchive(signature="signature", length=1)
+    append_item(appcast, AppcastRelease(tag="v1.0.0-alpha.1", channel="preview", sparkle_version=100,
+                                        display_version="1.0.0-alpha.1", url="https://example.test/alpha.dmg",
+                                        archive=archive))
+    append_item(appcast, AppcastRelease(tag="v1.0.0", channel="release", sparkle_version=900,
+                                        display_version="1.0.0", url="https://example.test/release.dmg",
+                                        archive=archive))
+    tree = xml.parse(appcast)
+    items = tree.findall("channel/item")
+    assert items[0].findtext("guid") == "v1.0.0"
+    assert items[0].find("{http://www.andymatuschak.org/xml-namespaces/sparkle}channel") is None
+    assert items[1].findtext("{http://www.andymatuschak.org/xml-namespaces/sparkle}channel") == "preview"
