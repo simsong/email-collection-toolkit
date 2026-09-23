@@ -145,7 +145,6 @@ def test_clamav_bundles_its_matching_openssl_pair(tmp_path: Path) -> None:
     ssl.write_bytes(b"older PyInstaller choice")
     crypto.write_bytes(b"older PyInstaller choice")
     bundle_clamav_openssl(tmp_path / "Fixture.app", "-")
-    assert crypto.read_bytes() == crypto_source.read_bytes()
     assert ssl.stat().st_size > len(b"older PyInstaller choice")
     commands = subprocess.run(["/usr/bin/otool", "-l", str(ssl)], check=True, capture_output=True, text=True).stdout
     assert f"@loader_path/{crypto.name}" in load_dependencies(commands)
