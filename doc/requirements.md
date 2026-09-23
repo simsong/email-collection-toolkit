@@ -1864,7 +1864,7 @@ definition updater and mounted updater test must pass an explicit temporary
 configuration, independent of any host ClamAV configuration.
 
 Package metadata and the About window use one canonical PEP 440 version:
-`1.0.0a5` is the current alpha and its annotated Git tag is `v1.0.0a5`.
+`1.0.0a6` is the current alpha and its annotated Git tag is `v1.0.0a6`.
 The release parser rejects noncanonical or unsupported versions; only stable
 `MAJOR.MINOR.PATCH`, alpha `MAJOR.MINOR.PATCHaN`, and beta
 `MAJOR.MINOR.PATCHbN` are accepted. Alpha and beta items use Sparkle's
@@ -1971,7 +1971,9 @@ must not make remote requests without explicit authorization.
   Third-party license grants remain unchanged.
 * A source or binary distribution includes `LICENSE`, `COPYRIGHT`,
   `THIRD_PARTY_NOTICES.md`, and every license text required by its included
-  components. Each platform's binary build audits its exact runtime dependency
+  components. The macOS DMG includes the ClamAV and OpenSSL license texts from
+  the same installations as its native libraries and verifies them mounted.
+  Each platform's binary build audits its exact runtime dependency
   closure and fails for unknown licenses, missing license texts, or
   development/test packages. Dependency licenses and required notices are
   retained. A passing inventory audit is not license compatibility clearance;

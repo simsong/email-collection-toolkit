@@ -2116,6 +2116,9 @@ development images. The mounted test launches its `--version` command with a
 temporary configuration pointing at certificates in the mounted app, never the
 host's `freshclam.conf`; this verifies that the updater and its bundled
 libraries load. The runtime and development updaters use the same config writer.
+The builder copies ClamAV's `COPYING.txt` and OpenSSL's `LICENSE.txt` from the
+native library installations into `Third Party Notices`, along with the project
+license and attribution files; the mounted test rejects missing or empty copies.
 `scripts/macos_signing.py` imports
 `APPLE_CERTIFICATE_P12_BASE64` using `APPLE_CERTIFICATE_PASSWORD` into a temporary
 keychain, selects exactly one valid Developer ID Application identity, and

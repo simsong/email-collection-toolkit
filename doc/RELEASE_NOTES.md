@@ -7,6 +7,7 @@
 * Run an unsigned mounted-DMG smoke test on the macOS CI runner before release
   tagging. Both the mounted updater check and definition updates supply a
   temporary FreshClam configuration instead of requiring the host's config.
+  Include and verify the matching ClamAV and OpenSSL license texts in the DMG.
 
 * Package ClamAV with its matching OpenSSL libraries so the mounted macOS app
   can load the antivirus engine. Validate that the bundled `freshclam` updater

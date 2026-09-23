@@ -184,6 +184,10 @@ def test_image(dmg: Path, *, gui: bool = False, manifest_path: Path | None = Non
         library = app / "Contents/Frameworks/clamav/libclamav.dylib"
         if not library.is_file():
             raise RuntimeError(f"Bundled ClamAV library is missing: {library}; see {manifest}")
+        notices = app / "Contents/Resources/Third Party Notices"
+        for name in ("LICENSE", "COPYRIGHT", "THIRD_PARTY_NOTICES.md", "ClamAV-COPYING.txt", "OpenSSL-LICENSE.txt"):
+            if not (notices / name).is_file() or not (notices / name).stat().st_size:
+                raise RuntimeError(f"Required distribution notice is missing or empty: {notices / name}; see {manifest}")
         run("/usr/bin/codesign", "--verify", "--deep", "--strict", app)
         if not (mount / "Applications").is_symlink() or os.readlink(mount / "Applications") != "/Applications":
             raise RuntimeError("DMG is missing its Applications shortcut")
@@ -367,6 +371,19 @@ def bundle_clamav_openssl(app: Path, signing_identity: str) -> None:
         run("/usr/bin/codesign", "--force", "--sign", signing_identity, *options, library)
 
 
+def copy_native_notices(notices: Path) -> None:
+    """Bundle license texts from the installations supplying the native libraries."""
+    ssl_source, _ = clamav_openssl_sources()
+    sources = (
+        (library_path().resolve().parent.parent / "COPYING.txt", "ClamAV-COPYING.txt"),
+        (ssl_source.resolve().parent.parent / "LICENSE.txt", "OpenSSL-LICENSE.txt"),
+    )
+    for source, name in sources:
+        if not source.is_file() or not source.stat().st_size:
+            raise FileNotFoundError(f"Required native license text is missing or empty: {source}")
+        shutil.copyfile(source, notices / name)
+
+
 def build(signing_identity: str, *, gui: bool = False, log_contents: bool = False) -> Path:
     output = ROOT / "dist"
     output.mkdir(exist_ok=True)
@@ -378,6 +395,9 @@ def build(signing_identity: str, *, gui: bool = False, log_contents: bool = Fals
         # Collect runtime notices, not development-only tools such as Pylint.
         notices = work / "Third Party Notices"
         notices.mkdir()
+        for name in ("LICENSE", "COPYRIGHT", "THIRD_PARTY_NOTICES.md"):
+            shutil.copyfile(ROOT / name, notices / name)
+        copy_native_notices(notices)
         pending = ["mailarchiver", "pyobjc-framework-Cocoa", "pyobjc-framework-WebKit"]
         visited = set()
         while pending:
