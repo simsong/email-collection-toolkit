@@ -4,8 +4,6 @@ from __future__ import annotations
 
 import base64
 import hashlib
-import subprocess
-import sys
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
@@ -62,29 +60,6 @@ def test_native_loader_distinguishes_missing_from_present_but_unloadable(tmp_pat
         load_library(library)
     assert "libclamav.dylib" in str(failure.value)
     assert failure.value.__cause__ is not None
-
-
-def test_pyinstaller_loader_reports_its_native_cause(tmp_path: Path) -> None:
-    """The frozen ctypes hook must not hide dlopen's actual failure behind its generic hint."""
-    library = tmp_path / "libclamav.dylib"
-    library.write_bytes(b"not a dynamic library")
-    code = """import sys
-from pathlib import Path
-sys._MEIPASS = sys.argv[1]
-from PyInstaller.loader.pyimod03_ctypes import install
-install()
-from mailarchiver.libclamav import load_library
-try:
-    load_library(Path(sys.argv[2]))
-except OSError as error:
-    print(error)
-else:
-    raise AssertionError('invalid dylib loaded')
-"""
-    result = subprocess.run([sys.executable, "-c", code, str(tmp_path), str(library)],
-                            capture_output=True, text=True, check=True)
-    assert "present (21 bytes) but cannot be loaded" in result.stdout
-    assert "Most likely this dynlib/dll was not found" not in result.stdout
 
 
 def test_startup_deadline_reaps_worker() -> None:

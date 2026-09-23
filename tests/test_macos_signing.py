@@ -16,7 +16,8 @@ from yaml import safe_load
 from scripts.macos_signing import (
     CERTIFICATE_SECRET, GITHUB_ACTIONS, NOTARY_ISSUER_SECRET, NOTARY_KEY_ID_SECRET, NOTARY_PRIVATE_KEY_SECRET,
     PASSWORD_SECRET, RUNNER_ENVIRONMENT, SPARKLE_PRIVATE_KEY_SECRET, NotarizationCredentials, SigningSecrets, developer_identity,
-    dmg_filename, release_safe_environment, security_command, sign_image, signing_identity,
+    dmg_filename, notary_log_summary, release_safe_environment, safe_apple_error, security_command, sign_image,
+    signing_identity,
 )
 from scripts.update_appcast import AppcastRelease, SignedArchive, append_item
 
@@ -85,6 +86,24 @@ def test_notarization_credentials_require_a_complete_pem_api_key() -> None:
     })
     with pytest.raises(ValueError, match="not a PEM"):
         credentials.decoded_private_key()
+
+
+def test_notary_rejection_reports_apple_issue_without_exposing_credentials(tmp_path: Path) -> None:
+    """A rejected submission identifies the invalid bundle item; tool errors redact API material."""
+    report = ('{"statusSummary":"Archive contains critical validation errors","issues":'
+              '[{"path":"Example.app/Contents/MacOS/helper","message":"The signature is invalid."}]}')
+    assert notary_log_summary(report) == ("Archive contains critical validation errors; "
+                                       "Example.app/Contents/MacOS/helper: The signature is invalid.")
+    credentials = NotarizationCredentials(key_id=SecretStr("PRIVATEKEYID"),
+                                         issuer_id=SecretStr("PRIVATE-ISSUER"),
+                                         private_key=SecretStr("PRIVATE-KEY-CONTENTS"))
+    key_path = tmp_path / "AuthKey_PRIVATEKEYID.p8"
+    result = subprocess.CompletedProcess(args=[], returncode=1,
+                                         stderr=f"Rejected PRIVATEKEYID PRIVATE-ISSUER {key_path} PRIVATE-KEY-CONTENTS")
+    message = safe_apple_error(result, credentials, key_path)
+    assert "Rejected" in message
+    for secret in ("PRIVATEKEYID", "PRIVATE-ISSUER", str(key_path), "PRIVATE-KEY-CONTENTS"):
+        assert secret not in message
 
 
 def test_release_children_never_receive_signing_or_notarization_credentials() -> None:

@@ -505,8 +505,8 @@ Python backend; existing browser tests do not establish native Windows support.
 ## Versioning and Updating
 
 One canonical PEP 440 version is used everywhere users see a version: package
-metadata and the About window currently say `1.0.0a6`. The annotated Git tag
-adds only `v`: `v1.0.0a6`. Alpha and beta releases use Sparkle's `preview`
+metadata and the About window currently say `1.0.0a7`. The annotated Git tag
+adds only `v`: `v1.0.0a7`. Alpha and beta releases use Sparkle's `preview`
 channel; stable releases use the default channel. The release parser accepts
 only canonical `MAJOR.MINOR.PATCH`, `MAJOR.MINOR.PATCHaN`, or
 `MAJOR.MINOR.PATCHbN` versions and rejects all other forms. Sparkle uses a

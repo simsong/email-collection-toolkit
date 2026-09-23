@@ -2052,7 +2052,8 @@ actions. `make test-packaging` checks real alert layout and both button sets
 without showing a modal dialog.
 The download action opens the application's release page. About reports configuration
 presence separately from readiness, which remains an ingest preflight check.
-`make test-packaging` exercises missing-scanner failure, explicit opt-out,
+`make test-packaging` installs the packaging dependency group and exercises
+the PyInstaller ctypes loader regression, missing-scanner failure, explicit opt-out,
 durable evidence, source immutability, and isolated headless diagnostics.
 
 ## Compiled desktop UI trials
@@ -2140,8 +2141,11 @@ App Store Connect notarization credentials only to its packaging step, submits
 the signed image through `make notarize-dmg`, staples and validates it, and then
 retests the mounted artifact before assembling the source and DMG checksums into
 a draft release. Missing credentials leave no publishable DMG and fail the
-release job. Assembly checks out the Mac job's verified
-commit and checks that the tag still names that commit. Both jobs validate the
+release job. Assembly checks out the Mac job's verified commit and checks that
+the tag still names that commit. `notarytool` uses JSON output; a rejected
+submission fetches Apple's issue log. Failures identify the signing, submission,
+stapling, or Gatekeeper stage while redacting API-key values and the temporary
+key path. Both jobs validate the
 tag reference, checked-out commit, annotation, and project version before
 installing dependencies. Unsigned annotated tags are accepted without a public-key
 allowlist or GitHub signature verification. Repository permissions control

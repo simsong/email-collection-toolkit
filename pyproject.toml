@@ -2,7 +2,7 @@
 
 [project]
 name = "mailarchiver"
-version = "1.0.0a6"
+version = "1.0.0a7"
 description = "Personal MBOX archive normalizer"
 requires-python = ">=3.12"
 license = "GPL-2.0-only"

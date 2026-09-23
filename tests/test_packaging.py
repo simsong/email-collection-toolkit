@@ -23,6 +23,30 @@ from mailarchiver.standalone_verify import verify_archive
 ROOT = Path(__file__).resolve().parents[1]
 
 
+def test_pyinstaller_loader_reports_its_native_cause(tmp_path: Path) -> None:
+    """The packaging-only frozen ctypes hook must preserve dlopen's actual failure."""
+    pytest.importorskip("PyInstaller")
+    library = tmp_path / "libclamav.dylib"
+    library.write_bytes(b"not a dynamic library")
+    code = """import sys
+from pathlib import Path
+sys._MEIPASS = sys.argv[1]
+from PyInstaller.loader.pyimod03_ctypes import install
+install()
+from mailarchiver.libclamav import load_library
+try:
+    load_library(Path(sys.argv[2]))
+except OSError as error:
+    print(error)
+else:
+    raise AssertionError('invalid dylib loaded')
+"""
+    result = subprocess.run([sys.executable, "-c", code, str(tmp_path), str(library)],
+                            capture_output=True, text=True, check=True)
+    assert "present (21 bytes) but cannot be loaded" in result.stdout
+    assert "Most likely this dynlib/dll was not found" not in result.stdout
+
+
 @pytest.mark.skipif(sys.platform != "darwin", reason="Mounted-DMG updater check requires macOS FreshClam")
 def test_freshclam_uses_explicit_app_relative_configuration(tmp_path: Path) -> None:
     """Mounted-DMG updater validation must not require the host freshclam.conf."""
