@@ -1864,7 +1864,7 @@ definition updater and mounted updater test must pass an explicit temporary
 configuration, independent of any host ClamAV configuration.
 
 Package metadata and the About window use one canonical PEP 440 version:
-`1.0.0a4` is the current alpha and its annotated Git tag is `v1.0.0a4`.
+`1.0.0a5` is the current alpha and its annotated Git tag is `v1.0.0a5`.
 The release parser rejects noncanonical or unsupported versions; only stable
 `MAJOR.MINOR.PATCH`, alpha `MAJOR.MINOR.PATCHaN`, and beta
 `MAJOR.MINOR.PATCHbN` are accepted. Alpha and beta items use Sparkle's
