@@ -27,6 +27,18 @@ class UpdateResult(BaseModel):
     directory: Path
 
 
+def write_freshclam_config(path: Path, certs: Path | None, *, checks: int | None = None) -> None:
+    """Write a one-shot config without relying on the host's ClamAV installation."""
+    lines = ["DatabaseMirror database.clamav.net", "TestDatabases yes"]
+    if checks is not None:
+        lines.append(f"Checks {checks}")
+    if certs is not None:
+        if "\n" in str(certs) or "\r" in str(certs):
+            raise ValueError("Invalid certificate directory")
+        lines.append(f"CVDCertsDirectory {certs}")
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
 @contextmanager
 def update_lock(root: Path):
     """OS-owned lock releases after a crash; never leave a stale directory lock."""
@@ -100,12 +112,7 @@ def refresh_definitions() -> UpdateResult:
             if state.is_file():
                 shutil.copyfile(state, staging / state.name)
             configuration = workspace / "freshclam.conf"
-            configuration_text = "DatabaseMirror database.clamav.net\nChecks 0\nTestDatabases yes\n"
-            if certs := certificates_path():
-                if "\n" in str(certs) or "\r" in str(certs):
-                    raise ValueError("Invalid certificate directory")
-                configuration_text += f"CVDCertsDirectory {certs}\n"
-            configuration.write_text(configuration_text, encoding="utf-8")
+            write_freshclam_config(configuration, certificates_path(), checks=0)
             try:
                 result = subprocess.run([str(updater_path()), f"--config-file={configuration}",
                     f"--datadir={staging}", "--stdout"], capture_output=True, text=True, check=False, timeout=600)
@@ -132,10 +139,7 @@ def refresh_development() -> UpdateResult:
                     break
     with tempfile.TemporaryDirectory(prefix="freshclam-") as temporary:
         configuration = Path(temporary) / "freshclam.conf"
-        text = "DatabaseMirror database.clamav.net\nTestDatabases yes\n"
-        if certs := certificates_path():
-            text += f"CVDCertsDirectory {certs}\n"
-        configuration.write_text(text, encoding="utf-8")
+        write_freshclam_config(configuration, certificates_path())
         subprocess.run([str(updater_path()), f"--config-file={configuration}",
                         f"--datadir={directory}", "--stdout"], check=True, timeout=600)
     definitions = read_definitions(directory, "development")

@@ -15,10 +15,28 @@ from pathlib import Path
 import pytest
 
 from mailarchiver.ingest_status import read_ingest_history
+from mailarchiver.clamav_definitions import updater_path
+from mailarchiver.clamav_update import write_freshclam_config
 from mailarchiver.self_test import SelfTestReport
 from mailarchiver.standalone_verify import verify_archive
 
 ROOT = Path(__file__).resolve().parents[1]
+
+
+@pytest.mark.skipif(sys.platform != "darwin", reason="Mounted-DMG updater check requires macOS FreshClam")
+def test_freshclam_uses_explicit_app_relative_configuration(tmp_path: Path) -> None:
+    """Mounted-DMG updater validation must not require the host freshclam.conf."""
+    updater = updater_path()
+    if not updater.is_file():
+        pytest.skip("FreshClam is not installed")
+    certs = tmp_path / "Mounted App.app/Contents/Resources/clamav/certs"
+    certs.mkdir(parents=True)
+    config = tmp_path / "freshclam.conf"
+    write_freshclam_config(config, certs, checks=0)
+    assert f"CVDCertsDirectory {certs}\n" in config.read_text()
+    result = subprocess.run([str(updater), "--version", f"--config-file={config}"],
+                            capture_output=True, text=True, check=False, timeout=20)
+    assert result.returncode == 0, result.stderr
 
 
 def test_mounted_inventory_retains_av_files_and_logs_each_entry(

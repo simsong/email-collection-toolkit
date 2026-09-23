@@ -80,7 +80,9 @@ Release CI runs make freshclam before make dmg; ordinary local DMG builds use
 the existing project copy and do not require a network refresh.
 
 About includes Update virus definitions, also exposed through make clamav-update.
-Updates use private configuration and independent staging copies. FreshClam
+Updates use an explicit temporary configuration, never the host's installed
+freshclam.conf, and independent staging copies. The mounted-DMG updater check
+uses that same configuration writer and the mounted app's certificates. FreshClam
 handles downloads, incremental patches and server cooldown state; no mail is
 uploaded. An OS-owned lock serializes update attempts. Native clean/EICAR scans
 validate a candidate before an atomic manifest selects an immutable generation.

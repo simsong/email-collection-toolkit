@@ -2112,8 +2112,11 @@ and signs both before resealing the app. This avoids an older Python-provided
 `libssl.3.dylib` lacking symbols required by ClamAV; the mounted self-test
 still checks actual native loading. The builder also re-signs `freshclam` as a
 child executable, disabling hardened-runtime Team-ID validation for ad-hoc
-development images. The mounted test launches its `--version` command to
-verify that the updater and its bundled libraries load. `scripts/macos_signing.py` imports
+development images. The mounted test launches its `--version` command with a
+temporary configuration pointing at certificates in the mounted app, never the
+host's `freshclam.conf`; this verifies that the updater and its bundled
+libraries load. The runtime and development updaters use the same config writer.
+`scripts/macos_signing.py` imports
 `APPLE_CERTIFICATE_P12_BASE64` using `APPLE_CERTIFICATE_PASSWORD` into a temporary
 keychain, selects exactly one valid Developer ID Application identity, and
 restores the original keychain search list and deletes the imported key in

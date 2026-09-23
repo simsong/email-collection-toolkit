@@ -193,8 +193,13 @@ def test_image(dmg: Path, *, gui: bool = False, manifest_path: Path | None = Non
         environment = release_safe_environment(
             os.environ, ("PYTHON", "DYLD_", "MAILARCHIVER", "MAIL_ARCHIVE"))
         environment["PATH"] = "/usr/bin:/bin:/usr/sbin:/sbin"
-        run(app / "Contents/Frameworks/clamav/freshclam", "--version",
-            cwd=mount.parent, env=environment, timeout=20)
+        from mailarchiver.clamav_update import write_freshclam_config
+        with tempfile.TemporaryDirectory(prefix="freshclam-mounted-test-") as temporary:
+            configuration = Path(temporary) / "freshclam.conf"
+            certs = app / "Contents/Resources/clamav/certs"
+            write_freshclam_config(configuration, certs if certs.is_dir() else None, checks=0)
+            run(app / "Contents/Frameworks/clamav/freshclam", "--version",
+                f"--config-file={configuration}", cwd=mount.parent, env=environment, timeout=20)
         converter = app / "Contents/Resources/importers/pff-converter/pff-converter"
         with tempfile.TemporaryDirectory(prefix="pff-mounted-test-") as temporary:
             receipt = Path(temporary) / "receipt.json"
