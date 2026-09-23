@@ -137,18 +137,18 @@ def notary_log_summary(output: str) -> str:
 
 def redact_apple_text(message: str, credentials: NotarizationCredentials, key_path: Path) -> str:
     """Remove API-key material and paths from bounded Apple diagnostics."""
+    message = message.replace(str(key_path), "[REDACTED KEY PATH]")
     for secret in (credentials.key_id, credentials.issuer_id, credentials.private_key):
         value = secret.get_secret_value().strip()
         if value:
             message = message.replace(value, "[REDACTED]")
-    message = message.replace(str(key_path), "[REDACTED KEY PATH]")
     return message[:2048] or "No diagnostic returned"
 
 
 def safe_apple_error(result: subprocess.CompletedProcess[str], credentials: NotarizationCredentials,
                      key_path: Path) -> str:
     """Show bounded tool errors while removing all API-key material and paths."""
-    return redact_apple_text((result.stderr or result.stdout).strip(), credentials, key_path)
+    return redact_apple_text(result.stderr.strip() or result.stdout.strip(), credentials, key_path)
 
 
 def developer_identity(output: str) -> str:
@@ -252,7 +252,8 @@ def notarize_image(image: Path, credentials: NotarizationCredentials, work_root:
                       ("notarytool submission", command, 1800),
                       ("ticket stapling", ["/usr/bin/xcrun", "stapler", "staple", str(image)], 300),
                       ("ticket validation", ["/usr/bin/xcrun", "stapler", "validate", str(image)], 120),
-                      ("Gatekeeper assessment", ["/usr/sbin/spctl", "--assess", "--type", "open", "--verbose=4", str(image)], 120)]
+                      ("Gatekeeper assessment", ["/usr/sbin/spctl", "--assess", "--type", "open",
+                                                 "--context", "context:primary-signature", "--verbose=4", str(image)], 120)]
             for stage, arguments, timeout in stages:
                 result = subprocess.run(arguments, check=False, capture_output=True, text=True, timeout=timeout)
                 submission = NotarySubmission()

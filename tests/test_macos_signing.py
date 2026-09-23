@@ -102,8 +102,10 @@ def test_notary_rejection_reports_apple_issue_without_exposing_credentials(tmp_p
                                          stderr=f"Rejected PRIVATEKEYID PRIVATE-ISSUER {key_path} PRIVATE-KEY-CONTENTS")
     message = safe_apple_error(result, credentials, key_path)
     assert "Rejected" in message
-    for secret in ("PRIVATEKEYID", "PRIVATE-ISSUER", str(key_path), "PRIVATE-KEY-CONTENTS"):
+    for secret in ("PRIVATEKEYID", "PRIVATE-ISSUER", str(tmp_path), "PRIVATE-KEY-CONTENTS"):
         assert secret not in message
+    blank_stderr = subprocess.CompletedProcess(args=[], returncode=1, stdout="Actual Apple error", stderr="  \n")
+    assert safe_apple_error(blank_stderr, credentials, key_path) == "Actual Apple error"
 
 
 def test_release_children_never_receive_signing_or_notarization_credentials() -> None:

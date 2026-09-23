@@ -2145,7 +2145,8 @@ release job. Assembly checks out the Mac job's verified commit and checks that
 the tag still names that commit. `notarytool` uses JSON output; a rejected
 submission fetches Apple's issue log. Failures identify the signing, submission,
 stapling, or Gatekeeper stage while redacting API-key values and the temporary
-key path. Both jobs validate the
+key path. Gatekeeper assesses the disk image with Apple's
+`context:primary-signature` context after stapling. Both jobs validate the
 tag reference, checked-out commit, annotation, and project version before
 installing dependencies. Unsigned annotated tags are accepted without a public-key
 allowlist or GitHub signature verification. Repository permissions control
