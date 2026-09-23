@@ -19,8 +19,8 @@ license version. Libpff runs in a separate GPLv3 converter and sends standard
 mboxrd to the independent GPLv2 Rust scanner before API admission. GPLv3 covers
 our converter code; pypff/libpff retains LGPLv3-or-later without relicensing.
 See the [GPLv2-only versus GPLv2-or-later distinction](../THIRD_PARTY_NOTICES.md#gplv2-and-lgplv3-compatibility).
-The remaining
-application dependency compatibility issue is Apache-2.0 ftfy; see
+Known application dependency compatibility issues include Apache-2.0 `ftfy`
+and bundled OpenSSL 3 libraries; see
 [THIRD_PARTY_NOTICES.md](../THIRD_PARTY_NOTICES.md). Changing project-owned
 code's license does not change those upstream terms or clear the full bundle.
 Preserve the exact native dependency licenses, notices and corresponding
@@ -80,7 +80,9 @@ Release CI runs make freshclam before make dmg; ordinary local DMG builds use
 the existing project copy and do not require a network refresh.
 
 About includes Update virus definitions, also exposed through make clamav-update.
-Updates use private configuration and independent staging copies. FreshClam
+Updates use an explicit temporary configuration, never the host's installed
+freshclam.conf, and independent staging copies. The mounted-DMG updater check
+uses that same configuration writer and the mounted app's certificates. FreshClam
 handles downloads, incremental patches and server cooldown state; no mail is
 uploaded. An OS-owned lock serializes update attempts. Native clean/EICAR scans
 validate a candidate before an atomic manifest selects an immutable generation.

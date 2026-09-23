@@ -15,10 +15,83 @@ from pathlib import Path
 import pytest
 
 from mailarchiver.ingest_status import read_ingest_history
+from mailarchiver.clamav_definitions import updater_path
+from mailarchiver.clamav_update import write_freshclam_config
 from mailarchiver.self_test import SelfTestReport
 from mailarchiver.standalone_verify import verify_archive
 
 ROOT = Path(__file__).resolve().parents[1]
+
+
+def test_pyinstaller_loader_reports_its_native_cause(tmp_path: Path) -> None:
+    """The packaging-only frozen ctypes hook must preserve dlopen's actual failure."""
+    pytest.importorskip("PyInstaller")
+    library = tmp_path / "libclamav.dylib"
+    library.write_bytes(b"not a dynamic library")
+    code = """import sys
+from pathlib import Path
+sys._MEIPASS = sys.argv[1]
+from PyInstaller.loader.pyimod03_ctypes import install
+install()
+from mailarchiver.libclamav import load_library
+try:
+    load_library(Path(sys.argv[2]))
+except OSError as error:
+    print(error)
+else:
+    raise AssertionError('invalid dylib loaded')
+"""
+    result = subprocess.run([sys.executable, "-c", code, str(tmp_path), str(library)],
+                            capture_output=True, text=True, check=True)
+    assert "present (21 bytes) but cannot be loaded" in result.stdout
+    assert "Most likely this dynlib/dll was not found" not in result.stdout
+
+
+@pytest.mark.skipif(sys.platform != "darwin", reason="Mounted-DMG updater check requires macOS FreshClam")
+def test_freshclam_uses_explicit_app_relative_configuration(tmp_path: Path) -> None:
+    """Mounted-DMG updater validation must not require the host freshclam.conf."""
+    updater = updater_path()
+    if not updater.is_file():
+        pytest.skip("FreshClam is not installed")
+    certs = tmp_path / "Mounted App.app/Contents/Resources/clamav/certs"
+    certs.mkdir(parents=True)
+    config = tmp_path / "freshclam.conf"
+    write_freshclam_config(config, certs, checks=0)
+    assert f"CVDCertsDirectory {certs}\n" in config.read_text()
+    result = subprocess.run([str(updater), "--version", f"--config-file={config}"],
+                            capture_output=True, text=True, check=False, timeout=20)
+    assert result.returncode == 0, result.stderr
+
+
+def test_mounted_inventory_retains_av_files_and_logs_each_entry(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Release validation retains and logs every mounted file/link before self-test."""
+    scripts = str(ROOT / "scripts")
+    sys.path.insert(0, scripts)
+    try:
+        from build_macos import ImageContents, ImageEntry, record_image_contents
+    finally:
+        sys.path.remove(scripts)
+    mount = tmp_path / "mounted"
+    library = mount / "Email Collection Toolkit.app/Contents/Frameworks/clamav/libclamav.dylib"
+    library.parent.mkdir(parents=True)
+    library.write_bytes(b"native fixture")
+    definitions = mount / "Email Collection Toolkit.app/Contents/Resources/clamav/definitions/daily.cvd"
+    definitions.parent.mkdir(parents=True)
+    definitions.write_bytes(b"definitions")
+    (mount / "Applications").symlink_to("/Applications")
+    manifest = tmp_path / "reports/fixture.contents.json"
+    record_image_contents(mount, manifest, log_entries=True)
+    entries = {entry.path: entry for entry in ImageContents.model_validate_json(manifest.read_text()).entries}
+    assert set(entries) == {str(library.relative_to(mount)), str(definitions.relative_to(mount)), "Applications"}
+    assert entries[str(library.relative_to(mount))].kind == "file"
+    assert entries[str(library.relative_to(mount))].size_bytes == len(b"native fixture")
+    assert entries["Applications"].kind == "symlink" and entries["Applications"].target == "/Applications"
+    output = capsys.readouterr().out.splitlines()
+    assert len(output) == len(entries) + 1
+    assert output[0].startswith("Recorded 3 mounted DMG files and links:")
+    assert [ImageEntry.model_validate_json(line).path for line in output[1:]] == sorted(entries)
 
 
 @pytest.mark.skipif(sys.platform != "darwin", reason="AppKit renders the macOS installer background")
@@ -91,6 +164,34 @@ def test_scanner_failure_never_silently_imports_unscanned(tmp_path: Path) -> Non
         assert catalog.execute("SELECT count(*) FROM metadata_defects WHERE field='antivirus' AND detail LIKE 'not-scanned:%'").fetchone() == (1,)
     assert source.read_bytes() == raw
     assert not verify_archive(archive)
+
+
+@pytest.mark.skipif(sys.platform != "darwin", reason="Mach-O linkage requires Apple's toolchain")
+def test_clamav_bundles_its_matching_openssl_pair(tmp_path: Path) -> None:
+    """Requirement: PyInstaller's OpenSSL choice cannot replace ClamAV's linked ABI."""
+    from mailarchiver.clamav_definitions import library_path
+
+    if not library_path().is_file():
+        pytest.skip("ClamAV is not installed")
+    scripts = str(ROOT / "scripts")
+    sys.path.insert(0, scripts)
+    try:
+        from build_macos import bundle_clamav_openssl, clamav_openssl_sources, load_dependencies
+    finally:
+        sys.path.remove(scripts)
+    ssl_source, crypto_source = clamav_openssl_sources()
+    frameworks = tmp_path / "Fixture.app/Contents/Frameworks"
+    frameworks.mkdir(parents=True)
+    ssl = frameworks / ssl_source.name
+    crypto = frameworks / crypto_source.name
+    ssl.write_bytes(b"older PyInstaller choice")
+    crypto.write_bytes(b"older PyInstaller choice")
+    bundle_clamav_openssl(tmp_path / "Fixture.app", "-")
+    assert ssl.stat().st_size > len(b"older PyInstaller choice")
+    commands = subprocess.run(["/usr/bin/otool", "-l", str(ssl)], check=True, capture_output=True, text=True).stdout
+    assert f"@loader_path/{crypto.name}" in load_dependencies(commands)
+    for library in (crypto, ssl):
+        subprocess.run(["/usr/bin/codesign", "--verify", "--strict", str(library)], check=True)
 
 
 @pytest.mark.skipif(sys.platform != "darwin", reason="Mach-O linkage requires Apple's toolchain")

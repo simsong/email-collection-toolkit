@@ -18,6 +18,36 @@ env:
   MAILARCHIVER_NATIVE_SETUP_E2E: "0"
 
 jobs:
+  dmg-smoke:
+    name: Build and mount unsigned macOS DMG
+    runs-on: macos-15
+    timeout-minutes: 45
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7.0.1
+      - name: Set up Python
+        uses: actions/setup-python@v7.0.0
+        with:
+          python-version: "3.12"
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v10.0.1
+      - name: Install dependencies and ClamAV
+        run: |
+          brew install clamav
+          uv sync --locked --all-groups
+      - name: Refresh project virus definitions
+        run: make freshclam
+      - name: Build and test mounted DMG without release credentials
+        run: make dmg
+      - name: Upload mounted-image inventory
+        if: always()
+        uses: actions/upload-artifact@v7.0.1
+        with:
+          name: macos-dmg-smoke-inventory-${{ github.run_id }}-${{ github.run_attempt }}
+          path: dist/*.contents.json
+          if-no-files-found: ignore
+          retention-days: 7
+
   pytest:
     runs-on: macos-15
     timeout-minutes: 25

@@ -30,6 +30,14 @@ an installed database if available. The DMG bundles this copy, the engine and
 FreshClam; release CI refreshes the definitions first. Its mounted self-test runs
 real clean/EICAR scans using the bundled definitions. Application releases refresh
 bundled definitions at least quarterly.
+Before signature/dependency checks and the mounted self-test, the DMG validator
+writes `dist/<DMG stem>.contents.json` with relative paths, sizes, and symlink
+targets for every mounted file/link. The release job uploads this inventory with
+its packaging reports even if validation fails. The release workflow passes
+`--log-dmg-contents` to the builder, which prints every entry after mounting
+and before executing the installed app. It separately checks for the
+bundled `libclamav.dylib`; if present but unloadable, the scanner reports the
+native loader's underlying error (PyInstaller's generic wrapper hides it).
 
 ## CI and release validation
 
@@ -2044,7 +2052,8 @@ actions. `make test-packaging` checks real alert layout and both button sets
 without showing a modal dialog.
 The download action opens the application's release page. About reports configuration
 presence separately from readiness, which remains an ingest preflight check.
-`make test-packaging` exercises missing-scanner failure, explicit opt-out,
+`make test-packaging` installs the packaging dependency group and exercises
+the PyInstaller ctypes loader regression, missing-scanner failure, explicit opt-out,
 durable evidence, source immutability, and isolated headless diagnostics.
 
 ## Compiled desktop UI trials
@@ -2097,7 +2106,21 @@ docstring fails this check before packaging starts.
 dependencies, creates the app icon from the existing PNG, collects runtime
 resources and dependency notices, declares `.mailarchive` document registration,
 and signs the resulting bundle ad-hoc unless a signing identity was supplied
-or both optional signing secrets are present. `scripts/macos_signing.py` imports
+or both optional signing secrets are present. After PyInstaller collection, the
+builder replaces its deduplicated OpenSSL pair with the two libraries named by
+the installed ClamAV engine, rewrites `libssl` to load the adjacent `libcrypto`,
+and signs both before resealing the app. This avoids an older Python-provided
+`libssl.3.dylib` lacking symbols required by ClamAV; the mounted self-test
+still checks actual native loading. The builder also re-signs `freshclam` as a
+child executable, disabling hardened-runtime Team-ID validation for ad-hoc
+development images. The mounted test launches its `--version` command with a
+temporary configuration pointing at certificates in the mounted app, never the
+host's `freshclam.conf`; this verifies that the updater and its bundled
+libraries load. The runtime and development updaters use the same config writer.
+The builder copies ClamAV's `COPYING.txt` and OpenSSL's `LICENSE.txt` from the
+native library installations into `Third Party Notices`, along with the project
+license and attribution files; the mounted test rejects missing or empty copies.
+`scripts/macos_signing.py` imports
 `APPLE_CERTIFICATE_P12_BASE64` using `APPLE_CERTIFICATE_PASSWORD` into a temporary
 keychain, selects exactly one valid Developer ID Application identity, and
 restores the original keychain search list and deletes the imported key in
@@ -2113,13 +2136,18 @@ The builder signs and verifies the completed DMG before publishing the candidate
 Missing either secret emits `::warning::` and produces `*_UNSIGNED.dmg`; invalid
 configured credentials fail. An explicit `--signing-identity` overrides secrets;
 `-` emits a distinct warning identifying that deliberate unsigned override.
-The release workflow builds the DMG on `macos-15`, passes protected signing and
+The release workflow builds the DMG on its hosted macOS runner, passes protected signing and
 App Store Connect notarization credentials only to its packaging step, submits
 the signed image through `make notarize-dmg`, staples and validates it, and then
 retests the mounted artifact before assembling the source and DMG checksums into
 a draft release. Missing credentials leave no publishable DMG and fail the
-release job. Assembly checks out the Mac job's verified
-commit and checks that the tag still names that commit. Both jobs validate the
+release job. Assembly checks out the Mac job's verified commit and checks that
+the tag still names that commit. `notarytool` uses JSON output; a rejected
+submission fetches Apple's issue log. Failures identify the signing, submission,
+stapling, or Gatekeeper stage while redacting API-key values and the temporary
+key path. The temporary `.p8` filename contains no API-key identifier, including
+in setup-error paths. Gatekeeper assesses the disk image with Apple's
+`context:primary-signature` context after stapling. Both jobs validate the
 tag reference, checked-out commit, annotation, and project version before
 installing dependencies. Unsigned annotated tags are accepted without a public-key
 allowlist or GitHub signature verification. Repository permissions control
@@ -2155,11 +2183,15 @@ passing the protected exported Sparkle key only on standard input. Sparkle
 32 bytes; legacy exports may decode to 64 bytes. Neither the key nor Apple's
 credentials reach PyInstaller or mounted-app test subprocesses.
 The release workflow creates a draft with the signed/notarized DMG, reads the
-existing appcast from `main`, signs and prepends the new item, and commits the
-feed to `main` with `[skip ci]`. It then publishes the draft, marking alpha and
-beta tags as prereleases, and explicitly dispatches Pages from `main`.
-GitHub's workflow token does not trigger a Pages run through its own commit or
-release event; the feed commit alone does not deploy a URL pointing at a draft asset.
+latest published release's `appcast.xml` asset (or the tracked empty seed),
+signs and prepends the new item, and attaches the feed as a draft-release asset.
+It then publishes the draft, marking alpha and beta tags as prereleases, and
+explicitly dispatches Pages from `main`. The Pages build overlays the latest
+published appcast asset on the tracked seed before building the site, including
+when a website edit later redeploys Pages. Neither workflow writes to protected
+`main`; GitHub's workflow token does not trigger Pages via its release event.
+Pages derives its stable and preview download links from published releases,
+not all pushed tags, and recognizes canonical `aN` and `bN` preview suffixes.
 Preview entries have Sparkle's `preview` channel and stable entries remain in
 the default release channel.
 `scripts/desktop_entry.py` dispatches normal GUI launch, `--cli`, `--self-test`,

@@ -16,7 +16,7 @@ from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
 from pathlib import Path
 
-from pydantic import BaseModel, SecretStr
+from pydantic import BaseModel, Field, SecretStr, ValidationError
 
 CERTIFICATE_SECRET = "APPLE_CERTIFICATE_P12_BASE64"
 PASSWORD_SECRET = "APPLE_CERTIFICATE_PASSWORD"
@@ -110,6 +110,47 @@ class NotarizationCredentials(BaseModel):
         return private_key
 
 
+class NotarySubmission(BaseModel):
+    id: str | None = None
+    status: str | None = None
+
+
+class NotaryIssue(BaseModel):
+    path: str | None = None
+    message: str | None = None
+
+
+class NotaryLog(BaseModel):
+    status_summary: str | None = Field(default=None, alias="statusSummary")
+    issues: tuple[NotaryIssue, ...] | None = None
+
+
+def notary_log_summary(output: str) -> str:
+    """Report Apple's validation findings without printing the full service response."""
+    try:
+        report = NotaryLog.model_validate_json(output)
+    except ValidationError:
+        return "Apple did not provide a parseable notarization log"
+    details = [f"{issue.path or 'archive'}: {issue.message}" for issue in report.issues or () if issue.message]
+    return "; ".join(([report.status_summary] if report.status_summary else []) + details[:8]) or "No issue detail returned"
+
+
+def redact_apple_text(message: str, credentials: NotarizationCredentials, key_path: Path) -> str:
+    """Remove API-key material and paths from bounded Apple diagnostics."""
+    message = message.replace(str(key_path), "[REDACTED KEY PATH]")
+    for secret in (credentials.key_id, credentials.issuer_id, credentials.private_key):
+        value = secret.get_secret_value().strip()
+        if value:
+            message = message.replace(value, "[REDACTED]")
+    return message[:2048] or "No diagnostic returned"
+
+
+def safe_apple_error(result: subprocess.CompletedProcess[str], credentials: NotarizationCredentials,
+                     key_path: Path) -> str:
+    """Show bounded tool errors while removing all API-key material and paths."""
+    return redact_apple_text(result.stderr.strip() or result.stdout.strip(), credentials, key_path)
+
+
 def developer_identity(output: str) -> str:
     """Select exactly one valid Developer ID Application key from the imported file."""
     identities = re.findall(r'^\s*\d+\) ([0-9A-Fa-f]{40}) "Developer ID Application: [^"\n]+"\s*$',
@@ -197,22 +238,39 @@ def notarize_image(image: Path, credentials: NotarizationCredentials, work_root:
     private_key = credentials.decoded_private_key()
     work_root.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix="notary-", dir=work_root) as temporary:
-        key_path = Path(temporary) / f"AuthKey_{credentials.key_id.get_secret_value().strip()}.p8"
+        key_path = Path(temporary) / "notary-key.p8"
         with key_path.open("xb") as handle:
             os.chmod(key_path, 0o600)
             handle.write(private_key)
-        command = ["/usr/bin/xcrun", "notarytool", "submit", str(image), "--key", str(key_path),
-                   "--key-id", credentials.key_id.get_secret_value().strip(), "--issuer",
-                   credentials.issuer_id.get_secret_value().strip(), "--wait"]
+        authentication = ["--key", str(key_path), "--key-id", credentials.key_id.get_secret_value().strip(),
+                          "--issuer", credentials.issuer_id.get_secret_value().strip()]
+        command = ["/usr/bin/xcrun", "notarytool", "submit", str(image), *authentication,
+                   "--wait", "--output-format", "json"]
+        stage = "notarization setup"
         try:
-            subprocess.run(["/usr/bin/codesign", "--verify", "--strict", str(image)], check=True,
-                           capture_output=True, text=True, timeout=120)
-            subprocess.run(command, check=True, capture_output=True, text=True, timeout=1800)
-            subprocess.run(["/usr/bin/xcrun", "stapler", "staple", str(image)], check=True,
-                           capture_output=True, text=True, timeout=300)
-            subprocess.run(["/usr/bin/xcrun", "stapler", "validate", str(image)], check=True,
-                           capture_output=True, text=True, timeout=120)
-            subprocess.run(["/usr/sbin/spctl", "--assess", "--type", "open", "--verbose=4", str(image)],
-                           check=True, capture_output=True, text=True, timeout=120)
-        except (OSError, subprocess.SubprocessError):
-            raise RuntimeError("Apple notarization, stapling, or Gatekeeper validation failed") from None
+            stages = [("DMG signature verification", ["/usr/bin/codesign", "--verify", "--strict", str(image)], 120),
+                      ("notarytool submission", command, 1800),
+                      ("ticket stapling", ["/usr/bin/xcrun", "stapler", "staple", str(image)], 300),
+                      ("ticket validation", ["/usr/bin/xcrun", "stapler", "validate", str(image)], 120),
+                      ("Gatekeeper assessment", ["/usr/sbin/spctl", "--assess", "--type", "open",
+                                                 "--context", "context:primary-signature", "--verbose=4", str(image)], 120)]
+            for stage, arguments, timeout in stages:
+                result = subprocess.run(arguments, check=False, capture_output=True, text=True, timeout=timeout)
+                submission = NotarySubmission()
+                if stage == "notarytool submission":
+                    try:
+                        submission = NotarySubmission.model_validate_json(result.stdout)
+                    except ValidationError:
+                        submission = NotarySubmission()
+                    if submission.id and submission.status != "Accepted":
+                        log = subprocess.run(["/usr/bin/xcrun", "notarytool", "log", submission.id, *authentication],
+                                             check=False, capture_output=True, text=True, timeout=120)
+                        detail = (notary_log_summary(log.stdout) if not log.returncode
+                                  else safe_apple_error(log, credentials, key_path))
+                        detail = redact_apple_text(detail, credentials, key_path)
+                        raise RuntimeError(f"Apple notarization {submission.status or 'failed'} ({submission.id}): {detail}")
+                if result.returncode or (stage == "notarytool submission" and submission.status != "Accepted"):
+                    raise RuntimeError(f"{stage} failed (exit {result.returncode}): "
+                                       f"{safe_apple_error(result, credentials, key_path)}")
+        except (OSError, subprocess.TimeoutExpired):
+            raise RuntimeError(f"{stage} did not complete") from None

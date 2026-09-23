@@ -441,6 +441,12 @@ recorded in THIRD_PARTY_NOTICES.md.
 * Development definitions live in ignored `etc/clamdb/`. `make freshclam` seeds
   that directory from an installed database when available, then refreshes it.
   The DMG bundles that project copy; release CI runs `make freshclam` before building.
+  Before running the mounted app self-test, DMG validation records every mounted
+  file and symlink in a retained inventory and checks that `libclamav.dylib` is
+  present. Release CI also lists every inventory entry in the Actions log before
+  testing the installed app. A present library rejected by the native loader
+  must report the underlying loader error, not misidentify it as a missing
+  file. A failed self-test never publishes the candidate DMG.
 * `ingest --workers N` controls the number of source containers ingested
   simultaneously. Its default is the detected CPU count capped at eight, and
   `N` must be positive. Each worker reads and parses its mailfile and submits
@@ -1850,15 +1856,26 @@ the source archive and checksum the final image. Missing protected signing or
 notarization credentials must fail release assembly; an unsigned development
 DMG must never be published as a release. The archive extension is declared in
 the bundle's document-type metadata.
+The bundled ClamAV engine and updater must load against the matching OpenSSL
+libraries from their ClamAV installation, not an older same-named library
+selected from another Python dependency. The mounted DMG self-test must fail
+when the native scanner or bundled `freshclam` updater cannot load. Both the
+definition updater and mounted updater test must pass an explicit temporary
+configuration, independent of any host ClamAV configuration.
+Notarization failures must identify the failed stage and report Apple's
+validation issues without printing API-key material.
 
 Package metadata and the About window use one canonical PEP 440 version:
-`1.0.0a2` is the current alpha and its annotated Git tag is `v1.0.0a2`.
+`1.0.0a10` is the current alpha and its annotated Git tag is `v1.0.0a10`.
 The release parser rejects noncanonical or unsupported versions; only stable
 `MAJOR.MINOR.PATCH`, alpha `MAJOR.MINOR.PATCHaN`, and beta
 `MAJOR.MINOR.PATCHbN` are accepted. Alpha and beta items use Sparkle's
-`preview` channel; stable items use its default channel. `appcast.xml` is
-published at the website's fixed HTTPS URL only after its matching notarized
-DMG has a Sparkle Ed25519 archive signature.
+`preview` channel; stable items use its default channel. The published release
+contains a signed `appcast.xml` asset; Pages serves the latest published asset
+at the website's fixed HTTPS URL. Only a notarized DMG with a Sparkle Ed25519
+archive signature may enter the feed.
+The website's release links use published release tags, recognize the same
+canonical alpha/beta spelling, and never advertise a draft or failed tag.
 
 `make sparkle-tools` downloads the pinned Sparkle developer archive to the
 ignored project-local `.tools/` directory, verifies its SHA-256 before extraction,
@@ -1871,8 +1888,9 @@ The packaged app contains only its `SUPublicEDKey` and fixed appcast HTTPS URL.
 `SPARKLE_ED25519_PRIVATE_KEY_BASE64` is release-only: `sign_update` receives it
 on standard input after Apple notarization/stapling, never through an argument,
 bundle, or application subprocess environment. The signed DMG remains in a
-draft GitHub release until the feed item is committed to `main`; publishing
-the draft is followed by an explicit GitHub Pages dispatch from `main`.
+draft GitHub release until the signed feed asset is attached; publishing the
+draft is followed by an explicit GitHub Pages dispatch from `main`. The workflow
+must not write directly to protected `main`.
 
 Ordinary `make dmg`, `make dmg-signed`, and `make test-dmg` must run only the
 headless mounted self-test, without opening GUI test windows. `make check-release`
@@ -1959,7 +1977,9 @@ must not make remote requests without explicit authorization.
   Third-party license grants remain unchanged.
 * A source or binary distribution includes `LICENSE`, `COPYRIGHT`,
   `THIRD_PARTY_NOTICES.md`, and every license text required by its included
-  components. Each platform's binary build audits its exact runtime dependency
+  components. The macOS DMG includes the ClamAV and OpenSSL license texts from
+  the same installations as its native libraries and verifies them mounted.
+  Each platform's binary build audits its exact runtime dependency
   closure and fails for unknown licenses, missing license texts, or
   development/test packages. Dependency licenses and required notices are
   retained. A passing inventory audit is not license compatibility clearance;

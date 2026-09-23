@@ -4,6 +4,20 @@
 
 ## Unreleased
 
+* Run an unsigned mounted-DMG smoke test on the macOS CI runner before release
+  tagging. Both the mounted updater check and definition updates supply a
+  temporary FreshClam configuration instead of requiring the host's config.
+  Include and verify the matching ClamAV and OpenSSL license texts in the DMG.
+  Report Apple's notarization issue log on a rejected submission without
+  exposing API-key credentials. Gatekeeper now assesses the stapled DMG with
+  the disk-image primary-signature context. The temporary API-key filename no
+  longer embeds its identifier.
+
+* Package ClamAV with its matching OpenSSL libraries so the mounted macOS app
+  can load the antivirus engine. Validate that the bundled `freshclam` updater
+  launches. Record mounted DMG contents and report native loader errors when
+  release validation fails.
+
 * Clarify GPLv2-only versus GPLv2-or-later linking compatibility with LGPLv3.
   The separate converter uses GPLv3 for project-owned code; upstream pypff/libpff
   remains LGPLv3-or-later and does not require relicensing.

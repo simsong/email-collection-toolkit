@@ -58,7 +58,13 @@ rights required by their licenses.
 The GPLv2-only application terms align with ClamAV's GPLv2-only grant but do
 not resolve every dependency's compatibility. The current application runtime
 still includes Apache-2.0 `ftfy`; its compatibility with a GPLv2-only combined
-distribution remains unresolved. Google authentication packages, Requests,
+distribution remains unresolved. The macOS DMG also bundles OpenSSL 3's
+Apache-2.0 `libssl.3.dylib` and `libcrypto.3.dylib` for ClamAV and other native
+dependencies. The GPLv2 system-library exception should not be assumed for
+copies shipped inside the application; this combined-distribution issue also
+requires copyright-owner or counsel review before publication. Matching
+ClamAV's OpenSSL ABI fixes loading, not licensing. Google authentication
+packages, Requests,
 requests-file and tldextract have been removed from the runtime;
 see the [GNU license compatibility guidance](https://www.gnu.org/licenses/license-list.html#apache2)
 and [LGPLv3 guidance](https://www.gnu.org/licenses/license-list.html#LGPLv3).

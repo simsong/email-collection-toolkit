@@ -54,9 +54,19 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh api --paginate "repos/${GITHUB_REPOSITORY}/git/refs/tags?per_page=100" \
-            --jq '.[] | .ref | ltrimstr("refs/tags/")' \
+          gh api --paginate "repos/${GITHUB_REPOSITORY}/releases?per_page=100" \
+            --jq '.[] | select(.draft == false) | .tag_name' \
             | python3 scripts/update_site_releases.py --output website/data/releases.toml
+      - name: Include latest published Sparkle appcast
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          appcast_tag="$(gh api "repos/$GITHUB_REPOSITORY/releases?per_page=100" \
+            --jq '[.[] | select(.draft == false) | select(any(.assets[]?; .name == "appcast.xml"))][0].tag_name // empty')"
+          if [[ -n "$appcast_tag" ]]; then
+            gh release download "$appcast_tag" --repo "$GITHUB_REPOSITORY" \
+              --pattern appcast.xml --output website/static/updates/mac/appcast.xml --clobber
+          fi
       - name: Build Zola site
         run: zola --root website build --output-dir "$RUNNER_TEMP/mail-archiver-site"
       - name: Upload Pages artifact

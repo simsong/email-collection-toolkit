@@ -225,7 +225,7 @@ self-test-gui:
 	uv run mailsearch-gui --self-test-gui $(ARGS)
 
 test-packaging:
-	uv run pytest -q tests/test_packaging.py tests/test_macos_signing.py tests/test_self_test.py
+	uv run --group packaging pytest -q tests/test_packaging.py tests/test_macos_signing.py tests/test_self_test.py
 
 .PHONY: test-self-test
 test-self-test: ruff
