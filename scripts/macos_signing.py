@@ -238,7 +238,7 @@ def notarize_image(image: Path, credentials: NotarizationCredentials, work_root:
     private_key = credentials.decoded_private_key()
     work_root.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix="notary-", dir=work_root) as temporary:
-        key_path = Path(temporary) / f"AuthKey_{credentials.key_id.get_secret_value().strip()}.p8"
+        key_path = Path(temporary) / "notary-key.p8"
         with key_path.open("xb") as handle:
             os.chmod(key_path, 0o600)
             handle.write(private_key)
