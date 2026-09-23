@@ -4,12 +4,14 @@
 
 import subprocess
 import sys
+import tomllib
 from pathlib import Path
 
 import pytest
 from yaml import safe_load
 
 from scripts.check_website import validate_config, validate_png
+from scripts.update_site_releases import choose_preview
 
 ZOLA_SHA256_ARM64 = "303b8e1f3251a6250e47f811eda143316f653c22201faa66777d48ac499c0ee3"
 ZOLA_SHA256_X86_64 = "e79edcba2e8d03d22065c9cb8fa2e3abf07b823ef17f00abdc060188dceabba7"
@@ -75,17 +77,35 @@ def test_release_workflow_validates_built_distributions() -> None:
         "name: Create draft release",
         "name: Prepare appcast update",
         "name: Sign the final notarized DMG's appcast item",
-        "name: Commit appcast and publish release",
+        "name: Attach appcast and publish release",
     )
     # Validate the release commit and version before installing or building.
     assert [text.index(gate) for gate in gates] == sorted(text.index(gate) for gate in gates)
     makefile = (workflow.parents[2] / "Makefile").read_text(encoding="utf-8")
     assert "uv run --no-project --with packaging --python '>=3.12' python scripts/release_tag.py" in makefile
     signing_step = text[text.index("name: Sign the final notarized DMG's appcast item"):
-                        text.index("name: Commit appcast and publish release")]
+                        text.index("name: Attach appcast and publish release")]
     assert "SPARKLE_ED25519_PRIVATE_KEY_BASE64" in signing_step
-    assert text.index("-f branch=main") < text.index("gh release edit")
-    assert "[skip ci]" in text
+    assert text.index('gh release upload "$RELEASE_TAG" "$APPCAST"') < text.index("gh release edit")
+    assert "-f branch=main" not in text
+    pages = (workflow.parent / "pages.yml").read_text(encoding="utf-8")
+    assert 'select(.draft == false) | .tag_name' in pages
+    assert pages.index("gh release download") < pages.index("name: Build Zola site")
+
+
+def test_site_links_select_published_pep440_previews(tmp_path: Path) -> None:
+    """Requirement: the site links to published alpha/beta tags, not failed or legacy tags."""
+    output = tmp_path / "releases.toml"
+    script = Path(__file__).parents[1] / "scripts/update_site_releases.py"
+    result = subprocess.run([sys.executable, str(script), "--output", str(output)],
+                            input="v1.0.0a2\nv1.0.0b1\nv1.0.0a10\nv1.0.0-beta9\n",
+                            capture_output=True, text=True, check=False)
+    assert result.returncode == 0, result.stderr
+    releases = tomllib.loads(output.read_text(encoding="utf-8"))
+    assert releases["preview"]["tag"] == "v1.0.0b1"
+    assert releases["current_version"] == "v1.0.0b1"
+    assert releases["stable"]["tag"] == ""
+    assert choose_preview(["v1.0.0a2", "v1.0.0a10"]) == "v1.0.0a10"
 
 
 def test_zola_config_rejects_accidental_template(tmp_path: Path) -> None:

@@ -11,13 +11,22 @@ import sys
 from pathlib import Path
 
 STABLE = re.compile(r"^v(\d+)\.(\d+)\.(\d+)$")
-BETA = re.compile(r"^v(\d+)\.(\d+)\.(\d+)-beta(\d+)$")
+PREVIEW = re.compile(r"^v(\d+)\.(\d+)\.(\d+)(a|b)([1-9]\d*)$")
 REPOSITORY = "https://github.com/simsong/email-collection-toolkit"
 
 
 def choose(tags: list[str], pattern: re.Pattern[str]) -> str | None:
     candidates = [(tuple(int(part) for part in match.groups()), tag)
                   for tag in tags if (match := pattern.fullmatch(tag))]
+    return max(candidates)[1] if candidates else None
+
+
+def choose_preview(tags: list[str]) -> str | None:
+    """Order canonical alpha/beta tags within their release series."""
+    candidates = [((int(major), int(minor), int(patch), stage == "b", int(number)), tag)
+                  for tag in tags
+                  if (match := PREVIEW.fullmatch(tag))
+                  for major, minor, patch, stage, number in [match.groups()]]
     return max(candidates)[1] if candidates else None
 
 
@@ -33,14 +42,14 @@ def main() -> int:
     args = parser.parse_args()
     tags = [line.strip() for line in sys.stdin if line.strip()]
     stable = choose(tags, STABLE)
-    beta = choose(tags, BETA)
-    current = stable or beta
+    preview = choose_preview(tags)
+    current = stable or preview
     current_version = current or "Unreleased"
     current_url = f"{REPOSITORY}/releases/tag/{current}" if current else f"{REPOSITORY}/releases"
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(
         f'current_version = "{current_version}"\ncurrent_url = "{current_url}"\n\n'
-        f"[stable]\n{release_block(stable, 'stable')}\n\n[beta]\n{release_block(beta, 'beta')}\n",
+        f"[stable]\n{release_block(stable, 'stable')}\n\n[preview]\n{release_block(preview, 'preview')}\n",
         encoding="utf-8",
     )
     return 0

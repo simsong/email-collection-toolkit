@@ -2183,11 +2183,15 @@ passing the protected exported Sparkle key only on standard input. Sparkle
 32 bytes; legacy exports may decode to 64 bytes. Neither the key nor Apple's
 credentials reach PyInstaller or mounted-app test subprocesses.
 The release workflow creates a draft with the signed/notarized DMG, reads the
-existing appcast from `main`, signs and prepends the new item, and commits the
-feed to `main` with `[skip ci]`. It then publishes the draft, marking alpha and
-beta tags as prereleases, and explicitly dispatches Pages from `main`.
-GitHub's workflow token does not trigger a Pages run through its own commit or
-release event; the feed commit alone does not deploy a URL pointing at a draft asset.
+latest published release's `appcast.xml` asset (or the tracked empty seed),
+signs and prepends the new item, and attaches the feed as a draft-release asset.
+It then publishes the draft, marking alpha and beta tags as prereleases, and
+explicitly dispatches Pages from `main`. The Pages build overlays the latest
+published appcast asset on the tracked seed before building the site, including
+when a website edit later redeploys Pages. Neither workflow writes to protected
+`main`; GitHub's workflow token does not trigger Pages via its release event.
+Pages derives its stable and preview download links from published releases,
+not all pushed tags, and recognizes canonical `aN` and `bN` preview suffixes.
 Preview entries have Sparkle's `preview` channel and stable entries remain in
 the default release channel.
 `scripts/desktop_entry.py` dispatches normal GUI launch, `--cli`, `--self-test`,

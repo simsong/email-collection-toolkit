@@ -169,8 +169,10 @@ locally and on self-hosted runners because `security` password arguments remain
 visible to other processes; use an existing keychain identity for local signing.
 The separate `SPARKLE_ED25519_PRIVATE_KEY_BASE64` secret contains Sparkle's
 already-Base64 exported update key. The release stays draft while its final
-DMG is signed for the appcast. The workflow commits the feed to `main`, then
-publishes the draft and explicitly dispatches GitHub Pages from `main`.
+DMG is signed for the appcast. The workflow attaches the signed feed to the
+draft release, then publishes it and explicitly dispatches GitHub Pages from
+`main`. The Pages build overlays the published feed asset without writing to
+protected `main`.
 
 Missing either secret is nonfatal: the build emits an Actions warning, leaves
 the DMG container unsigned, and names it `*_UNSIGNED.dmg`. An explicitly supplied
@@ -220,7 +222,7 @@ Do not move or reuse an already published tag.
 ```sh
 git switch main
 git pull --ff-only origin main
-release_tag=v1.0.0a9
+release_tag=v1.0.0a10
 make release-tag-check GITHUB_REF_NAME="$release_tag"
 git tag -a "$release_tag" -m "Release $release_tag"
 make release-tag-check GITHUB_REF_NAME="$release_tag" ARGS=--require-annotated
@@ -239,16 +241,14 @@ image. The assemble job validates distributions, builds source archives,
 downloads the tested DMG, and creates a draft GitHub release with SHA-256
 checksums. It uses `make sparkle-tools` and `make update-appcast` to run
 `scripts/update_appcast.py` with Sparkle's `sign_update` on the final DMG.
-Only after signing the feed item does it commit
-`website/static/updates/mac/appcast.xml` to `main`, publish the draft release,
-and explicitly dispatch [the Pages workflow](../.github/workflows/pages.yml)
-from `main`. Pages runs `scripts/update_site_releases.py`, builds the Zola site,
-and deploys it to GitHub Pages. The appcast commit message includes `[skip ci]`
-in [release.yml](../.github/workflows/release.yml), which skips push-triggered
-Actions. More importantly, the workflow uses `GITHUB_TOKEN` to commit the feed
-and publish the release, so neither event starts another workflow. Its explicit
-`workflow_dispatch` is what starts [Pages](../.github/workflows/pages.yml);
-the tag push alone does not deploy the site.
+Only after signing the feed item does it attach `appcast.xml` to the draft,
+publish the release, and explicitly dispatch [the Pages workflow](../.github/workflows/pages.yml)
+from `main`. Pages downloads the latest published release's appcast asset over
+the tracked empty seed, runs `scripts/update_site_releases.py`, builds the Zola
+site, and deploys it. This also preserves the feed on later website rebuilds.
+The protected `main` branch is not modified by either workflow. GitHub's
+`GITHUB_TOKEN` release event does not start Pages, so the explicit
+`workflow_dispatch` is required; a tag push alone does not deploy the site.
 If a release step fails before publication, inspect the Actions run and draft
 release rather than assuming the DMG or website is live.
 
@@ -262,13 +262,11 @@ to the steps that need them:
 | Sign appcast item | `SPARKLE_ED25519_PRIVATE_KEY_BASE64` | Sign the final DMG for Sparkle update verification. |
 
 The assemble job also uses the automatically provided `GITHUB_TOKEN` to create
-and publish the release, update the appcast on `main`, and dispatch Pages; it
+and publish the release, attach its appcast asset, and dispatch Pages; it
 is not an additional repository secret to configure. The Pages workflow uses
 its own token and Pages deployment permissions, not the six release secrets.
 See [certificate management](CERTIFICATE_MANAGEMENT.md) for secret setup.
 
-The website's release-link helper currently recognizes stable `v1.0.0` tags
-and legacy `v1.0.0-beta1` tags, but not the current PEP 440 preview spelling
-(`v1.0.0a2`/`v1.0.0b1`). The Sparkle appcast uses the current spelling; until
-the helper is updated, a successful Pages deployment does not guarantee that
-the site's preview download link points to the new preview release.
+The website's Stable and Preview links are selected from published releases,
+not all pushed tags; canonical `aN` and `bN` releases populate Preview. A
+failed tag or draft release is not advertised.

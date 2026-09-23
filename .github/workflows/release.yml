@@ -99,12 +99,16 @@ jobs:
           dmgs=(dist/*.dmg)
           test "${#dmgs[@]}" -eq 1
           appcast_path="$RUNNER_TEMP/appcast.xml"
-          appcast_sha="$(gh api "repos/$GITHUB_REPOSITORY/contents/website/static/updates/mac/appcast.xml?ref=main" --jq .sha)"
-          gh api "repos/$GITHUB_REPOSITORY/contents/website/static/updates/mac/appcast.xml?ref=main" --jq .content \
-            | tr -d '\n' | base64 -D > "$appcast_path"
+          previous_tag="$(gh api "repos/$GITHUB_REPOSITORY/releases?per_page=100" \
+            --jq '[.[] | select(.draft == false) | select(any(.assets[]?; .name == "appcast.xml"))][0].tag_name // empty')"
+          if [[ -n "$previous_tag" ]]; then
+            gh release download "$previous_tag" --repo "$GITHUB_REPOSITORY" \
+              --pattern appcast.xml --output "$appcast_path"
+          else
+            cp website/static/updates/mac/appcast.xml "$appcast_path"
+          fi
           test -s "$appcast_path"
           echo "APPCAST=$appcast_path" >> "$GITHUB_ENV"
-          echo "APPCAST_SHA=$appcast_sha" >> "$GITHUB_ENV"
           echo "ARCHIVE=${dmgs[0]}" >> "$GITHUB_ENV"
           echo "RELEASE_URL=https://github.com/$GITHUB_REPOSITORY/releases/download/$RELEASE_TAG/$(basename "${dmgs[0]}")" >> "$GITHUB_ENV"
       - name: Sign the final notarized DMG's appcast item
@@ -112,17 +116,12 @@ jobs:
           RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
           SPARKLE_ED25519_PRIVATE_KEY_BASE64: ${{ secrets.SPARKLE_ED25519_PRIVATE_KEY_BASE64 }}
         run: make update-appcast APPCAST="$APPCAST" ARCHIVE="$ARCHIVE" RELEASE_TAG="$RELEASE_TAG" RELEASE_URL="$RELEASE_URL"
-      - name: Commit appcast and publish release
+      - name: Attach appcast and publish release
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
         run: |
-          content="$(base64 < "$APPCAST" | tr -d '\n')"
-          gh api --method PUT "repos/$GITHUB_REPOSITORY/contents/website/static/updates/mac/appcast.xml" \
-            -f message="Publish Sparkle appcast for $RELEASE_TAG [skip ci]" \
-            -f content="$content" \
-            -f sha="$APPCAST_SHA" \
-            -f branch=main
+          gh release upload "$RELEASE_TAG" "$APPCAST" --repo "$GITHUB_REPOSITORY"
           gh release edit "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --draft=false
           gh workflow run pages.yml --repo "$GITHUB_REPOSITORY" --ref main
 
