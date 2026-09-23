@@ -220,7 +220,7 @@ Do not move or reuse an already published tag.
 ```sh
 git switch main
 git pull --ff-only origin main
-release_tag=v1.0.0a3
+release_tag=v1.0.0a4
 make release-tag-check GITHUB_REF_NAME="$release_tag"
 git tag -a "$release_tag" -m "Release $release_tag"
 make release-tag-check GITHUB_REF_NAME="$release_tag" ARGS=--require-annotated
