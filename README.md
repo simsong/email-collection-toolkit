@@ -504,6 +504,9 @@ Python backend; existing browser tests do not establish native Windows support.
 
 ## Versioning and Updating
 
+The [DevOps guide](doc/DEVOPS.md#github-actions) records the current GitHub
+Actions workflows and the proposed CI, Pages, and tagged-release gates.
+
 One canonical PEP 440 version is used everywhere users see a version: package
 metadata and the About window currently say `1.0.0a10`. The annotated Git tag
 adds only `v`: `v1.0.0a10`. Alpha and beta releases use Sparkle's `preview`
