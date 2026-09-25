@@ -7,7 +7,7 @@ A standalone [Microsoft-crate PST importer](PST_IMPORTER.md) is implemented,
 with documented extraction limits and a CLI archive-host adapter. OST uses
 the external libpff converter, qualified against a genuine Unicode/version-23 fixture with
 explicit partial-import reporting; compressed OST remains unqualified. The
-[executable importer specification](PST_DUAL_READER.md) supersedes the original
+[executable importer specification](PST_IMPORTER.md#executable-stream-contract) supersedes the original
 single-backend selection and development sequence below.
 
 This is the single inventory for physical mail formats: what the project can
@@ -17,7 +17,10 @@ rules in [requirements.md](requirements.md), the plug-in contracts in
 [PLUGINS.md](PLUGINS.md), and the implementation narrative in
 [implementation.md](implementation.md).
 
-## Decision summary
+## Original decision summary (historical)
+
+The following research plan predates the implemented Rust PST and libpff OST
+adapters described above.
 
 1. Make PST/OST the next import milestone. It is the most valuable near-term
    capability for the GUI and it supplies the data foundation for a useful,
@@ -25,7 +28,7 @@ rules in [requirements.md](requirements.md), the plug-in contracts in
 2. Implement filename-to-stdout-mboxrd ingest executables, starting with a
    qualified adapter around Microsoft's `outlook-pst-rs`. Run other importers
    as independent passes when wanted. Python retains scanning, integrity,
-   catalog and archive publication. See [PST_DUAL_READER.md](PST_DUAL_READER.md).
+   catalog and archive publication. See [PST_IMPORTER.md](PST_IMPORTER.md).
 3. Keep libpff, libpst, java-libpst and XstReader as alternative candidates;
    choose the second implementation using corpus results and package costs.
    Avoid counting wrappers and forks as independent parsers. No mandatory
@@ -177,10 +180,10 @@ or commercial converter.
 
 The first two rows are related, not competing at the same abstraction level:
 libpff/pypff is one low-level reader; libratom is a higher-level consumer of that
-same stack and adds no independent parser. The
-[executable specification](PST_DUAL_READER.md#other-parser-candidates) prioritizes
-the Microsoft Rust adapter candidate and leaves the alternate backend to corpus
-and packaging qualification.
+same stack and adds no independent parser. The implemented
+[reader selection](PST_IMPORTER.md#reader-selection-and-deduplication) uses the
+Microsoft Rust adapter for PST and libpff for OST; other readers remain
+research candidates.
 
 ## Source evidence and adapter boundary
 
@@ -235,7 +238,7 @@ source lacked that property.
 ## Original two-week development plan (superseded)
 
 The following 2026-08-31 sequence is retained as research history. Follow the
-[executable implementation sequence and acceptance](PST_DUAL_READER.md#implementation-sequence-and-acceptance)
+[executable qualification criteria](PST_IMPORTER.md#platform-packaging-and-qualification)
 for new work; the original estimate does not cover independent-pass comparison
 or the Windows/macOS/Snap packaging work.
 

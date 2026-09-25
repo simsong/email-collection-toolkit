@@ -15,7 +15,7 @@ Date: 2026-08-25
 At the audited 2026-08-25 revision, this snapshot covered the then-current 30
 tracked Python files in `src/mailarchiver/` and `tests/`, the GUI
 JavaScript/HTML/CSS, the bundled Swift helper, and the Makefile. It excludes
-`.tmp/`, virtual environments, and generated archives. The review examined
+ignored linked worktrees and output, virtual environments, and generated archives. The review examined
 source immutability, MBOX recovery,
 SQLite transactions and query plans, ClamAV lifecycle, resource cleanup,
 MIME/export handling, asynchronous UI state, CLI validation, failure

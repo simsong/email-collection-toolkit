@@ -1518,8 +1518,9 @@ and retain the current explicit-path CLI instructions.
   [ON_DISK_MAIL_FORMATS.md](ON_DISK_MAIL_FORMATS.md).
   The implemented Rust PST helper is a standalone ingest executable accepting a
   filename and emitting mboxrd to stdout, with diagnostics on stderr, as
-  specified in [PST_DUAL_READER.md](PST_DUAL_READER.md). Use Microsoft's Rust PST library for PST; the independent
-  external libpff converter remains the OST reader. Each emitted record carries `X-Imported-URI`,
+  specified in [PST_IMPORTER.md](PST_IMPORTER.md#executable-stream-contract).
+  Use Microsoft's Rust PST library for PST; the independent external libpff
+  converter remains the OST reader. Each emitted record carries `X-Imported-URI`,
   `X-Importer-Name` and `X-Importer-Version`. These fields are included in h2.
   Existing h3 includes selected headers AND the encoded MIME body; it is a
   comparison control, not permission to discard conflicting variants. The
@@ -1575,8 +1576,7 @@ and retain the current explicit-path CLI instructions.
   `Subject` components used by `h3`, and report `X-Apple-Auto-Saved` per file.
   Existing reports can be refreshed only after every exported file passes both
   its recorded `h2` and case `h3`; source messages are not needed for refresh.
-  Private
-  messages belong only in the gitignored project `.tmp` area and must never be
+  Private messages belong only in gitignored checkout-root output and must never be
   committed as fixtures or documentation.
 * Every source adapter emits original RFC 5322 bytes where the source contains
   them. When a proprietary store requires reconstruction or conversion, the
@@ -1788,7 +1788,7 @@ Supported Windows/macOS packages and the planned Linux Snap must bundle their
 selected ingest executables and dependencies without requiring user-installed
 runtimes, compilers or Outlook. The configured PST importer is the Rust helper;
 Java is required only if a Java importer is selected for distribution.
-[PST_DUAL_READER.md](PST_DUAL_READER.md) defines architecture-specific
+[PST_IMPORTER.md](PST_IMPORTER.md#platform-packaging-and-qualification) defines architecture-specific
 packaging, runtime provenance, signing, confinement and installed-fixture gates.
 No platform is supported merely because its package builds; validate full ingest,
 scanning, locking, cancellation and recovery in the installed application.
@@ -2026,7 +2026,7 @@ ambiguous work requires an explicit disposition rather than silent inclusion
 or deletion.
 
 The pr-to-ready workflow must retain a quiet post-handoff merge check and clean
-up its task-owned `.tmp` checkout only after the human merges the PR. Removal
+up its task-owned linked checkout only after the human merges the PR. Removal
 requires current-main ancestry or patch-equivalence evidence and a clean tree;
 ignored private evidence is not disposable. Dirty, unmerged, or uncertain
 checkouts must be retained and reported, not forcibly deleted.

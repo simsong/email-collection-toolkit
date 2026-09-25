@@ -13,18 +13,20 @@ early source tree. `audit_babyl.py` exercises the Babyl reader across a source
 tree. `summarize_evidence.py` prints compact aggregates from the generated CSV
 files.
 
-Run them only through the repository Makefile:
+Run them only through the repository Makefile from the checkout root. The
+example explicitly selects an ignored, root-relative output directory:
 
 ```console
 make data-quality-audit \
   ARCHIVE=/path/to/mailbag \
-  EARLY_SOURCE=/path/to/source
-make data-quality-babyl-audit EARLY_SOURCE=/path/to/source
-make data-quality-summary
+  EARLY_SOURCE=/path/to/source \
+  AUDIT_OUTPUT=build/data-quality-audit
+make data-quality-babyl-audit EARLY_SOURCE=/path/to/source AUDIT_OUTPUT=build/data-quality-audit
+make data-quality-summary AUDIT_OUTPUT=build/data-quality-audit
 ```
 
-The default output is `.tmp/data-quality-audit`. Override it with
-`AUDIT_OUTPUT=/private/path` when needed. The output includes complete RFC 5322
+The Makefile's default is also an ignored checkout-local directory. Override it
+with `AUDIT_OUTPUT=/private/path` when needed. The output includes complete RFC 5322
 messages, addresses, subjects, source paths, hashes, and catalog identifiers.
 It is private evidence: keep it outside Git, protect it like the archive, and
 delete it when the investigation is complete. Each exporter refuses to replace
