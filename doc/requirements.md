@@ -1896,8 +1896,9 @@ The packaged app contains only its `SUPublicEDKey` and fixed appcast HTTPS URL.
 on standard input after Apple notarization/stapling, never through an argument,
 bundle, or application subprocess environment. Before publication, the release
 must have Sparkle verify the signature it generated against the final DMG
-bytes; Pages checks feed structure and signature metadata but does not
-re-download historical DMGs to verify them. The signed DMG remains in a
+bytes; Pages checks feed structure, the exact repository/tagged GitHub DMG
+download URL, and signature metadata but does not re-download historical DMGs
+to verify them. The signed DMG remains in a
 draft GitHub release until the signed feed asset is attached; publishing the
 draft is followed by a dependent Pages job using the signed feed produced in
 that same release run. A Pages failure fails the release workflow. Ordinary

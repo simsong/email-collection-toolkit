@@ -2199,6 +2199,8 @@ push also builds Pages and overlays the latest published release's appcast,
 retrying by exact tag and failing if no published release or asset is available
 rather than publishing the empty seed. The two deployment paths share one queued
 concurrency group. Neither workflow writes to protected `main`.
+Both Pages paths reject any enclosure URL outside this repository's exact
+tagged GitHub DMG downloads, including URLs on other HTTPS hosts.
 Pages derives its stable and preview download links from published releases,
 not all pushed tags, and recognizes canonical `aN` and `bN` preview suffixes.
 Preview entries have Sparkle's `preview` channel and stable entries remain in

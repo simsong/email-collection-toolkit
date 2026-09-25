@@ -8,10 +8,25 @@ from __future__ import annotations
 import argparse
 import xml.etree.ElementTree as xml
 from pathlib import Path
+from urllib.parse import unquote, urlsplit
 
 SPARKLE_NAMESPACE = "http://www.andymatuschak.org/xml-namespaces/sparkle"
 SIGNATURE = f"{{{SPARKLE_NAMESPACE}}}edSignature"
 VERSION = f"{{{SPARKLE_NAMESPACE}}}version"
+RELEASE_PATH = "/simsong/email-collection-toolkit/releases/download/"
+
+
+def valid_release_url(url: str, tag: str) -> bool:
+    """Accept only a DMG asset under this repository's exact tagged release."""
+    if not tag.startswith("v") or any(character in tag for character in "/\\%?#"):
+        return False
+    parsed = urlsplit(url)
+    prefix = f"{RELEASE_PATH}{tag}/"
+    if (parsed.scheme != "https" or parsed.netloc != "github.com" or parsed.query or parsed.fragment
+            or not parsed.path.startswith(prefix)):
+        return False
+    name = unquote(parsed.path[len(prefix):])
+    return bool(name and "/" not in name and "\\" not in name and name.endswith(".dmg"))
 
 
 def check_appcast(path: Path, tag: str = "") -> None:
@@ -32,12 +47,10 @@ def check_appcast(path: Path, tag: str = "") -> None:
             length = int(enclosure.get("length", ""))
         except ValueError as error:
             raise ValueError("Sparkle appcast contains an invalid archive length") from error
-        if length <= 0 or not enclosure.get("url", "").startswith("https://"):
+        if length <= 0 or not valid_release_url(enclosure.get("url", ""), guid):
             raise ValueError("Sparkle appcast contains an invalid archive enclosure")
         if guid == tag:
             matches += 1
-            if f"/releases/download/{tag}/" not in enclosure.get("url", ""):
-                raise ValueError(f"Sparkle appcast item {tag} points to the wrong release")
     if tag and matches != 1:
         raise ValueError(f"Sparkle appcast must contain exactly one signed item for {tag}")
 

@@ -128,6 +128,26 @@ def test_appcast_gate_rejects_missing_and_unsigned_release_items(tmp_path: Path)
         check_appcast(appcast, "v1.0.0a10")
 
 
+@pytest.mark.parametrize("url", [
+    "https://evil.example/releases/download/v1.0.0a10/example.dmg",
+    "https://github.com.evil.example/simsong/email-collection-toolkit/releases/download/v1.0.0a10/example.dmg",
+    "https://github.com/simsong/other/releases/download/v1.0.0a10/example.dmg",
+    "https://github.com/simsong/email-collection-toolkit/releases/download/v1.0.0a9/example.dmg",
+    "https://github.com/simsong/email-collection-toolkit/releases/download/v1.0.0a10/../example.dmg",
+    "https://github.com/simsong/email-collection-toolkit/releases/download/v1.0.0a10/%2e%2e%2fexample.dmg",
+    "https://github.com/simsong/email-collection-toolkit/releases/download/v1.0.0a10/example.dmg?next=evil",
+])
+def test_appcast_gate_rejects_unrelated_or_ambiguous_downloads(tmp_path: Path, url: str) -> None:
+    """Requirement: a published feed cannot redirect Sparkle away from this tagged DMG."""
+    appcast = tmp_path / "appcast.xml"
+    appcast.write_text('<rss><channel><title>Updates</title></channel></rss>', encoding="utf-8")
+    append_item(appcast, AppcastRelease(tag="v1.0.0a10", channel="preview", sparkle_version=1000000110,
+                                       display_version="1.0.0a10", url=url,
+                                       archive=SignedArchive(signature="signed", length=123)))
+    with pytest.raises(ValueError, match="invalid archive enclosure"):
+        check_appcast(appcast, "v1.0.0a10")
+
+
 def test_site_links_select_published_pep440_previews(tmp_path: Path) -> None:
     """Requirement: the site links to published alpha/beta tags, not failed or legacy tags."""
     output = tmp_path / "releases.toml"
