@@ -108,6 +108,7 @@ def test_release_workflow_validates_built_distributions() -> None:
     assert "actions/download-artifact@" in pages
     assert 'if [[ -z "$appcast_tag" ]]; then' in pages
     assert 'if [[ -z "$previous_tag" ]]; then' in text
+    assert '"$(git tag --list \'v*\')" != "$RELEASE_TAG"' in text
 
 
 def test_appcast_gate_rejects_missing_and_unsigned_release_items(tmp_path: Path) -> None:

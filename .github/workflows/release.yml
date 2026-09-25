@@ -100,18 +100,23 @@ jobs:
           previous_tag="$(gh api "repos/$GITHUB_REPOSITORY/releases?per_page=100" \
             --jq '[.[] | select(.draft == false)][0].tag_name // empty')"
           if [[ -z "$previous_tag" ]]; then
-            echo "No previous published appcast is available; refusing to reset update history" >&2
-            exit 1
-          fi
-          for attempt in 1 2 3 4 5 6; do
-            if gh release download "$previous_tag" --repo "$GITHUB_REPOSITORY" \
-              --pattern appcast.xml --output "$appcast_path" --clobber; then
-              break
+            if [[ "$(git tag --list 'v*')" != "$RELEASE_TAG" ]]; then
+              echo "No previous published appcast is available; refusing to reset update history" >&2
+              exit 1
             fi
-            if [[ "$attempt" -eq 6 ]]; then exit 1; fi
-            sleep "$attempt"
-          done
-          make check-appcast APPCAST="$appcast_path" RELEASE_TAG="$previous_tag"
+            cp website/static/updates/mac/appcast.xml "$appcast_path"
+            make check-appcast APPCAST="$appcast_path"
+          else
+            for attempt in 1 2 3 4 5 6; do
+              if gh release download "$previous_tag" --repo "$GITHUB_REPOSITORY" \
+                --pattern appcast.xml --output "$appcast_path" --clobber; then
+                break
+              fi
+              if [[ "$attempt" -eq 6 ]]; then exit 1; fi
+              sleep "$attempt"
+            done
+            make check-appcast APPCAST="$appcast_path" RELEASE_TAG="$previous_tag"
+          fi
           test -s "$appcast_path"
           echo "APPCAST=$appcast_path" >> "$GITHUB_ENV"
           echo "ARCHIVE=${dmgs[0]}" >> "$GITHUB_ENV"

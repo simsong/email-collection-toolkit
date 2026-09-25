@@ -2188,9 +2188,10 @@ protected exported Sparkle key only on standard input. Sparkle
 32 bytes; legacy exports may decode to 64 bytes. Neither the key nor Apple's
 credentials reach PyInstaller or mounted-app test subprocesses.
 The release workflow creates a draft with the signed/notarized DMG and requires
-the latest published release's `appcast.xml` asset as its update-history base;
-an empty release-list response fails rather than resetting that history. It
-signs and prepends the new item, and attaches the feed as a draft-release asset.
+the latest published release's `appcast.xml` asset as its update-history base.
+Only when the pushed tag is the repository's sole `v*` tag may it bootstrap
+from the tracked empty seed; otherwise an empty release-list response fails.
+It signs and prepends the new item, and attaches the feed as a draft-release asset.
 It then publishes the draft, marking alpha and beta tags as prereleases. A
 dependent Pages job downloads the exact signed appcast artifact from the same
 run; it does not depend on release-list asset propagation. An ordinary `main`

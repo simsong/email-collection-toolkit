@@ -45,8 +45,10 @@ The release's Pages job consumes the appcast produced in its own run, not
 GitHub's eventually updated list of release assets. An ordinary `main` Pages
 run selects the latest published release by tag, retries downloading its
 appcast, and fails rather than silently deploying the tracked seed if that
-release or its asset is unavailable. Release assembly also fails rather than
-resetting update history when its previous published feed is unavailable.
+release or its asset is unavailable. Release assembly uses the tracked seed
+only when its pushed tag is the repository's sole `v*` tag, bootstrapping the
+first appcast. After that, it fails rather than resetting update history when
+its previous published feed is unavailable.
 Both paths check feed structure and signature metadata before
 building the site. A shared queued concurrency group serializes Pages builds
 and deployments; a documentation build cannot replace a release feed with the

@@ -264,9 +264,9 @@ to the steps that need them:
 | Sign appcast item | `SPARKLE_ED25519_PRIVATE_KEY_BASE64` | Sign the final DMG for Sparkle update verification. |
 
 The assemble job also uses the automatically provided `GITHUB_TOKEN` to create
-and publish the release, attach its appcast asset, and dispatch Pages; it
-is not an additional repository secret to configure. The Pages workflow uses
-its own token and Pages deployment permissions, not the six release secrets.
+and publish the release and attach its appcast asset. It is not an additional
+repository secret to configure. The dependent Pages job uses its own token and
+Pages deployment permissions, not the six release secrets.
 See [certificate management](CERTIFICATE_MANAGEMENT.md) for secret setup.
 
 The website's Stable and Preview links are selected from published releases,
