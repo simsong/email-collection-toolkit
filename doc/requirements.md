@@ -1328,11 +1328,14 @@ the command fails before reading or writing an archive.
 The Python GUI identifies itself as **Email Collection Toolkit** and uses the
 source-controlled rainbow-envelope icon in its native application identity.
 Current application development and all GitHub workflow jobs are macOS-only.
-Release CI runs headless `make dmg`; visible native release testing is an
-explicit local `make check-release` action. Website and release-assembly jobs
-also use macOS, including architecture-matched, checksum-verified Zola. All jobs
-in the continuous-integration workflow must use macOS runners; Windows and Linux
-validation are outside the current scope.
+Continuous integration runs on every non-`main` repository branch push, not
+again on its PR or merged `main` push; it does not build a DMG. Forked PRs
+currently need a separate CI policy. Release CI alone runs headless `make dmg`
+after a `v*` tag push; visible native release testing is an explicit local
+`make check-release` action. Website and release-assembly jobs also use macOS,
+including architecture-matched, checksum-verified Zola. All runner jobs in the
+continuous-integration workflow must use macOS; Windows and Linux validation
+are outside the current scope.
 The required continuous-integration gate exercises the archive lifecycle and
 complete HTML interface in headless Chromium with disposable fixtures. Native
 Cocoa/WKWebView smoke testing is an explicit local macOS development check and
@@ -1392,9 +1395,12 @@ reordering; the header wraps instead of hiding positional links. Long code
 examples scroll within their block without widening the mobile page. At widths
 of 650 pixels or less, the page shell keeps 15-pixel side margins. Icon
 regeneration closes its browser on success and failure.
-Release assembly verifies the annotated tag's signature and package version
-before installing project dependencies, building artifacts, or executing their
-entry points. Tag/version validation must not install the project itself.
+Release assembly verifies the annotated tag's type, package version, and
+ancestry on `main` before installing project dependencies, building artifacts,
+or executing their entry points. Tag/version validation must not install the
+project itself. Pages deploys on every `main` push and after a tagged release
+publishes, using the release run's signed appcast rather than a release-list
+query for that new asset; the two deployment paths are serialized.
 
 ## Remote account authorization
 
@@ -1846,10 +1852,11 @@ restore the prior keychain search list on completion or failure. Explicit local
 Explicit unsigned output must identify the override rather than report missing
 credentials. Reject automatic PKCS#12 import on local and self-hosted runners:
 `security` password arguments remain visible to other processes in the job.
-Release builds triggered by `v*` tags must accept unsigned annotated tags without
+Release builds triggered only by pushed `v*` tags must accept unsigned annotated tags without
 configured release-signing public keys or GitHub signature verification. Before
 installing project dependencies or using Apple secrets, require the tag to match
-the project version and the checked-out commit. Lightweight tags must fail.
+the project version and the checked-out commit, and require that commit to be
+reachable from `main`. Lightweight tags must fail.
 Administrators control release-tag creation and workflow changes through repository permissions.
 Release assembly must include the tested, notarized DMG from the same commit as
 the source archive and checksum the final image. Missing protected signing or
@@ -1889,8 +1896,11 @@ The packaged app contains only its `SUPublicEDKey` and fixed appcast HTTPS URL.
 on standard input after Apple notarization/stapling, never through an argument,
 bundle, or application subprocess environment. The signed DMG remains in a
 draft GitHub release until the signed feed asset is attached; publishing the
-draft is followed by an explicit GitHub Pages dispatch from `main`. The workflow
-must not write directly to protected `main`.
+draft is followed by a dependent Pages job using the signed feed produced in
+that same release run. A Pages failure fails the release workflow. Ordinary
+`main`-push Pages builds must not silently replace a published release's feed
+with the tracked empty seed when its asset is temporarily unavailable. Neither
+workflow may write directly to protected `main`.
 
 Ordinary `make dmg`, `make dmg-signed`, and `make test-dmg` must run only the
 headless mounted self-test, without opening GUI test windows. `make check-release`

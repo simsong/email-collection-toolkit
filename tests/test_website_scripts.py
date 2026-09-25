@@ -10,7 +10,9 @@ from pathlib import Path
 import pytest
 from yaml import safe_load
 
+from scripts.check_appcast import check_appcast
 from scripts.check_website import validate_config, validate_png
+from scripts.update_appcast import AppcastRelease, SignedArchive, append_item
 from scripts.update_site_releases import choose_preview
 
 ZOLA_SHA256_ARM64 = "303b8e1f3251a6250e47f811eda143316f653c22201faa66777d48ac499c0ee3"
@@ -42,12 +44,14 @@ def test_pages_workflow_pins_and_checks_the_zola_archive() -> None:
     configuration = safe_load(text)
     # PyYAML's YAML 1.1 resolver treats an unquoted "on" key as boolean True.
     triggers = configuration.get(WORKFLOW_ON, configuration.get(True))
-    assert triggers[RELEASE][TYPES] == ["published"]
+    assert triggers["push"]["branches"] == ["main"]
+    assert "workflow_call" in triggers
+    assert RELEASE not in triggers
     assert configuration[JOBS]["build"]["steps"][0]["with"]["ref"] == "main"
 
 
-def test_ci_builds_distributions_and_site_and_retains_browser_traces() -> None:
-    """Requirement: pull requests validate release/site boundaries and retain browser failures."""
+def test_ci_runs_each_repository_branch_push_once_without_building_a_dmg() -> None:
+    """Requirement: every non-main branch push runs all tests without duplicate PR or DMG work."""
     workflow = Path(__file__).parents[1] / ".github/workflows/continuous-integration.yml"
     text = workflow.read_text(encoding="utf-8")
 
@@ -56,9 +60,13 @@ def test_ci_builds_distributions_and_site_and_retains_browser_traces() -> None:
     assert "name: Upload Playwright failure traces" in text
     assert "path: test-results" in text
     configuration = safe_load(text)
+    triggers = configuration.get(WORKFLOW_ON, configuration.get(True))
+    assert triggers == {"push": {"branches": ["**", "!main"]}}
+    assert "dmg-smoke" not in configuration[JOBS]
+    assert any("make check" in step.get("run", "") for step in configuration[JOBS]["pytest"]["steps"])
     for definition in workflow.parent.glob("*.yml"):
         configuration = safe_load(definition.read_text())
-        assert all(job[RUNS_ON] == "macos-15" for job in configuration[JOBS].values()), definition
+        assert all(job.get(RUNS_ON) == "macos-15" or "uses" in job for job in configuration[JOBS].values()), definition
 
 
 def test_release_workflow_validates_built_distributions() -> None:
@@ -87,10 +95,34 @@ def test_release_workflow_validates_built_distributions() -> None:
                         text.index("name: Attach appcast and publish release")]
     assert "SPARKLE_ED25519_PRIVATE_KEY_BASE64" in signing_step
     assert text.index('gh release upload "$RELEASE_TAG" "$APPCAST"') < text.index("gh release edit")
-    assert "-f branch=main" not in text
+    configuration = safe_load(text)
+    triggers = configuration.get(WORKFLOW_ON, configuration.get(True))
+    assert triggers == {"push": {"tags": ["v*"]}}
+    assert configuration[JOBS]["pages"]["needs"] == "assemble"
+    assert configuration[JOBS]["pages"]["uses"] == "./.github/workflows/pages.yml"
+    assert "git merge-base --is-ancestor HEAD refs/remotes/origin/main" in text
+    assert "gh workflow run pages.yml" not in text
     pages = (workflow.parent / "pages.yml").read_text(encoding="utf-8")
     assert 'select(.draft == false) | .tag_name' in pages
     assert pages.index("gh release download") < pages.index("name: Build Zola site")
+    assert "actions/download-artifact@" in pages
+
+
+def test_appcast_gate_rejects_missing_and_unsigned_release_items(tmp_path: Path) -> None:
+    """Requirement: Pages cannot silently serve a seed or unsigned feed after publication."""
+    appcast = tmp_path / "appcast.xml"
+    appcast.write_text('<rss><channel><title>Updates</title></channel></rss>', encoding="utf-8")
+    with pytest.raises(ValueError, match="exactly one signed item"):
+        check_appcast(appcast, "v1.0.0a10")
+    append_item(appcast, AppcastRelease(tag="v1.0.0a10", channel="preview", sparkle_version=1000000110,
+                                       display_version="1.0.0a10",
+                                       url="https://github.com/simsong/email-collection-toolkit/releases/download/"
+                                           "v1.0.0a10/example.dmg",
+                                       archive=SignedArchive(signature="signed", length=123)))
+    check_appcast(appcast, "v1.0.0a10")
+    appcast.write_text(appcast.read_text().replace('sparkle:edSignature="signed"', ''), encoding="utf-8")
+    with pytest.raises(ValueError, match="unsigned"):
+        check_appcast(appcast, "v1.0.0a10")
 
 
 def test_site_links_select_published_pep440_previews(tmp_path: Path) -> None:

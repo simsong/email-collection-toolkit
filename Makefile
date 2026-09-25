@@ -333,6 +333,11 @@ release-tag-check:
 	@test -n "$(GITHUB_REF_NAME)" || { echo 'usage: make release-tag-check GITHUB_REF_NAME=v1.2.3'; exit 2; }
 	uv run --no-project --with packaging --python '>=3.12' python scripts/release_tag.py --tag "$(GITHUB_REF_NAME)" $(ARGS)
 
+.PHONY: check-appcast
+check-appcast:
+	@test -n "$(APPCAST)" || { echo 'usage: make check-appcast APPCAST=path [RELEASE_TAG=v1.2.3]'; exit 2; }
+	python3 scripts/check_appcast.py "$(APPCAST)" $(if $(RELEASE_TAG),--tag "$(RELEASE_TAG)",)
+
 test: pst-importer mcti-scan pff-converter test-pff-converter
 	uv run pytest -q
 

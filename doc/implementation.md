@@ -41,10 +41,14 @@ native loader's underlying error (PyInstaller's generic wrapper hides it).
 
 ## CI and release validation
 
-All workflow jobs use macos-15. Release packaging invokes make dmg, which
-mounts the candidate and runs its headless installed-app self-test. Native GUI
-release checks remain an explicit local make check-release action. Pages uses
-the same pinned Darwin Zola binaries/checksums as application CI.
+All runner jobs use macos-15. Continuous integration runs `make check` on each
+non-`main` repository branch push, without PR/main duplicates or a DMG smoke
+job. Forked PRs are not covered by that push trigger. Release packaging runs
+only for a pushed, version-matching annotated `v*` tag on `main` and invokes
+`make dmg`, which mounts the candidate and runs its headless installed-app
+self-test. Native GUI release checks remain an explicit local
+`make check-release` action. Pages uses the same pinned Darwin Zola
+binaries/checksums as application CI.
 
 ## Manual state and documentation status
 
@@ -2185,11 +2189,13 @@ credentials reach PyInstaller or mounted-app test subprocesses.
 The release workflow creates a draft with the signed/notarized DMG, reads the
 latest published release's `appcast.xml` asset (or the tracked empty seed),
 signs and prepends the new item, and attaches the feed as a draft-release asset.
-It then publishes the draft, marking alpha and beta tags as prereleases, and
-explicitly dispatches Pages from `main`. The Pages build overlays the latest
-published appcast asset on the tracked seed before building the site, including
-when a website edit later redeploys Pages. Neither workflow writes to protected
-`main`; GitHub's workflow token does not trigger Pages via its release event.
+It then publishes the draft, marking alpha and beta tags as prereleases. A
+dependent Pages job downloads the exact signed appcast artifact from the same
+run; it does not depend on release-list asset propagation. An ordinary `main`
+push also builds Pages and overlays the latest published release's appcast,
+retrying by exact tag and failing if that asset is unavailable rather than
+publishing the empty seed. The two deployment paths share one queued
+concurrency group. Neither workflow writes to protected `main`.
 Pages derives its stable and preview download links from published releases,
 not all pushed tags, and recognizes canonical `aN` and `bN` preview suffixes.
 Preview entries have Sparkle's `preview` channel and stable entries remain in
