@@ -63,7 +63,7 @@ def signing_key() -> SecretStr:
 
 
 def signed_archive(archive: Path, signer: Path, key: SecretStr) -> SignedArchive:
-    """Ask Sparkle to sign the final DMG, passing its private key only on stdin."""
+    """Ask Sparkle to sign and then verify the final DMG."""
     result = subprocess.run([signer, "--ed-key-file", "-", archive], input=key.get_secret_value(),
                             capture_output=True, text=True, check=False,
                             env={name: value for name, value in os.environ.items()
@@ -72,9 +72,21 @@ def signed_archive(archive: Path, signer: Path, key: SecretStr) -> SignedArchive
         raise RuntimeError("Sparkle archive signing failed")
     try:
         enclosure = xml.fromstring(f'<enclosure xmlns:sparkle="{SPARKLE_NAMESPACE}" {result.stdout.strip()}/>')
-        return SignedArchive(signature=enclosure.attrib[SPARKLE_SIGNATURE], length=int(enclosure.attrib["length"]))
+        signed = SignedArchive(signature=enclosure.attrib[SPARKLE_SIGNATURE], length=int(enclosure.attrib["length"]))
     except (KeyError, ValueError, xml.ParseError) as error:
         raise RuntimeError("Sparkle signer produced an invalid archive signature") from error
+    verify_signed_archive(archive, signer, key, signed.signature)
+    return signed
+
+
+def verify_signed_archive(archive: Path, signer: Path, key: SecretStr, signature: str) -> None:
+    """Have Sparkle verify the archive bytes with the exported update key."""
+    result = subprocess.run([signer, "--verify", "--ed-key-file", "-", archive, signature],
+                            input=key.get_secret_value(), capture_output=True, text=True, check=False,
+                            env={name: value for name, value in os.environ.items()
+                                 if name != SPARKLE_PRIVATE_KEY_SECRET})
+    if result.returncode:
+        raise RuntimeError("Sparkle archive signature verification failed")
 
 
 def append_item(appcast: Path, release: AppcastRelease) -> None:

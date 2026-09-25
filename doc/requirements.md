@@ -1894,13 +1894,18 @@ Git; it is never an application, Apple-signing, or notarization credential.
 The packaged app contains only its `SUPublicEDKey` and fixed appcast HTTPS URL.
 `SPARKLE_ED25519_PRIVATE_KEY_BASE64` is release-only: `sign_update` receives it
 on standard input after Apple notarization/stapling, never through an argument,
-bundle, or application subprocess environment. The signed DMG remains in a
+bundle, or application subprocess environment. Before publication, the release
+must have Sparkle verify the signature it generated against the final DMG
+bytes; Pages checks feed structure and signature metadata but does not
+re-download historical DMGs to verify them. The signed DMG remains in a
 draft GitHub release until the signed feed asset is attached; publishing the
 draft is followed by a dependent Pages job using the signed feed produced in
 that same release run. A Pages failure fails the release workflow. Ordinary
-`main`-push Pages builds must not silently replace a published release's feed
-with the tracked empty seed when its asset is temporarily unavailable. Neither
-workflow may write directly to protected `main`.
+`main`-push Pages builds must fail if the published-release list or latest
+appcast asset is unavailable; they must never deploy the tracked empty seed.
+Release assembly must likewise fail rather than reset update history when its
+previous published feed cannot be obtained. Neither workflow may write
+directly to protected `main`.
 
 Ordinary `make dmg`, `make dmg-signed`, and `make test-dmg` must run only the
 headless mounted self-test, without opening GUI test windows. `make check-release`

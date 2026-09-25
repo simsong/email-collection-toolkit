@@ -239,7 +239,8 @@ helpers to build, Developer ID-sign, notarize, staple, and test the mounted
 image. The assemble job validates distributions, builds source archives,
 downloads the tested DMG, and creates a draft GitHub release with SHA-256
 checksums. It uses `make sparkle-tools` and `make update-appcast` to run
-`scripts/update_appcast.py` with Sparkle's `sign_update` on the final DMG.
+`scripts/update_appcast.py` with Sparkle's `sign_update` on the final DMG and
+verifies that signature against the same archive before publishing it.
 Only after signing the feed item does it attach `appcast.xml` to the draft and
 publish the release. A dependent [Pages job](../.github/workflows/pages.yml)
 consumes that same run's signed appcast artifact, runs

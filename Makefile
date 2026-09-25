@@ -338,6 +338,10 @@ check-appcast:
 	@test -n "$(APPCAST)" || { echo 'usage: make check-appcast APPCAST=path [RELEASE_TAG=v1.2.3]'; exit 2; }
 	python3 scripts/check_appcast.py "$(APPCAST)" $(if $(RELEASE_TAG),--tag "$(RELEASE_TAG)",)
 
+.PHONY: test-workflow-gates
+test-workflow-gates:
+	uv run --locked pytest -q tests/test_website_scripts.py tests/test_macos_signing.py
+
 test: pst-importer mcti-scan pff-converter test-pff-converter
 	uv run pytest -q
 

@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from scripts.update_appcast import SPARKLE_PRIVATE_KEY_SECRET, signed_archive, signing_key
+from scripts.update_appcast import SPARKLE_PRIVATE_KEY_SECRET, signed_archive, signing_key, verify_signed_archive
 
 
 def test_real_signer_accepts_exported_seed_on_standard_input(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -23,3 +23,6 @@ def test_real_signer_accepts_exported_seed_on_standard_input(tmp_path: Path, mon
 
     assert result.length == archive.stat().st_size
     assert len(base64.b64decode(result.signature, validate=True)) == 64
+    archive.write_bytes(b"tampered Sparkle signing fixture")
+    with pytest.raises(RuntimeError, match="signature verification failed"):
+        verify_signed_archive(archive, signer, signing_key(), result.signature)

@@ -2182,19 +2182,21 @@ tools are absent; `make test-sparkle-signing` installs them and requires that
 integration test to run during release assembly.
 The macOS bundle carries that public key and the fixed Pages appcast URL. The
 appcast writer invokes `sign_update --ed-key-file -` on the final stapled DMG,
-passing the protected exported Sparkle key only on standard input. Sparkle
+then invokes `sign_update --verify` on the same DMG and signature, passing the
+protected exported Sparkle key only on standard input. Sparkle
 2.10 explicitly supports this stdin form. New-format exported seeds decode to
 32 bytes; legacy exports may decode to 64 bytes. Neither the key nor Apple's
 credentials reach PyInstaller or mounted-app test subprocesses.
-The release workflow creates a draft with the signed/notarized DMG, reads the
-latest published release's `appcast.xml` asset (or the tracked empty seed),
+The release workflow creates a draft with the signed/notarized DMG and requires
+the latest published release's `appcast.xml` asset as its update-history base;
+an empty release-list response fails rather than resetting that history. It
 signs and prepends the new item, and attaches the feed as a draft-release asset.
 It then publishes the draft, marking alpha and beta tags as prereleases. A
 dependent Pages job downloads the exact signed appcast artifact from the same
 run; it does not depend on release-list asset propagation. An ordinary `main`
 push also builds Pages and overlays the latest published release's appcast,
-retrying by exact tag and failing if that asset is unavailable rather than
-publishing the empty seed. The two deployment paths share one queued
+retrying by exact tag and failing if no published release or asset is available
+rather than publishing the empty seed. The two deployment paths share one queued
 concurrency group. Neither workflow writes to protected `main`.
 Pages derives its stable and preview download links from published releases,
 not all pushed tags, and recognizes canonical `aN` and `bN` preview suffixes.

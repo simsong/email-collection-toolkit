@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved.
 
-"""Reject a missing, malformed, or unsigned published Sparkle appcast."""
+"""Check published Sparkle feed structure and signature metadata, not DMG cryptography."""
 
 from __future__ import annotations
 
@@ -15,7 +15,7 @@ VERSION = f"{{{SPARKLE_NAMESPACE}}}version"
 
 
 def check_appcast(path: Path, tag: str = "") -> None:
-    """Require each listed archive to be signed and the requested release to exist."""
+    """Require signature metadata and exactly one item for the requested release."""
     try:
         channel = xml.parse(path).getroot().find("channel")
     except (OSError, xml.ParseError) as error:
