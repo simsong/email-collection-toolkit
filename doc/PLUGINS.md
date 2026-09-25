@@ -10,15 +10,16 @@ are created. The Rust PST importer remains an external executable. Use a fresh d
 there is no requirement to migrate or preserve existing generated archive
 formats. Source mail remains immutable.
 
-All commands run through the Makefile:
+Run these commands through the Makefile from the repository checkout root.
+`build/` is ignored and holds only disposable example archives:
 
 ~~~sh
-make processor ARGS="--archive .tmp/processor-demo --plugin-dir tests/processing_plugins init"
-make processor ARGS="--archive .tmp/processor-demo --plugin-dir tests/processing_plugins plugins"
-make processor ARGS="--archive .tmp/processor-demo --plugin-dir tests/processing_plugins submit tests/data/credible_date_with_quoted_body.eml"
-make processor ARGS="--archive .tmp/processor-demo --plugin-dir tests/processing_plugins run --max-jobs 1"
-make processor ARGS="--archive .tmp/processor-demo --plugin-dir tests/processing_plugins run"
-make processor ARGS="--archive .tmp/processor-demo --plugin-dir tests/processing_plugins status"
+make processor ARGS="--archive build/processor-demo --plugin-dir tests/processing_plugins init"
+make processor ARGS="--archive build/processor-demo --plugin-dir tests/processing_plugins plugins"
+make processor ARGS="--archive build/processor-demo --plugin-dir tests/processing_plugins submit tests/data/credible_date_with_quoted_body.eml"
+make processor ARGS="--archive build/processor-demo --plugin-dir tests/processing_plugins run --max-jobs 1"
+make processor ARGS="--archive build/processor-demo --plugin-dir tests/processing_plugins run"
+make processor ARGS="--archive build/processor-demo --plugin-dir tests/processing_plugins status"
 make test-processors
 ~~~
 
@@ -75,12 +76,12 @@ selection, attached messages and the real Rust PST adapter.
 ### Production CLI
 
 ~~~sh
-make run ARGS="--archive .tmp/demo ingest --owner-names-file tests/fixtures/owner-names.txt --clamav --defer-content tests/data/three_messages.mbox"
-make run ARGS="--archive .tmp/demo processors"
-make run ARGS="--archive .tmp/demo processing-status"
-make run ARGS="--archive .tmp/demo process --phase content"
-make run ARGS="--archive .tmp/demo identities addresses --mailbox sender --start 2024-01-01"
-make run ARGS="--archive .tmp/demo identities organizations --domain example.net"
+make run ARGS="--archive build/demo ingest --owner-names-file tests/fixtures/owner-names.txt --clamav --defer-content tests/data/three_messages.mbox"
+make run ARGS="--archive build/demo processors"
+make run ARGS="--archive build/demo processing-status"
+make run ARGS="--archive build/demo process --phase content"
+make run ARGS="--archive build/demo identities addresses --mailbox sender --start 2024-01-01"
+make run ARGS="--archive build/demo identities organizations --domain example.net"
 make test-cli-processors
 ~~~
 
@@ -552,7 +553,7 @@ Email Collection Toolkit has two independent generator plug-in layers:
 2. the built-in local source delegates each recognized filename to a
    **file-parser plug-in**.
 
-The planned [ingest executable protocol](PST_DUAL_READER.md) is a subprocess
+The [ingest executable protocol](PST_IMPORTER.md#executable-stream-contract) is a subprocess
 adapter into these layers: filename input, mboxrd stdout, stderr diagnostics,
 and separate `X-Imported-URI`, `X-Importer-Name`, `X-Importer-Version` fields.
 The [MCT Importer API 1.0](MCT_IMPORTER_API.md) Rust generator and validator are

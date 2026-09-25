@@ -41,10 +41,14 @@ native loader's underlying error (PyInstaller's generic wrapper hides it).
 
 ## CI and release validation
 
-All workflow jobs use macos-15. Release packaging invokes make dmg, which
-mounts the candidate and runs its headless installed-app self-test. Native GUI
-release checks remain an explicit local make check-release action. Pages uses
-the same pinned Darwin Zola binaries/checksums as application CI.
+All runner jobs use macos-15. Continuous integration runs `make check` on each
+non-`main` repository branch push, without PR/main duplicates or a DMG smoke
+job. Forked PRs are not covered by that push trigger. Release packaging runs
+only for a pushed, version-matching annotated `v*` tag on `main` and invokes
+`make dmg`, which mounts the candidate and runs its headless installed-app
+self-test. Native GUI release checks remain an explicit local
+`make check-release` action. Pages uses the same pinned Darwin Zola
+binaries/checksums as application CI.
 
 ## Manual state and documentation status
 
@@ -393,8 +397,8 @@ and whitespace may differ. None of the 100 exported messages contains an
 | 19 | no cache/archive h2 match | 4 | same | same, present | same, present | 0 |
 | 20 | one h2 shared across stores | 3 | same | same, present | same, present | 0 |
 
-The review material is stored under the project-local, gitignored
-`.tmp/h3-ambiguous-review/` directory with owner-only permissions. Each case
+The review material is stored in a project-local, gitignored review directory
+under the checkout root with owner-only permissions. Each case
 contains `apple-cache/`, `canonical-archive/`, and `manifest.json`; the root
 contains a warning, a compact h2/header/autosave table, CSV summary, and
 complete manifest. A refresh mode re-hashes every private EML before updating
@@ -404,7 +408,7 @@ distributed. The checked-in exporter and synthetic test are reproducibility
 infrastructure; the private corpus is not part of the software distribution.
 
 The [on-disk format inventory](ON_DISK_MAIL_FORMATS.md) records PST/OST research;
-the [executable importer specification](PST_DUAL_READER.md) defines the
+the [executable importer specification](PST_IMPORTER.md#executable-stream-contract) defines the
 filename-to-stdout-mboxrd interface. The standalone [PST adapter](PST_IMPORTER.md)
 uses Microsoft's `outlook-pst` 1.2.0 through read-only `read_from` handles,
 traverses the IPM subtree and validates each bounded temporary record before
@@ -570,8 +574,8 @@ email-collection-toolkit/
 
 The data-quality scripts reproduce the investigation that motivated the date,
 Babyl, MBCP, and `From XXX` rules. Makefile targets require explicit archive
-and source paths and write private derived evidence under ignored `.tmp/` by
-default. The scripts open the archive catalog read-only, verify bytes retrieved
+and source paths and write private derived evidence under ignored output in the
+checkout root by default. The scripts open the archive catalog read-only, verify bytes retrieved
 from canonical MBOX locations, leave all source and archive files unchanged,
 and refuse to replace existing evidence files. The generated MBOX, CSV, and
 JSON files are investigation artifacts, not repository fixtures.
@@ -1056,7 +1060,7 @@ search rows show the gray tag and the viewer links to each parent and MIME path.
 A parent outside the current search results opens in the viewer without trying
 to select or scroll to an absent result row.
 `make website-preview-screenshots` builds the website and renders its homepage,
-Searching and Importing pages using local assets into `.tmp/website-previews`.
+Searching and Importing pages using local assets into ignored checkout-root output.
 The headless tests use real bridges, queues and SQLite databases, including edits
 surviving replay, competing writers, content resume without source files, and
 attached-message navigation. Native macOS window behavior remains an opt-in check.
@@ -1493,7 +1497,7 @@ Chromium checks verify exactly three desktop lines without whitespace gaps.
 The story card stacks its text above the user-supplied `images/hands-typing.jpg`
 (799 × 372). The photograph scales proportionally without cropping and has a
 caption linking to Image Catalog on Flickr and its stated CC0 dedication.
-`make website-preview` reuses its disposable `.tmp/website-preview` output
+`make website-preview` reuses its disposable checkout-root output directory
 with Zola `--force` and runs a temporary preview on loopback port 1111
 (overridable with `WEBSITE_PREVIEW_PORT`) without publishing. The Zola configuration retains the
 existing project URLs under the Email Collection Toolkit title. The checker
@@ -2178,18 +2182,25 @@ tools are absent; `make test-sparkle-signing` installs them and requires that
 integration test to run during release assembly.
 The macOS bundle carries that public key and the fixed Pages appcast URL. The
 appcast writer invokes `sign_update --ed-key-file -` on the final stapled DMG,
-passing the protected exported Sparkle key only on standard input. Sparkle
+then invokes `sign_update --verify` on the same DMG and signature, passing the
+protected exported Sparkle key only on standard input. Sparkle
 2.10 explicitly supports this stdin form. New-format exported seeds decode to
 32 bytes; legacy exports may decode to 64 bytes. Neither the key nor Apple's
 credentials reach PyInstaller or mounted-app test subprocesses.
-The release workflow creates a draft with the signed/notarized DMG, reads the
-latest published release's `appcast.xml` asset (or the tracked empty seed),
-signs and prepends the new item, and attaches the feed as a draft-release asset.
-It then publishes the draft, marking alpha and beta tags as prereleases, and
-explicitly dispatches Pages from `main`. The Pages build overlays the latest
-published appcast asset on the tracked seed before building the site, including
-when a website edit later redeploys Pages. Neither workflow writes to protected
-`main`; GitHub's workflow token does not trigger Pages via its release event.
+The release workflow creates a draft with the signed/notarized DMG and requires
+the latest published release's `appcast.xml` asset as its update-history base.
+Only when the pushed tag is the repository's sole `v*` tag may it bootstrap
+from the tracked empty seed; otherwise an empty release-list response fails.
+It signs and prepends the new item, and attaches the feed as a draft-release asset.
+It then publishes the draft, marking alpha and beta tags as prereleases. A
+dependent Pages job downloads the exact signed appcast artifact from the same
+run; it does not depend on release-list asset propagation. An ordinary `main`
+push also builds Pages and overlays the latest published release's appcast,
+retrying by exact tag and failing if no published release or asset is available
+rather than publishing the empty seed. The two deployment paths share one queued
+concurrency group. Neither workflow writes to protected `main`.
+Both Pages paths reject any enclosure URL outside this repository's exact
+tagged GitHub DMG downloads, including URLs on other HTTPS hosts.
 Pages derives its stable and preview download links from published releases,
 not all pushed tags, and recognizes canonical `aN` and `bN` preview suffixes.
 Preview entries have Sparkle's `preview` channel and stable entries remain in
@@ -2492,8 +2503,8 @@ its signature-dependent destination; new signatures cannot excuse lost bytes.
 `make update-corpus-expectations` passes `--update-corpus-expectations` to
 pytest and regenerates the expected JSON only after those integrity checks.
 Review the generated diff: updating a golden file is not proof of correctness.
-Git-ignored local additions are recorded separately in
-`.tmp/expected-corpus-private.json`; neither their mail nor their subjects belong
+Git-ignored local additions are recorded separately in a private expectation
+file under the checkout root; neither their mail nor their subjects belong
 in the public fixture manifest. CI uses the same test on its tracked directory.
 New or missing files, wrong per-source message membership, and changed exclusion
 counts also fail even when the overall canonical message set is unchanged.
@@ -2535,7 +2546,8 @@ drives a hidden Cocoa/WKWebView window on macOS against a purpose-built
 one-message derived archive to retain the native bridge boundary without
 ClamAV or the full lifecycle fixture. This explicit local development target is
 excluded from `make check` and CI/CD; it retains its phase report and any
-timeout sample under `.tmp/native-gui-diagnostics`. Making native behavior a
+timeout sample in the ignored checkout-root diagnostics directory selected by
+`NATIVE_GUI_ARTIFACT_DIR`. Making native behavior a
 required gate would need a logged-in Mac and XCUITest/XCUIAutomation. `make test-bagit`
 validates the database-independent three-message fixture and corruption cases.
 The installed `verify_mail_archive.py

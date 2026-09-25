@@ -1,6 +1,6 @@
 <!-- Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved. -->
 
-# Microsoft-crate PST importer
+# PST and OST importers
 
 `pst-importer` implements [MCT Importer API 1.0](MCT_IMPORTER_API.md) using
 Microsoft's MIT-licensed [`outlook-pst` 1.2.0](https://docs.rs/outlook-pst/1.2.0/outlook_pst/).
@@ -166,6 +166,63 @@ plugins:
 converter for OST; it does not select a PST importer. Archive values override
 installation values.
 
+## Executable stream contract
+
+Both readers implement [MCT Importer API 1.0](MCT_IMPORTER_API.md): the host
+passes a local source filename as an argument, reads mboxrd from stdout, and
+captures progress and failures only from stderr. It never interpolates the
+filename into a shell command or treats the source URI as an instruction to
+fetch another resource. Windows executables must use binary standard streams.
+Each output record has an mboxrd `From ` delimiter and begins with three
+generated, single-line provenance headers in this order:
+
+```text
+X-Imported-URI: file:///path/archive.pst#item=2097220
+X-Importer-Name: pst-importer
+X-Importer-Version: 1.0.0
+```
+
+These are PST examples; the OST converter identifies itself separately.
+Exactly the first three physical header lines form the generated block. Each
+value must be nonempty ASCII without controls or header injection; a combined
+`X-Importer` field is not a substitute. The receiver rejects a missing or
+malformed block, retains same-named source fields later in the header section,
+and records the executable actually launched, its version and hash
+independently of its claims. Source URIs escape spaces and non-ASCII characters,
+may use HTTPS, and use stable source-native item selectors;
+the complete source SHA-256 is recorded separately because a path can identify
+different bytes at different times. The receiver removes one mboxrd quote level
+before computing h2 and applying the common scanner, observation, catalog, and
+writer path; archive publication quotes once again. Recovered MIME is not
+reserialized merely to insert these headers. All three generated fields
+participate in h2.
+
+## Completion and recovery
+
+Exit status 0 means traversal completed within the selected email scope, not
+that an OST cache represents its entire server mailbox. Unreadable mail or
+incomplete extraction produces a nonzero status. The host spools at most one
+bounded record at a time in private temporary storage, drains stderr
+concurrently, and withholds the final record until
+successful process exit; a crash can otherwise leave a plausible truncated
+MIME tail. Earlier complete records may be retained with an explicit partial
+run observation. It records failure and cancellation, reaps the child, and
+permits a later retry from a valid checkpoint. EOF alone is not success.
+Calendar, contacts, virtual search folders, configuration, and other Outlook
+administrative objects are outside the email scope.
+
+## Reader selection and deduplication
+
+The source's internal format selects the Rust PST reader or independent libpff
+OST converter, never a second competing reader for the same ordinary import.
+Existing deduplication uses normalized Message-ID plus h2. Different importer
+headers change h2 and retain both annotated variants. H3 includes selected
+headers and the entire encoded MIME body while ignoring the three generated
+top-level fields; it is a comparison control, not an automatic drop rule. A
+shared Message-ID or source item does not prove identical recovered content.
+No h4 or additional content fingerprint is needed. H3-based duplicate
+suppression would be separate implementation work.
+
 ## Reconstructed MIME and preservation limits
 
 PST exposes MAPI properties and, in some cases, saved transport headers. The
@@ -174,6 +231,16 @@ email. H2 protects the recovered RFC 5322 bytes including annotations; it is
 the integrity value for this archive representation. H3 already covers selected
 headers and the encoded body; no h4 is introduced. Keep the source PST when its
 native Outlook representation matters.
+
+Microsoft's [transport-header property](https://learn.microsoft.com/en-us/openspecs/exchange_server_protocols/ms-oxomsg/28f67517-0f35-4b87-a78d-8d5029141db0)
+contains the original header section, not an original MIME body. Its
+[message-body properties](https://learn.microsoft.com/en-us/openspecs/exchange_server_protocols/ms-oxcmail/59290e68-5bc7-4a2c-9824-846db0f365bc)
+represent text, HTML, and RTF; a MIME writer may choose different boundaries,
+encodings, folding, and attachment order. The optional
+[MIME skeleton](https://learn.microsoft.com/en-us/openspecs/exchange_server_protocols/ms-oxcmsg/2dd82209-0184-4321-a5ba-f0a10b8f1ec8)
+can retain conversion metadata but does not guarantee a complete untouched
+original MIME stream. Deterministic, readable, interoperable recovered email
+and source provenance are the collection result; the PST or OST is unchanged.
 
 * Preserve decoded Unicode text as UTF-8; retain String8/binary body bytes with
   a known charset (UTF-8, Windows-1252, Windows-1256, ASCII or ISO-8859-1).
@@ -271,3 +338,24 @@ The single macOS CI job builds/tests this helper through the Cargo workspace and
 exercises its Python CLI integration through `make check`. Installer behavior, ANSI inputs,
 RTF-only mail, embedded attachments, broader Exchange/contact variants, encrypted mail
 semantics, large files and damaged-store recovery require additional qualification.
+
+## Platform packaging and qualification
+
+The subprocess contract avoids a Python/Rust ABI dependency. Installers must
+bundle their selected executables and dependencies so users need no compiler,
+Python, Java, or Outlook. The current macOS builder bundles the PST and OST
+helpers; each nested Mach-O dependency must be audited and signed before the
+app, then notarized, stapled, and tested from the installed DMG.
+
+| Target | Required qualification |
+| --- | --- |
+| macOS arm64; Intel separately if offered | Installed and quarantined app without developer runtimes, relocation, architecture, source fixity, and independent archive verification. |
+| Windows x64 in v1.1; ARM64 separately | Native installed ingest, binary pipes, Unicode and space paths, NTFS locking, cancellation, scanning, recovery, and bundled DLLs. |
+| Linux Snap amd64 if offered | Bundled helpers inside strict confinement, writable user staging, permitted source access, cancellation, refresh, and archive reopening. |
+
+Rust-only PST delivery avoids a JVM. The libpff OST converter carries its own
+native build, dependency, and license obligations; a future Java reader would
+need a private JVM and JAR. Neither changes the stream contract. Validation
+uses public upstream fixtures and explicitly authorized source copies, never
+modifies or repairs a source, and never contacts a live account. OST reports
+what the local cache yields, including explicit incompleteness where applicable.

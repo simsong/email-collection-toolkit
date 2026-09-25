@@ -69,7 +69,7 @@ After an intentional fixture change, run `make update-corpus-expectations`
 (pytest's explicit `--update-corpus-expectations` option), then review the JSON
 diff. The updater requires a successful import, verification, and reimport;
 never accept its output merely to make a failing test green. Git-ignored local
-mailboxes have a separate `.tmp/expected-corpus-private.json` expectation file
+mailboxes have a separate expectation file in ignored checkout-root output
 to keep private subjects out of Git. CI tests its complete tracked directory;
 local runs also test the additional files present locally.
 
@@ -168,7 +168,8 @@ The child process atomically writes a JSON report after each phase and has a
 watchdog for bridge completion and Cocoa shutdown. Pytest independently bounds
 the process, captures a five-second macOS process sample on an outer timeout,
 and then terminates the whole process group. The Makefile retains these local
-diagnostics under `.tmp/native-gui-diagnostics`. Hosted CI does not launch
+diagnostics in the checkout-root output directory selected by
+`NATIVE_GUI_ARTIFACT_DIR`. Hosted CI does not launch
 AppKit or WKWebView; its required GUI coverage is the complete headless Chromium
 acceptance test.
 

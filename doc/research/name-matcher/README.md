@@ -47,7 +47,7 @@ The current prototype performs read-only evidence extraction:
 ```shell
 make name-matcher-observations \
   ARCHIVE=/Users/simsong/mail-archive \
-  OUTPUT=.tmp/name-evidence.sqlite3 \
+  OUTPUT=build/name-evidence.sqlite3 \
   ARGS='--limit 10000 --workers 4'
 ```
 
@@ -89,4 +89,4 @@ stronger evidence than a single heuristic result.
 
 Run focused validation with `make test-name-resolution`. All generated databases,
 signature text, review files, and provider request files are private derivatives
-and belong under ignored `.tmp/` storage.
+and belong under ignored `build/` storage at the checkout root.

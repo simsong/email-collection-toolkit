@@ -236,6 +236,7 @@ def test_release_accepts_unsigned_annotated_tags_and_checks_commit_and_version(
            "-c", "commit.gpgsign=false", "-c", "tag.gpgsign=false")
     run(*git, "init")
     run(*git, "commit", "--allow-empty", "-m", "fixture")
+    run(*git, "update-ref", "refs/remotes/origin/main", "HEAD")
     run(*git, "tag", *(["-a", tag, "-m", "fixture"] if annotated else [tag]))
     if move_head:
         run(*git, "commit", "--allow-empty", "-m", "different release commit")

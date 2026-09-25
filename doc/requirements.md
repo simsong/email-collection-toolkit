@@ -1328,11 +1328,14 @@ the command fails before reading or writing an archive.
 The Python GUI identifies itself as **Email Collection Toolkit** and uses the
 source-controlled rainbow-envelope icon in its native application identity.
 Current application development and all GitHub workflow jobs are macOS-only.
-Release CI runs headless `make dmg`; visible native release testing is an
-explicit local `make check-release` action. Website and release-assembly jobs
-also use macOS, including architecture-matched, checksum-verified Zola. All jobs
-in the continuous-integration workflow must use macOS runners; Windows and Linux
-validation are outside the current scope.
+Continuous integration runs on every non-`main` repository branch push, not
+again on its PR or merged `main` push; it does not build a DMG. Forked PRs
+currently need a separate CI policy. Release CI alone runs headless `make dmg`
+after a `v*` tag push; visible native release testing is an explicit local
+`make check-release` action. Website and release-assembly jobs also use macOS,
+including architecture-matched, checksum-verified Zola. All runner jobs in the
+continuous-integration workflow must use macOS; Windows and Linux validation
+are outside the current scope.
 The required continuous-integration gate exercises the archive lifecycle and
 complete HTML interface in headless Chromium with disposable fixtures. Native
 Cocoa/WKWebView smoke testing is an explicit local macOS development check and
@@ -1392,9 +1395,12 @@ reordering; the header wraps instead of hiding positional links. Long code
 examples scroll within their block without widening the mobile page. At widths
 of 650 pixels or less, the page shell keeps 15-pixel side margins. Icon
 regeneration closes its browser on success and failure.
-Release assembly verifies the annotated tag's signature and package version
-before installing project dependencies, building artifacts, or executing their
-entry points. Tag/version validation must not install the project itself.
+Release assembly verifies the annotated tag's type, package version, and
+ancestry on `main` before installing project dependencies, building artifacts,
+or executing their entry points. Tag/version validation must not install the
+project itself. Pages deploys on every `main` push and after a tagged release
+publishes, using the release run's signed appcast rather than a release-list
+query for that new asset; the two deployment paths are serialized.
 
 ## Remote account authorization
 
@@ -1512,8 +1518,9 @@ and retain the current explicit-path CLI instructions.
   [ON_DISK_MAIL_FORMATS.md](ON_DISK_MAIL_FORMATS.md).
   The implemented Rust PST helper is a standalone ingest executable accepting a
   filename and emitting mboxrd to stdout, with diagnostics on stderr, as
-  specified in [PST_DUAL_READER.md](PST_DUAL_READER.md). Use Microsoft's Rust PST library for PST; the independent
-  external libpff converter remains the OST reader. Each emitted record carries `X-Imported-URI`,
+  specified in [PST_IMPORTER.md](PST_IMPORTER.md#executable-stream-contract).
+  Use Microsoft's Rust PST library for PST; the independent external libpff
+  converter remains the OST reader. Each emitted record carries `X-Imported-URI`,
   `X-Importer-Name` and `X-Importer-Version`. These fields are included in h2.
   Existing h3 includes selected headers AND the encoded MIME body; it is a
   comparison control, not permission to discard conflicting variants. The
@@ -1569,8 +1576,7 @@ and retain the current explicit-path CLI instructions.
   `Subject` components used by `h3`, and report `X-Apple-Auto-Saved` per file.
   Existing reports can be refreshed only after every exported file passes both
   its recorded `h2` and case `h3`; source messages are not needed for refresh.
-  Private
-  messages belong only in the gitignored project `.tmp` area and must never be
+  Private messages belong only in gitignored checkout-root output and must never be
   committed as fixtures or documentation.
 * Every source adapter emits original RFC 5322 bytes where the source contains
   them. When a proprietary store requires reconstruction or conversion, the
@@ -1782,7 +1788,7 @@ Supported Windows/macOS packages and the planned Linux Snap must bundle their
 selected ingest executables and dependencies without requiring user-installed
 runtimes, compilers or Outlook. The configured PST importer is the Rust helper;
 Java is required only if a Java importer is selected for distribution.
-[PST_DUAL_READER.md](PST_DUAL_READER.md) defines architecture-specific
+[PST_IMPORTER.md](PST_IMPORTER.md#platform-packaging-and-qualification) defines architecture-specific
 packaging, runtime provenance, signing, confinement and installed-fixture gates.
 No platform is supported merely because its package builds; validate full ingest,
 scanning, locking, cancellation and recovery in the installed application.
@@ -1846,10 +1852,11 @@ restore the prior keychain search list on completion or failure. Explicit local
 Explicit unsigned output must identify the override rather than report missing
 credentials. Reject automatic PKCS#12 import on local and self-hosted runners:
 `security` password arguments remain visible to other processes in the job.
-Release builds triggered by `v*` tags must accept unsigned annotated tags without
+Release builds triggered only by pushed `v*` tags must accept unsigned annotated tags without
 configured release-signing public keys or GitHub signature verification. Before
 installing project dependencies or using Apple secrets, require the tag to match
-the project version and the checked-out commit. Lightweight tags must fail.
+the project version and the checked-out commit, and require that commit to be
+reachable from `main`. Lightweight tags must fail.
 Administrators control release-tag creation and workflow changes through repository permissions.
 Release assembly must include the tested, notarized DMG from the same commit as
 the source archive and checksum the final image. Missing protected signing or
@@ -1887,10 +1894,20 @@ Git; it is never an application, Apple-signing, or notarization credential.
 The packaged app contains only its `SUPublicEDKey` and fixed appcast HTTPS URL.
 `SPARKLE_ED25519_PRIVATE_KEY_BASE64` is release-only: `sign_update` receives it
 on standard input after Apple notarization/stapling, never through an argument,
-bundle, or application subprocess environment. The signed DMG remains in a
+bundle, or application subprocess environment. Before publication, the release
+must have Sparkle verify the signature it generated against the final DMG
+bytes; Pages checks feed structure, the exact repository/tagged GitHub DMG
+download URL, and signature metadata but does not re-download historical DMGs
+to verify them. The signed DMG remains in a
 draft GitHub release until the signed feed asset is attached; publishing the
-draft is followed by an explicit GitHub Pages dispatch from `main`. The workflow
-must not write directly to protected `main`.
+draft is followed by a dependent Pages job using the signed feed produced in
+that same release run. A Pages failure fails the release workflow. Ordinary
+`main`-push Pages builds must fail if the published-release list or latest
+appcast asset is unavailable; they must never deploy the tracked empty seed.
+Release assembly may bootstrap from the tracked seed only when the pushed tag
+is the repository's sole `v*` tag; otherwise it must fail rather than reset
+update history when its previous published feed cannot be obtained. Neither
+workflow may write directly to protected `main`.
 
 Ordinary `make dmg`, `make dmg-signed`, and `make test-dmg` must run only the
 headless mounted self-test, without opening GUI test windows. `make check-release`
@@ -2010,7 +2027,7 @@ ambiguous work requires an explicit disposition rather than silent inclusion
 or deletion.
 
 The pr-to-ready workflow must retain a quiet post-handoff merge check and clean
-up its task-owned `.tmp` checkout only after the human merges the PR. Removal
+up its task-owned linked checkout only after the human merges the PR. Removal
 requires current-main ancestry or patch-equivalence evidence and a clean tree;
 ignored private evidence is not disposable. Dirty, unmerged, or uncertain
 checkouts must be retained and reported, not forcibly deleted.

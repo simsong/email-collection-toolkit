@@ -28,9 +28,9 @@ need no Python, `uv`, Homebrew, or source checkout for the supported local-mail
 GUI. ClamAV is optional. Experimental PDF extraction/OCR, Tika/Java and the
 Apple Intelligence command are not included in this desktop workflow.
 
-The [planned ingest executables](PST_DUAL_READER.md#executables-and-installers)
-add selected native helpers, starting with a Rust PST adapter candidate. These
-are not included today. Delivery requires nested signing, dependency audits,
+The [ingest executables](PST_IMPORTER.md#platform-packaging-and-qualification)
+include the Rust PST adapter and separate libpff OST converter in the macOS
+bundle. Delivery requires nested signing, dependency audits,
 notarization/stapling and installed-fixture tests on each supported architecture.
 A JVM would be needed only if a Java importer is later bundled; Tika remains
 outside the supported desktop runtime.
@@ -170,9 +170,8 @@ visible to other processes; use an existing keychain identity for local signing.
 The separate `SPARKLE_ED25519_PRIVATE_KEY_BASE64` secret contains Sparkle's
 already-Base64 exported update key. The release stays draft while its final
 DMG is signed for the appcast. The workflow attaches the signed feed to the
-draft release, then publishes it and explicitly dispatches GitHub Pages from
-`main`. The Pages build overlays the published feed asset without writing to
-protected `main`.
+draft release, publishes it, and then runs a dependent GitHub Pages job with
+that exact feed from the same run. It does not write to protected `main`.
 
 Missing either secret is nonfatal: the build emits an Actions warning, leaves
 the DMG container unsigned, and names it `*_UNSIGNED.dmg`. An explicitly supplied
@@ -229,9 +228,9 @@ make release-tag-check GITHUB_REF_NAME="$release_tag" ARGS=--require-annotated
 git push origin "refs/tags/$release_tag"
 ```
 
-The tag push starts [the release workflow](../.github/workflows/release.yml)
-for tags beginning with `v`. It checks that the tag is annotated and matches
-the version in that tagged commit; `scripts/release_tag.py` also selects the
+The tag push is the only trigger for [the release workflow](../.github/workflows/release.yml)
+for tags beginning with `v`. It checks that the tag is annotated, points to a
+commit on `main`, and matches the version in that commit; `scripts/release_tag.py` selects the
 Sparkle preview channel for `aN`/`bN` versions and the release channel for a
 stable version. The macOS build job installs dependencies and ClamAV,
 then runs `make dmg`, `make notarize-dmg`, and `make test-dmg`.
@@ -240,17 +239,20 @@ helpers to build, Developer ID-sign, notarize, staple, and test the mounted
 image. The assemble job validates distributions, builds source archives,
 downloads the tested DMG, and creates a draft GitHub release with SHA-256
 checksums. It uses `make sparkle-tools` and `make update-appcast` to run
-`scripts/update_appcast.py` with Sparkle's `sign_update` on the final DMG.
-Only after signing the feed item does it attach `appcast.xml` to the draft,
-publish the release, and explicitly dispatch [the Pages workflow](../.github/workflows/pages.yml)
-from `main`. Pages downloads the latest published release's appcast asset over
-the tracked empty seed, runs `scripts/update_site_releases.py`, builds the Zola
-site, and deploys it. This also preserves the feed on later website rebuilds.
-The protected `main` branch is not modified by either workflow. GitHub's
-`GITHUB_TOKEN` release event does not start Pages, so the explicit
-`workflow_dispatch` is required; a tag push alone does not deploy the site.
-If a release step fails before publication, inspect the Actions run and draft
-release rather than assuming the DMG or website is live.
+`scripts/update_appcast.py` with Sparkle's `sign_update` on the final DMG and
+verifies that signature against the same archive before publishing it.
+Only after signing the feed item does it attach `appcast.xml` to the draft and
+publish the release. A dependent [Pages job](../.github/workflows/pages.yml)
+consumes that same run's signed appcast artifact, runs
+`scripts/update_site_releases.py`, builds the Zola site, and deploys it. A
+normal `main` push also runs Pages, retrieving the latest published feed by
+exact tag and failing if it is temporarily unavailable. Both deployment paths
+are serialized; neither modifies the protected `main` branch. The
+`github-pages` deployment environment must allow both `main` and `v*` tags.
+If a step fails before publication, inspect the Actions run and draft release.
+If Pages fails afterward, the release may be public while the website is stale;
+the release workflow reports failure and needs repair before treating the
+update feed as live.
 
 The release workflow accesses these GitHub Actions repository secrets, scoped
 to the steps that need them:
@@ -262,9 +264,9 @@ to the steps that need them:
 | Sign appcast item | `SPARKLE_ED25519_PRIVATE_KEY_BASE64` | Sign the final DMG for Sparkle update verification. |
 
 The assemble job also uses the automatically provided `GITHUB_TOKEN` to create
-and publish the release, attach its appcast asset, and dispatch Pages; it
-is not an additional repository secret to configure. The Pages workflow uses
-its own token and Pages deployment permissions, not the six release secrets.
+and publish the release and attach its appcast asset. It is not an additional
+repository secret to configure. The dependent Pages job uses its own token and
+Pages deployment permissions, not the six release secrets.
 See [certificate management](CERTIFICATE_MANAGEMENT.md) for secret setup.
 
 The website's Stable and Preview links are selected from published releases,

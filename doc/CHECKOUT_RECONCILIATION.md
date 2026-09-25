@@ -15,7 +15,7 @@ the root checkout, and deleting the others. The reviewed dispositions are:
 | `remove-release-signer-gate` | PR #125 is merged into `origin/main`; merge that release policy into #124. |
 
 Retain downloaded PST data at ignored `var/pst/` in the root checkout and old
-diagnostic artifacts under `.tmp/retired-checkout-artifacts/`. Corpus data is
+diagnostic artifacts at their original ignored root-checkout location. Corpus data is
 not source code, is not committed, and is not ingested by this cleanup.
 Downloader recovery is tested with temporary local HTTP servers and real child
 processes through `make rust-check` and `make test-pst-downloader`.
@@ -31,7 +31,7 @@ after review; private ignored evidence was not staged. The delivery tree ports
 missing behavior and retains newer main fixes. Its history-resolution merge
 records the listed tips only after the content dispositions below.
 
-| Checkout under `.tmp/` | Recorded source tip | Disposition |
+| Historical linked checkout | Recorded source tip | Disposition |
 | --- | --- | --- |
 | `copilot-to-complete` | `4913f656abfdac0a8770f232cc26b69ce40629a0` | Generated skill instructions and regular Claude wrappers already present in PR #94. Reverse-patch check confirms the instruction changes; no older workflow restored. |
 | `desktop-delivery-publication` | `181894943f35c2d2fc2205b225233cabaf0680ac` | Secure writer lease, OAuth handling, File New/Import, active-volume About status, and mailbox-only refresh plus browser tests already in main. Restore partial-EMLX directory continuation and development version `0.1.0.dev1`; retain newer type/native fixes. |
