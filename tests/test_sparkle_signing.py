@@ -3,7 +3,11 @@
 """Verify the real pinned Sparkle signer accepts the release key transport."""
 
 import base64
+import hashlib
+import io
 from pathlib import Path
+import subprocess
+import tarfile
 import xml.etree.ElementTree as xml
 
 import pytest
@@ -35,6 +39,35 @@ def test_historical_feed_audit_pins_a10_bytes_and_archive(tmp_path: Path) -> Non
     for changed in mutations:
         with pytest.raises(ValueError, match="appcast bytes do not match"):
             audit_legacy_feed(changed, archive, release)
+
+
+def test_sparkle_tools_rejects_a_modified_cached_signer(tmp_path: Path) -> None:
+    """Issue #91: signing prerequisites verify cached binaries against the pinned archive."""
+    repository = Path(__file__).parents[1]
+    downloads = tmp_path / "downloads"
+    downloads.mkdir()
+    archive = downloads / "Sparkle-2.10.0.tar.xz"
+    binaries = {"./bin/generate_keys": b"key generator", "./bin/sign_update": b"trusted signer"}
+    with tarfile.open(archive, "w:xz") as bundle:
+        for name, data in binaries.items():
+            member = tarfile.TarInfo(name)
+            member.mode = 0o755
+            member.size = len(data)
+            bundle.addfile(member, io.BytesIO(data))
+    checksum = hashlib.sha256(archive.read_bytes()).hexdigest()
+    tools = tmp_path / "sparkle"
+    command = [
+        "make", "sparkle-tools", f"SPARKLE_DOWNLOAD_DIR={downloads}",
+        f"SPARKLE_DIR={tools}", f"SPARKLE_SHA256={checksum}",
+    ]
+
+    extracted = subprocess.run(command, cwd=repository, capture_output=True, text=True, check=False)
+    assert extracted.returncode == 0, extracted.stdout + extracted.stderr
+    (tools / "bin/sign_update").write_bytes(b"tampered signer")
+
+    rejected = subprocess.run(command, cwd=repository, capture_output=True, text=True, check=False)
+    assert rejected.returncode != 0
+    assert "cached Sparkle tool differs from verified archive: sign_update" in rejected.stderr
 
 
 def test_historical_signing_orchestration_preserves_source_and_creates_verified_output(

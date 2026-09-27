@@ -1912,7 +1912,8 @@ canonical alpha/beta spelling, and never advertise a draft or failed tag.
 
 `make sparkle-tools` downloads the pinned Sparkle developer archive to the
 ignored project-local `.tools/` directory, verifies its SHA-256 before extraction,
-and refuses an incomplete prior extraction. The ordinary test suite must not
+and verifies cached `generate_keys` and `sign_update` bytes against that archive
+before use. The ordinary test suite must not
 require these optional developer tools; release assembly must run the real
 signer test after installing them. `make sparkle-keys` invokes the
 verified `generate_keys` tool locally. The private Ed25519 key remains outside

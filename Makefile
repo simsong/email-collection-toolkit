@@ -175,6 +175,9 @@ sparkle-tools:
 	@printf '%s  %s\n' "$(SPARKLE_SHA256)" "$(SPARKLE_ARCHIVE)" | shasum -a 256 -c -
 	@if test -e "$(SPARKLE_DIR)"; then \
 		test -x "$(SPARKLE_DIR)/bin/generate_keys" -a -x "$(SPARKLE_DIR)/bin/sign_update" || { echo "incomplete Sparkle tools directory: $(SPARKLE_DIR)" >&2; exit 1; }; \
+		for tool in generate_keys sign_update; do \
+			tar -xOf "$(SPARKLE_ARCHIVE)" "./bin/$$tool" | cmp - "$(SPARKLE_DIR)/bin/$$tool" || { echo "cached Sparkle tool differs from verified archive: $$tool" >&2; exit 1; }; \
+		done; \
 	else \
 		mkdir -p "$(SPARKLE_DIR)"; \
 		tar -xJf "$(SPARKLE_ARCHIVE)" --strip-components=1 -C "$(SPARKLE_DIR)"; \
@@ -185,7 +188,7 @@ sparkle-keys: sparkle-tools
 	"$(SPARKLE_DIR)/bin/generate_keys"
 
 .PHONY: update-appcast
-update-appcast:
+update-appcast: sparkle-tools
 	@test -n "$(ARCHIVE)" -a -n "$(RELEASE_TAG)" -a -n "$(RELEASE_URL)" || { echo 'usage: make update-appcast ARCHIVE=/path/to/image.dmg RELEASE_TAG=v1.0.0 RELEASE_URL=https://example.invalid/image.dmg'; exit 2; }
 	@test -x "$(SPARKLE_DIR)/bin/sign_update" || { echo 'run make sparkle-tools before update-appcast'; exit 2; }
 	uv run --locked --group packaging python scripts/update_appcast.py --appcast "$(or $(APPCAST),website/static/updates/mac/appcast.xml)" --archive "$(ARCHIVE)" --tag "$(RELEASE_TAG)" --url "$(RELEASE_URL)" --signer "$(SPARKLE_DIR)/bin/sign_update"

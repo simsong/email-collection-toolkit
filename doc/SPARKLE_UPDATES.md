@@ -58,6 +58,8 @@ The app contains the fixed HTTPS feed URL and public Ed25519 key in
 build. The release publisher verifies that the exported 32-byte private seed
 matches the embedded public key before signing. Legacy expanded exports require
 a reviewed migration; they are not silently reinterpreted as seeds.
+`make sparkle-tools` verifies cached `sign_update` and `generate_keys` bytes
+against the SHA-256-pinned archive before either tool is used.
 
 The build preserves framework symlinks/permissions, signs native executables
 and nested helper bundles before the framework and outer app, verifies seals,

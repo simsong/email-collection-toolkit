@@ -2174,8 +2174,10 @@ default channel, with separate monotonically increasing numeric Sparkle build
 values. The fixed website appcast starts empty; the Sparkle publication step
 adds only a post-notarization, Ed25519-signed item.
 `make sparkle-tools` pins Sparkle 2.10.0 and its upstream SHA-256, then places
-the verified developer archive below `.tools/sparkle/`. `make sparkle-keys`
-calls Sparkle's local `generate_keys`; the key generator retains the private
+the verified developer archive below `.tools/sparkle/`. Every invocation
+compares cached `generate_keys` and `sign_update` bytes against the verified
+archive before they can handle key material. `make sparkle-keys` calls Sparkle's
+local `generate_keys`; the key generator retains the private
 Ed25519 material in the developer's login Keychain and prints the public key.
 The ordinary test suite skips the real-signer integration when these developer
 tools are absent; `make test-sparkle-signing` installs them and requires that
