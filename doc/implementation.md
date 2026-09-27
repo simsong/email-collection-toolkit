@@ -2595,6 +2595,10 @@ shutdown until process exit or failure. Ordinary shutdown cancels any reservatio
 Writers on different archives remain concurrent. OS process death
 releases guards. The archive's existing exclusive lock still controls its writes.
 Raised continuation failures clear the update reservation and retain error state.
+Canceled or failed deferred installation also aborts its pending Quit; the Quit
+worker leaves windows open when cancellation wins or installation is underway.
+`make test-updates` exercises both deferred cancellation and a raised continuation
+after a real Quit request, then verifies definition work, archive creation and Quit retry.
 Application preferences version 2 migrates update choices and preserves them
 when recent archive paths change. `release_versions.py` supplies the build/appcast
 mapper to runtime and release code; Cocoa uses its numeric build value.

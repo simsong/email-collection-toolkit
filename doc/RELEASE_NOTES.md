@@ -5,7 +5,7 @@
 ## Unreleased
 
 - Sparkle installation now waits for CLI writers as well as GUI work, restores
-  writers after continuation errors, retains its guard through resource shutdown,
+  writers and cancels pending Quit after update errors, retains its guard through resource shutdown,
   and explicitly selects publisher and test dependencies. Both Pages deployment
   paths authenticate the feed with the embedded public key; release assembly
   authenticates previous history before appending or re-signing it. CLI virus-definition

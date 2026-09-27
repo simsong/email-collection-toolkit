@@ -3,6 +3,7 @@
 """Issue #91: persistent tracks and installation exclude all application writers."""
 
 from pathlib import Path
+from threading import enumerate as running_threads
 
 import pytest
 
@@ -133,6 +134,46 @@ def test_install_continuation_failure_restores_real_writer_access(tmp_path: Path
         assert attempts == [True]
         with WriterLease.acquire(document.path, document.descriptor.identity, "recovered", "fixture", "test"):
             assert not host._updating
+    finally:
+        host.cancel_update_install()
+
+
+@pytest.mark.parametrize("installing", [False, True])
+def test_failed_update_aborts_pending_quit(tmp_path: Path, installing: bool) -> None:
+    """Issue #91: Quit waiting for Sparkle must allow work again after update failure."""
+    controller = ApplicationController(ApplicationPreferencesStore(tmp_path / "preferences.json"))
+    document = controller.create_document(tmp_path / "archive.mailarchive")
+    assert document.path is not None
+    host = PyWebViewApplication(controller)
+
+    def failed_install() -> None:
+        raise RuntimeError("synthetic native installation error")
+
+    host.updates.defer_install(failed_install)
+    try:
+        host.request_quit(confirm_ingest=False)
+        for worker in running_threads():
+            if worker.name == "mailarchiver-quit":
+                worker.join(timeout=5)
+                assert not worker.is_alive()
+        assert host._quitting
+        if installing:
+            with pytest.raises(RuntimeError, match="native installation"):
+                host.updates.resume_install()
+        else:
+            host.updates.fail("Synthetic canceled deferred installation")
+        assert not host._quitting
+        assert not host._updating
+        assert host.updates.status.phase == "error"
+        assert not host.updates.resume_install()
+        with host.definitions_activity():
+            controller.create_document(tmp_path / "recovered.mailarchive")
+        host.request_quit(confirm_ingest=False)
+        for worker in running_threads():
+            if worker.name == "mailarchiver-quit":
+                worker.join(timeout=5)
+                assert not worker.is_alive()
+        assert host._quitting
     finally:
         host.cancel_update_install()
 

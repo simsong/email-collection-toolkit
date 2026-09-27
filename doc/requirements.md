@@ -1817,7 +1817,8 @@ CLI processes (including development definition refresh), then
 atomically exclude new writers before relaunch. Resource shutdown must retain
 the installation guard until process exit once relaunch has begun; ordinary
 shutdown releases reservations. Failure, including a raised
-native continuation error, must restore writer access. Source launches and other platforms must
+native continuation error, must restore writer access and cancel any Quit waiting
+for that update, allowing new work and a later Quit. Source launches and other platforms must
 report updates unavailable without starting checks.
 
 The app and publisher share numeric version mapping. Runtime Cocoa metadata

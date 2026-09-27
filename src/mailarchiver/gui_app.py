@@ -1389,6 +1389,8 @@ class PyWebViewApplication:
 
     def cancel_update_install(self) -> None:
         with self._lock:
+            if self.updates.status.phase in {"deferred", "installing"}:
+                self._quitting = False
             self._updating = False
             WriterLease.cancel_update()
 
@@ -2184,12 +2186,13 @@ class PyWebViewApplication:
                 workers = tuple(self._import_threads)
             for worker in workers:
                 worker.join()
-            if self.updates.status.phase == "deferred":
-                # Keep Cocoa alive for Sparkle's main-thread continuation. Its
-                # timer reserves installation after all remaining work ends.
-                return
-            for window in tuple(webview.windows):
-                window.destroy()
+            with self._lock:
+                if not self._quitting or self.updates.status.phase in {"deferred", "installing"}:
+                    # Keep Cocoa alive for Sparkle or a canceled Quit. The timer
+                    # reserves installation after all remaining work ends.
+                    return
+                for window in tuple(webview.windows):
+                    window.destroy()
 
         Thread(target=finish_quit, name="mailarchiver-quit", daemon=True).start()
 
