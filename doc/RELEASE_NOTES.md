@@ -4,6 +4,9 @@
 
 ## Unreleased
 
+- Sparkle installation now waits for CLI writers as well as GUI work, restores
+  writers after continuation errors, and explicitly selects publisher dependencies.
+
 * Integrate Sparkle 2.10.0 into the frozen macOS app with native Updates
   preferences, release/preview tracks, daily checks, and standard update UI.
   Retain update preferences across archive changes. Defer installation until

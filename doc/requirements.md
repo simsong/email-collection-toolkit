@@ -1812,8 +1812,9 @@ release-only; alpha/beta installations default to preview plus stable. Explicit
 choices and daily-check preferences migrate outside archives and survive recent
 archive changes and upgrades. Download and installation require confirmation.
 The updater must wait for all jobs, worker tails, definition replacement, and
-process-local writer leases, then atomically exclude new writers before relaunch.
-Failure must restore writer access. Source launches and other platforms must
+writer leases in the application and other same-user CLI processes, then
+atomically exclude new writers before relaunch. Failure, including a raised
+native continuation error, must restore writer access. Source launches and other platforms must
 report updates unavailable without starting checks.
 
 The app and publisher share numeric version mapping. Runtime Cocoa metadata

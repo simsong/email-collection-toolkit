@@ -187,8 +187,8 @@ sparkle-keys: sparkle-tools
 .PHONY: update-appcast
 update-appcast:
 	@test -n "$(ARCHIVE)" -a -n "$(RELEASE_TAG)" -a -n "$(RELEASE_URL)" || { echo 'usage: make update-appcast ARCHIVE=/path/to/image.dmg RELEASE_TAG=v1.0.0 RELEASE_URL=https://example.invalid/image.dmg'; exit 2; }
-	@test -x "$(SPARKLE_DIR)/bin/sign_update" -a -x .venv/bin/python || { echo 'run make sparkle-tools and uv sync before update-appcast'; exit 2; }
-	.venv/bin/python scripts/update_appcast.py --appcast "$(or $(APPCAST),website/static/updates/mac/appcast.xml)" --archive "$(ARCHIVE)" --tag "$(RELEASE_TAG)" --url "$(RELEASE_URL)" --signer "$(SPARKLE_DIR)/bin/sign_update"
+	@test -x "$(SPARKLE_DIR)/bin/sign_update" || { echo 'run make sparkle-tools before update-appcast'; exit 2; }
+	uv run --locked --group packaging python scripts/update_appcast.py --appcast "$(or $(APPCAST),website/static/updates/mac/appcast.xml)" --archive "$(ARCHIVE)" --tag "$(RELEASE_TAG)" --url "$(RELEASE_URL)" --signer "$(SPARKLE_DIR)/bin/sign_update"
 
 .PHONY: dmg dmg-signed notarize-dmg list-signatures check-release test-dmg preview-dmg self-test self-test-gui test-packaging
 dmg: ruff syntax-check sparkle-tools pst-importer mcti-scan pff-converter-bundle
@@ -243,14 +243,14 @@ test-signing: ruff
 
 .PHONY: test-sparkle-signing
 test-sparkle-signing: sparkle-tools ruff
-	uv run --locked pytest -q tests/test_sparkle_signing.py
+	uv run --locked --group packaging pytest -q tests/test_sparkle_signing.py
 
 .PHONY: sparkle-probe test-updates
 sparkle-probe: sparkle-tools ruff
 	uv run --locked --group packaging python scripts/sparkle_probe.py $(ARGS)
 
 test-updates: ruff
-	uv run --locked pytest -q tests/test_updates.py tests/test_application.py tests/test_website_scripts.py
+	uv run --locked pytest -q tests/test_updates.py tests/test_writer_lock.py tests/test_application.py tests/test_website_scripts.py
 
 compare-apple-mail:
 	uv run mailarchiver-compare-apple-mail --apple-mail "$(HOME)/Library/Mail" --archive "$(HOME)/mail-archive" $(ARGS)

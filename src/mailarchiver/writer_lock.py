@@ -9,6 +9,7 @@ import json
 import os
 import socket
 import stat
+import tempfile
 from collections.abc import Iterator
 from contextlib import contextmanager
 from datetime import UTC, datetime
@@ -48,16 +49,38 @@ class WriterLease(BaseModel):
     acquired: bool = True
     _handle: BinaryIO | None = PrivateAttr(default=None)
     _tracked: bool = PrivateAttr(default=False)
+    _application_guard: BinaryIO | None = PrivateAttr(default=None)
     _process_lock: ClassVar[RLock] = RLock()
     _active_count: ClassVar[int] = 0
     _update_reserved: ClassVar[bool] = False
+    _update_guard: ClassVar[BinaryIO | None] = None
+
+    @classmethod
+    def writers_active(cls) -> bool:
+        """Probe cross-process eligibility for notices without reserving installation."""
+        with cls._process_lock:
+            if cls._active_count:
+                return True
+            if cls._update_reserved:
+                return False
+            try:
+                guard = _application_guard(shared=False)
+            except ArchiveBusyError:
+                return True
+            guard.close()
+            return False
 
     @classmethod
     def reserve_update(cls) -> bool:
-        """Atomically exclude new process-local writers only after existing leases end."""
+        """Exclude writers across this user's application processes before relaunch."""
         with cls._process_lock:
             if cls._active_count:
                 return False
+            if cls._update_guard is None:
+                try:
+                    cls._update_guard = _application_guard(shared=False)
+                except ArchiveBusyError:
+                    return False
             cls._update_reserved = True
             return True
 
@@ -65,6 +88,9 @@ class WriterLease(BaseModel):
     def cancel_update(cls) -> None:
         """Restore writers when installation fails or the application shuts down."""
         with cls._process_lock:
+            guard, cls._update_guard = cls._update_guard, None
+            if guard is not None:
+                guard.close()
             cls._update_reserved = False
 
     @classmethod
@@ -84,11 +110,16 @@ class WriterLease(BaseModel):
             # Count acquisition itself as active, without holding the process
             # mutex across filesystem I/O on a potentially slow archive volume.
             cls._active_count += 1
+        guard = None
         try:
+            guard = _application_guard(shared=True)
             lease = cls._acquire(archive, archive_identity, operation, operation_id, application_version, create=create)
             lease._tracked = True
+            lease._application_guard = guard
             return lease
         except BaseException:
+            if guard is not None:
+                guard.close()
             with cls._process_lock:
                 cls._active_count -= 1
             raise
@@ -153,14 +184,19 @@ class WriterLease(BaseModel):
             if handle is None:
                 return
             tracked, self._tracked = self._tracked, False
+            guard, self._application_guard = self._application_guard, None
         try:
             _release(handle)
         finally:
-            handle.close()
-            self.acquired = False
-            if tracked:
-                with self._process_lock:
-                    type(self)._active_count -= 1
+            try:
+                handle.close()
+            finally:
+                if guard is not None:
+                    guard.close()
+                self.acquired = False
+                if tracked:
+                    with self._process_lock:
+                        type(self)._active_count -= 1
 
     def __enter__(self) -> Self:
         return self
@@ -229,10 +265,34 @@ def _archive_directory(archive: Path, create: bool) -> Iterator[int]:
             os.close(parent_fd)
 
 
-def _acquire_nonblocking(handle: BinaryIO) -> None:
+def _application_guard(*, shared: bool) -> BinaryIO:
+    """Shared writer/exclusive installer guard outside archives; OS death releases it."""
+    if os.name == "nt":
+        raise OSError("Windows archive writing is not supported; planned for v1.1.0")
+    directory = Path(tempfile.gettempdir()) / f"mailarchiver-writers-{os.getuid()}"
+    directory.mkdir(mode=0o700, exist_ok=True)
+    descriptor = os.open(directory, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    try:
+        metadata = os.fstat(descriptor)
+        if metadata.st_uid != os.getuid() or stat.S_IMODE(metadata.st_mode) & 0o077:
+            raise ValueError("application writer guard directory must be private and owned by this user")
+        handle = os.fdopen(_open_regular("application-write.lock", descriptor), "r+b", buffering=0)
+    finally:
+        os.close(descriptor)
+    try:
+        _acquire_nonblocking(handle, shared=shared)
+    except BaseException as error:
+        handle.close()
+        if _is_contention(error):
+            raise ArchiveBusyError("application writer or update installation is active") from error
+        raise
+    return handle
+
+
+def _acquire_nonblocking(handle: BinaryIO, *, shared: bool = False) -> None:
     import fcntl  # pylint: disable=import-outside-toplevel
 
-    fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+    fcntl.flock(handle.fileno(), (fcntl.LOCK_SH if shared else fcntl.LOCK_EX) | fcntl.LOCK_NB)
 
 
 def _release(handle: BinaryIO) -> None:

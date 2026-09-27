@@ -111,6 +111,32 @@ def test_pending_install_waits_for_real_writer_and_reserves_against_new_writes(t
         host.cancel_update_install()
 
 
+def test_install_continuation_failure_restores_real_writer_access(tmp_path: Path) -> None:
+    """Issue #91: a native continuation error clears reservation and runs only once."""
+    controller = ApplicationController(ApplicationPreferencesStore(tmp_path / "preferences.json"))
+    document = controller.create_document(tmp_path / "archive.mailarchive")
+    assert document.path is not None
+    host = PyWebViewApplication(controller)
+    attempts: list[bool] = []
+
+    def failed_install() -> None:
+        attempts.append(True)
+        raise RuntimeError("synthetic native installation error")
+
+    host.updates.defer_install(failed_install)
+    try:
+        with pytest.raises(RuntimeError, match="native installation"):
+            host.updates.resume_install()
+        assert host.updates.status.phase == "error"
+        assert "native installation" in host.updates.status.detail
+        assert not host.updates.resume_install()
+        assert attempts == [True]
+        with WriterLease.acquire(document.path, document.descriptor.identity, "recovered", "fixture", "test"):
+            assert not host._updating
+    finally:
+        host.cancel_update_install()
+
+
 def test_pending_install_waits_for_job_completion_even_after_lease_release(tmp_path: Path) -> None:
     """An active content job cannot be terminated during its checkpoint/worker tail."""
     controller = ApplicationController(ApplicationPreferencesStore(tmp_path / "preferences.json"))

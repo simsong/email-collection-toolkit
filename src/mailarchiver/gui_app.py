@@ -1393,11 +1393,11 @@ class PyWebViewApplication:
             WriterLease.cancel_update()
 
     def notify_update_deferred(self, detail: str) -> None:
-        if self._sparkle is not None and (self._definition_updates or any(
-            document.ingest_job for document in self.controller.documents()
-        )):
+        if self._sparkle is not None:
             self.add_notice("information", detail)
-            macos_alert("Update ready — archive work is active", detail, ("Wait for work to finish",))
+            if (self._definition_updates or any(document.ingest_job for document in self.controller.documents())
+                    or any(worker.is_alive() for worker in self._import_threads) or WriterLease.writers_active()):
+                macos_alert("Update ready — archive work is active", detail, ("Wait for work to finish",))
 
     def start_updates(self) -> None:
         if self._updates_started:

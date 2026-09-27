@@ -47,6 +47,8 @@ class ProbeReport(BaseModel):
     https_check: bool = False
     standard_ui_windows: list[str] = []
     preferences_ui: bool = False
+    automatic_checks: bool = False
+    continuation_error_recovered: bool = False
 
 
 def exercise_preferences(service: UpdateService) -> None:
@@ -100,6 +102,8 @@ def exercise(feed_check: bool) -> None:
     backend = start_installed_updater(service)
     if backend is None:
         raise RuntimeError("Sparkle probe must run inside the frozen app")
+    if backend.updater.automaticallyChecksForUpdates():
+        raise AssertionError("Saved automatic-check opt-out did not override the bundle default before startup")
     helper = ctypes.CDLL(str(Path(bundle.privateFrameworksPath()) / "probe.dylib"))
     helper.probe_channels.argtypes = [ctypes.c_void_p]
     helper.probe_postpone.argtypes = [ctypes.c_void_p]
@@ -124,10 +128,22 @@ def exercise(feed_check: bool) -> None:
         postponed = bool(helper.probe_postpone(delegate))
         if not service.resume_install() or service.resume_install():
             raise AssertionError("Deferred native continuation must run exactly once")
+        failures: list[bool] = []
+
+        def failed_install() -> None:
+            failures.append(True)
+            raise RuntimeError("synthetic native-timer installation failure")
+
+        service.defer_install(failed_install)
+        foundation.NSRunLoop.currentRunLoop().runUntilDate_(foundation.NSDate.dateWithTimeIntervalSinceNow_(1.1))
+        if failures != [True] or service.status.phase != "error":
+            raise AssertionError("Cocoa timer did not recover from the install failure exactly once")
         report = ProbeReport(frozen=bool(getattr(sys, "frozen", False)), controller=backend.controller.className(),
                              build=service.status.build, preview_channels=preview, release_channels=release,
                              postponed=postponed, continuation_calls=helper.probe_installs(),
-                             https_check=feed_check, standard_ui_windows=windows, preferences_ui=True)
+                             https_check=feed_check, standard_ui_windows=windows, preferences_ui=True,
+                             automatic_checks=bool(backend.updater.automaticallyChecksForUpdates()),
+                             continuation_error_recovered=True)
         if (preview, release, postponed, report.continuation_calls) != (1, 0, True, 1):
             raise AssertionError(report.model_dump_json())
         print(report.model_dump_json(indent=2))
@@ -156,7 +172,8 @@ def freeze(feed_check: bool) -> None:
     feed_key, public_key, version_key = "SUFeedURL", "SUPublicEDKey", "CFBundleVersion"
     checks_key, automatic_key, allows_key = "SUEnableAutomaticChecks", "SUAutomaticallyUpdate", "SUAllowsAutomaticUpdates"
     info[feed_key], info[public_key], info[version_key] = SPARKLE_FEED_URL, SPARKLE_PUBLIC_KEY, "1000000101"
-    info[checks_key] = info[automatic_key] = info[allows_key] = False
+    info[checks_key] = True
+    info[automatic_key] = info[allows_key] = False
     with plist.open("wb") as handle:
         plistlib.dump(info, handle)
     bundle_sparkle(app, ROOT / ".tools/sparkle" / SPARKLE_VERSION, "-")

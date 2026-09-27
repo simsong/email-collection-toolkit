@@ -101,5 +101,9 @@ class UpdateService:
         continuation, self._pending_install = self._pending_install, None
         self.status.phase = "installing"
         self.status.detail = "Installing update and relaunching…"
-        continuation()
+        try:
+            continuation()
+        except BaseException as error:
+            self.fail(f"Update installation failed: {error}")
+            raise
         return True

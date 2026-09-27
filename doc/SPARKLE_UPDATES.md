@@ -34,9 +34,15 @@ the application lifetime. A main-thread timer retries a deferred continuation
 after application work finishes.
 
 Installation waits for all document jobs, worker tails, ClamAV definition
-replacement, and process-local archive writer leases. An atomic writer gate
+replacement, and archive writer leases in other same-user CLI processes. Shared
+OS guards live outside archives in a private directory under the user's OS
+temporary directory; the exclusive installer guard excludes new processes and
+is released on failure or process death. Processes must share that temporary
+namespace; this does not coordinate unrelated users or historical client versions.
+The archive's existing exclusive lock remains authoritative. An atomic writer gate
 then excludes new archive mutations, including archive creation and short
-options/identity writes. Failed installation clears the reservation. If the user
+options/identity writes. Failed installation, including raised continuation
+errors, clears the reservation. If the user
 quits to stop imports while an update is pending, the normal stop/checkpoint
 path completes and keeps Cocoa alive for the installer continuation. Only an
 idle reserved installation may accept Cocoa termination. Other quit requests

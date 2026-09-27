@@ -36,11 +36,12 @@ def load_framework(path: Path) -> Any:
     bundle = foundation.NSBundle.bundleWithPath_(str(path))
     if bundle is None or not bundle.load():
         raise RuntimeError(f"Could not load bundled Sparkle framework: {path}")
-    # Objective-C encodes a block only as @?; PyObjC needs the block's callable ABI.
+    # PyObjC requires the implicit block pointer at index 0 even for void (^)(void).
+    # https://pyobjc.readthedocs.io/en/latest/metadata/manual.html
     block = {RETVAL: {TYPE: b"v"}, ARGUMENTS: {0: {TYPE: b"^v"}}}
     objc.registerMetaDataForSelector(
         b"MCTSparkleDelegate", b"updater:shouldPostponeRelaunchForUpdate:untilInvokingBlock:",
-        {ARGUMENTS: {4: {CALLABLE: block}}},
+        {ARGUMENTS: {4: {TYPE: b"@?", CALLABLE: block}}},
     )
     objc.registerMetaDataForSelector(b"SPUUpdater", b"startUpdater:",
                                      {ARGUMENTS: {2: {TYPE_MODIFIER: b"o"}}})
@@ -87,15 +88,20 @@ class SparkleBackend:
             False, self.delegate, None,
         )
         self.updater = self.controller.updater()
+        self.updater.setAutomaticallyChecksForUpdates_(service.status.automatic_checks)
+        self.updater.setAutomaticallyDownloadsUpdates_(False)
         success, error = self.updater.startUpdater_(None)
         if not success:
             raise RuntimeError(str(error.localizedDescription()) if error else "Sparkle could not start")
         checked = self.updater.lastUpdateCheckDate()
         if checked is not None:
             service.status.last_checked = datetime.fromtimestamp(float(checked.timeIntervalSince1970()), UTC)
-        self.updater.setAutomaticallyDownloadsUpdates_(False)
         def resume(_timer: object) -> None:
-            service.resume_install()
+            try:
+                service.resume_install()
+            except (OSError, RuntimeError, ValueError, objc.error) as error:
+                # Report native install errors without unwinding Cocoa's timer callback.
+                service.fail(f"Update installation failed: {error}")
         self.timer = import_module("Foundation").NSTimer.scheduledTimerWithTimeInterval_repeats_block_(
             0.5, True, resume,
         )

@@ -2586,8 +2586,12 @@ requires it and fails clearly.
 `sparkle.py` retains a PyObjC standard controller, formal channel delegate, and
 explicit block ABI metadata; Cocoa's main-thread timer resumes an idle reserved
 installation. `gui_app.py` adds native menu/preferences controls and coordinates
-quit, worker tails, and definition updates. `WriterLease` tracks process-local
-leases and atomically excludes new acquisitions when installation is reserved.
+quit, worker tails, and definition updates. `WriterLease` retains shared OS
+locks in a private same-user temporary guard directory for every writer,
+including CLI processes; installation retains an exclusive guard until shutdown
+or failure. Writers on different archives remain concurrent. OS process death
+releases guards. The archive's existing exclusive lock still controls its writes.
+Raised continuation failures clear the update reservation and retain error state.
 Application preferences version 2 migrates update choices and preserves them
 when recent archive paths change. `release_versions.py` supplies the build/appcast
 mapper to runtime and release code; Cocoa uses its numeric build value.
@@ -2595,7 +2599,8 @@ mapper to runtime and release code; Cocoa uses its numeric build value.
 `sparkle_bundle.py` preserves and signs Sparkle's framework/helpers and includes
 the upstream notice file. `update_appcast.py` verifies the release key against
 the app's public key, signs/verifies the stapled DMG, adds embedded notes/minimum
-macOS metadata, and signs/verifies the complete XML. Release/Pages gates require
+macOS metadata, and signs/verifies the complete XML. Publisher and signer-test
+Makefile targets explicitly select packaging dependencies. Release/Pages gates require
 the new feed signature metadata without rewriting signed bytes.
 The frozen controller/compiled delegate probe and real HTTPS standard-UI probe
 passed during development; these do not establish signed application replacement.

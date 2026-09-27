@@ -74,3 +74,7 @@ def test_release_key_must_match_embedded_public_key(monkeypatch: pytest.MonkeyPa
     require_matching_key(signing_key(), base64.b64encode(public).decode("ascii"))
     with pytest.raises(ValueError, match="does not match"):
         require_matching_key(signing_key(), base64.b64encode(bytes(32)).decode("ascii"))
+    for expanded_size in (64, 96):
+        monkeypatch.setenv(SPARKLE_PRIVATE_KEY_SECRET, base64.b64encode(bytes(expanded_size)).decode("ascii"))
+        with pytest.raises(ValueError, match="reviewed migration"):
+            signing_key()

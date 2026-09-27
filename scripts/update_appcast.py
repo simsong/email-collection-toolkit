@@ -61,8 +61,8 @@ def signing_key() -> SecretStr:
         decoded = base64.b64decode(value.get_secret_value(), validate=True)
     except (ValueError, binascii.Error):
         raise ValueError("Sparkle update-signing secret is not valid Base64") from None
-    if len(decoded) not in (32, 64):
-        raise ValueError("Sparkle update-signing secret is not an Ed25519 private key")
+    if len(decoded) != 32:
+        raise ValueError("Release signing requires a 32-byte Sparkle seed; legacy expanded keys need a reviewed migration")
     return value
 
 
@@ -71,6 +71,8 @@ def require_matching_key(key: SecretStr, expected_public_key: str) -> None:
     from Cryptodome.Signature import eddsa  # pylint: disable=import-outside-toplevel
 
     seed = base64.b64decode(key.get_secret_value(), validate=True)
+    # Sparkle 2.10 common_cli/Secret.swift decodes modern exports as 32-byte seeds.
+    # sign_update/main.swift retains an obsolete 64/96-byte diagnostic on failure.
     if len(seed) != 32:
         raise ValueError("Release signing requires a 32-byte Sparkle seed; legacy expanded keys need a reviewed migration")
     public = eddsa.import_private_key(seed).public_key().export_key(format="raw")
