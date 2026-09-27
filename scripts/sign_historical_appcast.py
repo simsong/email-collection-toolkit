@@ -7,6 +7,7 @@ from __future__ import annotations
 import argparse
 import base64
 import binascii
+import hashlib
 import os
 import tempfile
 import xml.etree.ElementTree as xml
@@ -29,6 +30,7 @@ SPARKLE_CHANNEL = f"{{{SPARKLE_NAMESPACE}}}channel"
 RELEASE_NOTES_LINK = f"{{{SPARKLE_NAMESPACE}}}releaseNotesLink"
 FEED_URL = "https://simsong.github.io/email-collection-toolkit/updates/mac/appcast.xml"
 ARCHIVE_MEDIA_TYPE = "application/octet-stream"
+FIRST_RELEASE_FEED_SHA256 = "de6d09cdc3e2efa508de9ba83d7701addd046660b18bcd3dcf3d5cb49efd8403"
 
 
 class HistoricalRelease(BaseModel):
@@ -65,6 +67,8 @@ def audit_legacy_feed(data: bytes, archive: Path, release: HistoricalRelease) ->
         raise ValueError("only the reviewed v1.0.0a10 history migration is supported")
     if len(data) > MAX_FEED_BYTES:
         raise ValueError("Sparkle appcast exceeds the 16 MiB feed limit")
+    if hashlib.sha256(data).hexdigest() != FIRST_RELEASE_FEED_SHA256:
+        raise ValueError("historical appcast bytes do not match the reviewed v1.0.0a10 asset")
     if b"<!-- sparkle-signatures:" in data:
         raise ValueError("historical feed already has a signing block; refusing to replace it")
     try:

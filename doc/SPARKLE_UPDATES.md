@@ -82,7 +82,8 @@ history requires a separately reviewed migration; it cannot enter this release p
 On 2026-09-27 the published `v1.0.0a10/appcast.xml` had no embedded XML
 signature, although its enclosure carried a Sparkle signature for the DMG. The
 one-time `make sign-historical-appcast RELEASE_TAG=v1.0.0a10 DMG=... APPCAST=... OUTPUT=...`
-migration audits downloaded copies of the exact release item and DMG. It tests
+migration checks the complete published feed against a pinned SHA-256, then audits
+downloaded copies of the exact release item and DMG. It tests
 the mounted app, verifies the Apple Developer ID seal, stapled notarization
 ticket, and Gatekeeper assessment, then verifies the existing Sparkle archive
 signature and signs the complete feed with the existing protected Sparkle key.

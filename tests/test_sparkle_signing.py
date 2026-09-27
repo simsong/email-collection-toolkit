@@ -13,34 +13,27 @@ from scripts.check_appcast import check_appcast
 from scripts.sign_historical_appcast import FIRST_RELEASE, audit_legacy_feed
 
 
-def test_historical_feed_audit_pins_a10_release_and_archive(tmp_path: Path) -> None:
-    """Issue #91: migration must not sign a feed with changed historical metadata."""
+def test_historical_feed_audit_pins_a10_bytes_and_archive(tmp_path: Path) -> None:
+    """Issue #91: migration rejects lexical and semantic changes to the published feed."""
     release = FIRST_RELEASE
-    appcast = (
-        '<?xml version="1.0" encoding="utf-8"?>'
-        '<rss xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle" version="2.0">'
-        '<channel><item><title>Email Collection Toolkit 1.0.0a10</title><guid>v1.0.0a10</guid>'
-        '<sparkle:version>1000000110</sparkle:version>'
-        '<sparkle:shortVersionString>1.0.0a10</sparkle:shortVersionString>'
-        '<sparkle:channel>preview</sparkle:channel><pubDate>Wed, 23 Sep 2026 10:26:21 GMT</pubDate><enclosure '
-        f'url="{release.archive_url}" length="{release.archive_length}" '
-        f'type="application/octet-stream" sparkle:edSignature="{release.archive_signature}" />'
-        '</item><title>Email Collection Toolkit updates</title>'
-        '<link>https://simsong.github.io/email-collection-toolkit/updates/mac/appcast.xml</link>'
-        '<description>Signed macOS release and preview updates.</description></channel></rss>'
-    ).encode()
+    appcast = Path(__file__).parent / "fixtures/sparkle/v1.0.0a10-appcast.xml"
+    data = appcast.read_bytes()
     archive = tmp_path / "v1.0.0a10.dmg"
     with archive.open("wb") as handle:
         handle.truncate(release.archive_length)
 
-    assert audit_legacy_feed(appcast, archive, release) == release.archive_signature
+    assert audit_legacy_feed(data, archive, release) == release.archive_signature
 
-    changed = appcast.replace(b"<sparkle:channel>preview</sparkle:channel>",
-                              b"<sparkle:channel>stable</sparkle:channel>")
-    with pytest.raises(ValueError, match="update channel differs"):
-        audit_legacy_feed(changed, archive, release)
-    with pytest.raises(ValueError, match="does not match the reviewed release asset"):
-        audit_legacy_feed(appcast.replace(b"length=\"160093151\"", b"length=\"1\""), archive, release)
+    mutations = (
+        data.replace(b"<channel>", b"<channel><!-- changed -->"),
+        data.replace(b"\n", b"\r\n", 1),
+        data.replace(b"<sparkle:channel>preview</sparkle:channel>",
+                     b"<sparkle:channel>stable</sparkle:channel>"),
+        data.replace(b'length="160093151"', b'length="1"'),
+    )
+    for changed in mutations:
+        with pytest.raises(ValueError, match="appcast bytes do not match"):
+            audit_legacy_feed(changed, archive, release)
 
 
 def test_real_signer_accepts_exported_seed_on_standard_input(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

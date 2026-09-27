@@ -2621,10 +2621,13 @@ is the reviewed, local-only migration for the original a10 history. It first
 mounts and tests the downloaded DMG, verifies its Developer ID signature,
 stapled ticket, and Gatekeeper acceptance, then checks the pinned Sparkle
 archive signature, exact release metadata, and protected-key match before
-writing a separately signed XML feed. The migration refuses an existing output
-and does not upload or publish anything; an operator must separately review and
-publish the resulting feed asset and Pages update. External release notes are
-not supported because they need their own Sparkle signature.
+writing a separately signed XML feed. Its SHA-256 pin covers the complete
+published feed bytes, including comments, whitespace, and XML declaration, so
+parsing cannot erase lexical edits before the audit. The migration refuses an
+existing output and does not upload or publish anything; an operator must
+separately review and publish the resulting feed asset and Pages update.
+External release notes are not supported because they need their own Sparkle
+signature.
 The frozen controller/compiled delegate probe and real HTTPS standard-UI probe
 passed during development; these do not establish signed application replacement.
 [SPARKLE_UPDATES.md](SPARKLE_UPDATES.md) records validation targets and remaining

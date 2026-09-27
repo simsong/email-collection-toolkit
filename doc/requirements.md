@@ -1936,7 +1936,8 @@ signature and its exact signed byte length before deploying an appcast. Feeds
 are bounded to 16 MiB; forged signing markers, wrong keys and post-signing edits
 must fail without rewriting authenticated bytes or requiring a private key.
 The one-time migration for the first published release must operate on
-downloaded copies, pin the known a10 item and original DMG metadata, verify the
+downloaded copies, pin the complete known a10 feed by SHA-256 as well as its
+release metadata and original DMG metadata, verify the
 original Sparkle archive signature using the existing protected key, and
 authenticate the DMG's Developer ID seal, stapled notarization ticket, and
 Gatekeeper assessment. It must sign a distinct appcast output with the existing
