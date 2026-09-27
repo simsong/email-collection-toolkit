@@ -250,7 +250,7 @@ sparkle-probe: sparkle-tools ruff
 	uv run --locked --group packaging python scripts/sparkle_probe.py $(ARGS)
 
 test-updates: ruff
-	uv run --locked pytest -q tests/test_updates.py tests/test_writer_lock.py tests/test_application.py tests/test_website_scripts.py
+	uv run --locked pytest -q tests/test_updates.py tests/test_writer_lock.py tests/test_application.py tests/test_clamav_definitions.py tests/test_website_scripts.py
 
 compare-apple-mail:
 	uv run mailarchiver-compare-apple-mail --apple-mail "$(HOME)/Library/Mail" --archive "$(HOME)/mail-archive" $(ARGS)
@@ -343,7 +343,7 @@ release-tag-check:
 .PHONY: check-appcast
 check-appcast:
 	@test -n "$(APPCAST)" || { echo 'usage: make check-appcast APPCAST=path [RELEASE_TAG=v1.2.3]'; exit 2; }
-	python3 scripts/check_appcast.py "$(APPCAST)" $(if $(RELEASE_TAG),--tag "$(RELEASE_TAG)",) $(ARGS)
+	PYTHONPATH=src uv run --no-project --with pycryptodomex==3.23.0 --python '>=3.12' python scripts/check_appcast.py "$(APPCAST)" $(if $(RELEASE_TAG),--tag "$(RELEASE_TAG)",) $(ARGS)
 
 .PHONY: test-workflow-gates
 test-workflow-gates:

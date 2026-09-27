@@ -49,7 +49,12 @@ def test_real_signer_signs_xml_and_rejects_modified_feed(tmp_path: Path, monkeyp
     with pytest.raises(ValueError, match="no embedded feed signature"):
         check_appcast(appcast, require_signed_feed=True)
     sign_feed(appcast, signer, signing_key())
-    check_appcast(appcast, require_signed_feed=True)
+    from Cryptodome.Signature import eddsa
+
+    public = base64.b64encode(eddsa.import_private_key(bytes(range(32))).public_key().export_key(format="raw")).decode("ascii")
+    check_appcast(appcast, require_signed_feed=True, public_key=public)
+    with pytest.raises(ValueError, match="signature verification failed"):
+        check_appcast(appcast, require_signed_feed=True)
     item = xml.parse(appcast).getroot().find("channel/item")
     assert item is not None
     assert item.findtext(SPARKLE_MINIMUM_SYSTEM) == "15.0"
@@ -58,6 +63,8 @@ def test_real_signer_signs_xml_and_rejects_modified_feed(tmp_path: Path, monkeyp
     signed = appcast.read_bytes()
     assert b"edSignature" in signed
     appcast.write_bytes(signed.replace(b"Fixture", b"Changed"))
+    with pytest.raises(ValueError, match="signature verification failed"):
+        check_appcast(appcast, require_signed_feed=True, public_key=public)
     verified = subprocess.run([signer, "--verify", "--ed-key-file", "-", appcast],
                               input=signing_key().get_secret_value(), capture_output=True, text=True, check=False)
     assert verified.returncode != 0

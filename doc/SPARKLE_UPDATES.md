@@ -70,8 +70,10 @@ signs/verifies the final DMG, appends the release item, and signs/verifies the
 XML feed itself. Release notes are embedded inside that signed feed. New items
 declare the minimum macOS version and require `arm64` hardware. The app enables `SURequireSignedFeed` and
 `SUVerifyUpdateBeforeExtraction`. Pages copies the signed bytes without XML
-rewriting. Its release-run gate checks the embedded signature's presence;
-cryptographic verification belongs to the release signer and native client.
+rewriting. Both deployment paths cryptographically verify the exact feed bytes
+and signed length using the app's public Ed25519 key. This gate uses pinned
+pycryptodomex through `uv --no-project`; it requires no private key or native
+signer and rejects forged markers, tampering and feeds larger than 16 MiB.
 Historical unsigned XML can be read as publication history before signing the
 new complete feed; it cannot satisfy a new signed-feed release gate.
 

@@ -2588,7 +2588,9 @@ explicit block ABI metadata; Cocoa's main-thread timer resumes an idle reserved
 installation. `gui_app.py` adds native menu/preferences controls and coordinates
 quit, worker tails, and definition updates. `WriterLease` retains shared OS
 locks in a private same-user temporary guard directory for every writer,
-including CLI processes; installation retains an exclusive guard through resource
+including CLI processes; definition refresh uses the same shared guard in both
+GUI and CLI paths, retaining its separate definition-generation lock.
+Installation retains an exclusive guard through resource
 shutdown until process exit or failure. Ordinary shutdown cancels any reservation.
 Writers on different archives remain concurrent. OS process death
 releases guards. The archive's existing exclusive lock still controls its writes.
@@ -2603,8 +2605,11 @@ the app's public key, signs/verifies the stapled DMG, adds embedded notes/minimu
 macOS metadata, and signs/verifies the complete XML. Publisher and signer-test
 Makefile targets explicitly select packaging dependencies; ordinary test dependencies
 also declare the cryptographic library directly. Release/Pages gates require
-the new feed signature metadata on both main-push and release-triggered deployment
-without rewriting signed bytes.
+public-key verification of exact feed bytes and signed length on both main-push
+and release-triggered deployment without rewriting signed bytes. The checker
+accepts the pinned Sparkle signing-block format, bounds input to 16 MiB and uses
+the embedded public Ed25519 key; its Makefile target provisions only pinned
+pycryptodomex through `uv --no-project`, with no release secret or native signer.
 The frozen controller/compiled delegate probe and real HTTPS standard-UI probe
 passed during development; these do not establish signed application replacement.
 [SPARKLE_UPDATES.md](SPARKLE_UPDATES.md) records validation targets and remaining

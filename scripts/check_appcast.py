@@ -1,19 +1,44 @@
 #!/usr/bin/env python3
 # Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved.
 
-"""Check published Sparkle feed structure and signature metadata, not DMG cryptography."""
+"""Check published Sparkle feed structure and public-key authenticity, not DMG bytes."""
 
 from __future__ import annotations
 
 import argparse
+import base64
+import binascii
+import re
 import xml.etree.ElementTree as xml
 from pathlib import Path
 from urllib.parse import unquote, urlsplit
+
+from mailarchiver.update_metadata import SPARKLE_PUBLIC_KEY
 
 SPARKLE_NAMESPACE = "http://www.andymatuschak.org/xml-namespaces/sparkle"
 SIGNATURE = f"{{{SPARKLE_NAMESPACE}}}edSignature"
 VERSION = f"{{{SPARKLE_NAMESPACE}}}version"
 RELEASE_PATH = "/simsong/email-collection-toolkit/releases/download/"
+MAX_FEED_BYTES = 16 * 1024 * 1024
+# Pinned Sparkle 2.10 signing.swift appends this block after the signed bytes.
+SIGNING_BLOCK = re.compile(rb"<!-- sparkle-signatures:\nedSignature: ([A-Za-z0-9+/]{86}==)\nlength: ([0-9]+)\n-->\n?\Z")
+
+
+def verify_feed(data: bytes, public_key: str) -> None:
+    """Authenticate exact XML bytes with the application's public Ed25519 key."""
+    from Cryptodome.Signature import eddsa  # pylint: disable=import-outside-toplevel
+
+    block = SIGNING_BLOCK.search(data)
+    if block is None:
+        raise ValueError("Sparkle appcast has no embedded feed signature or an invalid signing block")
+    content = data[:block.start()]
+    if int(block.group(2)) != len(content):
+        raise ValueError("Sparkle feed signed length does not match content")
+    try:
+        key = eddsa.import_public_key(base64.b64decode(public_key, validate=True))
+        eddsa.new(key, "rfc8032").verify(content, base64.b64decode(block.group(1), validate=True))
+    except (ValueError, binascii.Error) as error:
+        raise ValueError("Sparkle feed signature verification failed") from error
 
 
 def valid_release_url(url: str, tag: str) -> bool:
@@ -29,10 +54,17 @@ def valid_release_url(url: str, tag: str) -> bool:
     return bool(name and "/" not in name and "\\" not in name and name.endswith(".dmg"))
 
 
-def check_appcast(path: Path, tag: str = "", *, require_signed_feed: bool = False) -> None:
-    """Require signature metadata and exactly one item for the requested release."""
+def check_appcast(path: Path, tag: str = "", *, require_signed_feed: bool = False,
+                  public_key: str = SPARKLE_PUBLIC_KEY) -> None:
+    """Verify a bounded feed and exactly one item for the requested release."""
     try:
-        channel = xml.parse(path).getroot().find("channel")
+        with path.open("rb") as handle:
+            data = handle.read(MAX_FEED_BYTES + 1)
+        if len(data) > MAX_FEED_BYTES:
+            raise ValueError("Sparkle appcast exceeds the 16 MiB feed limit")
+        if require_signed_feed:
+            verify_feed(data, public_key)
+        channel = xml.fromstring(data).find("channel")
     except (OSError, xml.ParseError) as error:
         raise ValueError(f"cannot read Sparkle appcast: {path}") from error
     if channel is None:
@@ -53,12 +85,6 @@ def check_appcast(path: Path, tag: str = "", *, require_signed_feed: bool = Fals
             matches += 1
     if tag and matches != 1:
         raise ValueError(f"Sparkle appcast must contain exactly one signed item for {tag}")
-    if require_signed_feed:
-        with path.open("rb") as handle:
-            handle.seek(max(0, path.stat().st_size - 1024))
-            trailer = handle.read(1024)
-        if b"<!-- sparkle-signatures:" not in trailer or b"edSignature:" not in trailer:
-            raise ValueError("Sparkle appcast has no embedded feed signature")
 
 
 def main() -> None:

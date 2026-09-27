@@ -3,14 +3,18 @@
 from __future__ import annotations
 
 import shutil
+import os
+import subprocess
+import sys
 from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
 
-from mailarchiver.clamav_definitions import ActiveDefinitions, DATABASE_NAMES, choose_definitions, read_definitions, selected_definitions, three_months_after
+from mailarchiver.clamav_definitions import ActiveDefinitions, DATABASE_NAMES, UPDATE_ENV, choose_definitions, read_definitions, selected_definitions, three_months_after
 from mailarchiver.clamav_update import publish_definitions, update_lock
 from mailarchiver.scanner import ClamScannerStartupError
+from mailarchiver.writer_lock import WriterLease
 
 
 @pytest.mark.parametrize(("start", "expected"), [
@@ -70,6 +74,50 @@ def test_update_lock_blocks_concurrent_writer_and_releases(tmp_path: Path) -> No
                 pytest.fail("a second updater acquired the lock")
     with update_lock(tmp_path):
         pass
+
+
+@pytest.mark.parametrize("development", [False, True])
+def test_cli_definition_refresh_is_blocked_before_writes_during_install(tmp_path: Path, development: bool) -> None:
+    """Issue #91: both real CLI paths respect the OS install reservation without running FreshClam."""
+    root = tmp_path / "definitions"
+    assert WriterLease.reserve_update()
+    try:
+        result = subprocess.run([sys.executable, "-m", "mailarchiver.clamav_update", *(["--development"] if development else [])],
+                                env={**os.environ, UPDATE_ENV: str(root)}, capture_output=True, text=True,
+                                check=False, timeout=10)
+        assert result.returncode != 0
+        assert "application writer or update installation is active" in result.stderr
+        assert not root.exists()
+    finally:
+        WriterLease.cancel_update()
+
+
+def test_external_definition_lock_defers_install_and_releases(tmp_path: Path) -> None:
+    """Issue #91: the exact shared guard used by definition refresh blocks GUI relaunch."""
+    script = (
+        "import sys\nfrom pathlib import Path\n"
+        "from mailarchiver.writer_lock import application_write_activity\n"
+        "from mailarchiver.clamav_update import update_lock\n"
+        "with application_write_activity(), update_lock(Path(sys.argv[1])):\n"
+        " print('locked',flush=True)\n sys.stdin.readline()\n"
+    )
+    child = subprocess.Popen([sys.executable, "-c", script, str(tmp_path / "definitions")],
+                             stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    try:
+        assert child.stdout is not None
+        assert child.stdout.readline().strip() == "locked"
+        assert WriterLease.writers_active()
+        assert not WriterLease.reserve_update()
+    finally:
+        assert child.stdin is not None
+        child.stdin.write("release\n")
+        child.stdin.flush()
+        child.wait(timeout=10)
+    assert child.returncode == 0, child.stderr.read() if child.stderr else ""
+    try:
+        assert WriterLease.reserve_update()
+    finally:
+        WriterLease.cancel_update()
 
 
 def test_selection_uses_newer_baseline_and_recovers_bad_manifest(tmp_path: Path) -> None:

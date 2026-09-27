@@ -49,7 +49,8 @@ release or its asset is unavailable. Release assembly uses the tracked seed
 only when its pushed tag is the repository's sole `v*` tag, bootstrapping the
 first appcast. After that, it fails rather than resetting update history when
 its previous published feed is unavailable.
-Both paths check feed structure and signature metadata before
+Both paths check feed structure and cryptographically verify its signature with
+the app's embedded public Ed25519 key before
 building the site. A shared queued concurrency group serializes Pages builds
 and deployments; a documentation build cannot replace a release feed with the
 seed. A Pages failure fails the tagged release workflow, although an already

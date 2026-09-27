@@ -265,6 +265,13 @@ def _archive_directory(archive: Path, create: bool) -> Iterator[int]:
             os.close(parent_fd)
 
 
+@contextmanager
+def application_write_activity() -> Iterator[None]:
+    """Fence non-archive writes against installation in GUI and CLI processes."""
+    with _application_guard(shared=True):
+        yield
+
+
 def _application_guard(*, shared: bool) -> BinaryIO:
     """Shared writer/exclusive installer guard outside archives; OS death releases it."""
     if os.name == "nt":
