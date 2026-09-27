@@ -21,6 +21,7 @@ from pydantic import BaseModel, Field
 
 from mailarchiver.update_metadata import SPARKLE_PUBLIC_KEY
 from scripts.check_appcast import MAX_FEED_BYTES, SIGNATURE, SPARKLE_NAMESPACE, check_appcast
+from scripts.macos_signing import release_safe_environment
 from scripts.update_appcast import (
     require_matching_key,
     sign_feed,
@@ -153,10 +154,11 @@ def mounted_historical_dmg(dmg: Path):
     temporary = Path(tempfile.mkdtemp(prefix="sparkle-history-dmg-"))
     mount = temporary / "mounted"
     mount.mkdir()
+    environment = release_safe_environment(os.environ, ())
     try:
         attached = subprocess.run(
             ["/usr/bin/hdiutil", "attach", "-readonly", "-nobrowse", "-mountpoint", str(mount), str(dmg)],
-            capture_output=True, text=True, check=False,
+            capture_output=True, text=True, check=False, env=environment,
         )
         if attached.returncode:
             raise RuntimeError(f"could not mount historical DMG: {attached.stderr.strip()}")
@@ -166,7 +168,7 @@ def mounted_historical_dmg(dmg: Path):
             detached = None
             for _ in range(10):
                 detached = subprocess.run(["/usr/bin/hdiutil", "detach", str(mount)],
-                                          capture_output=True, text=True, check=False)
+                                          capture_output=True, text=True, check=False, env=environment)
                 if detached.returncode == 0:
                     break
                 time.sleep(1)
@@ -182,9 +184,23 @@ def mounted_historical_dmg(dmg: Path):
 
 
 def verify_historical_app_key(archive: Path, public_key: str) -> None:
-    """Mount the DMG read-only and verify its app key before loading the private key."""
+    """Authenticate the image and app before executing tests or loading the private key."""
+    environment = release_safe_environment(os.environ, ())
+    subprocess.run(["/usr/bin/codesign", "--verify", "--strict", str(archive)],
+                   check=True, env=environment)
+    subprocess.run(["/usr/bin/xcrun", "stapler", "validate", str(archive)],
+                   check=True, env=environment)
+    subprocess.run(["/usr/sbin/spctl", "--assess", "--type", "open", "--context",
+                    "context:primary-signature", str(archive)], check=True, env=environment)
     with mounted_historical_dmg(archive) as mount:
-        verify_embedded_app_key(mount / f"{APP_NAME}.app", public_key)
+        app = mount / f"{APP_NAME}.app"
+        subprocess.run(["/usr/bin/codesign", "--verify", "--deep", "--strict", str(app)],
+                       check=True, env=environment)
+        subprocess.run(["/usr/sbin/spctl", "--assess", "--type", "execute", str(app)],
+                       check=True, env=environment)
+        verify_embedded_app_key(app, public_key)
+    subprocess.run(["make", "test-dmg", f"DMG={archive}"], cwd=Path(__file__).parents[1],
+                   check=True, env=environment)
 
 
 def sign_historical_appcast(
@@ -243,7 +259,7 @@ def main() -> None:
         parser.error(f"this reviewed migration only supports {FIRST_RELEASE.tag}")
     try:
         sign_historical_appcast(args.appcast, args.archive, args.output, args.signer)
-    except (OSError, RuntimeError, ValueError) as error:
+    except (OSError, RuntimeError, ValueError, subprocess.CalledProcessError) as error:
         parser.error(str(error))
 
 

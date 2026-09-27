@@ -3,6 +3,7 @@
 """Verify the real pinned Sparkle signer accepts the release key transport."""
 
 import base64
+from contextlib import contextmanager
 import hashlib
 import io
 from pathlib import Path
@@ -16,6 +17,64 @@ from scripts.update_appcast import AppcastRelease, SPARKLE_HARDWARE, SPARKLE_MIN
 from scripts.check_appcast import check_appcast
 import scripts.sign_historical_appcast as historical_signer
 from scripts.sign_historical_appcast import FIRST_RELEASE, audit_legacy_feed, sign_historical_appcast
+from scripts.macos_signing import RELEASE_SECRET_NAMES
+
+
+@pytest.mark.parametrize("failure", [None, 0, 1, 2, 3, 4, 5])
+def test_historical_trust_checks_precede_execution_and_stop_on_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, failure: int | None,
+) -> None:
+    """Issue #91: no mounted code executes before image/app trust gates pass."""
+    import plistlib
+
+    archive = tmp_path / "historical.dmg"
+    mount = tmp_path / "mounted"
+    app = mount / f"{historical_signer.APP_NAME}.app"
+    info = app / "Contents/Info.plist"
+    info.parent.mkdir(parents=True)
+    info.write_bytes(plistlib.dumps({historical_signer.PLIST_SPARKLE_PUBLIC_KEY: "fixture-public-key"}))
+    expected = [
+        ["/usr/bin/codesign", "--verify", "--strict", str(archive)],
+        ["/usr/bin/xcrun", "stapler", "validate", str(archive)],
+        ["/usr/sbin/spctl", "--assess", "--type", "open", "--context",
+         "context:primary-signature", str(archive)],
+        ["/usr/bin/codesign", "--verify", "--deep", "--strict", str(app)],
+        ["/usr/sbin/spctl", "--assess", "--type", "execute", str(app)],
+        ["make", "test-dmg", f"DMG={archive}"],
+    ]
+    commands: list[list[str]] = []
+    for name in RELEASE_SECRET_NAMES:
+        monkeypatch.setenv(name, "fixture-secret")
+
+    @contextmanager
+    def mounted_fixture(path: Path):
+        assert path == archive
+        assert commands == expected[:3]
+        yield mount
+
+    def run(command: list[str], *, check: bool, env: dict[str, str],
+            cwd: Path | None = None) -> subprocess.CompletedProcess[str]:
+        assert check
+        assert all(name not in env for name in RELEASE_SECRET_NAMES)
+        if command[0] == "make":
+            assert cwd == Path(__file__).parents[1]
+        index = len(commands)
+        commands.append(command)
+        if index == failure:
+            raise subprocess.CalledProcessError(1, command)
+        return subprocess.CompletedProcess(command, 0)
+
+    # The protected historical DMG cannot be replaced with a synthetic signed
+    # image. Substitute only native trust/mount boundaries to exercise ordering.
+    monkeypatch.setattr(historical_signer, "mounted_historical_dmg", mounted_fixture)
+    monkeypatch.setattr(historical_signer.subprocess, "run", run)
+    if failure is None:
+        historical_signer.verify_historical_app_key(archive, "fixture-public-key")
+        assert commands == expected
+    else:
+        with pytest.raises(subprocess.CalledProcessError):
+            historical_signer.verify_historical_app_key(archive, "fixture-public-key")
+        assert commands == expected[:failure + 1]
 
 
 def test_historical_feed_audit_pins_a10_bytes_and_archive(tmp_path: Path) -> None:

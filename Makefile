@@ -198,10 +198,6 @@ sign-historical-appcast: sparkle-tools
 	@test "$(RELEASE_TAG)" = v1.0.0a10 || { echo 'this reviewed migration supports only RELEASE_TAG=v1.0.0a10' >&2; exit 2; }
 	@test -n "$(DMG)" -a -n "$(APPCAST)" -a -n "$(OUTPUT)" || { echo 'usage: make sign-historical-appcast RELEASE_TAG=v1.0.0a10 DMG=/path/to/original.dmg APPCAST=/path/to/downloaded/appcast.xml OUTPUT=/path/to/new-signed-appcast.xml'; exit 2; }
 	@test -f "$(DMG)" -a -r "$(DMG)" -a -f "$(APPCAST)" -a -r "$(APPCAST)" || { echo 'DMG and appcast inputs must be readable files' >&2; exit 2; }
-	$(MAKE) test-dmg DMG="$(DMG)"
-	/usr/bin/codesign --verify --strict "$(DMG)"
-	/usr/bin/xcrun stapler validate "$(DMG)"
-	/usr/sbin/spctl --assess --type open --context context:primary-signature "$(DMG)"
 	PYTHONPATH="$(CURDIR)/src:$(CURDIR)" uv run --locked --group packaging python scripts/sign_historical_appcast.py --appcast "$(APPCAST)" --archive "$(DMG)" --output "$(OUTPUT)" --tag "$(RELEASE_TAG)" --signer "$(SPARKLE_DIR)/bin/sign_update"
 
 .PHONY: dmg dmg-signed notarize-dmg list-signatures check-release test-dmg preview-dmg self-test self-test-gui test-packaging

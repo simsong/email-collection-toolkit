@@ -2619,9 +2619,11 @@ pycryptodomex through `uv --no-project`, with no release secret or native signer
 Release assembly also verifies its previous published feed before appending or
 re-signing history; only the sole-tag first-release seed bypasses that gate.
 `make sign-historical-appcast RELEASE_TAG=v1.0.0a10 DMG=... APPCAST=... OUTPUT=...`
-is the reviewed, local-only migration for the original a10 history. It first
-mounts and tests the downloaded DMG, verifies its Developer ID signature,
-stapled ticket, and Gatekeeper acceptance. The mounted app's `SUPublicEDKey`
+is the reviewed, local-only migration for the original a10 history. The Python
+orchestrator verifies the DMG seal, stapled ticket, and Gatekeeper acceptance
+before mounting it read-only. It verifies the app seal with nested-code checks
+and app-level Gatekeeper acceptance before running `make test-dmg`. All trust
+and test subprocesses exclude release credentials. The mounted app's `SUPublicEDKey`
 must match the signing key before the private key is loaded. It then checks the
 pinned Sparkle archive signature, exact release metadata, and protected-key
 match before writing a separately signed XML feed. Its SHA-256 pin covers the complete

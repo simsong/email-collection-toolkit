@@ -1942,7 +1942,11 @@ release metadata and original DMG metadata, verify the
 original Sparkle archive signature using the existing protected key, require
 the mounted app's `SUPublicEDKey` to match that key, and authenticate the DMG's
 Developer ID seal, stapled notarization ticket, and
-Gatekeeper assessment. It must sign a distinct appcast output with the existing
+Gatekeeper assessment. DMG trust checks must precede mounting; the app seal
+(including nested code), app-level Gatekeeper acceptance, and embedded-key
+check must precede executing any mounted binaries. A failed trust check or
+self-test must stop signing. Trust and test subprocesses must exclude release
+credentials. It must sign a distinct appcast output with the existing
 Sparkle key, verify the resulting XML signature with the embedded public key,
 and refuse to overwrite either source or an existing output. It must not upload,
 replace, or publish a GitHub release asset or Pages site; those remain separate
