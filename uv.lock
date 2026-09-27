@@ -675,6 +675,7 @@ dependencies = [
 dev = [
     { name = "boto3" },
     { name = "packaging" },
+    { name = "pycryptodomex" },
     { name = "pylint" },
     { name = "pyright" },
     { name = "pytest" },
@@ -708,6 +709,7 @@ requires-dist = [
 dev = [
     { name = "boto3", specifier = ">=1.43.89" },
     { name = "packaging", specifier = ">=24.0" },
+    { name = "pycryptodomex", specifier = ">=3.23.0" },
     { name = "pylint", specifier = ">=3.3" },
     { name = "pyright", specifier = ">=1.1.411" },
     { name = "pytest", specifier = ">=8.0" },

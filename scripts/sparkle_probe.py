@@ -39,6 +39,7 @@ int probe_installs(void) { return installs; }
 class ProbeReport(BaseModel):
     frozen: bool
     controller: str
+    framework_path: str
     build: str
     preview_channels: int
     release_channels: int
@@ -98,6 +99,10 @@ def exercise(feed_check: bool) -> None:
     ctypes = import_module("ctypes")
     appkit.NSApplication.sharedApplication()
     bundle = foundation.NSBundle.mainBundle()
+    framework = Path(bundle.privateFrameworksPath()) / "Sparkle.framework"
+    expected = Path(bundle.bundlePath()) / "Contents/Frameworks/Sparkle.framework"
+    if framework != expected or not framework.is_dir():
+        raise AssertionError(f"Native bundle framework lookup differs from packaging: {framework}; {expected}")
     service = UpdateService(UpdateStatus(version="1.0.0a1", channel="preview", automatic_checks=False), lambda: True)
     backend = start_installed_updater(service)
     if backend is None:
@@ -139,6 +144,7 @@ def exercise(feed_check: bool) -> None:
         if failures != [True] or service.status.phase != "error":
             raise AssertionError("Cocoa timer did not recover from the install failure exactly once")
         report = ProbeReport(frozen=bool(getattr(sys, "frozen", False)), controller=backend.controller.className(),
+                             framework_path=str(framework),
                              build=service.status.build, preview_channels=preview, release_channels=release,
                              postponed=postponed, continuation_calls=helper.probe_installs(),
                              https_check=feed_check, standard_ui_windows=windows, preferences_ui=True,

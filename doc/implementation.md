@@ -2588,8 +2588,9 @@ explicit block ABI metadata; Cocoa's main-thread timer resumes an idle reserved
 installation. `gui_app.py` adds native menu/preferences controls and coordinates
 quit, worker tails, and definition updates. `WriterLease` retains shared OS
 locks in a private same-user temporary guard directory for every writer,
-including CLI processes; installation retains an exclusive guard until shutdown
-or failure. Writers on different archives remain concurrent. OS process death
+including CLI processes; installation retains an exclusive guard through resource
+shutdown until process exit or failure. Ordinary shutdown cancels any reservation.
+Writers on different archives remain concurrent. OS process death
 releases guards. The archive's existing exclusive lock still controls its writes.
 Raised continuation failures clear the update reservation and retain error state.
 Application preferences version 2 migrates update choices and preserves them
@@ -2600,8 +2601,10 @@ mapper to runtime and release code; Cocoa uses its numeric build value.
 the upstream notice file. `update_appcast.py` verifies the release key against
 the app's public key, signs/verifies the stapled DMG, adds embedded notes/minimum
 macOS metadata, and signs/verifies the complete XML. Publisher and signer-test
-Makefile targets explicitly select packaging dependencies. Release/Pages gates require
-the new feed signature metadata without rewriting signed bytes.
+Makefile targets explicitly select packaging dependencies; ordinary test dependencies
+also declare the cryptographic library directly. Release/Pages gates require
+the new feed signature metadata on both main-push and release-triggered deployment
+without rewriting signed bytes.
 The frozen controller/compiled delegate probe and real HTTPS standard-UI probe
 passed during development; these do not establish signed application replacement.
 [SPARKLE_UPDATES.md](SPARKLE_UPDATES.md) records validation targets and remaining

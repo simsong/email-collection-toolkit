@@ -5,7 +5,9 @@
 ## Unreleased
 
 - Sparkle installation now waits for CLI writers as well as GUI work, restores
-  writers after continuation errors, and explicitly selects publisher dependencies.
+  writers after continuation errors, retains its guard through resource shutdown,
+  and explicitly selects publisher and test dependencies. Both Pages deployment
+  paths require signed-feed metadata.
 
 * Integrate Sparkle 2.10.0 into the frozen macOS app with native Updates
   preferences, release/preview tracks, daily checks, and standard update UI.

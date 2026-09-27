@@ -137,6 +137,30 @@ def test_install_continuation_failure_restores_real_writer_access(tmp_path: Path
         host.cancel_update_install()
 
 
+@pytest.mark.parametrize("installing", [False, True])
+def test_shutdown_retains_guard_only_after_installation_begins(tmp_path: Path, installing: bool) -> None:
+    """Issue #91: resource shutdown cannot reopen CLI writes before update termination."""
+    controller = ApplicationController(ApplicationPreferencesStore(tmp_path / "preferences.json"))
+    document = controller.create_document(tmp_path / "archive.mailarchive")
+    assert document.path is not None
+    host = PyWebViewApplication(controller)
+    try:
+        if installing:
+            host.updates.defer_install(lambda: None)
+            assert host.updates.resume_install()
+        else:
+            assert host.reserve_update_install()
+        host.shutdown()
+        if installing:
+            with pytest.raises(ArchiveBusyError, match="update installation"):
+                WriterLease.acquire(document.path, document.descriptor.identity, "shutdown", "fixture", "test")
+            host.updates.fail("Synthetic failed installation")
+        with WriterLease.acquire(document.path, document.descriptor.identity, "shutdown", "fixture", "test"):
+            assert not host._updating
+    finally:
+        host.cancel_update_install()
+
+
 def test_pending_install_waits_for_job_completion_even_after_lease_release(tmp_path: Path) -> None:
     """An active content job cannot be terminated during its checkpoint/worker tail."""
     controller = ApplicationController(ApplicationPreferencesStore(tmp_path / "preferences.json"))

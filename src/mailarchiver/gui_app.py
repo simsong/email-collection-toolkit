@@ -2214,7 +2214,9 @@ class PyWebViewApplication:
             self._menu_observer = None
         if self._sparkle is not None:
             self._sparkle.close()
-        self.cancel_update_install()
+        # Keep the OS guard until process exit once Sparkle has begun relaunch.
+        if self.updates.status.phase != "installing":
+            self.cancel_update_install()
         if self._connectivity is not None:
             self._connectivity.close()
         if self.asset_server is not None:

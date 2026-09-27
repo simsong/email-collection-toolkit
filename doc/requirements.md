@@ -1813,7 +1813,9 @@ choices and daily-check preferences migrate outside archives and survive recent
 archive changes and upgrades. Download and installation require confirmation.
 The updater must wait for all jobs, worker tails, definition replacement, and
 writer leases in the application and other same-user CLI processes, then
-atomically exclude new writers before relaunch. Failure, including a raised
+atomically exclude new writers before relaunch. Resource shutdown must retain
+the installation guard until process exit once relaunch has begun; ordinary
+shutdown releases reservations. Failure, including a raised
 native continuation error, must restore writer access. Source launches and other platforms must
 report updates unavailable without starting checks.
 
@@ -1926,6 +1928,8 @@ draft is followed by a dependent Pages job using the signed feed produced in
 that same release run. A Pages failure fails the release workflow. Ordinary
 `main`-push Pages builds must fail if the published-release list or latest
 appcast asset is unavailable; they must never deploy the tracked empty seed.
+Both main-push and release-triggered Pages paths must require embedded feed
+signature metadata before deploying an appcast.
 Release assembly may bootstrap from the tracked seed only when the pushed tag
 is the repository's sole `v*` tag; otherwise it must fail rather than reset
 update history when its previous published feed cannot be obtained. Neither

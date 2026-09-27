@@ -109,6 +109,11 @@ def test_release_workflow_validates_built_distributions() -> None:
     assert 'if [[ -z "$appcast_tag" ]]; then' in pages
     assert 'if [[ -z "$previous_tag" ]]; then' in text
     assert '"$(git tag --list \'v*\')" != "$RELEASE_TAG"' in text
+    pages_configuration = safe_load(pages)
+    validation_runs = [step.get("run", "") for step in pages_configuration[JOBS]["build"]["steps"]]
+    validation_runs = [run for run in validation_runs if "make check-appcast" in run]
+    assert len(validation_runs) == 2
+    assert all("ARGS=--require-signed-feed" in run for run in validation_runs)
 
 
 def test_appcast_gate_rejects_missing_and_unsigned_release_items(tmp_path: Path) -> None:
