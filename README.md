@@ -1,6 +1,6 @@
 <!-- Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved. -->
 
-# mailarchiver
+# Email Collection Toolkit
 
 `mailarchiver` turns scattered email exports into a durable archive that you
 can inspect with ordinary tools decades from now. It preserves the original
