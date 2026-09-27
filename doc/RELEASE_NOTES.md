@@ -4,6 +4,14 @@
 
 ## Unreleased
 
+* Integrate Sparkle 2.10.0 into the frozen macOS app with native Updates
+  preferences, release/preview tracks, daily checks, and standard update UI.
+  Retain update preferences across archive changes. Defer installation until
+  writers, worker tails, and definition updates finish; exclude new writes during
+  replacement. Sign the complete feed and verify its key matches the application.
+  Signed/notarized older-to-newer replacement acceptance remains required before
+  declaring issue #91 complete; see `SPARKLE_UPDATES.md`.
+
 * Run an unsigned mounted-DMG smoke test on the macOS CI runner before release
   tagging. Both the mounted updater check and definition updates supply a
   temporary FreshClam configuration instead of requiring the host's config.

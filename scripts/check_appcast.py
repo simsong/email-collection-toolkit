@@ -29,7 +29,7 @@ def valid_release_url(url: str, tag: str) -> bool:
     return bool(name and "/" not in name and "\\" not in name and name.endswith(".dmg"))
 
 
-def check_appcast(path: Path, tag: str = "") -> None:
+def check_appcast(path: Path, tag: str = "", *, require_signed_feed: bool = False) -> None:
     """Require signature metadata and exactly one item for the requested release."""
     try:
         channel = xml.parse(path).getroot().find("channel")
@@ -53,15 +53,22 @@ def check_appcast(path: Path, tag: str = "") -> None:
             matches += 1
     if tag and matches != 1:
         raise ValueError(f"Sparkle appcast must contain exactly one signed item for {tag}")
+    if require_signed_feed:
+        with path.open("rb") as handle:
+            handle.seek(max(0, path.stat().st_size - 1024))
+            trailer = handle.read(1024)
+        if b"<!-- sparkle-signatures:" not in trailer or b"edSignature:" not in trailer:
+            raise ValueError("Sparkle appcast has no embedded feed signature")
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("appcast", type=Path)
     parser.add_argument("--tag", default="")
+    parser.add_argument("--require-signed-feed", action="store_true")
     args = parser.parse_args()
     try:
-        check_appcast(args.appcast, args.tag)
+        check_appcast(args.appcast, args.tag, require_signed_feed=args.require_signed_feed)
     except ValueError as error:
         parser.error(str(error))
 

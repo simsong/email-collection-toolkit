@@ -91,7 +91,7 @@ jobs:
         if: ${{ inputs.release_tag != '' }}
         env:
           RELEASE_TAG: ${{ inputs.release_tag }}
-        run: make check-appcast APPCAST=website/static/updates/mac/appcast.xml RELEASE_TAG="$RELEASE_TAG"
+        run: make check-appcast APPCAST=website/static/updates/mac/appcast.xml RELEASE_TAG="$RELEASE_TAG" ARGS=--require-signed-feed
       - name: Build Zola site
         run: zola --root website build --output-dir "$RUNNER_TEMP/mail-archiver-site"
       - name: Upload Pages artifact

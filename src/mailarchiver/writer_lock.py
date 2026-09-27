@@ -13,7 +13,8 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import BinaryIO, Self
+from typing import BinaryIO, ClassVar, Self
+from threading import RLock
 
 from pydantic import BaseModel, ConfigDict, PrivateAttr
 
@@ -46,6 +47,25 @@ class WriterLease(BaseModel):
     metadata: WriterLeaseMetadata
     acquired: bool = True
     _handle: BinaryIO | None = PrivateAttr(default=None)
+    _tracked: bool = PrivateAttr(default=False)
+    _process_lock: ClassVar[RLock] = RLock()
+    _active_count: ClassVar[int] = 0
+    _update_reserved: ClassVar[bool] = False
+
+    @classmethod
+    def reserve_update(cls) -> bool:
+        """Atomically exclude new process-local writers only after existing leases end."""
+        with cls._process_lock:
+            if cls._active_count:
+                return False
+            cls._update_reserved = True
+            return True
+
+    @classmethod
+    def cancel_update(cls) -> None:
+        """Restore writers when installation fails or the application shuts down."""
+        with cls._process_lock:
+            cls._update_reserved = False
 
     @classmethod
     def acquire(
@@ -57,6 +77,26 @@ class WriterLease(BaseModel):
         application_version: str,
         *,
         create: bool = False,
+    ) -> WriterLease:
+        with cls._process_lock:
+            if cls._update_reserved:
+                raise ArchiveBusyError("application update installation is reserved")
+            # Count acquisition itself as active, without holding the process
+            # mutex across filesystem I/O on a potentially slow archive volume.
+            cls._active_count += 1
+        try:
+            lease = cls._acquire(archive, archive_identity, operation, operation_id, application_version, create=create)
+            lease._tracked = True
+            return lease
+        except BaseException:
+            with cls._process_lock:
+                cls._active_count -= 1
+            raise
+
+    @classmethod
+    def _acquire(
+        cls, archive: Path, archive_identity: str, operation: str, operation_id: str,
+        application_version: str, *, create: bool,
     ) -> WriterLease:
         if os.name == "nt":
             raise OSError("Windows archive writing is not supported; planned for v1.1.0")
@@ -108,14 +148,19 @@ class WriterLease(BaseModel):
 
     def release(self) -> None:
         """Release the OS lock; the diagnostic file may safely remain."""
-        handle, self._handle = self._handle, None
-        if handle is None:
-            return
+        with self._process_lock:
+            handle, self._handle = self._handle, None
+            if handle is None:
+                return
+            tracked, self._tracked = self._tracked, False
         try:
             _release(handle)
         finally:
             handle.close()
             self.acquired = False
+            if tracked:
+                with self._process_lock:
+                    type(self)._active_count -= 1
 
     def __enter__(self) -> Self:
         return self

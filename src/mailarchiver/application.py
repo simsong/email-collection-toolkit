@@ -23,8 +23,9 @@ from .identity import application_data_directory
 from .bagit import initialize_bag
 from .catalog import create_catalog, create_search, validate_catalog, validate_search
 from .writer_lock import ArchiveBusyError, WriterLease
+from .updates import UpdateChannel, default_channel
 
-APPLICATION_PREFERENCES_VERSION = 1
+APPLICATION_PREFERENCES_VERSION = 2
 RECENT_ARCHIVE_LIMIT = 10
 
 
@@ -35,9 +36,11 @@ class InvalidArchiveError(ValueError):
 class ApplicationPreferences(BaseModel):
     """Discardable, versioned state stored outside every archive."""
 
-    version: Literal[1] = APPLICATION_PREFERENCES_VERSION
+    version: Literal[1, 2] = APPLICATION_PREFERENCES_VERSION
     last_archive: Path | None = None
     recent_archives: list[Path] = Field(default_factory=list, max_length=RECENT_ARCHIVE_LIMIT)
+    update_channel: UpdateChannel | None = None
+    automatic_update_checks: bool = True
 
 
 class ApplicationPreferencesStore:
@@ -342,6 +345,20 @@ class ApplicationController:
     def preferences(self) -> ApplicationPreferences:
         return self._preferences.model_copy(deep=True)
 
+    def configure_updates(self, channel: UpdateChannel, automatic_checks: bool) -> None:
+        """Persist update choices outside archives without resetting document preferences."""
+        self._preferences.update_channel = channel
+        self._preferences.automatic_update_checks = automatic_checks
+        self._preferences.version = APPLICATION_PREFERENCES_VERSION
+        self._write_preferences()
+
+    def initialize_updates(self, installed_version: str) -> UpdateChannel:
+        """Migrate an unset choice once, using the installed release's track."""
+        channel = self._preferences.update_channel or default_channel(installed_version)
+        if self._preferences.update_channel is None or self._preferences.version != APPLICATION_PREFERENCES_VERSION:
+            self.configure_updates(channel, self._preferences.automatic_update_checks)
+        return channel
+
     @property
     def active_window(self) -> SearchWindow | None:
         with self._lock:
@@ -504,16 +521,16 @@ class ApplicationController:
         path = document.display_path
         recent = [item for item in self._preferences.recent_archives if item != path]
         recent.insert(0, path)
-        self._preferences = ApplicationPreferences(
-            last_archive=path, recent_archives=recent[:RECENT_ARCHIVE_LIMIT]
-        )
+        self._preferences.last_archive = path
+        self._preferences.recent_archives = recent[:RECENT_ARCHIVE_LIMIT]
         self._write_preferences()
 
     def _forget_recent(self, path: Path) -> None:
         display = Path(os.path.abspath(path.expanduser()))
         recent = [item for item in self._preferences.recent_archives if item != display]
         last = None if self._preferences.last_archive == display else self._preferences.last_archive
-        self._preferences = ApplicationPreferences(last_archive=last, recent_archives=recent)
+        self._preferences.last_archive = last
+        self._preferences.recent_archives = recent
         self._write_preferences()
 
     def _write_preferences(self) -> None:

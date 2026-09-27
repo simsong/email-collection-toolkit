@@ -1804,6 +1804,27 @@ scanner portability remain implementation work, not shipped features.
 
 ## macOS desktop delivery
 
+### Application updates (issue #91)
+
+The frozen macOS app must use Sparkle's standard updater UI, with native
+Preferences… and Check for Updates… commands. Stable installations default to
+release-only; alpha/beta installations default to preview plus stable. Explicit
+choices and daily-check preferences migrate outside archives and survive recent
+archive changes and upgrades. Download and installation require confirmation.
+The updater must wait for all jobs, worker tails, definition replacement, and
+process-local writer leases, then atomically exclude new writers before relaunch.
+Failure must restore writer access. Source launches and other platforms must
+report updates unavailable without starting checks.
+
+The app and publisher share numeric version mapping. Runtime Cocoa metadata
+must not overwrite that build number with a package-version string. Bundle the
+pinned framework with its helpers and full license notices, preserving links and
+nested signing. Sign and verify both final DMG and complete XML; embedded release
+notes and minimum macOS metadata are authenticated by the feed signature.
+Reject a release private key that differs from the embedded public key.
+[SPARKLE_UPDATES.md](SPARKLE_UPDATES.md) specifies behavior, operating procedure,
+and the signed/notarized update acceptance that must precede completion of #91.
+
 Ruff must pass with zero diagnostics before validation or packaging succeeds.
 `make ruff` checks the repository using the locked development dependency;
 `make check`, `make dmg`, and release builds must enforce it without ignoring

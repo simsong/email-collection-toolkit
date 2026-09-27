@@ -191,7 +191,7 @@ update-appcast:
 	.venv/bin/python scripts/update_appcast.py --appcast "$(or $(APPCAST),website/static/updates/mac/appcast.xml)" --archive "$(ARCHIVE)" --tag "$(RELEASE_TAG)" --url "$(RELEASE_URL)" --signer "$(SPARKLE_DIR)/bin/sign_update"
 
 .PHONY: dmg dmg-signed notarize-dmg list-signatures check-release test-dmg preview-dmg self-test self-test-gui test-packaging
-dmg: ruff syntax-check pst-importer mcti-scan pff-converter-bundle
+dmg: ruff syntax-check sparkle-tools pst-importer mcti-scan pff-converter-bundle
 	uv run --group packaging python scripts/build_macos.py $(ARGS)
 
 # Use the first valid Developer ID Application identity in the Keychain search list.
@@ -207,7 +207,7 @@ notarize-dmg:
 list-signatures:
 	/usr/bin/security find-identity -v -p codesigning
 
-check-release: ruff syntax-check $(if $(DMG),,pst-importer mcti-scan pff-converter-bundle)
+check-release: ruff syntax-check $(if $(DMG),,sparkle-tools pst-importer mcti-scan pff-converter-bundle)
 	uv run --group packaging python scripts/build_macos.py --check-release $(if $(DMG),--test-dmg "$(DMG)") $(ARGS)
 
 test-dmg:
@@ -244,6 +244,13 @@ test-signing: ruff
 .PHONY: test-sparkle-signing
 test-sparkle-signing: sparkle-tools ruff
 	uv run --locked pytest -q tests/test_sparkle_signing.py
+
+.PHONY: sparkle-probe test-updates
+sparkle-probe: sparkle-tools ruff
+	uv run --locked --group packaging python scripts/sparkle_probe.py $(ARGS)
+
+test-updates: ruff
+	uv run --locked pytest -q tests/test_updates.py tests/test_application.py tests/test_website_scripts.py
 
 compare-apple-mail:
 	uv run mailarchiver-compare-apple-mail --apple-mail "$(HOME)/Library/Mail" --archive "$(HOME)/mail-archive" $(ARGS)
@@ -331,12 +338,12 @@ website-build-check: website-check
 
 release-tag-check:
 	@test -n "$(GITHUB_REF_NAME)" || { echo 'usage: make release-tag-check GITHUB_REF_NAME=v1.2.3'; exit 2; }
-	uv run --no-project --with packaging --python '>=3.12' python scripts/release_tag.py --tag "$(GITHUB_REF_NAME)" $(ARGS)
+	PYTHONPATH=src uv run --no-project --with packaging --python '>=3.12' python scripts/release_tag.py --tag "$(GITHUB_REF_NAME)" $(ARGS)
 
 .PHONY: check-appcast
 check-appcast:
 	@test -n "$(APPCAST)" || { echo 'usage: make check-appcast APPCAST=path [RELEASE_TAG=v1.2.3]'; exit 2; }
-	python3 scripts/check_appcast.py "$(APPCAST)" $(if $(RELEASE_TAG),--tag "$(RELEASE_TAG)",)
+	python3 scripts/check_appcast.py "$(APPCAST)" $(if $(RELEASE_TAG),--tag "$(RELEASE_TAG)",) $(ARGS)
 
 .PHONY: test-workflow-gates
 test-workflow-gates:

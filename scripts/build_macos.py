@@ -30,18 +30,24 @@ from macos_signing import (
     signing_identity,
 )
 from release_tag import release_metadata
+from sparkle_bundle import bundle_sparkle
+from mailarchiver.update_metadata import MINIMUM_MACOS_VERSION, SPARKLE_FEED_URL, SPARKLE_PUBLIC_KEY, SPARKLE_VERSION
 
 ROOT = Path(__file__).resolve().parents[1]
 APP_NAME = "Email Collection Toolkit"
 IDENTIFIER = "net.simson.mailarchiver"
-SPARKLE_FEED_URL = "https://simsong.github.io/email-collection-toolkit/updates/mac/appcast.xml"
-SPARKLE_PUBLIC_KEY = "qkdXdvt9A3YjGYwpENGrEEBY7kp3hU+TIjhCz/b7cjw="
 PLIST_DOCUMENT_TYPES = "CFBundleDocumentTypes"
 PLIST_EXPORTED_TYPES = "UTExportedTypeDeclarations"
 PLIST_SHORT_VERSION = "CFBundleShortVersionString"
 PLIST_BUILD_VERSION = "CFBundleVersion"
 PLIST_SPARKLE_FEED_URL = "SUFeedURL"
 PLIST_SPARKLE_PUBLIC_KEY = "SUPublicEDKey"
+PLIST_REQUIRE_SIGNED_FEED = "SURequireSignedFeed"
+PLIST_VERIFY_BEFORE_EXTRACTION = "SUVerifyUpdateBeforeExtraction"
+PLIST_AUTOMATIC_CHECKS = "SUEnableAutomaticChecks"
+PLIST_AUTOMATIC_UPDATES = "SUAutomaticallyUpdate"
+PLIST_ALLOW_AUTOMATIC_UPDATES = "SUAllowsAutomaticUpdates"
+PLIST_MINIMUM_SYSTEM = "LSMinimumSystemVersion"
 PLIST_COPYRIGHT = "NSHumanReadableCopyright"
 PLIST_TYPE_NAME = "CFBundleTypeName"
 PLIST_TYPE_ROLE = "CFBundleTypeRole"
@@ -114,6 +120,12 @@ def configure_bundle(app: Path, signing_identity: str) -> None:
     info[PLIST_BUILD_VERSION] = str(sparkle_version)
     info[PLIST_SPARKLE_FEED_URL] = SPARKLE_FEED_URL
     info[PLIST_SPARKLE_PUBLIC_KEY] = SPARKLE_PUBLIC_KEY
+    info[PLIST_REQUIRE_SIGNED_FEED] = True
+    info[PLIST_VERIFY_BEFORE_EXTRACTION] = True
+    info[PLIST_AUTOMATIC_CHECKS] = True
+    info[PLIST_AUTOMATIC_UPDATES] = False
+    info[PLIST_ALLOW_AUTOMATIC_UPDATES] = False
+    info[PLIST_MINIMUM_SYSTEM] = MINIMUM_MACOS_VERSION
     info[PLIST_COPYRIGHT] = COPYRIGHT
     info[PLIST_DOCUMENT_TYPES] = [{
         PLIST_TYPE_NAME: "Mail Archive", PLIST_TYPE_ROLE: "Editor",
@@ -185,7 +197,7 @@ def test_image(dmg: Path, *, gui: bool = False, manifest_path: Path | None = Non
         if not library.is_file():
             raise RuntimeError(f"Bundled ClamAV library is missing: {library}; see {manifest}")
         notices = app / "Contents/Resources/Third Party Notices"
-        for name in ("LICENSE", "COPYRIGHT", "THIRD_PARTY_NOTICES.md", "ClamAV-COPYING.txt", "OpenSSL-LICENSE.txt"):
+        for name in ("LICENSE", "COPYRIGHT", "THIRD_PARTY_NOTICES.md", "ClamAV-COPYING.txt", "OpenSSL-LICENSE.txt", "Sparkle-LICENSE.txt"):
             if not (notices / name).is_file() or not (notices / name).stat().st_size:
                 raise RuntimeError(f"Required distribution notice is missing or empty: {notices / name}; see {manifest}")
         run("/usr/bin/codesign", "--verify", "--deep", "--strict", app)
@@ -444,6 +456,7 @@ def build(signing_identity: str, *, gui: bool = False, log_contents: bool = Fals
         run(*command, cwd=ROOT, env=environment)
         app = bundle_output / f"{APP_NAME}.app"
         bundle_clamav_openssl(app, signing_identity)
+        bundle_sparkle(app, ROOT / ".tools/sparkle" / SPARKLE_VERSION, signing_identity)
         configure_bundle(app, signing_identity)
         dmg = output / dmg_filename(version("mailarchiver"), platform.machine(), signing_identity)
         candidate = work / "candidate.dmg"

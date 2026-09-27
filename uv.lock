@@ -662,6 +662,7 @@ dependencies = [
     { name = "beautifulsoup4" },
     { name = "charset-normalizer" },
     { name = "ftfy" },
+    { name = "packaging" },
     { name = "py7zr" },
     { name = "pydantic" },
     { name = "pywebview" },
@@ -685,6 +686,7 @@ dev = [
 ]
 packaging = [
     { name = "dmgbuild", marker = "sys_platform == 'darwin'" },
+    { name = "pycryptodomex" },
     { name = "pyinstaller" },
 ]
 
@@ -693,6 +695,7 @@ requires-dist = [
     { name = "beautifulsoup4", specifier = ">=4.15.0" },
     { name = "charset-normalizer", specifier = ">=3.4.0" },
     { name = "ftfy", specifier = ">=6.3.0" },
+    { name = "packaging", specifier = ">=26.3" },
     { name = "py7zr", specifier = ">=1.0.0" },
     { name = "pydantic", specifier = ">=2.13.4" },
     { name = "pywebview", specifier = ">=6.2" },
@@ -716,6 +719,7 @@ dev = [
 ]
 packaging = [
     { name = "dmgbuild", marker = "sys_platform == 'darwin'", specifier = ">=1.6.7" },
+    { name = "pycryptodomex", specifier = ">=3.23.0" },
     { name = "pyinstaller", specifier = ">=6.22,<7" },
 ]
 

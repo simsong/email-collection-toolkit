@@ -2580,6 +2580,28 @@ requires it and fails clearly.
 
 ## Developer validation gates
 
+### Sparkle application integration
+
+`updates.py` holds typed updater status and exactly-once installation deferral.
+`sparkle.py` retains a PyObjC standard controller, formal channel delegate, and
+explicit block ABI metadata; Cocoa's main-thread timer resumes an idle reserved
+installation. `gui_app.py` adds native menu/preferences controls and coordinates
+quit, worker tails, and definition updates. `WriterLease` tracks process-local
+leases and atomically excludes new acquisitions when installation is reserved.
+Application preferences version 2 migrates update choices and preserves them
+when recent archive paths change. `release_versions.py` supplies the build/appcast
+mapper to runtime and release code; Cocoa uses its numeric build value.
+
+`sparkle_bundle.py` preserves and signs Sparkle's framework/helpers and includes
+the upstream notice file. `update_appcast.py` verifies the release key against
+the app's public key, signs/verifies the stapled DMG, adds embedded notes/minimum
+macOS metadata, and signs/verifies the complete XML. Release/Pages gates require
+the new feed signature metadata without rewriting signed bytes.
+The frozen controller/compiled delegate probe and real HTTPS standard-UI probe
+passed during development; these do not establish signed application replacement.
+[SPARKLE_UPDATES.md](SPARKLE_UPDATES.md) records validation targets and remaining
+production acceptance, with macOS 15/arm64 as the configured initial target.
+
 Scanner deadline and helper-execution regressions use real POSIX subprocesses
 and explicitly skip Windows before importing the `fcntl`-based scanner. They do not establish Windows
 scanner support. Pages release-trigger checks parse YAML rather than relying on
