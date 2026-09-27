@@ -10,6 +10,8 @@
   paths authenticate the feed with the embedded public key; release assembly
   authenticates previous history before appending or re-signing it. CLI virus-definition
   updates now hold the shared application guard as GUI updates do.
+  Historical Sparkle feed migration verifies the mounted app's embedded key
+  before loading the release key to sign its archive and feed.
 
 * Integrate Sparkle 2.10.0 into the frozen macOS app with native Updates
   preferences, release/preview tracks, daily checks, and standard update UI.

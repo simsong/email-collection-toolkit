@@ -88,7 +88,9 @@ migration checks the complete published feed against a pinned SHA-256, then audi
 downloaded copies of the exact release item and DMG. It tests
 the mounted app, verifies the Apple Developer ID seal, stapled notarization
 ticket, and Gatekeeper assessment, then verifies the existing Sparkle archive
-signature and signs the complete feed with the existing protected Sparkle key.
+signature. Before loading the protected Sparkle key, it requires the mounted
+app's `SUPublicEDKey` to match the key used to sign the archive and feed. It
+signs the complete feed with the existing protected Sparkle key.
 It checks the generated feed against the app's public key and refuses to alter
 the downloaded source or replace an existing output. It supports only the
 embedded release notes; external release notes need their own signature. The

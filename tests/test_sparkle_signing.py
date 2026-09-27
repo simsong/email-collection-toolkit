@@ -41,6 +41,21 @@ def test_historical_feed_audit_pins_a10_bytes_and_archive(tmp_path: Path) -> Non
             audit_legacy_feed(changed, archive, release)
 
 
+def test_historical_app_info_plist_requires_matching_sparkle_key(tmp_path: Path) -> None:
+    """Issue #91: the installed historical app must trust the key that signs its feed."""
+    import plistlib
+    from scripts.sign_historical_appcast import verify_embedded_app_key
+
+    app = tmp_path / "Email Collection Toolkit.app"
+    info_path = app / "Contents/Info.plist"
+    info_path.parent.mkdir(parents=True)
+    public_key = "fixture-public-key"
+    info_path.write_bytes(plistlib.dumps({"SUPublicEDKey": public_key}))
+    verify_embedded_app_key(app, public_key)
+    with pytest.raises(ValueError, match="does not match"):
+        verify_embedded_app_key(app, "different-public-key")
+
+
 def test_sparkle_tools_rejects_a_modified_cached_signer(tmp_path: Path) -> None:
     """Issue #91: signing prerequisites verify cached binaries against the pinned archive."""
     repository = Path(__file__).parents[1]
@@ -101,11 +116,19 @@ def test_historical_signing_orchestration_preserves_source_and_creates_verified_
     # The historical DMG is not checked in; its signature is independently covered
     # by the real signer test above, so this test isolates feed-signing orchestration.
     monkeypatch.setattr(historical_signer, "verify_signed_archive", verify_fixture_archive)
+    verified_app_keys: list[tuple[Path, str]] = []
+
+    def verify_fixture_app(path: Path, expected_key: str) -> None:
+        assert path == archive
+        verified_app_keys.append((path, expected_key))
+
+    monkeypatch.setattr(historical_signer, "verify_historical_app_key", verify_fixture_app)
     sign_historical_appcast(appcast, archive, output, signer, public_key=public_key)
 
     assert appcast.read_bytes() == original
     assert len(verified_archives) == 1
     assert verified_archives[0][2] == FIRST_RELEASE.archive_signature
+    assert verified_app_keys == [(archive, public_key)]
     check_appcast(output, FIRST_RELEASE.tag, require_signed_feed=True, public_key=public_key)
     assert b"<!-- sparkle-signatures:" in output.read_bytes()
     with pytest.raises(ValueError, match="refusing to replace existing"):

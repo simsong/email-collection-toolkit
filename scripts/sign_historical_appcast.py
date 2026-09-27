@@ -9,8 +9,12 @@ import base64
 import binascii
 import hashlib
 import os
+import plistlib
+import subprocess
 import tempfile
+import time
 import xml.etree.ElementTree as xml
+from contextlib import contextmanager
 from pathlib import Path
 
 from pydantic import BaseModel, Field
@@ -30,6 +34,8 @@ SPARKLE_CHANNEL = f"{{{SPARKLE_NAMESPACE}}}channel"
 RELEASE_NOTES_LINK = f"{{{SPARKLE_NAMESPACE}}}releaseNotesLink"
 FEED_URL = "https://simsong.github.io/email-collection-toolkit/updates/mac/appcast.xml"
 ARCHIVE_MEDIA_TYPE = "application/octet-stream"
+APP_NAME = "Email Collection Toolkit"
+PLIST_SPARKLE_PUBLIC_KEY = "SUPublicEDKey"
 FIRST_RELEASE_FEED_SHA256 = "de6d09cdc3e2efa508de9ba83d7701addd046660b18bcd3dcf3d5cb49efd8403"
 
 
@@ -129,6 +135,58 @@ def audit_legacy_feed(data: bytes, archive: Path, release: HistoricalRelease) ->
     return release.archive_signature
 
 
+def verify_embedded_app_key(app: Path, public_key: str) -> None:
+    """Require the mounted app to trust the same key as its archive and feed."""
+    info_path = app / "Contents/Info.plist"
+    try:
+        with info_path.open("rb") as source:
+            info = plistlib.load(source)
+    except (OSError, plistlib.InvalidFileException, ValueError) as error:
+        raise ValueError("cannot read historical app Sparkle key") from error
+    if not isinstance(info, dict) or info.get(PLIST_SPARKLE_PUBLIC_KEY) != public_key:
+        raise ValueError("historical app Sparkle public key does not match the archive and feed key")
+
+
+@contextmanager
+def mounted_historical_dmg(dmg: Path):
+    """Mount a read-only historical DMG and detach it without recursive cleanup."""
+    temporary = Path(tempfile.mkdtemp(prefix="sparkle-history-dmg-"))
+    mount = temporary / "mounted"
+    mount.mkdir()
+    try:
+        attached = subprocess.run(
+            ["/usr/bin/hdiutil", "attach", "-readonly", "-nobrowse", "-mountpoint", str(mount), str(dmg)],
+            capture_output=True, text=True, check=False,
+        )
+        if attached.returncode:
+            raise RuntimeError(f"could not mount historical DMG: {attached.stderr.strip()}")
+        try:
+            yield mount
+        finally:
+            detached = None
+            for _ in range(10):
+                detached = subprocess.run(["/usr/bin/hdiutil", "detach", str(mount)],
+                                          capture_output=True, text=True, check=False)
+                if detached.returncode == 0:
+                    break
+                time.sleep(1)
+            if detached is None or detached.returncode:
+                raise RuntimeError(f"could not detach historical DMG: {detached.stderr if detached else ''}")
+    finally:
+        if not os.path.ismount(mount):
+            try:
+                mount.rmdir()
+                temporary.rmdir()
+            except OSError:
+                pass
+
+
+def verify_historical_app_key(archive: Path, public_key: str) -> None:
+    """Mount the DMG read-only and verify its app key before loading the private key."""
+    with mounted_historical_dmg(archive) as mount:
+        verify_embedded_app_key(mount / f"{APP_NAME}.app", public_key)
+
+
 def sign_historical_appcast(
     appcast: Path,
     archive: Path,
@@ -148,6 +206,7 @@ def sign_historical_appcast(
     with appcast.open("rb") as source:
         data = source.read(MAX_FEED_BYTES + 1)
     signature = audit_legacy_feed(data, archive, release)
+    verify_historical_app_key(archive, public_key)
     key = signing_key()
     require_matching_key(key, public_key)
     verify_signed_archive(archive, signer, key, signature)

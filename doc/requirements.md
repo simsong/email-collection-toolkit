@@ -1939,8 +1939,9 @@ must fail without rewriting authenticated bytes or requiring a private key.
 The one-time migration for the first published release must operate on
 downloaded copies, pin the complete known a10 feed by SHA-256 as well as its
 release metadata and original DMG metadata, verify the
-original Sparkle archive signature using the existing protected key, and
-authenticate the DMG's Developer ID seal, stapled notarization ticket, and
+original Sparkle archive signature using the existing protected key, require
+the mounted app's `SUPublicEDKey` to match that key, and authenticate the DMG's
+Developer ID seal, stapled notarization ticket, and
 Gatekeeper assessment. It must sign a distinct appcast output with the existing
 Sparkle key, verify the resulting XML signature with the embedded public key,
 and refuse to overwrite either source or an existing output. It must not upload,

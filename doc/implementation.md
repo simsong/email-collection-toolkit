@@ -2621,9 +2621,10 @@ re-signing history; only the sole-tag first-release seed bypasses that gate.
 `make sign-historical-appcast RELEASE_TAG=v1.0.0a10 DMG=... APPCAST=... OUTPUT=...`
 is the reviewed, local-only migration for the original a10 history. It first
 mounts and tests the downloaded DMG, verifies its Developer ID signature,
-stapled ticket, and Gatekeeper acceptance, then checks the pinned Sparkle
-archive signature, exact release metadata, and protected-key match before
-writing a separately signed XML feed. Its SHA-256 pin covers the complete
+stapled ticket, and Gatekeeper acceptance. The mounted app's `SUPublicEDKey`
+must match the signing key before the private key is loaded. It then checks the
+pinned Sparkle archive signature, exact release metadata, and protected-key
+match before writing a separately signed XML feed. Its SHA-256 pin covers the complete
 published feed bytes, including comments, whitespace, and XML declaration, so
 parsing cannot erase lexical edits before the audit. The migration refuses an
 existing output and does not upload or publish anything; an operator must
