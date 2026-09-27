@@ -2610,6 +2610,8 @@ and release-triggered deployment without rewriting signed bytes. The checker
 accepts the pinned Sparkle signing-block format, bounds input to 16 MiB and uses
 the embedded public Ed25519 key; its Makefile target provisions only pinned
 pycryptodomex through `uv --no-project`, with no release secret or native signer.
+Release assembly also verifies its previous published feed before appending or
+re-signing history; only the sole-tag first-release seed bypasses that gate.
 The frozen controller/compiled delegate probe and real HTTPS standard-UI probe
 passed during development; these do not establish signed application replacement.
 [SPARKLE_UPDATES.md](SPARKLE_UPDATES.md) records validation targets and remaining

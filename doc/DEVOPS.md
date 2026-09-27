@@ -48,7 +48,8 @@ appcast, and fails rather than silently deploying the tracked seed if that
 release or its asset is unavailable. Release assembly uses the tracked seed
 only when its pushed tag is the repository's sole `v*` tag, bootstrapping the
 first appcast. After that, it fails rather than resetting update history when
-its previous published feed is unavailable.
+its previous published feed is unavailable or fails public-key signature
+verification before history is appended or re-signed.
 Both paths check feed structure and cryptographically verify its signature with
 the app's embedded public Ed25519 key before
 building the site. A shared queued concurrency group serializes Pages builds

@@ -74,8 +74,17 @@ rewriting. Both deployment paths cryptographically verify the exact feed bytes
 and signed length using the app's public Ed25519 key. This gate uses pinned
 pycryptodomex through `uv --no-project`; it requires no private key or native
 signer and rejects forged markers, tampering and feeds larger than 16 MiB.
-Historical unsigned XML can be read as publication history before signing the
-new complete feed; it cannot satisfy a new signed-feed release gate.
+Release assembly must authenticate the previous published feed before appending
+or re-signing any history. The tracked unsigned seed is allowed only for the
+first-release bootstrap when the pushed tag is the sole `v*` tag. Unsigned legacy
+history requires a separately reviewed migration; it cannot enter this release path.
+
+On 2026-09-27 the published `v1.0.0a10/appcast.xml` had no embedded XML
+signature. First rollout therefore needs an authorized migration that audits
+the immutable release archives and item metadata before signing that history
+with the existing protected key. Until then, Pages and subsequent release jobs
+fail this gate; the currently deployed site remains its last successful build.
+This PR does not replace a release asset or authorize that migration.
 
 The private Sparkle key belongs in the protected release secret
 `SPARKLE_ED25519_PRIVATE_KEY_BASE64`, with an offline recovery copy. Apple

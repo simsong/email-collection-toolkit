@@ -109,6 +109,9 @@ def test_release_workflow_validates_built_distributions() -> None:
     assert 'if [[ -z "$appcast_tag" ]]; then' in pages
     assert 'if [[ -z "$previous_tag" ]]; then' in text
     assert '"$(git tag --list \'v*\')" != "$RELEASE_TAG"' in text
+    previous_gate = 'make check-appcast APPCAST="$appcast_path" RELEASE_TAG="$previous_tag" ARGS=--require-signed-feed'
+    assert previous_gate in text
+    assert text.index(previous_gate) < text.index("name: Sign the final notarized DMG's appcast item")
     pages_configuration = safe_load(pages)
     validation_runs = [step.get("run", "") for step in pages_configuration[JOBS]["build"]["steps"]]
     validation_runs = [run for run in validation_runs if "make check-appcast" in run]

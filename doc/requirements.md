@@ -1936,7 +1936,10 @@ are bounded to 16 MiB; forged signing markers, wrong keys and post-signing edits
 must fail without rewriting authenticated bytes or requiring a private key.
 Release assembly may bootstrap from the tracked seed only when the pushed tag
 is the repository's sole `v*` tag; otherwise it must fail rather than reset
-update history when its previous published feed cannot be obtained. Neither
+update history when its previous published feed cannot be obtained. Any previous
+published feed must authenticate against the embedded public key before release
+assembly appends or re-signs history. Unsigned legacy history requires a separate,
+reviewed migration. Neither
 workflow may write directly to protected `main`.
 
 Ordinary `make dmg`, `make dmg-signed`, and `make test-dmg` must run only the

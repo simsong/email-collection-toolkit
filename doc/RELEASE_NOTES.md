@@ -7,7 +7,8 @@
 - Sparkle installation now waits for CLI writers as well as GUI work, restores
   writers after continuation errors, retains its guard through resource shutdown,
   and explicitly selects publisher and test dependencies. Both Pages deployment
-  paths authenticate the feed with the embedded public key. CLI virus-definition
+  paths authenticate the feed with the embedded public key; release assembly
+  authenticates previous history before appending or re-signing it. CLI virus-definition
   updates now hold the shared application guard as GUI updates do.
 
 * Integrate Sparkle 2.10.0 into the frozen macOS app with native Updates
