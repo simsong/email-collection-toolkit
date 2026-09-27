@@ -155,7 +155,9 @@ def sign_historical_appcast(
 
     temporary: Path | None = None
     try:
-        with tempfile.NamedTemporaryFile("wb", dir=output.parent, prefix=f".{output.name}.", delete=False) as target:
+        with tempfile.NamedTemporaryFile(
+            "wb", dir=output.parent, prefix=f".{output.name}.", suffix=".xml", delete=False
+        ) as target:
             temporary = Path(target.name)
             target.write(data)
             target.flush()

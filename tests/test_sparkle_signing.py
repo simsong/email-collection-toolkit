@@ -10,7 +10,8 @@ import pytest
 
 from scripts.update_appcast import AppcastRelease, SPARKLE_HARDWARE, SPARKLE_MINIMUM_SYSTEM, SPARKLE_PRIVATE_KEY_SECRET, append_item, require_matching_key, sign_feed, signed_archive, signing_key, verify_signed_archive
 from scripts.check_appcast import check_appcast
-from scripts.sign_historical_appcast import FIRST_RELEASE, audit_legacy_feed
+import scripts.sign_historical_appcast as historical_signer
+from scripts.sign_historical_appcast import FIRST_RELEASE, audit_legacy_feed, sign_historical_appcast
 
 
 def test_historical_feed_audit_pins_a10_bytes_and_archive(tmp_path: Path) -> None:
@@ -34,6 +35,48 @@ def test_historical_feed_audit_pins_a10_bytes_and_archive(tmp_path: Path) -> Non
     for changed in mutations:
         with pytest.raises(ValueError, match="appcast bytes do not match"):
             audit_legacy_feed(changed, archive, release)
+
+
+def test_historical_signing_orchestration_preserves_source_and_creates_verified_output(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Issue #91: signing writes a separately verified feed and preserves pinned inputs."""
+    from Cryptodome.Signature import eddsa
+
+    signer = Path(__file__).parents[1] / ".tools/sparkle/2.10.0/bin/sign_update"
+    if not signer.exists():
+        pytest.skip("Sparkle developer tools are not installed; run make test-sparkle-signing")
+    monkeypatch.setenv(SPARKLE_PRIVATE_KEY_SECRET, base64.b64encode(bytes(range(32))).decode("ascii"))
+    public_key = base64.b64encode(
+        eddsa.import_private_key(bytes(range(32))).public_key().export_key(format="raw")
+    ).decode("ascii")
+    source = Path(__file__).parent / "fixtures/sparkle/v1.0.0a10-appcast.xml"
+    appcast = tmp_path / "appcast.xml"
+    appcast.write_bytes(source.read_bytes())
+    original = appcast.read_bytes()
+    archive = tmp_path / "v1.0.0a10.dmg"
+    with archive.open("wb") as handle:
+        handle.truncate(FIRST_RELEASE.archive_length)
+    output = tmp_path / "signed-appcast.xml"
+    verified_archives: list[tuple[Path, Path, str]] = []
+
+    def verify_fixture_archive(path: Path, tool: Path, _key: object, signature: str) -> None:
+        assert path == archive
+        assert tool == signer
+        verified_archives.append((path, tool, signature))
+
+    # The historical DMG is not checked in; its signature is independently covered
+    # by the real signer test above, so this test isolates feed-signing orchestration.
+    monkeypatch.setattr(historical_signer, "verify_signed_archive", verify_fixture_archive)
+    sign_historical_appcast(appcast, archive, output, signer, public_key=public_key)
+
+    assert appcast.read_bytes() == original
+    assert len(verified_archives) == 1
+    assert verified_archives[0][2] == FIRST_RELEASE.archive_signature
+    check_appcast(output, FIRST_RELEASE.tag, require_signed_feed=True, public_key=public_key)
+    assert b"<!-- sparkle-signatures:" in output.read_bytes()
+    with pytest.raises(ValueError, match="refusing to replace existing"):
+        sign_historical_appcast(appcast, archive, output, signer, public_key=public_key)
 
 
 def test_real_signer_accepts_exported_seed_on_standard_input(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
