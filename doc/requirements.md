@@ -1935,6 +1935,15 @@ Both main-push and release-triggered Pages paths must verify the embedded feed
 signature and its exact signed byte length before deploying an appcast. Feeds
 are bounded to 16 MiB; forged signing markers, wrong keys and post-signing edits
 must fail without rewriting authenticated bytes or requiring a private key.
+The one-time migration for the first published release must operate on
+downloaded copies, pin the known a10 item and original DMG metadata, verify the
+original Sparkle archive signature using the existing protected key, and
+authenticate the DMG's Developer ID seal, stapled notarization ticket, and
+Gatekeeper assessment. It must sign a distinct appcast output with the existing
+Sparkle key, verify the resulting XML signature with the embedded public key,
+and refuse to overwrite either source or an existing output. It must not upload,
+replace, or publish a GitHub release asset or Pages site; those remain separate
+reviewed operations.
 Release assembly may bootstrap from the tracked seed only when the pushed tag
 is the repository's sole `v*` tag; otherwise it must fail rather than reset
 update history when its previous published feed cannot be obtained. Any previous

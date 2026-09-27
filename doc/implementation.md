@@ -2616,6 +2616,15 @@ the embedded public Ed25519 key; its Makefile target provisions only pinned
 pycryptodomex through `uv --no-project`, with no release secret or native signer.
 Release assembly also verifies its previous published feed before appending or
 re-signing history; only the sole-tag first-release seed bypasses that gate.
+`make sign-historical-appcast RELEASE_TAG=v1.0.0a10 DMG=... APPCAST=... OUTPUT=...`
+is the reviewed, local-only migration for the original a10 history. It first
+mounts and tests the downloaded DMG, verifies its Developer ID signature,
+stapled ticket, and Gatekeeper acceptance, then checks the pinned Sparkle
+archive signature, exact release metadata, and protected-key match before
+writing a separately signed XML feed. The migration refuses an existing output
+and does not upload or publish anything; an operator must separately review and
+publish the resulting feed asset and Pages update. External release notes are
+not supported because they need their own Sparkle signature.
 The frozen controller/compiled delegate probe and real HTTPS standard-UI probe
 passed during development; these do not establish signed application replacement.
 [SPARKLE_UPDATES.md](SPARKLE_UPDATES.md) records validation targets and remaining
