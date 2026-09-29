@@ -2580,6 +2580,47 @@ requires it and fails clearly.
 
 ## Developer validation gates
 
+### Sparkle application integration
+
+`updates.py` holds typed updater status and exactly-once installation deferral.
+`sparkle.py` retains a PyObjC standard controller, formal channel delegate, and
+explicit block ABI metadata; Cocoa's main-thread timer resumes an idle reserved
+installation. `gui_app.py` adds native menu/preferences controls and coordinates
+quit, worker tails, and definition updates. `WriterLease` retains shared OS
+locks in a private same-user temporary guard directory for every writer,
+including CLI processes; definition refresh uses the same shared guard in both
+GUI and CLI paths, retaining its separate definition-generation lock.
+Installation retains an exclusive guard through resource
+shutdown until process exit or failure. Ordinary shutdown cancels any reservation.
+Writers on different archives remain concurrent. OS process death
+releases guards. The archive's existing exclusive lock still controls its writes.
+Raised continuation failures clear the update reservation and retain error state.
+Canceled or failed deferred installation also aborts its pending Quit; the Quit
+worker leaves windows open when cancellation wins or installation is underway.
+`make test-updates` exercises both deferred cancellation and a raised continuation
+after a real Quit request, then verifies definition work, archive creation and Quit retry.
+Application preferences version 2 migrates update choices and preserves them
+when recent archive paths change. `release_versions.py` supplies the build/appcast
+mapper to runtime and release code; Cocoa uses its numeric build value.
+
+`sparkle_bundle.py` preserves and signs Sparkle's framework/helpers and includes
+the upstream notice file. `update_appcast.py` verifies the release key against
+the app's public key, signs/verifies the stapled DMG, adds embedded notes/minimum
+macOS metadata, and signs/verifies the complete XML. Publisher and signer-test
+Makefile targets explicitly select packaging dependencies; ordinary test dependencies
+also declare the cryptographic library directly. Release/Pages gates require
+public-key verification of exact feed bytes and signed length on both main-push
+and release-triggered deployment without rewriting signed bytes. The checker
+accepts the pinned Sparkle signing-block format, bounds input to 16 MiB and uses
+the embedded public Ed25519 key; its Makefile target provisions only pinned
+pycryptodomex through `uv --no-project`, with no release secret or native signer.
+Release assembly also verifies its previous published feed before appending or
+re-signing history; only the sole-tag first-release seed bypasses that gate.
+The frozen controller/compiled delegate probe and real HTTPS standard-UI probe
+passed during development; these do not establish signed application replacement.
+[SPARKLE_UPDATES.md](SPARKLE_UPDATES.md) records validation targets and remaining
+production acceptance, with macOS 15/arm64 as the configured initial target.
+
 Scanner deadline and helper-execution regressions use real POSIX subprocesses
 and explicitly skip Windows before importing the `fcntl`-based scanner. They do not establish Windows
 scanner support. Pages release-trigger checks parse YAML rather than relying on

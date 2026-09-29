@@ -4,6 +4,21 @@
 
 ## Unreleased
 
+- Sparkle installation now waits for CLI writers as well as GUI work, restores
+  writers and cancels pending Quit after update errors, retains its guard through resource shutdown,
+  and explicitly selects publisher and test dependencies. Both Pages deployment
+  paths authenticate the feed with the embedded public key; release assembly
+  authenticates previous history before appending or re-signing it. CLI virus-definition
+  updates now hold the shared application guard as GUI updates do.
+
+* Integrate Sparkle 2.10.0 into the frozen macOS app with native Updates
+  preferences, release/preview tracks, daily checks, and standard update UI.
+  Retain update preferences across archive changes. Defer installation until
+  writers, worker tails, and definition updates finish; exclude new writes during
+  replacement. Sign the complete feed and verify its key matches the application.
+  Signed/notarized older-to-newer replacement acceptance remains required before
+  declaring issue #91 complete; see `SPARKLE_UPDATES.md`.
+
 * Run an unsigned mounted-DMG smoke test on the macOS CI runner before release
   tagging. Both the mounted updater check and definition updates supply a
   temporary FreshClam configuration instead of requiring the host's config.

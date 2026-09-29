@@ -106,6 +106,12 @@ public binary release.
 
 ## Rust importer and PST fixtures
 
+The macOS application also bundles Sparkle 2.10.0 from the exact developer
+archive pinned by SHA-256 in the Makefile. Its complete `LICENSE`, including MIT
+and bundled dependency notices, is copied to `Third Party Notices/Sparkle-LICENSE.txt`.
+The framework and helpers are retained as native code; the Python-only runtime
+inventory does not replace review of these upstream notices.
+
 The standalone `pst-importer` uses Microsoft's MIT-licensed `outlook-pst` 1.2.0;
 its exact transitive dependency versions/checksums are pinned in `Cargo.lock`.
 The current Python runtime-license commands do not audit Rust dependencies.

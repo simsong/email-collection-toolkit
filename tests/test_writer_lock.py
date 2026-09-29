@@ -96,8 +96,59 @@ def test_writer_lease_releases_after_forced_process_death(tmp_path: Path) -> Non
     child.kill()
     child.wait(timeout=10)
 
+    assert WriterLease.reserve_update()
+    WriterLease.cancel_update()
     lease = acquire(archive, "after-crash")
     lease.release()
+
+
+def test_update_reservation_waits_for_external_writer_and_blocks_external_creation(tmp_path: Path) -> None:
+    """Issue #91: a real child writer delays relaunch; reservation excludes new CLI writes."""
+    archive = tmp_path / "external"
+    archive.mkdir()
+    holder = (
+        "import sys\n"
+        "from pathlib import Path\n"
+        "from mailarchiver.writer_lock import WriterLease\n"
+        "lease=WriterLease.acquire(Path(sys.argv[1]),'fixture','child','fixture','test')\n"
+        "print('locked',flush=True)\n"
+        "sys.stdin.readline()\n"
+        "lease.release()\n"
+    )
+    child = subprocess.Popen([sys.executable, "-c", holder, str(archive)],
+                             stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    try:
+        assert child.stdout is not None
+        assert child.stdout.readline().strip() == "locked"
+        assert WriterLease.writers_active()
+        assert not WriterLease.reserve_update()
+    finally:
+        assert child.stdin is not None
+        child.stdin.write("release\n")
+        child.stdin.flush()
+        child.wait(timeout=10)
+    assert child.returncode == 0, child.stderr.read() if child.stderr else ""
+    assert not WriterLease.writers_active()
+    assert WriterLease.reserve_update()
+    blocked = tmp_path / "must-not-exist"
+    creator = (
+        "import sys\n"
+        "from pathlib import Path\n"
+        "from mailarchiver.writer_lock import ArchiveBusyError,WriterLease\n"
+        "try: WriterLease.acquire(Path(sys.argv[1]),'fixture','create','fixture','test',create=True)\n"
+        "except ArchiveBusyError: print('blocked')\n"
+        "else: sys.exit(1)\n"
+    )
+    try:
+        result = subprocess.run([sys.executable, "-c", creator, str(blocked)],
+                                capture_output=True, text=True, check=False, timeout=10)
+        assert result.returncode == 0, result.stderr
+        assert result.stdout.strip() == "blocked"
+        assert not blocked.exists()
+    finally:
+        WriterLease.cancel_update()
+    with WriterLease.acquire(blocked, "fixture", "create", "recovered", "test", create=True):
+        assert blocked.is_dir()
 
 
 def test_cli_refresh_index_uses_the_same_writer_lease(tmp_path: Path) -> None:

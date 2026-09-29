@@ -18,6 +18,7 @@ import time
 from importlib import import_module
 from pathlib import Path
 from threading import Event, Timer, current_thread, enumerate as enumerate_threads
+from uuid import uuid4
 
 from pydantic import BaseModel, Field
 
@@ -103,8 +104,16 @@ def exercise_gui(archive: Path, directory: Path, report: SelfTestReport) -> None
     from .gui_app import AboutStatus, GUI_DIRECTORY, PyWebViewApplication, configure_macos_application, install_macos_document_events  # pylint: disable=import-outside-toplevel
     from .loopback import LoopbackAssetServer  # pylint: disable=import-outside-toplevel
 
+    # Sparkle also has native preferences. Keep packaged GUI checks in a unique
+    # fixture domain, without changing the installed application's saved choice.
+    foundation = import_module("Foundation")
+    defaults_domain = f"net.simson.mailarchiver.self-test.{uuid4().hex}"
+    domain_key, checks_key = "SUDefaultsDomain", "SUEnableAutomaticChecks"
+    info = foundation.NSBundle.mainBundle().infoDictionary()
+    info[domain_key], info[checks_key] = defaults_domain, False
     configure_macos_application()
     controller = ApplicationController(ApplicationPreferencesStore(directory / "preferences.json"))
+    controller.configure_updates("preview", False)
     application = PyWebViewApplication(controller, LoopbackAssetServer(GUI_DIRECTORY))
     install_macos_document_events(application)
     application.create_about_window()
@@ -169,6 +178,15 @@ def exercise_gui(archive: Path, directory: Path, report: SelfTestReport) -> None
                         raise AssertionError("native menu order is incorrect")
                     if menu.itemWithTitle_("File").submenu().itemWithTitle_("Open…").keyEquivalent() != "o":
                         raise AssertionError("Command-O is not bound to Open")
+                    application_menu = menu.itemAtIndex_(0).submenu()
+                    preferences_item = application_menu.itemWithTitle_("Preferences…")
+                    if preferences_item is None or preferences_item.keyEquivalent() != ",":
+                        raise AssertionError("Command-comma is not bound to Updates preferences")
+                    if application_menu.itemWithTitle_("Check for Updates…") is None:
+                        raise AssertionError("Native update-check command is missing")
+                    build_key = "CFBundleVersion"
+                    if not foundation.NSBundle.mainBundle().infoDictionary()[build_key].isdigit():
+                        raise AssertionError("Cocoa replaced the numeric Sparkle build version")
                 except Exception as error:  # pylint: disable=broad-exception-caught
                     failures.append(str(error))
                 finally:
@@ -182,6 +200,7 @@ def exercise_gui(archive: Path, directory: Path, report: SelfTestReport) -> None
             if application._import_document(api):  # pylint: disable=protected-access
                 raise AssertionError("canceling import started a job")
             report.checks.append("native import picker banner and cancellation; Finder handler; menu order and Command-O")
+            report.checks.append("native Updates menu, Command-comma, and numeric Sparkle build")
         except Exception as error:  # pylint: disable=broad-exception-caught
             failures.append(f"{type(error).__name__}: {error}")
         finally:
@@ -195,6 +214,7 @@ def exercise_gui(archive: Path, directory: Path, report: SelfTestReport) -> None
         webview.start(func=check, http_server=False, private_mode=True, menu=application.menu())
     finally:
         application.shutdown()
+        foundation.NSUserDefaults.standardUserDefaults().removePersistentDomainForName_(defaults_domain)
     if failures:
         raise AssertionError("; ".join(failures))
 

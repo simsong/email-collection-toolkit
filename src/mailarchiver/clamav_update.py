@@ -17,6 +17,7 @@ from pydantic import BaseModel
 
 from .clamav_definitions import DEVELOPMENT_DATABASE, PREFIXES, ActiveDefinitions, DefinitionSet, certificates_path, read_definitions, selected_definitions, update_root, updater_path
 from .scanner import ClamScanner
+from .writer_lock import application_write_activity
 
 EICAR = b"X5O!P%@AP[4\\PZX54(P^)7CC)7}$EICAR-STANDARD-ANTIVIRUS-TEST-FILE!$H+H*"
 
@@ -99,7 +100,7 @@ def publish_definitions(staging: Path, root: Path, baseline: DefinitionSet) -> U
 
 def refresh_definitions() -> UpdateResult:
     root = update_root()
-    with update_lock(root):
+    with application_write_activity(), update_lock(root):
         baseline = selected_definitions()
         with tempfile.TemporaryDirectory(prefix=".update-", dir=root) as temporary:
             workspace = Path(temporary)
@@ -125,6 +126,12 @@ def refresh_definitions() -> UpdateResult:
 
 
 def refresh_development() -> UpdateResult:
+    """Fence developer definition changes against application replacement too."""
+    with application_write_activity():
+        return _refresh_development()
+
+
+def _refresh_development() -> UpdateResult:
     """Seed the project copy from an installed database, then update it in place."""
     directory = DEVELOPMENT_DATABASE
     directory.mkdir(parents=True, exist_ok=True)

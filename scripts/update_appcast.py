@@ -7,6 +7,7 @@ from __future__ import annotations
 import argparse
 import base64
 import binascii
+import html
 import os
 import subprocess
 import tomllib
@@ -17,10 +18,9 @@ from pathlib import Path
 
 from pydantic import BaseModel, Field, SecretStr
 
-try:
-    from scripts.release_tag import PREVIEW_CHANNEL, release_metadata
-except ModuleNotFoundError:  # Direct execution makes scripts/ the import root.
-    from release_tag import PREVIEW_CHANNEL, release_metadata
+from mailarchiver.release_versions import PREVIEW_CHANNEL, release_metadata
+from mailarchiver.update_metadata import MINIMUM_MACOS_VERSION
+from mailarchiver.update_metadata import SPARKLE_PUBLIC_KEY
 
 ROOT = Path(__file__).resolve().parents[1]
 SPARKLE_NAMESPACE = "http://www.andymatuschak.org/xml-namespaces/sparkle"
@@ -28,6 +28,8 @@ SPARKLE_SIGNATURE = f"{{{SPARKLE_NAMESPACE}}}edSignature"
 SPARKLE_VERSION = f"{{{SPARKLE_NAMESPACE}}}version"
 SPARKLE_SHORT_VERSION = f"{{{SPARKLE_NAMESPACE}}}shortVersionString"
 SPARKLE_CHANNEL = f"{{{SPARKLE_NAMESPACE}}}channel"
+SPARKLE_MINIMUM_SYSTEM = f"{{{SPARKLE_NAMESPACE}}}minimumSystemVersion"
+SPARKLE_HARDWARE = f"{{{SPARKLE_NAMESPACE}}}hardwareRequirements"
 SPARKLE_PRIVATE_KEY_SECRET = "SPARKLE_ED25519_PRIVATE_KEY_BASE64"
 OCTET_STREAM = "application/octet-stream"
 
@@ -48,6 +50,8 @@ class AppcastRelease(BaseModel):
     display_version: str
     url: str
     archive: SignedArchive
+    minimum_system: str = MINIMUM_MACOS_VERSION
+    release_notes: str = ""
 
 
 def signing_key() -> SecretStr:
@@ -57,9 +61,23 @@ def signing_key() -> SecretStr:
         decoded = base64.b64decode(value.get_secret_value(), validate=True)
     except (ValueError, binascii.Error):
         raise ValueError("Sparkle update-signing secret is not valid Base64") from None
-    if len(decoded) not in (32, 64):
-        raise ValueError("Sparkle update-signing secret is not an Ed25519 private key")
+    if len(decoded) != 32:
+        raise ValueError("Release signing requires a 32-byte Sparkle seed; legacy expanded keys need a reviewed migration")
     return value
+
+
+def require_matching_key(key: SecretStr, expected_public_key: str) -> None:
+    """Reject a release key that existing installed applications cannot authenticate."""
+    from Cryptodome.Signature import eddsa  # pylint: disable=import-outside-toplevel
+
+    seed = base64.b64decode(key.get_secret_value(), validate=True)
+    # Sparkle 2.10 common_cli/Secret.swift decodes modern exports as 32-byte seeds.
+    # sign_update/main.swift retains an obsolete 64/96-byte diagnostic on failure.
+    if len(seed) != 32:
+        raise ValueError("Release signing requires a 32-byte Sparkle seed; legacy expanded keys need a reviewed migration")
+    public = eddsa.import_private_key(seed).public_key().export_key(format="raw")
+    if base64.b64encode(public).decode("ascii") != expected_public_key:
+        raise ValueError("Sparkle release signing key does not match the application's embedded public key")
 
 
 def signed_archive(archive: Path, signer: Path, key: SecretStr) -> SignedArchive:
@@ -103,6 +121,10 @@ def append_item(appcast: Path, release: AppcastRelease) -> None:
     xml.SubElement(item, "guid").text = release.tag
     xml.SubElement(item, SPARKLE_VERSION).text = str(release.sparkle_version)
     xml.SubElement(item, SPARKLE_SHORT_VERSION).text = release.display_version
+    xml.SubElement(item, SPARKLE_MINIMUM_SYSTEM).text = release.minimum_system
+    xml.SubElement(item, SPARKLE_HARDWARE).text = "arm64"
+    if release.release_notes:
+        xml.SubElement(item, "description").text = f"<pre>{html.escape(release.release_notes)}</pre>"
     if release.channel == PREVIEW_CHANNEL:
         xml.SubElement(item, SPARKLE_CHANNEL).text = PREVIEW_CHANNEL
     xml.SubElement(item, "pubDate").text = format_datetime(datetime.now(UTC), usegmt=True)
@@ -111,6 +133,17 @@ def append_item(appcast: Path, release: AppcastRelease) -> None:
     channel.insert(0, item)
     xml.indent(document, space="  ")
     document.write(appcast, encoding="utf-8", xml_declaration=True)
+
+
+def sign_feed(appcast: Path, signer: Path, key: SecretStr) -> None:
+    """Sign the XML itself, then verify Sparkle's embedded signature before publication."""
+    environment = {name: value for name, value in os.environ.items() if name != SPARKLE_PRIVATE_KEY_SECRET}
+    for options in ([], ["--verify"]):
+        result = subprocess.run([signer, "--ed-key-file", "-", *options, appcast],
+                                input=key.get_secret_value(), capture_output=True, text=True,
+                                check=False, env=environment)
+        if result.returncode:
+            raise RuntimeError("Sparkle feed signature verification failed" if options else "Sparkle feed signing failed")
 
 
 def main() -> None:
@@ -125,9 +158,13 @@ def main() -> None:
     expected_tag, channel, sparkle_version, display_version = release_metadata(version)
     if args.tag != expected_tag:
         parser.error(f"{args.tag} does not match expected release tag {expected_tag}")
+    key = signing_key()
+    require_matching_key(key, SPARKLE_PUBLIC_KEY)
     append_item(args.appcast, AppcastRelease(tag=args.tag, channel=channel, sparkle_version=sparkle_version,
                                              display_version=display_version, url=args.url,
-                                             archive=signed_archive(args.archive, args.signer, signing_key())))
+                                             release_notes=(ROOT / "doc/RELEASE_NOTES.md").read_text(encoding="utf-8"),
+                                             archive=signed_archive(args.archive, args.signer, key)))
+    sign_feed(args.appcast, args.signer, key)
 
 
 if __name__ == "__main__":

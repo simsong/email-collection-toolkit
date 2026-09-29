@@ -2,6 +2,11 @@
 
 # macOS application and DMG
 
+The Sparkle runtime, track preferences, native lifecycle, release-key matching,
+whole-feed signing, and update acceptance are documented in
+[SPARKLE_UPDATES.md](SPARKLE_UPDATES.md). The configured first update target is
+macOS 15/arm64; compatibility with other targets requires artifact testing.
+
 Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved.
 
 ## Build and test
