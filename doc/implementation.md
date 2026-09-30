@@ -2634,7 +2634,8 @@ the test script with the current absolute Python interpreter and a fixed
 `PATH`, avoiding a caller-provided `make`; normal
 `make test-dmg` still mounts its own image. The DMG attach/detach, app seal,
 native dependency probes, and mounted executable tests share a filtered
-environment without release credentials or Python/loader/archive overrides. The signer receives
+environment without release credentials, Python/loader/archive overrides, or
+Apple toolchain-selection variables. The signer receives
 the Sparkle key on standard input while Apple credentials and those overrides
 are excluded. `make update-appcast` sets the checkout root on `PYTHONPATH` so
 its direct script entrypoint can import the shared signing filter. The migration

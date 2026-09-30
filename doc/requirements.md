@@ -1954,8 +1954,11 @@ must invoke the mounted test through a fixed trusted interpreter and script,
 without resolving its driver through caller-controlled `PATH`. Trust and test
 subprocesses, including image attach/detach, app seal checks, and dependency
 probes, must exclude release credentials and inherited Python/loader/archive
-overrides. Sparkle signer subprocesses
-must exclude Apple credentials and those overrides. It must sign a distinct
+overrides. Native trust checks must also exclude Apple toolchain-selection
+variables. Sparkle signer subprocesses must exclude Apple credentials and
+those overrides. It must verify the cached Sparkle signer against each
+required member of the pinned archive, checking extraction status before
+comparison. It must sign a distinct
 appcast output with the existing Sparkle key, verify the resulting XML
 signature with the embedded public key,
 and refuse to overwrite either source or an existing output. It must not upload,

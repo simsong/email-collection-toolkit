@@ -55,7 +55,8 @@ def test_historical_trust_checks_precede_execution_and_stop_on_failure(
     commands: list[list[str]] = []
     for name in RELEASE_SECRET_NAMES:
         monkeypatch.setenv(name, "fixture-secret")
-    for name in ("PYTHONPATH", "DYLD_INSERT_LIBRARIES", "LD_PRELOAD", "ARCHIVE_OVERRIDE"):
+    for name in ("PYTHONPATH", "DYLD_INSERT_LIBRARIES", "LD_PRELOAD", "ARCHIVE_OVERRIDE",
+                 "DEVELOPER_DIR", "TOOLCHAINS", "SDKROOT", "CODESIGN_ALLOCATE"):
         monkeypatch.setenv(name, "fixture-override")
 
     @contextmanager
@@ -69,7 +70,9 @@ def test_historical_trust_checks_precede_execution_and_stop_on_failure(
         assert check
         assert all(name not in env for name in RELEASE_SECRET_NAMES)
         assert all(name not in env for name in
-                   ("PYTHONPATH", "DYLD_INSERT_LIBRARIES", "LD_PRELOAD", "ARCHIVE_OVERRIDE"))
+                   ("PYTHONPATH", "DYLD_INSERT_LIBRARIES", "LD_PRELOAD", "ARCHIVE_OVERRIDE",
+                    "DEVELOPER_DIR", "TOOLCHAINS", "SDKROOT", "CODESIGN_ALLOCATE"))
+        assert env["PATH"] == "/usr/bin:/bin:/usr/sbin:/sbin"
         assert cwd is None
         index = len(commands)
         commands.append(command)
@@ -228,6 +231,33 @@ def test_sparkle_tools_rejects_a_modified_cached_signer(tmp_path: Path) -> None:
     rejected = subprocess.run(command, cwd=repository, capture_output=True, text=True, check=False)
     assert rejected.returncode != 0
     assert "cached Sparkle tool differs from verified archive: sign_update" in rejected.stderr
+
+
+def test_sparkle_tools_rejects_missing_member_with_empty_cached_executable(tmp_path: Path) -> None:
+    """Issue #91: an absent tar member cannot pass comparison with an empty cache file."""
+    repository = Path(__file__).parents[1]
+    downloads = tmp_path / "downloads"
+    downloads.mkdir()
+    archive = downloads / "Sparkle-2.10.0.tar.xz"
+    data = b"key generator"
+    with tarfile.open(archive, "w:xz") as bundle:
+        member = tarfile.TarInfo("./bin/generate_keys")
+        member.mode = 0o755
+        member.size = len(data)
+        bundle.addfile(member, io.BytesIO(data))
+    tools = tmp_path / "sparkle/bin"
+    tools.mkdir(parents=True)
+    (tools / "generate_keys").write_bytes(data)
+    (tools / "generate_keys").chmod(0o700)
+    (tools / "sign_update").touch(mode=0o700)
+    result = subprocess.run(
+        ["make", "sparkle-tools", f"SPARKLE_DOWNLOAD_DIR={downloads}",
+         f"SPARKLE_DIR={tools.parent}",
+         f"SPARKLE_SHA256={hashlib.sha256(archive.read_bytes()).hexdigest()}"],
+        cwd=repository, capture_output=True, text=True, check=False,
+    )
+    assert result.returncode != 0
+    assert "verified Sparkle archive is missing tool: sign_update" in result.stderr
 
 
 def test_historical_signing_orchestration_preserves_source_and_creates_verified_output(

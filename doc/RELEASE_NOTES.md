@@ -17,6 +17,8 @@
   Mounted-image native probes also exclude release credentials.
   The migration pins the mounted app version and invokes its test through a
   fixed interpreter and script.
+  Cached Sparkle tools are compared only after each pinned archive member
+  extracts successfully; Apple toolchain overrides are excluded from trust checks.
 
 * Integrate Sparkle 2.10.0 into the frozen macOS app with native Updates
   preferences, release/preview tracks, daily checks, and standard update UI.

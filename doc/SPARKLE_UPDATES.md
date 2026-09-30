@@ -94,8 +94,9 @@ app-level Gatekeeper acceptance. It checks the mounted app key and bundle
 versions against the reviewed a10 release, then verifies the Sparkle
 archive signature, then runs the headless self-test against that same
 read-only mount through a fixed interpreter and script. Trust, native dependency probes,
-and self-test subprocesses receive no release credentials
-or inherited Python/loader/archive overrides; the signer receives no Apple
+and self-test subprocesses receive no release credentials,
+Python/loader/archive overrides, or Apple toolchain-selection variables;
+the signer receives no Apple
 credentials. The mounted app's `SUPublicEDKey` must match the archive/feed key
 before testing or loading the protected Sparkle key. It signs the complete
 feed with that key.

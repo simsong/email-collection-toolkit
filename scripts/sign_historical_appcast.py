@@ -168,6 +168,7 @@ def mounted_historical_dmg(dmg: Path) -> Iterator[Path]:
     mount = temporary / "mounted"
     mount.mkdir()
     environment = release_safe_environment(os.environ, NATIVE_TRUST_ENV_PREFIXES)
+    environment["PATH"] = "/usr/bin:/bin:/usr/sbin:/sbin"
     try:
         attached = subprocess.run(
             ["/usr/bin/hdiutil", "attach", "-readonly", "-nobrowse", "-mountpoint", str(mount), str(dmg)],
@@ -200,6 +201,7 @@ def mounted_historical_dmg(dmg: Path) -> Iterator[Path]:
 def verify_historical_app_key(archive: Path, public_key: str) -> Iterator[Path]:
     """Keep the authenticated image mounted through the executable test."""
     environment = release_safe_environment(os.environ, NATIVE_TRUST_ENV_PREFIXES)
+    environment["PATH"] = "/usr/bin:/bin:/usr/sbin:/sbin"
     subprocess.run(["/usr/bin/codesign", "--verify", "--strict", str(archive)],
                    check=True, env=environment)
     subprocess.run(["/usr/bin/xcrun", "stapler", "validate", str(archive)],

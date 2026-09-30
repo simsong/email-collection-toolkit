@@ -521,6 +521,10 @@ channel; stable releases use the default channel. The release parser accepts
 only canonical `MAJOR.MINOR.PATCH`, `MAJOR.MINOR.PATCHaN`, or
 `MAJOR.MINOR.PATCHbN` versions and rejects all other forms. Sparkle uses a
 separate increasing internal build number solely to order updates.
+Historical-feed native trust checks discard inherited `DEVELOPER_DIR`,
+`TOOLCHAINS`, `SDKROOT`, and `CODESIGN_ALLOCATE` because those variables can
+select Apple toolchain components. Release jobs use their configured toolchain
+outside that historical verification boundary.
 
 ## Test
 

@@ -175,8 +175,11 @@ sparkle-tools:
 	@printf '%s  %s\n' "$(SPARKLE_SHA256)" "$(SPARKLE_ARCHIVE)" | shasum -a 256 -c -
 	@if test -e "$(SPARKLE_DIR)"; then \
 		test -x "$(SPARKLE_DIR)/bin/generate_keys" -a -x "$(SPARKLE_DIR)/bin/sign_update" || { echo "incomplete Sparkle tools directory: $(SPARKLE_DIR)" >&2; exit 1; }; \
+		verified=$$(mktemp "$(SPARKLE_DOWNLOAD_DIR)/.sparkle-verify.XXXXXX") || exit 1; \
+		trap 'rm -f "$$verified"' 0; \
 		for tool in generate_keys sign_update; do \
-			tar -xOf "$(SPARKLE_ARCHIVE)" "./bin/$$tool" | cmp - "$(SPARKLE_DIR)/bin/$$tool" || { echo "cached Sparkle tool differs from verified archive: $$tool" >&2; exit 1; }; \
+			tar -xOf "$(SPARKLE_ARCHIVE)" "./bin/$$tool" > "$$verified" || { echo "verified Sparkle archive is missing tool: $$tool" >&2; exit 1; }; \
+			cmp "$$verified" "$(SPARKLE_DIR)/bin/$$tool" || { echo "cached Sparkle tool differs from verified archive: $$tool" >&2; exit 1; }; \
 		done; \
 	else \
 		mkdir -p "$(SPARKLE_DIR)"; \
@@ -196,7 +199,9 @@ update-appcast: sparkle-tools
 .PHONY: sign-historical-appcast
 # This local migration requires SPARKLE_ED25519_PRIVATE_KEY_BASE64 for feed
 # signing; Apple Developer ID/notary credentials are used by release jobs only.
-# Native trust checks and Sparkle signer subprocesses exclude unrelated secrets.
+# Native trust checks ignore DEVELOPER_DIR, TOOLCHAINS, SDKROOT, and
+# CODESIGN_ALLOCATE so inherited Apple toolchain overrides cannot redirect them.
+# Sparkle signer subprocesses exclude unrelated release secrets.
 sign-historical-appcast: sparkle-tools
 	@test "$(RELEASE_TAG)" = v1.0.0a10 || { echo 'this reviewed migration supports only RELEASE_TAG=v1.0.0a10' >&2; exit 2; }
 	@test -n "$(DMG)" -a -n "$(APPCAST)" -a -n "$(OUTPUT)" || { echo 'usage: make sign-historical-appcast RELEASE_TAG=v1.0.0a10 DMG=/path/to/original.dmg APPCAST=/path/to/downloaded/appcast.xml OUTPUT=/path/to/new-signed-appcast.xml'; exit 2; }
