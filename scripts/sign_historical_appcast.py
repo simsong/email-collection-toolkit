@@ -1,8 +1,8 @@
 # Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved.
 # Migrate the one reviewed unsigned historical Sparkle feed.
 # Pin the published XML bytes and release metadata before touching keys.
-# Authenticate one private DMG copy and app, then test that mount.
-# Verify the archive signature and sign a separate feed copy.
+# Authenticate one private DMG copy and app, checking version and key.
+# Test the trusted mount via a fixed interpreter, then sign a feed copy.
 # Never change the downloaded sources or publish an asset here.
 
 """Audit and sign the first unsigned Sparkle appcast without changing its source."""
@@ -17,6 +17,7 @@ import os
 import plistlib
 import shutil
 import subprocess
+import sys
 import tempfile
 import time
 import xml.etree.ElementTree as xml
@@ -44,6 +45,8 @@ FEED_URL = "https://simsong.github.io/email-collection-toolkit/updates/mac/appca
 ARCHIVE_MEDIA_TYPE = "application/octet-stream"
 APP_NAME = "Email Collection Toolkit"
 PLIST_SPARKLE_PUBLIC_KEY = "SUPublicEDKey"
+PLIST_BUNDLE_VERSION = "CFBundleVersion"
+PLIST_SHORT_VERSION = "CFBundleShortVersionString"
 FIRST_RELEASE_FEED_SHA256 = "de6d09cdc3e2efa508de9ba83d7701addd046660b18bcd3dcf3d5cb49efd8403"
 
 
@@ -144,7 +147,7 @@ def audit_legacy_feed(data: bytes, archive: Path, release: HistoricalRelease) ->
 
 
 def verify_embedded_app_key(app: Path, public_key: str) -> None:
-    """Require the mounted app to trust the same key as its archive and feed."""
+    """Require the mounted app to match the reviewed version and signing key."""
     info_path = app / "Contents/Info.plist"
     try:
         with info_path.open("rb") as source:
@@ -153,6 +156,9 @@ def verify_embedded_app_key(app: Path, public_key: str) -> None:
         raise ValueError("cannot read historical app Sparkle key") from error
     if not isinstance(info, dict) or info.get(PLIST_SPARKLE_PUBLIC_KEY) != public_key:
         raise ValueError("historical app Sparkle public key does not match the archive and feed key")
+    if (info.get(PLIST_BUNDLE_VERSION) != str(FIRST_RELEASE.sparkle_version)
+            or info.get(PLIST_SHORT_VERSION) != FIRST_RELEASE.display_version):
+        raise ValueError("historical app version does not match the reviewed a10 release")
 
 
 @contextmanager
@@ -212,9 +218,12 @@ def verify_historical_app_key(archive: Path, public_key: str) -> Iterator[Path]:
 
 def test_verified_mount(mount: Path, archive: Path) -> None:
     """Run the full mounted test against the app authenticated above."""
-    subprocess.run(["make", "test-mounted-dmg", f"DMG={archive}", f"MOUNT={mount}"],
-                   cwd=Path(__file__).parents[1], check=True,
-                   env=release_safe_environment(os.environ, NATIVE_TRUST_ENV_PREFIXES))
+    environment = release_safe_environment(os.environ, NATIVE_TRUST_ENV_PREFIXES)
+    environment["PATH"] = "/usr/bin:/bin:/usr/sbin:/sbin"
+    subprocess.run([str(Path(sys.executable).resolve(strict=True)),
+                    str(Path(__file__).with_name("build_macos.py")),
+                    "--test-mounted-dmg", str(mount), "--source-dmg", str(archive)],
+                   cwd=Path(__file__).parents[1], check=True, env=environment)
 
 
 @contextmanager

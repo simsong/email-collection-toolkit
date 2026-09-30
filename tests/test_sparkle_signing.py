@@ -39,7 +39,11 @@ def test_historical_trust_checks_precede_execution_and_stop_on_failure(
     app = mount / f"{historical_signer.APP_NAME}.app"
     info = app / "Contents/Info.plist"
     info.parent.mkdir(parents=True)
-    info.write_bytes(plistlib.dumps({historical_signer.PLIST_SPARKLE_PUBLIC_KEY: "fixture-public-key"}))
+    info.write_bytes(plistlib.dumps({
+        historical_signer.PLIST_SPARKLE_PUBLIC_KEY: "fixture-public-key",
+        historical_signer.PLIST_BUNDLE_VERSION: str(FIRST_RELEASE.sparkle_version),
+        historical_signer.PLIST_SHORT_VERSION: FIRST_RELEASE.display_version,
+    }))
     expected = [
         ["/usr/bin/codesign", "--verify", "--strict", str(archive)],
         ["/usr/bin/xcrun", "stapler", "validate", str(archive)],
@@ -143,7 +147,7 @@ def test_private_historical_copy_rejects_mutation(tmp_path: Path) -> None:
 
 
 def test_historical_app_info_plist_requires_matching_sparkle_key(tmp_path: Path) -> None:
-    """Issue #91: the installed historical app must trust the key that signs its feed."""
+    """Issue #91: mounted app key and versions must match the reviewed feed."""
     import plistlib
     from scripts.sign_historical_appcast import verify_embedded_app_key
 
@@ -151,10 +155,50 @@ def test_historical_app_info_plist_requires_matching_sparkle_key(tmp_path: Path)
     info_path = app / "Contents/Info.plist"
     info_path.parent.mkdir(parents=True)
     public_key = "fixture-public-key"
-    info_path.write_bytes(plistlib.dumps({"SUPublicEDKey": public_key}))
+    values = {
+        historical_signer.PLIST_SPARKLE_PUBLIC_KEY: public_key,
+        historical_signer.PLIST_BUNDLE_VERSION: str(FIRST_RELEASE.sparkle_version),
+        historical_signer.PLIST_SHORT_VERSION: FIRST_RELEASE.display_version,
+    }
+    info_path.write_bytes(plistlib.dumps(values))
     verify_embedded_app_key(app, public_key)
     with pytest.raises(ValueError, match="does not match"):
         verify_embedded_app_key(app, "different-public-key")
+    for field in (historical_signer.PLIST_BUNDLE_VERSION, historical_signer.PLIST_SHORT_VERSION):
+        changed = dict(values)
+        changed[field] = "wrong-version"
+        info_path.write_bytes(plistlib.dumps(changed))
+        with pytest.raises(ValueError, match="version does not match"):
+            verify_embedded_app_key(app, public_key)
+
+
+def test_historical_mount_test_does_not_run_make_from_path(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Issue #91: PATH substitution cannot turn the mounted test into a no-op."""
+    bin_directory = tmp_path / "bin"
+    bin_directory.mkdir()
+    marker = tmp_path / "fake-make-ran"
+    fake_make = bin_directory / "make"
+    fake_make.write_text(
+        "#!/bin/sh\n"
+        "# This disposable fixture impersonates make in PATH.\n"
+        "# It records an invocation instead of testing a mounted app.\n"
+        "# The historical migration must never execute this file.\n"
+        "# Its marker detects a silently skipped trust test.\n"
+        "# The test uses an unmounted path so the real driver fails.\n"
+        f"touch {marker}\n",
+        encoding="utf-8",
+    )
+    fake_make.chmod(0o700)
+    monkeypatch.setenv("PATH", str(bin_directory))
+    mount = tmp_path / "not-mounted"
+    archive = tmp_path / "not-a-dmg"
+    mount.mkdir()
+    archive.write_bytes(b"fixture")
+    with pytest.raises(subprocess.CalledProcessError):
+        historical_signer.test_verified_mount(mount, archive)
+    assert not marker.exists()
 
 
 def test_sparkle_tools_rejects_a_modified_cached_signer(tmp_path: Path) -> None:

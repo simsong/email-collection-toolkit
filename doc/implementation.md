@@ -2623,12 +2623,15 @@ is the reviewed, local-only migration for the original a10 history. The Python
 orchestrator verifies the DMG seal, stapled ticket, and Gatekeeper acceptance
 before mounting it read-only. It verifies the app seal with nested-code checks
 and app-level Gatekeeper acceptance before execution. The mounted app's
-`SUPublicEDKey` must match the signing key before the private key is loaded.
+`SUPublicEDKey`, `CFBundleVersion`, and `CFBundleShortVersionString` must match
+the signing key and reviewed a10 version before the private key is loaded.
 The downloaded DMG is streamed into an owner-private, read-only temporary copy.
 Image trust, mounting, Sparkle signature verification, and the internal
 `make test-mounted-dmg` self-test use that single copy, whose digest is checked
 again before output signing. The pinned Sparkle archive signature is checked
-before the self-test exercises that same read-only mount; normal
+before the self-test exercises that same read-only mount. The migration invokes
+the test script with the current absolute Python interpreter and a fixed
+`PATH`, avoiding a caller-provided `make`; normal
 `make test-dmg` still mounts its own image. The DMG attach/detach, app seal,
 native dependency probes, and mounted executable tests share a filtered
 environment without release credentials or Python/loader/archive overrides. The signer receives

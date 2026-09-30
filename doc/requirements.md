@@ -1940,7 +1940,8 @@ The one-time migration for the first published release must operate on
 downloaded copies, pin the complete known a10 feed by SHA-256 as well as its
 release metadata and original DMG metadata, verify the
 original Sparkle archive signature using the existing protected key, require
-the mounted app's `SUPublicEDKey` to match that key, and authenticate the DMG's
+the mounted app's `SUPublicEDKey`, build number, and display version to match
+the reviewed release, and authenticate the DMG's
 Developer ID seal, stapled notarization ticket, and
 Gatekeeper assessment. DMG trust checks must precede mounting; the app seal
 (including nested code), app-level Gatekeeper acceptance, and embedded-key
@@ -1948,7 +1949,9 @@ check must precede executing any mounted binaries. A failed trust check or
 self-test must stop signing. The migration must use one private read-only DMG
 copy for image trust, mounting, Sparkle signature verification, and the mounted
 app self-test; it must reject a copy changed during verification. The Sparkle
-signature must authenticate the image before its app self-test. Trust and test
+signature must authenticate the image before its app self-test. The migration
+must invoke the mounted test through a fixed trusted interpreter and script,
+without resolving its driver through caller-controlled `PATH`. Trust and test
 subprocesses, including image attach/detach, app seal checks, and dependency
 probes, must exclude release credentials and inherited Python/loader/archive
 overrides. Sparkle signer subprocesses
