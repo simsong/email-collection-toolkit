@@ -131,15 +131,21 @@ OCR_ENGINES ?= native,ocrmypdf,tesseract
 OCR_INVENTORY_ARGS ?=
 OCR_RUN_ARGS ?=
 
-.PHONY: lint ruff types ty pyright
+.PHONY: check check-static check-tests lint ruff types ty pyright
 # Recursive recipes preserve stage ordering even with make -j.
 check:
+	$(MAKE) check-static
+	$(MAKE) check-tests
+
+check-static:
 	$(MAKE) lint
 	$(MAKE) types
 	$(MAKE) rust-check
 	$(MAKE) test-clamav-rust
 	$(MAKE) copyright-check
 	$(MAKE) runtime-license-check
+
+check-tests:
 	$(MAKE) test
 	$(MAKE) test-e2e
 	$(MAKE) website-check

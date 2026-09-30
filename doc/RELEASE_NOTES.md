@@ -4,6 +4,9 @@
 
 ## Unreleased
 
+- CI runs static/Rust checks and Python/browser tests in parallel jobs while
+  local `make check` retains its ordered validation sequence.
+
 - Sparkle installation now waits for CLI writers as well as GUI work, restores
   writers and cancels pending Quit after update errors, retains its guard through resource shutdown,
   and explicitly selects publisher and test dependencies. Both Pages deployment

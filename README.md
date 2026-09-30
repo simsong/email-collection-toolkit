@@ -550,9 +550,11 @@ make check
 ```
 
 Install the pinned headless Chromium once with `make install-test-browser`.
-`make check` runs Ruff and Pylint, then ty and Pyright, then both test suites
-and website validation without showing a window. Use `make lint` and `make types`
-for the static checks alone. On macOS,
+`make check` runs Ruff and Pylint, then ty and Pyright, then Rust and license
+checks, then both test suites and website validation without showing a window.
+CI runs `make check-static` and `make check-tests` in parallel jobs; local
+`make check` retains their order. Use `make lint` and `make types` for the
+static checks alone. On macOS,
 `make test-native-gui` additionally exercises the hidden Cocoa/WKWebView bridge.
 This native target is an explicit local development check and does not run in
 CI/CD, which retains the complete headless Chromium GUI test.
