@@ -206,6 +206,19 @@ def test_historical_mount_test_does_not_run_make_from_path(
     assert not marker.exists()
 
 
+def test_historical_mount_interpreter_retains_locked_project() -> None:
+    """Issue #91: the credential-scrubbed native driver still imports its locked project."""
+    repository = Path(__file__).parents[1]
+    environment = release_safe_environment(os.environ, NATIVE_TRUST_ENV_PREFIXES)
+    environment["PATH"] = "/usr/bin:/bin:/usr/sbin:/sbin"
+    result = subprocess.run(
+        [str(historical_signer.mounted_test_interpreter()), "-c",
+         "from mailarchiver.self_test import SelfTestReport; import pydantic"],
+        cwd=repository, env=environment, capture_output=True, text=True, check=False,
+    )
+    assert result.returncode == 0, result.stderr
+
+
 def test_sparkle_tools_rejects_a_modified_cached_signer(tmp_path: Path) -> None:
     """Issue #91: signing prerequisites verify cached binaries against the pinned archive."""
     repository = Path(__file__).parents[1]

@@ -1836,6 +1836,8 @@ tag must remain immutable; a new code fix requires a new version and tag.
 The audited a10 migration must validate the old mounted app against its actual
 release version, embedded key and pre-Sparkle contents; candidate builds must
 retain the full Sparkle notice and native checks.
+Its mounted-test interpreter must retain the locked project's import path after
+credential and loader-path overrides are scrubbed.
 [SPARKLE_UPDATES.md](SPARKLE_UPDATES.md) specifies behavior, operating procedure,
 and the signed/notarized update acceptance that must precede completion of #91.
 

@@ -9,6 +9,8 @@
   whole-feed signing succeeds. Candidate-tag tests now derive the project version;
   a standalone Pages retry keeps the same signed-feed gate. Prepare the next
   candidate as a12 while preserving the failed a11 tag.
+- Preserve the locked Python virtual environment when the credential-scrubbed
+  historical DMG audit launches its mounted self-test.
 
 - CI runs static/Rust checks and Python/browser tests in parallel jobs while
   local `make check` retains its ordered validation sequence.
