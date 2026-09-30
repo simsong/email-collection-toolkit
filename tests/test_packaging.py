@@ -231,6 +231,45 @@ def test_dependency_audit_rejects_external_rpath(tmp_path: Path) -> None:
         verify_dependencies(app)
 
 
+@pytest.mark.skipif(sys.platform != "darwin", reason="Mach-O linkage requires Apple's toolchain")
+def test_dependency_audit_filters_release_credentials(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Issue #91: real otool probes must not inherit release keys or loader overrides."""
+    from scripts.macos_signing import RELEASE_SECRET_NAMES
+
+    scripts = str(ROOT / "scripts")
+    sys.path.insert(0, scripts)
+    try:
+        import build_macos
+    finally:
+        sys.path.remove(scripts)
+    app = tmp_path / "Fixture.app"
+    binary = app / "Contents/MacOS/fixture"
+    binary.parent.mkdir(parents=True)
+    source = tmp_path / "fixture.c"
+    source.write_text("int main(void) { return 0; }\n", encoding="utf-8")
+    subprocess.run(["cc", str(source), "-o", str(binary)], check=True)
+    for name in (*RELEASE_SECRET_NAMES, "PYTHONPATH", "DYLD_INSERT_LIBRARIES", "LD_PRELOAD", "ARCHIVE_OVERRIDE"):
+        monkeypatch.setenv(name, "fixture-secret")
+    actual_run = build_macos.run
+    observed: list[Path] = []
+
+    def checked_run(*arguments, **kwargs):
+        assert arguments[0] == "/usr/bin/otool"
+        environment = kwargs["env"]
+        assert all(name not in environment for name in RELEASE_SECRET_NAMES)
+        assert all(name not in environment for name in
+                   ("PYTHONPATH", "DYLD_INSERT_LIBRARIES", "LD_PRELOAD", "ARCHIVE_OVERRIDE"))
+        assert environment["PATH"] == "/usr/bin:/bin:/usr/sbin:/sbin"
+        observed.append(Path(arguments[-1]))
+        return actual_run(*arguments, **kwargs)
+
+    monkeypatch.setattr(build_macos, "run", checked_run)
+    build_macos.verify_dependencies(app)
+    assert observed == [binary, binary]
+
+
 @pytest.mark.parametrize("succeeds", [False, True])
 def test_gui_remembers_source_only_after_success(tmp_path: Path, succeeds: bool) -> None:
     """Requirement: failed GUI imports retain picker state and do not publish a generation."""

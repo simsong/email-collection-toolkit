@@ -16,9 +16,11 @@ archive on your Apple Silicon Mac. Windows support is planned for v1.1.0.
 - Install a self-contained Mac application by opening its DMG and dragging
   Email Collection Toolkit into Applications. No Python or developer tools are required
   for the supported desktop workflow.
-- Planned: check GitHub for new releases, indicate an available version, and
-  automatically download the appropriate update. Whether installation remains
-  manual is undecided. The updater is not implemented in the reviewed source.
+- The macOS updater uses Sparkle for preview/release checks and confirmed
+  download, installation, and relaunch. Production acceptance still requires a
+  signed/notarized older-to-newer update test.
+- Historical feed signing validates DMG and app trust before executing the
+  mounted self-test; publishing the migrated feed remains a separate action.
 - Developer ID signing, notarization, downloaded-DMG installation, and the
   supported macOS/architecture matrix must be verified for the actual release.
   Current local packaging supports ad-hoc signing and builds for its native

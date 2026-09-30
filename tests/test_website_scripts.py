@@ -22,6 +22,9 @@ RELEASE = "release"
 TYPES = "types"
 JOBS = "jobs"
 RUNS_ON = "runs-on"
+STEPS = "steps"
+RUN = "run"
+NEEDS = "needs"
 
 
 def test_missing_png_reports_a_clear_failure(tmp_path: Path) -> None:
@@ -50,8 +53,8 @@ def test_pages_workflow_pins_and_checks_the_zola_archive() -> None:
     assert configuration[JOBS]["build"]["steps"][0]["with"]["ref"] == "main"
 
 
-def test_ci_runs_each_repository_branch_push_once_without_building_a_dmg() -> None:
-    """Requirement: every non-main branch push runs all tests without duplicate PR or DMG work."""
+def test_ci_runs_parallel_branch_jobs_without_building_a_dmg() -> None:
+    """Requirement: each non-main push runs independent static and test jobs without a DMG."""
     workflow = Path(__file__).parents[1] / ".github/workflows/continuous-integration.yml"
     text = workflow.read_text(encoding="utf-8")
 
@@ -62,8 +65,17 @@ def test_ci_runs_each_repository_branch_push_once_without_building_a_dmg() -> No
     configuration = safe_load(text)
     triggers = configuration.get(WORKFLOW_ON, configuration.get(True))
     assert triggers == {"push": {"branches": ["**", "!main"]}}
-    assert "dmg-smoke" not in configuration[JOBS]
-    assert any("make check" in step.get("run", "") for step in configuration[JOBS]["pytest"]["steps"])
+    jobs = configuration[JOBS]
+    assert set(jobs) == {"static-rust", "python-browser"}
+    assert all(NEEDS not in job for job in jobs.values())
+    static_runs = [step.get(RUN, "") for step in jobs["static-rust"][STEPS]]
+    test_runs = [step.get(RUN, "") for step in jobs["python-browser"][STEPS]]
+    assert any("make check-static" in run for run in static_runs)
+    assert any("make check-tests" in run for run in test_runs)
+    assert all("make check-tests" not in run for run in static_runs)
+    assert all("make check-static" not in run for run in test_runs)
+    makefile = (workflow.parents[2] / "Makefile").read_text(encoding="utf-8")
+    assert "check:\n\t$(MAKE) check-static\n\t$(MAKE) check-tests" in makefile
     for definition in workflow.parent.glob("*.yml"):
         configuration = safe_load(definition.read_text())
         assert all(job.get(RUNS_ON) == "macos-15" or "uses" in job for job in configuration[JOBS].values()), definition

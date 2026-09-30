@@ -1912,7 +1912,8 @@ canonical alpha/beta spelling, and never advertise a draft or failed tag.
 
 `make sparkle-tools` downloads the pinned Sparkle developer archive to the
 ignored project-local `.tools/` directory, verifies its SHA-256 before extraction,
-and refuses an incomplete prior extraction. The ordinary test suite must not
+and verifies cached `generate_keys` and `sign_update` bytes against that archive
+before use. The ordinary test suite must not
 require these optional developer tools; release assembly must run the real
 signer test after installing them. `make sparkle-keys` invokes the
 verified `generate_keys` tool locally. The private Ed25519 key remains outside
@@ -1935,6 +1936,34 @@ Both main-push and release-triggered Pages paths must verify the embedded feed
 signature and its exact signed byte length before deploying an appcast. Feeds
 are bounded to 16 MiB; forged signing markers, wrong keys and post-signing edits
 must fail without rewriting authenticated bytes or requiring a private key.
+The one-time migration for the first published release must operate on
+downloaded copies, pin the complete known a10 feed by SHA-256 as well as its
+release metadata and original DMG metadata, verify the
+original Sparkle archive signature using the existing protected key, require
+the mounted app's `SUPublicEDKey`, build number, and display version to match
+the reviewed release, and authenticate the DMG's
+Developer ID seal, stapled notarization ticket, and
+Gatekeeper assessment. DMG trust checks must precede mounting; the app seal
+(including nested code), app-level Gatekeeper acceptance, and embedded-key
+check must precede executing any mounted binaries. A failed trust check or
+self-test must stop signing. The migration must use one private read-only DMG
+copy for image trust, mounting, Sparkle signature verification, and the mounted
+app self-test; it must reject a copy changed during verification. The Sparkle
+signature must authenticate the image before its app self-test. The migration
+must invoke the mounted test through a fixed trusted interpreter and script,
+without resolving its driver through caller-controlled `PATH`. Trust and test
+subprocesses, including image attach/detach, app seal checks, and dependency
+probes, must exclude release credentials and inherited Python/loader/archive
+overrides. Native trust checks must also exclude Apple toolchain-selection
+variables. Sparkle signer subprocesses must exclude Apple credentials and
+those overrides. It must verify the cached Sparkle signer against each
+required member of the pinned archive, checking extraction status before
+comparison. It must sign a distinct
+appcast output with the existing Sparkle key, verify the resulting XML
+signature with the embedded public key,
+and refuse to overwrite either source or an existing output. It must not upload,
+replace, or publish a GitHub release asset or Pages site; those remain separate
+reviewed operations.
 Release assembly may bootstrap from the tracked seed only when the pushed tag
 is the repository's sole `v*` tag; otherwise it must fail rather than reset
 update history when its previous published feed cannot be obtained. Any previous

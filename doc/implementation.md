@@ -41,9 +41,10 @@ native loader's underlying error (PyInstaller's generic wrapper hides it).
 
 ## CI and release validation
 
-All runner jobs use macos-15. Continuous integration runs `make check` on each
-non-`main` repository branch push, without PR/main duplicates or a DMG smoke
-job. Forked PRs are not covered by that push trigger. Release packaging runs
+All runner jobs use macos-15. Continuous integration runs `make check-static`
+and `make check-tests` in parallel jobs on each non-`main` repository branch
+push; local `make check` retains their order. CI has no PR/main duplicates or
+a DMG smoke job. Forked PRs are not covered by that push trigger. Release packaging runs
 only for a pushed, version-matching annotated `v*` tag on `main` and invokes
 `make dmg`, which mounts the candidate and runs its headless installed-app
 self-test. Native GUI release checks remain an explicit local
@@ -2174,8 +2175,10 @@ default channel, with separate monotonically increasing numeric Sparkle build
 values. The fixed website appcast starts empty; the Sparkle publication step
 adds only a post-notarization, Ed25519-signed item.
 `make sparkle-tools` pins Sparkle 2.10.0 and its upstream SHA-256, then places
-the verified developer archive below `.tools/sparkle/`. `make sparkle-keys`
-calls Sparkle's local `generate_keys`; the key generator retains the private
+the verified developer archive below `.tools/sparkle/`. Every invocation
+compares cached `generate_keys` and `sign_update` bytes against the verified
+archive before they can handle key material. `make sparkle-keys` calls Sparkle's
+local `generate_keys`; the key generator retains the private
 Ed25519 material in the developer's login Keychain and prints the public key.
 The ordinary test suite skips the real-signer integration when these developer
 tools are absent; `make test-sparkle-signing` installs them and requires that
@@ -2616,6 +2619,35 @@ the embedded public Ed25519 key; its Makefile target provisions only pinned
 pycryptodomex through `uv --no-project`, with no release secret or native signer.
 Release assembly also verifies its previous published feed before appending or
 re-signing history; only the sole-tag first-release seed bypasses that gate.
+`make sign-historical-appcast RELEASE_TAG=v1.0.0a10 DMG=... APPCAST=... OUTPUT=...`
+is the reviewed, local-only migration for the original a10 history. The Python
+orchestrator verifies the DMG seal, stapled ticket, and Gatekeeper acceptance
+before mounting it read-only. It verifies the app seal with nested-code checks
+and app-level Gatekeeper acceptance before execution. The mounted app's
+`SUPublicEDKey`, `CFBundleVersion`, and `CFBundleShortVersionString` must match
+the signing key and reviewed a10 version before the private key is loaded.
+The downloaded DMG is streamed into an owner-private, read-only temporary copy.
+Image trust, mounting, Sparkle signature verification, and the internal
+`make test-mounted-dmg` self-test use that single copy, whose digest is checked
+again before output signing. The pinned Sparkle archive signature is checked
+before the self-test exercises that same read-only mount. The migration invokes
+the test script with the current absolute Python interpreter and a fixed
+`PATH`, avoiding a caller-provided `make`; normal
+`make test-dmg` still mounts its own image. The DMG attach/detach, app seal,
+native dependency probes, and mounted executable tests share a filtered
+environment without release credentials, Python/loader/archive overrides, or
+Apple toolchain-selection variables. The signer receives
+the Sparkle key on standard input while Apple credentials and those overrides
+are excluded. `make update-appcast` sets the checkout root on `PYTHONPATH` so
+its direct script entrypoint can import the shared signing filter. The migration
+checks exact release metadata and protected-key
+match before writing a separately signed XML feed. Its SHA-256 pin covers the complete
+published feed bytes, including comments, whitespace, and XML declaration, so
+parsing cannot erase lexical edits before the audit. The migration refuses an
+existing output and does not upload or publish anything; an operator must
+separately review and publish the resulting feed asset and Pages update.
+External release notes are not supported because they need their own Sparkle
+signature.
 The frozen controller/compiled delegate probe and real HTTPS standard-UI probe
 passed during development; these do not establish signed application replacement.
 [SPARKLE_UPDATES.md](SPARKLE_UPDATES.md) records validation targets and remaining

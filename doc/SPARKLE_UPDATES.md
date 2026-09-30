@@ -58,6 +58,8 @@ The app contains the fixed HTTPS feed URL and public Ed25519 key in
 build. The release publisher verifies that the exported 32-byte private seed
 matches the embedded public key before signing. Legacy expanded exports require
 a reviewed migration; they are not silently reinterpreted as seeds.
+`make sparkle-tools` verifies cached `sign_update` and `generate_keys` bytes
+against the SHA-256-pinned archive before either tool is used.
 
 The build preserves framework symlinks/permissions, signs native executables
 and nested helper bundles before the framework and outer app, verifies seals,
@@ -80,11 +82,29 @@ first-release bootstrap when the pushed tag is the sole `v*` tag. Unsigned legac
 history requires a separately reviewed migration; it cannot enter this release path.
 
 On 2026-09-27 the published `v1.0.0a10/appcast.xml` had no embedded XML
-signature. First rollout therefore needs an authorized migration that audits
-the immutable release archives and item metadata before signing that history
-with the existing protected key. Until then, Pages and subsequent release jobs
-fail this gate; the currently deployed site remains its last successful build.
-This PR does not replace a release asset or authorize that migration.
+signature, although its enclosure carried a Sparkle signature for the DMG. The
+one-time `make sign-historical-appcast RELEASE_TAG=v1.0.0a10 DMG=... APPCAST=... OUTPUT=...`
+migration checks the complete published feed against a pinned SHA-256, then audits
+downloaded copies of the exact release item and DMG. It streams the DMG into an
+owner-private, read-only temporary copy used for every trust check, mounting,
+signature verification, and the mounted self-test. Before executing any
+mounted code, it verifies the DMG seal, stapled notarization ticket, and
+Gatekeeper assessment, then verifies the app seal (including nested code) and
+app-level Gatekeeper acceptance. It checks the mounted app key and bundle
+versions against the reviewed a10 release, then verifies the Sparkle
+archive signature, then runs the headless self-test against that same
+read-only mount through a fixed interpreter and script. Trust, native dependency probes,
+and self-test subprocesses receive no release credentials,
+Python/loader/archive overrides, or Apple toolchain-selection variables;
+the signer receives no Apple
+credentials. The mounted app's `SUPublicEDKey` must match the archive/feed key
+before testing or loading the protected Sparkle key. It signs the complete
+feed with that key.
+It checks the generated feed against the app's public key and refuses to alter
+the downloaded source or replace an existing output. It supports only the
+embedded release notes; external release notes need their own signature. The
+command creates a local signed feed only. Uploading a replacement release asset
+and deploying Pages remain separately reviewed publication actions.
 
 The private Sparkle key belongs in the protected release secret
 `SPARKLE_ED25519_PRIVATE_KEY_BASE64`, with an offline recovery copy. Apple
