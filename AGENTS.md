@@ -1,11 +1,5 @@
 <!-- Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved. -->
 
-<!-- BEGIN GENERATED pr-to-ready -->
-## pr-to-ready
-
-For `pr-to-ready`, `codex-to-complete`, or `codex-to-ready`, read and follow [the shared workflow](.agents/skills/pr-to-ready/SKILL.md). Apply the repository-specific rules below.
-<!-- END GENERATED pr-to-ready -->
-
 # AI contributor instructions
 
 ## Scope and source safety
