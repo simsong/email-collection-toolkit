@@ -202,6 +202,13 @@ update-appcast: sparkle-tools
 	@test -x "$(SPARKLE_DIR)/bin/sign_update" || { echo 'run make sparkle-tools before update-appcast'; exit 2; }
 	PYTHONPATH="$(CURDIR)/src:$(CURDIR)" uv run --locked --group packaging python scripts/update_appcast.py --appcast "$(or $(APPCAST),website/static/updates/mac/appcast.xml)" --archive "$(ARCHIVE)" --tag "$(RELEASE_TAG)" --url "$(RELEASE_URL)" --signer "$(SPARKLE_DIR)/bin/sign_update"
 
+.PHONY: release-appcast-base
+# RELEASE_TAG is the candidate tag; APPCAST is the output copy of the prior feed.
+# GITHUB_REPOSITORY selects the release source and GH_TOKEN authorizes API reads.
+release-appcast-base:
+	@test -n "$(RELEASE_TAG)" -a -n "$(APPCAST)" || { echo 'usage: make release-appcast-base RELEASE_TAG=v1.2.3 APPCAST=/path/to/base.xml' >&2; exit 2; }
+	bash scripts/fetch_release_appcast.sh "$(RELEASE_TAG)" "$(APPCAST)"
+
 .PHONY: sign-historical-appcast
 # This local migration requires SPARKLE_ED25519_PRIVATE_KEY_BASE64 for feed
 # signing; Apple Developer ID/notary credentials are used by release jobs only.
@@ -246,7 +253,7 @@ test-dmg:
 .PHONY: test-mounted-dmg
 test-mounted-dmg:
 	@test -n "$(DMG)" -a -n "$(MOUNT)" || { echo 'usage: make test-mounted-dmg DMG=/path/to/image.dmg MOUNT=/mounted/image'; exit 2; }
-	uv run --group packaging python scripts/build_macos.py --test-mounted-dmg "$(MOUNT)" --source-dmg "$(DMG)"
+	uv run --group packaging python scripts/build_macos.py --test-mounted-dmg "$(MOUNT)" --source-dmg "$(DMG)" $(if $(HISTORICAL_TAG),--historical-tag "$(HISTORICAL_TAG)",)
 
 preview-dmg: ruff
 	@test -n "$(DMG)" || { echo 'usage: make preview-dmg DMG=/path/to/Email-Collection-Toolkit.dmg'; exit 2; }

@@ -27,6 +27,34 @@ Developer ID signing identity on the hosted runner. `APPLE_NOTARY_KEY_ID`,
 Apple notarization. These protected variables are never needed by the installed
 app or its mounted self-test.
 
+For alpha (`aN`), beta (`bN`), and stable versions, set the canonical version in
+`pyproject.toml`, let branch CI run the real Sparkle signer target, merge, then
+push a new annotated matching `v*` tag. The tag workflow verifies the prior
+published feed, builds and notarizes the DMG, signs the DMG and complete XML,
+validates both, and only then creates and publishes a complete release. Its
+dependent Pages job deploys the exact signed feed. A failed pushed tag stays
+immutable: fix the cause on a new commit and use a new version/tag. After a
+transient Pages failure, rerun the standalone Pages workflow on `main`; it
+downloads and verifies the latest published release feed.
+
+The historical `v1.0.0a10` release has an archive signature but no signature on
+its complete XML feed. Before publishing a newer version, use the audited
+`Prepare historical signed appcast` manual workflow, which runs
+`make sign-historical-appcast` with the protected release key, to produce a
+separate reviewable signed copy. After review, explicitly replace that release
+asset and redeploy Pages. Merely merging the migration code does not
+alter the published feed. The failed `v1.0.0a11` run left a draft release;
+leave its pushed tag untouched. The next candidate is `v1.0.0a12`; reconcile
+the a11 draft separately rather than publishing it from newer source.
+
+Release workflow variables: `GITHUB_REPOSITORY` names the repository used to
+retrieve the prior feed; `GH_TOKEN` authorizes release API reads and publication;
+`GITHUB_REF_NAME` is the pushed tag validated against `pyproject.toml`.
+The Makefile's `RELEASE_TAG` selects the candidate tag and `APPCAST` identifies
+the copied feed output. `RUNNER_TEMP` is the hosted runner's temporary area.
+No variable should contain secret material except the protected signing and
+notarization variables named above.
+
 ## Windows development
 
 The compiled desktop UI candidates are **Dioxus Desktop and Tauri**, using Rust

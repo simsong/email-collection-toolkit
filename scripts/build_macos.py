@@ -68,6 +68,7 @@ PLIST_TAGS = "UTTypeTagSpecification"
 PLIST_EXTENSION = "public.filename-extension"
 COPYRIGHT = "Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved."
 MACHO_MAGIC = {bytes.fromhex(value) for value in ("feedface", "cefaedfe", "feedfacf", "cffaedfe", "cafebabe", "bebafeca", "cafebabf", "bfbafeca")}
+HISTORICAL_PRE_SPARKLE_TAG = "v1.0.0a10"
 
 
 class ImageEntry(BaseModel):
@@ -209,8 +210,30 @@ def test_image(dmg: Path, *, gui: bool = False, manifest_path: Path | None = Non
         test_mounted_image(mount, dmg, gui=gui, manifest_path=manifest_path, log_contents=log_contents)
 
 
+def verify_mounted_notices(app: Path, historical_tag: str | None = None) -> None:
+    """Match notices to an authenticated historical app or the current release."""
+    if historical_tag is not None:
+        if historical_tag != HISTORICAL_PRE_SPARKLE_TAG:
+            raise ValueError("pre-Sparkle notice exception supports only the audited a10 release")
+        _, _, expected_build, expected_version = release_metadata(historical_tag.removeprefix("v"))
+        with (app / "Contents/Info.plist").open("rb") as source:
+            info = plistlib.load(source)
+        if (info.get(PLIST_SHORT_VERSION) != expected_version
+                or info.get(PLIST_BUILD_VERSION) != str(expected_build)
+                or info.get(PLIST_SPARKLE_PUBLIC_KEY) != SPARKLE_PUBLIC_KEY):
+            raise ValueError("historical mounted app version or Sparkle public key differs from the release")
+    required_notices = ("LICENSE", "COPYRIGHT", "THIRD_PARTY_NOTICES.md", "ClamAV-COPYING.txt", "OpenSSL-LICENSE.txt")
+    if historical_tag is None:
+        required_notices += ("Sparkle-LICENSE.txt",)
+    notices = app / "Contents/Resources/Third Party Notices"
+    for name in required_notices:
+        if not (notices / name).is_file() or not (notices / name).stat().st_size:
+            raise RuntimeError(f"Required distribution notice is missing or empty: {notices / name}")
+
+
 def test_mounted_image(mount: Path, dmg: Path, *, gui: bool = False,
-                       manifest_path: Path | None = None, log_contents: bool = False) -> None:
+                       manifest_path: Path | None = None, log_contents: bool = False,
+                       historical_tag: str | None = None) -> None:
     """Exercise an existing read-only mount without opening a second image."""
     if not os.path.ismount(mount):
         raise ValueError("mounted DMG test requires an existing mounted volume")
@@ -218,13 +241,10 @@ def test_mounted_image(mount: Path, dmg: Path, *, gui: bool = False,
     manifest = manifest_path or ROOT / "dist" / f"{dmg.stem}.contents.json"
     record_image_contents(mount, manifest, log_entries=log_contents)
     app = mount / f"{APP_NAME}.app"
+    verify_mounted_notices(app, historical_tag)
     library = app / "Contents/Frameworks/clamav/libclamav.dylib"
     if not library.is_file():
         raise RuntimeError(f"Bundled ClamAV library is missing: {library}; see {manifest}")
-    notices = app / "Contents/Resources/Third Party Notices"
-    for name in ("LICENSE", "COPYRIGHT", "THIRD_PARTY_NOTICES.md", "ClamAV-COPYING.txt", "OpenSSL-LICENSE.txt", "Sparkle-LICENSE.txt"):
-        if not (notices / name).is_file() or not (notices / name).stat().st_size:
-            raise RuntimeError(f"Required distribution notice is missing or empty: {notices / name}; see {manifest}")
     run("/usr/bin/codesign", "--verify", "--deep", "--strict", app, env=environment)
     if not (mount / "Applications").is_symlink() or os.readlink(mount / "Applications") != "/Applications":
         raise RuntimeError("DMG is missing its Applications shortcut")
@@ -505,6 +525,7 @@ def main() -> None:
     parser.add_argument("--test-dmg", type=Path, help="mount and retest an existing DMG")
     parser.add_argument("--test-mounted-dmg", type=Path, help="test an existing verified read-only DMG mount")
     parser.add_argument("--source-dmg", type=Path, help="source image for mounted test report names")
+    parser.add_argument("--historical-tag", help="checked legacy tag for an already authenticated mounted DMG")
     parser.add_argument("--check-release", action="store_true", help="include the visible GUI self-test for release validation")
     parser.add_argument("--preview-dmg", type=Path, help="open the mounted installer in Finder until Return is pressed")
     parser.add_argument("--notarize-dmg", type=Path, help="submit, staple, and validate an existing signed DMG")
@@ -513,6 +534,8 @@ def main() -> None:
     args = parser.parse_args()
     if sys.platform != "darwin":
         parser.error("DMG builds and native tests require macOS")
+    if args.historical_tag and not args.test_mounted_dmg:
+        parser.error("--historical-tag requires --test-mounted-dmg")
     if args.preview_dmg:
         with mounted_image(args.preview_dmg.resolve(strict=True)) as mount:
             run("/usr/bin/open", mount)
@@ -524,7 +547,8 @@ def main() -> None:
         if args.source_dmg is None:
             parser.error("--test-mounted-dmg requires --source-dmg")
         test_mounted_image(args.test_mounted_dmg.resolve(strict=True), args.source_dmg.resolve(strict=True),
-                           gui=args.check_release, log_contents=args.log_dmg_contents)
+                           gui=args.check_release, log_contents=args.log_dmg_contents,
+                           historical_tag=args.historical_tag)
     elif args.notarize_dmg:
         notarize_image(args.notarize_dmg.resolve(strict=True),
                        NotarizationCredentials.from_environment(os.environ), ROOT / ".tmp")

@@ -1827,6 +1827,15 @@ pinned framework with its helpers and full license notices, preserving links and
 nested signing. Sign and verify both final DMG and complete XML; embedded release
 notes and minimum macOS metadata are authenticated by the feed signature.
 Reject a release private key that differs from the embedded public key.
+Every alpha, beta, and stable release must derive its tag, channel and numeric
+build from the project's canonical version. Branch CI and the tag run must
+exercise the real Sparkle signer without a release secret. A tag run must verify
+the published history before building a candidate, and sign and verify the
+candidate DMG and complete XML before creating a draft release. A failed pushed
+tag must remain immutable; a new code fix requires a new version and tag.
+The audited a10 migration must validate the old mounted app against its actual
+release version, embedded key and pre-Sparkle contents; candidate builds must
+retain the full Sparkle notice and native checks.
 [SPARKLE_UPDATES.md](SPARKLE_UPDATES.md) specifies behavior, operating procedure,
 and the signed/notarized update acceptance that must precede completion of #91.
 
