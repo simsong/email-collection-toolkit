@@ -1833,6 +1833,9 @@ exercise the real Sparkle signer without a release secret. A tag run must verify
 the published history before building a candidate, and sign and verify the
 candidate DMG and complete XML before creating a draft release. A failed pushed
 tag must remain immutable; a new code fix requires a new version and tag.
+The audited a10 migration must validate the old mounted app against its actual
+release version, embedded key and pre-Sparkle contents; candidate builds must
+retain the full Sparkle notice and native checks.
 [SPARKLE_UPDATES.md](SPARKLE_UPDATES.md) specifies behavior, operating procedure,
 and the signed/notarized update acceptance that must precede completion of #91.
 

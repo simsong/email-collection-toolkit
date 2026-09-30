@@ -119,6 +119,9 @@ The manual `Prepare historical signed appcast` Actions workflow uses this same
 Makefile target with the protected key, checks the pinned published DMG digest,
 and uploads only a signed XML artifact for review. It does not replace the a10
 release asset or deploy Pages.
+The historical mounted test checks the a10 app's actual version and embedded
+public key, and accepts its pre-Sparkle notice set. Ordinary candidate DMG tests
+still require the Sparkle license notice.
 For the separate approved publication, preserve the original a10 XML and its
 SHA-256, verify the prepared artifact with `make check-appcast
 APPCAST=<signed-copy> RELEASE_TAG=v1.0.0a10 ARGS=--require-signed-feed`, upload

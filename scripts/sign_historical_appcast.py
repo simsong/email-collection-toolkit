@@ -224,7 +224,8 @@ def test_verified_mount(mount: Path, archive: Path) -> None:
     environment["PATH"] = "/usr/bin:/bin:/usr/sbin:/sbin"
     subprocess.run([str(Path(sys.executable).resolve(strict=True)),
                     str(Path(__file__).with_name("build_macos.py")),
-                    "--test-mounted-dmg", str(mount), "--source-dmg", str(archive)],
+                    "--test-mounted-dmg", str(mount), "--source-dmg", str(archive),
+                    "--historical-tag", FIRST_RELEASE.tag],
                    cwd=Path(__file__).parents[1], check=True, env=environment)
 
 

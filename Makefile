@@ -253,7 +253,7 @@ test-dmg:
 .PHONY: test-mounted-dmg
 test-mounted-dmg:
 	@test -n "$(DMG)" -a -n "$(MOUNT)" || { echo 'usage: make test-mounted-dmg DMG=/path/to/image.dmg MOUNT=/mounted/image'; exit 2; }
-	uv run --group packaging python scripts/build_macos.py --test-mounted-dmg "$(MOUNT)" --source-dmg "$(DMG)"
+	uv run --group packaging python scripts/build_macos.py --test-mounted-dmg "$(MOUNT)" --source-dmg "$(DMG)" $(if $(HISTORICAL_TAG),--historical-tag "$(HISTORICAL_TAG)",)
 
 preview-dmg: ruff
 	@test -n "$(DMG)" || { echo 'usage: make preview-dmg DMG=/path/to/Email-Collection-Toolkit.dmg'; exit 2; }

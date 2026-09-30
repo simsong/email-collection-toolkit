@@ -2196,6 +2196,9 @@ feed before building the candidate DMG. `make release-appcast-base` shares the
 exact feed-history fetch and validation between this preflight and assembly.
 The release workflow requires the latest published release's `appcast.xml` asset
 as its update-history base.
+The one-time a10 feed signer passes an explicit historical tag to the mounted
+test, which verifies the old app's version and embedded key and uses its actual
+pre-Sparkle license notice set. New DMG checks still require Sparkle notices.
 Only when the pushed tag is the repository's sole `v*` tag may it bootstrap
 from the tracked empty seed; otherwise an empty release-list response fails.
 It signs and prepends the new item, verifies the DMG and complete XML, uploads

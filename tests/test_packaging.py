@@ -6,6 +6,7 @@ Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved.
 """
 
 import os
+import plistlib
 import sqlite3
 import subprocess
 import sys
@@ -21,6 +22,41 @@ from mailarchiver.self_test import SelfTestReport
 from mailarchiver.standalone_verify import verify_archive
 
 ROOT = Path(__file__).resolve().parents[1]
+
+
+def test_historical_notice_gate_matches_the_shipped_release(tmp_path: Path) -> None:
+    """Issue #91: the a10 repair may omit its absent Sparkle notice, but new DMGs may not."""
+    scripts = str(ROOT / "scripts")
+    sys.path.insert(0, scripts)
+    try:
+        from build_macos import verify_mounted_notices
+        from mailarchiver.update_metadata import SPARKLE_PUBLIC_KEY
+    finally:
+        sys.path.remove(scripts)
+    app = tmp_path / "Email Collection Toolkit.app"
+    info = app / "Contents/Info.plist"
+    info.parent.mkdir(parents=True)
+    info.write_bytes(plistlib.dumps({
+        "CFBundleVersion": "1000000110",
+        "CFBundleShortVersionString": "1.0.0a10",
+        "SUPublicEDKey": SPARKLE_PUBLIC_KEY,
+    }))
+    notices = app / "Contents/Resources/Third Party Notices"
+    notices.mkdir(parents=True)
+    for name in ("LICENSE", "COPYRIGHT", "THIRD_PARTY_NOTICES.md", "ClamAV-COPYING.txt", "OpenSSL-LICENSE.txt"):
+        (notices / name).write_text("reviewed historical notice\n", encoding="utf-8")
+    verify_mounted_notices(app, "v1.0.0a10")
+    with pytest.raises(RuntimeError, match="Sparkle-LICENSE.txt"):
+        verify_mounted_notices(app)
+    with pytest.raises(ValueError, match="only the audited a10 release"):
+        verify_mounted_notices(app, "v1.0.0a11")
+    with pytest.raises(ValueError, match="only the audited a10 release"):
+        verify_mounted_notices(app, "1.0.0a10")
+    altered = plistlib.loads(info.read_bytes())
+    altered["SUPublicEDKey"] = "different-key"
+    info.write_bytes(plistlib.dumps(altered))
+    with pytest.raises(ValueError, match="version or Sparkle public key"):
+        verify_mounted_notices(app, "v1.0.0a10")
 
 
 def test_pyinstaller_loader_reports_its_native_cause(tmp_path: Path) -> None:
