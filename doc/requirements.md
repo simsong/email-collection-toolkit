@@ -1945,9 +1945,11 @@ Developer ID seal, stapled notarization ticket, and
 Gatekeeper assessment. DMG trust checks must precede mounting; the app seal
 (including nested code), app-level Gatekeeper acceptance, and embedded-key
 check must precede executing any mounted binaries. A failed trust check or
-self-test must stop signing. The Sparkle archive signature must authenticate
-the image before its app self-test, which must use that same authenticated
-read-only mount. Trust and test subprocesses must exclude release credentials
+self-test must stop signing. The migration must use one private read-only DMG
+copy for image trust, mounting, Sparkle signature verification, and the mounted
+app self-test; it must reject a copy changed during verification. The Sparkle
+signature must authenticate the image before its app self-test. Trust and test
+subprocesses must exclude release credentials
 and inherited Python/loader/archive overrides. Sparkle signer subprocesses
 must exclude Apple credentials and those overrides. It must sign a distinct
 appcast output with the existing Sparkle key, verify the resulting XML

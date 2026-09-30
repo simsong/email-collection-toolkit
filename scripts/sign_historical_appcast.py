@@ -1,7 +1,7 @@
 # Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved.
 # Migrate the one reviewed unsigned historical Sparkle feed.
 # Pin the published XML bytes and release metadata before touching keys.
-# Authenticate one mounted DMG and app, then test that same mount.
+# Authenticate one private DMG copy and app, then test that mount.
 # Verify the archive signature and sign a separate feed copy.
 # Never change the downloaded sources or publish an asset here.
 
@@ -15,6 +15,7 @@ import binascii
 import hashlib
 import os
 import plistlib
+import shutil
 import subprocess
 import tempfile
 import time
@@ -216,6 +217,24 @@ def test_verified_mount(mount: Path, archive: Path) -> None:
                    env=release_safe_environment(os.environ, NATIVE_TRUST_ENV_PREFIXES))
 
 
+@contextmanager
+def private_archive_copy(archive: Path) -> Iterator[Path]:
+    """Keep one owner-private, read-only DMG inode through every trust gate."""
+    with tempfile.TemporaryDirectory(prefix="sparkle-history-image-") as directory:
+        copied = Path(directory) / archive.name
+        with archive.open("rb") as source, copied.open("xb") as target:
+            shutil.copyfileobj(source, target, length=1024 * 1024)
+            target.flush()
+            os.fsync(target.fileno())
+        copied.chmod(0o400)
+        with copied.open("rb") as image:
+            digest = hashlib.file_digest(image, "sha256").digest()
+        yield copied
+        with copied.open("rb") as image:
+            if hashlib.file_digest(image, "sha256").digest() != digest:
+                raise RuntimeError("private historical DMG changed during verification")
+
+
 def sign_historical_appcast(
     appcast: Path,
     archive: Path,
@@ -234,12 +253,13 @@ def sign_historical_appcast(
         raise ValueError(f"signed output directory does not exist: {output.parent}")
     with appcast.open("rb") as source:
         data = source.read(MAX_FEED_BYTES + 1)
-    signature = audit_legacy_feed(data, archive, release)
-    with verify_historical_app_key(archive, public_key) as mount:
-        key = signing_key()
-        require_matching_key(key, public_key)
-        verify_signed_archive(archive, signer, key, signature)
-        test_verified_mount(mount, archive)
+    with private_archive_copy(archive) as copied:
+        signature = audit_legacy_feed(data, copied, release)
+        with verify_historical_app_key(copied, public_key) as mount:
+            key = signing_key()
+            require_matching_key(key, public_key)
+            verify_signed_archive(copied, signer, key, signature)
+            test_verified_mount(mount, copied)
     check_appcast(appcast, release.tag)
 
     temporary: Path | None = None

@@ -85,7 +85,9 @@ On 2026-09-27 the published `v1.0.0a10/appcast.xml` had no embedded XML
 signature, although its enclosure carried a Sparkle signature for the DMG. The
 one-time `make sign-historical-appcast RELEASE_TAG=v1.0.0a10 DMG=... APPCAST=... OUTPUT=...`
 migration checks the complete published feed against a pinned SHA-256, then audits
-downloaded copies of the exact release item and DMG. Before executing any
+downloaded copies of the exact release item and DMG. It streams the DMG into an
+owner-private, read-only temporary copy used for every trust check, mounting,
+signature verification, and the mounted self-test. Before executing any
 mounted code, it verifies the DMG seal, stapled notarization ticket, and
 Gatekeeper assessment, then verifies the app seal (including nested code) and
 app-level Gatekeeper acceptance. It checks the mounted app key and Sparkle

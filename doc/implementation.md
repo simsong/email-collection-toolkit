@@ -2624,8 +2624,11 @@ orchestrator verifies the DMG seal, stapled ticket, and Gatekeeper acceptance
 before mounting it read-only. It verifies the app seal with nested-code checks
 and app-level Gatekeeper acceptance before execution. The mounted app's
 `SUPublicEDKey` must match the signing key before the private key is loaded.
-The pinned Sparkle archive signature is checked before the internal
-`make test-mounted-dmg` target exercises that same read-only mount; normal
+The downloaded DMG is streamed into an owner-private, read-only temporary copy.
+Image trust, mounting, Sparkle signature verification, and the internal
+`make test-mounted-dmg` self-test use that single copy, whose digest is checked
+again before output signing. The pinned Sparkle archive signature is checked
+before the self-test exercises that same read-only mount; normal
 `make test-dmg` still mounts its own image. Trust and test subprocesses exclude
 release credentials and Python/loader/archive overrides. The signer receives
 the Sparkle key on standard input while Apple credentials and those overrides

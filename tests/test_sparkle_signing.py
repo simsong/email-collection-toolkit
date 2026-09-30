@@ -112,6 +112,36 @@ def test_historical_feed_audit_pins_a10_bytes_and_archive(tmp_path: Path) -> Non
             audit_legacy_feed(changed, archive, release)
 
 
+def test_private_historical_copy_survives_source_replacement(tmp_path: Path) -> None:
+    """Issue #91: mounted and signed bytes stay fixed when the download path changes."""
+    archive = tmp_path / "download.dmg"
+    archive.write_bytes(b"original image bytes")
+    copied_path: Path | None = None
+    with historical_signer.private_archive_copy(archive) as copied:
+        copied_path = copied
+        assert copied != archive
+        assert copied.read_bytes() == b"original image bytes"
+        assert copied.stat().st_mode & 0o777 == 0o400
+        assert copied.parent.stat().st_mode & 0o777 == 0o700
+        archive.unlink()
+        archive.write_bytes(b"replacement image bytes")
+        assert copied.read_bytes() == b"original image bytes"
+    assert copied_path is not None and not copied_path.exists()
+
+
+def test_private_historical_copy_rejects_mutation(tmp_path: Path) -> None:
+    """Issue #91: an altered private image cannot produce a signed feed."""
+    archive = tmp_path / "download.dmg"
+    archive.write_bytes(b"original image bytes")
+    copied_path: Path | None = None
+    with pytest.raises(RuntimeError, match="changed during verification"):
+        with historical_signer.private_archive_copy(archive) as copied:
+            copied_path = copied
+            copied.chmod(0o600)
+            copied.write_bytes(b"tampered image bytes")
+    assert copied_path is not None and not copied_path.exists()
+
+
 def test_historical_app_info_plist_requires_matching_sparkle_key(tmp_path: Path) -> None:
     """Issue #91: the installed historical app must trust the key that signs its feed."""
     import plistlib
@@ -181,7 +211,8 @@ def test_historical_signing_orchestration_preserves_source_and_creates_verified_
     stages: list[str] = []
 
     def verify_fixture_archive(path: Path, tool: Path, _key: object, signature: str) -> None:
-        assert path == archive
+        assert path != archive
+        assert path.exists() and path.stat().st_size == FIRST_RELEASE.archive_length
         assert tool == signer
         verified_archives.append((path, tool, signature))
         stages.append("archive-verified")
@@ -193,7 +224,8 @@ def test_historical_signing_orchestration_preserves_source_and_creates_verified_
 
     @contextmanager
     def verify_fixture_app(path: Path, expected_key: str):
-        assert path == archive
+        assert path != archive
+        assert path.exists() and path.stat().st_size == FIRST_RELEASE.archive_length
         verified_app_keys.append((path, expected_key))
         stages.append("mount-open")
         yield tmp_path / "mounted"
@@ -201,7 +233,7 @@ def test_historical_signing_orchestration_preserves_source_and_creates_verified_
 
     def test_fixture_mount(mount: Path, path: Path) -> None:
         assert mount == tmp_path / "mounted"
-        assert path == archive
+        assert path == verified_archives[0][0]
         assert stages == ["mount-open", "archive-verified"]
         stages.append("mounted-test")
 
@@ -212,7 +244,7 @@ def test_historical_signing_orchestration_preserves_source_and_creates_verified_
     assert appcast.read_bytes() == original
     assert len(verified_archives) == 1
     assert verified_archives[0][2] == FIRST_RELEASE.archive_signature
-    assert verified_app_keys == [(archive, public_key)]
+    assert verified_app_keys == [(verified_archives[0][0], public_key)]
     assert stages == ["mount-open", "archive-verified", "mounted-test", "mount-closed"]
     check_appcast(output, FIRST_RELEASE.tag, require_signed_feed=True, public_key=public_key)
     assert b"<!-- sparkle-signatures:" in output.read_bytes()
