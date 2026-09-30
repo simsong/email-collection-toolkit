@@ -1,0 +1,61 @@
+# Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved.
+# Prepare a signed copy of the one published unsigned Sparkle feed.
+# Fetch the exact historical release inputs without modifying them.
+# Authenticate the DMG, mounted app, Sparkle archive signature, and feed.
+# Use the protected signing seed only for the audited Makefile operation.
+# Upload a reviewable signed XML artifact without changing a release or Pages.
+# This manual one-time repair unblocks ordinary future tag publication.
+
+name: Prepare historical signed appcast
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  prepare:
+    runs-on: macos-15
+    steps:
+      - name: Checkout main
+        uses: actions/checkout@v5
+        with:
+          ref: main
+          persist-credentials: false
+      - name: Set up Python
+        uses: actions/setup-python@v7.0.0
+        with:
+          python-version: "3.12"
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v10.0.1
+      - name: Install dependencies and pinned Sparkle tools
+        run: |
+          uv sync --locked --all-groups
+          make sparkle-tools
+      - name: Download original published assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release download v1.0.0a10 --repo "$GITHUB_REPOSITORY" \
+            --pattern appcast.xml --pattern Email-Collection-Toolkit-1.0.0a10-arm64.dmg \
+            --dir "$RUNNER_TEMP"
+          printf '%s  %s\n' \
+            0df3fa1b5a76a7ba2de96c7f751c51d908eaaa83e50c9f7a9026ceb88778e683 \
+            "$RUNNER_TEMP/Email-Collection-Toolkit-1.0.0a10-arm64.dmg" | shasum -a 256 --check -
+      - name: Audit and sign a separate copy
+        env:
+          SPARKLE_ED25519_PRIVATE_KEY_BASE64: ${{ secrets.SPARKLE_ED25519_PRIVATE_KEY_BASE64 }}
+        run: |
+          make sign-historical-appcast RELEASE_TAG=v1.0.0a10 \
+            DMG="$RUNNER_TEMP/Email-Collection-Toolkit-1.0.0a10-arm64.dmg" \
+            APPCAST="$RUNNER_TEMP/appcast.xml" \
+            OUTPUT="$RUNNER_TEMP/signed-v1.0.0a10-appcast.xml"
+      - name: Verify prepared feed
+        run: make check-appcast APPCAST="$RUNNER_TEMP/signed-v1.0.0a10-appcast.xml" RELEASE_TAG=v1.0.0a10 ARGS=--require-signed-feed
+      - name: Upload signed feed for review
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: signed-v1.0.0a10-appcast
+          path: ${{ runner.temp }}/signed-v1.0.0a10-appcast.xml
+          if-no-files-found: error

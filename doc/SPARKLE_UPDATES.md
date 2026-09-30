@@ -83,7 +83,17 @@ history requires a separately reviewed migration; it cannot enter this release p
 
 On 2026-09-27 the published `v1.0.0a10/appcast.xml` had no embedded XML
 signature, although its enclosure carried a Sparkle signature for the DMG. The
-one-time `make sign-historical-appcast RELEASE_TAG=v1.0.0a10 DMG=... APPCAST=... OUTPUT=...`
+original tag's publisher signed only the archive item; it never ran the Sparkle
+signer over the complete XML. Tag-triggered publication is retained, with the
+real signer in branch CI and release preflight, signed-history verification
+before packaging, and complete DMG/feed validation before draft creation.
+Version-dependent test inputs derive from current package metadata; only
+explicitly pinned historical fixtures may name an old release. Pushed tags are
+immutable, so fixing code after a failed tag requires a new version and tag.
+Alpha and beta items use the preview channel; stable items use the default
+channel. All use the same signed feed and release workflow. The failed a11
+tag remains fixed at its original commit; the next candidate is a12. The one-time
+`make sign-historical-appcast RELEASE_TAG=v1.0.0a10 DMG=... APPCAST=... OUTPUT=...`
 migration checks the complete published feed against a pinned SHA-256, then audits
 downloaded copies of the exact release item and DMG. It streams the DMG into an
 owner-private, read-only temporary copy used for every trust check, mounting,
@@ -105,6 +115,16 @@ the downloaded source or replace an existing output. It supports only the
 embedded release notes; external release notes need their own signature. The
 command creates a local signed feed only. Uploading a replacement release asset
 and deploying Pages remain separately reviewed publication actions.
+The manual `Prepare historical signed appcast` Actions workflow uses this same
+Makefile target with the protected key, checks the pinned published DMG digest,
+and uploads only a signed XML artifact for review. It does not replace the a10
+release asset or deploy Pages.
+For the separate approved publication, preserve the original a10 XML and its
+SHA-256, verify the prepared artifact with `make check-appcast
+APPCAST=<signed-copy> RELEASE_TAG=v1.0.0a10 ARGS=--require-signed-feed`, upload
+that exact XML as the a10 `appcast.xml` release asset, and dispatch the Pages
+workflow on `main`. Verify the downloaded release asset and live Pages feed
+against the reviewed signed bytes before pushing a new candidate tag.
 
 The private Sparkle key belongs in the protected release secret
 `SPARKLE_ED25519_PRIVATE_KEY_BASE64`, with an offline recovery copy. Apple

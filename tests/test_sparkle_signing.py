@@ -16,6 +16,7 @@ from pathlib import Path
 import subprocess
 import sys
 import tarfile
+import tomllib
 import xml.etree.ElementTree as xml
 
 import pytest
@@ -25,6 +26,7 @@ from scripts.check_appcast import check_appcast
 import scripts.sign_historical_appcast as historical_signer
 from scripts.sign_historical_appcast import FIRST_RELEASE, audit_legacy_feed, sign_historical_appcast
 from scripts.macos_signing import NATIVE_TRUST_ENV_PREFIXES, RELEASE_SECRET_NAMES, release_safe_environment
+from mailarchiver.release_versions import release_metadata
 
 
 @pytest.mark.parametrize("failure", [None, 0, 1, 2, 3, 4])
@@ -385,9 +387,11 @@ def test_update_appcast_make_entrypoint_reaches_key_gate_without_secret(tmp_path
     repository = Path(__file__).parents[1]
     if not (repository / ".tools/sparkle/2.10.0/bin/sign_update").exists():
         pytest.skip("Sparkle developer tools are not installed; run make test-sparkle-signing")
+    version = tomllib.loads((repository / "pyproject.toml").read_text(encoding="utf-8"))["project"]["version"]
+    tag = release_metadata(version)[0]
     result = subprocess.run(
         ["make", "update-appcast", f"APPCAST={tmp_path / 'missing.xml'}",
-         f"ARCHIVE={tmp_path / 'missing.dmg'}", "RELEASE_TAG=v1.0.0a10",
+         f"ARCHIVE={tmp_path / 'missing.dmg'}", f"RELEASE_TAG={tag}",
          "RELEASE_URL=https://example.invalid/missing.dmg"],
         cwd=repository, env=release_safe_environment(os.environ, NATIVE_TRUST_ENV_PREFIXES),
         capture_output=True, text=True, check=False,

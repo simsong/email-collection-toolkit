@@ -2,6 +2,28 @@
 
 # AI contributor instructions
 
+## Release invariants
+
+Never hard-code the current project version, candidate release tag, or expected
+Sparkle build number in release code, workflow steps, or tests. Derive these
+values from `pyproject.toml` through the shared release-version mapper. A named,
+immutable historical fixture may pin an old version when the test explicitly
+audits that exact published artifact; it must not stand in for the current
+release candidate. Exercise the real Makefile signing and release gates in
+branch CI before pushing a tag. Treat a pushed tag as immutable; prepare a new
+version and tag after fixing a tagged release, rather than moving the tag.
+Verify the prior published feed and the candidate's signed DMG and complete XML
+before creating a draft release. Alpha, beta, and stable publication all follow
+the same sequence; the release mapper controls their channels and build numbers.
+
+Source files created by Codex, including tests and scripts, start after any
+shebang and license header with a 5–10 line comment explaining purpose,
+operation, and system role. Document project environment-variable names and
+purposes in `README.md` and briefly beside the relevant Makefile targets; never
+document secret values. Use Makefile targets to run code and tests in every
+language. Test DynamoDB with DynamoDB Local and S3 with MinIO through those
+targets.
+
 ## Scope and source safety
 
 This project creates a personal, long-lived email archive. Its canonical

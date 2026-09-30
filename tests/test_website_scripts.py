@@ -94,20 +94,26 @@ def test_release_workflow_validates_built_distributions() -> None:
         "name: Install dependencies",
         "name: Validate distributions",
         "name: Build source distribution",
-        "name: Create draft release",
         "name: Prepare appcast update",
         "name: Sign the final notarized DMG's appcast item",
-        "name: Attach appcast and publish release",
+        "name: Validate and share signed appcast with Pages",
+        "name: Create complete draft release",
+        "name: Publish complete release",
     )
     # Validate the release commit and version before installing or building.
     assert [text.index(gate) for gate in gates] == sorted(text.index(gate) for gate in gates)
     makefile = (workflow.parents[2] / "Makefile").read_text(encoding="utf-8")
     assert "uv run --no-project --with packaging --python '>=3.12' python scripts/release_tag.py" in makefile
     signing_step = text[text.index("name: Sign the final notarized DMG's appcast item"):
-                        text.index("name: Attach appcast and publish release")]
+                        text.index("name: Validate and share signed appcast with Pages")]
     assert "SPARKLE_ED25519_PRIVATE_KEY_BASE64" in signing_step
-    assert text.index('gh release upload "$RELEASE_TAG" "$APPCAST"') < text.index("gh release edit")
+    assert text.index('dist/* "$APPCAST"') < text.index('gh release edit "$RELEASE_TAG"')
     configuration = safe_load(text)
+    macos_steps = [step["name"] for step in configuration[JOBS]["macos"]["steps"]]
+    assert macos_steps.index("Verify Sparkle release signer") < macos_steps.index("Verify signed update history")
+    assert macos_steps.index("Verify signed update history") < macos_steps.index("Build DMG, list mounted contents, and run headless self-test")
+    ci = safe_load((workflow.parent / "continuous-integration.yml").read_text(encoding="utf-8"))
+    assert any(step.get("run") == "make test-sparkle-signing" for step in ci[JOBS]["python-browser"]["steps"])
     triggers = configuration.get(WORKFLOW_ON, configuration.get(True))
     assert triggers == {"push": {"tags": ["v*"]}}
     assert configuration[JOBS]["pages"]["needs"] == "assemble"
@@ -119,11 +125,12 @@ def test_release_workflow_validates_built_distributions() -> None:
     assert pages.index("gh release download") < pages.index("name: Build Zola site")
     assert "actions/download-artifact@" in pages
     assert 'if [[ -z "$appcast_tag" ]]; then' in pages
-    assert 'if [[ -z "$previous_tag" ]]; then' in text
-    assert '"$(git tag --list \'v*\')" != "$RELEASE_TAG"' in text
+    history = (workflow.parents[2] / "scripts/fetch_release_appcast.sh").read_text(encoding="utf-8")
+    assert 'if [[ -z "$previous_tag" ]]; then' in history
+    assert '"$(git tag --list \'v*\')" != "$candidate_tag"' in history
     previous_gate = 'make check-appcast APPCAST="$appcast_path" RELEASE_TAG="$previous_tag" ARGS=--require-signed-feed'
-    assert previous_gate in text
-    assert text.index(previous_gate) < text.index("name: Sign the final notarized DMG's appcast item")
+    assert previous_gate.replace('$appcast_path', '$output') in history
+    assert text.index('make release-appcast-base APPCAST="$appcast_path"') < text.index("name: Sign the final notarized DMG's appcast item")
     pages_configuration = safe_load(pages)
     validation_runs = [step.get("run", "") for step in pages_configuration[JOBS]["build"]["steps"]]
     validation_runs = [run for run in validation_runs if "make check-appcast" in run]
