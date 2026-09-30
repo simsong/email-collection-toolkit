@@ -31,6 +31,8 @@ jobs:
         with:
           ref: main
           fetch-depth: 0
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v10.0.1
       - name: Configure Pages
         uses: actions/configure-pages@v5
       - name: Install Zola
@@ -79,7 +81,7 @@ jobs:
             if [[ "$attempt" -eq 6 ]]; then exit 1; fi
             sleep "$attempt"
           done
-          make check-appcast APPCAST="$RUNNER_TEMP/latest-appcast.xml" RELEASE_TAG="$appcast_tag"
+          make check-appcast APPCAST="$RUNNER_TEMP/latest-appcast.xml" RELEASE_TAG="$appcast_tag" ARGS=--require-signed-feed
           cp "$RUNNER_TEMP/latest-appcast.xml" website/static/updates/mac/appcast.xml
       - name: Include this release's signed appcast
         if: ${{ inputs.release_tag != '' }}
@@ -91,7 +93,7 @@ jobs:
         if: ${{ inputs.release_tag != '' }}
         env:
           RELEASE_TAG: ${{ inputs.release_tag }}
-        run: make check-appcast APPCAST=website/static/updates/mac/appcast.xml RELEASE_TAG="$RELEASE_TAG"
+        run: make check-appcast APPCAST=website/static/updates/mac/appcast.xml RELEASE_TAG="$RELEASE_TAG" ARGS=--require-signed-feed
       - name: Build Zola site
         run: zola --root website build --output-dir "$RUNNER_TEMP/mail-archiver-site"
       - name: Upload Pages artifact

@@ -41,9 +41,10 @@ native loader's underlying error (PyInstaller's generic wrapper hides it).
 
 ## CI and release validation
 
-All runner jobs use macos-15. Continuous integration runs `make check` on each
-non-`main` repository branch push, without PR/main duplicates or a DMG smoke
-job. Forked PRs are not covered by that push trigger. Release packaging runs
+All runner jobs use macos-15. Continuous integration runs `make check-static`
+and `make check-tests` in parallel jobs on each non-`main` repository branch
+push; local `make check` retains their order. CI has no PR/main duplicates or
+a DMG smoke job. Forked PRs are not covered by that push trigger. Release packaging runs
 only for a pushed, version-matching annotated `v*` tag on `main` and invokes
 `make dmg`, which mounts the candidate and runs its headless installed-app
 self-test. Native GUI release checks remain an explicit local
@@ -2174,8 +2175,10 @@ default channel, with separate monotonically increasing numeric Sparkle build
 values. The fixed website appcast starts empty; the Sparkle publication step
 adds only a post-notarization, Ed25519-signed item.
 `make sparkle-tools` pins Sparkle 2.10.0 and its upstream SHA-256, then places
-the verified developer archive below `.tools/sparkle/`. `make sparkle-keys`
-calls Sparkle's local `generate_keys`; the key generator retains the private
+the verified developer archive below `.tools/sparkle/`. Every invocation
+compares cached `generate_keys` and `sign_update` bytes against the verified
+archive before they can handle key material. `make sparkle-keys` calls Sparkle's
+local `generate_keys`; the key generator retains the private
 Ed25519 material in the developer's login Keychain and prints the public key.
 The ordinary test suite skips the real-signer integration when these developer
 tools are absent; `make test-sparkle-signing` installs them and requires that
@@ -2579,6 +2582,76 @@ requires it and fails clearly.
    retrieval API.
 
 ## Developer validation gates
+
+### Sparkle application integration
+
+`updates.py` holds typed updater status and exactly-once installation deferral.
+`sparkle.py` retains a PyObjC standard controller, formal channel delegate, and
+explicit block ABI metadata; Cocoa's main-thread timer resumes an idle reserved
+installation. `gui_app.py` adds native menu/preferences controls and coordinates
+quit, worker tails, and definition updates. `WriterLease` retains shared OS
+locks in a private same-user temporary guard directory for every writer,
+including CLI processes; definition refresh uses the same shared guard in both
+GUI and CLI paths, retaining its separate definition-generation lock.
+Installation retains an exclusive guard through resource
+shutdown until process exit or failure. Ordinary shutdown cancels any reservation.
+Writers on different archives remain concurrent. OS process death
+releases guards. The archive's existing exclusive lock still controls its writes.
+Raised continuation failures clear the update reservation and retain error state.
+Canceled or failed deferred installation also aborts its pending Quit; the Quit
+worker leaves windows open when cancellation wins or installation is underway.
+`make test-updates` exercises both deferred cancellation and a raised continuation
+after a real Quit request, then verifies definition work, archive creation and Quit retry.
+Application preferences version 2 migrates update choices and preserves them
+when recent archive paths change. `release_versions.py` supplies the build/appcast
+mapper to runtime and release code; Cocoa uses its numeric build value.
+
+`sparkle_bundle.py` preserves and signs Sparkle's framework/helpers and includes
+the upstream notice file. `update_appcast.py` verifies the release key against
+the app's public key, signs/verifies the stapled DMG, adds embedded notes/minimum
+macOS metadata, and signs/verifies the complete XML. Publisher and signer-test
+Makefile targets explicitly select packaging dependencies; ordinary test dependencies
+also declare the cryptographic library directly. Release/Pages gates require
+public-key verification of exact feed bytes and signed length on both main-push
+and release-triggered deployment without rewriting signed bytes. The checker
+accepts the pinned Sparkle signing-block format, bounds input to 16 MiB and uses
+the embedded public Ed25519 key; its Makefile target provisions only pinned
+pycryptodomex through `uv --no-project`, with no release secret or native signer.
+Release assembly also verifies its previous published feed before appending or
+re-signing history; only the sole-tag first-release seed bypasses that gate.
+`make sign-historical-appcast RELEASE_TAG=v1.0.0a10 DMG=... APPCAST=... OUTPUT=...`
+is the reviewed, local-only migration for the original a10 history. The Python
+orchestrator verifies the DMG seal, stapled ticket, and Gatekeeper acceptance
+before mounting it read-only. It verifies the app seal with nested-code checks
+and app-level Gatekeeper acceptance before execution. The mounted app's
+`SUPublicEDKey`, `CFBundleVersion`, and `CFBundleShortVersionString` must match
+the signing key and reviewed a10 version before the private key is loaded.
+The downloaded DMG is streamed into an owner-private, read-only temporary copy.
+Image trust, mounting, Sparkle signature verification, and the internal
+`make test-mounted-dmg` self-test use that single copy, whose digest is checked
+again before output signing. The pinned Sparkle archive signature is checked
+before the self-test exercises that same read-only mount. The migration invokes
+the test script with the current absolute Python interpreter and a fixed
+`PATH`, avoiding a caller-provided `make`; normal
+`make test-dmg` still mounts its own image. The DMG attach/detach, app seal,
+native dependency probes, and mounted executable tests share a filtered
+environment without release credentials, Python/loader/archive overrides, or
+Apple toolchain-selection variables. The signer receives
+the Sparkle key on standard input while Apple credentials and those overrides
+are excluded. `make update-appcast` sets the checkout root on `PYTHONPATH` so
+its direct script entrypoint can import the shared signing filter. The migration
+checks exact release metadata and protected-key
+match before writing a separately signed XML feed. Its SHA-256 pin covers the complete
+published feed bytes, including comments, whitespace, and XML declaration, so
+parsing cannot erase lexical edits before the audit. The migration refuses an
+existing output and does not upload or publish anything; an operator must
+separately review and publish the resulting feed asset and Pages update.
+External release notes are not supported because they need their own Sparkle
+signature.
+The frozen controller/compiled delegate probe and real HTTPS standard-UI probe
+passed during development; these do not establish signed application replacement.
+[SPARKLE_UPDATES.md](SPARKLE_UPDATES.md) records validation targets and remaining
+production acceptance, with macOS 15/arm64 as the configured initial target.
 
 Scanner deadline and helper-execution regressions use real POSIX subprocesses
 and explicitly skip Windows before importing the `fcntl`-based scanner. They do not establish Windows

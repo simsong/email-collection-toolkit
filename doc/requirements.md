@@ -1804,6 +1804,32 @@ scanner portability remain implementation work, not shipped features.
 
 ## macOS desktop delivery
 
+### Application updates (issue #91)
+
+The frozen macOS app must use Sparkle's standard updater UI, with native
+Preferences… and Check for Updates… commands. Stable installations default to
+release-only; alpha/beta installations default to preview plus stable. Explicit
+choices and daily-check preferences migrate outside archives and survive recent
+archive changes and upgrades. Download and installation require confirmation.
+The updater must wait for all jobs, worker tails, definition replacement, and
+writer leases and definition updates in the application and other same-user
+CLI processes (including development definition refresh), then
+atomically exclude new writers before relaunch. Resource shutdown must retain
+the installation guard until process exit once relaunch has begun; ordinary
+shutdown releases reservations. Failure, including a raised
+native continuation error, must restore writer access and cancel any Quit waiting
+for that update, allowing new work and a later Quit. Source launches and other platforms must
+report updates unavailable without starting checks.
+
+The app and publisher share numeric version mapping. Runtime Cocoa metadata
+must not overwrite that build number with a package-version string. Bundle the
+pinned framework with its helpers and full license notices, preserving links and
+nested signing. Sign and verify both final DMG and complete XML; embedded release
+notes and minimum macOS metadata are authenticated by the feed signature.
+Reject a release private key that differs from the embedded public key.
+[SPARKLE_UPDATES.md](SPARKLE_UPDATES.md) specifies behavior, operating procedure,
+and the signed/notarized update acceptance that must precede completion of #91.
+
 Ruff must pass with zero diagnostics before validation or packaging succeeds.
 `make ruff` checks the repository using the locked development dependency;
 `make check`, `make dmg`, and release builds must enforce it without ignoring
@@ -1886,7 +1912,8 @@ canonical alpha/beta spelling, and never advertise a draft or failed tag.
 
 `make sparkle-tools` downloads the pinned Sparkle developer archive to the
 ignored project-local `.tools/` directory, verifies its SHA-256 before extraction,
-and refuses an incomplete prior extraction. The ordinary test suite must not
+and verifies cached `generate_keys` and `sign_update` bytes against that archive
+before use. The ordinary test suite must not
 require these optional developer tools; release assembly must run the real
 signer test after installing them. `make sparkle-keys` invokes the
 verified `generate_keys` tool locally. The private Ed25519 key remains outside
@@ -1896,17 +1923,53 @@ The packaged app contains only its `SUPublicEDKey` and fixed appcast HTTPS URL.
 on standard input after Apple notarization/stapling, never through an argument,
 bundle, or application subprocess environment. Before publication, the release
 must have Sparkle verify the signature it generated against the final DMG
-bytes; Pages checks feed structure, the exact repository/tagged GitHub DMG
-download URL, and signature metadata but does not re-download historical DMGs
+bytes; Pages cryptographically authenticates the XML against the application's
+public Ed25519 key, checks the exact repository/tagged GitHub DMG
+download URL and signature metadata, but does not re-download historical DMGs
 to verify them. The signed DMG remains in a
 draft GitHub release until the signed feed asset is attached; publishing the
 draft is followed by a dependent Pages job using the signed feed produced in
 that same release run. A Pages failure fails the release workflow. Ordinary
 `main`-push Pages builds must fail if the published-release list or latest
 appcast asset is unavailable; they must never deploy the tracked empty seed.
+Both main-push and release-triggered Pages paths must verify the embedded feed
+signature and its exact signed byte length before deploying an appcast. Feeds
+are bounded to 16 MiB; forged signing markers, wrong keys and post-signing edits
+must fail without rewriting authenticated bytes or requiring a private key.
+The one-time migration for the first published release must operate on
+downloaded copies, pin the complete known a10 feed by SHA-256 as well as its
+release metadata and original DMG metadata, verify the
+original Sparkle archive signature using the existing protected key, require
+the mounted app's `SUPublicEDKey`, build number, and display version to match
+the reviewed release, and authenticate the DMG's
+Developer ID seal, stapled notarization ticket, and
+Gatekeeper assessment. DMG trust checks must precede mounting; the app seal
+(including nested code), app-level Gatekeeper acceptance, and embedded-key
+check must precede executing any mounted binaries. A failed trust check or
+self-test must stop signing. The migration must use one private read-only DMG
+copy for image trust, mounting, Sparkle signature verification, and the mounted
+app self-test; it must reject a copy changed during verification. The Sparkle
+signature must authenticate the image before its app self-test. The migration
+must invoke the mounted test through a fixed trusted interpreter and script,
+without resolving its driver through caller-controlled `PATH`. Trust and test
+subprocesses, including image attach/detach, app seal checks, and dependency
+probes, must exclude release credentials and inherited Python/loader/archive
+overrides. Native trust checks must also exclude Apple toolchain-selection
+variables. Sparkle signer subprocesses must exclude Apple credentials and
+those overrides. It must verify the cached Sparkle signer against each
+required member of the pinned archive, checking extraction status before
+comparison. It must sign a distinct
+appcast output with the existing Sparkle key, verify the resulting XML
+signature with the embedded public key,
+and refuse to overwrite either source or an existing output. It must not upload,
+replace, or publish a GitHub release asset or Pages site; those remain separate
+reviewed operations.
 Release assembly may bootstrap from the tracked seed only when the pushed tag
 is the repository's sole `v*` tag; otherwise it must fail rather than reset
-update history when its previous published feed cannot be obtained. Neither
+update history when its previous published feed cannot be obtained. Any previous
+published feed must authenticate against the embedded public key before release
+assembly appends or re-signs history. Unsigned legacy history requires a separate,
+reviewed migration. Neither
 workflow may write directly to protected `main`.
 
 Ordinary `make dmg`, `make dmg-signed`, and `make test-dmg` must run only the

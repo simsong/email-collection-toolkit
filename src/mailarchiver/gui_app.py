@@ -16,6 +16,8 @@ import sys
 import tempfile
 import time
 from concurrent.futures import Future, ThreadPoolExecutor
+from contextlib import contextmanager
+from collections.abc import Iterator
 from datetime import UTC, datetime
 from importlib import import_module
 from importlib.metadata import version
@@ -32,6 +34,9 @@ from webview.menu import Menu, MenuAction, MenuSeparator
 
 from .file_drag import FILE_DRAGS, install_file_drag
 from .identity import APPLICATION_NAME
+from .updates import UpdateService, UpdateStatus, default_channel
+from .release_versions import release_metadata
+from .sparkle import SparkleBackend, show_preferences, start_installed_updater
 from .__main__ import IngestInterrupted, IngestOutcome, IngestRequest, run_ingest
 from .application import (
     ApplicationController,
@@ -597,7 +602,8 @@ class AboutApi:
 
     def update_definitions(self) -> dict[str, Any]:
         from .clamav_update import refresh_definitions
-        result = refresh_definitions()
+        with self._application.definitions_activity():
+            result = refresh_definitions()
         self._application.add_notice("information", f"Virus definitions updated: {result.versions}")
         return result.model_dump(mode="json")
 
@@ -1343,6 +1349,74 @@ class PyWebViewApplication:
         self._lock = RLock()
         self._quitting = False
         self._import_threads: list[Thread] = []
+        self._updates_started = False
+        self._updating = False
+        self._definition_updates = 0
+        self._sparkle: SparkleBackend | None = None
+        installed_version = application_metadata().version
+        self.updates = UpdateService(
+            UpdateStatus(version=installed_version, channel=controller.preferences.update_channel or default_channel(installed_version),
+                         automatic_checks=controller.preferences.automatic_update_checks),
+            self.reserve_update_install, self.cancel_update_install, self.notify_update_deferred,
+        )
+
+    def reserve_update_install(self) -> bool:
+        """Prevent new writes only when all jobs, worker tails, and writer leases end."""
+        with self._lock:
+            if self._definition_updates:
+                return False
+            if any(document.ingest_job for document in self.controller.documents()):
+                return False
+            if any(worker.is_alive() for worker in self._import_threads):
+                return False
+            if not WriterLease.reserve_update():
+                return False
+            self._updating = True
+            return True
+
+    @contextmanager
+    def definitions_activity(self) -> Iterator[None]:
+        """Definition replacement also finishes before an application update can proceed."""
+        with self._lock:
+            if self._quitting or self._updating:
+                raise ValueError("The application is quitting or installing an update.")
+            self._definition_updates += 1
+        try:
+            yield
+        finally:
+            with self._lock:
+                self._definition_updates -= 1
+
+    def cancel_update_install(self) -> None:
+        with self._lock:
+            if self.updates.status.phase in {"deferred", "installing"}:
+                self._quitting = False
+            self._updating = False
+            WriterLease.cancel_update()
+
+    def notify_update_deferred(self, detail: str) -> None:
+        if self._sparkle is not None:
+            self.add_notice("information", detail)
+            if (self._definition_updates or any(document.ingest_job for document in self.controller.documents())
+                    or any(worker.is_alive() for worker in self._import_threads) or WriterLease.writers_active()):
+                macos_alert("Update ready — archive work is active", detail, ("Wait for work to finish",))
+
+    def start_updates(self) -> None:
+        if self._updates_started:
+            return
+        self._updates_started = True
+        try:
+            if sys.platform == "darwin" and getattr(sys, "frozen", False):
+                self.updates.status.channel = self.controller.initialize_updates(application_metadata().version)
+            self._sparkle = start_installed_updater(self.updates)
+        except (OSError, RuntimeError, ValueError) as error:
+            self.updates.fail(str(error))
+            self.add_notice("warning", f"Updates unavailable: {error}")
+
+    def show_update_preferences(self) -> None:
+        show_preferences(self.updates, self.controller.configure_updates)
+        if self.controller.preference_error:
+            self.add_notice("warning", self.controller.preference_error)
 
     def asset_url(
         self, asset: str, parameters: list[tuple[str, str]] | None = None
@@ -1707,7 +1781,7 @@ class PyWebViewApplication:
         processing_request: IngestRequest | None = None,
     ) -> bool:
         """Acquire both ingest layers before launching the shared service."""
-        if self._quitting:
+        if self._quitting or self._updating:
             return False
         document = api.document
         session = api.search_window
@@ -1733,8 +1807,8 @@ class PyWebViewApplication:
             job = IngestJob(operation_id=operation_id, owner_window_id=session.window_id,
                             kind="ingest" if ingesting else "content")
             with self._lock:
-                if self._quitting:
-                    raise ValueError("The application is stopping imports and quitting.")
+                if self._quitting or self._updating:
+                    raise ValueError("The application is stopping imports or installing an update.")
                 self.controller.begin_ingest(document.descriptor.document_id, job, lease)
         except (OSError, ArchiveBusyError, ValueError) as error:
             if lease is not None:
@@ -2112,8 +2186,13 @@ class PyWebViewApplication:
                 workers = tuple(self._import_threads)
             for worker in workers:
                 worker.join()
-            for window in tuple(webview.windows):
-                window.destroy()
+            with self._lock:
+                if not self._quitting or self.updates.status.phase in {"deferred", "installing"}:
+                    # Keep Cocoa alive for Sparkle or a canceled Quit. The timer
+                    # reserves installation after all remaining work ends.
+                    return
+                for window in tuple(webview.windows):
+                    window.destroy()
 
         Thread(target=finish_quit, name="mailarchiver-quit", daemon=True).start()
 
@@ -2136,6 +2215,11 @@ class PyWebViewApplication:
             from Foundation import NSNotificationCenter  # pylint: disable=import-outside-toplevel,no-name-in-module,import-error
             NSNotificationCenter.defaultCenter().removeObserver_(self._menu_observer)
             self._menu_observer = None
+        if self._sparkle is not None:
+            self._sparkle.close()
+        # Keep the OS guard until process exit once Sparkle has begun relaunch.
+        if self.updates.status.phase != "installing":
+            self.cancel_update_install()
         if self._connectivity is not None:
             self._connectivity.close()
         if self.asset_server is not None:
@@ -2206,6 +2290,16 @@ class PyWebViewApplication:
             about_item = menu.itemAtIndex_(0).submenu().itemAtIndex_(0)
             about_item.setTarget_(BrowserView.app.delegate())
             about_item.setAction_("showMailArchiverAbout:")
+            self.start_updates()
+            app_menu = menu.itemAtIndex_(0).submenu()
+            appkit = import_module("AppKit")
+            for offset, (title, action, key) in enumerate((
+                ("Preferences…", "showUpdatePreferences:", ","),
+                ("Check for Updates…", "checkForUpdates:", ""),
+            ), 1):
+                item = appkit.NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(title, action, key)
+                item.setTarget_(BrowserView.app.delegate())
+                app_menu.insertItem_atIndex_(item, offset)
             setattr(BrowserView, "current_menu", active.menu)
             for index, title in enumerate(("File", "Edit", "View", "Window"), 1):
                 item = next(
@@ -2344,7 +2438,7 @@ def configure_macos_application() -> None:
     info["CFBundleName"] = metadata.name
     info["CFBundleDisplayName"] = metadata.name
     info["CFBundleShortVersionString"] = metadata.version
-    info["CFBundleVersion"] = metadata.version
+    info["CFBundleVersion"] = str(release_metadata(metadata.version)[2])
     info["NSHumanReadableCopyright"] = metadata.copyright
     NSProcessInfo.processInfo().setProcessName_(metadata.name)
     icon = NSImage.alloc().initWithContentsOfFile_(str(application_icon_path()))
@@ -2367,6 +2461,8 @@ def install_macos_document_events(application: PyWebViewApplication) -> None:
         def applicationShouldTerminate_(self, app):
             import AppKit  # pylint: disable=import-outside-toplevel,import-error
 
+            if application._updating and application.reserve_update_install():
+                return AppKit.NSTerminateNow
             application.request_quit()
             # Close through pywebview after workers finish, keeping Cocoa's event
             # loop alive until window destruction releases webview.start().
@@ -2385,6 +2481,12 @@ def install_macos_document_events(application: PyWebViewApplication) -> None:
                     AppHelper.callAfter(sender.replyToOpenOrPrint_, 1)
 
             Thread(target=open_documents, name="mailarchiver-open-documents", daemon=True).start()
+
+        def showUpdatePreferences_(self, _sender):
+            application.show_update_preferences()
+
+        def checkForUpdates_(self, _sender):
+            application.updates.check()
 
         def showMailArchiverAbout_(self, _sender):
             Thread(target=application.create_about_window, name="mailarchiver-about", daemon=True).start()

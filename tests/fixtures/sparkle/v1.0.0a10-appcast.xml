@@ -1,0 +1,17 @@
+<?xml version='1.0' encoding='utf-8'?>
+<rss xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle" version="2.0">
+  <channel>
+    <item>
+      <title>Email Collection Toolkit 1.0.0a10</title>
+      <guid>v1.0.0a10</guid>
+      <sparkle:version>1000000110</sparkle:version>
+      <sparkle:shortVersionString>1.0.0a10</sparkle:shortVersionString>
+      <sparkle:channel>preview</sparkle:channel>
+      <pubDate>Wed, 23 Sep 2026 10:26:21 GMT</pubDate>
+      <enclosure url="https://github.com/simsong/email-collection-toolkit/releases/download/v1.0.0a10/Email-Collection-Toolkit-1.0.0a10-arm64.dmg" length="160093151" type="application/octet-stream" sparkle:edSignature="Z6XrcShVFHwVV8T5sHRQSvUpvIsM224Fo1AkBA19WusIvVXtXFTi4rQ2B7MP3lyLw0AU8psWLUMV1+Y0P6iGCA==" />
+    </item>
+    <title>Email Collection Toolkit updates</title>
+    <link>https://simsong.github.io/email-collection-toolkit/updates/mac/appcast.xml</link>
+    <description>Signed macOS release and preview updates.</description>
+  </channel>
+</rss>

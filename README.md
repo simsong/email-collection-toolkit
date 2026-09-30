@@ -1,6 +1,6 @@
 <!-- Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved. -->
 
-# mailarchiver
+# Email Collection Toolkit
 
 `mailarchiver` turns scattered email exports into a durable archive that you
 can inspect with ordinary tools decades from now. It preserves the original
@@ -19,6 +19,13 @@ runs headless self-tests before publishing the local artifact. Visible native
 validation is an explicit local `make check-release` operation.
 See [macOS distribution](doc/MACOS_DISTRIBUTION.md) for installation, test commands,
 architecture limits, and Developer ID renewal/signing instructions.
+
+Release jobs use `SPARKLE_ED25519_PRIVATE_KEY_BASE64` to sign the DMG and XML
+feed. `APPLE_CERTIFICATE_P12_BASE64` and `APPLE_CERTIFICATE_PASSWORD` import the
+Developer ID signing identity on the hosted runner. `APPLE_NOTARY_KEY_ID`,
+`APPLE_NOTARY_ISSUER_ID`, and `APPLE_NOTARY_PRIVATE_KEY_BASE64` authenticate
+Apple notarization. These protected variables are never needed by the installed
+app or its mounted self-test.
 
 ## Windows development
 
@@ -514,6 +521,10 @@ channel; stable releases use the default channel. The release parser accepts
 only canonical `MAJOR.MINOR.PATCH`, `MAJOR.MINOR.PATCHaN`, or
 `MAJOR.MINOR.PATCHbN` versions and rejects all other forms. Sparkle uses a
 separate increasing internal build number solely to order updates.
+Historical-feed native trust checks discard inherited `DEVELOPER_DIR`,
+`TOOLCHAINS`, `SDKROOT`, and `CODESIGN_ALLOCATE` because those variables can
+select Apple toolchain components. Release jobs use their configured toolchain
+outside that historical verification boundary.
 
 ## Test
 
@@ -539,9 +550,11 @@ make check
 ```
 
 Install the pinned headless Chromium once with `make install-test-browser`.
-`make check` runs Ruff and Pylint, then ty and Pyright, then both test suites
-and website validation without showing a window. Use `make lint` and `make types`
-for the static checks alone. On macOS,
+`make check` runs Ruff and Pylint, then ty and Pyright, then Rust and license
+checks, then both test suites and website validation without showing a window.
+CI runs `make check-static` and `make check-tests` in parallel jobs; local
+`make check` retains their order. Use `make lint` and `make types` for the
+static checks alone. On macOS,
 `make test-native-gui` additionally exercises the hidden Cocoa/WKWebView bridge.
 This native target is an explicit local development check and does not run in
 CI/CD, which retains the complete headless Chromium GUI test.

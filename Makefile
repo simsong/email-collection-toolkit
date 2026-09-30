@@ -131,15 +131,21 @@ OCR_ENGINES ?= native,ocrmypdf,tesseract
 OCR_INVENTORY_ARGS ?=
 OCR_RUN_ARGS ?=
 
-.PHONY: lint ruff types ty pyright
+.PHONY: check check-static check-tests lint ruff types ty pyright
 # Recursive recipes preserve stage ordering even with make -j.
 check:
+	$(MAKE) check-static
+	$(MAKE) check-tests
+
+check-static:
 	$(MAKE) lint
 	$(MAKE) types
 	$(MAKE) rust-check
 	$(MAKE) test-clamav-rust
 	$(MAKE) copyright-check
 	$(MAKE) runtime-license-check
+
+check-tests:
 	$(MAKE) test
 	$(MAKE) test-e2e
 	$(MAKE) website-check
@@ -175,6 +181,12 @@ sparkle-tools:
 	@printf '%s  %s\n' "$(SPARKLE_SHA256)" "$(SPARKLE_ARCHIVE)" | shasum -a 256 -c -
 	@if test -e "$(SPARKLE_DIR)"; then \
 		test -x "$(SPARKLE_DIR)/bin/generate_keys" -a -x "$(SPARKLE_DIR)/bin/sign_update" || { echo "incomplete Sparkle tools directory: $(SPARKLE_DIR)" >&2; exit 1; }; \
+		verified=$$(mktemp "$(SPARKLE_DOWNLOAD_DIR)/.sparkle-verify.XXXXXX") || exit 1; \
+		trap 'rm -f "$$verified"' 0; \
+		for tool in generate_keys sign_update; do \
+			tar -xOf "$(SPARKLE_ARCHIVE)" "./bin/$$tool" > "$$verified" || { echo "verified Sparkle archive is missing tool: $$tool" >&2; exit 1; }; \
+			cmp "$$verified" "$(SPARKLE_DIR)/bin/$$tool" || { echo "cached Sparkle tool differs from verified archive: $$tool" >&2; exit 1; }; \
+		done; \
 	else \
 		mkdir -p "$(SPARKLE_DIR)"; \
 		tar -xJf "$(SPARKLE_ARCHIVE)" --strip-components=1 -C "$(SPARKLE_DIR)"; \
@@ -185,21 +197,37 @@ sparkle-keys: sparkle-tools
 	"$(SPARKLE_DIR)/bin/generate_keys"
 
 .PHONY: update-appcast
-update-appcast:
+update-appcast: sparkle-tools
 	@test -n "$(ARCHIVE)" -a -n "$(RELEASE_TAG)" -a -n "$(RELEASE_URL)" || { echo 'usage: make update-appcast ARCHIVE=/path/to/image.dmg RELEASE_TAG=v1.0.0 RELEASE_URL=https://example.invalid/image.dmg'; exit 2; }
-	@test -x "$(SPARKLE_DIR)/bin/sign_update" -a -x .venv/bin/python || { echo 'run make sparkle-tools and uv sync before update-appcast'; exit 2; }
-	.venv/bin/python scripts/update_appcast.py --appcast "$(or $(APPCAST),website/static/updates/mac/appcast.xml)" --archive "$(ARCHIVE)" --tag "$(RELEASE_TAG)" --url "$(RELEASE_URL)" --signer "$(SPARKLE_DIR)/bin/sign_update"
+	@test -x "$(SPARKLE_DIR)/bin/sign_update" || { echo 'run make sparkle-tools before update-appcast'; exit 2; }
+	PYTHONPATH="$(CURDIR)/src:$(CURDIR)" uv run --locked --group packaging python scripts/update_appcast.py --appcast "$(or $(APPCAST),website/static/updates/mac/appcast.xml)" --archive "$(ARCHIVE)" --tag "$(RELEASE_TAG)" --url "$(RELEASE_URL)" --signer "$(SPARKLE_DIR)/bin/sign_update"
+
+.PHONY: sign-historical-appcast
+# This local migration requires SPARKLE_ED25519_PRIVATE_KEY_BASE64 for feed
+# signing; Apple Developer ID/notary credentials are used by release jobs only.
+# Native trust checks ignore DEVELOPER_DIR, TOOLCHAINS, SDKROOT, and
+# CODESIGN_ALLOCATE so inherited Apple toolchain overrides cannot redirect them.
+# Sparkle signer subprocesses exclude unrelated release secrets.
+sign-historical-appcast: sparkle-tools
+	@test "$(RELEASE_TAG)" = v1.0.0a10 || { echo 'this reviewed migration supports only RELEASE_TAG=v1.0.0a10' >&2; exit 2; }
+	@test -n "$(DMG)" -a -n "$(APPCAST)" -a -n "$(OUTPUT)" || { echo 'usage: make sign-historical-appcast RELEASE_TAG=v1.0.0a10 DMG=/path/to/original.dmg APPCAST=/path/to/downloaded/appcast.xml OUTPUT=/path/to/new-signed-appcast.xml'; exit 2; }
+	@test -f "$(DMG)" -a -r "$(DMG)" -a -f "$(APPCAST)" -a -r "$(APPCAST)" || { echo 'DMG and appcast inputs must be readable files' >&2; exit 2; }
+	PYTHONPATH="$(CURDIR)/src:$(CURDIR)" uv run --locked --group packaging python scripts/sign_historical_appcast.py --appcast "$(APPCAST)" --archive "$(DMG)" --output "$(OUTPUT)" --tag "$(RELEASE_TAG)" --signer "$(SPARKLE_DIR)/bin/sign_update"
 
 .PHONY: dmg dmg-signed notarize-dmg list-signatures check-release test-dmg preview-dmg self-test self-test-gui test-packaging
-dmg: ruff syntax-check pst-importer mcti-scan pff-converter-bundle
+dmg: ruff syntax-check sparkle-tools pst-importer mcti-scan pff-converter-bundle
 	uv run --group packaging python scripts/build_macos.py $(ARGS)
 
+# APPLE_CERTIFICATE_P12_BASE64 and APPLE_CERTIFICATE_PASSWORD import the
+# Developer ID identity on hosted release runners; local builds use Keychain.
 # Use the first valid Developer ID Application identity in the Keychain search list.
 dmg-signed: SIGNING_IDENTITY ?= $(shell /usr/bin/security find-identity -v -p codesigning | awk '/"Developer ID Application: / {print $$2; exit}')
 dmg-signed:
 	@test -n "$(strip $(SIGNING_IDENTITY))" -a "$(strip $(SIGNING_IDENTITY))" != '-' || { echo 'No Developer ID Application identity selected. Run make list-signatures or set SIGNING_IDENTITY.' >&2; exit 2; }
 	$(MAKE) dmg ARGS='$(ARGS) --signing-identity "$(SIGNING_IDENTITY)"'
 
+# APPLE_NOTARY_KEY_ID, APPLE_NOTARY_ISSUER_ID, and
+# APPLE_NOTARY_PRIVATE_KEY_BASE64 authenticate Apple's notarization service.
 notarize-dmg:
 	@test -n "$(DMG)" || { echo 'usage: make notarize-dmg DMG=/path/to/Email-Collection-Toolkit.dmg'; exit 2; }
 	uv run --group packaging python scripts/build_macos.py --notarize-dmg "$(DMG)"
@@ -207,12 +235,18 @@ notarize-dmg:
 list-signatures:
 	/usr/bin/security find-identity -v -p codesigning
 
-check-release: ruff syntax-check $(if $(DMG),,pst-importer mcti-scan pff-converter-bundle)
+check-release: ruff syntax-check $(if $(DMG),,sparkle-tools pst-importer mcti-scan pff-converter-bundle)
 	uv run --group packaging python scripts/build_macos.py --check-release $(if $(DMG),--test-dmg "$(DMG)") $(ARGS)
 
 test-dmg:
 	@test -n "$(DMG)" || { echo 'usage: make test-dmg DMG=/path/to/Email-Collection-Toolkit.dmg'; exit 2; }
 	uv run --group packaging python scripts/build_macos.py --test-dmg "$(DMG)"
+
+# Internal migration check: exercise the same authenticated read-only mount.
+.PHONY: test-mounted-dmg
+test-mounted-dmg:
+	@test -n "$(DMG)" -a -n "$(MOUNT)" || { echo 'usage: make test-mounted-dmg DMG=/path/to/image.dmg MOUNT=/mounted/image'; exit 2; }
+	uv run --group packaging python scripts/build_macos.py --test-mounted-dmg "$(MOUNT)" --source-dmg "$(DMG)"
 
 preview-dmg: ruff
 	@test -n "$(DMG)" || { echo 'usage: make preview-dmg DMG=/path/to/Email-Collection-Toolkit.dmg'; exit 2; }
@@ -243,7 +277,14 @@ test-signing: ruff
 
 .PHONY: test-sparkle-signing
 test-sparkle-signing: sparkle-tools ruff
-	uv run --locked pytest -q tests/test_sparkle_signing.py
+	uv run --locked --group packaging pytest -q tests/test_sparkle_signing.py
+
+.PHONY: sparkle-probe test-updates
+sparkle-probe: sparkle-tools ruff
+	uv run --locked --group packaging python scripts/sparkle_probe.py $(ARGS)
+
+test-updates: ruff
+	uv run --locked pytest -q tests/test_updates.py tests/test_writer_lock.py tests/test_application.py tests/test_clamav_definitions.py tests/test_website_scripts.py
 
 compare-apple-mail:
 	uv run mailarchiver-compare-apple-mail --apple-mail "$(HOME)/Library/Mail" --archive "$(HOME)/mail-archive" $(ARGS)
@@ -331,12 +372,12 @@ website-build-check: website-check
 
 release-tag-check:
 	@test -n "$(GITHUB_REF_NAME)" || { echo 'usage: make release-tag-check GITHUB_REF_NAME=v1.2.3'; exit 2; }
-	uv run --no-project --with packaging --python '>=3.12' python scripts/release_tag.py --tag "$(GITHUB_REF_NAME)" $(ARGS)
+	PYTHONPATH=src uv run --no-project --with packaging --python '>=3.12' python scripts/release_tag.py --tag "$(GITHUB_REF_NAME)" $(ARGS)
 
 .PHONY: check-appcast
 check-appcast:
 	@test -n "$(APPCAST)" || { echo 'usage: make check-appcast APPCAST=path [RELEASE_TAG=v1.2.3]'; exit 2; }
-	python3 scripts/check_appcast.py "$(APPCAST)" $(if $(RELEASE_TAG),--tag "$(RELEASE_TAG)",)
+	PYTHONPATH=src uv run --no-project --with pycryptodomex==3.23.0 --python '>=3.12' python scripts/check_appcast.py "$(APPCAST)" $(if $(RELEASE_TAG),--tag "$(RELEASE_TAG)",) $(ARGS)
 
 .PHONY: test-workflow-gates
 test-workflow-gates:

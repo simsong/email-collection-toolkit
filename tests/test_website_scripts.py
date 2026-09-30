@@ -10,7 +10,7 @@ from pathlib import Path
 import pytest
 from yaml import safe_load
 
-from scripts.check_appcast import check_appcast
+from scripts.check_appcast import MAX_FEED_BYTES, check_appcast
 from scripts.check_website import validate_config, validate_png
 from scripts.update_appcast import AppcastRelease, SignedArchive, append_item
 from scripts.update_site_releases import choose_preview
@@ -22,6 +22,9 @@ RELEASE = "release"
 TYPES = "types"
 JOBS = "jobs"
 RUNS_ON = "runs-on"
+STEPS = "steps"
+RUN = "run"
+NEEDS = "needs"
 
 
 def test_missing_png_reports_a_clear_failure(tmp_path: Path) -> None:
@@ -50,8 +53,8 @@ def test_pages_workflow_pins_and_checks_the_zola_archive() -> None:
     assert configuration[JOBS]["build"]["steps"][0]["with"]["ref"] == "main"
 
 
-def test_ci_runs_each_repository_branch_push_once_without_building_a_dmg() -> None:
-    """Requirement: every non-main branch push runs all tests without duplicate PR or DMG work."""
+def test_ci_runs_parallel_branch_jobs_without_building_a_dmg() -> None:
+    """Requirement: each non-main push runs independent static and test jobs without a DMG."""
     workflow = Path(__file__).parents[1] / ".github/workflows/continuous-integration.yml"
     text = workflow.read_text(encoding="utf-8")
 
@@ -62,8 +65,17 @@ def test_ci_runs_each_repository_branch_push_once_without_building_a_dmg() -> No
     configuration = safe_load(text)
     triggers = configuration.get(WORKFLOW_ON, configuration.get(True))
     assert triggers == {"push": {"branches": ["**", "!main"]}}
-    assert "dmg-smoke" not in configuration[JOBS]
-    assert any("make check" in step.get("run", "") for step in configuration[JOBS]["pytest"]["steps"])
+    jobs = configuration[JOBS]
+    assert set(jobs) == {"static-rust", "python-browser"}
+    assert all(NEEDS not in job for job in jobs.values())
+    static_runs = [step.get(RUN, "") for step in jobs["static-rust"][STEPS]]
+    test_runs = [step.get(RUN, "") for step in jobs["python-browser"][STEPS]]
+    assert any("make check-static" in run for run in static_runs)
+    assert any("make check-tests" in run for run in test_runs)
+    assert all("make check-tests" not in run for run in static_runs)
+    assert all("make check-static" not in run for run in test_runs)
+    makefile = (workflow.parents[2] / "Makefile").read_text(encoding="utf-8")
+    assert "check:\n\t$(MAKE) check-static\n\t$(MAKE) check-tests" in makefile
     for definition in workflow.parent.glob("*.yml"):
         configuration = safe_load(definition.read_text())
         assert all(job.get(RUNS_ON) == "macos-15" or "uses" in job for job in configuration[JOBS].values()), definition
@@ -109,6 +121,14 @@ def test_release_workflow_validates_built_distributions() -> None:
     assert 'if [[ -z "$appcast_tag" ]]; then' in pages
     assert 'if [[ -z "$previous_tag" ]]; then' in text
     assert '"$(git tag --list \'v*\')" != "$RELEASE_TAG"' in text
+    previous_gate = 'make check-appcast APPCAST="$appcast_path" RELEASE_TAG="$previous_tag" ARGS=--require-signed-feed'
+    assert previous_gate in text
+    assert text.index(previous_gate) < text.index("name: Sign the final notarized DMG's appcast item")
+    pages_configuration = safe_load(pages)
+    validation_runs = [step.get("run", "") for step in pages_configuration[JOBS]["build"]["steps"]]
+    validation_runs = [run for run in validation_runs if "make check-appcast" in run]
+    assert len(validation_runs) == 2
+    assert all("ARGS=--require-signed-feed" in run for run in validation_runs)
 
 
 def test_appcast_gate_rejects_missing_and_unsigned_release_items(tmp_path: Path) -> None:
@@ -126,6 +146,47 @@ def test_appcast_gate_rejects_missing_and_unsigned_release_items(tmp_path: Path)
     appcast.write_text(appcast.read_text().replace('sparkle:edSignature="signed"', ''), encoding="utf-8")
     with pytest.raises(ValueError, match="unsigned"):
         check_appcast(appcast, "v1.0.0a10")
+
+
+@pytest.mark.parametrize("tamper", ["content", "length", "signature", "public-key", "trailing", "duplicate"])
+def test_signed_feed_gate_authenticates_bytes_not_marker_text(tmp_path: Path, tamper: str) -> None:
+    """Issue #91: Pages rejects forged blocks, wrong keys, length edits and post-signing changes."""
+    import base64
+    from Cryptodome.Signature import eddsa
+
+    key = eddsa.import_private_key(bytes(range(32)))
+    public = base64.b64encode(key.public_key().export_key(format="raw")).decode("ascii")
+    content = b"<rss><channel><title>Fixture</title></channel></rss>"
+    signature = base64.b64encode(eddsa.new(key, "rfc8032").sign(content))
+    block = b"<!-- sparkle-signatures:\nedSignature: " + signature + f"\nlength: {len(content)}\n-->\n".encode()
+    signed = content + block
+    appcast = tmp_path / "signed.xml"
+    appcast.write_bytes(signed)
+    check_appcast(appcast, require_signed_feed=True, public_key=public)
+    if tamper == "content":
+        signed = signed.replace(b"Fixture", b"Changed")
+    elif tamper == "length":
+        signed = signed.replace(f"length: {len(content)}".encode(), b"length: 1")
+    elif tamper == "signature":
+        signed = signed.replace(signature, base64.b64encode(bytes(64)))
+    elif tamper == "public-key":
+        public = base64.b64encode(eddsa.import_private_key(bytes(reversed(range(32)))).public_key().export_key(format="raw")).decode()
+    elif tamper == "trailing":
+        signed += b"<!-- unsigned extra content -->"
+    else:
+        signed += block
+    appcast.write_bytes(signed)
+    with pytest.raises(ValueError, match="signature|signed length"):
+        check_appcast(appcast, require_signed_feed=True, public_key=public)
+
+
+def test_feed_limit_rejects_oversized_input_before_parsing(tmp_path: Path) -> None:
+    """Issue #91: the deployment checker bounds input without reading a whole oversized feed."""
+    appcast = tmp_path / "oversized.xml"
+    with appcast.open("wb") as handle:
+        handle.truncate(MAX_FEED_BYTES + 1)
+    with pytest.raises(ValueError, match="16 MiB feed limit"):
+        check_appcast(appcast, require_signed_feed=True)
 
 
 @pytest.mark.parametrize("url", [
