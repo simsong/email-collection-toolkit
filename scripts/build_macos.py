@@ -19,6 +19,7 @@ import sys
 import tempfile
 import time
 from contextlib import contextmanager
+from collections.abc import Mapping
 from importlib.metadata import distribution, version
 from pathlib import Path
 from typing import Literal
@@ -102,6 +103,13 @@ def run(*arguments: str | Path, **kwargs) -> subprocess.CompletedProcess:
     return subprocess.run([str(argument) for argument in arguments], check=True, **kwargs)
 
 
+def native_test_environment() -> dict[str, str]:
+    """Isolate mounted-image probes and executables from release credentials."""
+    environment = release_safe_environment(os.environ, NATIVE_TRUST_ENV_PREFIXES)
+    environment["PATH"] = "/usr/bin:/bin:/usr/sbin:/sbin"
+    return environment
+
+
 def icon(work: Path) -> Path:
     iconset = work / "MailArchiver.iconset"
     iconset.mkdir()
@@ -163,11 +171,13 @@ def configure_bundle(app: Path, signing_identity: str) -> None:
 @contextmanager
 def mounted_image(dmg: Path):
     """Never recursively clean a directory that might still contain a mounted volume."""
+    environment = native_test_environment()
     temporary = Path(tempfile.mkdtemp(prefix="mailarchiver-dmg-test-"))
     mount = temporary / "mounted"
     mount.mkdir()
     try:
-        run("/usr/bin/hdiutil", "attach", "-readonly", "-nobrowse", "-mountpoint", mount, dmg)
+        run("/usr/bin/hdiutil", "attach", "-readonly", "-nobrowse", "-mountpoint", mount, dmg,
+            env=environment)
         try:
             yield mount
         finally:
@@ -175,7 +185,7 @@ def mounted_image(dmg: Path):
             result: subprocess.CompletedProcess[str] | None = None
             for _ in range(10):
                 result = subprocess.run(["/usr/bin/hdiutil", "detach", str(mount)],
-                                        capture_output=True, text=True, check=False)
+                                        capture_output=True, text=True, check=False, env=environment)
                 if result.returncode == 0:
                     break
                 time.sleep(1)
@@ -204,6 +214,7 @@ def test_mounted_image(mount: Path, dmg: Path, *, gui: bool = False,
     """Exercise an existing read-only mount without opening a second image."""
     if not os.path.ismount(mount):
         raise ValueError("mounted DMG test requires an existing mounted volume")
+    environment = native_test_environment()
     manifest = manifest_path or ROOT / "dist" / f"{dmg.stem}.contents.json"
     record_image_contents(mount, manifest, log_entries=log_contents)
     app = mount / f"{APP_NAME}.app"
@@ -214,14 +225,12 @@ def test_mounted_image(mount: Path, dmg: Path, *, gui: bool = False,
     for name in ("LICENSE", "COPYRIGHT", "THIRD_PARTY_NOTICES.md", "ClamAV-COPYING.txt", "OpenSSL-LICENSE.txt", "Sparkle-LICENSE.txt"):
         if not (notices / name).is_file() or not (notices / name).stat().st_size:
             raise RuntimeError(f"Required distribution notice is missing or empty: {notices / name}; see {manifest}")
-    run("/usr/bin/codesign", "--verify", "--deep", "--strict", app)
+    run("/usr/bin/codesign", "--verify", "--deep", "--strict", app, env=environment)
     if not (mount / "Applications").is_symlink() or os.readlink(mount / "Applications") != "/Applications":
         raise RuntimeError("DMG is missing its Applications shortcut")
-    verify_dependencies(app)
+    verify_dependencies(app, environment=environment)
     verify_layout(mount, app.name)
     executable = app / "Contents/MacOS" / APP_NAME
-    environment = release_safe_environment(os.environ, NATIVE_TRUST_ENV_PREFIXES)
-    environment["PATH"] = "/usr/bin:/bin:/usr/sbin:/sbin"
     from mailarchiver.clamav_update import write_freshclam_config
     with tempfile.TemporaryDirectory(prefix="freshclam-mounted-test-") as temporary:
         configuration = Path(temporary) / "freshclam.conf"
@@ -307,8 +316,10 @@ def bundle_loader_path(app: Path, binary: Path, value: str) -> Path:
     return resolved
 
 
-def verify_dependencies(app: Path) -> None:
+def verify_dependencies(app: Path, *, environment: Mapping[str, str] | None = None) -> None:
     """Reject accidental Homebrew/build-machine linkage in every bundled Mach-O file."""
+    if environment is None:
+        environment = native_test_environment()
     checked: set[Path] = set()
     rpaths: set[Path] = set()
     for candidate in app.rglob("*"):
@@ -323,10 +334,12 @@ def verify_dependencies(app: Path) -> None:
             if handle.read(4) not in MACHO_MAGIC:
                 continue
         checked.add(path)
-        commands = run("/usr/bin/otool", "-l", path, capture_output=True, text=True).stdout
+        commands = run("/usr/bin/otool", "-l", path, capture_output=True, text=True,
+                       env=environment).stdout
         rpaths.update(bundle_loader_path(app, path, value) for value in load_rpaths(commands))
     for path in checked:
-        commands = run("/usr/bin/otool", "-l", path, capture_output=True, text=True).stdout
+        commands = run("/usr/bin/otool", "-l", path, capture_output=True, text=True,
+                       env=environment).stdout
         for dependency in load_dependencies(commands):
             if dependency.startswith(("/usr/lib/", "/System/Library/")):
                 continue

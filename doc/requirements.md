@@ -1949,8 +1949,9 @@ self-test must stop signing. The migration must use one private read-only DMG
 copy for image trust, mounting, Sparkle signature verification, and the mounted
 app self-test; it must reject a copy changed during verification. The Sparkle
 signature must authenticate the image before its app self-test. Trust and test
-subprocesses must exclude release credentials
-and inherited Python/loader/archive overrides. Sparkle signer subprocesses
+subprocesses, including image attach/detach, app seal checks, and dependency
+probes, must exclude release credentials and inherited Python/loader/archive
+overrides. Sparkle signer subprocesses
 must exclude Apple credentials and those overrides. It must sign a distinct
 appcast output with the existing Sparkle key, verify the resulting XML
 signature with the embedded public key,

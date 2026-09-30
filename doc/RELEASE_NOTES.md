@@ -14,6 +14,7 @@
   before loading the release key. It authenticates the archive before testing
   that same mount and isolates Apple credentials from the Sparkle signer.
   A private read-only DMG copy binds the mounted and signed image bytes.
+  Mounted-image native probes also exclude release credentials.
 
 * Integrate Sparkle 2.10.0 into the frozen macOS app with native Updates
   preferences, release/preview tracks, daily checks, and standard update UI.

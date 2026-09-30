@@ -2629,8 +2629,9 @@ Image trust, mounting, Sparkle signature verification, and the internal
 `make test-mounted-dmg` self-test use that single copy, whose digest is checked
 again before output signing. The pinned Sparkle archive signature is checked
 before the self-test exercises that same read-only mount; normal
-`make test-dmg` still mounts its own image. Trust and test subprocesses exclude
-release credentials and Python/loader/archive overrides. The signer receives
+`make test-dmg` still mounts its own image. The DMG attach/detach, app seal,
+native dependency probes, and mounted executable tests share a filtered
+environment without release credentials or Python/loader/archive overrides. The signer receives
 the Sparkle key on standard input while Apple credentials and those overrides
 are excluded. `make update-appcast` sets the checkout root on `PYTHONPATH` so
 its direct script entrypoint can import the shared signing filter. The migration
