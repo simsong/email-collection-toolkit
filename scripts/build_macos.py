@@ -1,4 +1,9 @@
 # Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved.
+# Build the self-contained macOS application and installer image.
+# Collect Python and native components, then seal the app and DMG.
+# Test a mounted image with synthetic archive inputs before publication.
+# The historical-feed migration can pass its already authenticated mount.
+# Ordinary builds still create and detach their own read-only mount.
 
 """Build a self-contained app and DMG, optionally Developer ID signed, and test it mounted."""
 
@@ -26,7 +31,8 @@ from pydantic import BaseModel
 
 from dmg_layout import create_image, verify_layout
 from macos_signing import (
-    NotarizationCredentials, SigningSecrets, dmg_filename, notarize_image, release_safe_environment, sign_image,
+    NATIVE_TRUST_ENV_PREFIXES, NotarizationCredentials, SigningSecrets, dmg_filename, notarize_image,
+    release_safe_environment, sign_image,
     signing_identity,
 )
 from release_tag import release_metadata
@@ -190,61 +196,68 @@ def test_image(dmg: Path, *, gui: bool = False, manifest_path: Path | None = Non
                log_contents: bool = False) -> None:
     """Mount read-only and test the actual bundle outside the source checkout."""
     with mounted_image(dmg) as mount:
-        manifest = manifest_path or ROOT / "dist" / f"{dmg.stem}.contents.json"
-        record_image_contents(mount, manifest, log_entries=log_contents)
-        app = mount / f"{APP_NAME}.app"
-        library = app / "Contents/Frameworks/clamav/libclamav.dylib"
-        if not library.is_file():
-            raise RuntimeError(f"Bundled ClamAV library is missing: {library}; see {manifest}")
-        notices = app / "Contents/Resources/Third Party Notices"
-        for name in ("LICENSE", "COPYRIGHT", "THIRD_PARTY_NOTICES.md", "ClamAV-COPYING.txt", "OpenSSL-LICENSE.txt", "Sparkle-LICENSE.txt"):
-            if not (notices / name).is_file() or not (notices / name).stat().st_size:
-                raise RuntimeError(f"Required distribution notice is missing or empty: {notices / name}; see {manifest}")
-        run("/usr/bin/codesign", "--verify", "--deep", "--strict", app)
-        if not (mount / "Applications").is_symlink() or os.readlink(mount / "Applications") != "/Applications":
-            raise RuntimeError("DMG is missing its Applications shortcut")
-        verify_dependencies(app)
-        verify_layout(mount, app.name)
-        executable = app / "Contents/MacOS" / APP_NAME
-        environment = release_safe_environment(
-            os.environ, ("PYTHON", "DYLD_", "MAILARCHIVER", "MAIL_ARCHIVE"))
-        environment["PATH"] = "/usr/bin:/bin:/usr/sbin:/sbin"
-        from mailarchiver.clamav_update import write_freshclam_config
-        with tempfile.TemporaryDirectory(prefix="freshclam-mounted-test-") as temporary:
-            configuration = Path(temporary) / "freshclam.conf"
-            certs = app / "Contents/Resources/clamav/certs"
-            write_freshclam_config(configuration, certs if certs.is_dir() else None, checks=0)
-            run(app / "Contents/Frameworks/clamav/freshclam", "--version",
-                f"--config-file={configuration}", cwd=mount.parent, env=environment, timeout=20)
-        converter = app / "Contents/Resources/importers/pff-converter/pff-converter"
-        with tempfile.TemporaryDirectory(prefix="pff-mounted-test-") as temporary:
-            receipt = Path(temporary) / "receipt.json"
-            run(converter, "--receipt", receipt, "--", ROOT / "rust/mct-importer/tests/fixtures/empty.pst",
-                cwd=temporary, env=environment, timeout=60)
-            from mailarchiver.pff_source import PffReceipt
-            converted = PffReceipt.model_validate_json(receipt.read_text())
-            if not converted.complete or converted.emitted:
-                raise RuntimeError("mounted standalone converter failed the empty PST fixture")
-            archive = Path(temporary) / "archive"
-            archive.mkdir()
-            owners = Path(temporary) / "owners.txt"
-            owners.write_text("fixture@example.test\n")
-            run(executable, "--cli", "--archive", archive, "ingest", "--no-scan",
-                "--owner-names-file", owners, "--defer-content",
-                ROOT / "rust/mct-importer/tests/fixtures/empty.pst", cwd=temporary, env=environment, timeout=90)
-            from mailarchiver.pst_source import ImportReceipt
-            receipts = list(archive.glob("processing-pst/*/receipt.json"))
-            if len(receipts) != 1 or ImportReceipt.model_validate_json(receipts[0].read_text()).emitted:
-                raise RuntimeError("mounted application did not retain Rust PST import evidence")
-        for mode in (("self-test", "self-test-gui") if gui else ("self-test",)):
-            detail = "opens and closes synthetic test windows" if mode == "self-test-gui" else "no windows"
-            print(f"Running mounted {mode} ({detail}); waiting for the test process to exit.", flush=True)
-            report_path = dmg.with_suffix(f".{mode}.json")
-            run(executable, f"--{mode}", "--report", report_path,
-                cwd=mount.parent, env=environment, timeout=150)
-            report = SelfTestReport.model_validate_json(report_path.read_text(encoding="utf-8"))
-            if not report.passed or not report.frozen:
-                raise RuntimeError(f"mounted {mode} failed: {report}")
+        test_mounted_image(mount, dmg, gui=gui, manifest_path=manifest_path, log_contents=log_contents)
+
+
+def test_mounted_image(mount: Path, dmg: Path, *, gui: bool = False,
+                       manifest_path: Path | None = None, log_contents: bool = False) -> None:
+    """Exercise an existing read-only mount without opening a second image."""
+    if not os.path.ismount(mount):
+        raise ValueError("mounted DMG test requires an existing mounted volume")
+    manifest = manifest_path or ROOT / "dist" / f"{dmg.stem}.contents.json"
+    record_image_contents(mount, manifest, log_entries=log_contents)
+    app = mount / f"{APP_NAME}.app"
+    library = app / "Contents/Frameworks/clamav/libclamav.dylib"
+    if not library.is_file():
+        raise RuntimeError(f"Bundled ClamAV library is missing: {library}; see {manifest}")
+    notices = app / "Contents/Resources/Third Party Notices"
+    for name in ("LICENSE", "COPYRIGHT", "THIRD_PARTY_NOTICES.md", "ClamAV-COPYING.txt", "OpenSSL-LICENSE.txt", "Sparkle-LICENSE.txt"):
+        if not (notices / name).is_file() or not (notices / name).stat().st_size:
+            raise RuntimeError(f"Required distribution notice is missing or empty: {notices / name}; see {manifest}")
+    run("/usr/bin/codesign", "--verify", "--deep", "--strict", app)
+    if not (mount / "Applications").is_symlink() or os.readlink(mount / "Applications") != "/Applications":
+        raise RuntimeError("DMG is missing its Applications shortcut")
+    verify_dependencies(app)
+    verify_layout(mount, app.name)
+    executable = app / "Contents/MacOS" / APP_NAME
+    environment = release_safe_environment(os.environ, NATIVE_TRUST_ENV_PREFIXES)
+    environment["PATH"] = "/usr/bin:/bin:/usr/sbin:/sbin"
+    from mailarchiver.clamav_update import write_freshclam_config
+    with tempfile.TemporaryDirectory(prefix="freshclam-mounted-test-") as temporary:
+        configuration = Path(temporary) / "freshclam.conf"
+        certs = app / "Contents/Resources/clamav/certs"
+        write_freshclam_config(configuration, certs if certs.is_dir() else None, checks=0)
+        run(app / "Contents/Frameworks/clamav/freshclam", "--version",
+            f"--config-file={configuration}", cwd=mount.parent, env=environment, timeout=20)
+    converter = app / "Contents/Resources/importers/pff-converter/pff-converter"
+    with tempfile.TemporaryDirectory(prefix="pff-mounted-test-") as temporary:
+        receipt = Path(temporary) / "receipt.json"
+        run(converter, "--receipt", receipt, "--", ROOT / "rust/mct-importer/tests/fixtures/empty.pst",
+            cwd=temporary, env=environment, timeout=60)
+        from mailarchiver.pff_source import PffReceipt
+        converted = PffReceipt.model_validate_json(receipt.read_text())
+        if not converted.complete or converted.emitted:
+            raise RuntimeError("mounted standalone converter failed the empty PST fixture")
+        archive = Path(temporary) / "archive"
+        archive.mkdir()
+        owners = Path(temporary) / "owners.txt"
+        owners.write_text("fixture@example.test\n")
+        run(executable, "--cli", "--archive", archive, "ingest", "--no-scan",
+            "--owner-names-file", owners, "--defer-content",
+            ROOT / "rust/mct-importer/tests/fixtures/empty.pst", cwd=temporary, env=environment, timeout=90)
+        from mailarchiver.pst_source import ImportReceipt
+        receipts = list(archive.glob("processing-pst/*/receipt.json"))
+        if len(receipts) != 1 or ImportReceipt.model_validate_json(receipts[0].read_text()).emitted:
+            raise RuntimeError("mounted application did not retain Rust PST import evidence")
+    for mode in (("self-test", "self-test-gui") if gui else ("self-test",)):
+        detail = "opens and closes synthetic test windows" if mode == "self-test-gui" else "no windows"
+        print(f"Running mounted {mode} ({detail}); waiting for the test process to exit.", flush=True)
+        report_path = dmg.with_suffix(f".{mode}.json")
+        run(executable, f"--{mode}", "--report", report_path,
+            cwd=mount.parent, env=environment, timeout=150)
+        report = SelfTestReport.model_validate_json(report_path.read_text(encoding="utf-8"))
+        if not report.passed or not report.frozen:
+            raise RuntimeError(f"mounted {mode} failed: {report}")
 
 
 def load_rpaths(commands: str) -> tuple[str, ...]:
@@ -477,6 +490,8 @@ def build(signing_identity: str, *, gui: bool = False, log_contents: bool = Fals
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--test-dmg", type=Path, help="mount and retest an existing DMG")
+    parser.add_argument("--test-mounted-dmg", type=Path, help="test an existing verified read-only DMG mount")
+    parser.add_argument("--source-dmg", type=Path, help="source image for mounted test report names")
     parser.add_argument("--check-release", action="store_true", help="include the visible GUI self-test for release validation")
     parser.add_argument("--preview-dmg", type=Path, help="open the mounted installer in Finder until Return is pressed")
     parser.add_argument("--notarize-dmg", type=Path, help="submit, staple, and validate an existing signed DMG")
@@ -492,6 +507,11 @@ def main() -> None:
     elif args.test_dmg:
         test_image(args.test_dmg.resolve(strict=True), gui=args.check_release,
                    log_contents=args.log_dmg_contents)
+    elif args.test_mounted_dmg:
+        if args.source_dmg is None:
+            parser.error("--test-mounted-dmg requires --source-dmg")
+        test_mounted_image(args.test_mounted_dmg.resolve(strict=True), args.source_dmg.resolve(strict=True),
+                           gui=args.check_release, log_contents=args.log_dmg_contents)
     elif args.notarize_dmg:
         notarize_image(args.notarize_dmg.resolve(strict=True),
                        NotarizationCredentials.from_environment(os.environ), ROOT / ".tmp")

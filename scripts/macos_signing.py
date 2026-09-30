@@ -1,4 +1,9 @@
 # Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved.
+# Contain optional Apple release credentials in a short-lived keychain.
+# Distinguish hosted signing from local explicit identities.
+# Redact secret values from errors and child-process environments.
+# Keep notarization and Sparkle keys separate from application execution.
+# Restore the original Keychain search list after every signing attempt.
 
 """Optional Developer ID signing with a short-lived imported identity."""
 
@@ -28,6 +33,7 @@ PEM_PRIVATE_KEY_BEGIN = b"-----BEGIN PRIVATE KEY-----"
 PEM_PRIVATE_KEY_END = b"-----END PRIVATE KEY-----"
 RELEASE_SECRET_NAMES = (CERTIFICATE_SECRET, PASSWORD_SECRET, NOTARY_KEY_ID_SECRET, NOTARY_ISSUER_SECRET,
                         NOTARY_PRIVATE_KEY_SECRET, SPARKLE_PRIVATE_KEY_SECRET)
+NATIVE_TRUST_ENV_PREFIXES = ("PYTHON", "DYLD_", "LD_", "ARCHIVE_", "MAILARCHIVER", "MAIL_ARCHIVE")
 GITHUB_ACTIONS = "GITHUB_ACTIONS"
 RUNNER_ENVIRONMENT = "RUNNER_ENVIRONMENT"
 EXPLICIT_UNSIGNED_WARNING = (

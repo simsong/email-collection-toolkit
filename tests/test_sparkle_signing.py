@@ -1,4 +1,9 @@
 # Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved.
+# Exercise the Sparkle release signer with disposable key material.
+# Check archive and feed verification using the pinned real tool.
+# Audit the historical feed's exact bytes and app-key policy.
+# Keep native trust boundaries isolated when the old DMG is unavailable.
+# Assert that release secrets never enter unrelated signer subprocesses.
 
 """Verify the real pinned Sparkle signer accepts the release key transport."""
 
@@ -6,8 +11,10 @@ import base64
 from contextlib import contextmanager
 import hashlib
 import io
+import os
 from pathlib import Path
 import subprocess
+import sys
 import tarfile
 import xml.etree.ElementTree as xml
 
@@ -17,10 +24,10 @@ from scripts.update_appcast import AppcastRelease, SPARKLE_HARDWARE, SPARKLE_MIN
 from scripts.check_appcast import check_appcast
 import scripts.sign_historical_appcast as historical_signer
 from scripts.sign_historical_appcast import FIRST_RELEASE, audit_legacy_feed, sign_historical_appcast
-from scripts.macos_signing import RELEASE_SECRET_NAMES
+from scripts.macos_signing import NATIVE_TRUST_ENV_PREFIXES, RELEASE_SECRET_NAMES, release_safe_environment
 
 
-@pytest.mark.parametrize("failure", [None, 0, 1, 2, 3, 4, 5])
+@pytest.mark.parametrize("failure", [None, 0, 1, 2, 3, 4])
 def test_historical_trust_checks_precede_execution_and_stop_on_failure(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, failure: int | None,
 ) -> None:
@@ -40,11 +47,12 @@ def test_historical_trust_checks_precede_execution_and_stop_on_failure(
          "context:primary-signature", str(archive)],
         ["/usr/bin/codesign", "--verify", "--deep", "--strict", str(app)],
         ["/usr/sbin/spctl", "--assess", "--type", "execute", str(app)],
-        ["make", "test-dmg", f"DMG={archive}"],
     ]
     commands: list[list[str]] = []
     for name in RELEASE_SECRET_NAMES:
         monkeypatch.setenv(name, "fixture-secret")
+    for name in ("PYTHONPATH", "DYLD_INSERT_LIBRARIES", "LD_PRELOAD", "ARCHIVE_OVERRIDE"):
+        monkeypatch.setenv(name, "fixture-override")
 
     @contextmanager
     def mounted_fixture(path: Path):
@@ -56,8 +64,9 @@ def test_historical_trust_checks_precede_execution_and_stop_on_failure(
             cwd: Path | None = None) -> subprocess.CompletedProcess[str]:
         assert check
         assert all(name not in env for name in RELEASE_SECRET_NAMES)
-        if command[0] == "make":
-            assert cwd == Path(__file__).parents[1]
+        assert all(name not in env for name in
+                   ("PYTHONPATH", "DYLD_INSERT_LIBRARIES", "LD_PRELOAD", "ARCHIVE_OVERRIDE"))
+        assert cwd is None
         index = len(commands)
         commands.append(command)
         if index == failure:
@@ -69,11 +78,14 @@ def test_historical_trust_checks_precede_execution_and_stop_on_failure(
     monkeypatch.setattr(historical_signer, "mounted_historical_dmg", mounted_fixture)
     monkeypatch.setattr(historical_signer.subprocess, "run", run)
     if failure is None:
-        historical_signer.verify_historical_app_key(archive, "fixture-public-key")
+        with historical_signer.verify_historical_app_key(archive, "fixture-public-key") as verified_mount:
+            assert verified_mount == mount
+            assert commands == expected
         assert commands == expected
     else:
         with pytest.raises(subprocess.CalledProcessError):
-            historical_signer.verify_historical_app_key(archive, "fixture-public-key")
+            with historical_signer.verify_historical_app_key(archive, "fixture-public-key"):
+                pytest.fail("failed trust check must not expose a mount")
         assert commands == expected[:failure + 1]
 
 
@@ -166,28 +178,42 @@ def test_historical_signing_orchestration_preserves_source_and_creates_verified_
         handle.truncate(FIRST_RELEASE.archive_length)
     output = tmp_path / "signed-appcast.xml"
     verified_archives: list[tuple[Path, Path, str]] = []
+    stages: list[str] = []
 
     def verify_fixture_archive(path: Path, tool: Path, _key: object, signature: str) -> None:
         assert path == archive
         assert tool == signer
         verified_archives.append((path, tool, signature))
+        stages.append("archive-verified")
 
     # The historical DMG is not checked in; its signature is independently covered
     # by the real signer test above, so this test isolates feed-signing orchestration.
     monkeypatch.setattr(historical_signer, "verify_signed_archive", verify_fixture_archive)
     verified_app_keys: list[tuple[Path, str]] = []
 
-    def verify_fixture_app(path: Path, expected_key: str) -> None:
+    @contextmanager
+    def verify_fixture_app(path: Path, expected_key: str):
         assert path == archive
         verified_app_keys.append((path, expected_key))
+        stages.append("mount-open")
+        yield tmp_path / "mounted"
+        stages.append("mount-closed")
+
+    def test_fixture_mount(mount: Path, path: Path) -> None:
+        assert mount == tmp_path / "mounted"
+        assert path == archive
+        assert stages == ["mount-open", "archive-verified"]
+        stages.append("mounted-test")
 
     monkeypatch.setattr(historical_signer, "verify_historical_app_key", verify_fixture_app)
+    monkeypatch.setattr(historical_signer, "test_verified_mount", test_fixture_mount)
     sign_historical_appcast(appcast, archive, output, signer, public_key=public_key)
 
     assert appcast.read_bytes() == original
     assert len(verified_archives) == 1
     assert verified_archives[0][2] == FIRST_RELEASE.archive_signature
     assert verified_app_keys == [(archive, public_key)]
+    assert stages == ["mount-open", "archive-verified", "mounted-test", "mount-closed"]
     check_appcast(output, FIRST_RELEASE.tag, require_signed_feed=True, public_key=public_key)
     assert b"<!-- sparkle-signatures:" in output.read_bytes()
     with pytest.raises(ValueError, match="refusing to replace existing"):
@@ -210,6 +236,60 @@ def test_real_signer_accepts_exported_seed_on_standard_input(tmp_path: Path, mon
     archive.write_bytes(b"tampered Sparkle signing fixture")
     with pytest.raises(RuntimeError, match="signature verification failed"):
         verify_signed_archive(archive, signer, signing_key(), result.signature)
+
+
+def test_signer_subprocess_receives_no_apple_or_loader_secrets(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Issue #91: real archive/XML signing isolates unrelated protected inputs."""
+    real_signer = Path(__file__).parents[1] / ".tools/sparkle/2.10.0/bin/sign_update"
+    if not real_signer.exists():
+        pytest.skip("Sparkle developer tools are not installed; run make test-sparkle-signing")
+    for name in RELEASE_SECRET_NAMES:
+        monkeypatch.setenv(name, "fixture-secret")
+    monkeypatch.setenv(SPARKLE_PRIVATE_KEY_SECRET, base64.b64encode(bytes(range(32))).decode("ascii"))
+    for name in ("PYTHONPATH", "DYLD_INSERT_LIBRARIES", "LD_PRELOAD", "ARCHIVE_OVERRIDE"):
+        monkeypatch.setenv(name, "fixture-override")
+    wrapper = tmp_path / "checked-signer"
+    wrapper.write_text(
+        f"#!{sys.executable}\n"
+        "# Check the environment before delegating to the pinned signer.\n"
+        "# This disposable fixture runs only within the signing test.\n"
+        "# It observes variable names, not protected secret values.\n"
+        "# The real Sparkle signer still performs every signing operation.\n"
+        "# A leaked variable makes the test fail before signing.\n"
+        "import os, sys\n"
+        f"for name in {(*RELEASE_SECRET_NAMES, 'PYTHONPATH', 'DYLD_INSERT_LIBRARIES', 'LD_PRELOAD', 'ARCHIVE_OVERRIDE')!r}:\n"
+        "    if name in os.environ: raise SystemExit('signer received protected environment')\n"
+        f"os.execv({str(real_signer)!r}, [{str(real_signer)!r}, *sys.argv[1:]])\n",
+        encoding="utf-8",
+    )
+    wrapper.chmod(0o700)
+    archive = tmp_path / "fixture.dmg"
+    archive.write_bytes(b"signed archive environment fixture")
+    assert signed_archive(archive, wrapper, signing_key()).length == archive.stat().st_size
+    feed = tmp_path / "appcast.xml"
+    feed.write_text('<rss version="2.0"><channel><title>Fixture</title></channel></rss>', encoding="utf-8")
+    sign_feed(feed, wrapper, signing_key())
+    assert b"<!-- sparkle-signatures:" in feed.read_bytes()
+
+
+def test_update_appcast_make_entrypoint_reaches_key_gate_without_secret(tmp_path: Path) -> None:
+    """Issue #91: release publisher imports shared signing code when run as a script."""
+    repository = Path(__file__).parents[1]
+    if not (repository / ".tools/sparkle/2.10.0/bin/sign_update").exists():
+        pytest.skip("Sparkle developer tools are not installed; run make test-sparkle-signing")
+    result = subprocess.run(
+        ["make", "update-appcast", f"APPCAST={tmp_path / 'missing.xml'}",
+         f"ARCHIVE={tmp_path / 'missing.dmg'}", "RELEASE_TAG=v1.0.0a10",
+         "RELEASE_URL=https://example.invalid/missing.dmg"],
+        cwd=repository, env=release_safe_environment(os.environ, NATIVE_TRUST_ENV_PREFIXES),
+        capture_output=True, text=True, check=False,
+    )
+    assert result.returncode != 0
+    assert "Release signing requires a 32-byte Sparkle seed" in result.stderr
+    assert "ModuleNotFoundError" not in result.stderr
+    assert not (tmp_path / "missing.xml").exists()
 
 
 def test_real_signer_signs_xml_and_rejects_modified_feed(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

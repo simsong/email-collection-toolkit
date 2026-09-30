@@ -1,4 +1,9 @@
 # Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved.
+# Publish one Sparkle release into the signed macOS appcast.
+# Validate version and archive metadata before writing the feed.
+# Supply the protected Ed25519 seed only through signer standard input.
+# Verify archive and XML signatures before release publication.
+# Keep Apple and build-environment credentials away from the signer.
 
 """Append a Sparkle-signed, notarized macOS release archive to an appcast."""
 
@@ -21,6 +26,7 @@ from pydantic import BaseModel, Field, SecretStr
 from mailarchiver.release_versions import PREVIEW_CHANNEL, release_metadata
 from mailarchiver.update_metadata import MINIMUM_MACOS_VERSION
 from mailarchiver.update_metadata import SPARKLE_PUBLIC_KEY
+from scripts.macos_signing import NATIVE_TRUST_ENV_PREFIXES, release_safe_environment
 
 ROOT = Path(__file__).resolve().parents[1]
 SPARKLE_NAMESPACE = "http://www.andymatuschak.org/xml-namespaces/sparkle"
@@ -84,8 +90,7 @@ def signed_archive(archive: Path, signer: Path, key: SecretStr) -> SignedArchive
     """Ask Sparkle to sign and then verify the final DMG."""
     result = subprocess.run([signer, "--ed-key-file", "-", archive], input=key.get_secret_value(),
                             capture_output=True, text=True, check=False,
-                            env={name: value for name, value in os.environ.items()
-                                 if name != SPARKLE_PRIVATE_KEY_SECRET})
+                            env=release_safe_environment(os.environ, NATIVE_TRUST_ENV_PREFIXES))
     if result.returncode:
         raise RuntimeError("Sparkle archive signing failed")
     try:
@@ -101,8 +106,7 @@ def verify_signed_archive(archive: Path, signer: Path, key: SecretStr, signature
     """Have Sparkle verify the archive bytes with the exported update key."""
     result = subprocess.run([signer, "--verify", "--ed-key-file", "-", archive, signature],
                             input=key.get_secret_value(), capture_output=True, text=True, check=False,
-                            env={name: value for name, value in os.environ.items()
-                                 if name != SPARKLE_PRIVATE_KEY_SECRET})
+                            env=release_safe_environment(os.environ, NATIVE_TRUST_ENV_PREFIXES))
     if result.returncode:
         raise RuntimeError("Sparkle archive signature verification failed")
 
@@ -137,7 +141,7 @@ def append_item(appcast: Path, release: AppcastRelease) -> None:
 
 def sign_feed(appcast: Path, signer: Path, key: SecretStr) -> None:
     """Sign the XML itself, then verify Sparkle's embedded signature before publication."""
-    environment = {name: value for name, value in os.environ.items() if name != SPARKLE_PRIVATE_KEY_SECRET}
+    environment = release_safe_environment(os.environ, NATIVE_TRUST_ENV_PREFIXES)
     for options in ([], ["--verify"]):
         result = subprocess.run([signer, "--ed-key-file", "-", *options, appcast],
                                 input=key.get_secret_value(), capture_output=True, text=True,

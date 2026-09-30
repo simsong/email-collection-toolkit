@@ -20,6 +20,13 @@ validation is an explicit local `make check-release` operation.
 See [macOS distribution](doc/MACOS_DISTRIBUTION.md) for installation, test commands,
 architecture limits, and Developer ID renewal/signing instructions.
 
+Release jobs use `SPARKLE_ED25519_PRIVATE_KEY_BASE64` to sign the DMG and XML
+feed. `APPLE_CERTIFICATE_P12_BASE64` and `APPLE_CERTIFICATE_PASSWORD` import the
+Developer ID signing identity on the hosted runner. `APPLE_NOTARY_KEY_ID`,
+`APPLE_NOTARY_ISSUER_ID`, and `APPLE_NOTARY_PRIVATE_KEY_BASE64` authenticate
+Apple notarization. These protected variables are never needed by the installed
+app or its mounted self-test.
+
 ## Windows development
 
 The compiled desktop UI candidates are **Dioxus Desktop and Tauri**, using Rust

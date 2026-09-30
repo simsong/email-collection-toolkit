@@ -191,9 +191,12 @@ sparkle-keys: sparkle-tools
 update-appcast: sparkle-tools
 	@test -n "$(ARCHIVE)" -a -n "$(RELEASE_TAG)" -a -n "$(RELEASE_URL)" || { echo 'usage: make update-appcast ARCHIVE=/path/to/image.dmg RELEASE_TAG=v1.0.0 RELEASE_URL=https://example.invalid/image.dmg'; exit 2; }
 	@test -x "$(SPARKLE_DIR)/bin/sign_update" || { echo 'run make sparkle-tools before update-appcast'; exit 2; }
-	uv run --locked --group packaging python scripts/update_appcast.py --appcast "$(or $(APPCAST),website/static/updates/mac/appcast.xml)" --archive "$(ARCHIVE)" --tag "$(RELEASE_TAG)" --url "$(RELEASE_URL)" --signer "$(SPARKLE_DIR)/bin/sign_update"
+	PYTHONPATH="$(CURDIR)/src:$(CURDIR)" uv run --locked --group packaging python scripts/update_appcast.py --appcast "$(or $(APPCAST),website/static/updates/mac/appcast.xml)" --archive "$(ARCHIVE)" --tag "$(RELEASE_TAG)" --url "$(RELEASE_URL)" --signer "$(SPARKLE_DIR)/bin/sign_update"
 
 .PHONY: sign-historical-appcast
+# This local migration requires SPARKLE_ED25519_PRIVATE_KEY_BASE64 for feed
+# signing; Apple Developer ID/notary credentials are used by release jobs only.
+# Native trust checks and Sparkle signer subprocesses exclude unrelated secrets.
 sign-historical-appcast: sparkle-tools
 	@test "$(RELEASE_TAG)" = v1.0.0a10 || { echo 'this reviewed migration supports only RELEASE_TAG=v1.0.0a10' >&2; exit 2; }
 	@test -n "$(DMG)" -a -n "$(APPCAST)" -a -n "$(OUTPUT)" || { echo 'usage: make sign-historical-appcast RELEASE_TAG=v1.0.0a10 DMG=/path/to/original.dmg APPCAST=/path/to/downloaded/appcast.xml OUTPUT=/path/to/new-signed-appcast.xml'; exit 2; }
@@ -204,12 +207,16 @@ sign-historical-appcast: sparkle-tools
 dmg: ruff syntax-check sparkle-tools pst-importer mcti-scan pff-converter-bundle
 	uv run --group packaging python scripts/build_macos.py $(ARGS)
 
+# APPLE_CERTIFICATE_P12_BASE64 and APPLE_CERTIFICATE_PASSWORD import the
+# Developer ID identity on hosted release runners; local builds use Keychain.
 # Use the first valid Developer ID Application identity in the Keychain search list.
 dmg-signed: SIGNING_IDENTITY ?= $(shell /usr/bin/security find-identity -v -p codesigning | awk '/"Developer ID Application: / {print $$2; exit}')
 dmg-signed:
 	@test -n "$(strip $(SIGNING_IDENTITY))" -a "$(strip $(SIGNING_IDENTITY))" != '-' || { echo 'No Developer ID Application identity selected. Run make list-signatures or set SIGNING_IDENTITY.' >&2; exit 2; }
 	$(MAKE) dmg ARGS='$(ARGS) --signing-identity "$(SIGNING_IDENTITY)"'
 
+# APPLE_NOTARY_KEY_ID, APPLE_NOTARY_ISSUER_ID, and
+# APPLE_NOTARY_PRIVATE_KEY_BASE64 authenticate Apple's notarization service.
 notarize-dmg:
 	@test -n "$(DMG)" || { echo 'usage: make notarize-dmg DMG=/path/to/Email-Collection-Toolkit.dmg'; exit 2; }
 	uv run --group packaging python scripts/build_macos.py --notarize-dmg "$(DMG)"
@@ -223,6 +230,12 @@ check-release: ruff syntax-check $(if $(DMG),,sparkle-tools pst-importer mcti-sc
 test-dmg:
 	@test -n "$(DMG)" || { echo 'usage: make test-dmg DMG=/path/to/Email-Collection-Toolkit.dmg'; exit 2; }
 	uv run --group packaging python scripts/build_macos.py --test-dmg "$(DMG)"
+
+# Internal migration check: exercise the same authenticated read-only mount.
+.PHONY: test-mounted-dmg
+test-mounted-dmg:
+	@test -n "$(DMG)" -a -n "$(MOUNT)" || { echo 'usage: make test-mounted-dmg DMG=/path/to/image.dmg MOUNT=/mounted/image'; exit 2; }
+	uv run --group packaging python scripts/build_macos.py --test-mounted-dmg "$(MOUNT)" --source-dmg "$(DMG)"
 
 preview-dmg: ruff
 	@test -n "$(DMG)" || { echo 'usage: make preview-dmg DMG=/path/to/Email-Collection-Toolkit.dmg'; exit 2; }

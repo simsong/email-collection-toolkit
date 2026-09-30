@@ -88,12 +88,13 @@ migration checks the complete published feed against a pinned SHA-256, then audi
 downloaded copies of the exact release item and DMG. Before executing any
 mounted code, it verifies the DMG seal, stapled notarization ticket, and
 Gatekeeper assessment, then verifies the app seal (including nested code) and
-app-level Gatekeeper acceptance. It checks the mounted app key, runs the
-headless self-test, and verifies the existing Sparkle archive signature.
-Trust checks and self-test subprocesses receive no release credentials. The
-mounted app's `SUPublicEDKey` must match the archive/feed key before testing
-or loading the protected Sparkle key. It
-signs the complete feed with the existing protected Sparkle key.
+app-level Gatekeeper acceptance. It checks the mounted app key and Sparkle
+archive signature, then runs the headless self-test against that same
+read-only mount. Trust and self-test subprocesses receive no release credentials
+or inherited Python/loader/archive overrides; the signer receives no Apple
+credentials. The mounted app's `SUPublicEDKey` must match the archive/feed key
+before testing or loading the protected Sparkle key. It signs the complete
+feed with that key.
 It checks the generated feed against the app's public key and refuses to alter
 the downloaded source or replace an existing output. It supports only the
 embedded release notes; external release notes need their own signature. The

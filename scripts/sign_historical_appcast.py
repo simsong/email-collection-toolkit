@@ -1,4 +1,9 @@
 # Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved.
+# Migrate the one reviewed unsigned historical Sparkle feed.
+# Pin the published XML bytes and release metadata before touching keys.
+# Authenticate one mounted DMG and app, then test that same mount.
+# Verify the archive signature and sign a separate feed copy.
+# Never change the downloaded sources or publish an asset here.
 
 """Audit and sign the first unsigned Sparkle appcast without changing its source."""
 
@@ -15,13 +20,14 @@ import tempfile
 import time
 import xml.etree.ElementTree as xml
 from contextlib import contextmanager
+from collections.abc import Iterator
 from pathlib import Path
 
 from pydantic import BaseModel, Field
 
 from mailarchiver.update_metadata import SPARKLE_PUBLIC_KEY
 from scripts.check_appcast import MAX_FEED_BYTES, SIGNATURE, SPARKLE_NAMESPACE, check_appcast
-from scripts.macos_signing import release_safe_environment
+from scripts.macos_signing import NATIVE_TRUST_ENV_PREFIXES, release_safe_environment
 from scripts.update_appcast import (
     require_matching_key,
     sign_feed,
@@ -149,12 +155,12 @@ def verify_embedded_app_key(app: Path, public_key: str) -> None:
 
 
 @contextmanager
-def mounted_historical_dmg(dmg: Path):
+def mounted_historical_dmg(dmg: Path) -> Iterator[Path]:
     """Mount a read-only historical DMG and detach it without recursive cleanup."""
     temporary = Path(tempfile.mkdtemp(prefix="sparkle-history-dmg-"))
     mount = temporary / "mounted"
     mount.mkdir()
-    environment = release_safe_environment(os.environ, ())
+    environment = release_safe_environment(os.environ, NATIVE_TRUST_ENV_PREFIXES)
     try:
         attached = subprocess.run(
             ["/usr/bin/hdiutil", "attach", "-readonly", "-nobrowse", "-mountpoint", str(mount), str(dmg)],
@@ -183,9 +189,10 @@ def mounted_historical_dmg(dmg: Path):
                 pass
 
 
-def verify_historical_app_key(archive: Path, public_key: str) -> None:
-    """Authenticate the image and app before executing tests or loading the private key."""
-    environment = release_safe_environment(os.environ, ())
+@contextmanager
+def verify_historical_app_key(archive: Path, public_key: str) -> Iterator[Path]:
+    """Keep the authenticated image mounted through the executable test."""
+    environment = release_safe_environment(os.environ, NATIVE_TRUST_ENV_PREFIXES)
     subprocess.run(["/usr/bin/codesign", "--verify", "--strict", str(archive)],
                    check=True, env=environment)
     subprocess.run(["/usr/bin/xcrun", "stapler", "validate", str(archive)],
@@ -199,8 +206,14 @@ def verify_historical_app_key(archive: Path, public_key: str) -> None:
         subprocess.run(["/usr/sbin/spctl", "--assess", "--type", "execute", str(app)],
                        check=True, env=environment)
         verify_embedded_app_key(app, public_key)
-    subprocess.run(["make", "test-dmg", f"DMG={archive}"], cwd=Path(__file__).parents[1],
-                   check=True, env=environment)
+        yield mount
+
+
+def test_verified_mount(mount: Path, archive: Path) -> None:
+    """Run the full mounted test against the app authenticated above."""
+    subprocess.run(["make", "test-mounted-dmg", f"DMG={archive}", f"MOUNT={mount}"],
+                   cwd=Path(__file__).parents[1], check=True,
+                   env=release_safe_environment(os.environ, NATIVE_TRUST_ENV_PREFIXES))
 
 
 def sign_historical_appcast(
@@ -222,10 +235,11 @@ def sign_historical_appcast(
     with appcast.open("rb") as source:
         data = source.read(MAX_FEED_BYTES + 1)
     signature = audit_legacy_feed(data, archive, release)
-    verify_historical_app_key(archive, public_key)
-    key = signing_key()
-    require_matching_key(key, public_key)
-    verify_signed_archive(archive, signer, key, signature)
+    with verify_historical_app_key(archive, public_key) as mount:
+        key = signing_key()
+        require_matching_key(key, public_key)
+        verify_signed_archive(archive, signer, key, signature)
+        test_verified_mount(mount, archive)
     check_appcast(appcast, release.tag)
 
     temporary: Path | None = None

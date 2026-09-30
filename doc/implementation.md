@@ -2622,10 +2622,16 @@ re-signing history; only the sole-tag first-release seed bypasses that gate.
 is the reviewed, local-only migration for the original a10 history. The Python
 orchestrator verifies the DMG seal, stapled ticket, and Gatekeeper acceptance
 before mounting it read-only. It verifies the app seal with nested-code checks
-and app-level Gatekeeper acceptance before running `make test-dmg`. All trust
-and test subprocesses exclude release credentials. The mounted app's `SUPublicEDKey`
-must match the signing key before the private key is loaded. It then checks the
-pinned Sparkle archive signature, exact release metadata, and protected-key
+and app-level Gatekeeper acceptance before execution. The mounted app's
+`SUPublicEDKey` must match the signing key before the private key is loaded.
+The pinned Sparkle archive signature is checked before the internal
+`make test-mounted-dmg` target exercises that same read-only mount; normal
+`make test-dmg` still mounts its own image. Trust and test subprocesses exclude
+release credentials and Python/loader/archive overrides. The signer receives
+the Sparkle key on standard input while Apple credentials and those overrides
+are excluded. `make update-appcast` sets the checkout root on `PYTHONPATH` so
+its direct script entrypoint can import the shared signing filter. The migration
+checks exact release metadata and protected-key
 match before writing a separately signed XML feed. Its SHA-256 pin covers the complete
 published feed bytes, including comments, whitespace, and XML declaration, so
 parsing cannot erase lexical edits before the audit. The migration refuses an
