@@ -48,7 +48,9 @@ def test_pages_workflow_pins_and_checks_the_zola_archive() -> None:
     # PyYAML's YAML 1.1 resolver treats an unquoted "on" key as boolean True.
     triggers = configuration.get(WORKFLOW_ON, configuration.get(True))
     assert triggers["push"]["branches"] == ["main"]
-    assert "workflow_call" in triggers
+    assert "workflow_dispatch" in triggers
+    assert triggers["workflow_dispatch"]["inputs"]["release_tag"]["required"] is False
+    assert "workflow_call" not in triggers
     assert RELEASE not in triggers
     assert configuration[JOBS]["build"]["steps"][0]["with"]["ref"] == "main"
 
@@ -96,16 +98,17 @@ def test_release_workflow_validates_built_distributions() -> None:
         "name: Build source distribution",
         "name: Prepare appcast update",
         "name: Sign the final notarized DMG's appcast item",
-        "name: Validate and share signed appcast with Pages",
+        "name: Validate signed appcast",
         "name: Create complete draft release",
         "name: Publish complete release",
+        "name: Dispatch Pages deployment from main",
     )
     # Validate the release commit and version before installing or building.
     assert [text.index(gate) for gate in gates] == sorted(text.index(gate) for gate in gates)
     makefile = (workflow.parents[2] / "Makefile").read_text(encoding="utf-8")
     assert "uv run --no-project --with packaging --python '>=3.12' python scripts/release_tag.py" in makefile
     signing_step = text[text.index("name: Sign the final notarized DMG's appcast item"):
-                        text.index("name: Validate and share signed appcast with Pages")]
+                        text.index("name: Validate signed appcast")]
     assert "SPARKLE_ED25519_PRIVATE_KEY_BASE64" in signing_step
     assert text.index('dist/* "$APPCAST"') < text.index('gh release edit "$RELEASE_TAG"')
     configuration = safe_load(text)
@@ -116,14 +119,16 @@ def test_release_workflow_validates_built_distributions() -> None:
     assert any(step.get("run") == "make test-sparkle-signing" for step in ci[JOBS]["python-browser"]["steps"])
     triggers = configuration.get(WORKFLOW_ON, configuration.get(True))
     assert triggers == {"push": {"tags": ["v*"]}}
-    assert configuration[JOBS]["pages"]["needs"] == "assemble"
-    assert configuration[JOBS]["pages"]["uses"] == "./.github/workflows/pages.yml"
+    assert set(configuration[JOBS]) == {"assemble", "macos"}
     assert "git merge-base --is-ancestor HEAD refs/remotes/origin/main" in text
-    assert "gh workflow run pages.yml" not in text
+    assert ('gh workflow run pages.yml --repo "$GITHUB_REPOSITORY" '
+            '--ref main -f release_tag="$RELEASE_TAG"') in text
+    assert configuration[JOBS]["assemble"]["permissions"]["actions"] == "write"
     pages = (workflow.parent / "pages.yml").read_text(encoding="utf-8")
     assert 'select(.draft == false) | .tag_name' in pages
+    assert 'appcast_tag="$RELEASE_TAG"' in pages
     assert pages.index("gh release download") < pages.index("name: Build Zola site")
-    assert "actions/download-artifact@" in pages
+    assert "actions/download-artifact@" not in pages
     assert 'if [[ -z "$appcast_tag" ]]; then' in pages
     history = (workflow.parents[2] / "scripts/fetch_release_appcast.sh").read_text(encoding="utf-8")
     assert 'if [[ -z "$previous_tag" ]]; then' in history
@@ -134,7 +139,7 @@ def test_release_workflow_validates_built_distributions() -> None:
     pages_configuration = safe_load(pages)
     validation_runs = [step.get("run", "") for step in pages_configuration[JOBS]["build"]["steps"]]
     validation_runs = [run for run in validation_runs if "make check-appcast" in run]
-    assert len(validation_runs) == 2
+    assert len(validation_runs) == 1
     assert all("ARGS=--require-signed-feed" in run for run in validation_runs)
 
 

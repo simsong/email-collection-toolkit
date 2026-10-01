@@ -2204,19 +2204,19 @@ resolving it to the host Python would lose the installed project. New DMG checks
 still require Sparkle notices.
 Only when the pushed tag is the repository's sole `v*` tag may it bootstrap
 from the tracked empty seed; otherwise an empty release-list response fails.
-It signs and prepends the new item, verifies the DMG and complete XML, uploads
-the feed for the dependent Pages job, and only then creates a draft with every
-DMG, source artifact, checksum and signed-feed asset present. It publishes that
-complete draft, marking alpha and beta tags as prereleases. A
-dependent Pages job downloads the exact signed appcast artifact from the same
-run; it does not depend on release-list asset propagation. An ordinary `main`
-push also builds Pages and overlays the latest published release's appcast,
-retrying by exact tag and failing if no published release or asset is available
-rather than publishing the empty seed. The two deployment paths share one queued
-concurrency group. Neither workflow writes to protected `main`.
-The standalone Pages workflow can be dispatched on `main` after a transient
-deploy failure; it repeats the same public-key feed validation.
-Both Pages paths reject any enclosure URL outside this repository's exact
+It signs and prepends the new item, verifies the DMG and complete XML, and only
+then creates a draft with every DMG, source artifact, checksum, and signed-feed
+asset present. It publishes that complete draft, marking alpha and beta tags as
+prereleases, then dispatches Pages on `main` with the exact release tag. The
+standalone Pages workflow downloads that release's appcast; ordinary `main`
+pushes select the latest published release. Both retry by exact tag and fail
+if no published release or asset is available rather than publishing
+the empty seed. It authenticates the downloaded XML before deployment.
+Both triggers use this workflow and its queued concurrency group.
+This keeps deployment within the Pages environment's `main` branch rule without
+widening that rule. Neither workflow writes to protected `main`. A transient
+deploy failure can be retried by dispatching Pages on `main` again.
+Pages rejects any enclosure URL outside this repository's exact
 tagged GitHub DMG downloads, including URLs on other HTTPS hosts.
 Pages derives its stable and preview download links from published releases,
 not all pushed tags, and recognizes canonical `aN` and `bN` preview suffixes.

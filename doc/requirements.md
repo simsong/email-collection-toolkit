@@ -1909,14 +1909,17 @@ configuration, independent of any host ClamAV configuration.
 Notarization failures must identify the failed stage and report Apple's
 validation issues without printing API-key material.
 
-Package metadata and the About window use one canonical PEP 440 version:
-`1.0.0a10` is the current alpha and its annotated Git tag is `v1.0.0a10`.
+Package metadata and the About window use one canonical PEP 440 version from
+`pyproject.toml`; its annotated Git tag adds only `v`. Tests and workflows must
+derive the current candidate from that metadata rather than pinning a mutable
+release number.
 The release parser rejects noncanonical or unsupported versions; only stable
 `MAJOR.MINOR.PATCH`, alpha `MAJOR.MINOR.PATCHaN`, and beta
 `MAJOR.MINOR.PATCHbN` are accepted. Alpha and beta items use Sparkle's
 `preview` channel; stable items use its default channel. The published release
-contains a signed `appcast.xml` asset; Pages serves the latest published asset
-at the website's fixed HTTPS URL. Only a notarized DMG with a Sparkle Ed25519
+contains a signed `appcast.xml` asset; the tag workflow dispatches Pages from
+`main` with the exact release tag after publication. Pages verifies and serves that
+asset at the website's fixed HTTPS URL. Only a notarized DMG with a Sparkle Ed25519
 archive signature may enter the feed.
 The website's release links use published release tags, recognize the same
 canonical alpha/beta spelling, and never advertise a draft or failed tag.
