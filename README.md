@@ -31,21 +31,20 @@ For alpha (`aN`), beta (`bN`), and stable versions, set the canonical version in
 `pyproject.toml`, let branch CI run the real Sparkle signer target, merge, then
 push a new annotated matching `v*` tag. The tag workflow verifies the prior
 published feed, builds and notarizes the DMG, signs the DMG and complete XML,
-validates both, and only then creates and publishes a complete release. Its
-dependent Pages job deploys the exact signed feed. A failed pushed tag stays
-immutable: fix the cause on a new commit and use a new version/tag. After a
-transient Pages failure, rerun the standalone Pages workflow on `main`; it
-downloads and verifies the latest published release feed.
+validates both, and only then creates and publishes a complete release. It
+dispatches the Pages workflow on `main`, which downloads and verifies the
+published signed feed before deployment. This keeps Pages within its `main`
+environment rule. After a transient Pages failure, rerun that workflow on
+`main`. Retire a failed unpublished tag only by explicit release decision;
+publish a corrected build under a new version and tag.
 
-The historical `v1.0.0a10` release has an archive signature but no signature on
-its complete XML feed. Before publishing a newer version, use the audited
-`Prepare historical signed appcast` manual workflow, which runs
-`make sign-historical-appcast` with the protected release key, to produce a
-separate reviewable signed copy. After review, explicitly replace that release
-asset and redeploy Pages. Merely merging the migration code does not
-alter the published feed. The failed `v1.0.0a11` run left a draft release;
-leave its pushed tag untouched. The next candidate is `v1.0.0a12`; reconcile
-the a11 draft separately rather than publishing it from newer source.
+The original `v1.0.0a10` release signed its archive but omitted a complete XML
+signature. The audited `Prepare historical signed appcast` workflow produced a
+separate signed copy, which was verified and published as the a10 release asset
+and Pages feed before the next tag. The failed `v1.0.0a11` run left a draft release;
+its tag is retired by explicit request while the draft remains as failure
+evidence. The next candidate is `v1.0.0a13`, built from matching source on
+`main`.
 
 Release workflow variables: `GITHUB_REPOSITORY` names the repository used to
 retrieve the prior feed; `GH_TOKEN` authorizes release API reads and publication;

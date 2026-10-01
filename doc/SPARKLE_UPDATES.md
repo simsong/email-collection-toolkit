@@ -88,11 +88,13 @@ signer over the complete XML. Tag-triggered publication is retained, with the
 real signer in branch CI and release preflight, signed-history verification
 before packaging, and complete DMG/feed validation before draft creation.
 Version-dependent test inputs derive from current package metadata; only
-explicitly pinned historical fixtures may name an old release. Pushed tags are
-immutable, so fixing code after a failed tag requires a new version and tag.
+explicitly pinned historical fixtures may name an old release. Published tags
+stay fixed; retire a failed unpublished tag only by explicit release decision,
+then use a new version and tag for the corrected build.
 Alpha and beta items use the preview channel; stable items use the default
-channel. All use the same signed feed and release workflow. The failed a11
-tag remains fixed at its original commit; the next candidate is a12. The one-time
+channel. All use the same signed feed and release workflow. The failed a11 tag
+was retired by explicit request; its draft remains as failure evidence. The
+next candidate is a13. The one-time
 `make sign-historical-appcast RELEASE_TAG=v1.0.0a10 DMG=... APPCAST=... OUTPUT=...`
 migration checks the complete published feed against a pinned SHA-256, then audits
 downloaded copies of the exact release item and DMG. It streams the DMG into an
@@ -130,11 +132,18 @@ APPCAST=<signed-copy> RELEASE_TAG=v1.0.0a10 ARGS=--require-signed-feed`, upload
 that exact XML as the a10 `appcast.xml` release asset, and dispatch the Pages
 workflow on `main`. Verify the downloaded release asset and live Pages feed
 against the reviewed signed bytes before pushing a new candidate tag.
+The completed a10 migration used Actions run `36796346772`; both the release
+asset and live Pages feed matched signed XML SHA-256
+`37ed3067d1f288bd572a3a6f039fe286ac7a2ffd0e2db755f14c1a9c19568a06`
+and passed the public-key verifier. The original unsigned XML SHA-256 was
+`de6d09cdc3e2efa508de9ba83d7701addd046660b18bcd3dcf3d5cb49efd8403`.
 
 The private Sparkle key belongs in the protected release secret
 `SPARKLE_ED25519_PRIVATE_KEY_BASE64`, with an offline recovery copy. Apple
 Developer ID and notarization credentials remain separate. Before publishing,
-allow `v*` tags in the github-pages environment. Do not change the deployed feed
+keep Pages deployments on `main`: the tag workflow dispatches the Pages
+workflow there after publishing, and Pages downloads the verified release asset.
+Do not change the deployed feed
 URL or bundle identifier without an explicit migration.
 
 For key loss/rotation, follow Sparkle's documented Developer ID signed-DMG
