@@ -72,6 +72,11 @@ def test_cover_text_remains_accessible_without_artwork(page: Page, width: int) -
     page.set_content(str(cover))
     page.add_style_tag(content=(ROOT / "website/static/styles.css").read_text(encoding="utf-8"))
     expect(page.get_by_role("heading", level=1, name="Mail Collection Toolkit")).to_be_visible()
+    download = page.get_by_role("link", name="Download", exact=True)
+    expect(download).to_be_visible()
+    expect(download).to_have_attribute(
+        "href", "https://github.com/simsong/email-collection-toolkit/releases/"
+    )
     expect(page.get_by_text("Collect. Preserve. Search. Understand.", exact=True)).to_be_visible()
     expect(page.get_by_text(
         "A modern, open source toolkit for making email a lasting part of the historical record.",

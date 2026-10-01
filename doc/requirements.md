@@ -1923,6 +1923,7 @@ asset at the website's fixed HTTPS URL. Only a notarized DMG with a Sparkle Ed25
 archive signature may enter the feed.
 The website's release links use published release tags, recognize the same
 canonical alpha/beta spelling, and never advertise a draft or failed tag.
+The homepage's primary Download action links to the GitHub releases listing.
 
 `make sparkle-tools` downloads the pinned Sparkle developer archive to the
 ignored project-local `.tools/` directory, verifies its SHA-256 before extraction,
