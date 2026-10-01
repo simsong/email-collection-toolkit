@@ -2781,7 +2781,8 @@ when a complete MBOX source is required.
 ## Toolkit branding and website media
 
 The application, installer, documentation, and website use Email Collection
-Toolkit. Repository and Pages URLs use the renamed project. The platform
+Toolkit. The homepage Download button opens the GitHub releases listing.
+Repository and Pages URLs use the renamed project. The platform
 settings helper chooses the current application directory containing preferences.json or auth/, then an
 existing legacy directory, without
 moving or rewriting settings; Linux configuration,

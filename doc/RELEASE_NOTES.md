@@ -4,12 +4,15 @@
 
 ## Unreleased
 
+- Prepare `v1.0.0a14` and make the homepage's primary Download button open
+  the published GitHub releases listing.
+
 - Require the real Sparkle signer in branch CI and tag preflight, validate signed
   release history before packaging, and create release drafts only after DMG and
   whole-feed signing succeeds. Candidate-tag tests now derive the project version;
   a standalone Pages retry keeps the same signed-feed gate. The a10 feed was
-  audited, signed, and deployed. Prepare the next candidate as a13 after the
-  failed a11 tag was retired by explicit request.
+  audited, signed, and deployed. The a13 candidate followed the retirement of
+  the failed a11 tag by explicit request.
 - Dispatch Pages on `main` with the exact release tag after publication so the
   signed feed can be deployed under the environment's existing branch rule.
 - Preserve the locked Python virtual environment when the credential-scrubbed
