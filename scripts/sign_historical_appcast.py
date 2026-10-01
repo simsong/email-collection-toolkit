@@ -218,11 +218,19 @@ def verify_historical_app_key(archive: Path, public_key: str) -> Iterator[Path]:
         yield mount
 
 
+def mounted_test_interpreter() -> Path:
+    """Keep the locked virtualenv entrypoint without resolving its Python symlink."""
+    interpreter = Path(sys.executable).absolute()
+    if not interpreter.is_file():
+        raise RuntimeError("historical mounted-test interpreter is unavailable")
+    return interpreter
+
+
 def test_verified_mount(mount: Path, archive: Path) -> None:
     """Run the full mounted test against the app authenticated above."""
     environment = release_safe_environment(os.environ, NATIVE_TRUST_ENV_PREFIXES)
     environment["PATH"] = "/usr/bin:/bin:/usr/sbin:/sbin"
-    subprocess.run([str(Path(sys.executable).resolve(strict=True)),
+    subprocess.run([str(mounted_test_interpreter()),
                     str(Path(__file__).with_name("build_macos.py")),
                     "--test-mounted-dmg", str(mount), "--source-dmg", str(archive),
                     "--historical-tag", FIRST_RELEASE.tag],

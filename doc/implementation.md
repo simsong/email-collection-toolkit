@@ -2198,7 +2198,10 @@ The release workflow requires the latest published release's `appcast.xml` asset
 as its update-history base.
 The one-time a10 feed signer passes an explicit historical tag to the mounted
 test, which verifies the old app's version and embedded key and uses its actual
-pre-Sparkle license notice set. New DMG checks still require Sparkle notices.
+pre-Sparkle license notice set. The fixed mounted-test interpreter retains its
+locked virtualenv symlink while scrubbing release credentials and path overrides;
+resolving it to the host Python would lose the installed project. New DMG checks
+still require Sparkle notices.
 Only when the pushed tag is the repository's sole `v*` tag may it bootstrap
 from the tracked empty seed; otherwise an empty release-list response fails.
 It signs and prepends the new item, verifies the DMG and complete XML, uploads

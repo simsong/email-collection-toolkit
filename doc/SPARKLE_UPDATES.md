@@ -103,7 +103,9 @@ Gatekeeper assessment, then verifies the app seal (including nested code) and
 app-level Gatekeeper acceptance. It checks the mounted app key and bundle
 versions against the reviewed a10 release, then verifies the Sparkle
 archive signature, then runs the headless self-test against that same
-read-only mount through a fixed interpreter and script. Trust, native dependency probes,
+read-only mount through the locked virtualenv interpreter and fixed script. The
+interpreter path keeps the virtualenv symlink so imports still work after the
+environment is scrubbed. Trust, native dependency probes,
 and self-test subprocesses receive no release credentials,
 Python/loader/archive overrides, or Apple toolchain-selection variables;
 the signer receives no Apple
