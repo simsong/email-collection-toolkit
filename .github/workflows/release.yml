@@ -117,7 +117,8 @@ jobs:
       - name: Dispatch Pages deployment from main
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh workflow run pages.yml --repo "$GITHUB_REPOSITORY" --ref main
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: gh workflow run pages.yml --repo "$GITHUB_REPOSITORY" --ref main -f release_tag="$RELEASE_TAG"
 
   macos:
     name: Build macOS DMG (optional Developer ID signing)

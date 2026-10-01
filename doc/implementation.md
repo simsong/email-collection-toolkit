@@ -2207,11 +2207,12 @@ from the tracked empty seed; otherwise an empty release-list response fails.
 It signs and prepends the new item, verifies the DMG and complete XML, and only
 then creates a draft with every DMG, source artifact, checksum, and signed-feed
 asset present. It publishes that complete draft, marking alpha and beta tags as
-prereleases, then dispatches Pages on `main`. The standalone Pages workflow
-downloads the latest published release's appcast, retrying by exact tag and
-failing if no published release or asset is available rather than publishing
+prereleases, then dispatches Pages on `main` with the exact release tag. The
+standalone Pages workflow downloads that release's appcast; ordinary `main`
+pushes select the latest published release. Both retry by exact tag and fail
+if no published release or asset is available rather than publishing
 the empty seed. It authenticates the downloaded XML before deployment.
-Ordinary `main` pushes use this same workflow and its queued concurrency group.
+Both triggers use this workflow and its queued concurrency group.
 This keeps deployment within the Pages environment's `main` branch rule without
 widening that rule. Neither workflow writes to protected `main`. A transient
 deploy failure can be retried by dispatching Pages on `main` again.

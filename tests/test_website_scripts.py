@@ -49,6 +49,7 @@ def test_pages_workflow_pins_and_checks_the_zola_archive() -> None:
     triggers = configuration.get(WORKFLOW_ON, configuration.get(True))
     assert triggers["push"]["branches"] == ["main"]
     assert "workflow_dispatch" in triggers
+    assert triggers["workflow_dispatch"]["inputs"]["release_tag"]["required"] is False
     assert "workflow_call" not in triggers
     assert RELEASE not in triggers
     assert configuration[JOBS]["build"]["steps"][0]["with"]["ref"] == "main"
@@ -120,10 +121,12 @@ def test_release_workflow_validates_built_distributions() -> None:
     assert triggers == {"push": {"tags": ["v*"]}}
     assert set(configuration[JOBS]) == {"assemble", "macos"}
     assert "git merge-base --is-ancestor HEAD refs/remotes/origin/main" in text
-    assert 'gh workflow run pages.yml --repo "$GITHUB_REPOSITORY" --ref main' in text
+    assert ('gh workflow run pages.yml --repo "$GITHUB_REPOSITORY" '
+            '--ref main -f release_tag="$RELEASE_TAG"') in text
     assert configuration[JOBS]["assemble"]["permissions"]["actions"] == "write"
     pages = (workflow.parent / "pages.yml").read_text(encoding="utf-8")
     assert 'select(.draft == false) | .tag_name' in pages
+    assert 'appcast_tag="$RELEASE_TAG"' in pages
     assert pages.index("gh release download") < pages.index("name: Build Zola site")
     assert "actions/download-artifact@" not in pages
     assert 'if [[ -z "$appcast_tag" ]]; then' in pages

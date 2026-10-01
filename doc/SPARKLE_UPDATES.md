@@ -142,7 +142,8 @@ The private Sparkle key belongs in the protected release secret
 `SPARKLE_ED25519_PRIVATE_KEY_BASE64`, with an offline recovery copy. Apple
 Developer ID and notarization credentials remain separate. Before publishing,
 keep Pages deployments on `main`: the tag workflow dispatches the Pages
-workflow there after publishing, and Pages downloads the verified release asset.
+workflow there with the exact published tag, and Pages downloads and verifies
+that release asset.
 Do not change the deployed feed
 URL or bundle identifier without an explicit migration.
 

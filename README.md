@@ -32,11 +32,11 @@ For alpha (`aN`), beta (`bN`), and stable versions, set the canonical version in
 push a new annotated matching `v*` tag. The tag workflow verifies the prior
 published feed, builds and notarizes the DMG, signs the DMG and complete XML,
 validates both, and only then creates and publishes a complete release. It
-dispatches the Pages workflow on `main`, which downloads and verifies the
-published signed feed before deployment. This keeps Pages within its `main`
-environment rule. After a transient Pages failure, rerun that workflow on
-`main`. Retire a failed unpublished tag only by explicit release decision;
-publish a corrected build under a new version and tag.
+dispatches the Pages workflow on `main` with the exact release tag; Pages
+downloads and verifies that published signed feed before deployment. This keeps
+Pages within its `main` environment rule. After a transient Pages failure,
+rerun that workflow on `main`. Retire a failed unpublished tag only by explicit
+release decision; publish a corrected build under a new version and tag.
 
 The original `v1.0.0a10` release signed its archive but omitted a complete XML
 signature. The audited `Prepare historical signed appcast` workflow produced a

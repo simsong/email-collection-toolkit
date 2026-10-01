@@ -1918,7 +1918,7 @@ The release parser rejects noncanonical or unsupported versions; only stable
 `MAJOR.MINOR.PATCHbN` are accepted. Alpha and beta items use Sparkle's
 `preview` channel; stable items use its default channel. The published release
 contains a signed `appcast.xml` asset; the tag workflow dispatches Pages from
-`main` after publication, and Pages verifies and serves the latest published
+`main` with the exact release tag after publication. Pages verifies and serves that
 asset at the website's fixed HTTPS URL. Only a notarized DMG with a Sparkle Ed25519
 archive signature may enter the feed.
 The website's release links use published release tags, recognize the same

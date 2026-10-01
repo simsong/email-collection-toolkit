@@ -6,6 +6,11 @@ on:
   push:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      release_tag:
+        description: Published release tag whose signed appcast must be deployed.
+        required: false
+        type: string
 
 permissions:
   actions: read
@@ -50,16 +55,23 @@ jobs:
       - name: Resolve release links
         env:
           GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.release_tag }}
         run: |
-          gh api --paginate "repos/${GITHUB_REPOSITORY}/releases?per_page=100" \
-            --jq '.[] | select(.draft == false) | .tag_name' | \
-            python3 scripts/update_site_releases.py --output website/data/releases.toml
+          {
+            gh api --paginate "repos/${GITHUB_REPOSITORY}/releases?per_page=100" \
+              --jq '.[] | select(.draft == false) | .tag_name'
+            if [[ -n "$RELEASE_TAG" ]]; then printf '%s\n' "$RELEASE_TAG"; fi
+          } | python3 scripts/update_site_releases.py --output website/data/releases.toml
       - name: Include latest published Sparkle appcast
         env:
           GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.release_tag }}
         run: |
-          appcast_tag="$(gh api "repos/$GITHUB_REPOSITORY/releases?per_page=100" \
-            --jq '[.[] | select(.draft == false)][0].tag_name // empty')"
+          appcast_tag="$RELEASE_TAG"
+          if [[ -z "$appcast_tag" ]]; then
+            appcast_tag="$(gh api "repos/$GITHUB_REPOSITORY/releases?per_page=100" \
+              --jq '[.[] | select(.draft == false)][0].tag_name // empty')"
+          fi
           if [[ -z "$appcast_tag" ]]; then
             echo "No published release appcast is available; refusing to deploy the seed feed" >&2
             exit 1
