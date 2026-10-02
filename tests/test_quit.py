@@ -20,6 +20,8 @@ import pytest
 from mailarchiver.__main__ import IngestRequest, run_ingest
 from mailarchiver.application import ApplicationController, ApplicationPreferencesStore, InvalidArchiveError, validate_archive
 from mailarchiver.gui_app import DocumentOptionsApi, GuiApi, PyWebViewApplication, QUIT_TIMEOUT_SECONDS, cleanup_stale_exports
+from mailarchiver.gui_processing import resume_request, unfinished_work
+from mailarchiver.document_options import DocumentOptions
 from mailarchiver.layout import mbox_directory
 from mailarchiver.owner_rules import OwnerRules
 from mailarchiver.standalone_verify import verify_archive
@@ -55,16 +57,31 @@ def run_quit_probe(root: Path, mode: str) -> float:
                 child.wait(timeout=5)
 
 
-@pytest.mark.parametrize("mode", ["idle", "setup", "cooperative", "blocked", "writer", "exports", "blocked-exports"])
+@pytest.mark.parametrize("mode", ["idle", "setup", "cooperative", "blocked", "writer", "exports", "blocked-exports", "lock", "startup", "definitions"])
 def test_quit_exits_despite_stranded_callbacks(tmp_path: Path, mode: str) -> None:
     """Issue #150: inactive work exits now; two blocked jobs share one five-second budget."""
     elapsed = run_quit_probe(tmp_path, mode)
-    if mode in {"blocked", "blocked-exports"}:
+    if mode in {"blocked", "blocked-exports", "lock", "definitions"}:
         assert QUIT_TIMEOUT_SECONDS - 0.5 <= elapsed < QUIT_TIMEOUT_SECONDS + 2
     else:
         assert elapsed < 2
     if mode == "writer":
         assert (tmp_path / "saved").read_text() == "completed"
+    if mode == "startup":
+        archive = tmp_path / "startup-archive"
+        assert DocumentOptions(archive).defaults().include == ["owner@example.test"]
+        with WriterLease.acquire(archive, str(archive), "startup release", "probe", "test"):
+            pass
+    if mode == "definitions":
+        pid = int((tmp_path / "updater-pid").read_text())
+        deadline = monotonic() + 5
+        while monotonic() < deadline:
+            state = subprocess.run(["ps", "-o", "stat=", "-p", str(pid)], capture_output=True, text=True, check=False).stdout.strip()
+            if not state or state.startswith("Z"):
+                break
+            sleep(0.05)
+        else:
+            pytest.fail("definition updater survived its GUI owner")
     if mode in {"exports", "blocked-exports"}:
         exported = Path((tmp_path / "export-path").read_text())
         if mode == "blocked-exports":
@@ -103,6 +120,8 @@ def test_quit_exits_despite_stranded_callbacks(tmp_path: Path, mode: str) -> Non
                 journal.unlink()
             outside.rename(journal)
         assert controller.open_document(archive).path == archive
+        assert unfinished_work(archive).available
+        assert resume_request(archive, True, False).archive == archive
         with WriterLease.acquire(archive, str(archive), "recovery check", "probe", "test"):
             with sqlite3.connect(archive / "archive.sqlite3") as catalog:
                 assert catalog.execute("PRAGMA integrity_check").fetchone() == ("ok",)

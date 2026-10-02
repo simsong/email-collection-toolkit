@@ -311,6 +311,13 @@ including while a scan is blocked. Replayed ingest work follows the same
 current-message cancellation boundary as newly acquired mail. GUI Open must
 recover hot SQLite rollback journals under the archive writer lease before
 read-only schema validation, retaining database and sidecar path-safety checks.
+Include the optional existing processing database so Continue Processing can
+read its queue and saved policy after a crash. Import startup remains tracked
+from lease acquisition and settings writes through job registration; failed
+startup releases its lease before reporting completion. Definition refreshes
+also share the Quit deadline, and their updater process cannot outlive the GUI.
+Arm the exit watchdog before taking any application locks after confirmation;
+a callback waiting on Cocoa must not prevent deadline enforcement.
 
 The default pytest suite must import the entire local `tests/data/` directory
 through the CLI into a disposable archive, with a ten-minute subprocess

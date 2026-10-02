@@ -11,8 +11,8 @@ from importlib.resources import files
 from pathlib import Path
 
 from .api import ArchiveContext, ContentReference, PluginStatistics, ProcessingObject, RAW_MESSAGE, RunReport
+from ..catalog import PROCESSING_DATABASE as DATABASE
 
-DATABASE = "processing.sqlite3"
 SCHEMA_RESOURCE = "V2__processing.sql"
 
 

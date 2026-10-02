@@ -49,6 +49,16 @@ class ObservedSetupApplication(PyWebViewApplication):
         return super().prepare_quit()
 
     def _refresh_menus(self) -> None:
+        if self.observe_cancel and self._setup_api is not None:
+            window = self._setup_api.window
+
+            def focus() -> None:
+                import_module("AppKit").NSApplication.sharedApplication().activateIgnoringOtherApps_(True)
+                native = window.native
+                assert native is not None
+                native.makeKeyAndOrderFront_(None)
+
+            import_module("PyObjCTools.AppHelper").callAfter(focus)
         super()._refresh_menus()
         if not self.observe_cancel or self._setup_api is None:
             return
@@ -157,7 +167,11 @@ def main() -> None:
                 if not enabled and time.monotonic() < deadline:
                     app_helper.callLater(0.05, inspect)
                     return
-                assert enabled, "Close did not become enabled after the setup action finished"
+                active = webview.active_window()
+                assert enabled, (f"Close stayed disabled: active={active.uid if active else None}, "
+                    f"setup={setup.uid}, key={setup.native.isKeyWindow() if setup.native else None}, "
+                    f"busy={application._setup_api._lock.locked() if application._setup_api else None}, "
+                    f"autoenable={native.mainMenu().itemWithTitle_('File').submenu().autoenablesItems()}")
             except Exception:  # pylint: disable=broad-exception-caught
                 errors.append(traceback.format_exc())
             inspected.set()

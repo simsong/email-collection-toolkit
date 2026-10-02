@@ -27,6 +27,7 @@ from mailarchiver.layout import mbox_directory
 from mailarchiver.loopback import LoopbackAssetServer
 from mailarchiver.mbox import PendingPublication, journal_publication
 from mailarchiver.owner_rules import OwnerRules
+from mailarchiver.owned_command import run_owned_command
 from mailarchiver.writer_lock import WriterLease
 
 
@@ -55,6 +56,10 @@ def start_job(app: PyWebViewApplication, root: Path, number: int, blocked: bool)
             search.execute("PRAGMA cache_size=1")
             search.executemany("INSERT INTO message_fts(sha256,content) VALUES (?,?)",
                                ((str(index), "uncommitted search text " * 100) for index in range(100)))
+            processing = sqlite3.connect(archive / "processing.sqlite3")
+            processing.execute("PRAGMA cache_size=1")
+            processing.executemany("INSERT INTO processing_settings(name,value) VALUES (?,?)",
+                                   ((f"uncommitted-{index}", "pending" * 1000) for index in range(100)))
             raw = b"Message-ID: <incomplete@example.test>\n\nunfinished message\n"
             destination = mbox_directory(archive) / "2024-Archive1.mbox"
             journal_publication(archive, PendingPublication(filename=destination.name, prior_size=0,
@@ -107,6 +112,54 @@ def main() -> None:
 
         Thread(target=save, daemon=True).start()
         assert entered.wait(5)
+    if mode == "lock":
+        locked = Event()
+
+        def hold_application_lock() -> None:
+            with app._lock:
+                locked.set()
+                Event().wait()
+
+        Thread(target=hold_application_lock, daemon=True).start()
+        assert locked.wait(5)
+    if mode == "startup":
+        document = controller.create_document(root / "startup-archive")
+        assert document.path is not None
+        session = controller.new_search_window(document)
+        api = GuiApi(document.path, application=app, document=document, search_window=session)
+        config = document.path / "config.yaml"
+        os.mkfifo(config)
+        started = Event()
+
+        def start_import() -> None:
+            assert not app.start_import(api, [], owner_rules=OwnerRules(include=["owner@example.test"]), scan_policy="not-scanned")
+            (root / "startup-stopped").touch()
+
+        Thread(target=start_import, daemon=True).start()
+        descriptor = os.open(config, os.O_WRONLY)
+
+        def finish_settings() -> None:
+            assert started.wait(5)
+            sleep(0.3)
+            os.write(descriptor, b"{}\n")
+            os.close(descriptor)
+
+        Thread(target=finish_settings, daemon=True).start()
+        started.set()
+    if mode == "definitions":
+        def update_definitions() -> None:
+            with app.definitions_activity():
+                run_owned_command([sys.executable, "-c",
+                    "import os,sys; from pathlib import Path; from threading import Event; "
+                    "Path(sys.argv[1]).write_text(str(os.getpid())); Event().wait()",
+                    str(root / "updater-pid")], timeout=60)
+
+        Thread(target=update_definitions, daemon=True).start()
+        for _ in range(500):
+            if (root / "updater-pid").exists():
+                break
+            sleep(0.01)
+        assert (root / "updater-pid").exists()
     if mode == "scanner":
         from mailarchiver.scanner import ClamScanner  # pylint: disable=import-outside-toplevel
         scanner = ClamScanner(scan_temporary_directory=root)

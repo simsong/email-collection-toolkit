@@ -2523,11 +2523,21 @@ PID. A later launch removes only private directories owned by this user whose
 PID no longer exists; live or inaccessible owners are preserved. The scanner
 helper watches its multiprocessing parent sentinel on a daemon thread and uses
 immediate exit on parent death, even during engine startup or a blocked scan.
+Import startup reserves writer activity through lease/settings I/O and job
+registration, releasing a failed startup's lease before its completion event.
+Definition refreshes reserve the same activity. FreshClam runs in a spawned
+supervisor's private POSIX process group; the supervisor watches the GUI parent
+sentinel and kills the entire group on parent death or command completion.
+The independent Quit watchdog starts before stop/snapshot lock acquisition.
+`prepare_quit` probes its lock without waiting; canceled confirmation never arms
+the watchdog, and canceled Sparkle installation invalidates that Quit's event.
 
 Forced exit may leave an unfinished transaction, append or BagIt checkpoint.
 GUI Open first validates read-only. If SQLite reports a hot rollback journal,
 it acquires the writer lease, rejects database/sidecar symlinks and hardlinks,
 opens the existing database read-write for rollback, and repeats validation.
+This also checks and recovers the optional `processing.sqlite3`, without creating
+or migrating it, before the GUI reads pending work or the saved resume request.
 The next ingest uses SQLite rollback and `recover_publication` to truncate an
 uncatalogued append or retain a committed message, then refreshes manifests.
 The incomplete-work prompt or File → Import resumes saved work; this is recovery,

@@ -21,7 +21,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from .identity import application_data_directory
 
 from .bagit import initialize_bag
-from .catalog import create_catalog, create_search, validate_catalog, validate_search
+from .catalog import PROCESSING_DATABASE, create_catalog, create_search, validate_catalog, validate_search, validate_processing
 from .writer_lock import ArchiveBusyError, WriterLease
 from .updates import UpdateChannel, default_channel
 
@@ -172,14 +172,17 @@ def validate_archive(path: Path, *, recover: bool = False) -> tuple[Path, Path, 
     if missing:
         raise InvalidArchiveError(f"archive is missing {', '.join(missing)}: {display}")
     canonical = display.resolve(strict=True)
-    for name in ("archive.sqlite3", "search.sqlite3"):
+    validators = [("archive.sqlite3", validate_catalog), ("search.sqlite3", validate_search)]
+    if (canonical / PROCESSING_DATABASE).exists() or (canonical / PROCESSING_DATABASE).is_symlink():
+        validators.append((PROCESSING_DATABASE, validate_processing))
+    for name, _validate in validators:
         metadata = (canonical / name).lstat()
         if not stat.S_ISREG(metadata.st_mode) or metadata.st_nlink != 1:
             raise InvalidArchiveError(f"archive database must be a regular file with one link: {name}")
     metadata = canonical.stat()
     identity = f"{metadata.st_dev}:{metadata.st_ino}"
     try:
-        for name, validate in (("archive.sqlite3", validate_catalog), ("search.sqlite3", validate_search)):
+        for name, validate in validators:
             try:
                 validate(canonical / name)
             except sqlite3.OperationalError as error:

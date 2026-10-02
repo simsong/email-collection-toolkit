@@ -1379,6 +1379,7 @@ class PyWebViewApplication:
         self._menu_observer: Any = None
         self._lock = RLock()
         self._quitting = False
+        self._quit_done = Event()
         self._import_threads: list[Thread] = []
         self._writers: set[Event] = set()
         self._updates_started = False
@@ -1424,20 +1425,20 @@ class PyWebViewApplication:
     @contextmanager
     def definitions_activity(self) -> Iterator[None]:
         """Definition replacement also finishes before an application update can proceed."""
-        with self._lock:
-            if self._quitting or self._updating:
-                raise ValueError("The application is quitting or installing an update.")
-            self._definition_updates += 1
-        try:
-            yield
-        finally:
+        with self.writer_activity():
             with self._lock:
-                self._definition_updates -= 1
+                self._definition_updates += 1
+            try:
+                yield
+            finally:
+                with self._lock:
+                    self._definition_updates -= 1
 
     def cancel_update_install(self) -> None:
         with self._lock:
             if self.updates.status.phase in {"deferred", "installing"}:
                 self._quitting = False
+                self._quit_done.set()
             self._updating = False
             WriterLease.cancel_update()
 
@@ -1842,24 +1843,25 @@ class PyWebViewApplication:
         operation_id = uuid4().hex
         lease: WriterLease | None = None
         try:
-            lease = WriterLease.acquire(
-                document.path,
-                document.descriptor.identity,
-                "GUI import",
-                operation_id,
-                application_metadata().version,
-            )
-            if owner_rules is not None:
-                DocumentOptions(document.path).save(owner_rules, lease, owner_revision)
-            job = IngestJob(operation_id=operation_id, owner_window_id=session.window_id,
-                            kind="ingest" if ingesting else "content")
-            with self._lock:
-                if self._quitting or self._updating:
-                    raise ValueError("The application is stopping imports or installing an update.")
-                self.controller.begin_ingest(document.descriptor.document_id, job, lease)
+            with self.writer_activity():
+                try:
+                    lease = WriterLease.acquire(
+                        document.path, document.descriptor.identity, "GUI import", operation_id,
+                        application_metadata().version,
+                    )
+                    if owner_rules is not None:
+                        DocumentOptions(document.path).save(owner_rules, lease, owner_revision)
+                    job = IngestJob(operation_id=operation_id, owner_window_id=session.window_id,
+                                    kind="ingest" if ingesting else "content")
+                    with self._lock:
+                        if self._quitting or self._updating:
+                            raise ValueError("The application is stopping imports or installing an update.")
+                        self.controller.begin_ingest(document.descriptor.document_id, job, lease)
+                except BaseException:
+                    if lease is not None:
+                        lease.release()
+                    raise
         except (OSError, ArchiveBusyError, ValueError) as error:
-            if lease is not None:
-                lease.release()
             self.add_notice("warning", f"Import did not start: {error}")
             return False
         self.add_notice("information", f"Import started for {document.display_path}")
@@ -2222,8 +2224,22 @@ class PyWebViewApplication:
             )
             if not confirmed:
                 return
-        jobs = self.stop_imports_for_quit()
         deadline = time.monotonic() + QUIT_TIMEOUT_SECONDS
+        done = self._quit_done = Event()
+        self._quitting = True
+
+        def exit_if_allowed() -> None:
+            if not done.is_set() and self._quitting and self.updates.status.phase not in {"deferred", "installing"}:
+                done.set()
+                self._exit_process(0)
+
+        def enforce_deadline() -> None:
+            if not done.wait(max(0.0, deadline - time.monotonic())):
+                exit_if_allowed()
+
+        # Arm independently before any snapshot/stop lock can wait on Cocoa.
+        Thread(target=enforce_deadline, name="mailarchiver-quit-deadline", daemon=True).start()
+        jobs = self.stop_imports_for_quit()
         with self._lock:
             workers = tuple(self._import_threads)
             writers = tuple(self._writers)
@@ -2232,7 +2248,7 @@ class PyWebViewApplication:
             # Sparkle owns termination/relaunch and may still cancel installation.
             return
         if not jobs and not writers and not apis and not any(worker.is_alive() for worker in workers):
-            self._exit_process(0)
+            exit_if_allowed()
             return
 
         cleaned = Event()
@@ -2256,18 +2272,21 @@ class PyWebViewApplication:
             cleaned.wait(max(0.0, deadline - time.monotonic()))
             # Do not acquire application/UI locks or enter interpreter finalization:
             # a stuck callback must not defeat the single shared quit deadline.
-            if self._quitting and self.updates.status.phase not in {"deferred", "installing"}:
-                self._exit_process(0)
+            exit_if_allowed()
 
         Thread(target=finish_quit, name="mailarchiver-quit", daemon=True).start()
 
     def prepare_quit(self) -> bool:
         """Keep windows and services alive until every import has completed."""
-        with self._lock:
+        if not self._lock.acquire(blocking=False):
+            return False
+        try:
             if any(document.ingest_job for document in self.controller.documents()):
                 return False
             self._quitting = True
             return True
+        finally:
+            self._lock.release()
 
     def shutdown(self) -> None:
         """Release non-document resources after the native event loop exits."""
