@@ -10,6 +10,8 @@ from __future__ import annotations
 
 import hashlib
 import sqlite3
+import subprocess
+import sys
 from functools import partial
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -80,7 +82,8 @@ def create_plugin():
 
 
 @pytest.mark.parametrize("source_kind", ["native", "api"])
-def test_stop_finishes_current_message_before_fetching_next(tmp_path: Path, source_kind: str) -> None:
+@pytest.mark.parametrize("replay", [False, True])
+def test_stop_finishes_current_message_before_fetching_next(tmp_path: Path, source_kind: str, replay: bool) -> None:
     """Issue #150: cooperative stop preserves the current message for both acquisition paths."""
     plugins = tmp_path / "plugins"
     processor = plugins / "processors" / "quit-boundary"
@@ -135,6 +138,20 @@ entrypoint="plugin:create_plugin"
 
     worker = Thread(target=ingest, daemon=True)
     try:
+        if replay:
+            # Crash with durable pending ingest work, then stop its replay while
+            # the same processor is actively checking cancellation again.
+            (tmp_path / "request.json").write_text(request.model_dump_json())
+            with subprocess.Popen([sys.executable, "-m", "tests.quit_probe", "replay", str(tmp_path)]) as child:
+                try:
+                    deadline = monotonic() + 20
+                    while not (tmp_path / "entered").exists() and child.poll() is None and monotonic() < deadline:
+                        sleep(0.01)
+                    assert (tmp_path / "entered").exists()
+                finally:
+                    child.kill()
+                    child.wait(5)
+            (tmp_path / "entered").unlink()
         worker.start()
         deadline = monotonic() + 15
         while not (tmp_path / "entered").exists() and worker.is_alive() and monotonic() < deadline:
@@ -143,7 +160,8 @@ entrypoint="plugin:create_plugin"
         stop.set()
         sleep(0.1)  # The processor actively checks cancellation during this interval.
         (tmp_path / "release").touch()
-        worker.join(20)
+        if worker.ident is not None:
+            worker.join(20)
         assert not worker.is_alive()
         assert len(errors) == 1 and isinstance(errors[0], IngestInterrupted), errors
         assert read_ingest_history(archive).statuses[0].state == "interrupted"
@@ -165,7 +183,8 @@ entrypoint="plugin:create_plugin"
     finally:
         stop.set()
         (tmp_path / "release").touch()
-        worker.join(20)
+        if worker.ident is not None:
+            worker.join(20)
         server.shutdown()
         server.server_close()
         server_thread.join(5)

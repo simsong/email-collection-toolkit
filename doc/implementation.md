@@ -2503,17 +2503,31 @@ flight can finish; `ProductionPipeline.ingest` temporarily defers cooperative
 cancellation through that message's ingest/message pipeline while keeping processor
 deadlines. Discovery, scanner startup and content-only processing remain cancellable.
 Workers attempt the existing interrupted-run checkpoint and lease-release path.
+`resume_ingest` replays one durable message at a time with the same cancellation
+deferral; the runtime filters by message identity so another pending message
+cannot start before the next stop check.
 
-With no jobs or live import workers, `request_quit` calls `os._exit(0)` immediately.
-Otherwise a daemon waiter gives all jobs and worker tails one monotonic
+With no jobs, live import workers, document-option/identity saves or export cleanup,
+`request_quit` calls `os._exit(0)` immediately.
+Otherwise a daemon waiter gives all jobs, worker tails, document-option/identity saves
+and non-UI private-export cleanup one monotonic
 `QUIT_TIMEOUT_SECONDS` budget of five seconds, then calls `os._exit(0)` even if
 they remain blocked; it exits sooner when workers finish. It does not destroy
 windows, wait for UI callbacks, run atexit handlers or enter Python finalization.
 The native event loop remains available during the grace period. Sparkle's
 deferred/installing phases retain ownership of termination and relaunch.
 Setup Cancel and GUI SIGINT use the same path; CLI Ctrl-C remains graceful.
+Document-option and identity bridges reserve `writer_activity` under the same Quit lock;
+new saves are rejected after reservation. Export directories carry their owner
+PID. A later launch removes only private directories owned by this user whose
+PID no longer exists; live or inaccessible owners are preserved. The scanner
+helper watches its multiprocessing parent sentinel on a daemon thread and uses
+immediate exit on parent death, even during engine startup or a blocked scan.
 
 Forced exit may leave an unfinished transaction, append or BagIt checkpoint.
+GUI Open first validates read-only. If SQLite reports a hot rollback journal,
+it acquires the writer lease, rejects database/sidecar symlinks and hardlinks,
+opens the existing database read-write for rollback, and repeats validation.
 The next ingest uses SQLite rollback and `recover_publication` to truncate an
 uncatalogued append or retain a committed message, then refreshes manifests.
 The incomplete-work prompt or File → Import resumes saved work; this is recovery,

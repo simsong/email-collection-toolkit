@@ -16,7 +16,7 @@ import sys
 import tempfile
 import time
 from concurrent.futures import Future, ThreadPoolExecutor
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 from collections.abc import Callable, Iterator
 from datetime import UTC, datetime
 from importlib import import_module
@@ -581,15 +581,17 @@ class IngestWindowApi:
 class IdentityPickerApi:
     """A picker is permanently bound to its archive; writes share the import lease."""
 
-    def __init__(self, archive: Path, kind: Literal["name", "institution"]) -> None:
+    def __init__(self, archive: Path, kind: Literal["name", "institution"], application: PyWebViewApplication | None = None) -> None:
         self.archive = archive
         self.kind: Literal["name", "institution"] = kind
+        self.application = application
 
     def query(self, filters: dict[str, Any]) -> dict[str, Any]:
         return picker_page(self.archive, self.kind, IdentityFilter.model_validate(filters)).model_dump(mode="json")
 
     def update(self, decision: dict[str, Any]) -> bool:
-        save_identity(self.archive, ManualDecision.model_validate(decision))
+        with self.application.writer_activity() if self.application else nullcontext():
+            save_identity(self.archive, ManualDecision.model_validate(decision))
         return True
 
 
@@ -614,10 +616,11 @@ class AboutApi:
 class DocumentOptionsApi:
     """Explicit options bridge permanently bound to one document."""
 
-    def __init__(self, document: ArchiveDocument) -> None:
+    def __init__(self, document: ArchiveDocument, application: PyWebViewApplication | None = None) -> None:
         if document.path is None:
             raise ValueError("Document options require a saved archive")
         self._document = document
+        self._application = application
         self._archive = document.path
         self.window: Any = None
 
@@ -629,14 +632,10 @@ class DocumentOptionsApi:
     def update(self, include: str, exclude: str, revision: str) -> dict[str, Any]:
         document = self._document
         store = DocumentOptions(self._archive)
-        lease = WriterLease.acquire(
-            self._archive, document.descriptor.identity, "Document options", uuid4().hex,
-            application_metadata().version,
-        )
-        try:
-            return store.save(OwnerRules.from_text(include, exclude), lease, revision).model_dump(mode="json")
-        finally:
-            lease.release()
+        with self._application.writer_activity() if self._application else nullcontext():
+            with WriterLease.acquire(self._archive, document.descriptor.identity, "Document options", uuid4().hex,
+                                    application_metadata().version) as lease:
+                return store.save(OwnerRules.from_text(include, exclude), lease, revision).model_dump(mode="json")
 
 
 class OwnerRulesPrompt:
@@ -716,7 +715,8 @@ class GuiApi:
         self._drag_tokens: set[str] = set()
         self._drag_lock = Lock()
         self._drag_closed = False
-        self._temporary = tempfile.TemporaryDirectory(prefix="mailarchive-gui-") if temporary_directory is None else None
+        self._export_stop = Event()
+        self._temporary = tempfile.TemporaryDirectory(prefix=f"mailarchive-gui-{os.getpid()}-") if temporary_directory is None else None
         if self._temporary is not None:
             self.temporary_directory: Path = Path(self._temporary.name)
         else:
@@ -1105,7 +1105,7 @@ class GuiApi:
     def prepare_drag(self, message_pks: list[int]) -> dict[str, str]:
         """Prepare one explicit Finder drag without proactively exporting mail."""
         with self._drag_lock:
-            if self._drag_closed:
+            if self._drag_closed or self._export_stop.is_set():
                 raise ValueError("message viewer is closed")
             unique = list(dict.fromkeys(message_pks))
             if not unique:
@@ -1131,8 +1131,11 @@ class GuiApi:
         destination = self.temporary_directory / safe_filename(
             descriptor.filename, part_id, descriptor.content_type
         )
-        write_attachment(self._archive(), message_pk, part_id, destination)
-        subprocess.Popen(["/usr/bin/open", str(destination)], close_fds=True)
+        with self._drag_lock:
+            if self._drag_closed or self._export_stop.is_set():
+                raise ValueError("message viewer is closed")
+            write_attachment(self._archive(), message_pk, part_id, destination)
+            subprocess.Popen(["/usr/bin/open", str(destination)], close_fds=True)
         return OpenResult(filename=descriptor.filename, opened=True).model_dump()
 
     def open_message_window(self, message_pk: int, highlight_terms: list[str] | None = None) -> bool:
@@ -1145,6 +1148,7 @@ class GuiApi:
         child_api = GuiApi(
             self._archive(), self.temporary_directory, self.e2e_directory, self.filter_sets.path
         )
+        child_api._export_stop = self._export_stop
         child = webview.create_window(
             view.subject,
             f"{base_url}?{urlencode(parameters)}",
@@ -1181,6 +1185,14 @@ class GuiApi:
                 child.window.destroy()
             child.close()
         self.children.clear()
+        self.cleanup_exports()
+
+    def cleanup_exports(self, *, quitting: bool = False) -> None:
+        """Remove private copies without any window or JavaScript callbacks."""
+        if self._temporary is not None or quitting:
+            self._export_stop.set()
+        for child in tuple(self.children):
+            child.cleanup_exports(quitting=quitting)
         with self._drag_lock:
             self._drag_closed = True
             FILE_DRAGS.discard(self._drag_tokens)
@@ -1319,6 +1331,25 @@ class SetupApi:
         self.application._refresh_menus()
 
 
+def cleanup_stale_exports() -> None:
+    """Remove only this user's private export directories whose owner PID is gone."""
+    for directory in Path(tempfile.gettempdir()).glob("mailarchive-gui-*"):
+        fields = directory.name.split("-", 3)
+        if len(fields) != 4 or not fields[2].isdecimal() or int(fields[2]) <= 0:
+            continue
+        try:
+            info = directory.lstat()
+            if directory.is_symlink() or not directory.is_dir() or info.st_uid != os.getuid() or info.st_mode & 0o077:
+                continue
+            try:
+                os.kill(int(fields[2]), 0)
+            except ProcessLookupError:
+                shutil.rmtree(directory)
+        except (OSError, OverflowError):
+            # Live, inaccessible, or concurrently removed directories are left alone.
+            continue
+
+
 class PyWebViewApplication:
     """Bind the platform-neutral application controller to pywebview windows."""
 
@@ -1332,6 +1363,7 @@ class PyWebViewApplication:
         self.controller = controller
         self.asset_server = asset_server
         self._exit_process = exit_process
+        Thread(target=cleanup_stale_exports, name="mailarchiver-stale-exports", daemon=True).start()
         self._apis: dict[str, GuiApi] = {}
         self._ingest_apis: dict[str, IngestWindowApi] = {}
         self._options_apis: dict[str, DocumentOptionsApi] = {}
@@ -1348,6 +1380,7 @@ class PyWebViewApplication:
         self._lock = RLock()
         self._quitting = False
         self._import_threads: list[Thread] = []
+        self._writers: set[Event] = set()
         self._updates_started = False
         self._updating = False
         self._definition_updates = 0
@@ -1359,10 +1392,25 @@ class PyWebViewApplication:
             self.reserve_update_install, self.cancel_update_install, self.notify_update_deferred,
         )
 
+    @contextmanager
+    def writer_activity(self) -> Iterator[None]:
+        """Reserve a non-import write before Quit and expose its completion to the deadline."""
+        finished = Event()
+        with self._lock:
+            if self._quitting or self._updating:
+                raise ValueError("The application is quitting or installing an update.")
+            self._writers.add(finished)
+        try:
+            yield
+        finally:
+            finished.set()
+            with self._lock:
+                self._writers.discard(finished)
+
     def reserve_update_install(self) -> bool:
         """Prevent new writes only when all jobs, worker tails, and writer leases end."""
         with self._lock:
-            if self._definition_updates:
+            if self._definition_updates or self._writers:
                 return False
             if any(document.ingest_job for document in self.controller.documents()):
                 return False
@@ -1982,7 +2030,7 @@ class PyWebViewApplication:
                 options.window.restore()
                 options.window.show()
                 return True
-            options = DocumentOptionsApi(document)
+            options = DocumentOptionsApi(document, self)
             window = webview.create_window(
                 f"{APPLICATION_NAME} — Document Options — {document.display_path}",
                 self.asset_url("options.html"),
@@ -2010,7 +2058,7 @@ class PyWebViewApplication:
     def open_picker(self, document: ArchiveDocument, kind: Literal["name", "institution"]) -> bool:
         if document.path is None:
             return False
-        api = IdentityPickerApi(document.path, kind)
+        api = IdentityPickerApi(document.path, kind, self)
         window = webview.create_window(
             f"{APPLICATION_NAME} — {kind.title()} matcher — {document.display_path}",
             self.asset_url("identity.html", [("kind", kind)]),
@@ -2178,18 +2226,34 @@ class PyWebViewApplication:
         deadline = time.monotonic() + QUIT_TIMEOUT_SECONDS
         with self._lock:
             workers = tuple(self._import_threads)
+            writers = tuple(self._writers)
+            apis = tuple(self._apis.values())
         if self.updates.status.phase in {"deferred", "installing"}:
             # Sparkle owns termination/relaunch and may still cancel installation.
             return
-        if not jobs and not any(worker.is_alive() for worker in workers):
+        if not jobs and not writers and not apis and not any(worker.is_alive() for worker in workers):
             self._exit_process(0)
             return
 
+        cleaned = Event()
+
+        def cleanup() -> None:
+            try:
+                for api in apis:
+                    api.cleanup_exports(quitting=True)
+            finally:
+                cleaned.set()
+
+        Thread(target=cleanup, name="mailarchiver-export-cleanup", daemon=True).start()
+
         def finish_quit() -> None:
+            for finished in writers:
+                finished.wait(max(0.0, deadline - time.monotonic()))
             for job in jobs:
                 job.finished.wait(max(0.0, deadline - time.monotonic()))
             for worker in workers:
                 worker.join(max(0.0, deadline - time.monotonic()))
+            cleaned.wait(max(0.0, deadline - time.monotonic()))
             # Do not acquire application/UI locks or enter interpreter finalization:
             # a stuck callback must not defeat the single shared quit deadline.
             if self._quitting and self.updates.status.phase not in {"deferred", "installing"}:

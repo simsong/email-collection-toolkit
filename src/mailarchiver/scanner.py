@@ -10,7 +10,7 @@ from collections.abc import Callable
 from concurrent.futures import Future, ThreadPoolExecutor
 from contextlib import AbstractContextManager
 from datetime import UTC, datetime
-from multiprocessing.connection import Connection
+from multiprocessing.connection import Connection, wait
 from multiprocessing.process import BaseProcess
 from pathlib import Path
 from threading import RLock, Thread, current_thread
@@ -75,8 +75,17 @@ class ScanResponse(BaseModel):
     evidence: ScanEvidence
 
 
+def exit_with_parent(sentinel: int) -> None:
+    """A dead owner must not leave native scans or executor finalization running."""
+    wait([sentinel])
+    os._exit(0)
+
+
 def engine_worker(connection: Connection, library: Path, definitions: DefinitionSet, workers: int, temporary_directory: Path) -> None:
     """Share one immutable engine among native scan threads; ctypes releases the GIL."""
+    parent = multiprocessing.parent_process()
+    if parent is not None:
+        Thread(target=exit_with_parent, args=(parent.sentinel,), name="clamav-owner", daemon=True).start()
     engine = None
     send_lock = RLock()
     try:

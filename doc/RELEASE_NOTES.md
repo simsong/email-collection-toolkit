@@ -9,6 +9,9 @@
   message, with one five-second deadline before forced exit. Interrupted writes
   use the existing transaction and MBOX-journal recovery on the next ingest;
   manifests may need regeneration. Sparkle retains its update handoff policy.
+  Replayed imports also finish their current message. Quit bounds owner-rule
+  saves and private-export cleanup, and scanner helpers exit with their owner.
+  GUI Open recovers hot SQLite journals under the writer lease before validation.
 
 - Prepare `v1.0.0a14` and make the homepage's primary Download button open
   the published GitHub releases listing.

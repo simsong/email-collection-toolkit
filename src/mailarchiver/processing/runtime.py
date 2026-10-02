@@ -226,7 +226,7 @@ def run(database: sqlite3.Connection, plugins: tuple[PluginSpec, ...], *, retry:
         max_jobs: int | None = None, installation_config: Path | None = None,
         pipelines: tuple[Pipeline, ...] = ("ingest", "message", "content"),
         services: ProcessorServices | None = None, cancelled: Callable[[], None] | None = None,
-        failures: list[Exception] | None = None) -> RunReport:
+        failures: list[Exception] | None = None, message_id: str | None = None) -> RunReport:
     """Caller holds the archive writer lease. Atomic output release follows each barrier."""
     registry_hash = fingerprint(plugins)
     failures = failures if failures is not None else []
@@ -243,7 +243,9 @@ def run(database: sqlite3.Connection, plugins: tuple[PluginSpec, ...], *, retry:
         placeholders = ",".join("?" for _ in pipelines)
         row = database.execute("SELECT job_id,item_json FROM jobs WHERE status='pending' "
             f"AND json_extract(item_json,'$.pipeline') IN ({placeholders}) "
-            "AND (parent_job_id IS NULL OR parent_job_id IN (SELECT job_id FROM jobs WHERE status='completed')) ORDER BY job_id LIMIT 1", pipelines).fetchone()
+            "AND (? IS NULL OR json_extract(item_json,'$.message_id')=?) "
+            "AND (parent_job_id IS NULL OR parent_job_id IN (SELECT job_id FROM jobs WHERE status='completed')) ORDER BY job_id LIMIT 1",
+            (*pipelines, message_id, message_id)).fetchone()
         if row is None:
             break
         job_id, payload = row

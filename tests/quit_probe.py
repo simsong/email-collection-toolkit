@@ -9,6 +9,7 @@
 from __future__ import annotations
 
 import hashlib
+import os
 import sqlite3
 import sys
 from pathlib import Path
@@ -20,7 +21,7 @@ import webview
 from mailarchiver.__main__ import IngestRequest, run_ingest
 from mailarchiver.application import ApplicationController, ApplicationPreferencesStore, IngestJob
 from mailarchiver.gui_app import (
-    GUI_DIRECTORY, PyWebViewApplication, SetupApi, configure_macos_application, install_macos_document_events,
+    GUI_DIRECTORY, GuiApi, PyWebViewApplication, SetupApi, configure_macos_application, install_macos_document_events,
 )
 from mailarchiver.layout import mbox_directory
 from mailarchiver.loopback import LoopbackAssetServer
@@ -45,7 +46,15 @@ def start_job(app: PyWebViewApplication, root: Path, number: int, blocked: bool)
     def work() -> None:
         if blocked:
             catalog = sqlite3.connect(archive / "archive.sqlite3")
+            catalog.execute("PRAGMA cache_size=1")
             catalog.execute("INSERT INTO email_addresses(address) VALUES ('uncommitted@example.test')")
+            # Force dirty pages to disk so read-only GUI open must recover a hot journal.
+            catalog.executemany("INSERT INTO email_addresses(address) VALUES (?)",
+                                ((f"pending-{index}@example.test",) for index in range(500)))
+            search = sqlite3.connect(archive / "search.sqlite3")
+            search.execute("PRAGMA cache_size=1")
+            search.executemany("INSERT INTO message_fts(sha256,content) VALUES (?,?)",
+                               ((str(index), "uncommitted search text " * 100) for index in range(100)))
             raw = b"Message-ID: <incomplete@example.test>\n\nunfinished message\n"
             destination = mbox_directory(archive) / "2024-Archive1.mbox"
             journal_publication(archive, PendingPublication(filename=destination.name, prior_size=0,
@@ -70,6 +79,9 @@ def start_job(app: PyWebViewApplication, root: Path, number: int, blocked: bool)
 def main() -> None:
     mode, directory = sys.argv[1:]
     root = Path(directory)
+    if mode == "replay":
+        run_ingest(IngestRequest.model_validate_json((root / "request.json").read_text()), terminal=False)
+        return
     controller = ApplicationController(ApplicationPreferencesStore(root / "preferences.json"))
     app = PyWebViewApplication(controller)
     # This live non-daemon waiter would hang sys.exit/Py_FinalizeEx indefinitely.
@@ -77,6 +89,42 @@ def main() -> None:
     if mode in {"blocked", "cooperative"}:
         for number in range(2):
             start_job(app, root, number, mode == "blocked")
+    if mode in {"exports", "blocked-exports"}:
+        api = GuiApi(None)
+        app._apis["fixture"] = api
+        (api.temporary_directory / "private.eml").write_bytes(b"synthetic private mail")
+        (root / "export-path").write_text(str(api.temporary_directory))
+        if mode == "blocked-exports":
+            api._drag_lock.acquire()
+    if mode == "writer":
+        entered = Event()
+
+        def save() -> None:
+            with app.writer_activity():
+                entered.set()
+                sleep(0.3)
+                (root / "saved").write_text("completed")
+
+        Thread(target=save, daemon=True).start()
+        assert entered.wait(5)
+    if mode == "scanner":
+        from mailarchiver.scanner import ClamScanner  # pylint: disable=import-outside-toplevel
+        scanner = ClamScanner(scan_temporary_directory=root)
+        scanner.__enter__()
+        assert scanner.process is not None
+        (root / "scanner-pid").write_text(str(scanner.process.pid))
+        fifo = root / "blocked-scan"
+        os.mkfifo(fifo)
+        done = Event()
+
+        def scan() -> None:
+            try:
+                scanner.scan(fifo)
+            finally:
+                done.set()
+
+        Thread(target=scan, daemon=True).start()
+        assert not done.wait(0.3), "the native scan must still be blocked when its owner exits"
 
     def quit_app() -> None:
         print("ready", flush=True)

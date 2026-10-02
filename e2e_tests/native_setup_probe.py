@@ -161,8 +161,17 @@ def main() -> None:
             except Exception:  # pylint: disable=broad-exception-caught
                 errors.append(traceback.format_exc())
             inspected.set()
-        application._refresh_menus()  # pylint: disable=protected-access
-        app_helper.callAfter(inspect)
+        def focus() -> None:
+            # Close applies to the key window. Another desktop app may have
+            # taken focus while this native probe was loading or using panels.
+            appkit.NSApplication.sharedApplication().activateIgnoringOtherApps_(True)
+            native_window = setup.native
+            assert native_window is not None
+            native_window.makeKeyAndOrderFront_(None)
+            application._refresh_menus()  # pylint: disable=protected-access
+            app_helper.callAfter(inspect)
+
+        app_helper.callAfter(focus)
         assert inspected.wait(5)
         assert not errors, errors
 

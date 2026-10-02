@@ -1941,7 +1941,7 @@ def _run_ingest(request: IngestRequest, writer_lease: WriterLease, outcome: Inge
         if request.continue_ingest:
             def resume_ingest(_unused: int) -> None:
                 assert pipeline is not None
-                pipeline.resume(("ingest", "message"))
+                pipeline.resume_ingest()
             run_file_workers([0], 1, resume_ingest, stop, refresh_import, on_interrupt=progress.announce_interrupt)
         progress.set_phase("checking sources")
         run_file_workers(

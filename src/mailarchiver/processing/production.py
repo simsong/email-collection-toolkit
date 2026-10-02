@@ -116,23 +116,36 @@ class ProductionPipeline:
             state = self.database.execute("SELECT parsed_json FROM message_state WHERE message_id=?", (item.message_id,)).fetchone()
             if state is None or state[0] is None:
                 enqueue(self.database, item, self.registry_hash)
-        # The host serializes ingest calls under its publication lock. Finish
-        # this message before honoring cooperative Quit; processor deadlines
-        # still apply, and GUI termination has its own five-second hard limit.
-        cancelled, self.cancelled = self.cancelled, None
-        try:
-            self.resume(("ingest", "message"))
-        finally:
-            self.cancelled = cancelled
+        self._finish_ingest_message(item.message_id)
         row = self.database.execute("SELECT parsed_json,catalog_message_pk,excluded FROM message_state WHERE message_id=?", (item.message_id,)).fetchone()
         if row is None or row[0] is None:
             raise RuntimeError("ingest processor tree ended without a filing decision")
         return IngestedMessage(parsed=ParsedMessage.model_validate_json(row[0]), message_pk=row[1], duplicate=existing is not None, excluded=bool(row[2]))
 
-    def resume(self, pipelines: tuple[Pipeline, ...], *, max_jobs: int | None = None) -> RunReport:
+    def resume_ingest(self) -> None:
+        """Replay durable ingest work with cooperative stops between messages."""
+        while row := self.database.execute("SELECT json_extract(item_json,'$.message_id') FROM jobs "
+                "WHERE status IN ('pending','running','failed') AND json_extract(item_json,'$.pipeline') "
+                "IN ('ingest','message') AND (parent_job_id IS NULL OR parent_job_id IN "
+                "(SELECT job_id FROM jobs WHERE status='completed')) ORDER BY job_id LIMIT 1").fetchone():
+            if self.cancelled is not None:
+                self.cancelled()
+            self._finish_ingest_message(str(row[0]))
+
+    def _finish_ingest_message(self, message_id: str) -> None:
+        # The host serializes ingest calls under its publication lock. Finish
+        # this message before honoring cooperative Quit; processor deadlines
+        # still apply, and GUI termination has its own five-second hard limit.
+        cancelled, self.cancelled = self.cancelled, None
+        try:
+            self.resume(("ingest", "message"), message_id=message_id)
+        finally:
+            self.cancelled = cancelled
+    def resume(self, pipelines: tuple[Pipeline, ...], *, max_jobs: int | None = None, message_id: str | None = None) -> RunReport:
         failures: list[Exception] = []
         result = run(self.database, self.plugins, retry=True, pipelines=pipelines, max_jobs=max_jobs,
-                     installation_config=self.installation_config, services=self, cancelled=self.cancelled, failures=failures)
+                     installation_config=self.installation_config, services=self, cancelled=self.cancelled, failures=failures,
+                     message_id=message_id)
         placeholders = ",".join("?" for _ in pipelines)
         failed = self.database.execute(f"SELECT detail FROM jobs WHERE status='failed' AND json_extract(item_json,'$.pipeline') IN ({placeholders}) LIMIT 1", pipelines).fetchone()
         if failed:

@@ -293,7 +293,7 @@ resumes saved work (or File → Import retries the source), and that already
 archived messages are not imported twice. Cancel leaves imports running. Confirmed
 Quit disallows new imports and signals every local/native and API import to stop
 after its current message, before fetching the next. With no active jobs or import
-worker tails, exit immediately without waiting for UI callbacks. Otherwise allow
+worker tails, exit immediately after bounded private-export cleanup without waiting for UI callbacks. Otherwise allow
 one shared five-second budget for message completion, checkpointing and lease
 release, then force process exit even if workers remain. Exit sooner when work
 finishes. A deadline can interrupt a message or checkpoint: SQLite transaction
@@ -302,6 +302,15 @@ an interrupted archive is not promised to have current BagIt manifests. Continue
 Processing or reimport repairs checkpoints and deduplicates committed messages.
 Do not bypass Sparkle's deferred/installing handoff. Window-close restrictions
 during ingest remain intact.
+
+Owner-rule and identity saves already in progress share the Quit deadline; reject new saves
+after Quit is reserved. Delete private attachment/drag copies without window
+callbacks, and reclaim interrupted cleanup on a later launch only when the
+owning process is gone. Native scanner helpers must exit when their owner dies,
+including while a scan is blocked. Replayed ingest work follows the same
+current-message cancellation boundary as newly acquired mail. GUI Open must
+recover hot SQLite rollback journals under the archive writer lease before
+read-only schema validation, retaining database and sidecar path-safety checks.
 
 The default pytest suite must import the entire local `tests/data/` directory
 through the CLI into a disposable archive, with a ten-minute subprocess
@@ -940,8 +949,9 @@ last archive and at most ten recent archive paths, but no archive content or
 credentials.
 
 An `ArchiveDocument` represents one archive. Opening validates the directory
-and the versioned layout and SQLite readable state of both databases without
-creating or modifying anything. A missing or invalid saved archive is removed
+and the versioned layout and SQLite readable state of both databases read-only,
+except for lease-protected recovery of hot rollback journals left by a crashed
+writer. It does not create missing databases or migrate schemas. A missing or invalid saved archive is removed
 from recent preferences and reported in About status and stderr; About remains hidden until requested. The document
 retains the user's absolute display path and also uses a canonical,
 filesystem device/inode pair as its process-local identity. Windows opened through
@@ -1009,7 +1019,7 @@ shortcuts on macOS. Search windows have no Open Archive toolbar button.
 The archive path appears in the native title bar, without a duplicate toolbar label.
 The native menu order is Application, File, Edit, View, Window. Existing archive
 directories do not require an extension. Opening checks SQLite schema and layout
-read-only, without scanning every database page; this is not a full corruption
+read-only after any required hot-journal recovery, without scanning every database page; this is not a full corruption
 audit. Open failures appear in About and stderr even if a document cannot open.
 
 The About window is retained hidden at startup and opens through the application

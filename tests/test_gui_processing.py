@@ -224,14 +224,14 @@ class Processor:
 def test_quit_with_deferred_but_not_started_work_does_not_start_processing(tmp_path: Path) -> None:
     """Merely opening an archive and skipping its pending work does not create a live ingest job."""
     archive = build_deferred_archive(tmp_path)
-    exits: list[int] = []
-    app, api = open_headless(archive, tmp_path / "preferences.json", exit_process=exits.append)
+    exited = Event()
+    app, api = open_headless(archive, tmp_path / "preferences.json", exit_process=lambda _code: exited.set())
     before = unfinished_work(archive)
     try:
         assert api.document is not None and api.document.ingest_job is None
         assert not app.has_active_ingest()
         app.request_quit()
-        assert exits == [0]
+        assert exited.wait(2)
         assert unfinished_work(archive) == before
         assert api.document.ingest_job is None
     finally:

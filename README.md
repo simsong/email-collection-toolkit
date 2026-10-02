@@ -586,8 +586,9 @@ static checks alone. On macOS,
 stopping for local and loopback API sources, and interrupted archive recovery.
 `make test-native-quit` uses `MAILARCHIVER_NATIVE_GUI_E2E=1` to exercise Quit
 during status polling in a real macOS Cocoa window; it requires a GUI session.
-Idle Quit exits immediately; active jobs get at most five seconds to finish their
-current message and checkpoint. Forced exit can leave stale manifests or an
+Idle Quit exits after bounded private-export cleanup. Active imports finish their
+current message and checkpoint; imports, settings saves, and cleanup share one
+five-second deadline. Forced exit can leave stale manifests or an
 incomplete append; Continue Processing or reimport invokes archive recovery.
 
 `make test-native-gui` additionally exercises the hidden Cocoa/WKWebView bridge.

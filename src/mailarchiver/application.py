@@ -30,7 +30,7 @@ RECENT_ARCHIVE_LIMIT = 10
 
 
 class InvalidArchiveError(ValueError):
-    """An archive path failed read-only document validation."""
+    """An archive path failed document validation or required crash recovery."""
 
 
 class ApplicationPreferences(BaseModel):
@@ -163,8 +163,8 @@ def application_preferences_path() -> Path:
     return root / application / "preferences.json"
 
 
-def validate_archive(path: Path) -> tuple[Path, Path, str]:
-    """Validate without mutation and return display path, canonical path, and identity."""
+def validate_archive(path: Path, *, recover: bool = False) -> tuple[Path, Path, str]:
+    """Validate read-only; GUI Open may request lease-protected hot-journal recovery."""
     display = Path(os.path.abspath(path.expanduser()))
     if not display.is_dir():
         raise InvalidArchiveError(f"archive does not exist or is not a directory: {display}")
@@ -179,8 +179,27 @@ def validate_archive(path: Path) -> tuple[Path, Path, str]:
     metadata = canonical.stat()
     identity = f"{metadata.st_dev}:{metadata.st_ino}"
     try:
-        validate_catalog(canonical / "archive.sqlite3")
-        validate_search(canonical / "search.sqlite3")
+        for name, validate in (("archive.sqlite3", validate_catalog), ("search.sqlite3", validate_search)):
+            try:
+                validate(canonical / name)
+            except sqlite3.OperationalError as error:
+                if not recover or error.sqlite_errorcode != sqlite3.SQLITE_READONLY_ROLLBACK:
+                    raise
+                with WriterLease.acquire(canonical, identity, "recover SQLite journal", uuid4().hex, version("mailarchiver")):
+                    # Recovery may write database sidecars. Reject aliases before
+                    # allowing SQLite to touch any of these archive-owned paths.
+                    for suffix in ("", "-journal", "-wal", "-shm"):
+                        candidate = canonical / (name + suffix)
+                        if candidate.exists() or candidate.is_symlink():
+                            info = candidate.lstat()
+                            if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1:
+                                raise InvalidArchiveError(f"unsafe SQLite recovery path: {candidate.name}")
+                    database = sqlite3.connect(f"{(canonical / name).as_uri()}?mode=rw", uri=True)
+                    try:
+                        database.execute("SELECT count(*) FROM sqlite_schema").fetchone()
+                    finally:
+                        database.close()
+                    validate(canonical / name)
     except (OSError, RuntimeError, sqlite3.Error) as error:
         raise InvalidArchiveError(f"archive databases are invalid: {display}: {error}") from error
     return display, canonical, identity
@@ -230,7 +249,7 @@ class ArchiveDocument:
 
     @classmethod
     def open(cls, path: Path) -> ArchiveDocument:
-        display, canonical, identity = validate_archive(path)
+        display, canonical, identity = validate_archive(path, recover=True)
         digest = sha256(identity.encode("utf-8")).hexdigest()[:20]
         return cls(
             ArchiveDescriptor(
