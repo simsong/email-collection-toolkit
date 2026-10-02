@@ -1671,6 +1671,7 @@ def _run_ingest(request: IngestRequest, writer_lease: WriterLease, outcome: Inge
         byte_length = work.container.estimated_bytes or 0
         source: MailObject | None = None
         try:
+            check_interrupted()
             if stop.is_set():
                 return
             progress.record_worker("checking", display_path, 0, byte_length)
@@ -1711,13 +1712,16 @@ def _run_ingest(request: IngestRequest, writer_lease: WriterLease, outcome: Inge
 
             items = iter(source_plugin.messages(work.container, decision.resume_cursor))
             while True:
+                # Both native and API sources stop before requesting another
+                # message. A fetch already in flight may finish and be published.
+                check_interrupted()
+                if stop.is_set():
+                    return
                 source = None
                 try:
                     item = next(items)
                 except StopIteration:
                     break
-                if stop.is_set():
-                    return
                 if isinstance(item, ProgressEvent):
                     progress.record_plugin_event(item, display_path)
                     continue
@@ -1787,6 +1791,7 @@ def _run_ingest(request: IngestRequest, writer_lease: WriterLease, outcome: Inge
                         progress.record_disposition("duplicate")
                     catalog.commit()
 
+            check_interrupted()
             if stop.is_set():
                 return
             checkpoint(work, source_file_pk, integrity_check_pk, integrity_result.evidence)

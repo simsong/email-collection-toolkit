@@ -1361,11 +1361,11 @@ creates an empty one, reuses its search owner on retry, and passes the chosen
 root into the existing confirmed import workflow. A started job opens Ingests
 and hides setup after clearing its selections. The webview stays alive to
 receive the bridge reply; destroying it inside that call would strand a reply
-thread at exit. Cancel (also Escape) waits for its bridge reply thread to finish, then quits the
-application using the existing stop/checkpoint policy. `request_quit` first calls
+thread at exit. Cancel (also Escape) requests Quit on a background thread without
+waiting for that bridge reply. `request_quit` first calls
 `prepare_quit` under the same application lock used to publish import jobs: a
 job-free decision sets `_quitting` before new jobs can register; otherwise it
-confirms active ingest, stops jobs, and waits on a background thread. An opt-in native regression
+confirms active ingest, stops jobs, and applies the bounded exit policy below. An opt-in native regression
 publishes a real leased job immediately before that decision and verifies the
 confirmation, stop signal, lease retention, completion, and application exit.
 Picker selection and the Cancel action do not persist setup paths or write
@@ -2496,15 +2496,33 @@ for stored Tabulator and website-theme code in source distributions.
 before antivirus confirmation and verifies the saved rules after a synthetic
 import. Setup reuses File Import's current revision-checked owner-rule workflow.
 
-The Cocoa termination delegate confirms active ingest, then returns
-`NSTerminateCancel` while a background waiter arranges orderly window closure.
-The event loop stays alive while `IngestJob.stop` requests cooperative cancellation. The shared service checks this event during discovery,
-scanner startup, and worker status refresh; ordinary worker failures remain
-distinct from cancellation. It follows the existing interrupted-run checkpoint
-and lease-release path. Completion events and worker joins allow pywebview window closure only after
-the GUI workers finish, including their final callbacks. The incomplete-work prompt offers resumption; File → Import also safely
-retries the same source. `make test-application` tests partial publication,
-interrupted status, verification, duplicate-free restart, and multi-document stop.
+The Cocoa termination delegate confirms active ingest and requests bounded Quit.
+`IngestJob.stop` signals all document jobs. The common local/native and API source
+loop checks cancellation before requesting another message. A fetch already in
+flight can finish; `ProductionPipeline.ingest` temporarily defers cooperative
+cancellation through that message's ingest/message pipeline while keeping processor
+deadlines. Discovery, scanner startup and content-only processing remain cancellable.
+Workers attempt the existing interrupted-run checkpoint and lease-release path.
+
+With no jobs or live import workers, `request_quit` calls `os._exit(0)` immediately.
+Otherwise a daemon waiter gives all jobs and worker tails one monotonic
+`QUIT_TIMEOUT_SECONDS` budget of five seconds, then calls `os._exit(0)` even if
+they remain blocked; it exits sooner when workers finish. It does not destroy
+windows, wait for UI callbacks, run atexit handlers or enter Python finalization.
+The native event loop remains available during the grace period. Sparkle's
+deferred/installing phases retain ownership of termination and relaunch.
+Setup Cancel and GUI SIGINT use the same path; CLI Ctrl-C remains graceful.
+
+Forced exit may leave an unfinished transaction, append or BagIt checkpoint.
+The next ingest uses SQLite rollback and `recover_publication` to truncate an
+uncatalogued append or retain a committed message, then refreshes manifests.
+The incomplete-work prompt or File → Import resumes saved work; this is recovery,
+not a guarantee that every interrupted archive immediately passes verification.
+`make test-quit` exercises actual process termination, multi-job stop, rollback,
+partial-append recovery, native-source and loopback-HTTP message boundaries, and
+duplicate-free restart. `make test-native-quit` tests the real Cocoa About window
+during periodic status polling. Its existing `MAILARCHIVER_NATIVE_GUI_E2E` opt-in
+flag requires a macOS GUI session. These tests use only disposable archives.
 
 `make test-corpus-import` runs the single full-directory regression in
 `tests/test_corpus_import.py`, also included in `make test`. It imports the
@@ -2749,9 +2767,9 @@ terminal stream, including windowed builds with no stderr. Ingest child windows
 route document actions to an attached search window. Informational notices stay
 in About instead of appearing as errors. Closing an import owner offers waiting
 or keeping the window open. Native macOS Quit offers Cancel or Stop Import and Quit while an import is
-active. Confirmed quit signals all imports, retains their leases and windows
-until checkpoint completion, and then exits. Shutdown joins tracked workers
-before releasing resources. Makefile Ruff checks select this checkout's configuration explicitly. Git
+active. Confirmed Quit signals all imports at message boundaries and allows at
+most five seconds before forced exit; idle Quit exits immediately. Workers retain
+leases until checkpoint completion or process death. Makefile Ruff checks select this checkout's configuration explicitly. Git
 selects tracked and non-ignored new `.py` and `.pyi` files, so linked worktrees
 are checked without descending into ignored generated directories.
 
@@ -2907,9 +2925,10 @@ Generic GUI tiles consume typed tags and choices, including dates. Headless test
 exercise tag menus, explicit selectors, compound terms, and date normalization.
 
 GUI jobs distinguish ingest from content-only processing. Quit confirms only
-active ingest, then a background waiter closes pywebview windows after workers
-checkpoint. The Cocoa delegate returns Cancel while that orderly close runs,
-avoiding Cocoa termination before Python workers finish. Final import refreshes
-are suppressed during shutdown. SIGINT requests the same stop without a dialog.
+active ingest, then signals every job and gives active workers at most five
+seconds before forced process exit. Idle Quit exits immediately. The Cocoa
+delegate returns Cancel during the grace period so callbacks can still run.
+Final import refreshes are suppressed during shutdown. GUI SIGINT requests the
+same bounded stop without a dialog.
 Headless regressions cancel a real cooperative processor and verify retained
 pending work; deferred-but-unstarted jobs never become active merely on quit.

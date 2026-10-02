@@ -116,7 +116,14 @@ class ProductionPipeline:
             state = self.database.execute("SELECT parsed_json FROM message_state WHERE message_id=?", (item.message_id,)).fetchone()
             if state is None or state[0] is None:
                 enqueue(self.database, item, self.registry_hash)
-        self.resume(("ingest", "message"))
+        # The host serializes ingest calls under its publication lock. Finish
+        # this message before honoring cooperative Quit; processor deadlines
+        # still apply, and GUI termination has its own five-second hard limit.
+        cancelled, self.cancelled = self.cancelled, None
+        try:
+            self.resume(("ingest", "message"))
+        finally:
+            self.cancelled = cancelled
         row = self.database.execute("SELECT parsed_json,catalog_message_pk,excluded FROM message_state WHERE message_id=?", (item.message_id,)).fetchone()
         if row is None or row[0] is None:
             raise RuntimeError("ingest processor tree ended without a filing decision")

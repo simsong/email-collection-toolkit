@@ -17,12 +17,12 @@ import tempfile
 import time
 from concurrent.futures import Future, ThreadPoolExecutor
 from contextlib import contextmanager
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from datetime import UTC, datetime
 from importlib import import_module
 from importlib.metadata import version
 from pathlib import Path
-from threading import Event, Lock, RLock, Thread, current_thread
+from threading import Event, Lock, RLock, Thread
 from typing import Any, Literal
 from urllib.parse import urlencode, urlsplit
 from urllib.request import Request, urlopen
@@ -95,6 +95,7 @@ APPLICATION_ICON = GUI_DIRECTORY / "icons" / "rainbow-post-192.png"
 EXTERNAL_LINK_SCHEMES = frozenset({"http", "https", "mailto"})
 INTERNET_CHECK_URL = "https://www.example.com/"
 INTERNET_CHECK_INTERVAL_SECONDS = 30.0
+QUIT_TIMEOUT_SECONDS = 5.0
 
 
 def owner_rules_text(include: str, exclude: str) -> OwnerRules:
@@ -366,7 +367,8 @@ IMPORT_CONFIRMATION_WIDTH = 560
 QUIT_IMPORT_MESSAGE = (
     "Quitting will stop active ingest and content processing. Reopen the archive and use "
     "Continue Processing to resume. Messages already archived will not be imported twice.\n\n"
-    "The application will quit after the current work has stopped and the archive has been checkpointed."
+    "Each import will stop after its current message. The application will quit within five seconds; "
+    "unfinished work will be recovered when you resume."
 )
 
 
@@ -1298,22 +1300,16 @@ class SetupApi:
             self.application._refresh_menus()
 
     def cancel(self) -> bool:
-        """Quit after this bridge thread has delivered its response to JavaScript."""
+        """Request Quit without depending on a JavaScript reply that may never finish."""
         if not self._lock.acquire(blocking=False):
             return False
         try:
             self.application._refresh_menus()
-            reply_thread = current_thread()
-
-            def quit_after_reply() -> None:
-                reply_thread.join()
-                self.application.request_quit()
-
-            Thread(target=quit_after_reply, name="mailarchiver-setup-quit", daemon=True).start()
-            return True
         finally:
             self._lock.release()
             self.application._refresh_menus()
+        Thread(target=self.application.request_quit, name="mailarchiver-setup-quit", daemon=True).start()
+        return True
 
     def _dismiss(self) -> None:
         # Keep the webview alive until pywebview delivers this bridge reply.
@@ -1330,9 +1326,12 @@ class PyWebViewApplication:
         self,
         controller: ApplicationController,
         asset_server: LoopbackAssetServer | None = None,
+        *,
+        exit_process: Callable[[int], object] = os._exit,
     ) -> None:
         self.controller = controller
         self.asset_server = asset_server
+        self._exit_process = exit_process
         self._apis: dict[str, GuiApi] = {}
         self._ingest_apis: dict[str, IngestWindowApi] = {}
         self._options_apis: dict[str, DocumentOptionsApi] = {}
@@ -2160,7 +2159,7 @@ class PyWebViewApplication:
                    if (job := document.ingest_job) is not None)
 
     def request_quit(self, *, confirm_ingest: bool = True) -> None:
-        """Use the normal stop-and-checkpoint policy before closing every window."""
+        """Stop imports at message boundaries, allowing at most five seconds to exit."""
         # Never wait for workers on Cocoa's event thread: they may still be
         # returning from a bridge callback that needs that same event loop.
         if self._quitting:
@@ -2176,23 +2175,25 @@ class PyWebViewApplication:
             if not confirmed:
                 return
         jobs = self.stop_imports_for_quit()
+        deadline = time.monotonic() + QUIT_TIMEOUT_SECONDS
+        with self._lock:
+            workers = tuple(self._import_threads)
+        if self.updates.status.phase in {"deferred", "installing"}:
+            # Sparkle owns termination/relaunch and may still cancel installation.
+            return
+        if not jobs and not any(worker.is_alive() for worker in workers):
+            self._exit_process(0)
+            return
 
         def finish_quit() -> None:
             for job in jobs:
-                job.finished.wait()
-            # A completed job may have released its lease but still be returning
-            # from a UI refresh. Keep the event loop alive through that tail too.
-            with self._lock:
-                workers = tuple(self._import_threads)
+                job.finished.wait(max(0.0, deadline - time.monotonic()))
             for worker in workers:
-                worker.join()
-            with self._lock:
-                if not self._quitting or self.updates.status.phase in {"deferred", "installing"}:
-                    # Keep Cocoa alive for Sparkle or a canceled Quit. The timer
-                    # reserves installation after all remaining work ends.
-                    return
-                for window in tuple(webview.windows):
-                    window.destroy()
+                worker.join(max(0.0, deadline - time.monotonic()))
+            # Do not acquire application/UI locks or enter interpreter finalization:
+            # a stuck callback must not defeat the single shared quit deadline.
+            if self._quitting and self.updates.status.phase not in {"deferred", "installing"}:
+                self._exit_process(0)
 
         Thread(target=finish_quit, name="mailarchiver-quit", daemon=True).start()
 

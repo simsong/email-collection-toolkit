@@ -4,6 +4,12 @@
 
 ## Unreleased
 
+- Fix Quit hanging on pywebview callback threads (#150). Idle Quit exits
+  immediately. Active native/local and API imports stop after their current
+  message, with one five-second deadline before forced exit. Interrupted writes
+  use the existing transaction and MBOX-journal recovery on the next ingest;
+  manifests may need regeneration. Sparkle retains its update handoff policy.
+
 - Prepare `v1.0.0a14` and make the homepage's primary Download button open
   the published GitHub releases listing.
 

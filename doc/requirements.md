@@ -290,9 +290,18 @@ in an actual message body.
 On macOS, Command-Q during an active import must offer Cancel or Stop Import
 and Quit. Explain that quitting stops imports, that **Continue Processing**
 resumes saved work (or File → Import retries the source), and that already
-archived messages are not imported twice. Cancel leaves imports running. Confirmed quit stops all active imports
-cooperatively, disallows new imports, and waits for checkpointing and writer-lease
-release before terminating. Window-close restrictions during ingest remain intact.
+archived messages are not imported twice. Cancel leaves imports running. Confirmed
+Quit disallows new imports and signals every local/native and API import to stop
+after its current message, before fetching the next. With no active jobs or import
+worker tails, exit immediately without waiting for UI callbacks. Otherwise allow
+one shared five-second budget for message completion, checkpointing and lease
+release, then force process exit even if workers remain. Exit sooner when work
+finishes. A deadline can interrupt a message or checkpoint: SQLite transaction
+rollback and the durable MBOX append journal support recovery on the next ingest;
+an interrupted archive is not promised to have current BagIt manifests. Continue
+Processing or reimport repairs checkpoints and deduplicates committed messages.
+Do not bypass Sparkle's deferred/installing handoff. Window-close restrictions
+during ingest remain intact.
 
 The default pytest suite must import the entire local `tests/data/` directory
 through the CLI into a disposable archive, with a ten-minute subprocess
@@ -703,7 +712,8 @@ Pending work alone must not trigger a quit warning. Content-only jobs stop and
 checkpoint on quit without an ingest warning. Active ingest still requires stop
 confirmation. Quit must not block the Cocoa event loop while waiting for workers;
 workers must skip final UI refresh during shutdown. Ctrl-C requests the same
-orderly shutdown without a confirmation dialog.
+bounded shutdown without a confirmation dialog in the GUI. CLI Ctrl-C retains
+its existing graceful checkpoint behavior without the GUI's forced-exit deadline.
 
 Matcher matrix cells use two-point vertical padding, black text and column
 headings, and dark supporting text. Live pickers have no Archive identities badge.
@@ -969,12 +979,15 @@ preferences. It does not undo earlier writes: normal startup may already have
 removed a missing or invalid remembered archive from saved preferences before
 showing setup.
 If another window is importing, use the normal Stop Import and Quit confirmation
-and retain its writer lease until checkpoint completion. It and native File → Close are disabled while a setup operation or dialog is pending.
+and retain its writer lease until checkpoint completion or the five-second exit
+deadline. It and native File → Close are disabled while a setup operation or dialog is pending.
 The Close lock applies globally, including Cancel and native modal focus falling
 back to an existing search window; a queued Close action must also refuse closure.
 Folder pickers must clear any warning accessory left by a previous import dialog.
 Cancel must atomically reserve a job-free quit against import publication; if a
-job wins that race, present the normal stop confirmation and wait for its checkpoint.
+job wins that race, present the normal stop confirmation and apply the shared
+five-second deadline. Setup Cancel must not wait for its JavaScript reply before
+requesting Quit.
 
 When launched through `mailsearch-gui`, macOS must not reinterpret the Python
 launcher or command-line option values as documents. Explicit `--archive`
@@ -2158,9 +2171,9 @@ terminal stream, including windowed builds with no stderr. Ingest child windows
 route document actions to an attached search window. Informational notices stay
 in About instead of appearing as errors. Closing an import owner offers waiting
 or keeping the window open. Native macOS Quit offers Cancel or Stop Import and Quit while an import is
-active. Confirmed quit signals all imports, retains their leases and windows
-until checkpoint completion, and then exits. Shutdown joins tracked workers
-before releasing resources. Makefile Ruff checks select this checkout's configuration explicitly. Git
+active. Confirmed Quit signals all imports at message boundaries and allows at
+most five seconds before forced exit; idle Quit exits immediately. Workers retain
+leases until checkpoint completion or process death. Makefile Ruff checks select this checkout's configuration explicitly. Git
 selects tracked and non-ignored new `.py` and `.pyi` files, so linked worktrees
 are checked without descending into ignored generated directories.
 

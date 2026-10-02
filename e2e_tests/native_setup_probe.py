@@ -30,11 +30,16 @@ class ObservedSetupApplication(PyWebViewApplication):
     """Inspect real native menu state at both Cancel lock transitions."""
 
     def __init__(self, controller: ApplicationController, server: LoopbackAssetServer) -> None:
-        super().__init__(controller, server)
+        self.exit_requested = Event()
+        super().__init__(controller, server, exit_process=self.record_exit)
         self.before_quit: Callable[[], None] | None = None
         self.observe_cancel = False
         self.cancel_menu_states: list[bool] = []
         self.cancel_menu_errors: list[str] = []
+
+    def record_exit(self, _code: int) -> None:
+        """Let this probe finish its UI assertions; real process exit has separate tests."""
+        self.exit_requested.set()
 
     def prepare_quit(self) -> bool:
         # Place a real competing job just before the atomic quit decision.
@@ -143,15 +148,19 @@ def main() -> None:
 
     def check_close_enabled() -> None:
         inspected = Event()
+        deadline = time.monotonic() + 4
 
         def inspect() -> None:
             try:
                 native = appkit.NSApplication.sharedApplication()
-                assert native.mainMenu().itemWithTitle_("File").submenu().itemWithTitle_("Close").isEnabled()
+                enabled = native.mainMenu().itemWithTitle_("File").submenu().itemWithTitle_("Close").isEnabled()
+                if not enabled and time.monotonic() < deadline:
+                    app_helper.callLater(0.05, inspect)
+                    return
+                assert enabled, "Close did not become enabled after the setup action finished"
             except Exception:  # pylint: disable=broad-exception-caught
                 errors.append(traceback.format_exc())
-            finally:
-                inspected.set()
+            inspected.set()
         application._refresh_menus()  # pylint: disable=protected-access
         app_helper.callAfter(inspect)
         assert inspected.wait(5)
@@ -252,10 +261,8 @@ def main() -> None:
                         foundation.NSRunLoop.mainRunLoop().addTimer_forMode_(timer, appkit.NSModalPanelRunLoopMode)
                     app_helper.callAfter(schedule_quit_confirmation)
                 application.observe_cancel = not quit_race
-                windows_before_cancel = tuple(webview.windows)
                 setup.evaluate_js("document.getElementById('cancel').click()")
-                for window in windows_before_cancel:
-                    assert window.events.closed.wait(10), f"Cancel did not close {window.title}"
+                assert application.exit_requested.wait(10), "Cancel did not request process exit"
                 if not quit_race:
                     assert application.cancel_menu_states == [False, True], application.cancel_menu_states
                     assert not application.cancel_menu_errors, application.cancel_menu_errors
