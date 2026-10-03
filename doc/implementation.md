@@ -2507,9 +2507,9 @@ Workers attempt the existing interrupted-run checkpoint and lease-release path.
 deferral; the runtime filters by message identity so another pending message
 cannot start before the next stop check.
 
-With no jobs, live import workers, document-option/identity saves or export cleanup,
+With no jobs, live import workers, tracked writes or export cleanup,
 `request_quit` calls `os._exit(0)` immediately.
-Otherwise a daemon waiter gives all jobs, worker tails, document-option/identity saves
+Otherwise a daemon waiter gives all jobs, worker tails, tracked writes
 and non-UI private-export cleanup one monotonic
 `QUIT_TIMEOUT_SECONDS` budget of five seconds, then calls `os._exit(0)` even if
 they remain blocked; it exits sooner when workers finish. It does not destroy
@@ -2518,7 +2518,10 @@ The native event loop remains available during the grace period. Sparkle's
 deferred/installing phases retain ownership of termination and relaunch.
 Setup Cancel and GUI SIGINT use the same path; CLI Ctrl-C remains graceful.
 Document-option and identity bridges reserve `writer_activity` under the same Quit lock;
-new saves are rejected after reservation. Export directories carry their owner
+both setup and File New also reserve it around archive initialization and registration.
+Explicit message/attachment saves reserve it after the destination dialog through
+atomic replacement; standalone message bridges retain the same application owner.
+New writes are rejected after Quit reservation. Export directories carry their owner
 PID. A later launch removes only private directories owned by this user whose
 PID no longer exists; live or inaccessible owners are preserved. The scanner
 helper watches its multiprocessing parent sentinel on a daemon thread and uses
@@ -2529,8 +2532,12 @@ Definition refreshes reserve the same activity. FreshClam runs in a spawned
 supervisor's private POSIX process group; the supervisor watches the GUI parent
 sentinel and kills the entire group on parent death or command completion.
 The independent Quit watchdog starts before stop/snapshot lock acquisition.
-`prepare_quit` probes its lock without waiting; canceled confirmation never arms
-the watchdog, and canceled Sparkle installation invalidates that Quit's event.
+`prepare_quit` and `has_active_ingest` use nonblocking application/controller/document
+job probes. Unknown state requires confirmation and cannot reserve an idle Quit.
+Canceled confirmation never arms the watchdog, and canceled Sparkle installation
+invalidates that Quit's event. Regression gates pause real archive initialization
+between databases and real exports before replacement; subprocess probes hold each
+of the three locks while requesting Quit.
 
 Forced exit may leave an unfinished transaction, append or BagIt checkpoint.
 GUI Open first validates read-only. If SQLite reports a hot rollback journal,

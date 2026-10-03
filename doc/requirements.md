@@ -303,8 +303,11 @@ Processing or reimport repairs checkpoints and deduplicates committed messages.
 Do not bypass Sparkle's deferred/installing handoff. Window-close restrictions
 during ingest remain intact.
 
-Owner-rule and identity saves already in progress share the Quit deadline; reject new saves
-after Quit is reserved. Delete private attachment/drag copies without window
+Archive creation, explicit message/attachment saves (including standalone windows),
+and owner-rule/identity saves already in progress share the Quit deadline; reject
+new writes after Quit is reserved. Track creation before the first archive file
+is initialized, and explicit saves through atomic destination replacement.
+Delete private attachment/drag copies without window
 callbacks, and reclaim interrupted cleanup on a later launch only when the
 owning process is gone. Native scanner helpers must exit when their owner dies,
 including while a scan is blocked. Replayed ingest work follows the same
@@ -318,6 +321,9 @@ startup releases its lease before reporting completion. Definition refreshes
 also share the Quit deadline, and their updater process cannot outlive the GUI.
 Arm the exit watchdog before taking any application locks after confirmation;
 a callback waiting on Cocoa must not prevent deadline enforcement.
+Pre-confirmation probes of application, controller and document state must not
+block. Unavailable job state requires confirmation rather than an idle assumption;
+Cancel must leave work running without reserving Quit or arming its watchdog.
 
 The default pytest suite must import the entire local `tests/data/` directory
 through the CLI into a disposable archive, with a ten-minute subprocess

@@ -295,6 +295,15 @@ class ArchiveDocument:
         with self._lock:
             return self._ingest_job
 
+    def has_job(self, kind: str | None = None, *, blocking: bool = True) -> bool | None:
+        """Return unknown when a nonblocking shutdown probe cannot inspect this job."""
+        if not self._lock.acquire(blocking=blocking):
+            return None
+        try:
+            return self._ingest_job is not None and (kind is None or self._ingest_job.kind == kind)
+        finally:
+            self._lock.release()
+
     @property
     def generation(self) -> int:
         with self._lock:
@@ -484,6 +493,19 @@ class ApplicationController:
         """Return live archive documents in stable creation order."""
         with self._lock:
             return tuple(self._documents.values())
+
+    def has_jobs(self, kind: str | None = None, *, blocking: bool = True) -> bool | None:
+        """Probe document jobs without treating contended state as an idle application."""
+        if not self._lock.acquire(blocking=blocking):
+            return None
+        try:
+            for document in self._documents.values():
+                active = document.has_job(kind, blocking=blocking)
+                if active is not False:
+                    return active
+            return False
+        finally:
+            self._lock.release()
 
     def import_document(self) -> ArchiveDocument:
         document = self.active_document

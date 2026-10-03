@@ -112,16 +112,22 @@ def main() -> None:
 
         Thread(target=save, daemon=True).start()
         assert entered.wait(5)
-    if mode == "lock":
+    if mode in {"lock", "controller-lock", "document-lock"}:
         locked = Event()
+        held_lock = app._lock if mode == "lock" else controller._lock
+        if mode == "document-lock":
+            held_lock = controller.create_document(root / "locked-archive")._lock
 
         def hold_application_lock() -> None:
-            with app._lock:
+            with held_lock:
                 locked.set()
                 Event().wait()
 
         Thread(target=hold_application_lock, daemon=True).start()
         assert locked.wait(5)
+        assert not app.prepare_quit()
+        if mode != "lock":
+            assert app.has_active_ingest(), "unknown state must still require confirmation"
     if mode == "startup":
         document = controller.create_document(root / "startup-archive")
         assert document.path is not None

@@ -15,6 +15,9 @@
   Recovery includes the saved processing queue. The deadline watchdog starts
   before application-lock waits; import startup and definition refreshes share
   its budget, and the definition updater is terminated when its GUI owner exits.
+  Archive creation and explicit message/attachment saves also receive that budget,
+  including saves from standalone windows. Quit's preflight probes cannot block
+  on controller or document locks before the watchdog starts.
 
 - Prepare `v1.0.0a14` and make the homepage's primary Download button open
   the published GitHub releases listing.

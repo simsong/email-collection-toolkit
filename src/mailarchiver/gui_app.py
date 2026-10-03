@@ -1068,7 +1068,8 @@ class GuiApi:
         view = describe_message(self._archive(), message_pk)
         if self.e2e_directory is not None:
             destination = self.e2e_directory / f"saved-{export_filename(view)}"
-            write_message(self._archive(), message_pk, destination)
+            with self.application.writer_activity() if self.application else nullcontext():
+                write_message(self._archive(), message_pk, destination)
             return str(destination)
         selected = self.window.create_file_dialog(
             webview.FileDialog.SAVE,
@@ -1081,14 +1082,16 @@ class GuiApi:
         destination = dialog_paths(selected)[0]
         if destination.suffix.casefold() != ".eml":
             destination = destination.with_suffix(".eml")
-        write_message(self._archive(), message_pk, destination)
+        with self.application.writer_activity() if self.application else nullcontext():
+            write_message(self._archive(), message_pk, destination)
         return str(destination)
 
     def save_attachment(self, message_pk: int, part_id: int) -> str | None:
         attachment = attachment_descriptor(self._archive(), message_pk, part_id)
         if self.e2e_directory is not None:
             destination = self.e2e_directory / f"saved-{safe_filename(attachment.filename, part_id, attachment.content_type)}"
-            write_attachment(self._archive(), message_pk, part_id, destination)
+            with self.application.writer_activity() if self.application else nullcontext():
+                write_attachment(self._archive(), message_pk, part_id, destination)
             return str(destination)
         selected = self.window.create_file_dialog(
             webview.FileDialog.SAVE,
@@ -1099,7 +1102,8 @@ class GuiApi:
         if not selected:
             return None
         destination = dialog_paths(selected)[0]
-        write_attachment(self._archive(), message_pk, part_id, destination)
+        with self.application.writer_activity() if self.application else nullcontext():
+            write_attachment(self._archive(), message_pk, part_id, destination)
         return str(destination)
 
     def prepare_drag(self, message_pks: list[int]) -> dict[str, str]:
@@ -1146,7 +1150,8 @@ class GuiApi:
         parameters = [("message", str(message_pk)), ("standalone", "1")]
         parameters.extend(("highlight", term) for term in highlight_terms or [])
         child_api = GuiApi(
-            self._archive(), self.temporary_directory, self.e2e_directory, self.filter_sets.path
+            self._archive(), self.temporary_directory, self.e2e_directory, self.filter_sets.path,
+            application=self.application, document=self.document,
         )
         child_api._export_stop = self._export_stop
         child = webview.create_window(
@@ -1174,7 +1179,7 @@ class GuiApi:
 
     def close(self, *_args: object) -> None:
         self._preview_executor.shutdown(wait=False, cancel_futures=True)
-        if self.application is None:
+        if self.application is None or self.document is None:
             with self._ingest_window_lock:
                 ingest_api, self._ingest_window_api = self._ingest_window_api, None
             if ingest_api is not None and ingest_api.window is not None:
@@ -1292,11 +1297,12 @@ class SetupApi:
             selection = SetupSelection(source=self._source, destination=self._destination)
             selection.validate_paths()
             controller = self.application.controller
-            document = (
-                controller.open_document(selection.destination)
-                if _is_archive(selection.destination)
-                else controller.create_document(selection.destination)
-            )
+            with self.application.writer_activity():
+                document = (
+                    controller.open_document(selection.destination)
+                    if _is_archive(selection.destination)
+                    else controller.create_document(selection.destination)
+                )
             api = next((item for item in self.application._search_apis() if item.document is document), None)
             if api is None:
                 api = self.application.create_search_window(controller.new_search_window(document))
@@ -1663,7 +1669,8 @@ class PyWebViewApplication:
             return None
         try:
             destination = archive_destination(selected)
-            document = self.controller.create_document(destination)
+            with self.writer_activity():
+                document = self.controller.create_document(destination)
         except (OSError, ValueError) as error:
             self.add_notice("error", f"Could not create archive: {error}")
             return None
@@ -2205,8 +2212,8 @@ class PyWebViewApplication:
         return self.controller.can_close_window(window_id)
 
     def has_active_ingest(self) -> bool:
-        return any(job.kind == "ingest" for document in self.controller.documents()
-                   if (job := document.ingest_job) is not None)
+        # Unknown state still requires confirmation, but never a pre-watchdog wait.
+        return self.controller.has_jobs("ingest", blocking=False) is not False
 
     def request_quit(self, *, confirm_ingest: bool = True) -> None:
         """Stop imports at message boundaries, allowing at most five seconds to exit."""
@@ -2214,14 +2221,14 @@ class PyWebViewApplication:
         # returning from a bridge callback that needs that same event loop.
         if self._quitting:
             return
-        if not self.prepare_quit() and self.has_active_ingest() and confirm_ingest:
-            anchor = self._dialog_window()
-            confirmed = (
-                macos_alert("Stop importing and quit?", QUIT_IMPORT_MESSAGE,
-                            ("Cancel", "Stop Import and Quit"), body_width=IMPORT_CONFIRMATION_WIDTH) == 1
-                if sys.platform == "darwin" else
-                bool(anchor and anchor.create_confirmation_dialog("Stop importing and quit?", QUIT_IMPORT_MESSAGE))
-            )
+        if not self.prepare_quit() and confirm_ingest and self.has_active_ingest():
+            if sys.platform == "darwin":
+                confirmed = macos_alert("Stop importing and quit?", QUIT_IMPORT_MESSAGE,
+                    ("Cancel", "Stop Import and Quit"), body_width=IMPORT_CONFIRMATION_WIDTH) == 1
+            else:
+                # Do not route through _dialog_window's application-lock fallback.
+                anchor = webview.active_window() or self._about_window
+                confirmed = bool(anchor and anchor.create_confirmation_dialog("Stop importing and quit?", QUIT_IMPORT_MESSAGE))
             if not confirmed:
                 return
         deadline = time.monotonic() + QUIT_TIMEOUT_SECONDS
@@ -2277,11 +2284,11 @@ class PyWebViewApplication:
         Thread(target=finish_quit, name="mailarchiver-quit", daemon=True).start()
 
     def prepare_quit(self) -> bool:
-        """Keep windows and services alive until every import has completed."""
+        """Reserve a known job-free Quit without waiting on application state."""
         if not self._lock.acquire(blocking=False):
             return False
         try:
-            if any(document.ingest_job for document in self.controller.documents()):
+            if self.controller.has_jobs(blocking=False) is not False:
                 return False
             self._quitting = True
             return True
