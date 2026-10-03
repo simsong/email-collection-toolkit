@@ -923,15 +923,18 @@ class GuiApi:
     def save_filter_set(self, name: str, show_volumes: bool, selections: list[str]) -> dict[str, Any]:
         for token in selections:
             MailboxSelection.from_token(token)
-        return self.filter_sets.save(
-            FilterSet(name=name, show_volumes=show_volumes, selections=selections)
-        ).model_dump(mode="json")
+        with self.application.writer_activity() if self.application else nullcontext():
+            return self.filter_sets.save(
+                FilterSet(name=name, show_volumes=show_volumes, selections=selections)
+            ).model_dump(mode="json")
 
     def rename_filter_set(self, old_name: str, new_name: str) -> dict[str, Any]:
-        return self.filter_sets.rename(old_name, new_name).model_dump(mode="json")
+        with self.application.writer_activity() if self.application else nullcontext():
+            return self.filter_sets.rename(old_name, new_name).model_dump(mode="json")
 
     def delete_filter_set(self, name: str) -> dict[str, Any]:
-        return self.filter_sets.delete(name).model_dump(mode="json")
+        with self.application.writer_activity() if self.application else nullcontext():
+            return self.filter_sets.delete(name).model_dump(mode="json")
 
     def request_previews(self, message_pks: list[int]) -> bool:
         if not message_pks or len(message_pks) > DEFAULT_PAGE_SIZE:
@@ -1322,11 +1325,11 @@ class SetupApi:
         if not self._lock.acquire(blocking=False):
             return False
         try:
+            Thread(target=self.application.request_quit, name="mailarchiver-setup-quit", daemon=True).start()
             self.application._refresh_menus()
         finally:
             self._lock.release()
             self.application._refresh_menus()
-        Thread(target=self.application.request_quit, name="mailarchiver-setup-quit", daemon=True).start()
         return True
 
     def _dismiss(self) -> None:

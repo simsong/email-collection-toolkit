@@ -7,6 +7,7 @@
 # Separate subprocess probes test actual forced exit with contended locks.
 
 from pathlib import Path
+import os
 import sqlite3
 from threading import Event, Thread
 from time import monotonic
@@ -19,6 +20,7 @@ from mailarchiver import application as application_module
 from mailarchiver.application import ApplicationController, ApplicationPreferencesStore, IngestJob
 from mailarchiver.gui_app import GuiApi, PyWebViewApplication, SetupApi
 from mailarchiver.gui_service import describe_message
+from mailarchiver.mailbox_tree import FilterSet
 from mailarchiver.writer_lock import WriterLease
 from tests.test_gui_service import MULTIPART_MESSAGE, make_gui_archive
 
@@ -183,3 +185,46 @@ def test_cancel_quit_with_contended_state(tmp_path: Path, monkeypatch: pytest.Mo
         worker.join(3)
         document.finish_ingest(job.operation_id, published=False)
     assert not app.has_active_ingest()
+
+
+@pytest.mark.parametrize("operation", ["save", "rename", "delete"])
+def test_quit_waits_for_filter_preferences(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, operation: str) -> None:
+    """Filter mutations share the exit deadline through their real atomic JSON replacement."""
+    controller = ApplicationController(ApplicationPreferencesStore(tmp_path / "app.json"))
+    exited, entered, release = Event(), Event(), Event()
+    app = PyWebViewApplication(controller, exit_process=lambda _code: exited.set())
+    api = GuiApi(None, preferences_file=tmp_path / "filters.json", application=app)
+    api.filter_sets.save(FilterSet(name="original"))
+    replace = os.replace
+
+    def pause_replace(source: str, target: str | Path) -> None:
+        if Path(target) == api.filter_sets.path:
+            entered.set()
+            assert release.wait(3)
+        replace(source, target)
+
+    monkeypatch.setattr(os, "replace", pause_replace)
+
+    def mutate() -> None:
+        if operation == "save":
+            api.save_filter_set("saved", False, [])
+        elif operation == "rename":
+            api.rename_filter_set("original", "renamed")
+        else:
+            api.delete_filter_set("original")
+
+    worker = Thread(target=mutate)
+    worker.start()
+    try:
+        assert entered.wait(3)
+        app.request_quit(confirm_ingest=False)
+        assert not exited.wait(0.1)
+    finally:
+        release.set()
+        worker.join(3)
+        api.cleanup_exports()
+    assert not worker.is_alive() and exited.wait(2)
+    names = [item.name for item in api.filter_sets.read().filter_sets]
+    assert names == (["original", "saved"] if operation == "save" else ["renamed"] if operation == "rename" else [])
+    with pytest.raises(ValueError, match="quitting"):
+        mutate()

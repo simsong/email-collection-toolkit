@@ -112,9 +112,9 @@ def main() -> None:
 
         Thread(target=save, daemon=True).start()
         assert entered.wait(5)
-    if mode in {"lock", "controller-lock", "document-lock"}:
+    if mode in {"lock", "controller-lock", "document-lock", "setup-lock"}:
         locked = Event()
-        held_lock = app._lock if mode == "lock" else controller._lock
+        held_lock = app._lock if mode in {"lock", "setup-lock"} else controller._lock
         if mode == "document-lock":
             held_lock = controller.create_document(root / "locked-archive")._lock
 
@@ -126,7 +126,7 @@ def main() -> None:
         Thread(target=hold_application_lock, daemon=True).start()
         assert locked.wait(5)
         assert not app.prepare_quit()
-        if mode != "lock":
+        if mode not in {"lock", "setup-lock"}:
             assert app.has_active_ingest(), "unknown state must still require confirmation"
     if mode == "startup":
         document = controller.create_document(root / "startup-archive")
@@ -187,7 +187,7 @@ def main() -> None:
 
     def quit_app() -> None:
         print("ready", flush=True)
-        if mode == "setup":
+        if mode in {"setup", "setup-lock"}:
             assert SetupApi(app).cancel()
         else:
             app.request_quit(confirm_ingest=False)

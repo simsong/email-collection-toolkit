@@ -58,11 +58,11 @@ def run_quit_probe(root: Path, mode: str) -> float:
 
 
 @pytest.mark.parametrize("mode", ["idle", "setup", "cooperative", "blocked", "writer", "exports", "blocked-exports",
-                                 "lock", "controller-lock", "document-lock", "startup", "definitions"])
+                                 "lock", "controller-lock", "document-lock", "setup-lock", "startup", "definitions"])
 def test_quit_exits_despite_stranded_callbacks(tmp_path: Path, mode: str) -> None:
     """Issue #150: inactive work exits now; two blocked jobs share one five-second budget."""
     elapsed = run_quit_probe(tmp_path, mode)
-    if mode in {"blocked", "blocked-exports", "lock", "controller-lock", "document-lock", "definitions"}:
+    if mode in {"blocked", "blocked-exports", "lock", "controller-lock", "document-lock", "setup-lock", "definitions"}:
         assert QUIT_TIMEOUT_SECONDS - 0.5 <= elapsed < QUIT_TIMEOUT_SECONDS + 2
     else:
         assert elapsed < 2

@@ -203,7 +203,7 @@ def validate_archive(path: Path, *, recover: bool = False) -> tuple[Path, Path, 
                     finally:
                         database.close()
                     validate(canonical / name)
-    except (OSError, RuntimeError, sqlite3.Error) as error:
+    except (OSError, RuntimeError, ValueError, sqlite3.Error) as error:
         raise InvalidArchiveError(f"archive databases are invalid: {display}: {error}") from error
     return display, canonical, identity
 

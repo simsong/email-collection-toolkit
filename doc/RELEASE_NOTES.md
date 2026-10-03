@@ -18,6 +18,9 @@
   Archive creation and explicit message/attachment saves also receive that budget,
   including saves from standalone windows. Quit's preflight probes cannot block
   on controller or document locks before the watchdog starts.
+  Setup Cancel starts Quit before refreshing menus; filter-set changes share the
+  write deadline. Processing initialization publishes a complete schema atomically,
+  validation rejects partial schemas, and replay avoids per-message archive reports.
 
 - Prepare `v1.0.0a14` and make the homepage's primary Download button open
   the published GitHub releases listing.

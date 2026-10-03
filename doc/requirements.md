@@ -304,7 +304,7 @@ Do not bypass Sparkle's deferred/installing handoff. Window-close restrictions
 during ingest remain intact.
 
 Archive creation, explicit message/attachment saves (including standalone windows),
-and owner-rule/identity saves already in progress share the Quit deadline; reject
+filter-set mutations, and owner-rule/identity saves already in progress share the Quit deadline; reject
 new writes after Quit is reserved. Track creation before the first archive file
 is initialized, and explicit saves through atomic destination replacement.
 Delete private attachment/drag copies without window
@@ -324,6 +324,10 @@ a callback waiting on Cocoa must not prevent deadline enforcement.
 Pre-confirmation probes of application, controller and document state must not
 block. Unavailable job state requires confirmation rather than an idle assumption;
 Cancel must leave work running without reserving Quit or arming its watchdog.
+Setup Cancel must dispatch Quit before either menu refresh can wait on a callback lock.
+Processing database initialization must publish a complete schema atomically;
+a version marker alone is insufficient for validation. Message-boundary replay
+must not repeat archive-wide recovery or aggregate-report scans for every message.
 
 The default pytest suite must import the entire local `tests/data/` directory
 through the CLI into a disposable archive, with a ten-minute subprocess

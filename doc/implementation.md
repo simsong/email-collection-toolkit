@@ -2521,6 +2521,7 @@ Document-option and identity bridges reserve `writer_activity` under the same Qu
 both setup and File New also reserve it around archive initialization and registration.
 Explicit message/attachment saves reserve it after the destination dialog through
 atomic replacement; standalone message bridges retain the same application owner.
+Filter-set save/rename/delete operations also reserve it through preferences replacement.
 New writes are rejected after Quit reservation. Export directories carry their owner
 PID. A later launch removes only private directories owned by this user whose
 PID no longer exists; live or inaccessible owners are preserved. The scanner
@@ -2538,6 +2539,8 @@ Canceled confirmation never arms the watchdog, and canceled Sparkle installation
 invalidates that Quit's event. Regression gates pause real archive initialization
 between databases and real exports before replacement; subprocess probes hold each
 of the three locks while requesting Quit.
+Setup Cancel dispatches its Quit thread before either locked/unlocked menu refresh,
+so a stuck refresh cannot prevent the watchdog from starting.
 
 Forced exit may leave an unfinished transaction, append or BagIt checkpoint.
 GUI Open first validates read-only. If SQLite reports a hot rollback journal,
@@ -2545,10 +2548,19 @@ it acquires the writer lease, rejects database/sidecar symlinks and hardlinks,
 opens the existing database read-write for rollback, and repeats validation.
 This also checks and recovers the optional `processing.sqlite3`, without creating
 or migrating it, before the GUI reads pending work or the saved resume request.
+Processing validation requires the complete V2 table set. New processing databases
+are initialized transactionally in a private sibling file and renamed into place
+only after closing the complete schema; interruption before publication can leave
+an unused `.processing-init-*` file, while the optional database remains absent.
+The production writer lease covers this initialization. Existing partial schemas
+are rejected without silently creating missing tables.
 The next ingest uses SQLite rollback and `recover_publication` to truncate an
 uncatalogued append or retain a committed message, then refreshes manifests.
 The incomplete-work prompt or File → Import resumes saved work; this is recovery,
 not a guarantee that every interrupted archive immediately passes verification.
+Production processing prepares interrupted jobs once when opening its pipeline;
+per-message replay uses the dispatch loop without recomputing aggregate reports.
+Explicit status/report requests still calculate complete archive statistics.
 `make test-quit` exercises actual process termination, multi-job stop, rollback,
 partial-append recovery, native-source and loopback-HTTP message boundaries, and
 duplicate-free restart. `make test-native-quit` tests the real Cocoa About window

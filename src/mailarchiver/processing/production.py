@@ -26,7 +26,7 @@ from .api import (
 )
 from .contracts import AddressEvidence, ContentMetadata, HeaderMetadata, MailboxReference, MimeInventory, ProcessingPolicy, SourceMetadata
 from .registry import fingerprint, load_processors
-from .runtime import run
+from .runtime import dispatch, prepare_run, run
 from .store import DATABASE, connect, enqueue, report, snapshot
 
 Publisher = Callable[[MailObject, ParsedMessage, MailboxReference, int], int]
@@ -65,6 +65,7 @@ class ProductionPipeline:
         previous = self.database.execute("SELECT value FROM processing_settings WHERE name='configuration'").fetchone()
         if previous and previous[0] != self.configuration_hash:
             self.reprocess()
+        prepare_run(self.database, self.plugins, retry=True)
 
     def _configuration_hash(self) -> str:
         digest = hashlib.sha256(self.registry_hash.encode())
@@ -138,7 +139,10 @@ class ProductionPipeline:
         # still apply, and GUI termination has its own five-second hard limit.
         cancelled, self.cancelled = self.cancelled, None
         try:
-            self.resume(("ingest", "message"), message_id=message_id)
+            failures: list[Exception] = []
+            dispatch(self.database, self.plugins, pipelines=("ingest", "message"),
+                     installation_config=self.installation_config, services=self, failures=failures, message_id=message_id)
+            self._raise_failures(("ingest", "message"), failures)
         finally:
             self.cancelled = cancelled
     def resume(self, pipelines: tuple[Pipeline, ...], *, max_jobs: int | None = None, message_id: str | None = None) -> RunReport:
@@ -146,13 +150,16 @@ class ProductionPipeline:
         result = run(self.database, self.plugins, retry=True, pipelines=pipelines, max_jobs=max_jobs,
                      installation_config=self.installation_config, services=self, cancelled=self.cancelled, failures=failures,
                      message_id=message_id)
+        self._raise_failures(pipelines, failures)
+        return result
+
+    def _raise_failures(self, pipelines: tuple[Pipeline, ...], failures: list[Exception]) -> None:
         placeholders = ",".join("?" for _ in pipelines)
         failed = self.database.execute(f"SELECT detail FROM jobs WHERE status='failed' AND json_extract(item_json,'$.pipeline') IN ({placeholders}) LIMIT 1", pipelines).fetchone()
         if failed:
             error = self.database.execute("SELECT error,kind FROM invocations WHERE status='failed' ORDER BY invocation_id DESC LIMIT 1").fetchone()
             prefix = "failed to parse message" if error and error[1] in ("file-message", "headers") else "processor failed"
             raise RuntimeError(f"{prefix}: {error[0] if error else failed[0]}") from (failures[-1] if failures else None)
-        return result
 
     def reprocess(self) -> None:
         generation = str(uuid4())
