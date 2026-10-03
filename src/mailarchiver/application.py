@@ -21,7 +21,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from .identity import application_data_directory
 
 from .bagit import initialize_bag
-from .catalog import create_catalog, create_search, validate_catalog, validate_search
+from .catalog import PROCESSING_DATABASE, create_catalog, create_search, validate_catalog, validate_search, validate_processing
 from .writer_lock import ArchiveBusyError, WriterLease
 from .updates import UpdateChannel, default_channel
 
@@ -30,7 +30,7 @@ RECENT_ARCHIVE_LIMIT = 10
 
 
 class InvalidArchiveError(ValueError):
-    """An archive path failed read-only document validation."""
+    """An archive path failed document validation or required crash recovery."""
 
 
 class ApplicationPreferences(BaseModel):
@@ -163,8 +163,8 @@ def application_preferences_path() -> Path:
     return root / application / "preferences.json"
 
 
-def validate_archive(path: Path) -> tuple[Path, Path, str]:
-    """Validate without mutation and return display path, canonical path, and identity."""
+def validate_archive(path: Path, *, recover: bool = False) -> tuple[Path, Path, str]:
+    """Validate read-only; GUI Open may request lease-protected hot-journal recovery."""
     display = Path(os.path.abspath(path.expanduser()))
     if not display.is_dir():
         raise InvalidArchiveError(f"archive does not exist or is not a directory: {display}")
@@ -172,16 +172,38 @@ def validate_archive(path: Path) -> tuple[Path, Path, str]:
     if missing:
         raise InvalidArchiveError(f"archive is missing {', '.join(missing)}: {display}")
     canonical = display.resolve(strict=True)
-    for name in ("archive.sqlite3", "search.sqlite3"):
+    validators = [("archive.sqlite3", validate_catalog), ("search.sqlite3", validate_search)]
+    if (canonical / PROCESSING_DATABASE).exists() or (canonical / PROCESSING_DATABASE).is_symlink():
+        validators.append((PROCESSING_DATABASE, validate_processing))
+    for name, _validate in validators:
         metadata = (canonical / name).lstat()
         if not stat.S_ISREG(metadata.st_mode) or metadata.st_nlink != 1:
             raise InvalidArchiveError(f"archive database must be a regular file with one link: {name}")
     metadata = canonical.stat()
     identity = f"{metadata.st_dev}:{metadata.st_ino}"
     try:
-        validate_catalog(canonical / "archive.sqlite3")
-        validate_search(canonical / "search.sqlite3")
-    except (OSError, RuntimeError, sqlite3.Error) as error:
+        for name, validate in validators:
+            try:
+                validate(canonical / name)
+            except sqlite3.OperationalError as error:
+                if not recover or error.sqlite_errorcode != sqlite3.SQLITE_READONLY_ROLLBACK:
+                    raise
+                with WriterLease.acquire(canonical, identity, "recover SQLite journal", uuid4().hex, version("mailarchiver")):
+                    # Recovery may write database sidecars. Reject aliases before
+                    # allowing SQLite to touch any of these archive-owned paths.
+                    for suffix in ("", "-journal", "-wal", "-shm"):
+                        candidate = canonical / (name + suffix)
+                        if candidate.exists() or candidate.is_symlink():
+                            info = candidate.lstat()
+                            if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1:
+                                raise InvalidArchiveError(f"unsafe SQLite recovery path: {candidate.name}")
+                    database = sqlite3.connect(f"{(canonical / name).as_uri()}?mode=rw", uri=True)
+                    try:
+                        database.execute("SELECT count(*) FROM sqlite_schema").fetchone()
+                    finally:
+                        database.close()
+                    validate(canonical / name)
+    except (OSError, RuntimeError, ValueError, sqlite3.Error) as error:
         raise InvalidArchiveError(f"archive databases are invalid: {display}: {error}") from error
     return display, canonical, identity
 
@@ -230,7 +252,7 @@ class ArchiveDocument:
 
     @classmethod
     def open(cls, path: Path) -> ArchiveDocument:
-        display, canonical, identity = validate_archive(path)
+        display, canonical, identity = validate_archive(path, recover=True)
         digest = sha256(identity.encode("utf-8")).hexdigest()[:20]
         return cls(
             ArchiveDescriptor(
@@ -272,6 +294,15 @@ class ArchiveDocument:
     def ingest_job(self) -> IngestJob | None:
         with self._lock:
             return self._ingest_job
+
+    def has_job(self, kind: str | None = None, *, blocking: bool = True) -> bool | None:
+        """Return unknown when a nonblocking shutdown probe cannot inspect this job."""
+        if not self._lock.acquire(blocking=blocking):
+            return None
+        try:
+            return self._ingest_job is not None and (kind is None or self._ingest_job.kind == kind)
+        finally:
+            self._lock.release()
 
     @property
     def generation(self) -> int:
@@ -462,6 +493,19 @@ class ApplicationController:
         """Return live archive documents in stable creation order."""
         with self._lock:
             return tuple(self._documents.values())
+
+    def has_jobs(self, kind: str | None = None, *, blocking: bool = True) -> bool | None:
+        """Probe document jobs without treating contended state as an idle application."""
+        if not self._lock.acquire(blocking=blocking):
+            return None
+        try:
+            for document in self._documents.values():
+                active = document.has_job(kind, blocking=blocking)
+                if active is not False:
+                    return active
+            return False
+        finally:
+            self._lock.release()
 
     def import_document(self) -> ArchiveDocument:
         document = self.active_document

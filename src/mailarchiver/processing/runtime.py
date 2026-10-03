@@ -226,10 +226,17 @@ def run(database: sqlite3.Connection, plugins: tuple[PluginSpec, ...], *, retry:
         max_jobs: int | None = None, installation_config: Path | None = None,
         pipelines: tuple[Pipeline, ...] = ("ingest", "message", "content"),
         services: ProcessorServices | None = None, cancelled: Callable[[], None] | None = None,
-        failures: list[Exception] | None = None) -> RunReport:
+        failures: list[Exception] | None = None, message_id: str | None = None) -> RunReport:
     """Caller holds the archive writer lease. Atomic output release follows each barrier."""
+    prepare_run(database, plugins, retry=retry)
+    dispatch(database, plugins, max_jobs=max_jobs, installation_config=installation_config,
+             pipelines=pipelines, services=services, cancelled=cancelled, failures=failures, message_id=message_id)
+    return report(database, tuple(p.manifest.kind for p in plugins))
+
+
+def prepare_run(database: sqlite3.Connection, plugins: tuple[PluginSpec, ...], *, retry: bool = False) -> None:
+    """Recover interrupted invocations once at the start of a writer-owned run."""
     registry_hash = fingerprint(plugins)
-    failures = failures if failures is not None else []
     incompatible = database.execute("SELECT 1 FROM jobs WHERE registry_hash<>? AND status IN ('pending','running','failed') LIMIT 1", (registry_hash,)).fetchone()
     if incompatible:
         raise ValueError("registry changed; use the explicit reprocess command")
@@ -238,12 +245,24 @@ def run(database: sqlite3.Connection, plugins: tuple[PluginSpec, ...], *, retry:
         database.execute("UPDATE jobs SET status='pending' WHERE status='running'")
         if retry:
             database.execute("UPDATE jobs SET status='pending',detail='' WHERE status='failed'")
+
+
+def dispatch(database: sqlite3.Connection, plugins: tuple[PluginSpec, ...], *,
+        max_jobs: int | None = None, installation_config: Path | None = None,
+        pipelines: tuple[Pipeline, ...] = ("ingest", "message", "content"),
+        services: ProcessorServices | None = None, cancelled: Callable[[], None] | None = None,
+        failures: list[Exception] | None = None, message_id: str | None = None) -> None:
+    """Dispatch prepared work without rescanning history or computing an aggregate report."""
+    registry_hash = fingerprint(plugins)
+    failures = failures if failures is not None else []
     processed = 0
     while max_jobs is None or processed < max_jobs:
         placeholders = ",".join("?" for _ in pipelines)
         row = database.execute("SELECT job_id,item_json FROM jobs WHERE status='pending' "
             f"AND json_extract(item_json,'$.pipeline') IN ({placeholders}) "
-            "AND (parent_job_id IS NULL OR parent_job_id IN (SELECT job_id FROM jobs WHERE status='completed')) ORDER BY job_id LIMIT 1", pipelines).fetchone()
+            "AND (? IS NULL OR json_extract(item_json,'$.message_id')=?) "
+            "AND (parent_job_id IS NULL OR parent_job_id IN (SELECT job_id FROM jobs WHERE status='completed')) ORDER BY job_id LIMIT 1",
+            (*pipelines, message_id, message_id)).fetchone()
         if row is None:
             break
         job_id, payload = row
@@ -311,4 +330,3 @@ def run(database: sqlite3.Connection, plugins: tuple[PluginSpec, ...], *, retry:
             with database:
                 database.execute("UPDATE jobs SET status='completed' WHERE job_id=?", (job_id,))
         processed += 1
-    return report(database, tuple(p.manifest.kind for p in plugins))

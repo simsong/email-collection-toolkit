@@ -582,6 +582,15 @@ checks, then both test suites and website validation without showing a window.
 CI runs `make check-static` and `make check-tests` in parallel jobs; local
 `make check` retains their order. Use `make lint` and `make types` for the
 static checks alone. On macOS,
+`make test-quit` checks real immediate/bounded process exit, message-boundary
+stopping for local and loopback API sources, and interrupted archive recovery.
+`make test-native-quit` uses `MAILARCHIVER_NATIVE_GUI_E2E=1` to exercise Quit
+during status polling in a real macOS Cocoa window; it requires a GUI session.
+Idle Quit exits after bounded private-export cleanup. Active imports finish their
+current message and checkpoint; imports, settings saves, definition updates, and cleanup share one
+five-second deadline. Forced exit can leave stale manifests or an
+incomplete append; Continue Processing or reimport invokes archive recovery.
+
 `make test-native-gui` additionally exercises the hidden Cocoa/WKWebView bridge.
 This native target is an explicit local development check and does not run in
 CI/CD, which retains the complete headless Chromium GUI test.

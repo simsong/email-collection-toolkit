@@ -290,9 +290,44 @@ in an actual message body.
 On macOS, Command-Q during an active import must offer Cancel or Stop Import
 and Quit. Explain that quitting stops imports, that **Continue Processing**
 resumes saved work (or File → Import retries the source), and that already
-archived messages are not imported twice. Cancel leaves imports running. Confirmed quit stops all active imports
-cooperatively, disallows new imports, and waits for checkpointing and writer-lease
-release before terminating. Window-close restrictions during ingest remain intact.
+archived messages are not imported twice. Cancel leaves imports running. Confirmed
+Quit disallows new imports and signals every local/native and API import to stop
+after its current message, before fetching the next. With no active jobs or import
+worker tails, exit immediately after bounded private-export cleanup without waiting for UI callbacks. Otherwise allow
+one shared five-second budget for message completion, checkpointing and lease
+release, then force process exit even if workers remain. Exit sooner when work
+finishes. A deadline can interrupt a message or checkpoint: SQLite transaction
+rollback and the durable MBOX append journal support recovery on the next ingest;
+an interrupted archive is not promised to have current BagIt manifests. Continue
+Processing or reimport repairs checkpoints and deduplicates committed messages.
+Do not bypass Sparkle's deferred/installing handoff. Window-close restrictions
+during ingest remain intact.
+
+Archive creation, explicit message/attachment saves (including standalone windows),
+filter-set mutations, and owner-rule/identity saves already in progress share the Quit deadline; reject
+new writes after Quit is reserved. Track creation before the first archive file
+is initialized, and explicit saves through atomic destination replacement.
+Delete private attachment/drag copies without window
+callbacks, and reclaim interrupted cleanup on a later launch only when the
+owning process is gone. Native scanner helpers must exit when their owner dies,
+including while a scan is blocked. Replayed ingest work follows the same
+current-message cancellation boundary as newly acquired mail. GUI Open must
+recover hot SQLite rollback journals under the archive writer lease before
+read-only schema validation, retaining database and sidecar path-safety checks.
+Include the optional existing processing database so Continue Processing can
+read its queue and saved policy after a crash. Import startup remains tracked
+from lease acquisition and settings writes through job registration; failed
+startup releases its lease before reporting completion. Definition refreshes
+also share the Quit deadline, and their updater process cannot outlive the GUI.
+Arm the exit watchdog before taking any application locks after confirmation;
+a callback waiting on Cocoa must not prevent deadline enforcement.
+Pre-confirmation probes of application, controller and document state must not
+block. Unavailable job state requires confirmation rather than an idle assumption;
+Cancel must leave work running without reserving Quit or arming its watchdog.
+Setup Cancel must dispatch Quit before either menu refresh can wait on a callback lock.
+Processing database initialization must publish a complete schema atomically;
+a version marker alone is insufficient for validation. Message-boundary replay
+must not repeat archive-wide recovery or aggregate-report scans for every message.
 
 The default pytest suite must import the entire local `tests/data/` directory
 through the CLI into a disposable archive, with a ten-minute subprocess
@@ -703,7 +738,8 @@ Pending work alone must not trigger a quit warning. Content-only jobs stop and
 checkpoint on quit without an ingest warning. Active ingest still requires stop
 confirmation. Quit must not block the Cocoa event loop while waiting for workers;
 workers must skip final UI refresh during shutdown. Ctrl-C requests the same
-orderly shutdown without a confirmation dialog.
+bounded shutdown without a confirmation dialog in the GUI. CLI Ctrl-C retains
+its existing graceful checkpoint behavior without the GUI's forced-exit deadline.
 
 Matcher matrix cells use two-point vertical padding, black text and column
 headings, and dark supporting text. Live pickers have no Archive identities badge.
@@ -930,8 +966,9 @@ last archive and at most ten recent archive paths, but no archive content or
 credentials.
 
 An `ArchiveDocument` represents one archive. Opening validates the directory
-and the versioned layout and SQLite readable state of both databases without
-creating or modifying anything. A missing or invalid saved archive is removed
+and the versioned layout and SQLite readable state of both databases read-only,
+except for lease-protected recovery of hot rollback journals left by a crashed
+writer. It does not create missing databases or migrate schemas. A missing or invalid saved archive is removed
 from recent preferences and reported in About status and stderr; About remains hidden until requested. The document
 retains the user's absolute display path and also uses a canonical,
 filesystem device/inode pair as its process-local identity. Windows opened through
@@ -969,12 +1006,15 @@ preferences. It does not undo earlier writes: normal startup may already have
 removed a missing or invalid remembered archive from saved preferences before
 showing setup.
 If another window is importing, use the normal Stop Import and Quit confirmation
-and retain its writer lease until checkpoint completion. It and native File → Close are disabled while a setup operation or dialog is pending.
+and retain its writer lease until checkpoint completion or the five-second exit
+deadline. It and native File → Close are disabled while a setup operation or dialog is pending.
 The Close lock applies globally, including Cancel and native modal focus falling
 back to an existing search window; a queued Close action must also refuse closure.
 Folder pickers must clear any warning accessory left by a previous import dialog.
 Cancel must atomically reserve a job-free quit against import publication; if a
-job wins that race, present the normal stop confirmation and wait for its checkpoint.
+job wins that race, present the normal stop confirmation and apply the shared
+five-second deadline. Setup Cancel must not wait for its JavaScript reply before
+requesting Quit.
 
 When launched through `mailsearch-gui`, macOS must not reinterpret the Python
 launcher or command-line option values as documents. Explicit `--archive`
@@ -996,7 +1036,7 @@ shortcuts on macOS. Search windows have no Open Archive toolbar button.
 The archive path appears in the native title bar, without a duplicate toolbar label.
 The native menu order is Application, File, Edit, View, Window. Existing archive
 directories do not require an extension. Opening checks SQLite schema and layout
-read-only, without scanning every database page; this is not a full corruption
+read-only after any required hot-journal recovery, without scanning every database page; this is not a full corruption
 audit. Open failures appear in About and stderr even if a document cannot open.
 
 The About window is retained hidden at startup and opens through the application
@@ -2158,9 +2198,9 @@ terminal stream, including windowed builds with no stderr. Ingest child windows
 route document actions to an attached search window. Informational notices stay
 in About instead of appearing as errors. Closing an import owner offers waiting
 or keeping the window open. Native macOS Quit offers Cancel or Stop Import and Quit while an import is
-active. Confirmed quit signals all imports, retains their leases and windows
-until checkpoint completion, and then exits. Shutdown joins tracked workers
-before releasing resources. Makefile Ruff checks select this checkout's configuration explicitly. Git
+active. Confirmed Quit signals all imports at message boundaries and allows at
+most five seconds before forced exit; idle Quit exits immediately. Workers retain
+leases until checkpoint completion or process death. Makefile Ruff checks select this checkout's configuration explicitly. Git
 selects tracked and non-ignored new `.py` and `.pyi` files, so linked worktrees
 are checked without descending into ignored generated directories.
 

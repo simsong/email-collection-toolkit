@@ -14,7 +14,16 @@ import pytest
 from mailarchiver.clamav_definitions import ActiveDefinitions, DATABASE_NAMES, UPDATE_ENV, choose_definitions, read_definitions, selected_definitions, three_months_after
 from mailarchiver.clamav_update import publish_definitions, update_lock
 from mailarchiver.scanner import ClamScannerStartupError
+from mailarchiver.owned_command import run_owned_command
 from mailarchiver.writer_lock import WriterLease
+
+
+def test_owned_updater_preserves_diagnostics_and_enforces_timeout() -> None:
+    """The supervised updater reports command failures and bounds an unresponsive utility."""
+    result = run_owned_command([sys.executable, "-c", "print('update diagnostic'); raise SystemExit(7)"], timeout=5)
+    assert result.returncode == 7 and result.stdout == "update diagnostic\n"
+    with pytest.raises(RuntimeError, match="timed out"):
+        run_owned_command([sys.executable, "-c", "from threading import Event; Event().wait()"], timeout=0.1)
 
 
 @pytest.mark.parametrize(("start", "expected"), [

@@ -144,7 +144,8 @@ def test_failed_update_aborts_pending_quit(tmp_path: Path, installing: bool) -> 
     controller = ApplicationController(ApplicationPreferencesStore(tmp_path / "preferences.json"))
     document = controller.create_document(tmp_path / "archive.mailarchive")
     assert document.path is not None
-    host = PyWebViewApplication(controller)
+    exits: list[int] = []
+    host = PyWebViewApplication(controller, exit_process=exits.append)
 
     def failed_install() -> None:
         raise RuntimeError("synthetic native installation error")
@@ -157,6 +158,7 @@ def test_failed_update_aborts_pending_quit(tmp_path: Path, installing: bool) -> 
                 worker.join(timeout=5)
                 assert not worker.is_alive()
         assert host._quitting
+        assert not exits
         if installing:
             with pytest.raises(RuntimeError, match="native installation"):
                 host.updates.resume_install()
@@ -169,6 +171,7 @@ def test_failed_update_aborts_pending_quit(tmp_path: Path, installing: bool) -> 
         with host.definitions_activity():
             controller.create_document(tmp_path / "recovered.mailarchive")
         host.request_quit(confirm_ingest=False)
+        assert exits == [0]
         for worker in running_threads():
             if worker.name == "mailarchiver-quit":
                 worker.join(timeout=5)

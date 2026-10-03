@@ -11,8 +11,9 @@ from importlib.resources import files
 from pathlib import Path
 
 from .api import ArchiveContext, ContentReference, PluginStatistics, ProcessingObject, RAW_MESSAGE, RunReport
+from ..catalog import PROCESSING_DATABASE as DATABASE
+from ..catalog import require_processing_schema
 
-DATABASE = "processing.sqlite3"
 SCHEMA_RESOURCE = "V2__processing.sql"
 
 
@@ -24,13 +25,32 @@ def connect(archive: Path, *, create: bool = False, production: bool = False) ->
             raise ValueError("initialization requires a fresh framework archive")
     if not path.exists() and not create:
         raise ValueError("framework archive does not exist; use init")
-    database = sqlite3.connect(path, check_same_thread=not production)
-    database.execute("PRAGMA foreign_keys=ON")
     if create:
-        database.executescript(files("mailarchiver.processing").joinpath("sql", SCHEMA_RESOURCE).read_text())
-    if database.execute("SELECT version FROM schema_info").fetchall() != [(2,)]:
+        # The production caller owns the archive writer lease. Publish only a
+        # closed, complete schema. A crash before replacement leaves
+        # an ignored staging file, not a partially initialized processing database.
+        descriptor, name = tempfile.mkstemp(prefix=".processing-init-", dir=archive)
+        os.close(descriptor)
+        temporary = Path(name)
+        try:
+            staging = sqlite3.connect(temporary)
+            try:
+                staging.executescript("BEGIN IMMEDIATE;\n" + files("mailarchiver.processing").joinpath("sql", SCHEMA_RESOURCE).read_text() + "\nCOMMIT;")
+                require_processing_schema(staging)
+            finally:
+                staging.close()
+            if path.exists():
+                raise ValueError("initialization requires a fresh framework archive")
+            temporary.replace(path)
+        finally:
+            temporary.unlink(missing_ok=True)
+    database = sqlite3.connect(path, check_same_thread=not production)
+    try:
+        database.execute("PRAGMA foreign_keys=ON")
+        require_processing_schema(database)
+    except BaseException:
         database.close()
-        raise ValueError("unsupported processing schema; use a fresh archive")
+        raise
     return database
 
 

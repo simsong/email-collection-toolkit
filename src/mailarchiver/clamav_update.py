@@ -17,6 +17,7 @@ from pydantic import BaseModel
 
 from .clamav_definitions import DEVELOPMENT_DATABASE, PREFIXES, ActiveDefinitions, DefinitionSet, certificates_path, read_definitions, selected_definitions, update_root, updater_path
 from .scanner import ClamScanner
+from .owned_command import run_owned_command
 from .writer_lock import application_write_activity
 
 EICAR = b"X5O!P%@AP[4\\PZX54(P^)7CC)7}$EICAR-STANDARD-ANTIVIRUS-TEST-FILE!$H+H*"
@@ -115,8 +116,8 @@ def refresh_definitions() -> UpdateResult:
             configuration = workspace / "freshclam.conf"
             write_freshclam_config(configuration, certificates_path(), checks=0)
             try:
-                result = subprocess.run([str(updater_path()), f"--config-file={configuration}",
-                    f"--datadir={staging}", "--stdout"], capture_output=True, text=True, check=False, timeout=600)
+                result = run_owned_command([str(updater_path()), f"--config-file={configuration}",
+                    f"--datadir={staging}", "--stdout"], timeout=600)
             finally:
                 if (staging / "freshclam.dat").is_file():
                     shutil.copyfile(staging / "freshclam.dat", state)

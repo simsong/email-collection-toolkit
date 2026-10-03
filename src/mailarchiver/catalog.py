@@ -12,6 +12,7 @@ SCHEMA_VERSION = 1
 SEARCH_SCHEMA_VERSION = 1
 ARCHIVE_SCHEMA = "V1__archive.sql"
 SEARCH_SCHEMA = "V1__search.sql"
+PROCESSING_DATABASE = "processing.sqlite3"
 
 
 class UnsupportedSearchSchemaError(RuntimeError):
@@ -201,6 +202,25 @@ def create_search(path: Path, *, check_same_thread: bool = True) -> sqlite3.Conn
     except BaseException:
         database.close()
         raise
+
+
+def require_processing_schema(database: sqlite3.Connection) -> None:
+    """Reject a version marker without the complete V2 processing table set."""
+    required = {"schema_info", "messages", "occurrences", "jobs", "invocations", "persons", "addresses",
+                "person_addresses", "person_aliases", "organizations", "organization_domains", "affiliations",
+                "evidence", "tags", "message_tags", "manual_decisions", "message_state", "content_parts",
+                "message_addresses", "processing_settings"}
+    if not required <= _tables(database) or database.execute("SELECT version FROM schema_info").fetchall() != [(2,)]:
+        raise ValueError("unsupported or incomplete processing schema; use a fresh archive")
+
+
+def validate_processing(path: Path) -> None:
+    """Read the optional processing schema without creating or migrating it."""
+    database = sqlite3.connect(f"{path.as_uri()}?mode=ro", uri=True)
+    try:
+        require_processing_schema(database)
+    finally:
+        database.close()
 
 
 def validate_catalog(path: Path) -> None:
