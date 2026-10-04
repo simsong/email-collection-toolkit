@@ -68,7 +68,7 @@ def test_ci_runs_parallel_branch_jobs_without_building_a_dmg() -> None:
     triggers = configuration.get(WORKFLOW_ON, configuration.get(True))
     assert triggers == {"push": {"branches": ["**", "!main"]}}
     jobs = configuration[JOBS]
-    assert set(jobs) == {"static-rust", "python-browser"}
+    assert set(jobs) == {"static-rust", "python-browser", "rust-gui"}
     assert all(NEEDS not in job for job in jobs.values())
     static_runs = [step.get(RUN, "") for step in jobs["static-rust"][STEPS]]
     test_runs = [step.get(RUN, "") for step in jobs["python-browser"][STEPS]]
@@ -76,11 +76,25 @@ def test_ci_runs_parallel_branch_jobs_without_building_a_dmg() -> None:
     assert any("make check-tests" in run for run in test_runs)
     assert all("make check-tests" not in run for run in static_runs)
     assert all("make check-static" not in run for run in test_runs)
+    native = jobs["rust-gui"]
+    assert native["strategy"]["matrix"] == {"os": ["macos-latest"]}
+    assert native[RUNS_ON] == "${{ matrix.os }}"
+    native_runs = [step.get(RUN, "") for step in native[STEPS]]
+    assert "make rust-gui-build test-rust-gui" in native_runs
+    assert "make test-rust-gui-native" in native_runs
+    upload = next(step for step in native[STEPS] if step.get("uses", "").startswith("actions/upload-artifact@"))
+    assert upload["if"] == "always()"
+    assert upload["with"]["path"] == ".tmp/rust-gui-native"
+    assert upload["with"]["include-hidden-files"] is True
+    assert upload["with"]["if-no-files-found"] == "error"
     makefile = (workflow.parents[2] / "Makefile").read_text(encoding="utf-8")
     assert "check:\n\t$(MAKE) check-static\n\t$(MAKE) check-tests" in makefile
     for definition in workflow.parent.glob("*.yml"):
         configuration = safe_load(definition.read_text())
-        assert all(job.get(RUNS_ON) == "macos-15" or "uses" in job for job in configuration[JOBS].values()), definition
+        for name, job in configuration[JOBS].items():
+            if definition == workflow and name == "rust-gui":
+                continue  # The explicit macos-latest matrix is checked above.
+            assert job.get(RUNS_ON) == "macos-15" or "uses" in job, definition
 
 
 def test_release_workflow_validates_built_distributions() -> None:

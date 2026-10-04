@@ -18,6 +18,45 @@ env:
   MAILARCHIVER_NATIVE_SETUP_E2E: "0"
 
 jobs:
+  rust-gui:
+    name: Rust GUI (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 25
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7.0.1
+      - name: Set up Python for the archive CLI
+        uses: actions/setup-python@v7.0.0
+        with:
+          python-version: "3.12"
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v10.0.1
+      - name: Install CLI dependencies
+        run: uv sync --locked --all-groups
+      - name: Set up Rust
+        run: rustup toolchain install stable --profile minimal --component rustfmt,clippy
+      - name: Build and test the Rust GUI
+        env:
+          RUSTUP_TOOLCHAIN: stable
+        run: make rust-gui-build test-rust-gui
+      - name: Create archive with CLI and exercise native GUI
+        env:
+          RUSTUP_TOOLCHAIN: stable
+        run: make test-rust-gui-native
+      - name: Upload native GUI screenshot and synthetic archive
+        if: always()
+        uses: actions/upload-artifact@v7.0.1
+        with:
+          name: rust-gui-${{ matrix.os }}-${{ github.sha }}
+          path: .tmp/rust-gui-native
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 14
+
   static-rust:
     runs-on: macos-15
     timeout-minutes: 25

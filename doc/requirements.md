@@ -2341,3 +2341,12 @@ retain read-only archive fixity. Reader parity is an intermediate milestone;
 full Windows application parity includes imports, processing, attachments,
 output operations, and packaged execution. Track evidence and remaining gaps
 using [WINDOWS_RUST_HANDOFF.md](WINDOWS_RUST_HANDOFF.md).
+
+The Rust GUI CI matrix must initially contain only `macos-latest` and explicitly
+build/test the reader. Native acceptance must create a synthetic `.mailarchive`
+through the real ingest CLI, verify it, boot the actual Wry/WKWebView shell,
+submit a simple search, select the expected result, and verify its body before
+capturing a PNG of the native webview. Missing results, startup/callback timeouts,
+premature close, snapshot failures, or source/archive mutations must fail the
+test. Upload the synthetic archive and evidence even on failure. Keep automation
+behind an explicit build feature; a Chromium/RPC screenshot is not native proof.

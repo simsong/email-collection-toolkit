@@ -12,6 +12,10 @@ use std::{
     path::PathBuf,
 };
 
+#[cfg(all(target_os = "macos", feature = "native-smoke"))]
+#[path = "../native_smoke.rs"]
+mod native_smoke;
+
 fn main() -> Result<()> {
     let args: Vec<String> = std::env::args().skip(1).collect();
     match args.as_slice() {
@@ -75,7 +79,11 @@ fn main() -> Result<()> {
             }
             Ok(())
         }
-        [flag, path] if flag == "--archive" => native(PathBuf::from(path)),
+        [flag, path] if flag == "--archive" => native(PathBuf::from(path), None),
+        #[cfg(feature = "native-smoke")]
+        [flag, path, output] if flag == "--native-smoke" => {
+            native(PathBuf::from(path), Some(PathBuf::from(output)))
+        }
         _ => bail!(
             "Usage: mailsearch-webview --archive DIRECTORY (or --rpc DIRECTORY for headless tests)"
         ),
@@ -83,12 +91,12 @@ fn main() -> Result<()> {
 }
 
 #[cfg(not(target_os = "macos"))]
-fn native(_path: PathBuf) -> Result<()> {
+fn native(_path: PathBuf, _smoke_output: Option<PathBuf>) -> Result<()> {
     bail!("The initial native shell is enabled on macOS only; RPC and core tests are portable")
 }
 
 #[cfg(target_os = "macos")]
-fn native(path: PathBuf) -> Result<()> {
+fn native(path: PathBuf, smoke_output: Option<PathBuf>) -> Result<()> {
     use mailsearch_rust::bridge::{asset, Reply, SCRIPT};
     use std::{borrow::Cow, sync::mpsc, thread};
     use tao::{
@@ -100,6 +108,10 @@ fn native(path: PathBuf) -> Result<()> {
     enum NativeEvent {
         Reply(Reply),
         Quit,
+        #[cfg(feature = "native-smoke")]
+        Snapshot,
+        #[cfg(feature = "native-smoke")]
+        SmokeFinished(Result<()>),
     }
     let events = EventLoopBuilder::<NativeEvent>::with_user_event().build();
     let window = WindowBuilder::new()
@@ -130,7 +142,8 @@ fn native(path: PathBuf) -> Result<()> {
             }
         })?;
     let ipc_proxy = events.create_proxy();
-    let view = WebViewBuilder::new()
+    let smoke_enabled = smoke_output.is_some();
+    let builder = WebViewBuilder::new()
         .with_custom_protocol("ect".into(), |_, request| {
             let (status, mime, bytes) = match asset(request.uri().path()) {
                 Some((mime, bytes)) => (200, mime, bytes),
@@ -149,6 +162,22 @@ fn native(path: PathBuf) -> Result<()> {
                 return;
             }
             if let Ok(message) = serde_json::from_str::<Request>(request.body()) {
+                #[cfg(feature = "native-smoke")]
+                if smoke_enabled {
+                    match message.method.as_str() {
+                        "native_smoke_ready" => {
+                            let _ = ipc_proxy.send_event(NativeEvent::Snapshot);
+                            return;
+                        }
+                        "native_smoke_failed" => {
+                            let _ = ipc_proxy.send_event(NativeEvent::SmokeFinished(Err(
+                                anyhow::anyhow!("Native UI assertion: {:?}", message.args),
+                            )));
+                            return;
+                        }
+                        _ => (),
+                    }
+                }
                 if message.method == "quit" {
                     let _ = ipc_proxy.send_event(NativeEvent::Quit);
                     return;
@@ -163,8 +192,28 @@ fn native(path: PathBuf) -> Result<()> {
                 }
             }
         })
-        .with_url("ect://localhost/index.html")
-        .build(&window)?;
+        .with_url("ect://localhost/index.html");
+    #[cfg(feature = "native-smoke")]
+    let builder = if smoke_enabled {
+        builder.with_initialization_script(include_str!("../../native-smoke.js"))
+    } else {
+        builder
+    };
+    let view = builder.build(&window)?;
+    #[cfg(feature = "native-smoke")]
+    let snapshot_proxy = events.create_proxy();
+    #[cfg(feature = "native-smoke")]
+    let mut smoke_output = smoke_output;
+    #[cfg(feature = "native-smoke")]
+    if smoke_enabled {
+        let timeout_proxy = events.create_proxy();
+        thread::spawn(move || {
+            thread::sleep(std::time::Duration::from_secs(60));
+            let _ = timeout_proxy.send_event(NativeEvent::SmokeFinished(Err(anyhow::anyhow!(
+                "Native smoke timed out"
+            ))));
+        });
+    }
     events.run(move |event, _, flow| {
         *flow = ControlFlow::Wait;
         match event {
@@ -172,7 +221,25 @@ fn native(path: PathBuf) -> Result<()> {
                 event: WindowEvent::CloseRequested,
                 ..
             }
-            | Event::UserEvent(NativeEvent::Quit) => *flow = ControlFlow::Exit,
+            | Event::UserEvent(NativeEvent::Quit) => {
+                *flow = ControlFlow::ExitWithCode(if smoke_enabled { 1 } else { 0 })
+            }
+            #[cfg(feature = "native-smoke")]
+            Event::UserEvent(NativeEvent::Snapshot) => {
+                if let Some(output) = smoke_output.take() {
+                    let proxy = snapshot_proxy.clone();
+                    native_smoke::snapshot(&view, output, move |result| {
+                        let _ = proxy.send_event(NativeEvent::SmokeFinished(result));
+                    });
+                }
+            }
+            #[cfg(feature = "native-smoke")]
+            Event::UserEvent(NativeEvent::SmokeFinished(result)) => {
+                if let Err(error) = &result {
+                    eprintln!("{error:#}");
+                }
+                *flow = ControlFlow::ExitWithCode(if result.is_ok() { 0 } else { 1 });
+            }
             Event::UserEvent(NativeEvent::Reply(reply)) => {
                 if let Ok(value) = serde_json::to_string(&reply) {
                     if let Err(error) =

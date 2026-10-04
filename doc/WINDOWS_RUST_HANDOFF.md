@@ -381,8 +381,12 @@ warning during synthetic screenshot ingest, not a scanner failure.
 
 This evidence does not establish native Windows behavior, a Windows package,
 Linux support, or a complete Rust rewrite. The publication PR/CI should be
-checked at its exact current SHA. At preparation, CI used only `macos-15`
-runners; the two focused Rust/Python interoperability targets were opt-in and
+checked at its exact current SHA. A follow-up adds a `macos-latest` Rust GUI
+matrix job and `make test-rust-gui-native`: it creates a synthetic archive with
+the CLI, searches/displays through actual WKWebView IPC, captures a native PNG,
+and verifies archive fixity. See README for its uploaded evidence. The original
+static/Python jobs remain on `macos-15`; the two focused Rust/Python
+interoperability targets were opt-in and
 not explicitly called by the aggregate CI target. A default pytest run skips
 them when their binary environment variables are absent. Add appropriate
 Windows coverage once prerequisites and native execution have been established;

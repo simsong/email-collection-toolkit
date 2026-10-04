@@ -731,3 +731,13 @@ test-rust-webview: rust-gui-build
 rust-webview-probe: rust-gui-build
 	@test -n "$(ARCHIVE)" || { echo 'usage: make rust-webview-probe ARCHIVE=/path QUERY=words'; exit 2; }
 	$(CARGO_RUN) run --locked -p mailsearch-rust --bin mailsearch-webview -- --probe "$(ARCHIVE)" "$(QUERY)"
+
+# RUST_GUI_ARTIFACT_DIR retains the synthetic .mailarchive, native PNG, hashes and logs.
+# Requires a logged-in macOS GUI session; uses explicitly unscanned synthetic EML only.
+RUST_GUI_ARTIFACT_DIR ?= $(CURDIR)/.tmp/rust-gui-native
+.PHONY: test-rust-gui-native
+test-rust-gui-native:
+	@test "$$(uname -s)" = Darwin || { echo 'native Rust GUI smoke currently requires macOS'; exit 2; }
+	$(CARGO_RUN) fmt -p mailsearch-rust -- --check
+	$(CARGO_RUN) clippy --locked -p mailsearch-rust --features native-smoke --all-targets -- -D warnings
+	RUST_GUI_ARTIFACT_DIR="$(RUST_GUI_ARTIFACT_DIR)" $(CARGO_RUN) test --locked -p mailsearch-rust --features native-smoke --test native_smoke -- --ignored --nocapture

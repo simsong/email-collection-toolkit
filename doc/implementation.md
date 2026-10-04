@@ -41,7 +41,8 @@ native loader's underlying error (PyInstaller's generic wrapper hides it).
 
 ## CI and release validation
 
-All runner jobs use macos-15. Continuous integration runs `make check-static`
+Existing static/Python runner jobs use macos-15; the Rust GUI matrix uses only
+macos-latest initially. Continuous integration runs `make check-static`
 and `make check-tests` in parallel jobs on each non-`main` repository branch
 push; local `make check` retains their order. CI has no PR/main duplicates or
 a DMG smoke job. Forked PRs are not covered by that push trigger. Release packaging runs
@@ -2995,3 +2996,17 @@ unfinished search, and delayed replies after replacement or clearing.
 plan and publication evidence. The native shell remains macOS-gated. Windows
 must adapt the custom-protocol navigation/IPC origin checks to WebView2's URL
 handling before claiming native parity; RPC/Chromium tests do not establish it.
+
+The independent `rust-gui` matrix job explicitly builds/tests the reader and
+runs `make test-rust-gui-native`. Its Rust integration test creates two synthetic
+EML messages, invokes the real CLI with explicit `--no-scan`, runs the portable
+archive verifier, then launches the feature-enabled native executable. The
+injected test driver submits the actual form, waits for a complete one-result
+search, clicks the expected row, and verifies the displayed subject/body through
+the production IPC/workers. WebKit's snapshot API returns a PNG of the actual
+WKWebView without capturing the user's desktop or needing Screen Recording
+permission. Snapshot completion controls process success; a deadline and early
+close are failures. The test compares source/archive inventories and SHA-256
+hashes and retains logs, the synthetic `.mailarchive`, PNG and success evidence
+under `RUST_GUI_ARTIFACT_DIR`. CI uploads these even on failure. Automation and
+snapshot dependencies are isolated behind the `native-smoke` Cargo feature.

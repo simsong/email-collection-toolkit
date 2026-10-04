@@ -88,5 +88,10 @@ selected message through the same worker, so use synthetic mail when recording
 logs. These checks do not establish native window appearance or platform parity.
 `make test-rust-webview` drives the original page against the actual Rust
 backend in headless Chromium and records `.tmp/rust-gui-existing-interface.png`.
-The native webview's IPC and window behavior still need a manual trial.
+`make test-rust-gui-native` builds a synthetic `.mailarchive` through the CLI
+and checks startup, a simple search, selection, decoded body, and a native
+WKWebView screenshot in a visible window. Its Rust-owned test retains logs,
+hashes and the archive under `RUST_GUI_ARTIFACT_DIR` (default
+`.tmp/rust-gui-native`). CI runs it in the macos-latest matrix job and uploads
+the evidence; broader native interaction and platform parity still need trials.
 `make rust-gui` and `make rust-gui-egui` launch visible apps; tests do not.

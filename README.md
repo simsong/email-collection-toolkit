@@ -81,6 +81,17 @@ exposing message text. Results are paged on scroll; message reads remain usable
 while the separate search worker runs, and replacement queries cancel old work.
 See [scope and limitations](doc/RUST_GUI_EXPERIMENT.md).
 
+`make test-rust-gui-native` builds with the opt-in `native-smoke` feature and
+opens the actual macOS Wry/WKWebView window. A Rust test creates synthetic EML,
+ingests it with the CLI into `Sample.mailarchive`, runs the portable verifier,
+searches and selects a message through the native UI, and captures a WebKit PNG.
+It checks source/archive fixity and fails on timeout or missing evidence.
+`RUST_GUI_ARTIFACT_DIR` chooses the evidence directory (default
+`.tmp/rust-gui-native`); each run retains its synthetic archive, logs, hashes and
+`rust-gui.png`. CI runs this in the **Rust GUI (macos-latest)** matrix job and
+uploads a `rust-gui-macos-latest-<commit>` artifact even on failure. It requires
+a macOS GUI session; ordinary reader builds contain no smoke driver.
+
 ## Windows development
 
 Continue the working Wry/Tao Rust reader on Windows using the detailed

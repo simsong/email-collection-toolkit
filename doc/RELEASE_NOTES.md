@@ -4,6 +4,10 @@
 
 ## Unreleased
 
+- Add a macos-latest Rust GUI CI matrix job that builds a synthetic archive
+  through the CLI, boots the native webview, searches/displays a message, checks
+  archive fixity, and uploads a native screenshot with reproducible evidence.
+
 - Publish the Rust prototype with a detailed Windows continuation handoff,
   including WebView2 integration boundaries, preservation requirements, test
   commands, and remaining work toward full macOS application parity.
