@@ -2289,3 +2289,55 @@ Organization-domain evidence uses the bundled ICANN Public Suffix List offline,
 including longest-match, wildcard and exception rules, with IDNA normalization.
 Private suffix entries remain excluded, matching the prior tldextract policy.
 No Requests-based fetching or public-suffix network update occurs at runtime.
+
+### Experimental Rust archive reader
+
+A separate `mailsearch-rust` executable must open existing version-1 catalog and
+search databases read-only, search indexed message words, select a result, and
+display headers and decoded text only after verifying canonical message SHA-256.
+It must not require Python, import mail, repair journals, or alter archives.
+File/database work belongs to background workers; UI callbacks must not acquire
+archive locks or wait for worker completion on close. Validation must include real
+headless widget interactions and a fixture produced by the Python archive writer.
+
+This experiment returns at most the newest 100 matching messages, treats words
+as literal FTS terms joined by AND, and caps search execution at three seconds.
+It displays at most 256 KiB per text field from records no larger than 16 MiB.
+HTML is converted to text without fetching resources or executing scripts.
+Unsupported/corrupt records and recovery-required databases produce visible
+errors. WAL-mode databases must be refused without creating sidecar files.
+Attachment viewing, advanced search selectors, pagination, import,
+packaging, and full legacy mboxo ambiguity recovery remain outside its scope.
+
+The Rust shell must reuse the shipped `gui/index.html`, `app.js`, and `style.css`
+so layout, result selection, split panes, highlighting, previews, and
+find-in-message retain their existing behavior. Rust must handle words, quoted
+phrases, subject/address selectors, ordering and bounded result batches behind
+that interface. Preview windows have a 15-second deadline; the comprehensive
+query has a 120-second safety limit and must report incomplete results on
+failure. Deadlines must be cleared after each request.
+The native shell initially targets macOS. Original-mailbox filters, date/name
+resolution selectors, suggestions, attachment operations, imports, exports and
+extra message windows remain unported; their controls must be disabled or an
+explicit unsupported-operation error shown. Full application parity is not
+claimed. Headless acceptance uses the actual frontend and Rust dispatcher.
+
+Interactive Rust search must publish two bounded ordered catalog windows before
+running one comprehensive query over the remainder. Each window must be painted
+before continuing, even when empty. Results must remain sorted, without duplicates
+or omissions at tied sort values. A separate search connection must keep message
+selection, previews, and text display usable during the comprehensive query.
+Changing a query or sort, clearing the query, or closing must cancel obsolete
+work; stale results and failures must never alter the replacement search.
+The backend retains complete ordered message IDs and sends bounded display pages
+on scroll. Completion reports the total count separately from loaded rows and
+preserves selection and scroll position. No partial search may claim completeness.
+Headless tests must exercise both preview stages, full completion, sparse matches,
+all sort orders, cancellation, paging, message reads, and unchanged archive bytes.
+
+Windows continuation must preserve the working Rust reader behavior and shared
+frontend, validate real WebView2 navigation/IPC and native interactions, and
+retain read-only archive fixity. Reader parity is an intermediate milestone;
+full Windows application parity includes imports, processing, attachments,
+output operations, and packaged execution. Track evidence and remaining gaps
+using [WINDOWS_RUST_HANDOFF.md](WINDOWS_RUST_HANDOFF.md).

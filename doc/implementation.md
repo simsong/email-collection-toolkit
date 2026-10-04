@@ -2913,3 +2913,85 @@ avoiding Cocoa termination before Python workers finish. Final import refreshes
 are suppressed during shutdown. SIGINT requests the same stop without a dialog.
 Headless regressions cancel a real cooperative processor and verify retained
 pending work; deferred-but-unstarted jobs never become active merely on quit.
+
+### Rust reader experiment
+
+`rust/mailsearch-gui` is a separate Cargo workspace member using eframe/egui,
+rusqlite with bundled SQLite, mailparse, and html2text. The native window owns
+only presentation state. One worker owns both read-only databases and consumes
+Open/Search/Select requests over bounded channels. Controls serialize requests;
+responses update UI state on the UI thread. Closing drops channels without
+joining a worker, whose operations cannot write archive data.
+
+The catalog joins a read-only attached FTS database; literal tokens are quoted
+and bound as SQL parameters. A SQLite progress handler limits search duration.
+Selection reads one bounded location in `data/mbox`, tries reversible mboxrd and
+simple legacy interpretations plus terminal-newline/envelope variants, and
+accepts only an original SHA-256 match. MIME display prefers plain alternatives,
+ignores attachment parts, and converts HTML locally to text. Databases and MBOX
+paths resolving outside the archive are rejected. WAL-mode database headers are rejected before SQLite opens them, avoiding
+shared-memory sidecar creation. The prototype does not repair
+hot journals or provide a cross-database snapshot during simultaneous importing;
+use a quiescent archive for the experiment.
+
+`make test-rust-gui` runs Clippy, formatting, integrity/MIME/worker tests and a
+headless egui Search/select/display test. `make test-rust-gui-interop` builds the
+binary and verifies search/display against the Python writer's real fixture,
+comparing archive bytes before and after. Neither target opens native windows.
+`make rust-gui-demo` creates a new synthetic reader fixture, not a complete
+Mailbag export. Run instructions and deliberate limits are in
+[RUST_GUI_EXPERIMENT.md](RUST_GUI_EXPERIMENT.md). This is not part of the packaged
+Python application, and Windows/Linux runtime parity is unverified.
+
+The follow-on `mailsearch-webview` binary embeds the existing frontend assets
+unchanged and serves only an explicit asset allowlist through `ect://localhost`.
+On macOS, Wry hosts the system webview and Tao owns the window/event loop.
+`bridge.js` adapts the existing `window.pywebview.api` calls to request-ID-based
+Rust IPC; that compatibility name does not start Python. A bounded channel
+feeds a foreground `Bridge` worker for message reads and short search-control
+requests. A separate worker owns the search connection. Replies are delivered as
+native user events, and
+closing exits without joining archive reads or waiting for JavaScript callbacks.
+Only the local main document may send IPC or navigate the window.
+
+The Rust dispatcher supports FTS words/phrases, literal subject/address filters,
+ordering, indexed previews, verified message text/headers and archive locations.
+HTML still uses the text converter; attachments and other unported operations
+are explicitly unavailable. The original egui binary remains available through
+`make rust-gui-egui`, with its earlier 100-result/three-second limits.
+
+`make test-rust-webview` connects headless Chromium to the real Rust `--rpc`
+dispatcher using the same JS adapter and a Python-created synthetic archive. It
+checks filters, selection, sorting, preview, pane resizing, find-in-message and
+unchanged archive hashes, and writes `.tmp/rust-gui-existing-interface.png` for
+visual inspection. Native IPC/window behavior still requires manual validation;
+headless Chromium is not WKWebView. The Python search path remains unchanged; shared frontend screenshot assets use
+only synthetic mail.
+
+The Rust frontend opts into `search_start/status/advance/page/cancel`. One
+replaceable pending job and an atomic generation counter bound obsolete work.
+A condition variable wakes the search worker; its SQLite progress handler checks
+cancellation every 1,000 VM instructions. Search and message reads use separate
+read-only connections. Closing signals cancellation without joining the worker.
+
+The worker scans two ordered 512-entry catalog windows, probing indexed FTS row
+IDs. A sort-value/message-ID cursor advances across empty windows and tied values.
+Each window waits for the frontend's acknowledgement after painting. One full
+FTS query then returns the remaining ordered IDs, using the metadata FTS-row-ID
+mapping and the cursor boundary. The backend retains IDs, not all display records;
+`search_page` hydrates at most 512 rows on the foreground connection. The browser
+loads up to 1,024 initial rows and requests further pages near the scroll bottom.
+Completion preserves existing rows/selection and distinguishes total matches from
+loaded rows. Partial failures remain explicitly incomplete. Preview queries have
+15-second limits; the full query has a 120-second safety limit.
+
+Python keeps its existing API path. `make rust-webview-probe ARCHIVE=... QUERY=...`
+measures both windows and complete search, printing only counts and timings.
+Headless regressions verify all six sort/direction combinations, sparse searches,
+SQL interruption, obsolete generations, page boundaries, selection during an
+unfinished search, and delayed replies after replacement or clearing.
+
+[WINDOWS_RUST_HANDOFF.md](WINDOWS_RUST_HANDOFF.md) records the Windows continuation
+plan and publication evidence. The native shell remains macOS-gated. Windows
+must adapt the custom-protocol navigation/IPC origin checks to WebView2's URL
+handling before claiming native parity; RPC/Chromium tests do not establish it.

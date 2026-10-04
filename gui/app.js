@@ -29,6 +29,7 @@ const state = {
   selected: null,
   selectionRequest: null,
   searchRequest: 0,
+  rustSearch: null,
   partRequest: 0,
   remoteContentAuthorizedMessage: null,
   remoteContentAuthorizedPart: null,
@@ -902,6 +903,8 @@ async function runSearch() {
   const sortDirection = state.sortDirection;
   const searchAttachments = elements["search-attachments"].checked;
   const request = ++state.searchRequest;
+  state.rustSearch = null;
+  if (window.pywebview.api.search_cancel) void window.pywebview.api.search_cancel().catch(() => {});
   clearCurrentMessageFind();
   clearLinkDestination();
   state.partRequest += 1;
@@ -935,6 +938,10 @@ async function runCompleteSearch(context) {
   const {query, sortBy, sortDirection, searchAttachments, mailboxSelections, request} = context;
   Object.assign(state, {query, sortBy, sortDirection, searchAttachments, offset: 0});
   clearResultViewport();
+  if (window.pywebview.api.search_start) {
+    await runIncrementalSearch(context);
+    return;
+  }
   const first = await call(() => window.pywebview.api.search(
     query, 0, sortBy, sortDirection, searchAttachments, mailboxSelections, RESULT_INITIAL_LIMIT,
   ));
@@ -962,6 +969,72 @@ async function runCompleteSearch(context) {
   appendResults(remainder.results, request);
   state.offset += remainder.results.length;
   updateResultStatus();
+}
+
+async function runIncrementalSearch(context) {
+  const {query, sortBy, sortDirection, request} = context;
+  try {
+    const started = await window.pywebview.api.search_start(query, sortBy, sortDirection);
+    if (request !== state.searchRequest) return;
+    state.highlightTerms = started.highlight_terms;
+    const search = {request, generation: started.generation, count: 0, complete: false, loading: false, error: null};
+    state.rustSearch = search;
+    elements["result-status"].classList.add("background-search");
+    let acknowledged = 0;
+    while (request === state.searchRequest) {
+      const status = await window.pywebview.api.search_status(search.generation);
+      if (request !== state.searchRequest || status.stale) return;
+      Object.assign(search, {count: status.count, complete: status.complete, error: status.error || search.error});
+      // Paint both preview windows before releasing the comprehensive query.
+      // Once complete, fetch additional display pages only as the user scrolls.
+      if (state.offset < Math.min(search.count, 1024)) await loadRustSearchPage(search, Math.min(512, 1024 - state.offset));
+      if (request !== state.searchRequest) return;
+      updateRustSearchStatus(search);
+      if (search.error || status.complete) { if (status.complete && !search.error) showResultTable(); return; }
+      if (status.window > acknowledged && state.offset >= search.count) {
+        await new Promise(resolve => window.requestAnimationFrame(() => window.setTimeout(resolve, 0)));
+        if (request !== state.searchRequest) return;
+        acknowledged = status.window;
+        await window.pywebview.api.search_advance(search.generation, acknowledged);
+      }
+      await new Promise(resolve => window.setTimeout(resolve, 75));
+    }
+  } catch (error) {
+    if (request !== state.searchRequest) return;
+    elements["result-status"].classList.remove("background-search");
+    elements["result-status"].textContent = `${state.offset.toLocaleString()} messages shown; search incomplete: ${error.message}`;
+  }
+}
+
+async function loadRustSearchPage(search, limit = 512) {
+  if (search !== state.rustSearch || search.loading || state.offset >= search.count) return;
+  search.loading = true;
+  try {
+    const page = await window.pywebview.api.search_page(search.generation, state.offset, limit);
+    if (search !== state.rustSearch || page.stale) return;
+    if (!page.results.length) return;
+    state.results.push(...page.results);
+    showResultTable();
+    await state.resultTable.addData(page.results, false);
+    if (search !== state.rustSearch) return;
+    state.offset = state.results.length;
+    updateRustSearchStatus(search);
+  } catch (error) {
+    if (search === state.rustSearch) {
+      search.error = `Unable to load results: ${error.message}`;
+      updateRustSearchStatus(search);
+    }
+  } finally { search.loading = false; }
+}
+
+function updateRustSearchStatus(search) {
+  if (search !== state.rustSearch) return;
+  const shown = state.offset.toLocaleString();
+  elements["result-status"].classList.toggle("background-search", !search.complete && !search.error);
+  elements["result-status"].textContent = search.error
+    ? `${shown} messages shown; search incomplete: ${search.error}`
+    : !search.complete ? `Searching in background… ${shown} messages shown`
+    : `${search.count.toLocaleString()} message${search.count === 1 ? "" : "s"}${search.count > state.offset ? ` · ${shown} shown; scroll for more` : ""}`;
 }
 
 function renderSearchHelp() {
@@ -1023,6 +1096,13 @@ function initializeResultTable() {
       resizable: false,
       widthGrow: 1,
     }],
+  });
+  state.resultTable.on("scrollVertical", () => {
+    const search = state.rustSearch;
+    const holder = elements["result-list"].querySelector(".tabulator-tableholder");
+    if (search && holder && holder.scrollTop + holder.clientHeight >= holder.scrollHeight - 600) {
+      void loadRustSearchPage(search);
+    }
   });
   state.resultTable.on("rowClick", selectResultRow);
   state.resultTable.on("rowDblClick", openResultWindow);

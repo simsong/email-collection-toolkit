@@ -1,0 +1,32 @@
+# Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved.
+# Experimental read-only desktop archive reader.
+# The library owns SQLite queries, verified MBOX reads, and display decoding.
+# Binaries connect that library to the existing web UI or an egui comparison.
+# Both use the existing archive format without a Python runtime.
+# Synthetic fixtures and headless tests share the production read path.
+[package]
+name = "mailsearch-rust"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.95"
+publish = false
+license = "GPL-2.0-only"
+
+[dependencies]
+anyhow = "1.0"
+eframe = { version = "0.36.2", default-features = false, features = ["default_fonts", "glow", "x11", "wayland"] }
+html2text = "0.17.1"
+mailparse = "0.17.0"
+rusqlite = { version = "0.37", features = ["bundled", "hooks"] }
+sha2 = "0.10.9"
+url = "2.5"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[dev-dependencies]
+tempfile = "3.23"
+egui_kittest = { version = "0.36.2", default-features = false }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+wry = "0.57"
+tao = "0.37"

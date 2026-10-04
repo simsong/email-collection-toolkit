@@ -1,5 +1,5 @@
 # Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved.
 
 [workspace]
-members = ["rust/mct-importer", "pst"]
+members = ["rust/mct-importer", "pst", "rust/mailsearch-gui"]
 resolver = "2"

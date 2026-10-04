@@ -686,3 +686,48 @@ pff-converter-bundle: pff-converter
 
 test-pff-converter: pff-converter
 	uv run --locked --project converters/pff pytest -q converters/pff/tests
+
+# Rust GUI experiment: ARCHIVE is an existing archive directory; QUERY is literal search text.
+# RUST_GUI_DEMO selects a new synthetic fixture directory; no real mail is imported.
+RUST_GUI_DEMO ?= $(CURDIR)/.tmp/rust-gui-demo
+.PHONY: rust-gui-build rust-gui rust-gui-demo rust-gui-smoke test-rust-gui
+rust-gui-build:
+	$(CARGO_RUN) build --locked -p mailsearch-rust
+
+rust-gui: rust-gui-build
+	@test -n "$(ARCHIVE)" || { echo 'usage: make rust-gui ARCHIVE=/path/to/archive'; exit 2; }
+	$(CARGO_RUN) run --locked -p mailsearch-rust --bin mailsearch-webview -- --archive "$(ARCHIVE)"
+
+rust-gui-demo: rust-gui-build
+	$(CARGO_RUN) run --locked -p mailsearch-rust --bin mailsearch-rust -- --create-demo "$(RUST_GUI_DEMO)"
+
+rust-gui-smoke: rust-gui-build
+	@test -n "$(ARCHIVE)" || { echo 'usage: make rust-gui-smoke ARCHIVE=/path/to/archive QUERY=words'; exit 2; }
+	$(CARGO_RUN) run --locked -p mailsearch-rust --bin mailsearch-rust -- --smoke "$(ARCHIVE)" "$(QUERY)"
+
+test-rust-gui:
+	$(CARGO_RUN) fmt -p mailsearch-rust -- --check
+	$(CARGO_RUN) clippy --locked -p mailsearch-rust --all-targets -- -D warnings
+	$(CARGO_RUN) test --locked -p mailsearch-rust
+
+.PHONY: test-rust-gui-interop
+
+# RUST_GUI_BINARY tells the Python interoperability test which freshly built executable to use.
+test-rust-gui-interop: rust-gui-build
+	RUST_GUI_BINARY="$(RUST_TARGET_DIR)/debug/mailsearch-rust$(RUST_EXE_SUFFIX)" uv run --locked pytest -q tests/test_rust_gui.py
+
+# The original native-widget prototype remains available for comparison.
+.PHONY: rust-gui-egui
+rust-gui-egui: rust-gui-build
+	$(CARGO_RUN) run --locked -p mailsearch-rust --bin mailsearch-rust -- $(if $(ARCHIVE),--archive "$(ARCHIVE)")
+
+# RUST_WEBVIEW_BINARY selects the built Rust dispatcher for real headless browser tests.
+.PHONY: test-rust-webview
+test-rust-webview: rust-gui-build
+	RUST_WEBVIEW_BINARY="$(RUST_TARGET_DIR)/debug/mailsearch-webview$(RUST_EXE_SUFFIX)" uv run --locked pytest -q tests/test_rust_webview.py --browser chromium
+
+# Read-only timing probe: prints counts/timings only, never message contents.
+.PHONY: rust-webview-probe
+rust-webview-probe: rust-gui-build
+	@test -n "$(ARCHIVE)" || { echo 'usage: make rust-webview-probe ARCHIVE=/path QUERY=words'; exit 2; }
+	$(CARGO_RUN) run --locked -p mailsearch-rust --bin mailsearch-webview -- --probe "$(ARCHIVE)" "$(QUERY)"

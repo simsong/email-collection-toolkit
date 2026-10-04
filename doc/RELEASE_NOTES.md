@@ -4,6 +4,23 @@
 
 ## Unreleased
 
+- Publish the Rust prototype with a detailed Windows continuation handoff,
+  including WebView2 integration boundaries, preservation requirements, test
+  commands, and remaining work toward full macOS application parity.
+
+- Show two quick Rust search windows before a comprehensive background query.
+  Cancel obsolete SQL on replacement, keep message reads independent, and retain
+  the full ordered result IDs in Rust with display pages fetched on scrolling.
+  Completion preserves selection and reports total matches separately from
+  loaded rows; partial failures remain explicit.
+- Add an experimental Rust-only, read-only archive reader with indexed word
+  search, message selection, SHA-256 verification, and plain-text MIME display.
+  Makefile build/demo targets and headless interaction/interoperability tests
+  support local trials; the existing packaged application is unchanged.
+- Host the existing search interface in a Rust-owned macOS Wry/Tao shell,
+  preserving layout, sorting, previews, split panes and find-in-message. Rust
+  handles words, phrases and address/subject filters; unported operations are
+  clearly unavailable. Headless browser tests exercise the actual Rust backend.
 - Prepare `v1.0.0a14` and make the homepage's primary Download button open
   the published GitHub releases listing.
 

@@ -54,16 +54,42 @@ the copied feed output. `RUNNER_TEMP` is the hosted runner's temporary area.
 No variable should contain secret material except the protected signing and
 notarization variables named above.
 
+## Rust reader experiment
+
+`work-rust-gui` includes a separate, read-only Rust desktop reader. Its macOS
+shell hosts the existing HTML/CSS/JavaScript search interface using Wry/Tao,
+with Rust owning the archive operations. It opens an
+existing archive, searches indexed words, and displays a selected message after
+SHA-256 verification. It requires Rust 1.95+; the built app needs no Python.
+Run `make rust-gui ARCHIVE="/path/to/archive"`, or create the synthetic fixture
+with `make rust-gui-demo` and then run
+`make rust-gui ARCHIVE=".tmp/rust-gui-demo"`. `make rust-gui` opens the reused interface; `make rust-gui-egui` opens the
+earlier widget prototype for comparison.
+
+`make test-rust-gui` runs headless Rust and widget tests;
+`make test-rust-gui-interop` checks a Python-created archive.
+`make test-rust-webview` tests the reused page against the real Rust dispatcher
+in headless Chromium. `RUST_WEBVIEW_BINARY` selects that dispatcher for the test
+and is set automatically by its Makefile target. `ARCHIVE` is the
+archive path and `QUERY` supplies words to `make rust-gui-smoke`.
+`RUST_GUI_DEMO` overrides the new synthetic fixture destination; creation refuses
+an existing directory. `RUST_GUI_BINARY` selects the compiled executable for the
+Python interoperability test and is set automatically by its Makefile target.
+`make rust-webview-probe ARCHIVE="/path/to/archive" QUERY=words` prints
+counts and timings for the two preview windows and comprehensive search without
+exposing message text. Results are paged on scroll; message reads remain usable
+while the separate search worker runs, and replacement queries cancel old work.
+See [scope and limitations](doc/RUST_GUI_EXPERIMENT.md).
+
 ## Windows development
 
-The compiled desktop UI candidates are **Dioxus Desktop and Tauri**, using Rust
-and the system webview, while ingest, search, and archive preservation remain in Python.
-Windows with full ingest is the next platform priority. This migration is
-planned; the current application remains pywebview. See
-[the desktop architecture decision](doc/DIOXUS.md).
-
-Plan comparable trial implementations in Dioxus and Tauri before choosing a
-framework. Either approach retains the Python archive engine.
+Continue the working Wry/Tao Rust reader on Windows using the detailed
+[Windows Rust handoff](doc/WINDOWS_RUST_HANDOFF.md). Its native shell is currently
+macOS-only; Windows WebView2 integration and native acceptance are the next
+milestone. Full Windows application parity also requires imports, processing,
+attachments, exports, and packaging. The existing packaged application still
+uses Python/pywebview. The earlier [Dioxus/Tauri plan](doc/DIOXUS.md) is historical
+context, not a prerequisite to porting this prototype.
 
 See [Windows setup](doc/WINDOWS.md) for clean-install VM directions and the
 remaining work required for full Windows ingest. This is a development setup

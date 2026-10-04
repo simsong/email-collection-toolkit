@@ -2,6 +2,14 @@
 
 # Windows development setup
 
+**Current Rust prototype:** start with
+[WINDOWS_RUST_HANDOFF.md](WINDOWS_RUST_HANDOFF.md). The working macOS prototype
+uses Wry/Tao and the existing web interface with a Rust reader. The older
+Dioxus/Tauri trial and Python-backend directions below remain historical setup
+context; do not install those framework CLIs to port the Wry prototype. The
+scanner now uses embedded libclamav, so the daemon-era scanner description
+below is also historical. Native Windows acceptance remains unverified.
+
 This guide prepares a clean Windows 11 system to develop and test Email
 Collection Toolkit's planned **compiled Rust desktop experience with a Python backend**,
 including the planned full ingest workflow. See [DIOXUS.md](DIOXUS.md). Use Windows
