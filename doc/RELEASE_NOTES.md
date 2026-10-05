@@ -25,6 +25,24 @@
   preserving layout, sorting, previews, split panes and find-in-message. Rust
   handles words, phrases and address/subject filters; unported operations are
   clearly unavailable. Headless browser tests exercise the actual Rust backend.
+- Fix Quit hanging on pywebview callback threads (#150). Idle Quit exits
+  immediately. Active native/local and API imports stop after their current
+  message, with one five-second deadline before forced exit. Interrupted writes
+  use the existing transaction and MBOX-journal recovery on the next ingest;
+  manifests may need regeneration. Sparkle retains its update handoff policy.
+  Replayed imports also finish their current message. Quit bounds owner-rule
+  saves and private-export cleanup, and scanner helpers exit with their owner.
+  GUI Open recovers hot SQLite journals under the writer lease before validation.
+  Recovery includes the saved processing queue. The deadline watchdog starts
+  before application-lock waits; import startup and definition refreshes share
+  its budget, and the definition updater is terminated when its GUI owner exits.
+  Archive creation and explicit message/attachment saves also receive that budget,
+  including saves from standalone windows. Quit's preflight probes cannot block
+  on controller or document locks before the watchdog starts.
+  Setup Cancel starts Quit before refreshing menus; filter-set changes share the
+  write deadline. Processing initialization publishes a complete schema atomically,
+  validation rejects partial schemas, and replay avoids per-message archive reports.
+
 - Prepare `v1.0.0a14` and make the homepage's primary Download button open
   the published GitHub releases listing.
 

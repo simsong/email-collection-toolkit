@@ -4,8 +4,12 @@ from __future__ import annotations
 
 import base64
 import hashlib
+import os
+import signal
+import subprocess
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+from time import monotonic, sleep
 
 import pytest
 
@@ -13,6 +17,27 @@ from mailarchiver.clamav_update import EICAR
 from mailarchiver.libclamav import load_library
 from mailarchiver.processing.contracts import ScanFailure
 from mailarchiver.scanner import ClamScanner, ClamScannerStartupError, scan_message
+from tests.test_quit import run_quit_probe
+
+
+def test_scanner_exits_with_owner_during_blocked_native_scan(tmp_path: Path) -> None:
+    """Bounded GUI Quit must not orphan the native helper or its blocked scan threads."""
+    try:
+        assert run_quit_probe(tmp_path, "scanner") < 2
+        pid = int((tmp_path / "scanner-pid").read_text())
+        deadline = monotonic() + 5
+        while monotonic() < deadline:
+            state = subprocess.run(["ps", "-o", "stat=", "-p", str(pid)], capture_output=True, text=True, check=False).stdout.strip()
+            if not state or state.startswith("Z"):
+                return
+            sleep(0.05)
+        pytest.fail("native scanner survived its owner's immediate process exit")
+    finally:
+        if (tmp_path / "scanner-pid").exists():
+            try:
+                os.kill(int((tmp_path / "scanner-pid").read_text()), signal.SIGKILL)
+            except ProcessLookupError:
+                pass
 
 
 @pytest.fixture
