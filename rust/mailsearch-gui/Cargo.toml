@@ -26,6 +26,12 @@ url = "2.5"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tempfile = "3.23"
+chrono = { version = "0.4", default-features = false, features = ["std"] }
+base64 = "0.22"
+ammonia = "4"
+encoding_rs = "0.8"
+rfd = "0.15"
+arboard = "3.6"
 
 [build-dependencies]
 toml = "1.1"
@@ -46,7 +52,12 @@ objc2-app-kit = { version = "0.3", default-features = false, features = ["NSBitm
 objc2-foundation = { version = "0.3", default-features = false, features = ["NSData", "NSDictionary", "NSError"], optional = true }
 objc2-web-kit = { version = "0.3", default-features = false, features = ["WKSnapshotConfiguration", "WKWebView", "block2"], optional = true }
 
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
 [target.'cfg(target_os = "windows")'.dependencies]
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_System_JobObjects", "Win32_System_Threading", "Win32_Security"] }
+open = "5"
 libloading = "0.8"
 webview2-com = { version = "0.39", optional = true }
 windows = { version = "0.62", features = ["Win32_UI_Shell", "Win32_System_Com"], optional = true }

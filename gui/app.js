@@ -91,7 +91,7 @@ window.setTimeout(() => {
 async function initialize() {
   if (initialized) return;
   initialized = true;
-  const parameters = new URLSearchParams(window.location.search);
+  const parameters = new URLSearchParams(window.__rustWindowParameters || window.location.search);
   if (parameters.get("native-smoke") === "1") {
     await runNativeSmoke();
     return;
@@ -972,9 +972,9 @@ async function runCompleteSearch(context) {
 }
 
 async function runIncrementalSearch(context) {
-  const {query, sortBy, sortDirection, request} = context;
+  const {query, sortBy, sortDirection, searchAttachments, mailboxSelections, request} = context;
   try {
-    const started = await window.pywebview.api.search_start(query, sortBy, sortDirection);
+    const started = await window.pywebview.api.search_start(query, sortBy, sortDirection, searchAttachments, mailboxSelections);
     if (request !== state.searchRequest) return;
     state.highlightTerms = started.highlight_terms;
     const search = {request, generation: started.generation, count: 0, complete: false, loading: false, error: null};

@@ -2341,9 +2341,9 @@ including longest-match, wildcard and exception rules, with IDNA normalization.
 Private suffix entries remain excluded, matching the prior tldextract policy.
 No Requests-based fetching or public-suffix network update occurs at runtime.
 
-### Experimental Rust archive reader
+### Rust desktop migration and retained reader prototype
 
-A separate `mailsearch-rust` executable must open existing version-1 catalog and
+The retained egui `mailsearch-rust` prototype must open existing version-1 catalog and
 search databases read-only, search indexed message words, select a result, and
 display headers and decoded text only after verifying canonical message SHA-256.
 It must not require Python, import mail, repair journals, or alter archives.
@@ -2367,11 +2367,28 @@ phrases, subject/address selectors, ordering and bounded result batches behind
 that interface. Preview windows have a 15-second deadline; the comprehensive
 query has a 120-second safety limit and must report incomplete results on
 failure. Deadlines must be cleared after each request.
-The native shell initially targets macOS. Original-mailbox filters, date/name
-resolution selectors, suggestions, attachment operations, imports, exports and
-extra message windows remain unported; their controls must be disabled or an
-explicit unsupported-operation error shown. Full application parity is not
-claimed. Headless acceptance uses the actual frontend and Rust dispatcher.
+The Wry desktop shell targets macOS and Windows. Search includes date selectors,
+header/manual identity and institution names, autocomplete, attachment text,
+original folders and version-1 saved filter sets shared with Python. Rich MIME
+viewing includes sanitized HTML, CID raster images, per-message remote-content
+consent, raw source, attachment previews, parent-message provenance and computed-date
+notices. Native actions include safe file exports, attachment open confirmation,
+clipboard, links, print and additional reader/message windows.
+
+During migration, a private, archive-bound Python helper may provide creation,
+owner-rule editing, identity decisions, imports, processing resume/history and
+virus-definition updates. It must not load the Python GUI. Mutations use existing
+writer leases and preserve source bytes. Pipe closure requests message-boundary
+cancellation; both Rust close and helper owner-loss handling have five-second
+bounds independent of UI callbacks. Import and definition work run outside the
+request loop. Rust reads stay read-only; explicitly opening an archive may use
+lease-protected recovery of hot journals. No automatic source ingest is allowed.
+
+Headless acceptance uses the real frontend and service boundary, synthetic
+archives, writer-conflict checks, cancellation/resume and byte inventories.
+Native drag-out, file associations, packaged delivery, Windows writer support and
+full native acceptance remain gates before Python-GUI deprecation; compilation
+or headless success must not mark those gates complete.
 
 Interactive Rust search must publish two bounded ordered catalog windows before
 running one comprehensive query over the remainder. Each window must be painted
@@ -2402,9 +2419,10 @@ premature close, snapshot failures, or source/archive mutations must fail the
 test. Upload the synthetic archive and evidence even on failure. Keep automation
 behind an explicit build feature; a Chromium/RPC screenshot is not native proof.
 The native main-document boundary must admit only `ect://localhost/index.html`
-on macOS and WebView2's `http://ect.localhost/index.html` on Windows. Other
-origins, asset paths, query strings and fragments must not gain navigation or
-backend access. Validate the actual callback URLs in the native runtime.
+on macOS and WebView2's `http://ect.localhost/index.html` on Windows. Only embedded identity/options/history pages may navigate as trusted editor
+frames, with a constrained parent-provided API. They must not invoke native IPC
+directly. Other origins, asset paths, query strings and fragments must not gain
+backend access. MIME frames remain script-disabled and cannot receive editor APIs. Validate the actual callback URLs in the native runtime.
 The shared reader must accept Ctrl shortcuts for find, find-next, selection and
 MIME-part navigation on Windows while preserving Command shortcuts on macOS.
 

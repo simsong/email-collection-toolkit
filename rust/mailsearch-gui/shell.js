@@ -42,7 +42,16 @@
         const status = await api.shell_status();
         if (!dialog.open || !body.isConnected) return;
         if (action === "about") {
-          body.append(text("p", `Version ${status.version}\n${status.platform} · ${status.architecture}\nRust / Wry desktop reader`), text("p", "Copyright © 2026 Simson L. Garfinkel.\nLicensed under GPL-2.0-only."), text("p", "This preview reads existing archives without changing their bytes. Imports, attachments and packaging are still in development."));
+          body.append(text("p", `Version ${status.version}\n${status.platform} · ${status.architecture}\nRust / Wry desktop reader`), text("p", "Copyright © 2026 Simson L. Garfinkel.\nLicensed under GPL-2.0-only."), text("p", "Search and message viewing run in Rust. Import, recovery and identity services use the project Python engine during migration."));
+          const antivirus=await api.antivirus();
+          body.append(text("p",antivirus.detail),text("p",antivirus.warning || ""));
+          const refresh=text("button","Update virus definitions");
+          refresh.addEventListener("click",async()=>{
+            refresh.disabled=true;
+            try { await api.refresh_definitions(); body.append(text("p","Updating definitions in the background. Failures will appear in the main window.")); }
+            catch(failure){error.textContent=failure.message; refresh.disabled=false;}
+          });
+          footer.append(refresh);
         } else if (action === "preferences") {
           const sizeLabel = text("label", "Message text size ");
           const size = document.createElement("input");

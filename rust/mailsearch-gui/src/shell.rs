@@ -85,17 +85,49 @@ pub fn menu(window: &tao::window::Window) -> Result<muda::Menu> {
     let updates = MenuItem::with_id("updates", "Check for Updates…", true, None);
     let quit = MenuItem::with_id("quit", "Quit", true, None);
     let separator = PredefinedMenuItem::separator();
-    #[cfg(target_os = "macos")]
-    let menu = Menu::with_items(&[&Submenu::with_items(
-        "Email Collection Toolkit",
+    let open = MenuItem::with_id("open_archive", "Open Archive…", true, None);
+    let new_search = MenuItem::with_id("new_search_window", "New Search Window", true, None);
+    let recent = Submenu::new("Open Recent", true);
+    let documents = crate::documents::Documents::load(&crate::documents::Documents::path()?)?;
+    for (index, path) in documents.recent.iter().enumerate() {
+        recent.append(&MenuItem::with_id(
+            format!("recent-{index}"),
+            path.to_string_lossy(),
+            true,
+            None,
+        ))?;
+    }
+    let new = MenuItem::with_id("new_archive", "New Archive…", true, None);
+    let import = MenuItem::with_id("import_directory", "Import…", true, None);
+    let options = MenuItem::with_id("open_options", "Owner Emails…", true, None);
+    let history = MenuItem::with_id("open_ingest_window", "Import History", true, None);
+    let file_menu = Submenu::with_items(
+        "File",
         true,
-        &[&about, &preferences, &updates, &separator, &quit],
-    )?])?;
+        &[
+            &new,
+            &open,
+            &recent,
+            &new_search,
+            &import,
+            &options,
+            &history,
+        ],
+    )?;
+    #[cfg(target_os = "macos")]
+    let menu = Menu::with_items(&[
+        &Submenu::with_items(
+            "Email Collection Toolkit",
+            true,
+            &[&about, &preferences, &updates, &separator, &quit],
+        )?,
+        &file_menu,
+    ])?;
     #[cfg(target_os = "windows")]
     let menu = Menu::with_items(&[
-        &Submenu::with_items("&File", true, &[&quit])?,
+        &file_menu,
         &Submenu::with_items("&Edit", true, &[&preferences])?,
-        &Submenu::with_items("&Help", true, &[&updates, &separator, &about])?,
+        &Submenu::with_items("&Help", true, &[&updates, &separator, &about, &quit])?,
     ])?;
     #[cfg(target_os = "windows")]
     {

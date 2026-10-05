@@ -5,6 +5,9 @@
 # The test searches, sorts, selects, resizes, and finds text through real widgets.
 # A Python-created archive proves compatibility and stays byte-for-byte unchanged.
 # No native windows, private email, or simulated backend responses participate.
+from functools import partial
+from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
+from threading import Thread
 from hashlib import sha256
 import json
 from os import environ
@@ -17,6 +20,7 @@ from playwright.sync_api import Page, expect
 import pytest
 
 from test_mailsearch import make_archive
+from test_gui_service import make_gui_archive
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -51,7 +55,7 @@ def test_existing_interface_with_rust_backend(page: Page, tmp_path: Path) -> Non
         page.add_init_script(path=ROOT / "rust/mailsearch-gui/bridge.js")
         page.goto((ROOT / "gui/index.html").as_uri())
         expect(page.locator("#search")).to_be_enabled()
-        expect(page.locator("#processing-open")).to_be_disabled()
+        expect(page.locator("#processing-open")).to_be_enabled(timeout=15000)
         page.evaluate("""() => {
             window.batchEvidence = [];
             window.holdNextSearch = true;
@@ -134,3 +138,113 @@ def test_existing_interface_with_rust_backend(page: Page, tmp_path: Path) -> Non
             process.wait(timeout=5)
     after = [(p.relative_to(archive), sha256(p.read_bytes()).hexdigest()) for p in sorted(archive.rglob("*")) if p.is_file()]
     assert after == before
+
+
+def test_rust_mime_filters_and_dates_in_shared_widgets(page: Page, tmp_path: Path) -> None:
+    """Reader migration: real MIME, date and attachment controls preserve source bytes."""
+    binary = environ.get("RUST_WEBVIEW_BINARY")
+    if not binary:
+        pytest.skip("run make test-rust-webview")
+    archive = make_gui_archive(tmp_path)
+    before = [(p.relative_to(archive), sha256(p.read_bytes()).hexdigest()) for p in sorted(archive.rglob("*")) if p.is_file()]
+    process = subprocess.Popen([binary, "--rpc", str(archive)], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                               stderr=subprocess.PIPE, text=True)
+    try:
+        def transport(request: str) -> object:
+            assert process.stdin is not None and process.stdout is not None
+            process.stdin.write(request + "\n")
+            process.stdin.flush()
+            response = process.stdout.readline()
+            assert response, "Rust dispatcher exited unexpectedly"
+            return json.loads(response)
+
+        page.expose_function("__rustTestTransport", transport)
+        page.add_init_script(path=ROOT / "rust/mailsearch-gui/bridge.js")
+        page.goto((ROOT / "gui/index.html").as_uri())
+        expect(page.locator("#search")).to_be_enabled()
+        expect(page.locator("#search-attachments")).to_be_enabled()
+        page.locator("#search").fill("Appendixquartz")
+        page.locator("#search").press("Enter")
+        expect(page.locator("#result-status")).to_have_text("0 messages")
+        page.locator("#search-attachments").check()
+        expect(page.locator("#result-status")).to_have_text("1 message")
+        page.locator("#result-list .result").first.click()
+        expect(page.locator("#message-subject")).to_have_text("multipart message")
+        expect(page.frame_locator("#body-view iframe").locator("body")).to_contain_text("HTML version.")
+        expect(page.locator("#remote-content")).to_be_visible()
+        expect(page.locator("#attachment-list")).to_contain_text("report.pdf")
+        assert page.frame_locator("#body-view iframe").locator("script").count() == 0
+        assert page.frame_locator("#body-view iframe").locator("img[src^='https://']").count() == 0
+        assert page.frame_locator("#body-view iframe").locator("img[src^='data:image/png;']").count() == 1
+        page.locator("#part-select").select_option("-1")
+        expect(page.locator("#body-view")).to_contain_text("Content-Type: multipart/mixed")
+        page.locator("#search").fill('date:"January 3, 2024"')
+        page.locator("#search").press("Enter")
+        expect(page.locator("#result-status")).to_have_text("2 messages")
+        page.locator("#search").fill("after:1/3/2024")
+        page.locator("#search").press("Enter")
+        expect(page.locator("#result-status")).to_have_text("0 messages")
+        page.locator("#show-original-folders").check()
+        expect(page.locator("#mailbox-tree")).to_contain_text("mail")
+        expect(page.locator("#error")).to_be_hidden()
+    finally:
+        if process.stdin is not None:
+            process.stdin.close()
+        try:
+            process.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            process.terminate()
+            process.wait(timeout=5)
+    after = [(p.relative_to(archive), sha256(p.read_bytes()).hexdigest()) for p in sorted(archive.rglob("*")) if p.is_file()]
+    assert after == before
+
+
+def test_rust_archive_editors_use_real_services(page: Page, tmp_path: Path) -> None:
+    """Migration: existing editor widgets persist settings through the supervised engine."""
+    binary = environ.get("RUST_WEBVIEW_BINARY")
+    if not binary:
+        pytest.skip("run make test-rust-webview")
+    archive = make_gui_archive(tmp_path)
+    canonical = [(p, sha256(p.read_bytes()).hexdigest()) for p in (archive / "data/mbox").glob("*.mbox")]
+    server = ThreadingHTTPServer(("127.0.0.1", 0), partial(SimpleHTTPRequestHandler, directory=str(ROOT / "gui")))
+    serving = Thread(target=server.serve_forever, daemon=True)
+    serving.start()
+    process = subprocess.Popen([binary, "--rpc", str(archive)], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                               stderr=subprocess.PIPE, text=True)
+    try:
+        def transport(request: str) -> object:
+            assert process.stdin is not None and process.stdout is not None
+            process.stdin.write(request + "\n")
+            process.stdin.flush()
+            return json.loads(process.stdout.readline())
+        page.expose_function("__rustTestTransport", transport)
+        page.add_init_script(path=ROOT / "rust/mailsearch-gui/bridge.js")
+        page.goto(f"http://127.0.0.1:{server.server_port}/index.html")
+        expect(page.get_by_role("button", name="Owner emails…", exact=True)).to_be_enabled(timeout=15000)
+        # Native menus use the same promise-returning action as the toolbar.
+        assert page.evaluate("window.pywebview.api.open_options().catch(error => { throw error; })") is True
+        editor = page.frame_locator(".rust-workflow iframe")
+        expect(editor.locator("#owner-include")).to_be_enabled()
+        editor.locator("#owner-include").fill("fixture@example.test")
+        editor.locator("#save").click()
+        expect(editor.locator("#saved")).to_be_visible()
+        page.screenshot(path=str(ROOT / ".tmp/rust-owner-editor.png"), full_page=True)
+        page.locator(".rust-workflow > button").click()
+        page.get_by_role("button", name="Owner emails…", exact=True).click()
+        expect(page.frame_locator(".rust-workflow iframe").locator("#owner-include")).to_have_value("fixture@example.test")
+        page.locator(".rust-workflow > button").click()
+        page.get_by_role("button", name="Names and addresses", exact=True).click()
+        expect(page.frame_locator(".rust-workflow iframe").locator("#summary")).to_contain_text("0 of 0 addresses")
+        page.locator(".rust-workflow > button").click()
+        page.get_by_role("button", name="Import history", exact=True).click()
+        expect(page.frame_locator(".rust-workflow iframe").locator("#history-count")).to_have_text("0 runs")
+        page.locator(".rust-workflow > button").click()
+        expect(page.locator("#error")).to_be_hidden()
+    finally:
+        assert process.stdin is not None
+        process.stdin.close()
+        process.wait(timeout=6)
+        server.shutdown()
+        server.server_close()
+        serving.join(timeout=2)
+    assert all(sha256(path.read_bytes()).hexdigest() == digest for path, digest in canonical)

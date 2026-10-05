@@ -54,16 +54,22 @@ the copied feed output. `RUNNER_TEMP` is the hosted runner's temporary area.
 No variable should contain secret material except the protected signing and
 notarization variables named above.
 
-## Rust reader experiment
+## Rust desktop migration
 
-`work-rust-gui` includes a separate, read-only Rust desktop reader. Its native
-shell targets macOS and Windows and hosts the existing HTML/CSS/JavaScript search interface using Wry/Tao,
-with Rust owning the archive operations. It opens an
-existing archive, searches indexed words, and displays a selected message after
-SHA-256 verification. It requires Rust 1.95+; the built app needs no Python.
+`work-rust-gui` hosts the existing HTML/CSS/JavaScript interface in a Rust
+Wry/Tao shell on macOS and Windows. Rust handles staged search, folder filters,
+verified MIME/HTML display, attachments and native reader actions. The local
+migration build uses a supervised Python archive-service helper for creation,
+imports, recovery, owner rules and identity edits; it never starts pywebview.
+The original Python GUI remains available until native migration acceptance.
+Rust 1.95+ and the prepared project Python environment are required for all workflows.
+`ECT_RUST_ENGINE_PYTHON` optionally selects that environment's Python executable;
+the default is this checkout's `.venv/bin/python` (`.venv/Scripts/python.exe` on
+Windows). There is no HTTP service. See the [migration status](doc/RUST_GUI_MIGRATION.md)
+for implemented controls and outstanding platform/release work.
 Use `cargo run-ect --archive "/path/to/archive"` to build and launch the GUI
 on Windows or macOS. The macOS Makefile launch target delegates to this alias.
-Run `make rust-gui ARCHIVE="/path/to/archive"`, or create the synthetic fixture
+Run `make rust-gui ARCHIVE="/path/to/archive"` (or omit `ARCHIVE` for recent/open/new selection), or create the synthetic fixture
 with `make rust-gui-demo` and then run
 `make rust-gui ARCHIVE=".tmp/rust-gui-demo"`. `make rust-gui` opens the reused interface; `make rust-gui-egui` opens the
 earlier widget prototype for comparison.
@@ -71,7 +77,7 @@ earlier widget prototype for comparison.
 `make test-rust-gui` runs headless Rust and widget tests;
 `make test-rust-gui-interop` checks a Python-created archive.
 `make test-rust-webview` tests the reused page against the real Rust dispatcher
-in headless Chromium. `RUST_WEBVIEW_BINARY` selects that dispatcher for the test
+in headless Chromium. `make test-rust-engine` exercises synthetic import, cancellation, resume, writer exclusion and identity edits. `RUST_WEBVIEW_BINARY` selects that dispatcher for the test
 and is set automatically by its Makefile target. `ARCHIVE` is the
 archive path and `QUERY` supplies words to `make rust-gui-smoke`.
 `RUST_GUI_DEMO` overrides the new synthetic fixture destination; creation refuses
@@ -273,8 +279,8 @@ make install-mac TIKA_VERSION=X.Y.Z
 
 ## Batch import from an external drive
 
-Batch import currently runs through the Python archive engine on macOS, not
-through the Rust GUI. Windows archive writing is explicitly unsupported in
+Batch import uses the Python archive engine on macOS. The Rust GUI now connects
+to that engine through its Import control; the CLI remains available for batch work. Windows archive writing is explicitly unsupported in
 this checkout. From a prepared macOS development checkout, with current ClamAV
 definitions and an owner-names file (one owner name or address per line):
 

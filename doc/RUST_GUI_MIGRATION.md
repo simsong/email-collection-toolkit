@@ -1,0 +1,80 @@
+<!-- Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved. -->
+
+# Rust desktop migration: local testing
+
+The Rust/Wry desktop owns the existing interface, search and message reader.
+A transitional Python **archive service** handles import, recovery, options and
+identity operations without importing the Python GUI. The project environment
+must be available; this is not a self-contained release package.
+
+From the repository root:
+
+```sh
+make rust-gui ARCHIVE="/path/to/archive.mailarchive"
+```
+
+Without `ARCHIVE`, the app opens the most recent valid archive or offers creation
+and opening. File → New Archive chooses an empty destination. File → Open and
+Open Recent open additional reader processes. Closing one closes that window's
+engine; other reader windows remain independent. Import jobs belong to the
+window that started them, with cross-process writer leases preventing conflicts.
+
+## Implemented for local trials
+
+| Area | Controls and behavior |
+| --- | --- |
+| Search | Two painted previews followed by comprehensive search; cancellation, paging, sorting, selection; dates, phrases, names/institutions, role-count autocomplete, attachment text, original folders and shared saved filters |
+| Reading | Hash-verified source; decoded headers/text, HTML sanitization, CID images, remote-image consent, MIME alternatives/raw source, attachment previews and parent/source provenance |
+| Actions | Save message and attachment to new files, confirmed attachment opening, clipboard, approved links, print, separate message and search windows |
+| Documents | Empty archive creation, Open, recent archives and native folder/file dialogs |
+| Archive services | Owner rules with revision conflicts, name/address and institution editors, persistent manual decisions |
+| Import | Source selection, owner rules, scanner policy, attachment indexing, start, progress/history, stop after current message, failures and Continue Processing |
+| Recovery | Existing lease-protected journal recovery when opening; interrupted import resume; helper pipe-close cancellation and five-second shutdown deadline |
+| Health | About/Preferences, scanner status and explicit background definition refresh; update availability remains platform/build dependent |
+
+Try imports only into a disposable archive until you have reviewed the native
+behavior. Source selections are read-only. Save refuses existing targets and
+paths inside the archive. Reads retain the prototype's 16 MiB record bound and
+256 KiB plain/raw display bound; HTML formatting is sanitized and may differ from
+the original mail. These restrictions are visible errors, not dropped messages.
+
+## Validation and remaining acceptance
+
+Headless targets use real services and synthetic bytes:
+
+```sh
+make test-rust-gui
+make test-rust-webview
+make test-rust-engine
+make test-gui
+```
+
+The engine tests import and verify hashes, reject competing writers, edit
+identities, stop an active import by closing its owner pipe, and resume it.
+The browser tests exercise the shared widgets through actual Rust RPC. They
+never start native windows. Native file dialogs, clipboard, printing, external
+attachment opening, WKWebView editor frames and Windows job objects still need
+platform trials; these tests are not native acceptance.
+
+Local validation on macOS (October 5, 2026): Rust build and 24 tests passed;
+three Rust-backed browser tests and two archive-service tests passed. The shared
+GUI (77), application/writer/loopback (40), and browser suite (34) passed;
+seven native browser-suite tests were skipped. Ruff, Pylint, ty and Pyright
+passed. Synthetic website screenshots were regenerated and the homepage,
+Searching and Importing pages visually inspected. No native windows were run;
+these results establish local validation only, pending CI and native trials.
+
+The broader [issue #49 checklist](https://github.com/simsong/email-collection-toolkit/issues/49)
+remains open. Specifically, this local build does **not** complete:
+
+- Native drag-out and multi-message ZIP dragging (controls remain hidden).
+- One application-wide window coordinator, file associations and Finder/Explorer
+  document activation. Additional windows currently run separate processes.
+- Windows archive-writing support, scanner/converter execution and full native
+  macOS/Windows acceptance. Preserve the existing Windows writer restriction.
+- Self-contained resources, installers/signing/notarization, macOS updater wiring,
+  coordinated release-feed publication and migration of the default entry point.
+- Full database rebuild/reprocess acceptance, large-message streaming and IMAP.
+
+Do not deprecate the Python GUI or mark v1.0 complete until these gates pass.
+The local app does not install anything or register file associations.

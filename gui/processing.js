@@ -40,5 +40,5 @@ window.addEventListener("pywebviewready", () => {
     try { await api.open_picker(kind); }
     catch (failure) { showError(failure.message || String(failure)); }
   });
-  if (!new URLSearchParams(location.search).has("message")) void showWork();
+  if (!new URLSearchParams(window.__rustWindowParameters || location.search).has("message")) void showWork();
 });

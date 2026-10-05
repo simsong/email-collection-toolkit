@@ -698,14 +698,15 @@ test-pff-converter: pff-converter
 # Rust GUI experiment: ARCHIVE is an existing archive directory; QUERY is literal search text.
 # RUST_GUI_DEMO selects a new synthetic fixture directory; no real mail is imported.
 # ECT_RUST_WEBVIEW_DIAGNOSTICS enables native navigation/IPC URL diagnostics.
+# ECT_RUST_ENGINE_PYTHON selects the prepared Python archive-service interpreter;
+# default: this checkout .venv/bin/python (Windows .venv/Scripts/python.exe).
 RUST_GUI_DEMO ?= $(CURDIR)/.tmp/rust-gui-demo
 .PHONY: rust-gui-build rust-gui rust-gui-demo rust-gui-smoke test-rust-gui
 rust-gui-build:
 	$(CARGO_RUN) reader-build
 
 rust-gui: rust-gui-build
-	@test -n "$(ARCHIVE)" || { echo 'usage: make rust-gui ARCHIVE=/path/to/archive'; exit 2; }
-	$(CARGO_RUN) run-ect --archive "$(ARCHIVE)"
+	$(CARGO_RUN) run-ect $(if $(ARCHIVE),--archive "$(ARCHIVE)")
 
 rust-gui-demo: rust-gui-build
 	$(CARGO_RUN) reader-demo "$(RUST_GUI_DEMO)"
@@ -756,3 +757,8 @@ test-rust-gui-native:
 .PHONY: test-rust-updater
 test-rust-updater:
 	$(CARGO_RUN) reader-updater-check
+
+# The transitional Rust engine test uses only synthetic archives and no GUI windows.
+.PHONY: test-rust-engine
+test-rust-engine:
+	uv run --locked pytest -q tests/test_rust_engine.py

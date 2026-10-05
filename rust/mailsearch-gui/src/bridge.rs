@@ -1,11 +1,11 @@
 // Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved.
-// Adapt the existing HTML search interface to the read-only Rust archive core.
+// Adapt the existing HTML interface to the Rust reader and archive service.
 // The external JSON protocol matches the existing frontend's method signatures.
 // A foreground worker owns message reads; a separate worker runs staged searches.
 // Replies preserve request IDs so the frontend can discard stale search results.
-// Unsupported write/import operations fail explicitly instead of pretending success.
+// Native actions are gated; mutations use a supervised, lease-protected service.
 // The same dispatcher runs in a native webview and in headless browser tests.
-use crate::{Archive, Message};
+use crate::Archive;
 use anyhow::{bail, ensure, Context, Result};
 use rusqlite::types::Value as SqlValue;
 use serde::{Deserialize, Serialize};
@@ -22,7 +22,7 @@ pub struct Request {
     #[serde(default)]
     pub args: Vec<Value>,
 }
-#[derive(Serialize)]
+#[derive(Deserialize, Serialize)]
 pub struct Reply {
     pub id: u64,
     pub result: Option<Value>,
@@ -32,7 +32,11 @@ pub struct Bridge {
     pub(crate) archive: Archive,
     search: Option<crate::search::Search>,
     pub(crate) cancellation: Option<(std::sync::Arc<std::sync::atomic::AtomicU64>, u64)>,
-    selected: Option<(i64, Message)>,
+    selected: Option<(i64, Vec<u8>)>,
+    exports: Option<tempfile::TempDir>,
+    desktop_enabled: bool,
+    engine: Option<crate::engine::Engine>,
+    engine_generation: u64,
 }
 
 impl Bridge {
@@ -40,9 +44,16 @@ impl Bridge {
         Ok(Self {
             archive: Archive::open(path)?,
             selected: None,
+            exports: None,
+            desktop_enabled: false,
+            engine: None,
+            engine_generation: 0,
             search: None,
             cancellation: None,
         })
+    }
+    pub fn enable_desktop(&mut self) {
+        self.desktop_enabled = true;
     }
     pub fn reply(&mut self, request: Request) -> Reply {
         match self.call(&request.method, &request.args) {
@@ -58,9 +69,44 @@ impl Bridge {
             },
         }
     }
+    fn engine_call(&mut self, method: &str, args: &[Value]) -> Result<Value> {
+        if self.engine.is_none() {
+            self.engine = Some(crate::engine::Engine::open(&self.archive.root)?);
+        }
+        let result = self.engine.as_mut().unwrap().call(method, args)?;
+        if method == "job_status" && result["active"] == false {
+            let generation = result["generation"].as_u64().unwrap_or(0);
+            if generation != self.engine_generation {
+                self.search = None;
+                self.archive = Archive::open(&self.archive.root)?;
+                self.selected = None;
+                self.engine_generation = generation;
+            }
+        }
+        Ok(result)
+    }
     fn call(&mut self, method: &str, args: &[Value]) -> Result<Value> {
         // The previous query's progress deadline must never affect another method.
         self.archive.db.progress_handler(0, None::<fn() -> bool>);
+        if matches!(
+            method,
+            "save_message"
+                | "save_attachment"
+                | "open_attachment"
+                | "open_message_window"
+                | "new_search_window"
+                | "open_archive"
+                | "open_recent"
+                | "open_link"
+                | "copy_source_path"
+                | "copy_visible_text"
+                | "copy_link"
+        ) {
+            ensure!(
+                self.desktop_enabled,
+                "This operation requires the native desktop window"
+            );
+        }
         match method {
             "status" => {
                 let count: i64 =
@@ -72,9 +118,81 @@ impl Bridge {
                 )
             }
             "activate" | "request_previews" => Ok(json!(true)),
-            "ingest_overview" => Ok(json!({"status":null})),
-            "saved_filter_sets" => Ok(json!({"filter_sets":[]})),
-            "suggestions" => Ok(json!({"items":[],"prefix":""})),
+            "engine_status" => match self.engine_call("ping", &[]) {
+                Ok(_) => Ok(json!({"available":true})),
+                Err(error) => Ok(json!({"available":false,"detail":format!("{error:#}")})),
+            },
+            "processing_work"
+            | "resume_processing"
+            | "ingest_overview"
+            | "history"
+            | "antivirus"
+            | "options_status"
+            | "options_update"
+            | "identity_query"
+            | "identity_update"
+            | "job_status"
+            | "stop_import"
+            | "refresh_definitions" => self.engine_call(method, args),
+            "prepare_import" => {
+                ensure!(
+                    self.desktop_enabled,
+                    "Import selection requires a native window"
+                );
+                if let Some(source) = rfd::FileDialog::new()
+                    .set_title("Choose source mail folder (read only)")
+                    .pick_folder()
+                {
+                    self.engine_call("import_defaults", &[json!(source)])
+                } else {
+                    Ok(Value::Null)
+                }
+            }
+            "start_import" => {
+                ensure!(
+                    self.desktop_enabled,
+                    "Import confirmation requires a native window"
+                );
+                self.engine_call(method, args)
+            }
+            "new_archive" => {
+                ensure!(
+                    self.desktop_enabled,
+                    "Archive creation requires a native window"
+                );
+                if let Some(path) = rfd::FileDialog::new()
+                    .set_title("Create new archive (choose an empty destination)")
+                    .pick_folder()
+                {
+                    let mut engine = crate::engine::Engine::open(&path)?;
+                    engine.call("create", &[])?;
+                    crate::desktop::spawn(
+                        std::process::Command::new(std::env::current_exe()?)
+                            .arg("--archive")
+                            .arg(path),
+                    )?;
+                }
+                Ok(json!(true))
+            }
+            "saved_filter_sets" | "save_filter_set" | "rename_filter_set" | "delete_filter_set" => {
+                let path = crate::browse::preferences_path()?;
+                crate::browse::filters(&path, method, args)
+            }
+            "mailbox_tree" => {
+                self.search_guard(Duration::from_secs(15));
+                crate::browse::tree(
+                    &self.archive.db,
+                    args.first().and_then(Value::as_bool).unwrap_or(false),
+                )
+            }
+            "suggestions" => {
+                self.search_guard(Duration::from_secs(2));
+                crate::browse::suggestions(
+                    &self.archive.db,
+                    text(args, 0, ""),
+                    args.get(1).and_then(Value::as_u64).unwrap_or(20) as usize,
+                )
+            }
             "search" => self.search(args),
             "search_batch" => self.search_batch(args),
             "search_start" => {
@@ -85,6 +203,8 @@ impl Bridge {
                     text(args, 0, ""),
                     text(args, 1, "date"),
                     text(args, 2, "descending"),
+                    args.get(3).and_then(Value::as_bool).unwrap_or(false),
+                    args.get(4).cloned().unwrap_or(json!([])),
                 )
             }
             "search_cancel" => {
@@ -138,36 +258,180 @@ impl Bridge {
             }
             "message" => {
                 let id = number(args, 0)?;
-                let message = self.archive.message(id)?;
-                let (subject,date_source,filename):(String,String,String)=self.archive.db.query_row("SELECT m.subject,m.date_source,g.filename FROM messages m JOIN locations l USING(message_pk) JOIN mbox_generations g USING(generation_pk) WHERE message_pk=?1",[id],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?)))?;
-                let headers: Vec<_> = message
-                    .headers
-                    .lines()
-                    .filter_map(|line| line.split_once(": "))
-                    .map(|(name, value)| json!({"name":name,"value":value}))
-                    .collect();
-                let result = json!({"message_pk":id,"subject":subject,"date_source":date_source,"headers":headers,
-                    "body_parts":[{"part_id":0,"content_type":"text/plain","label":"Message text"},{"part_id":1,"content_type":"text/plain","label":"Headers"}],
-                    "preferred_part_id":0,"attachments":[],"archive_path":self.archive.root.join("data/mbox").join(filename),"source_locations":[],"attached_origins":[]});
-                self.selected = Some((id, message));
+                let raw = self.archive.raw_message(id)?;
+                let mut result = crate::mime::describe(&raw)?;
+                let (date_source,filename,date_utc,offset):(String,String,String,i64)=self.archive.db.query_row("SELECT m.date_source,g.filename,m.date_utc,l.byte_offset FROM messages m JOIN locations l USING(message_pk) JOIN mbox_generations g USING(generation_pk) WHERE message_pk=?1",[id],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?)))?;
+                result["message_pk"] = json!(id);
+                result["date_source"] = json!(date_source);
+                if date_source == "received-median" {
+                    let header = result["headers"]
+                        .as_array()
+                        .and_then(|headers| {
+                            headers.iter().find(|h| {
+                                h["name"]
+                                    .as_str()
+                                    .is_some_and(|v| v.eq_ignore_ascii_case("Date"))
+                            })
+                        })
+                        .map(|h| h["value"].clone())
+                        .unwrap_or(json!("(missing)"));
+                    result["date_adjustment"] = json!({"date_header":header,"received_median_utc":date_utc,"archive_routing_utc":date_utc});
+                }
+                let mut origins=self.archive.db.prepare("SELECT parent_message_pk,parent_message_id,part_path FROM attached_origins WHERE child=? ORDER BY parent_message_id,part_path")?;
+                result["attached_origins"]=json!(origins.query_map([id],|r| Ok(json!({"parent_message_pk":r.get::<_,Option<i64>>(0)?,"parent_message_id":r.get::<_,String>(1)?,"part_path":serde_json::from_str::<Value>(&r.get::<_,String>(2)?).unwrap_or(json!([]))})))?.collect::<rusqlite::Result<Vec<_>>>()?);
+                result["archive_path"] = json!(format!(
+                    "{}?offset={offset}",
+                    self.archive.root.join("data/mbox").join(filename).display()
+                ));
+                result["source_locations"] = self.source_locations(id)?;
+                self.selected = Some((id, raw));
                 Ok(result)
             }
-            "part" => {
+            "part" | "attachment" => {
                 let id = number(args, 0)?;
                 let part = number(args, 1)?;
-                ensure!(part == 0 || part == 1, "Unsupported message part");
                 if self.selected.as_ref().map(|v| v.0) != Some(id) {
-                    self.selected = Some((id, self.archive.message(id)?));
+                    self.selected = Some((id, self.archive.raw_message(id)?));
                 }
-                let message = &self.selected.as_ref().context("Message unavailable")?.1;
-                Ok(
-                    json!({"part_id":part,"kind":"text","content_type":"text/plain","content":if part==0 {&message.body} else {&message.headers},"remote_content_blocked":false}),
-                )
+                let raw = &self.selected.as_ref().context("Message unavailable")?.1;
+                if method == "attachment" {
+                    crate::mime::attachment_content(raw, part)
+                } else {
+                    crate::mime::render(
+                        raw,
+                        part,
+                        args.get(2).and_then(Value::as_bool).unwrap_or(false),
+                    )
+                }
             }
-            _ => bail!(
-                "This operation is not yet available in the read-only Rust experiment: {method}"
-            ),
+            "open_message_window" | "new_search_window" | "open_archive" | "open_recent" => {
+                let path = if method == "open_recent" {
+                    let recent =
+                        crate::documents::Documents::load(&crate::documents::Documents::path()?)?;
+                    let path = recent
+                        .recent
+                        .get(number(args, 0)? as usize)
+                        .context("Unknown recent archive")?
+                        .clone();
+                    if Archive::open(&path).is_err() {
+                        crate::engine::Engine::open(&path)?.call("recover", &[])?;
+                    }
+                    Archive::open(&path)?;
+                    path
+                } else if method == "open_archive" {
+                    let Some(path) = rfd::FileDialog::new()
+                        .set_title("Open email archive")
+                        .pick_folder()
+                    else {
+                        return Ok(json!(false));
+                    };
+                    if Archive::open(&path).is_err() {
+                        crate::engine::Engine::open(&path)?.call("recover", &[])?;
+                    }
+                    Archive::open(&path)?;
+                    path
+                } else {
+                    self.archive.root.clone()
+                };
+                let mut child = std::process::Command::new(std::env::current_exe()?);
+                child.arg("--archive").arg(path);
+                if method == "open_message_window" {
+                    let id = number(args, 0)?;
+                    self.archive.raw_message(id)?;
+                    child
+                        .arg("--message")
+                        .arg(id.to_string())
+                        .arg("--highlights")
+                        .arg(serde_json::to_string(args.get(1).unwrap_or(&json!([])))?);
+                }
+                crate::desktop::spawn(&mut child)?;
+                Ok(json!(true))
+            }
+            "copy_visible_text" | "copy_link" => {
+                crate::desktop::copy(text(args, 0, ""))?;
+                Ok(json!(true))
+            }
+            "copy_source_path" => {
+                let locations = self.source_locations(number(args, 0)?)?;
+                let path = locations
+                    .get(number(args, 1)? as usize)
+                    .and_then(|v| v["copy_path"].as_str())
+                    .context("No local path is recorded for this source")?;
+                crate::desktop::copy(path)?;
+                Ok(json!(path))
+            }
+            "open_link" => {
+                crate::desktop::open_link(text(args, 0, ""))?;
+                Ok(json!(true))
+            }
+            "save_message" | "save_attachment" => {
+                let raw = self.archive.raw_message(number(args, 0)?)?;
+                let (name, bytes) = if method == "save_message" {
+                    ("Message.eml".to_string(), raw)
+                } else {
+                    let (name, _, bytes) = crate::mime::payload(&raw, number(args, 1)?)?;
+                    (name, bytes)
+                };
+                let Some(destination) = rfd::FileDialog::new().set_file_name(&name).save_file()
+                else {
+                    return Ok(Value::Null);
+                };
+                crate::desktop::export(&self.archive.root, &destination, &bytes)?;
+                Ok(json!(destination))
+            }
+            "open_attachment" => {
+                let raw = self.archive.raw_message(number(args, 0)?)?;
+                let (name, _, bytes) = crate::mime::payload(&raw, number(args, 1)?)?;
+                if !args.get(2).and_then(Value::as_bool).unwrap_or(false) {
+                    return Ok(json!({"requires_confirmation":true}));
+                }
+                if self.exports.is_none() {
+                    self.exports = Some(tempfile::tempdir()?);
+                }
+                let directory = tempfile::Builder::new()
+                    .prefix("attachment-")
+                    .tempdir_in(self.exports.as_ref().unwrap().path())?;
+                let destination =
+                    directory
+                        .path()
+                        .join(if name.is_empty() { "attachment" } else { &name });
+                crate::desktop::export(&self.archive.root, &destination, &bytes)?;
+                let _retained = directory.keep();
+                crate::desktop::open(
+                    destination
+                        .to_str()
+                        .context("Invalid attachment pathname")?,
+                )?;
+                Ok(json!({"requires_confirmation":false,"path":destination}))
+            }
+            _ => bail!("This operation is not yet available in the Rust desktop: {method}"),
         }
+    }
+
+    fn source_locations(&self, id: i64) -> Result<Value> {
+        let mut statement=self.archive.db.prepare("SELECT v.metadata_json,s.metadata_json,s.source_path,s.path_kind,o.source_offset,o.raw_sha256,o.semantic_sha256,s.source_plugin FROM observations o JOIN source_files s USING(source_file_pk) JOIN source_volumes v USING(source_volume_pk) WHERE o.message_pk=? ORDER BY o.observation_pk")?;
+        let mut locations=statement.query_map([id],|r| {
+            let volume:Value=serde_json::from_str(&r.get::<_,String>(0)?).unwrap_or(Value::Null);
+            let metadata:Value=serde_json::from_str(&r.get::<_,String>(1)?).unwrap_or(Value::Null);
+            let path=r.get::<_,String>(2)?;
+            let kind=r.get::<_,String>(3)?;
+            let plugin=r.get::<_,String>(7)?;
+            let cached=metadata["relationship"]["role"]=="cache";
+            let preferred=plugin!="file-folder"&&!cached;
+            let origin=if preferred {format!("Direct {plugin} source")}else if cached{format!("Local cache of {}",metadata["relationship"]["upstream_plugin_kind"].as_str().unwrap_or("upstream account"))}else{"Local source".into()};
+            let copy=if plugin=="file-folder"&&kind!="provider"{volume["current_mount_path"].as_str().filter(|v|Path::new(v).is_absolute()).map(|mount|Path::new(mount).join(&path))}else{None};
+            let display=if kind=="provider"{metadata["display_name"].as_str().unwrap_or(&path).to_string()}else if kind=="file"&&path.starts_with("Users/"){format!("/{path}")}else{path};
+            Ok(json!({"volume":volume["volume_label"].as_str().or(volume["current_mount_path"].as_str()).unwrap_or("Unknown source volume"),"path":display,"offset":r.get::<_,Option<i64>>(4)?,"raw_sha256":r.get::<_,String>(5)?,"semantic_sha256":r.get::<_,Option<String>>(6)?,"origin":origin,"preferred":preferred,"copy_path":copy}))
+        })?.collect::<rusqlite::Result<Vec<_>>>()?;
+        locations.sort_by_key(|v| {
+            (
+                !v["preferred"].as_bool().unwrap_or(false),
+                v["origin"].as_str().unwrap_or("").to_string(),
+                v["volume"].as_str().unwrap_or("").to_string(),
+                v["path"].as_str().unwrap_or("").to_string(),
+            )
+        });
+        Ok(json!(locations))
     }
 
     pub(crate) fn search_guard(&self, duration: Duration) {
@@ -217,9 +481,9 @@ impl Bridge {
                     .context("Invalid search cursor")?
                     .into(),
             );
-            format!("WHERE ({sort},m.message_pk) {comparison} (?,?)")
+            format!("WHERE m.category IN ('Archive','Sent') AND ({sort},m.message_pk) {comparison} (?,?)")
         } else {
-            String::new()
+            "WHERE m.category IN ('Archive','Sent')".into()
         };
         // Scan a bounded ordered catalog slice before testing FTS row IDs. Never
         // materialize and sort the complete FTS match set for the first response.
@@ -237,7 +501,11 @@ impl Bridge {
             let next = candidates
                 .last()
                 .map(|(id, key)| json!({"id":id,"key":key}));
-            let (mut clauses, mut values, terms) = query_parts(query)?;
+            let (mut clauses, mut values, terms) = crate::selectors::plan(
+                query,
+                args.get(4).and_then(Value::as_bool).unwrap_or(false),
+                args.get(5),
+            )?;
             for clause in &mut clauses {
                 if clause.starts_with("m.sha256 IN(") {
                     *clause = "EXISTS(SELECT 1 FROM search.message_fts WHERE rowid=mm.message_fts_rowid AND message_fts MATCH ?)".into();
@@ -287,19 +555,13 @@ impl Bridge {
             "descending" => "DESC",
             _ => bail!("Unknown sort direction"),
         };
-        ensure!(
-            !args.get(4).and_then(Value::as_bool).unwrap_or(false),
-            "Attachment search has not yet been ported"
-        );
-        ensure!(
-            args.get(5)
-                .and_then(Value::as_array)
-                .is_none_or(Vec::is_empty),
-            "Mailbox filtering has not yet been ported"
-        );
         let limit = args.get(6).and_then(Value::as_u64).unwrap_or(2000);
         let limit = if limit == 0 { 100_000 } else { limit.min(2000) };
-        let (clauses, values, terms) = query_parts(query)?;
+        let (clauses, values, terms) = crate::selectors::plan(
+            query,
+            args.get(4).and_then(Value::as_bool).unwrap_or(false),
+            args.get(5),
+        )?;
         let sql=format!("SELECT m.message_pk,a.address,m.subject,m.date_utc,coalesce(mm.attachment_count,0),(SELECT group_concat(e.address, ', ') FROM recipients r JOIN email_addresses e USING(address_pk) WHERE r.message_pk=m.message_pk) FROM messages m JOIN email_addresses a ON a.address_pk=m.sender_address_pk LEFT JOIN search.message_metadata mm USING(sha256) WHERE {} ORDER BY {sort} {direction},m.message_pk {direction} LIMIT {} OFFSET {offset}",if clauses.is_empty(){"1".into()}else{clauses.join(" AND ")},limit+1);
         let deadline = Instant::now() + Duration::from_secs(15);
         self.archive
@@ -343,65 +605,28 @@ fn number(args: &[Value], index: usize) -> Result<i64> {
         .context("Missing message/part ID")
 }
 
-pub(crate) fn query_parts(query: &str) -> Result<(Vec<String>, Vec<SqlValue>, Vec<String>)> {
-    let mut tokens = Vec::new();
-    let mut token = String::new();
-    let mut quoted = false;
-    for ch in query.chars() {
-        if ch == '"' {
-            quoted = !quoted;
-        } else if ch.is_whitespace() && !quoted {
-            if !token.is_empty() {
-                tokens.push(std::mem::take(&mut token));
-            }
-        } else {
-            token.push(ch);
-        }
-    }
-    ensure!(!quoted, "Close the quoted search phrase");
-    if !token.is_empty() {
-        tokens.push(token);
-    }
-    let mut clauses = vec!["m.category IN ('Archive','Sent')".to_string()];
-    let mut values = Vec::new();
-    let mut terms = Vec::new();
-    let mut fulltext = Vec::new();
-    for token in tokens {
-        if let Some((field, value)) = token.split_once(':') {
-            ensure!(!value.is_empty(), "Enter a value after {field}:");
-            let pattern = format!(
-                "%{}%",
-                value
-                    .replace('\\', "\\\\")
-                    .replace('%', "\\%")
-                    .replace('_', "\\_")
-            );
-            match field {
-                "subject"=>{clauses.push("m.subject LIKE ? ESCAPE '\\'".into());values.push(pattern.into());},
-                "from"=>{clauses.push("a.address LIKE ? ESCAPE '\\'".into());values.push(pattern.into());},
-                "to"|"cc"|"bcc"=>{clauses.push("EXISTS(SELECT 1 FROM recipients r JOIN email_addresses e USING(address_pk) WHERE r.message_pk=m.message_pk AND r.role=? AND e.address LIKE ? ESCAPE '\\')".into());values.push(field.to_string().into());values.push(pattern.into());},
-                "any"=>{clauses.push("(a.address LIKE ? ESCAPE '\\' OR EXISTS(SELECT 1 FROM recipients r JOIN email_addresses e USING(address_pk) WHERE r.message_pk=m.message_pk AND e.address LIKE ? ESCAPE '\\'))".into());values.push(pattern.clone().into());values.push(pattern.into());},
-                _=>bail!("The Rust experiment supports words, phrases, subject:, from:, to:, cc:, bcc:, and any:. {field}: is not yet supported."),
-            }
-            terms.push(value.to_string());
-        } else {
-            fulltext.push(format!("\"{}\"", token.replace('"', "\"\"")));
-            terms.push(token);
-        }
-    }
-    if !fulltext.is_empty() {
-        clauses.push(
-            "m.sha256 IN(SELECT sha256 FROM search.message_fts WHERE message_fts MATCH ?)".into(),
-        );
-        values.push(fulltext.join(" AND ").into());
-    }
-    Ok((clauses, values, terms))
-}
-
 pub const SCRIPT: &str = include_str!("../bridge.js");
 pub fn asset(path: &str) -> Option<(&'static str, &'static [u8])> {
     Some(match path {
         "/" | "/index.html" => ("text/html", include_bytes!("../../../gui/index.html")),
+        "/identity.html" => ("text/html", include_bytes!("../../../gui/identity.html")),
+        "/identity.js" => (
+            "text/javascript",
+            include_bytes!("../../../gui/identity.js"),
+        ),
+        "/matcher.css" => ("text/css", include_bytes!("../../../gui/matcher.css")),
+        "/matcher.js" => ("text/javascript", include_bytes!("../../../gui/matcher.js")),
+        "/matcher-types.js" => (
+            "text/javascript",
+            include_bytes!("../../../gui/matcher-types.js"),
+        ),
+        "/options.html" => ("text/html", include_bytes!("../../../gui/options.html")),
+        "/options.css" => ("text/css", include_bytes!("../../../gui/options.css")),
+        "/options.js" => ("text/javascript", include_bytes!("../../../gui/options.js")),
+        "/ingests.html" => ("text/html", include_bytes!("../../../gui/ingests.html")),
+        "/ingests.css" => ("text/css", include_bytes!("../../../gui/ingests.css")),
+        "/ingests.js" => ("text/javascript", include_bytes!("../../../gui/ingests.js")),
+        "/rust-workflow.css" => ("text/css", include_bytes!("../../../gui/rust-workflow.css")),
         "/app.js" => ("text/javascript", include_bytes!("../../../gui/app.js")),
         "/style.css" => ("text/css", include_bytes!("../../../gui/style.css")),
         "/rust-shell.css" => ("text/css", include_bytes!("../shell.css")),
@@ -662,7 +887,9 @@ mod tests {
                 .unwrap()["results"][0]["message_pk"],
             4
         );
-        assert!(bridge.call("search_start", &[json!("bad:query")]).is_err());
+        assert!(bridge
+            .call("search_start", &[json!("date:not-a-date")])
+            .is_err());
         assert_eq!(bridge.call("search_status", &[new]).unwrap()["stale"], true);
     }
 
@@ -741,7 +968,8 @@ mod tests {
             .call("part", &[json!(1), json!(0), json!(false)])
             .unwrap();
         assert!(part["content"].as_str().unwrap().contains("From the hill"));
-        assert!(bridge.call("search", &[json!("date:2024-01-01")]).is_err());
+        assert!(bridge.call("search", &[json!("date:2024-01-01")]).is_ok());
+        assert!(bridge.call("search", &[json!("date:2024-02-31")]).is_err());
         assert!(bridge.call("search", &[json!("\"unfinished")]).is_err());
         assert!(bridge.call("save_message", &[json!(1)]).is_err());
         assert!(bridge.call("part", &[json!(1), json!(99)]).is_err());

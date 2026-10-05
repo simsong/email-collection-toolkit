@@ -6,9 +6,15 @@
 // Each reader owns its connections; background workers keep database work off the UI.
 // The native UI and headless smoke tests use this same request path.
 pub mod bridge;
+mod browse;
 pub mod demo;
+mod desktop;
+pub mod documents;
+pub mod engine;
+mod mime;
 pub mod preferences;
 mod search;
+mod selectors;
 pub mod shell;
 pub mod updater;
 pub mod worker;
@@ -74,6 +80,38 @@ impl Archive {
         let uri = url::Url::from_file_path(search)
             .map_err(|_| anyhow::anyhow!("Invalid archive path"))?;
         db.execute("ATTACH DATABASE ?1 AS search", [format!("{uri}?mode=ro")])?;
+        // Header display names are derived evidence; this temp view never writes the archive.
+        let has_names: bool = db.query_row(
+            "SELECT EXISTS(SELECT 1 FROM search.sqlite_master WHERE name='address_suggestions')",
+            [],
+            |r| r.get(0),
+        )?;
+        let mut names = if has_names {
+            "SELECT address, display_name AS name FROM search.address_suggestions".to_string()
+        } else {
+            "SELECT '' AS address, '' AS name WHERE 0".to_string()
+        };
+        if root.join("processing.sqlite3").exists() {
+            let identities = within(&root, Path::new("processing.sqlite3"))?;
+            let mut header = [0; 20];
+            File::open(&identities)?.read_exact(&mut header)?;
+            ensure!(
+                &header[..16] == b"SQLite format 3\0" && header[18..] == [1, 1],
+                "Unsupported processing database journal mode"
+            );
+            let uri = url::Url::from_file_path(identities)
+                .map_err(|_| anyhow::anyhow!("Invalid processing database path"))?;
+            db.execute(
+                "ATTACH DATABASE ? AS identities",
+                [format!("{uri}?mode=ro")],
+            )?;
+            names.push_str(" UNION SELECT a.address,p.canonical_name FROM identities.addresses a JOIN identities.person_addresses pa USING(address_id) JOIN identities.persons p USING(person_id) UNION SELECT a.address,n.name FROM identities.addresses a JOIN identities.person_addresses pa USING(address_id) JOIN identities.person_aliases n USING(person_id) UNION SELECT a.address,json_extract(e.value,'$.name') FROM identities.addresses a JOIN identities.evidence e USING(address_id) WHERE e.kind='header' UNION SELECT a.address,o.name FROM identities.addresses a JOIN identities.organization_domains d ON a.domain=d.domain OR a.domain LIKE '%.'||d.domain JOIN identities.organizations o USING(organization_id)");
+            db.execute_batch("CREATE TEMP VIEW attached_origins AS SELECT DISTINCT child.catalog_message_pk AS child, parent.catalog_message_pk AS parent_message_pk,o.parent_message_id,o.part_path FROM identities.occurrences o JOIN identities.message_state child ON child.message_id=o.message_id LEFT JOIN identities.message_state parent ON parent.message_id=o.parent_message_id WHERE o.parent_message_id IS NOT NULL")?;
+        }
+        if !root.join("processing.sqlite3").exists() {
+            db.execute_batch("CREATE TEMP VIEW attached_origins AS SELECT 0 AS child,0 AS parent_message_pk,'' AS parent_message_id,'[]' AS part_path WHERE 0")?;
+        }
+        db.execute_batch(&format!("CREATE TEMP VIEW address_search_names AS {names}"))?;
         db.execute_batch("PRAGMA query_only=ON")?;
         for schema in ["main", "search"] {
             let versions: Vec<i64> = db
@@ -123,7 +161,7 @@ impl Archive {
         Ok(result)
     }
 
-    pub fn message(&self, id: i64) -> Result<Message> {
+    pub(crate) fn raw_message(&self, id: i64) -> Result<Vec<u8>> {
         self.db.progress_handler(0, None::<fn() -> bool>);
         let (digest, filename, offset, length): (String, String, u64, u64) = self.db.query_row(
             "SELECT m.sha256,g.filename,l.byte_offset,l.byte_length FROM messages m JOIN locations l USING(message_pk) JOIN mbox_generations g USING(generation_pk) WHERE m.message_pk=?1", [id], |r| Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?)))?;
@@ -148,7 +186,12 @@ impl Archive {
         file.seek(SeekFrom::Start(offset))?;
         let mut record = vec![0; length as usize];
         file.read_exact(&mut record)?;
-        let raw = verified_bytes(&record, &digest)?;
+        verified_bytes(&record, &digest)
+    }
+
+    pub fn message(&self, id: i64) -> Result<Message> {
+        let raw = self.raw_message(id)?;
+        let digest = format!("{:x}", Sha256::digest(&raw));
         let parsed = mailparse::parse_mail(&raw)
             .context("Message integrity passed, but MIME parsing failed")?;
         let headers = ["From", "To", "Cc", "Date", "Subject"]

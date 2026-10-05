@@ -5,7 +5,7 @@
 // A generation counter interrupts obsolete SQLite work and rejects stale pages.
 // One replaceable pending job bounds work even during rapid typing and sorting.
 // Closing signals cancellation without joining a potentially blocked reader.
-use crate::bridge::{query_parts, Bridge};
+use crate::bridge::Bridge;
 use anyhow::{ensure, Result};
 use serde_json::{json, Value};
 use std::{
@@ -22,6 +22,8 @@ struct Job {
     query: String,
     sort: String,
     direction: String,
+    attachments: bool,
+    selections: Value,
 }
 #[derive(Default)]
 struct State {
@@ -80,11 +82,18 @@ impl Search {
             })?;
         Ok(Self { shared })
     }
-    pub fn start(&self, query: &str, sort: &str, direction: &str) -> Result<Value> {
+    pub fn start(
+        &self,
+        query: &str,
+        sort: &str,
+        direction: &str,
+        attachments: bool,
+        selections: Value,
+    ) -> Result<Value> {
         // Cancel before parsing: an invalid replacement must also stop old work.
         self.cancel();
         ensure!(query.len() <= 4096, "Search is limited to 4096 bytes");
-        let (_, _, terms) = query_parts(query)?;
+        let (_, _, terms) = crate::selectors::plan(query, attachments, Some(&selections))?;
         ensure!(
             ["date", "subject", "sender"].contains(&sort),
             "Unknown sort field"
@@ -100,6 +109,8 @@ impl Search {
             query: query.into(),
             sort: sort.into(),
             direction: direction.into(),
+            attachments,
+            selections,
         });
         self.shared.wake.notify_one();
         Ok(json!({"generation":generation,"highlight_terms":terms}))
@@ -163,6 +174,8 @@ fn run(bridge: &mut Bridge, shared: &Shared, job: &Job) -> Result<()> {
             cursor,
             json!(job.sort),
             json!(job.direction),
+            json!(job.attachments),
+            job.selections.clone(),
         ])?;
         let mut state = shared.state.lock().unwrap();
         if state.generation != job.generation {
@@ -199,7 +212,8 @@ fn run(bridge: &mut Bridge, shared: &Shared, job: &Job) -> Result<()> {
     } else {
         ("DESC", "<")
     };
-    let (mut clauses, mut values, _) = query_parts(&job.query)?;
+    let (mut clauses, mut values, _) =
+        crate::selectors::plan(&job.query, job.attachments, Some(&job.selections))?;
     for clause in &mut clauses {
         if clause.starts_with("m.sha256 IN(") {
             *clause = "mm.message_fts_rowid IN(SELECT rowid FROM search.message_fts WHERE message_fts MATCH ?)".into();

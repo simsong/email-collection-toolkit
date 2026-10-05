@@ -4,6 +4,15 @@
 
 ## Unreleased
 
+- Extend the Rust desktop migration with date/name/institution search, autocomplete,
+  attachment-text and original-folder filters, compatible saved filters, rich MIME
+  display, CID images, exports, print, clipboard, native file selection and extra
+  reader windows. Source bytes remain hash-verified and preserved.
+- Connect owner rules, identity edits, imports, progress/history, cancellation,
+  resume and recovery through a supervised Python archive-service helper without
+  loading the Python GUI. This is a local migration build: native acceptance,
+  drag-out, file associations, Windows writing and packaged delivery remain pending.
+
 - Allow explicit Windows x64/ARM64 branch validation with a `[windows-ci]`
   head commit marker, without adding Windows costs to ordinary Mac iterations.
 

@@ -3,7 +3,7 @@
 // Embedded application assets are the only files exposed to the webview protocol.
 // JSON requests go to one bounded worker; SQLite never runs on the window thread.
 // Replies return through the native event loop without waiting on JS callbacks.
-// Closing exits the event loop without joining any read-only worker operation.
+// Closing cancels the archive service with an independent five-second exit bound.
 // The --rpc mode exercises the same dispatcher headlessly over standard I/O.
 use anyhow::{bail, Result};
 use mailsearch_rust::bridge::{Bridge, Request};
@@ -23,6 +23,40 @@ mod native_smoke;
 fn main() -> Result<()> {
     let args: Vec<String> = std::env::args().skip(1).collect();
     match args.as_slice() {
+        [] => {
+            let recent = mailsearch_rust::documents::Documents::load(
+                &mailsearch_rust::documents::Documents::path()?,
+            )?;
+            if let Some(path) = recent
+                .recent
+                .first()
+                .filter(|path| mailsearch_rust::Archive::open(path).is_ok())
+            {
+                return native(path.clone(), None, None);
+            }
+            let decision=rfd::MessageDialog::new().set_title("Email Collection Toolkit")
+                .set_description("Create a new archive? Choose Yes to create an empty archive, No to open an existing archive, or Cancel to exit.")
+                .set_buttons(rfd::MessageButtons::YesNoCancel).show();
+            if decision == rfd::MessageDialogResult::Cancel {
+                return Ok(());
+            }
+            let create = decision == rfd::MessageDialogResult::Yes;
+            if let Some(path) = rfd::FileDialog::new()
+                .set_title(if create {
+                    "Choose empty destination for new archive"
+                } else {
+                    "Open email archive"
+                })
+                .pick_folder()
+            {
+                if create {
+                    mailsearch_rust::engine::Engine::open(&path)?.call("create", &[])?;
+                }
+                native(path, None, None)
+            } else {
+                Ok(())
+            }
+        }
         [flag, path] if flag == "--rpc" => {
             let mut bridge = Bridge::open(&PathBuf::from(path))?;
             for line in io::stdin().lock().lines() {
@@ -83,10 +117,26 @@ fn main() -> Result<()> {
             }
             Ok(())
         }
-        [flag, path] if flag == "--archive" => native(PathBuf::from(path), None),
+        [flag, path] if flag == "--archive" => native(PathBuf::from(path), None, None),
+        [flag, path, message_flag, message, highlight_flag, highlights]
+            if flag == "--archive"
+                && message_flag == "--message"
+                && highlight_flag == "--highlights" =>
+        {
+            let message = message.parse::<i64>()?;
+            let highlights = serde_json::from_str::<Vec<String>>(highlights)?;
+            let mut parameters = url::form_urlencoded::Serializer::new(String::new());
+            parameters
+                .append_pair("standalone", "1")
+                .append_pair("message", &message.to_string());
+            for term in highlights {
+                parameters.append_pair("highlight", &term);
+            }
+            native(PathBuf::from(path), None, Some(parameters.finish()))
+        }
         #[cfg(feature = "native-smoke")]
         [flag, path, output] if flag == "--native-smoke" => {
-            native(PathBuf::from(path), Some(PathBuf::from(output)))
+            native(PathBuf::from(path), Some(PathBuf::from(output)), None)
         }
         _ => bail!(
             "Usage: mailsearch-webview --archive DIRECTORY (or --rpc DIRECTORY for headless tests)"
@@ -95,7 +145,11 @@ fn main() -> Result<()> {
 }
 
 #[cfg(not(any(target_os = "macos", target_os = "windows")))]
-fn native(_path: PathBuf, _smoke_output: Option<PathBuf>) -> Result<()> {
+fn native(
+    _path: PathBuf,
+    _smoke_output: Option<PathBuf>,
+    _parameters: Option<String>,
+) -> Result<()> {
     bail!("The native shell is enabled on macOS and Windows; RPC and core tests are portable")
 }
 
@@ -108,8 +162,30 @@ fn trusted_document(url: &str, windows: bool) -> bool {
     }
 }
 
+#[cfg(any(target_os = "macos", target_os = "windows", test))]
+fn trusted_panel(value: &str, windows: bool) -> bool {
+    let Ok(url) = url::Url::parse(value) else {
+        return false;
+    };
+    url.scheme() == if windows { "http" } else { "ect" }
+        && url.host_str()
+            == Some(if windows {
+                "ect.localhost"
+            } else {
+                "localhost"
+            })
+        && url.port().is_none()
+        && url.username().is_empty()
+        && url.password().is_none()
+        && ["/identity.html", "/options.html", "/ingests.html"].contains(&url.path())
+        && url.fragment().is_none()
+        && (url.query().is_none()
+            || (url.path() == "/identity.html"
+                && matches!(url.query(), Some("kind=name" | "kind=institution"))))
+}
+
 #[cfg(any(target_os = "macos", target_os = "windows"))]
-fn native(path: PathBuf, smoke_output: Option<PathBuf>) -> Result<()> {
+fn native(path: PathBuf, smoke_output: Option<PathBuf>, parameters: Option<String>) -> Result<()> {
     use mailsearch_rust::bridge::{asset, Reply, SCRIPT};
     use std::{borrow::Cow, sync::mpsc, thread};
     use tao::{
@@ -123,12 +199,24 @@ fn native(path: PathBuf, smoke_output: Option<PathBuf>) -> Result<()> {
         Shell(Request),
         Menu(muda::MenuEvent),
         Quit,
+        QuitFinished,
+        Print(u64),
         #[cfg(feature = "native-smoke")]
         Snapshot,
         #[cfg(feature = "native-smoke")]
         ResizeSmoke,
         #[cfg(feature = "native-smoke")]
         SmokeFinished(Result<()>),
+    }
+    if smoke_output.is_none() {
+        if mailsearch_rust::Archive::open(&path).is_err() {
+            mailsearch_rust::engine::Engine::open(&path)?.call("recover", &[])?;
+            mailsearch_rust::Archive::open(&path)?;
+        }
+        mailsearch_rust::documents::Documents::remember(
+            &mailsearch_rust::documents::Documents::path()?,
+            &path,
+        )?;
     }
     let events = EventLoopBuilder::<NativeEvent>::with_user_event().build();
     let window = WindowBuilder::new()
@@ -152,8 +240,18 @@ fn native(path: PathBuf, smoke_output: Option<PathBuf>) -> Result<()> {
     thread::Builder::new()
         .name("archive-web-reader".into())
         .spawn(move || {
-            let mut bridge = Bridge::open(&path).map_err(|e| format!("{e:#}"));
+            let mut bridge = Bridge::open(&path)
+                .map(|mut bridge| {
+                    bridge.enable_desktop();
+                    bridge
+                })
+                .map_err(|e| format!("{e:#}"));
             while let Ok(request) = receiver.recv() {
+                if request.method == "shutdown" {
+                    drop(bridge);
+                    let _ = proxy.send_event(NativeEvent::QuitFinished);
+                    return;
+                }
                 let reply = match &mut bridge {
                     Ok(bridge) => bridge.reply(request),
                     Err(error) => Reply {
@@ -167,10 +265,16 @@ fn native(path: PathBuf, smoke_output: Option<PathBuf>) -> Result<()> {
                 }
             }
         })?;
+    let shutdown_sender = sender.clone();
     let ipc_proxy = events.create_proxy();
     let diagnostics = std::env::var_os("ECT_RUST_WEBVIEW_DIAGNOSTICS").is_some();
     let smoke_enabled = smoke_output.is_some();
+    let window_parameters = format!(
+        "window.__rustWindowParameters={};",
+        serde_json::to_string(&parameters.unwrap_or_default())?
+    );
     let builder = WebViewBuilder::new()
+        .with_initialization_script(&window_parameters)
         .with_custom_protocol("ect".into(), |_, request| {
             let (status, mime, bytes) = match asset(request.uri().path()) {
                 Some((mime, bytes)) => (200, mime, bytes),
@@ -185,7 +289,8 @@ fn native(path: PathBuf, smoke_output: Option<PathBuf>) -> Result<()> {
         .with_initialization_script(SCRIPT)
         .with_initialization_script(mailsearch_rust::shell::SCRIPT)
         .with_navigation_handler(move |url| {
-            let trusted = trusted_document(&url, cfg!(target_os = "windows"));
+            let trusted = trusted_document(&url, cfg!(target_os = "windows"))
+                || trusted_panel(&url, cfg!(target_os = "windows"));
             if diagnostics {
                 eprintln!("Webview navigation: {url:?}, trusted={trusted}");
             }
@@ -231,6 +336,10 @@ fn native(path: PathBuf, smoke_output: Option<PathBuf>) -> Result<()> {
                     "shell_status" | "preferences_save" | "check_updates"
                 ) {
                     let _ = ipc_proxy.send_event(NativeEvent::Shell(message));
+                    return;
+                }
+                if message.method == "print" {
+                    let _ = ipc_proxy.send_event(NativeEvent::Print(message.id));
                     return;
                 }
                 if message.method == "quit" {
@@ -284,6 +393,7 @@ fn native(path: PathBuf, smoke_output: Option<PathBuf>) -> Result<()> {
         });
     }
     let reply_proxy = events.create_proxy();
+    let mut quitting = false;
     events.run(move |event, _, flow| {
         *flow = ControlFlow::Wait;
         match event {
@@ -292,7 +402,15 @@ fn native(path: PathBuf, smoke_output: Option<PathBuf>) -> Result<()> {
                 ..
             }
             | Event::UserEvent(NativeEvent::Quit) => {
-                *flow = ControlFlow::ExitWithCode(if smoke_enabled { 1 } else { 0 })
+                if !quitting {
+                    quitting=true;
+                    let _=shutdown_sender.try_send(Request{id:0,method:"shutdown".into(),args:vec![]});
+                    let watchdog=reply_proxy.clone();
+                    thread::spawn(move||{thread::sleep(std::time::Duration::from_secs(5));let _=watchdog.send_event(NativeEvent::QuitFinished);});
+                }
+            }
+            Event::UserEvent(NativeEvent::QuitFinished) => {
+                *flow = ControlFlow::ExitWithCode(if smoke_enabled { 1 } else { 0 });
             }
             #[cfg(feature = "native-smoke")]
             Event::UserEvent(NativeEvent::ResizeSmoke) => {
@@ -319,10 +437,25 @@ fn native(path: PathBuf, smoke_output: Option<PathBuf>) -> Result<()> {
                     let _ = reply_proxy.send_event(NativeEvent::Reply(shell.reply(request)));
                 }
             }
+            Event::UserEvent(NativeEvent::Print(id)) => {
+                let result = view.print();
+                let _ = reply_proxy.send_event(NativeEvent::Reply(Reply {
+                    id,
+                    result: result.as_ref().ok().map(|_| serde_json::json!(true)),
+                    error: result.err().map(|e| e.to_string()),
+                }));
+            }
             Event::UserEvent(NativeEvent::Menu(event)) => {
                 let action = event.id.as_ref();
                 if action == "quit" {
-                    *flow = ControlFlow::Exit;
+                    let _=reply_proxy.send_event(NativeEvent::Quit);
+                } else if let Some(index)=action.strip_prefix("recent-").and_then(|value|value.parse::<usize>().ok()) {
+                    let _=view.evaluate_script(&format!("window.pywebview.api.open_recent({index}).catch(e=>window.mailArchiverNotice(e.message))"));
+                } else if matches!(action, "open_archive" | "new_search_window" | "new_archive" | "import_directory" | "open_options" | "open_ingest_window") {
+                    let _ = view.evaluate_script(&format!(
+                        "window.pywebview.api[{}]().catch(e=>window.mailArchiverNotice(e.message))",
+                        serde_json::to_string(action).unwrap()
+                    ));
                 } else if matches!(action, "about" | "preferences" | "updates") {
                     if let Err(error) = view.evaluate_script(&format!(
                         "window.__rustShellAction({})",
@@ -353,7 +486,42 @@ fn native(path: PathBuf, smoke_output: Option<PathBuf>) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use super::trusted_document;
+    use super::{trusted_document, trusted_panel};
+
+    #[test]
+    fn editor_navigation_does_not_grant_direct_ipc() {
+        // Editors receive a narrow parent bridge; message and arbitrary frames never do.
+        for windows in [false, true] {
+            let origin = if windows {
+                "http://ect.localhost"
+            } else {
+                "ect://localhost"
+            };
+            for path in [
+                "/options.html",
+                "/ingests.html",
+                "/identity.html?kind=name",
+                "/identity.html?kind=institution",
+            ] {
+                let value = format!("{origin}{path}");
+                assert!(trusted_panel(&value, windows));
+                assert!(!trusted_document(&value, windows));
+            }
+            for path in [
+                "/message.html",
+                "/options.html?path=elsewhere",
+                "/identity.html?kind=evil",
+                "/identity.html#fragment",
+                "/app.js",
+            ] {
+                assert!(!trusted_panel(&format!("{origin}{path}"), windows));
+            }
+            assert!(!trusted_panel(
+                "https://evil.example/identity.html?kind=name",
+                windows
+            ));
+        }
+    }
 
     #[test]
     fn only_the_platform_main_document_can_navigate_or_invoke_ipc() {

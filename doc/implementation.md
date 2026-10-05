@@ -2079,7 +2079,7 @@ durable evidence, source immutability, and isolated headless diagnostics.
 
 [DIOXUS.md](DIOXUS.md) records the planned UI trials: Dioxus Desktop and Tauri
 using the system webview, with ingest/search/preservation still in Python.
-The planned typed local Python worker and Rust frontend are not implemented.
+The Rust frontend and transitional typed local Python worker are implemented in the desktop migration described below; packaged delivery remains pending.
 Current `PyWebViewApplication`, `WindowBridge`, HTML/JavaScript, and PyInstaller
 sections describe the existing application. They remain the migration baseline,
 not evidence of Dioxus support. Windows full ingest takes priority over Linux
@@ -2990,7 +2990,7 @@ same bounded stop without a dialog.
 Headless regressions cancel a real cooperative processor and verify retained
 pending work; deferred-but-unstarted jobs never become active merely on quit.
 
-### Rust reader experiment
+### Rust desktop migration and reader prototype
 
 `rust/mailsearch-gui` is a separate Cargo workspace member using eframe/egui,
 rusqlite with bundled SQLite, mailparse, and html2text. The native window owns
@@ -3023,17 +3023,42 @@ The follow-on `mailsearch-webview` binary embeds the existing frontend assets
 unchanged and serves only an explicit asset allowlist through `ect://localhost`.
 On macOS, Wry hosts the system webview and Tao owns the window/event loop.
 `bridge.js` adapts the existing `window.pywebview.api` calls to request-ID-based
-Rust IPC; that compatibility name does not start Python. A bounded channel
+Rust IPC. Reading/searching use Rust; archive workflow calls lazily start the private Python service helper. A bounded channel
 feeds a foreground `Bridge` worker for message reads and short search-control
 requests. A separate worker owns the search connection. Replies are delivered as
 native user events, and
-closing exits without joining archive reads or waiting for JavaScript callbacks.
-Only the local main document may send IPC or navigate the window.
+closing asks the foreground worker to drop its engine pipe and has an independent
+five-second event-loop deadline. Only the exact local main document can invoke
+native IPC. Allowlisted editor frames get narrow APIs from their parent; MIME
+frames remain isolated and cannot obtain those APIs.
 
-The Rust dispatcher supports FTS words/phrases, literal subject/address filters,
-ordering, indexed previews, verified message text/headers and archive locations.
-HTML still uses the text converter; attachments and other unported operations
-are explicitly unavailable. The original egui binary remains available through
+The Rust dispatcher uses one selector plan for preview and comprehensive queries:
+FTS words/phrases, subject/address/name/institution/date selectors, attachment text
+and original-folder selections. `browse.rs` supplies role-count completions and
+compatible saved filters. `mime.rs` describes alternatives/attachments, decodes
+text, sanitizes HTML with Ammonia and applies a restrictive CSP. CID raster images
+are embedded; network images require explicit consent. `desktop.rs` exports only
+to new paths outside the archive, opens confirmed copies and handles clipboard
+and safe external links. Additional windows currently use separate Rust processes.
+
+`engine.rs` launches `mailarchiver.rust_engine` via a private JSON-line pipe using
+`ECT_RUST_ENGINE_PYTHON` or the checkout interpreter. The helper does not import
+`gui_app`; Pydantic requests bind actions to one archive. It reuses `run_ingest`,
+`DocumentOptions`, identity services, status history and lease-protected recovery.
+Import/definition work runs in a background thread; reader work remains in Rust.
+The helper pipe watcher signals cancellation on EOF and exits within five seconds,
+even if a service request is blocked. Unix process groups and Windows kill-on-close
+job objects supervise ordinary descendants; existing owned native helpers retain
+their own parent-death handling. Windows execution of this new boundary is unverified.
+`make test-rust-engine` exercises actual import, owner rules, identity edits,
+writer exclusion, pipe-close cancellation and resume using synthetic sources.
+Owner options, identity and history pages are reused in trusted embedded dialogs.
+Native file dialogs select source/destination; explicit import confirmation
+collects owner rules, scanning policy and attachment indexing. Missing helpers and
+service errors are reported without disabling the Rust search/message reader.
+
+Current limitations and unverified native/release gates are maintained in
+[RUST_GUI_MIGRATION.md](RUST_GUI_MIGRATION.md). The original egui binary remains available through
 `make rust-gui-egui`, with its earlier 100-result/three-second limits.
 
 `make test-rust-webview` connects headless Chromium to the real Rust `--rpc`
