@@ -60,14 +60,24 @@ Fetch the exact branch and compare revisions; do not reset or clean somebody
 else's changes. Query **all open PRs** before starting branch work and report
 their base/head branches and overlap, as required by `AGENTS.md`.
 
-At handoff preparation, PR
-[#151](https://github.com/simsong/email-collection-toolkit/pull/151),
-“Fix frozen Quit with immediate idle exit and bounded import shutdown,” was
-open from `codex/bounded-quit` into `main`. It changes Python shutdown behavior
-and overlaps this prototype's Makefile, README, requirements, implementation
-documentation, and release notes. It does not supply this Rust shell. Do not
-silently merge its unfinished shutdown work into the Windows port. Re-check
-its status when you begin; future integration needs a deliberate comparison.
+PR [#151](https://github.com/simsong/email-collection-toolkit/pull/151)
+merged into `main` as `945ffa40c9d0e8fbff949dff4039f2493fdadd6d`.
+That main revision is integrated into `work-rust-gui` for PR #153 by merge
+`85c9b9626fb6845f311438a9dd943a73e81bb19f`.
+The merge retains both Rust-reader and Python shutdown release notes; Makefile,
+README, requirements, and implementation documentation combine both changes.
+The Rust shell remains read-only and separate from the Python import lifecycle.
+Preserve the macOS code and its CI job while adding Windows-specific support.
+
+Two acknowledged Python import defects remain inherited from #151; this merge
+is not a fix for them: converter processes can survive forced owner exit
+([converter thread](https://github.com/simsong/email-collection-toolkit/pull/151#discussion_r4173626875)),
+and registry compatibility checking can precede explicit `--reprocess` after
+a first-ingest crash
+([reprocess thread](https://github.com/simsong/email-collection-toolkit/pull/151#discussion_r4173626902)).
+Neither is exercised by ordinary read-only Rust search. They remain relevant
+before claiming import/shutdown parity; do not infer their resolution from #151's
+merge or weaken the recovery requirements to accommodate them.
 
 Separate, **unpublished and uncommitted** work exists on the Mac in
 `.tmp/rust-import-verification`, branch `codex/rust-import-verification`.
