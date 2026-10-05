@@ -94,4 +94,17 @@ WKWebView screenshot in a visible window. Its Rust-owned test retains logs,
 hashes and the archive under `RUST_GUI_ARTIFACT_DIR` (default
 `.tmp/rust-gui-native`). CI runs it in the macos-latest matrix job and uploads
 the evidence; broader native interaction and platform parity still need trials.
-`make rust-gui` and `make rust-gui-egui` launch visible apps; tests do not.
+`make rust-gui`, `make rust-gui-egui`, and the native smoke test launch visible
+apps; the headless checks do not.
+
+<details>
+<summary>Native Rust GUI screenshot — macos-latest CI, ae69d75</summary>
+
+![Native WKWebView displaying the observatory search and selected synthetic message](images/rust-gui-macos-ae69d75.png)
+
+Captured by [CI run 37232804538](https://github.com/simsong/email-collection-toolkit/actions/runs/37232804538/job/111525888410)
+from commit `ae69d7546ed4f55e492d6628cde922c088d7ce9e`. This is a retained
+snapshot of that run, not an automatically refreshed image. The full artifact
+also contains the CLI-built synthetic archive, verifier logs and hash inventory.
+
+</details>
