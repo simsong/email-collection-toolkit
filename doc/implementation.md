@@ -2,6 +2,19 @@
 
 # Mail archive normalizer implementation
 
+`cargo run-ect --archive PATH` builds and launches the native Rust GUI; the
+macOS `make rust-gui` target delegates to this alias. It replaces `cargo reader`.
+Batch import remains the Python `mailarchiver ingest` command. Local discovery
+recurses through directory roots, silently ignores empty files and configured
+metadata, and reports other unrecognized files as skipped inputs. Directory
+enumeration errors propagate. The Windows archive-writer guard remains in
+place; the Rust GUI cannot yet import a drive into a canonical archive.
+
+[DEVOPS.md](DEVOPS.md) records the agreed macOS-focused CI and coordinated
+Mac/Windows release design. It is not yet fully implemented: Windows reader CI is opt-in/release-only, while combined Windows
+installer packaging, shared-feed publication, and static dual-platform download
+buttons remain pending.
+
 ## Embedded antivirus migration status
 
 [PR #124](EMBEDDED_CLAMAV.md) uses libclamav directly from Python and Rust.
@@ -3055,9 +3068,24 @@ SQL interruption, obsolete generations, page boundaries, selection during an
 unfinished search, and delayed replies after replacement or clearing.
 
 [WINDOWS_RUST_HANDOFF.md](WINDOWS_RUST_HANDOFF.md) records the Windows continuation
-plan and publication evidence. The native shell remains macOS-gated. Windows
-must adapt the custom-protocol navigation/IPC origin checks to WebView2's URL
-handling before claiming native parity; RPC/Chromium tests do not establish it.
+plan and publication evidence. The initial Windows adaptation enables the same
+native shell and Wry/Tao dependencies on Windows. Navigation and IPC use an exact
+platform-specific document URL: `ect://localhost/index.html` on macOS and
+`http://ect.localhost/index.html` on Windows. The asset allowlist, top-frame bridge
+guard and read-only archive engine are retained. Optional
+`ECT_RUST_WEBVIEW_DIAGNOSTICS` logs callback document URLs without message bodies.
+The shared frontend accepts Ctrl as well as Command for its reader shortcuts;
+the browser regression selects the host shortcut. Native ARM64 build, WebView2 callback, search and screenshot evidence is
+recorded in the Windows handoff; full interactive acceptance remains incomplete.
+
+The WinSparkle client accepts the existing macOS HTTPS appcast URL as the shared
+feed; the `/updates/mac/` path is retained for installed-client compatibility.
+Selection uses `sparkle:os` on separate platform items, not the URL path. The
+current publisher and checker still handle macOS DMGs only; mixed-feed generation,
+historical-entry classification, complete-feed signing, and signed Windows
+installers remain release work. Builds without explicit updater feed/key/build
+configuration leave update checks unavailable rather than contact that legacy
+feed prematurely.
 
 The independent `rust-gui` matrix job explicitly builds/tests the reader and
 runs `make test-rust-gui-native`. Its Rust integration test creates two synthetic

@@ -1,0 +1,12 @@
+/* Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved. */
+/* Style Rust desktop dialogs through the trusted local asset protocol.
+ * The shared page keeps its restrictive self-only stylesheet policy.
+ * Message-size preferences use a variable set by the native shell adapter.
+ * Dialog selectors affect only elements created by that adapter.
+ * Python and the shared search layout retain their existing styling.
+ */
+#body-view.plain, #body-view .plain { font-size: var(--rust-message-font-size, 14px); }
+#rust-shell-dialog { width: 460px; max-width: 85vw; }
+#rust-shell-dialog label { display: block; margin: 14px 0; }
+#rust-shell-dialog footer { display: flex; justify-content: flex-end; gap: 8px; margin-top: 22px; }
+#rust-shell-dialog p { white-space: pre-wrap; }

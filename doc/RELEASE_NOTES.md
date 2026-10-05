@@ -4,9 +4,28 @@
 
 ## Unreleased
 
+- Exclude quarantined categories from all ordinary Rust search paths, and
+  recover displayable MIME alternatives/siblings when an inline part is damaged.
+- Add native About/Preferences menus and dialogs, atomic per-user preferences,
+  and optional WinSparkle client support. Shared-feed publication and installers
+  remain pending; ordinary branch CI remains macOS-only.
+
 - Add a macos-latest Rust GUI CI matrix job that builds a synthetic archive
   through the CLI, boots the native webview, searches/displays a message, checks
   archive fixity, and uploads a native screenshot with reproducible evidence.
+- Document the agreed DevOps policy: macOS-focused development CI, explicit
+  parallel Mac/Windows test and release builds, one coordinated signed appcast,
+  and static direct-download buttons. Workflow and packaging implementation
+  remain pending.
+
+- Rename the Cargo GUI launch command to `cargo run-ect` and update its macOS
+  Makefile wrapper. Document batch import from external-drive roots, current
+  skipped-file noise, and the Windows archive-writing limitation.
+
+- Add Windows Wry/Tao shell support and a native synthetic smoke with exact
+  WebView2 main-document checks and opt-in boundary diagnostics. The shared
+  reader accepts Ctrl shortcuts alongside Command. Native reader parity,
+  imports and Windows packaging remain incomplete.
 
 - Publish the Rust prototype with a detailed Windows continuation handoff,
   including WebView2 integration boundaries, preservation requirements, test

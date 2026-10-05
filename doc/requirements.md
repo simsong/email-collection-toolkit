@@ -2,6 +2,17 @@
 
 # Mail archive normalizer requirements
 
+The native Rust GUI launch command is `cargo run-ect --archive PATH` on
+Windows and macOS; macOS Makefile launch targets delegate to that command.
+Batch import documentation must distinguish the Python writer from the Rust
+reader and identify the Windows writer restriction and discovery noise.
+
+The agreed release policy in [DEVOPS.md](DEVOPS.md) requires macOS-focused
+ordinary CI, explicit cross-platform test releases, concurrent Mac/Windows
+installer builds, coordinated publication through one signed appcast, and
+static direct-download buttons derived from complete published releases.
+These are release-workflow requirements, not evidence of Windows feature parity.
+
 ## Manual state and documentation status
 
 The archive has three operational databases: `archive.sqlite3` (catalog and
@@ -2390,3 +2401,27 @@ capturing a PNG of the native webview. Missing results, startup/callback timeout
 premature close, snapshot failures, or source/archive mutations must fail the
 test. Upload the synthetic archive and evidence even on failure. Keep automation
 behind an explicit build feature; a Chromium/RPC screenshot is not native proof.
+The native main-document boundary must admit only `ect://localhost/index.html`
+on macOS and WebView2's `http://ect.localhost/index.html` on Windows. Other
+origins, asset paths, query strings and fragments must not gain navigation or
+backend access. Validate the actual callback URLs in the native runtime.
+The shared reader must accept Ctrl shortcuts for find, find-next, selection and
+MIME-part navigation on Windows while preserving Command shortcuts on macOS.
+
+Windows WinSparkle and macOS Sparkle must share the existing appcast URL.
+Publication must use separate items with explicit enclosure `sparkle:os` values
+`macos` and `windows` (a combined installer), retaining platform-specific minimum
+OS versions and signed payloads. Derive release versions and builds through the
+shared mapper. Validate the complete mixed feed and re-sign it before publication;
+do not enable Windows updates against historical unclassified macOS entries.
+
+Ordinary Rust search exposes only Archive/Sent categories, including blank,
+structured, preview and comprehensive queries; quarantined rows must never
+appear in ordinary results even if indexed. Hash-verified malformed MIME must
+remain displayable: prefer a valid alternative over a damaged preferred part,
+retain usable inline siblings, and use bounded replacement-decoded fallback
+text when decoding fails. Display recovery must not rewrite archive bytes.
+
+Windows native smoke must retain a real WebView2 PNG and unchanged archive
+inventory/hash evidence. Use synthetic fixtures only and isolate preferences;
+Windows writer restrictions must not be bypassed to manufacture acceptance.

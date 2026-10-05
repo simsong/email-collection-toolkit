@@ -7,7 +7,10 @@
 // The native UI and headless smoke tests use this same request path.
 pub mod bridge;
 pub mod demo;
+pub mod preferences;
 mod search;
+pub mod shell;
+pub mod updater;
 pub mod worker;
 
 use anyhow::{bail, ensure, Context, Result};
@@ -98,9 +101,9 @@ impl Archive {
         let filter = if query.is_empty() {
             ""
         } else {
-            "WHERE m.sha256 IN (SELECT sha256 FROM search.message_fts WHERE message_fts MATCH ?1)"
+            "AND m.sha256 IN (SELECT sha256 FROM search.message_fts WHERE message_fts MATCH ?1)"
         };
-        let sql = format!("SELECT m.message_pk,m.subject,a.address,m.date_utc FROM messages m JOIN email_addresses a ON a.address_pk=m.sender_address_pk {filter} ORDER BY m.date_utc DESC,m.message_pk DESC LIMIT {PAGE_SIZE}");
+        let sql = format!("SELECT m.message_pk,m.subject,a.address,m.date_utc FROM messages m JOIN email_addresses a ON a.address_pk=m.sender_address_pk WHERE m.category IN ('Archive','Sent') {filter} ORDER BY m.date_utc DESC,m.message_pk DESC LIMIT {PAGE_SIZE}");
         let mut statement = self.db.prepare(&sql)?;
         let values = if query.is_empty() {
             vec![]
@@ -195,41 +198,77 @@ fn limited(mut value: String) -> String {
 }
 
 fn body_text(mail: &ParsedMail<'_>) -> Result<Option<String>> {
+    display_part(mail, true)
+}
+
+fn display_part(mail: &ParsedMail<'_>, fallback: bool) -> Result<Option<String>> {
     if mail.get_content_disposition().disposition == DispositionType::Attachment {
         return Ok(None);
     }
     if !mail.subparts.is_empty() {
-        // multipart/alternative chooses plain text; mixed messages show inline parts.
         if mail.ctype.mimetype == "multipart/alternative" {
-            for part in &mail.subparts {
-                if part.ctype.mimetype == "text/plain" {
-                    if let Some(body) = body_text(part)? {
-                        return Ok(Some(body));
-                    }
+            let ordered = || {
+                mail.subparts
+                    .iter()
+                    .filter(|p| p.ctype.mimetype == "text/plain")
+                    .chain(
+                        mail.subparts
+                            .iter()
+                            .filter(|p| p.ctype.mimetype != "text/plain"),
+                    )
+            };
+            // Try usable alternatives before displaying damaged encoded text.
+            for part in ordered() {
+                if let Ok(Some(body)) = display_part(part, false) {
+                    return Ok(Some(body));
                 }
             }
-            for part in &mail.subparts {
-                if let Some(body) = body_text(part)? {
-                    return Ok(Some(body));
+            if fallback {
+                for part in ordered() {
+                    if let Ok(Some(body)) = display_part(part, true) {
+                        return Ok(Some(body));
+                    }
                 }
             }
             return Ok(None);
         }
         let mut parts = Vec::new();
         for part in &mail.subparts {
-            if let Some(body) = body_text(part)? {
+            if let Some(body) = display_part(part, fallback)? {
                 parts.push(body);
             }
         }
-        return Ok((!parts.is_empty()).then(|| parts.join("\n\n")));
+        return Ok((!parts.is_empty()).then(|| limited(parts.join("\n\n"))));
     }
-    match mail.ctype.mimetype.as_str() {
-        "text/plain" => Ok(Some(mail.get_body()?)),
-        "text/html" => Ok(Some(html2text::from_read(
-            mail.get_body()?.as_bytes(),
-            100,
-        )?)),
-        _ => Ok(None),
+    if !matches!(mail.ctype.mimetype.as_str(), "text/plain" | "text/html") {
+        return Ok(None);
+    }
+    let body = match mail.get_body() {
+        Ok(body) => body,
+        Err(error) if fallback => {
+            let raw = match mail.get_body_encoded() {
+                mailparse::body::Body::Base64(body)
+                | mailparse::body::Body::QuotedPrintable(body) => body.get_raw(),
+                mailparse::body::Body::SevenBit(body) | mailparse::body::Body::EightBit(body) => {
+                    body.get_raw()
+                }
+                mailparse::body::Body::Binary(body) => body.get_raw(),
+            };
+            return Ok(Some(format!(
+                "[MIME decoding failed: {error}; showing encoded text.]\n{}",
+                String::from_utf8_lossy(&raw[..raw.len().min(MAX_DISPLAY)])
+            )));
+        }
+        Err(error) => return Err(error.into()),
+    };
+    if mail.ctype.mimetype == "text/html" {
+        match html2text::from_read(body.as_bytes(), 100) {
+            Ok(text) => Ok(Some(limited(text))),
+            Err(_) if fallback => Ok(Some(limited(body))),
+            Err(error) => Err(error.into()),
+        }
+    } else {
+        Ok(Some(limited(body)))
     }
 }
 
@@ -428,6 +467,47 @@ mod tests {
         assert!(body.contains("plain version"));
         assert!(!body.contains("html version"));
         assert!(!body.contains("attachment content"));
+    }
+
+    #[test]
+    fn malformed_mime_keeps_siblings_and_tries_usable_alternatives() {
+        // Retained malformed mail must remain displayable without changing bytes.
+        let bad = b"Content-Type: text/plain; charset=utf-8\nContent-Transfer-Encoding: base64\n\n%%%invalid%%%";
+        let mixed = [
+            b"Content-Type: multipart/mixed; boundary=m\n\n--m\n".as_slice(),
+            bad,
+            b"\n--m\nContent-Type: text/plain\n\nvalid sibling\n--m--\n",
+        ]
+        .concat();
+        let before = sha256(&mixed);
+        let shown = body_text(&mailparse::parse_mail(&mixed).unwrap())
+            .unwrap()
+            .unwrap();
+        assert!(shown.contains("valid sibling"));
+        assert!(shown.contains("MIME decoding failed"));
+        assert_eq!(sha256(&mixed), before);
+        let alternative = [
+            b"Content-Type: multipart/alternative; boundary=m\n\n--m\n".as_slice(),
+            bad,
+            b"\n--m\nContent-Type: text/html\n\n<b>usable alternative</b>\n--m--\n",
+        ]
+        .concat();
+        let shown = body_text(&mailparse::parse_mail(&alternative).unwrap())
+            .unwrap()
+            .unwrap();
+        assert!(shown.contains("usable alternative"));
+        assert!(!shown.contains("invalid"));
+        for raw in [
+            bad.as_slice(),
+            b"Content-Type: text/plain; charset=unknown-charset\n\nretained \xff text".as_slice(),
+        ] {
+            let before = sha256(raw);
+            assert!(!body_text(&mailparse::parse_mail(raw).unwrap())
+                .unwrap()
+                .unwrap()
+                .is_empty());
+            assert_eq!(sha256(raw), before);
+        }
     }
 
     #[test]

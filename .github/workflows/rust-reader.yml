@@ -1,0 +1,91 @@
+# Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved.
+# Build the Rust reader with Cargo on each supported development platform.
+# Native Windows runners cover both x64 and ARM64 MSVC executables.
+# Ordered format, Clippy and fixture tests use the same Cargo entry point locally.
+# Release-mode binaries become CI artifacts, not signed product installers.
+# Native smoke uses the platform webview and retains synthetic evidence.
+# Only explicit dispatch and release workflows spend Windows runner time.
+name: Rust reader builds
+
+on:
+  workflow_call:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  reader:
+    name: Rust reader (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, windows-11-arm, macos-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 40
+    env:
+      RUSTUP_TOOLCHAIN: stable
+      CARGO_TERM_COLOR: always
+    steps:
+      - name: Preserve fixture bytes during checkout
+        run: git config --global core.autocrlf false
+      - name: Checkout
+        uses: actions/checkout@v7.0.1
+      - name: Provision Rust checks
+        run: rustup toolchain install stable --profile minimal --component rustfmt,clippy
+      - name: Record native toolchain
+        run: |
+          rustc -vV
+          cargo --version
+      - name: Check reader and real synthetic fixtures
+        run: cargo reader-check
+      - name: Set up release metadata tooling
+        uses: astral-sh/setup-uv@v10.0.1
+      - name: Prepare macOS archive CLI
+        if: runner.os == 'macOS'
+        run: uv sync --locked --all-groups
+      - name: Exercise native webview
+        run: cargo reader-native-check
+      - name: Retain native evidence
+        if: always()
+        uses: actions/upload-artifact@v7.0.1
+        with:
+          name: native-reader-${{ matrix.os }}-${{ github.sha }}
+          path: .tmp/rust-gui-native*
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 7
+      - name: Derive build identity with the shared release mapper
+        env:
+          PYTHONPATH: src
+        run: uv run --no-project --with packaging --python '>=3.12' python scripts/rust_release_metadata.py --github-env
+      - name: Build optimized executables
+        run: cargo reader-build --release
+      - name: Stage verified Windows updater and validate its native ABI
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $architecture = if ($env:RUNNER_ARCH -eq 'ARM64') { 'ARM64' } else { 'x64' }
+          ./scripts/prepare_winsparkle.ps1 -Architecture $architecture -OutputDirectory target/release
+          $env:ECT_WINSPARKLE_TEST_DLL = (Resolve-Path target/release/WinSparkle.dll).Path
+          cargo reader-updater-check
+      - name: Upload Windows executables
+        if: runner.os == 'Windows'
+        uses: actions/upload-artifact@v7.0.1
+        with:
+          name: rust-reader-${{ matrix.os }}-${{ github.sha }}
+          path: |
+            target/release/mailsearch-webview.exe
+            target/release/mailsearch-rust.exe
+            target/release/WinSparkle.dll
+            target/release/WinSparkle-COPYING*.txt
+          if-no-files-found: error
+      - name: Upload macOS executables
+        if: runner.os == 'macOS'
+        uses: actions/upload-artifact@v7.0.1
+        with:
+          name: rust-reader-${{ matrix.os }}-${{ github.sha }}
+          path: |
+            target/release/mailsearch-webview
+            target/release/mailsearch-rust
+          if-no-files-found: error

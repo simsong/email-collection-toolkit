@@ -31,14 +31,15 @@
     });
   }
   const names = ["status", "activate", "search", "search_start", "search_status", "search_advance", "search_page", "search_cancel", "message", "part", "request_previews", "take_previews",
-    "suggestions", "ingest_overview", "saved_filter_sets", "open_message_window"];
+    "suggestions", "ingest_overview", "saved_filter_sets", "open_message_window",
+    "shell_status", "preferences_save", "check_updates"];
   const api = Object.fromEntries(names.map(name => [name, (...args) => invoke(name, args)]));
   async function copy(text) {
     const field = document.createElement("textarea");
     field.value = text;
     document.body.append(field); field.select();
     const copied = document.execCommand("copy"); field.remove();
-    if (!copied) throw new Error("Clipboard copy unavailable; select the text and use Command-C.");
+    if (!copied) throw new Error("Clipboard copy unavailable; select the text and use Ctrl-C or Command-C.");
     return true;
   }
   api.copy_visible_text = copy;

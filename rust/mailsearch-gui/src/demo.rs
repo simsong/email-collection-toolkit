@@ -64,7 +64,7 @@ pub fn create(path: &Path) -> Result<()> {
             ],
         )?;
         db.execute(
-            "INSERT INTO messages VALUES(?1,?2,?3,?1,?4,'2024-01-02T10:00:00Z','header','normal')",
+            "INSERT INTO messages VALUES(?1,?2,?3,?1,?4,'2024-01-02T10:00:00Z','header','Archive')",
             params![
                 id,
                 format!("demo{id}@example.test"),

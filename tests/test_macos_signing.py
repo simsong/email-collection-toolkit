@@ -191,7 +191,7 @@ def test_release_waits_for_exact_dmg_before_checksumming() -> None:
     workflow = safe_load((Path(__file__).parents[1] / ".github/workflows/release.yml").read_text())
     jobs = workflow[JOBS]
     assembly, macos = jobs[ASSEMBLE], jobs[MACOS]
-    assert assembly[NEEDS] == MACOS
+    assert set(assembly[NEEDS]) == {MACOS, "rust-reader"}
     assert assembly[STEPS][0][WITH][REF] == "${{ needs.macos.outputs.commit }}"
     steps = assembly[STEPS]
     download = next(i for i, step in enumerate(steps) if "actions/download-artifact@" in step.get(USES, ""))

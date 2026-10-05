@@ -16,6 +16,10 @@ use std::{
 #[path = "../native_smoke.rs"]
 mod native_smoke;
 
+#[cfg(all(target_os = "windows", feature = "native-smoke"))]
+#[path = "../native_smoke_windows.rs"]
+mod native_smoke;
+
 fn main() -> Result<()> {
     let args: Vec<String> = std::env::args().skip(1).collect();
     match args.as_slice() {
@@ -90,12 +94,21 @@ fn main() -> Result<()> {
     }
 }
 
-#[cfg(not(target_os = "macos"))]
+#[cfg(not(any(target_os = "macos", target_os = "windows")))]
 fn native(_path: PathBuf, _smoke_output: Option<PathBuf>) -> Result<()> {
-    bail!("The initial native shell is enabled on macOS only; RPC and core tests are portable")
+    bail!("The native shell is enabled on macOS and Windows; RPC and core tests are portable")
 }
 
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", target_os = "windows", test))]
+fn trusted_document(url: &str, windows: bool) -> bool {
+    url == if windows {
+        "http://ect.localhost/index.html"
+    } else {
+        "ect://localhost/index.html"
+    }
+}
+
+#[cfg(any(target_os = "macos", target_os = "windows"))]
 fn native(path: PathBuf, smoke_output: Option<PathBuf>) -> Result<()> {
     use mailsearch_rust::bridge::{asset, Reply, SCRIPT};
     use std::{borrow::Cow, sync::mpsc, thread};
@@ -107,9 +120,13 @@ fn native(path: PathBuf, smoke_output: Option<PathBuf>) -> Result<()> {
     use wry::WebViewBuilder;
     enum NativeEvent {
         Reply(Reply),
+        Shell(Request),
+        Menu(muda::MenuEvent),
         Quit,
         #[cfg(feature = "native-smoke")]
         Snapshot,
+        #[cfg(feature = "native-smoke")]
+        ResizeSmoke,
         #[cfg(feature = "native-smoke")]
         SmokeFinished(Result<()>),
     }
@@ -121,6 +138,15 @@ fn native(path: PathBuf, smoke_output: Option<PathBuf>) -> Result<()> {
         ))
         .with_inner_size(tao::dpi::LogicalSize::new(1250.0, 850.0))
         .build(&events)?;
+    let mut menu = Some(mailsearch_rust::shell::menu(&window)?);
+    let menu_proxy = events.create_proxy();
+    muda::MenuEvent::set_event_handler(Some(move |event| {
+        let _ = menu_proxy.send_event(NativeEvent::Menu(event));
+    }));
+    let quit_proxy = events.create_proxy();
+    let mut shell = Some(mailsearch_rust::shell::Shell::new(move || {
+        let _ = quit_proxy.send_event(NativeEvent::Quit);
+    })?);
     let proxy = events.create_proxy();
     let (sender, receiver) = mpsc::sync_channel::<Request>(64);
     thread::Builder::new()
@@ -142,6 +168,7 @@ fn native(path: PathBuf, smoke_output: Option<PathBuf>) -> Result<()> {
             }
         })?;
     let ipc_proxy = events.create_proxy();
+    let diagnostics = std::env::var_os("ECT_RUST_WEBVIEW_DIAGNOSTICS").is_some();
     let smoke_enabled = smoke_output.is_some();
     let builder = WebViewBuilder::new()
         .with_custom_protocol("ect".into(), |_, request| {
@@ -156,15 +183,36 @@ fn native(path: PathBuf, smoke_output: Option<PathBuf>) -> Result<()> {
                 .unwrap()
         })
         .with_initialization_script(SCRIPT)
-        .with_navigation_handler(|url| url == "ect://localhost/index.html")
+        .with_initialization_script(mailsearch_rust::shell::SCRIPT)
+        .with_navigation_handler(move |url| {
+            let trusted = trusted_document(&url, cfg!(target_os = "windows"));
+            if diagnostics {
+                eprintln!("Webview navigation: {url:?}, trusted={trusted}");
+            }
+            trusted
+        })
         .with_ipc_handler(move |request| {
-            if request.uri() != "ect://localhost/index.html" {
+            let url = request.uri().to_string();
+            let trusted = trusted_document(&url, cfg!(target_os = "windows"));
+            if diagnostics {
+                eprintln!("Webview IPC: {url:?}, trusted={trusted}");
+            }
+            if !trusted {
                 return;
             }
             if let Ok(message) = serde_json::from_str::<Request>(request.body()) {
                 #[cfg(feature = "native-smoke")]
                 if smoke_enabled {
                     match message.method.as_str() {
+                        "native_smoke_close_ready" => {
+                            eprintln!("Native smoke: verified quit during unfinished search");
+                            let _ = ipc_proxy.send_event(NativeEvent::Quit);
+                            return;
+                        }
+                        "native_smoke_resize" => {
+                            let _ = ipc_proxy.send_event(NativeEvent::ResizeSmoke);
+                            return;
+                        }
                         "native_smoke_ready" => {
                             let _ = ipc_proxy.send_event(NativeEvent::Snapshot);
                             return;
@@ -177,6 +225,13 @@ fn native(path: PathBuf, smoke_output: Option<PathBuf>) -> Result<()> {
                         }
                         _ => (),
                     }
+                }
+                if matches!(
+                    message.method.as_str(),
+                    "shell_status" | "preferences_save" | "check_updates"
+                ) {
+                    let _ = ipc_proxy.send_event(NativeEvent::Shell(message));
+                    return;
                 }
                 if message.method == "quit" {
                     let _ = ipc_proxy.send_event(NativeEvent::Quit);
@@ -195,7 +250,21 @@ fn native(path: PathBuf, smoke_output: Option<PathBuf>) -> Result<()> {
         .with_url("ect://localhost/index.html");
     #[cfg(feature = "native-smoke")]
     let builder = if smoke_enabled {
-        builder.with_initialization_script(include_str!("../../native-smoke.js"))
+        {
+            #[cfg(target_os = "macos")]
+            let driver = include_str!("../../native-smoke.js");
+            #[cfg(target_os = "windows")]
+            let driver = include_str!("../../native-smoke-windows.js");
+            builder
+                .with_initialization_script(driver)
+                .with_initialization_script(
+                    if std::env::var_os("ECT_RUST_NATIVE_CLOSE_SMOKE").is_some() {
+                        "window.__ectCloseSmoke = true;"
+                    } else {
+                        "window.__ectCloseSmoke = false;"
+                    },
+                )
+        }
     } else {
         builder
     };
@@ -214,6 +283,7 @@ fn native(path: PathBuf, smoke_output: Option<PathBuf>) -> Result<()> {
             ))));
         });
     }
+    let reply_proxy = events.create_proxy();
     events.run(move |event, _, flow| {
         *flow = ControlFlow::Wait;
         match event {
@@ -223,6 +293,10 @@ fn native(path: PathBuf, smoke_output: Option<PathBuf>) -> Result<()> {
             }
             | Event::UserEvent(NativeEvent::Quit) => {
                 *flow = ControlFlow::ExitWithCode(if smoke_enabled { 1 } else { 0 })
+            }
+            #[cfg(feature = "native-smoke")]
+            Event::UserEvent(NativeEvent::ResizeSmoke) => {
+                window.set_inner_size(tao::dpi::LogicalSize::new(1100.0, 740.0));
             }
             #[cfg(feature = "native-smoke")]
             Event::UserEvent(NativeEvent::Snapshot) => {
@@ -240,6 +314,29 @@ fn native(path: PathBuf, smoke_output: Option<PathBuf>) -> Result<()> {
                 }
                 *flow = ControlFlow::ExitWithCode(if result.is_ok() { 0 } else { 1 });
             }
+            Event::UserEvent(NativeEvent::Shell(request)) => {
+                if let Some(shell) = &mut shell {
+                    let _ = reply_proxy.send_event(NativeEvent::Reply(shell.reply(request)));
+                }
+            }
+            Event::UserEvent(NativeEvent::Menu(event)) => {
+                let action = event.id.as_ref();
+                if action == "quit" {
+                    *flow = ControlFlow::Exit;
+                } else if matches!(action, "about" | "preferences" | "updates") {
+                    if let Err(error) = view.evaluate_script(&format!(
+                        "window.__rustShellAction({})",
+                        serde_json::to_string(action).unwrap()
+                    )) {
+                        eprintln!("Menu delivery failed: {error}");
+                    }
+                }
+            }
+            Event::LoopDestroyed => {
+                // Stop WinSparkle callbacks before dropping its DLL and native menu.
+                shell.take();
+                menu.take();
+            }
             Event::UserEvent(NativeEvent::Reply(reply)) => {
                 if let Ok(value) = serde_json::to_string(&reply) {
                     if let Err(error) =
@@ -252,4 +349,40 @@ fn native(path: PathBuf, smoke_output: Option<PathBuf>) -> Result<()> {
             _ => (),
         }
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::trusted_document;
+
+    #[test]
+    fn only_the_platform_main_document_can_navigate_or_invoke_ipc() {
+        // Native-shell requirement: WebView2's mapped origin is exact, not a
+        // host prefix or permission for external pages, frames, or asset paths.
+        for windows in [false, true] {
+            let trusted = if windows {
+                "http://ect.localhost/index.html"
+            } else {
+                "ect://localhost/index.html"
+            };
+            assert!(trusted_document(trusted, windows));
+            assert!(!trusted_document(trusted, !windows));
+            for suffix in ["?query=1", "#fragment", "/child", ".evil"] {
+                assert!(!trusted_document(&format!("{trusted}{suffix}"), windows));
+            }
+            for untrusted in [
+                "https://ect.localhost/index.html",
+                "http://ect.localhost.evil/index.html",
+                "http://ect.localhost:80/index.html",
+                "http://evil@ect.localhost/index.html",
+                "http://ect.localhost/app.js",
+                "ect://localhost/app.js",
+                "ect://evil/index.html",
+                "file:///index.html",
+                "about:blank",
+            ] {
+                assert!(!trusted_document(untrusted, windows), "{untrusted}");
+            }
+        }
+    }
 }

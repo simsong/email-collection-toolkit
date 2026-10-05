@@ -3,7 +3,7 @@
 # Rust reader experiment
 
 The default experiment hosts the existing HTML/CSS/JavaScript search interface
-in a Rust-owned macOS window (Wry/Tao). Separate Rust workers handle search and
+in a Rust-owned window (Wry/Tao). Separate Rust workers handle search and
 verified message decoding, keeping message reads usable during a long search. It reuses ECT's catalog, FTS index and canonical MBOX
 files without a Python process, HTTP server, or schema migration.
 
@@ -70,7 +70,10 @@ An empty query shows search help. Choose the archive using `ARCHIVE` at launch. 
   before SQLite opens them, avoiding shared-memory sidecar creation.
   Simultaneous import snapshots,
   native accessibility, installer distribution, and OS parity are not yet proven.
-  The new shell is initially enabled only on macOS.
+  The shell is enabled for macOS and Windows; native ARM64 WebView2 smoke
+  and fixity tests have passed. Full interactive acceptance remains incomplete. Use Ctrl shortcuts on Windows and
+  Command shortcuts on macOS. Optional `ECT_RUST_WEBVIEW_DIAGNOSTICS=1` logs
+  document navigation/IPC boundaries for native validation.
 
 ## Validate without windows
 

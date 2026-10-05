@@ -2,9 +2,121 @@
 
 # DevOps
 
+## Agreed development and release policy
+
+Primary development takes place on macOS. Minimize GitHub Actions spending by
+keeping ordinary development iterations independent of Windows. Bring Windows
+to the intended macOS feature fidelity when preparing a release, with limited
+local validation on the Windows ARM64 VM and focused release-time checks.
+
+**Implementation status:** this section is the agreed target workflow, not a
+claim that it is deployed. The Windows branch preserves macOS-only ordinary CI and provides explicit
+manual/release Cargo reader builds for macOS, Windows x64 and Windows ARM64. Windows installer packaging, the mixed-platform appcast publisher, and
+the website's two direct-download buttons remain to be implemented. The Rust
+Windows application is currently a reader preview; archive writing/imports
+remain unsupported. Building an installer does not establish feature parity.
+
+### When to spend runner time
+
+| Event | Required work | Publication |
+| --- | --- | --- |
+| Ordinary development push | Existing macOS checks, once per commit; Cargo for Rust builds/tests and macOS Makefile wrappers. No automatic Windows build or installer. | None. |
+| Explicit test-release run | Build the macOS DMG and Windows installer concurrently from the same selected commit, using the production packaging workflow and focused installed-app checks. | Retain downloadable CI artifacts; no public appcast or current-download changes. |
+| Tagged alpha, beta, or stable release | Validate the annotated tag and canonical project version first; build, sign, and validate both installers concurrently from that exact commit. | Publish only after both platforms and all release gates succeed. Alpha/beta publication uses the preview channel. |
+| Ordinary website deployment | Build the site using the last complete published release and verified appcast. | Update Pages without rebuilding installers. |
+
+Add a manual test-release entry point that reuses the same packaging jobs as
+tagged releases. A manual test run is not itself permission to publish an
+update. Published test releases use the normal immutable alpha/beta tag path;
+stable clients must not receive previews unless explicitly opted in. Derive
+versions, channels, tags, and updater build numbers from `pyproject.toml`
+through the shared release-version mapper, including installer-specific version
+fields. Never hard-code a candidate version or move a published tag.
+
+Do not run duplicate push/PR jobs or create a Windows build for every macOS
+iteration. Explicit test releases are an intentional packaging cost. Build each
+architecture once per run and pass those artifacts forward to packaging and
+release assembly rather than rebuilding them in the publisher.
+
+### Windows distribution and evidence
+
+The planned Windows download is one installer containing native x64 and ARM64
+application builds. It selects the matching executable and WinSparkle DLL for
+the machine. These remain separate native builds inside a common installer;
+the application is not a universal executable. Include license notices,
+WebView2 prerequisite detection/installation, shortcuts, and uninstall support.
+
+Keep the macOS native GUI test. Windows release validation should cover install,
+launch, opening a synthetic archive, search, message display, unchanged archive
+bytes, upgrade, and uninstall. Exercise the packaged application, not only a
+Cargo executable. Record the architecture and distinguish hosted checks from
+the limited ARM64 VM checks; do not claim x64 execution from an ARM64 build.
+Imports and other newly ported features need their own acceptance evidence.
+Report untested behavior and remaining parity gaps explicitly.
+
+Windows executable/installer code signing and WinSparkle payload signing are
+distinct steps. Preserve the macOS signing, notarization, and installed-DMG
+gates. Keep release credentials out of ordinary branch CI and use the same
+packaging logic in test runs, reporting any unavailable signing validation.
+
+### One release and one appcast
+
+Retain one shared appcast URL for Sparkle and WinSparkle, including the existing
+`/updates/mac/appcast.xml` path for installed-client compatibility. Announce a
+version only when both platform installers are complete; do not let two jobs
+independently append or publish competing feeds.
+
+Use separate macOS and Windows items, with their own minimum OS versions,
+payload lengths, URLs, and signatures. Enclosures use `sparkle:os="macos"` and
+`sparkle:os="windows"` for the combined Windows installer. If architecture-specific
+installers are introduced later, use `windows-x64` and `windows-arm64` instead.
+Extend publisher/checker assumptions that currently allow only DMGs and one
+item per tag. Verify prior signed history before classifying historical macOS
+entries, then sign and verify the complete updated XML before publication.
+Test platform and preview-channel selection in both clients.
+
+Release orchestration is:
+
+1. Validate the release identity, then build and validate both installers in
+   parallel from the same commit.
+2. Assemble both installers, checksums, and required release assets. Verify
+   prior feed history, sign the final payloads, and generate and verify the
+   complete shared appcast before creating the complete draft release.
+3. Publish the complete GitHub release only after all required gates succeed.
+4. Deploy Pages using that exact release's verified appcast and download metadata.
+
+If either platform fails before publication, keep the previous public release,
+appcast, and current-download links intact. Serialize publication to prevent
+concurrent runs from losing feed history. GitHub Releases and Pages are not an
+atomic transaction: if Pages deployment fails after release publication, retain
+the failure and retry deployment of the exact published release without moving
+its tag, rebuilding installers, or silently resetting the feed.
+
+### Website downloads
+
+Render both platform buttons in static HTML; JavaScript is not required:
+
+- **Download for Mac (.dmg)**
+- **Download for Windows (.exe)** — includes native x64 and ARM64 builds
+- **View all downloads and release notes** — links to the GitHub release listing
+
+Display **Current release: VERSION** beside the primary buttons. Each primary
+button links directly to its installer asset, not an Actions artifact or a
+GitHub release-detail page. Generate version, URLs, and availability at site
+build time from a complete published release; validate that both assets exist.
+Keep preview downloads distinctly labeled and separate from the current stable
+release. If only previews exist, label them as previews. Before the first
+complete Windows release, do not render an active Windows download button for
+an absent asset. Browser platform detection may later emphasize a button but
+must not hide the other platform or be necessary for downloading.
+
 ## GitHub Actions
 
-### Workflow gates
+### Existing macOS publication baseline
+
+The following describes the macOS workflow being extended. The agreed policy
+above governs the planned combined release; the manual test-release path and
+Windows packaging must be added rather than inferred from this baseline.
 
 | Workflow | Trigger | Gate and result |
 | --- | --- | --- |

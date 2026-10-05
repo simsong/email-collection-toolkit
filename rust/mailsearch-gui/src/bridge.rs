@@ -362,7 +362,7 @@ pub(crate) fn query_parts(query: &str) -> Result<(Vec<String>, Vec<SqlValue>, Ve
     if !token.is_empty() {
         tokens.push(token);
     }
-    let mut clauses = Vec::new();
+    let mut clauses = vec!["m.category IN ('Archive','Sent')".to_string()];
     let mut values = Vec::new();
     let mut terms = Vec::new();
     let mut fulltext = Vec::new();
@@ -404,6 +404,7 @@ pub fn asset(path: &str) -> Option<(&'static str, &'static [u8])> {
         "/" | "/index.html" => ("text/html", include_bytes!("../../../gui/index.html")),
         "/app.js" => ("text/javascript", include_bytes!("../../../gui/app.js")),
         "/style.css" => ("text/css", include_bytes!("../../../gui/style.css")),
+        "/rust-shell.css" => ("text/css", include_bytes!("../shell.css")),
         "/processing.js" => (
             "text/javascript",
             include_bytes!("../../../gui/processing.js"),
@@ -424,6 +425,78 @@ pub fn asset(path: &str) -> Option<(&'static str, &'static [u8])> {
 mod tests {
     use super::*;
     #[test]
+    fn quarantine_is_excluded_from_every_search_path() {
+        // Ordinary reader searches expose only Archive/Sent, even if FTS contains quarantine.
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("categories");
+        crate::demo::create(&path).unwrap();
+        let db = rusqlite::Connection::open(path.join("archive.sqlite3")).unwrap();
+        db.execute_batch("UPDATE messages SET category=CASE message_pk WHEN 1 THEN 'INFECTED' WHEN 2 THEN 'MALFORMED' ELSE 'Sent' END").unwrap();
+        drop(db);
+        let before = std::fs::read(path.join("archive.sqlite3")).unwrap();
+        let archive = Archive::open(&path).unwrap();
+        assert_eq!(
+            archive
+                .search("")
+                .unwrap()
+                .iter()
+                .map(|r| r.id)
+                .collect::<Vec<_>>(),
+            [3]
+        );
+        assert!(archive.search("observatory").unwrap().is_empty());
+        let mut bridge = Bridge::open(&path).unwrap();
+        for query in ["", "subject:planning", "from:alice", "observatory", "roses"] {
+            let expected = if matches!(query, "" | "roses") {
+                vec![3]
+            } else {
+                vec![]
+            };
+            for method in ["search", "search_batch"] {
+                let reply = bridge.call(method, &[json!(query)]).unwrap();
+                let ids: Vec<i64> = reply["results"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .map(|r| r["message_pk"].as_i64().unwrap())
+                    .collect();
+                assert_eq!(ids, expected, "{method} {query}");
+            }
+            let generation =
+                bridge.call("search_start", &[json!(query)]).unwrap()["generation"].clone();
+            let deadline = Instant::now() + Duration::from_secs(5);
+            loop {
+                let status = bridge
+                    .call("search_status", std::slice::from_ref(&generation))
+                    .unwrap();
+                assert!(status["error"].is_null(), "{status}");
+                if status["complete"] == true {
+                    break;
+                }
+                bridge
+                    .call(
+                        "search_advance",
+                        &[generation.clone(), status["window"].clone()],
+                    )
+                    .unwrap();
+                assert!(Instant::now() < deadline);
+                std::thread::sleep(Duration::from_millis(1));
+            }
+            let page = bridge
+                .call("search_page", &[generation, json!(0), json!(512)])
+                .unwrap();
+            let ids: Vec<i64> = page["results"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|r| r["message_pk"].as_i64().unwrap())
+                .collect();
+            assert_eq!(ids, expected);
+        }
+        assert_eq!(std::fs::read(path.join("archive.sqlite3")).unwrap(), before);
+    }
+
+    #[test]
     fn incremental_search_returns_bounded_ordered_complete_batches() {
         // Broad FTS matches must return before the full result set is visited.
         // Sparse matches must continue through empty batches; ties cannot duplicate.
@@ -431,11 +504,11 @@ mod tests {
         let path = dir.path().join("bulk");
         crate::demo::create(&path).unwrap();
         let db = rusqlite::Connection::open(path.join("archive.sqlite3")).unwrap();
-        db.execute_batch("WITH RECURSIVE seq(x) AS(VALUES(4) UNION ALL SELECT x+1 FROM seq WHERE x<5000) INSERT INTO messages SELECT x,printf('bulk%d',x),printf('%064d',x),1,printf('Subject %05d',x),'2025-01-01','header','normal' FROM seq;").unwrap();
+        db.execute_batch("WITH RECURSIVE seq(x) AS(VALUES(4) UNION ALL SELECT x+1 FROM seq WHERE x<5002) INSERT INTO messages SELECT x,printf('bulk%d',x),printf('%064d',x),1,printf('Subject %05d',x),'2025-01-01','header',CASE x WHEN 5001 THEN 'INFECTED' WHEN 5002 THEN 'MALFORMED' ELSE 'Archive' END FROM seq;").unwrap();
         drop(db);
         let mut db = rusqlite::Connection::open(path.join("search.sqlite3")).unwrap();
         let transaction = db.transaction().unwrap();
-        for id in 4..=5000 {
+        for id in 4..=5002 {
             let digest = format!("{id:064}");
             let content = if id == 4 { "simson needle" } else { "simson" };
             transaction
@@ -479,7 +552,7 @@ mod tests {
                     }
                     cursor = batch["cursor"].clone();
                     // Selection/status work can run between continuation batches.
-                    assert_eq!(bridge.call("status", &[]).unwrap()["message_count"], 5000);
+                    assert_eq!(bridge.call("status", &[]).unwrap()["message_count"], 5002);
                 }
                 let mut expected: Vec<i64> = (4..=5000).collect();
                 if direction == "descending" {

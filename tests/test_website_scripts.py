@@ -2,6 +2,7 @@
 
 """Verify project-website validation and workflow integrity controls."""
 
+import re
 import subprocess
 import sys
 import tomllib
@@ -31,7 +32,7 @@ def test_missing_png_reports_a_clear_failure(tmp_path: Path) -> None:
     """Requirement: a missing required icon fails without a file-open traceback."""
     path = tmp_path / "rainbow-post-48.png"
 
-    with pytest.raises(SystemExit, match=f"missing PNG icon: {path}"):
+    with pytest.raises(SystemExit, match=re.escape(f"missing PNG icon: {path}")):
         validate_png(path, 48)
 
 
@@ -90,11 +91,36 @@ def test_ci_runs_parallel_branch_jobs_without_building_a_dmg() -> None:
     makefile = (workflow.parents[2] / "Makefile").read_text(encoding="utf-8")
     assert "check:\n\t$(MAKE) check-static\n\t$(MAKE) check-tests" in makefile
     for definition in workflow.parent.glob("*.yml"):
+        if definition.name == "rust-reader.yml":
+            continue  # Its explicit multi-platform build matrix is checked below.
         configuration = safe_load(definition.read_text())
         for name, job in configuration[JOBS].items():
             if definition == workflow and name == "rust-gui":
                 continue  # The explicit macos-latest matrix is checked above.
             assert job.get(RUNS_ON) == "macos-15" or "uses" in job, definition
+
+
+def test_cargo_reader_builds_gate_branch_and_tag_workflows() -> None:
+    """Windows delivery: both architectures must build/test and retain executable artifacts."""
+    workflows = Path(__file__).parents[1] / ".github/workflows"
+    ci = safe_load((workflows / "continuous-integration.yml").read_text(encoding="utf-8"))
+    assert "rust-reader" not in ci[JOBS]  # Ordinary Mac iterations must not spend Windows time.
+    release = safe_load((workflows / "release.yml").read_text(encoding="utf-8"))
+    assert release[JOBS]["rust-reader"]["uses"] == "./.github/workflows/rust-reader.yml"
+    assert "rust-reader" in release[JOBS]["assemble"][NEEDS]
+    reader = safe_load((workflows / "rust-reader.yml").read_text(encoding="utf-8"))
+    job = reader[JOBS]["reader"]
+    assert job[RUNS_ON] == "${{ matrix.os }}"
+    assert set(job["strategy"]["matrix"]["os"]) == {
+        "windows-latest", "windows-11-arm", "macos-latest",
+    }
+    runs = [step.get(RUN, "") for step in job[STEPS]]
+    assert runs.index("cargo reader-check") < runs.index("cargo reader-build --release")
+    windows_upload = next(step for step in job[STEPS]
+                          if step.get("if") == "runner.os == 'Windows'" and step.get("uses", "").startswith("actions/upload-artifact@"))
+    assert windows_upload["uses"].startswith("actions/upload-artifact@")
+    assert "target/release/mailsearch-webview.exe" in windows_upload["with"]["path"]
+    assert windows_upload["with"]["if-no-files-found"] == "error"
 
 
 def test_release_workflow_validates_built_distributions() -> None:
@@ -133,7 +159,7 @@ def test_release_workflow_validates_built_distributions() -> None:
     assert any(step.get("run") == "make test-sparkle-signing" for step in ci[JOBS]["python-browser"]["steps"])
     triggers = configuration.get(WORKFLOW_ON, configuration.get(True))
     assert triggers == {"push": {"tags": ["v*"]}}
-    assert set(configuration[JOBS]) == {"assemble", "macos"}
+    assert set(configuration[JOBS]) == {"assemble", "macos", "rust-reader"}
     assert "git merge-base --is-ancestor HEAD refs/remotes/origin/main" in text
     assert ('gh workflow run pages.yml --repo "$GITHUB_REPOSITORY" '
             '--ref main -f release_tag="$RELEASE_TAG"') in text

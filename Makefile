@@ -42,7 +42,9 @@ TIKA_VERSION ?= 4.0.0
 CARGO ?= cargo
 RUST_EXE_SUFFIX := $(if $(filter Windows_NT,$(OS)),.exe,)
 RUST_TARGET_DIR ?= $(CURDIR)/target
-CARGO_RUN = $(CARGO) --config 'build.target-dir="$(RUST_TARGET_DIR)"'
+# Export Cargo's native override so nested Cargo checks use the same output tree.
+export CARGO_TARGET_DIR := $(RUST_TARGET_DIR)
+CARGO_RUN = $(CARGO)
 
 .PHONY: test-pst pst-import pst-smoke rust-programs mdti-validator mcti-generator pst-importer mcti-scan pst-downloader pst-download pst-download-plan test-pst-downloader rust-toolchain rust-lock rust-fmt rust-check test-rust rust-smoke
 rust-programs:
@@ -62,9 +64,7 @@ rust-fmt:
 	$(CARGO_RUN) fmt --all
 
 rust-check:
-	$(CARGO_RUN) fmt --all -- --check
-	$(CARGO_RUN) clippy --locked --workspace --all-targets -- -D warnings
-	$(MAKE) test-rust
+	$(CARGO_RUN) workspace-check
 
 test-rust:
 	$(CARGO_RUN) test --locked --workspace
@@ -697,26 +697,25 @@ test-pff-converter: pff-converter
 
 # Rust GUI experiment: ARCHIVE is an existing archive directory; QUERY is literal search text.
 # RUST_GUI_DEMO selects a new synthetic fixture directory; no real mail is imported.
+# ECT_RUST_WEBVIEW_DIAGNOSTICS enables native navigation/IPC URL diagnostics.
 RUST_GUI_DEMO ?= $(CURDIR)/.tmp/rust-gui-demo
 .PHONY: rust-gui-build rust-gui rust-gui-demo rust-gui-smoke test-rust-gui
 rust-gui-build:
-	$(CARGO_RUN) build --locked -p mailsearch-rust
+	$(CARGO_RUN) reader-build
 
 rust-gui: rust-gui-build
 	@test -n "$(ARCHIVE)" || { echo 'usage: make rust-gui ARCHIVE=/path/to/archive'; exit 2; }
-	$(CARGO_RUN) run --locked -p mailsearch-rust --bin mailsearch-webview -- --archive "$(ARCHIVE)"
+	$(CARGO_RUN) run-ect --archive "$(ARCHIVE)"
 
 rust-gui-demo: rust-gui-build
-	$(CARGO_RUN) run --locked -p mailsearch-rust --bin mailsearch-rust -- --create-demo "$(RUST_GUI_DEMO)"
+	$(CARGO_RUN) reader-demo "$(RUST_GUI_DEMO)"
 
 rust-gui-smoke: rust-gui-build
 	@test -n "$(ARCHIVE)" || { echo 'usage: make rust-gui-smoke ARCHIVE=/path/to/archive QUERY=words'; exit 2; }
-	$(CARGO_RUN) run --locked -p mailsearch-rust --bin mailsearch-rust -- --smoke "$(ARCHIVE)" "$(QUERY)"
+	$(CARGO_RUN) reader-smoke "$(ARCHIVE)" "$(QUERY)"
 
 test-rust-gui:
-	$(CARGO_RUN) fmt -p mailsearch-rust -- --check
-	$(CARGO_RUN) clippy --locked -p mailsearch-rust --all-targets -- -D warnings
-	$(CARGO_RUN) test --locked -p mailsearch-rust
+	$(CARGO_RUN) reader-check
 
 .PHONY: test-rust-gui-interop
 
@@ -738,7 +737,7 @@ test-rust-webview: rust-gui-build
 .PHONY: rust-webview-probe
 rust-webview-probe: rust-gui-build
 	@test -n "$(ARCHIVE)" || { echo 'usage: make rust-webview-probe ARCHIVE=/path QUERY=words'; exit 2; }
-	$(CARGO_RUN) run --locked -p mailsearch-rust --bin mailsearch-webview -- --probe "$(ARCHIVE)" "$(QUERY)"
+	$(CARGO_RUN) reader-probe "$(ARCHIVE)" "$(QUERY)"
 
 # RUST_GUI_ARTIFACT_DIR retains the synthetic .mailarchive, native PNG, hashes and logs.
 # Requires a logged-in macOS GUI session; uses explicitly unscanned synthetic EML only.
@@ -748,4 +747,12 @@ test-rust-gui-native:
 	@test "$$(uname -s)" = Darwin || { echo 'native Rust GUI smoke currently requires macOS'; exit 2; }
 	$(CARGO_RUN) fmt -p mailsearch-rust -- --check
 	$(CARGO_RUN) clippy --locked -p mailsearch-rust --features native-smoke --all-targets -- -D warnings
-	RUST_GUI_ARTIFACT_DIR="$(RUST_GUI_ARTIFACT_DIR)" $(CARGO_RUN) test --locked -p mailsearch-rust --features native-smoke --test native_smoke -- --ignored --nocapture
+	RUST_GUI_ARTIFACT_DIR="$(RUST_GUI_ARTIFACT_DIR)" $(CARGO_RUN) reader-native-check
+
+# ECT_WINSPARKLE_TEST_DLL points to the staged checksum-verified native SDK DLL.
+# ECT_RELEASE_VERSION/BUILD/CHANNEL come from the shared release mapper.
+# ECT_WINSPARKLE_APPCAST_URL/PUBLIC_KEY are optional public build configuration.
+# ECT_RUST_NATIVE_CLOSE_SMOKE is used only by feature-gated lifecycle tests.
+.PHONY: test-rust-updater
+test-rust-updater:
+	$(CARGO_RUN) reader-updater-check

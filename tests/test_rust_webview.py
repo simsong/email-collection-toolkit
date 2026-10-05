@@ -11,6 +11,7 @@ from os import environ
 from pathlib import Path
 import subprocess
 import sqlite3
+import sys
 
 from playwright.sync_api import Page, expect
 import pytest
@@ -30,6 +31,10 @@ def test_existing_interface_with_rust_backend(page: Page, tmp_path: Path) -> Non
     with sqlite3.connect(archive / "archive.sqlite3") as database:
         database.execute("WITH RECURSIVE seq(x) AS (VALUES(2) UNION ALL SELECT x+1 FROM seq WHERE x<1600) INSERT INTO messages SELECT x,printf('copy%d@example.test',x),sha256,sender_address_pk,subject,date_utc,date_source,category FROM seq CROSS JOIN messages WHERE message_pk=1")
         database.execute("INSERT INTO locations SELECT message_pk,1,(SELECT byte_offset FROM locations WHERE message_pk=1),(SELECT byte_length FROM locations WHERE message_pk=1) FROM messages WHERE message_pk>1")
+        # Ordinary frontend search must exclude quarantine even for indexed bytes.
+        for message_id, category in ((1601, "INFECTED"), (1602, "MALFORMED")):
+            database.execute("INSERT INTO messages SELECT ?,?,sha256,sender_address_pk,subject,date_utc,date_source,? FROM messages WHERE message_pk=1",
+                             (message_id, f"quarantine{message_id}@example.test", category))
     before = [(p.relative_to(archive), sha256(p.read_bytes()).hexdigest()) for p in sorted(archive.rglob("*")) if p.is_file()]
     process = subprocess.Popen([binary, "--rpc", str(archive)], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                                stderr=subprocess.PIPE, text=True)
@@ -112,7 +117,7 @@ def test_existing_interface_with_rust_backend(page: Page, tmp_path: Path) -> Non
         width_after = page.locator("#results-pane").evaluate("e => e.getBoundingClientRect().width")
         assert width_after > width_before
         page.locator("#body-view").click()
-        page.keyboard.press("Meta+f")
+        page.keyboard.press("Meta+f" if sys.platform == "darwin" else "Control+f")
         expect(page.locator("#message-find")).to_be_visible()
         page.locator("#message-find-query").fill("agenda")
         expect(page.locator("#message-find-status")).to_contain_text("1")

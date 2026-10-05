@@ -14,9 +14,12 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  rust-reader:
+    uses: ./.github/workflows/rust-reader.yml
+
   assemble:
     name: Assemble macOS release
-    needs: macos
+    needs: [macos, rust-reader]
     runs-on: macos-15
     permissions:
       actions: write

@@ -4,6 +4,51 @@
 
 Prepared 2026-10-04 for the Codex instance working inside the Windows VM.
 
+## Windows continuation checkpoint (2026-10-05)
+
+Integrated baseline: `5f7bab67f86d951080b15a78766c956e55f6d351` on
+`work-rust-gui` in `.tmp/windows-rust-gui`. Earlier local work is preserved in
+stash `963db2f8854e20ca95ed0e527f7d271190525c5e` while integration is published.
+The merged #151 code and its two acknowledged import limitations below remain.
+
+Native Windows ARM64 uses Rust/Cargo 1.99.0, Windows build 26200, MSVC 14.44,
+Windows SDK 10.0.26100.0, and installed WebView2. The actual navigation and IPC
+callbacks report `http://ect.localhost/index.html`; exact-origin checks remain
+in force. The native smoke uses WebView2 CapturePreview, not Chromium or a
+whole-desktop screenshot. It exercises a 1,600-result synthetic archive with
+spaces/non-ASCII in its path, staged previews, six sort orders over real IPC,
+scroll paging, selection during search, replacement/clear cancellation, About,
+Preferences save, resizing, find-in-message and quit during unfinished search.
+It verifies the archive inventory and hashes afterward. Programmatic keyboard
+events validate frontend handlers, not physical keyboard delivery or Alt-F4.
+Multiple monitor/DPI configurations and physical native menu operation still
+need manual acceptance. Windows importing and installers remain unimplemented.
+
+Use the user-approved Cargo workflow directly in PowerShell; GNU Make is not
+installed on this VM. macOS Makefile targets wrap the same Cargo commands:
+`cargo reader-build`, `cargo reader-check`, `cargo reader-native-check`, and
+`cargo run-ect --archive PATH`. The macOS native smoke and ordinary macOS CI
+are retained. Windows Actions runs are explicit dispatch/release only, in
+accordance with [DEVOPS.md](DEVOPS.md). Full installer/appcast work is pending.
+See [WINDOWS.md](WINDOWS.md) for build/run commands.
+
+Windows validation at this checkpoint: `cargo reader-check` passed 16 tests;
+feature-enabled Clippy passed with warnings denied; `cargo reader-native-check`
+passed the native Windows test (the macOS-only test is compiled out here);
+`cargo reader-updater-check` passed against the verified ARM64 WinSparkle DLL.
+The selected WebView2 runtime reported `154.0.4258.53`. Retained local evidence
+is `.tmp/rust-gui-native-windows/run-MCNbFg`, including the quit-during-search
+marker, PNG, logs, and archive hash inventory. The [native Windows screenshot](images/rust-gui-windows-arm64.png)
+was visually inspected; it contains only synthetic messages.
+
+Direct `uv` equivalents passed Ruff with zero diagnostics, scoped Pylint, ty,
+and Pyright, and 60 workflow/signing tests (two macOS-only tests skipped).
+`make ruff` and the full `make check` could not run because Make is absent.
+Python interoperability/browser tests, fresh website screenshots, macOS runtime,
+and Linux runtime were not exercised on this VM. The inherited macOS CI remains
+the macOS validation path. Installer signing and live appcast update delivery
+are not covered by the DLL ABI/key-parser test.
+
 ## Assignment and definition of success
 
 Continue the working macOS Rust prototype on Windows, retaining one Rust core
@@ -104,7 +149,7 @@ test harnesses. This is not a completed Python removal or a Rust import engine.
 
 | File | Responsibility and porting relevance |
 | --- | --- |
-| `rust/mailsearch-gui/Cargo.toml` | Dependencies and Rust 1.95 minimum. Wry 0.57 and Tao 0.37 currently exist only under the macOS dependency condition. |
+| `rust/mailsearch-gui/Cargo.toml` | Dependencies and Rust 1.95 minimum. Wry 0.57 and Tao 0.37 support macOS and Windows; snapshot dependencies are feature-gated. |
 | `rust/mailsearch-gui/src/bin/mailsearch-webview.rs` | CLI modes, native window/event loop, embedded asset protocol, navigation/IPC trust checks, bounded foreground worker channel, reply delivery, close/quit. |
 | `rust/mailsearch-gui/bridge.js` | Request IDs and promise resolution; exposes the compatibility name `window.pywebview.api` without running Python; disables unported controls. |
 | `rust/mailsearch-gui/src/bridge.rs` | Real frontend API dispatcher, asset allowlist, search grammar, parameterized SQL, selected-message representation, previews and regression tests. |
@@ -128,8 +173,8 @@ for reproducing this baseline.
 
 ## First Windows implementation boundary
 
-`mailsearch-webview.rs` uses `#[cfg(target_os = "macos")]` for `native()`.
-Other systems call a stub that returns an explicit macOS-only error. Merely
+`mailsearch-webview.rs` enables `native()` on macOS and Windows.
+Other systems call an explicit unsupported-native-shell stub. Merely
 building an EXE, passing RPC tests, or opening the egui app cannot establish
 Windows webview support.
 
@@ -185,8 +230,8 @@ explicit baseline consistent with the available compiler/SDK, record it, and
 test the other desired architecture separately. Do not silently combine x64
 and ARM64 libraries or claim native ARM performance from emulation.
 
-Use GNU Make plus a compatible shell for this repository's recipes. PowerShell
-alone does not interpret the POSIX recipes. `doc/WINDOWS.md` documents the
+Rust builds/tests use Cargo directly on Windows, as authorized by the user.
+The historical Make recipes require a POSIX-compatible shell. `doc/WINDOWS.md` documents the
 MSYS2/native-Windows tool split and Python setup, but its earlier Dioxus/Tauri
 trial instructions are historical for this task. MSYS2 supplies utilities; the
 app must still be built with the intended native Windows Rust/MSVC toolchain.
@@ -229,8 +274,7 @@ make rust-gui ARCHIVE=.tmp/windows-reader-demo
 ```
 
 Create `.tmp` first if absent; the current demo helper creates the destination
-directory but not a missing parent. The final command deliberately fails with
-the macOS-only error until the Windows native shell is implemented. The demo
+directory but not a missing parent. The equivalent Windows launch is `cargo run-ect --archive PATH`. The demo
 creation target must not be rerun against an existing directory. Reuse that
 fixture for later reader runs, or choose a fresh directory; never delete an
 unknown archive to make fixture creation pass.
