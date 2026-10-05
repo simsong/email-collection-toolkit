@@ -18,6 +18,13 @@ env:
   MAILARCHIVER_NATIVE_SETUP_E2E: "0"
 
 jobs:
+  rust-reader:
+    # Explicit opt-in while ordinary Mac development avoids Windows runner costs.
+    if: contains(github.event.head_commit.message, '[windows-ci]')
+    uses: ./.github/workflows/rust-reader.yml
+    with:
+      windows_only: true
+
   rust-gui:
     name: Rust GUI (${{ matrix.os }})
     strategy:

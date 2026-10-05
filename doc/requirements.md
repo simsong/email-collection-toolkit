@@ -2408,6 +2408,10 @@ backend access. Validate the actual callback URLs in the native runtime.
 The shared reader must accept Ctrl shortcuts for find, find-next, selection and
 MIME-part navigation on Windows while preserving Command shortcuts on macOS.
 
+Explicit pre-merge Windows CI is opt-in via `[windows-ci]` in the pushed head
+commit message; ordinary pushes must skip both Windows runners. Reuse the
+reader workflow without duplicating the normal macOS native job.
+
 Windows WinSparkle and macOS Sparkle must share the existing appcast URL.
 Publication must use separate items with explicit enclosure `sparkle:os` values
 `macos` and `windows` (a combined installer), retaining platform-specific minimum

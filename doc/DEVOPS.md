@@ -40,6 +40,12 @@ release assembly rather than rebuilding them in the publisher.
 
 ### Windows distribution and evidence
 
+For explicit pre-merge Windows validation, include `[windows-ci]` in the pushed
+head commit message. The branch workflow calls the shared reader workflow for
+Windows x64/ARM64 only; its normal macOS job already validates that platform.
+Ordinary pushes omit this marker and skip Windows runners. The standalone
+manual reader workflow and release caller still build all three platforms.
+
 The planned Windows download is one installer containing native x64 and ARM64
 application builds. It selects the matching executable and WinSparkle DLL for
 the machine. These remain separate native builds inside a common installer;

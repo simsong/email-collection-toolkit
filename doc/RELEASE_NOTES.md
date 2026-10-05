@@ -4,6 +4,9 @@
 
 ## Unreleased
 
+- Allow explicit Windows x64/ARM64 branch validation with a `[windows-ci]`
+  head commit marker, without adding Windows costs to ordinary Mac iterations.
+
 - Exclude quarantined categories from all ordinary Rust search paths, and
   recover displayable MIME alternatives/siblings when an inline part is damaged.
 - Add native About/Preferences menus and dialogs, atomic per-user preferences,

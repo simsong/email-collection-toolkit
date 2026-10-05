@@ -3078,6 +3078,10 @@ The shared frontend accepts Ctrl as well as Command for its reader shortcuts;
 the browser regression selects the host shortcut. Native ARM64 build, WebView2 callback, search and screenshot evidence is
 recorded in the Windows handoff; full interactive acceptance remains incomplete.
 
+An explicit `[windows-ci]` head commit message calls the reusable reader workflow
+with `windows_only: true`; the existing macOS job supplies native Mac coverage.
+Other pushes skip this caller, retaining the ordinary development cost policy.
+
 The WinSparkle client accepts the existing macOS HTTPS appcast URL as the shared
 feed; the `/updates/mac/` path is retained for installed-client compatibility.
 Selection uses `sparkle:os` on separate platform items, not the URL path. The

@@ -69,7 +69,7 @@ def test_ci_runs_parallel_branch_jobs_without_building_a_dmg() -> None:
     triggers = configuration.get(WORKFLOW_ON, configuration.get(True))
     assert triggers == {"push": {"branches": ["**", "!main"]}}
     jobs = configuration[JOBS]
-    assert set(jobs) == {"static-rust", "python-browser", "rust-gui"}
+    assert set(jobs) == {"static-rust", "python-browser", "rust-gui", "rust-reader"}
     assert all(NEEDS not in job for job in jobs.values())
     static_runs = [step.get(RUN, "") for step in jobs["static-rust"][STEPS]]
     test_runs = [step.get(RUN, "") for step in jobs["python-browser"][STEPS]]
@@ -104,16 +104,20 @@ def test_cargo_reader_builds_gate_branch_and_tag_workflows() -> None:
     """Windows delivery: both architectures must build/test and retain executable artifacts."""
     workflows = Path(__file__).parents[1] / ".github/workflows"
     ci = safe_load((workflows / "continuous-integration.yml").read_text(encoding="utf-8"))
-    assert "rust-reader" not in ci[JOBS]  # Ordinary Mac iterations must not spend Windows time.
+    opt_in = ci[JOBS]["rust-reader"]
+    assert opt_in["if"] == "contains(github.event.head_commit.message, '[windows-ci]')"
+    assert opt_in["uses"] == "./.github/workflows/rust-reader.yml"
+    assert opt_in["with"] == {"windows_only": True}
     release = safe_load((workflows / "release.yml").read_text(encoding="utf-8"))
     assert release[JOBS]["rust-reader"]["uses"] == "./.github/workflows/rust-reader.yml"
     assert "rust-reader" in release[JOBS]["assemble"][NEEDS]
     reader = safe_load((workflows / "rust-reader.yml").read_text(encoding="utf-8"))
     job = reader[JOBS]["reader"]
     assert job[RUNS_ON] == "${{ matrix.os }}"
-    assert set(job["strategy"]["matrix"]["os"]) == {
-        "windows-latest", "windows-11-arm", "macos-latest",
-    }
+    assert job["strategy"]["matrix"]["os"] == (
+        "${{ fromJSON(inputs.windows_only && '[\"windows-latest\",\"windows-11-arm\"]'"
+        " || '[\"windows-latest\",\"windows-11-arm\",\"macos-latest\"]') }}"
+    )
     runs = [step.get(RUN, "") for step in job[STEPS]]
     assert runs.index("cargo reader-check") < runs.index("cargo reader-build --release")
     windows_upload = next(step for step in job[STEPS]
