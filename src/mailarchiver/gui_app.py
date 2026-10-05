@@ -16,13 +16,13 @@ import sys
 import tempfile
 import time
 from concurrent.futures import Future, ThreadPoolExecutor
-from contextlib import contextmanager
-from collections.abc import Iterator
+from contextlib import contextmanager, nullcontext
+from collections.abc import Callable, Iterator
 from datetime import UTC, datetime
 from importlib import import_module
 from importlib.metadata import version
 from pathlib import Path
-from threading import Event, Lock, RLock, Thread, current_thread
+from threading import Event, Lock, RLock, Thread
 from typing import Any, Literal
 from urllib.parse import urlencode, urlsplit
 from urllib.request import Request, urlopen
@@ -95,6 +95,7 @@ APPLICATION_ICON = GUI_DIRECTORY / "icons" / "rainbow-post-192.png"
 EXTERNAL_LINK_SCHEMES = frozenset({"http", "https", "mailto"})
 INTERNET_CHECK_URL = "https://www.example.com/"
 INTERNET_CHECK_INTERVAL_SECONDS = 30.0
+QUIT_TIMEOUT_SECONDS = 5.0
 
 
 def owner_rules_text(include: str, exclude: str) -> OwnerRules:
@@ -366,7 +367,8 @@ IMPORT_CONFIRMATION_WIDTH = 560
 QUIT_IMPORT_MESSAGE = (
     "Quitting will stop active ingest and content processing. Reopen the archive and use "
     "Continue Processing to resume. Messages already archived will not be imported twice.\n\n"
-    "The application will quit after the current work has stopped and the archive has been checkpointed."
+    "Each import will stop after its current message. The application will quit within five seconds; "
+    "unfinished work will be recovered when you resume."
 )
 
 
@@ -579,15 +581,17 @@ class IngestWindowApi:
 class IdentityPickerApi:
     """A picker is permanently bound to its archive; writes share the import lease."""
 
-    def __init__(self, archive: Path, kind: Literal["name", "institution"]) -> None:
+    def __init__(self, archive: Path, kind: Literal["name", "institution"], application: PyWebViewApplication | None = None) -> None:
         self.archive = archive
         self.kind: Literal["name", "institution"] = kind
+        self.application = application
 
     def query(self, filters: dict[str, Any]) -> dict[str, Any]:
         return picker_page(self.archive, self.kind, IdentityFilter.model_validate(filters)).model_dump(mode="json")
 
     def update(self, decision: dict[str, Any]) -> bool:
-        save_identity(self.archive, ManualDecision.model_validate(decision))
+        with self.application.writer_activity() if self.application else nullcontext():
+            save_identity(self.archive, ManualDecision.model_validate(decision))
         return True
 
 
@@ -612,10 +616,11 @@ class AboutApi:
 class DocumentOptionsApi:
     """Explicit options bridge permanently bound to one document."""
 
-    def __init__(self, document: ArchiveDocument) -> None:
+    def __init__(self, document: ArchiveDocument, application: PyWebViewApplication | None = None) -> None:
         if document.path is None:
             raise ValueError("Document options require a saved archive")
         self._document = document
+        self._application = application
         self._archive = document.path
         self.window: Any = None
 
@@ -627,14 +632,10 @@ class DocumentOptionsApi:
     def update(self, include: str, exclude: str, revision: str) -> dict[str, Any]:
         document = self._document
         store = DocumentOptions(self._archive)
-        lease = WriterLease.acquire(
-            self._archive, document.descriptor.identity, "Document options", uuid4().hex,
-            application_metadata().version,
-        )
-        try:
-            return store.save(OwnerRules.from_text(include, exclude), lease, revision).model_dump(mode="json")
-        finally:
-            lease.release()
+        with self._application.writer_activity() if self._application else nullcontext():
+            with WriterLease.acquire(self._archive, document.descriptor.identity, "Document options", uuid4().hex,
+                                    application_metadata().version) as lease:
+                return store.save(OwnerRules.from_text(include, exclude), lease, revision).model_dump(mode="json")
 
 
 class OwnerRulesPrompt:
@@ -714,7 +715,8 @@ class GuiApi:
         self._drag_tokens: set[str] = set()
         self._drag_lock = Lock()
         self._drag_closed = False
-        self._temporary = tempfile.TemporaryDirectory(prefix="mailarchive-gui-") if temporary_directory is None else None
+        self._export_stop = Event()
+        self._temporary = tempfile.TemporaryDirectory(prefix=f"mailarchive-gui-{os.getpid()}-") if temporary_directory is None else None
         if self._temporary is not None:
             self.temporary_directory: Path = Path(self._temporary.name)
         else:
@@ -921,15 +923,18 @@ class GuiApi:
     def save_filter_set(self, name: str, show_volumes: bool, selections: list[str]) -> dict[str, Any]:
         for token in selections:
             MailboxSelection.from_token(token)
-        return self.filter_sets.save(
-            FilterSet(name=name, show_volumes=show_volumes, selections=selections)
-        ).model_dump(mode="json")
+        with self.application.writer_activity() if self.application else nullcontext():
+            return self.filter_sets.save(
+                FilterSet(name=name, show_volumes=show_volumes, selections=selections)
+            ).model_dump(mode="json")
 
     def rename_filter_set(self, old_name: str, new_name: str) -> dict[str, Any]:
-        return self.filter_sets.rename(old_name, new_name).model_dump(mode="json")
+        with self.application.writer_activity() if self.application else nullcontext():
+            return self.filter_sets.rename(old_name, new_name).model_dump(mode="json")
 
     def delete_filter_set(self, name: str) -> dict[str, Any]:
-        return self.filter_sets.delete(name).model_dump(mode="json")
+        with self.application.writer_activity() if self.application else nullcontext():
+            return self.filter_sets.delete(name).model_dump(mode="json")
 
     def request_previews(self, message_pks: list[int]) -> bool:
         if not message_pks or len(message_pks) > DEFAULT_PAGE_SIZE:
@@ -1066,7 +1071,8 @@ class GuiApi:
         view = describe_message(self._archive(), message_pk)
         if self.e2e_directory is not None:
             destination = self.e2e_directory / f"saved-{export_filename(view)}"
-            write_message(self._archive(), message_pk, destination)
+            with self.application.writer_activity() if self.application else nullcontext():
+                write_message(self._archive(), message_pk, destination)
             return str(destination)
         selected = self.window.create_file_dialog(
             webview.FileDialog.SAVE,
@@ -1079,14 +1085,16 @@ class GuiApi:
         destination = dialog_paths(selected)[0]
         if destination.suffix.casefold() != ".eml":
             destination = destination.with_suffix(".eml")
-        write_message(self._archive(), message_pk, destination)
+        with self.application.writer_activity() if self.application else nullcontext():
+            write_message(self._archive(), message_pk, destination)
         return str(destination)
 
     def save_attachment(self, message_pk: int, part_id: int) -> str | None:
         attachment = attachment_descriptor(self._archive(), message_pk, part_id)
         if self.e2e_directory is not None:
             destination = self.e2e_directory / f"saved-{safe_filename(attachment.filename, part_id, attachment.content_type)}"
-            write_attachment(self._archive(), message_pk, part_id, destination)
+            with self.application.writer_activity() if self.application else nullcontext():
+                write_attachment(self._archive(), message_pk, part_id, destination)
             return str(destination)
         selected = self.window.create_file_dialog(
             webview.FileDialog.SAVE,
@@ -1097,13 +1105,14 @@ class GuiApi:
         if not selected:
             return None
         destination = dialog_paths(selected)[0]
-        write_attachment(self._archive(), message_pk, part_id, destination)
+        with self.application.writer_activity() if self.application else nullcontext():
+            write_attachment(self._archive(), message_pk, part_id, destination)
         return str(destination)
 
     def prepare_drag(self, message_pks: list[int]) -> dict[str, str]:
         """Prepare one explicit Finder drag without proactively exporting mail."""
         with self._drag_lock:
-            if self._drag_closed:
+            if self._drag_closed or self._export_stop.is_set():
                 raise ValueError("message viewer is closed")
             unique = list(dict.fromkeys(message_pks))
             if not unique:
@@ -1129,8 +1138,11 @@ class GuiApi:
         destination = self.temporary_directory / safe_filename(
             descriptor.filename, part_id, descriptor.content_type
         )
-        write_attachment(self._archive(), message_pk, part_id, destination)
-        subprocess.Popen(["/usr/bin/open", str(destination)], close_fds=True)
+        with self._drag_lock:
+            if self._drag_closed or self._export_stop.is_set():
+                raise ValueError("message viewer is closed")
+            write_attachment(self._archive(), message_pk, part_id, destination)
+            subprocess.Popen(["/usr/bin/open", str(destination)], close_fds=True)
         return OpenResult(filename=descriptor.filename, opened=True).model_dump()
 
     def open_message_window(self, message_pk: int, highlight_terms: list[str] | None = None) -> bool:
@@ -1141,8 +1153,10 @@ class GuiApi:
         parameters = [("message", str(message_pk)), ("standalone", "1")]
         parameters.extend(("highlight", term) for term in highlight_terms or [])
         child_api = GuiApi(
-            self._archive(), self.temporary_directory, self.e2e_directory, self.filter_sets.path
+            self._archive(), self.temporary_directory, self.e2e_directory, self.filter_sets.path,
+            application=self.application, document=self.document,
         )
+        child_api._export_stop = self._export_stop
         child = webview.create_window(
             view.subject,
             f"{base_url}?{urlencode(parameters)}",
@@ -1168,7 +1182,7 @@ class GuiApi:
 
     def close(self, *_args: object) -> None:
         self._preview_executor.shutdown(wait=False, cancel_futures=True)
-        if self.application is None:
+        if self.application is None or self.document is None:
             with self._ingest_window_lock:
                 ingest_api, self._ingest_window_api = self._ingest_window_api, None
             if ingest_api is not None and ingest_api.window is not None:
@@ -1179,6 +1193,14 @@ class GuiApi:
                 child.window.destroy()
             child.close()
         self.children.clear()
+        self.cleanup_exports()
+
+    def cleanup_exports(self, *, quitting: bool = False) -> None:
+        """Remove private copies without any window or JavaScript callbacks."""
+        if self._temporary is not None or quitting:
+            self._export_stop.set()
+        for child in tuple(self.children):
+            child.cleanup_exports(quitting=quitting)
         with self._drag_lock:
             self._drag_closed = True
             FILE_DRAGS.discard(self._drag_tokens)
@@ -1278,11 +1300,12 @@ class SetupApi:
             selection = SetupSelection(source=self._source, destination=self._destination)
             selection.validate_paths()
             controller = self.application.controller
-            document = (
-                controller.open_document(selection.destination)
-                if _is_archive(selection.destination)
-                else controller.create_document(selection.destination)
-            )
+            with self.application.writer_activity():
+                document = (
+                    controller.open_document(selection.destination)
+                    if _is_archive(selection.destination)
+                    else controller.create_document(selection.destination)
+                )
             api = next((item for item in self.application._search_apis() if item.document is document), None)
             if api is None:
                 api = self.application.create_search_window(controller.new_search_window(document))
@@ -1298,22 +1321,16 @@ class SetupApi:
             self.application._refresh_menus()
 
     def cancel(self) -> bool:
-        """Quit after this bridge thread has delivered its response to JavaScript."""
+        """Request Quit without depending on a JavaScript reply that may never finish."""
         if not self._lock.acquire(blocking=False):
             return False
         try:
+            Thread(target=self.application.request_quit, name="mailarchiver-setup-quit", daemon=True).start()
             self.application._refresh_menus()
-            reply_thread = current_thread()
-
-            def quit_after_reply() -> None:
-                reply_thread.join()
-                self.application.request_quit()
-
-            Thread(target=quit_after_reply, name="mailarchiver-setup-quit", daemon=True).start()
-            return True
         finally:
             self._lock.release()
             self.application._refresh_menus()
+        return True
 
     def _dismiss(self) -> None:
         # Keep the webview alive until pywebview delivers this bridge reply.
@@ -1323,6 +1340,25 @@ class SetupApi:
         self.application._refresh_menus()
 
 
+def cleanup_stale_exports() -> None:
+    """Remove only this user's private export directories whose owner PID is gone."""
+    for directory in Path(tempfile.gettempdir()).glob("mailarchive-gui-*"):
+        fields = directory.name.split("-", 3)
+        if len(fields) != 4 or not fields[2].isdecimal() or int(fields[2]) <= 0:
+            continue
+        try:
+            info = directory.lstat()
+            if directory.is_symlink() or not directory.is_dir() or info.st_uid != os.getuid() or info.st_mode & 0o077:
+                continue
+            try:
+                os.kill(int(fields[2]), 0)
+            except ProcessLookupError:
+                shutil.rmtree(directory)
+        except (OSError, OverflowError):
+            # Live, inaccessible, or concurrently removed directories are left alone.
+            continue
+
+
 class PyWebViewApplication:
     """Bind the platform-neutral application controller to pywebview windows."""
 
@@ -1330,9 +1366,13 @@ class PyWebViewApplication:
         self,
         controller: ApplicationController,
         asset_server: LoopbackAssetServer | None = None,
+        *,
+        exit_process: Callable[[int], object] = os._exit,
     ) -> None:
         self.controller = controller
         self.asset_server = asset_server
+        self._exit_process = exit_process
+        Thread(target=cleanup_stale_exports, name="mailarchiver-stale-exports", daemon=True).start()
         self._apis: dict[str, GuiApi] = {}
         self._ingest_apis: dict[str, IngestWindowApi] = {}
         self._options_apis: dict[str, DocumentOptionsApi] = {}
@@ -1348,7 +1388,9 @@ class PyWebViewApplication:
         self._menu_observer: Any = None
         self._lock = RLock()
         self._quitting = False
+        self._quit_done = Event()
         self._import_threads: list[Thread] = []
+        self._writers: set[Event] = set()
         self._updates_started = False
         self._updating = False
         self._definition_updates = 0
@@ -1360,10 +1402,25 @@ class PyWebViewApplication:
             self.reserve_update_install, self.cancel_update_install, self.notify_update_deferred,
         )
 
+    @contextmanager
+    def writer_activity(self) -> Iterator[None]:
+        """Reserve a non-import write before Quit and expose its completion to the deadline."""
+        finished = Event()
+        with self._lock:
+            if self._quitting or self._updating:
+                raise ValueError("The application is quitting or installing an update.")
+            self._writers.add(finished)
+        try:
+            yield
+        finally:
+            finished.set()
+            with self._lock:
+                self._writers.discard(finished)
+
     def reserve_update_install(self) -> bool:
         """Prevent new writes only when all jobs, worker tails, and writer leases end."""
         with self._lock:
-            if self._definition_updates:
+            if self._definition_updates or self._writers:
                 return False
             if any(document.ingest_job for document in self.controller.documents()):
                 return False
@@ -1377,20 +1434,20 @@ class PyWebViewApplication:
     @contextmanager
     def definitions_activity(self) -> Iterator[None]:
         """Definition replacement also finishes before an application update can proceed."""
-        with self._lock:
-            if self._quitting or self._updating:
-                raise ValueError("The application is quitting or installing an update.")
-            self._definition_updates += 1
-        try:
-            yield
-        finally:
+        with self.writer_activity():
             with self._lock:
-                self._definition_updates -= 1
+                self._definition_updates += 1
+            try:
+                yield
+            finally:
+                with self._lock:
+                    self._definition_updates -= 1
 
     def cancel_update_install(self) -> None:
         with self._lock:
             if self.updates.status.phase in {"deferred", "installing"}:
                 self._quitting = False
+                self._quit_done.set()
             self._updating = False
             WriterLease.cancel_update()
 
@@ -1615,7 +1672,8 @@ class PyWebViewApplication:
             return None
         try:
             destination = archive_destination(selected)
-            document = self.controller.create_document(destination)
+            with self.writer_activity():
+                document = self.controller.create_document(destination)
         except (OSError, ValueError) as error:
             self.add_notice("error", f"Could not create archive: {error}")
             return None
@@ -1795,24 +1853,25 @@ class PyWebViewApplication:
         operation_id = uuid4().hex
         lease: WriterLease | None = None
         try:
-            lease = WriterLease.acquire(
-                document.path,
-                document.descriptor.identity,
-                "GUI import",
-                operation_id,
-                application_metadata().version,
-            )
-            if owner_rules is not None:
-                DocumentOptions(document.path).save(owner_rules, lease, owner_revision)
-            job = IngestJob(operation_id=operation_id, owner_window_id=session.window_id,
-                            kind="ingest" if ingesting else "content")
-            with self._lock:
-                if self._quitting or self._updating:
-                    raise ValueError("The application is stopping imports or installing an update.")
-                self.controller.begin_ingest(document.descriptor.document_id, job, lease)
+            with self.writer_activity():
+                try:
+                    lease = WriterLease.acquire(
+                        document.path, document.descriptor.identity, "GUI import", operation_id,
+                        application_metadata().version,
+                    )
+                    if owner_rules is not None:
+                        DocumentOptions(document.path).save(owner_rules, lease, owner_revision)
+                    job = IngestJob(operation_id=operation_id, owner_window_id=session.window_id,
+                                    kind="ingest" if ingesting else "content")
+                    with self._lock:
+                        if self._quitting or self._updating:
+                            raise ValueError("The application is stopping imports or installing an update.")
+                        self.controller.begin_ingest(document.descriptor.document_id, job, lease)
+                except BaseException:
+                    if lease is not None:
+                        lease.release()
+                    raise
         except (OSError, ArchiveBusyError, ValueError) as error:
-            if lease is not None:
-                lease.release()
             self.add_notice("warning", f"Import did not start: {error}")
             return False
         self.add_notice("information", f"Import started for {document.display_path}")
@@ -1983,7 +2042,7 @@ class PyWebViewApplication:
                 options.window.restore()
                 options.window.show()
                 return True
-            options = DocumentOptionsApi(document)
+            options = DocumentOptionsApi(document, self)
             window = webview.create_window(
                 f"{APPLICATION_NAME} — Document Options — {document.display_path}",
                 self.asset_url("options.html"),
@@ -2011,7 +2070,7 @@ class PyWebViewApplication:
     def open_picker(self, document: ArchiveDocument, kind: Literal["name", "institution"]) -> bool:
         if document.path is None:
             return False
-        api = IdentityPickerApi(document.path, kind)
+        api = IdentityPickerApi(document.path, kind, self)
         window = webview.create_window(
             f"{APPLICATION_NAME} — {kind.title()} matcher — {document.display_path}",
             self.asset_url("identity.html", [("kind", kind)]),
@@ -2156,53 +2215,88 @@ class PyWebViewApplication:
         return self.controller.can_close_window(window_id)
 
     def has_active_ingest(self) -> bool:
-        return any(job.kind == "ingest" for document in self.controller.documents()
-                   if (job := document.ingest_job) is not None)
+        # Unknown state still requires confirmation, but never a pre-watchdog wait.
+        return self.controller.has_jobs("ingest", blocking=False) is not False
 
     def request_quit(self, *, confirm_ingest: bool = True) -> None:
-        """Use the normal stop-and-checkpoint policy before closing every window."""
+        """Stop imports at message boundaries, allowing at most five seconds to exit."""
         # Never wait for workers on Cocoa's event thread: they may still be
         # returning from a bridge callback that needs that same event loop.
         if self._quitting:
             return
-        if not self.prepare_quit() and self.has_active_ingest() and confirm_ingest:
-            anchor = self._dialog_window()
-            confirmed = (
-                macos_alert("Stop importing and quit?", QUIT_IMPORT_MESSAGE,
-                            ("Cancel", "Stop Import and Quit"), body_width=IMPORT_CONFIRMATION_WIDTH) == 1
-                if sys.platform == "darwin" else
-                bool(anchor and anchor.create_confirmation_dialog("Stop importing and quit?", QUIT_IMPORT_MESSAGE))
-            )
+        if not self.prepare_quit() and confirm_ingest and self.has_active_ingest():
+            if sys.platform == "darwin":
+                confirmed = macos_alert("Stop importing and quit?", QUIT_IMPORT_MESSAGE,
+                    ("Cancel", "Stop Import and Quit"), body_width=IMPORT_CONFIRMATION_WIDTH) == 1
+            else:
+                # Do not route through _dialog_window's application-lock fallback.
+                anchor = webview.active_window() or self._about_window
+                confirmed = bool(anchor and anchor.create_confirmation_dialog("Stop importing and quit?", QUIT_IMPORT_MESSAGE))
             if not confirmed:
                 return
+        deadline = time.monotonic() + QUIT_TIMEOUT_SECONDS
+        done = self._quit_done = Event()
+        self._quitting = True
+
+        def exit_if_allowed() -> None:
+            if not done.is_set() and self._quitting and self.updates.status.phase not in {"deferred", "installing"}:
+                done.set()
+                self._exit_process(0)
+
+        def enforce_deadline() -> None:
+            if not done.wait(max(0.0, deadline - time.monotonic())):
+                exit_if_allowed()
+
+        # Arm independently before any snapshot/stop lock can wait on Cocoa.
+        Thread(target=enforce_deadline, name="mailarchiver-quit-deadline", daemon=True).start()
         jobs = self.stop_imports_for_quit()
+        with self._lock:
+            workers = tuple(self._import_threads)
+            writers = tuple(self._writers)
+            apis = tuple(self._apis.values())
+        if self.updates.status.phase in {"deferred", "installing"}:
+            # Sparkle owns termination/relaunch and may still cancel installation.
+            return
+        if not jobs and not writers and not apis and not any(worker.is_alive() for worker in workers):
+            exit_if_allowed()
+            return
+
+        cleaned = Event()
+
+        def cleanup() -> None:
+            try:
+                for api in apis:
+                    api.cleanup_exports(quitting=True)
+            finally:
+                cleaned.set()
+
+        Thread(target=cleanup, name="mailarchiver-export-cleanup", daemon=True).start()
 
         def finish_quit() -> None:
+            for finished in writers:
+                finished.wait(max(0.0, deadline - time.monotonic()))
             for job in jobs:
-                job.finished.wait()
-            # A completed job may have released its lease but still be returning
-            # from a UI refresh. Keep the event loop alive through that tail too.
-            with self._lock:
-                workers = tuple(self._import_threads)
+                job.finished.wait(max(0.0, deadline - time.monotonic()))
             for worker in workers:
-                worker.join()
-            with self._lock:
-                if not self._quitting or self.updates.status.phase in {"deferred", "installing"}:
-                    # Keep Cocoa alive for Sparkle or a canceled Quit. The timer
-                    # reserves installation after all remaining work ends.
-                    return
-                for window in tuple(webview.windows):
-                    window.destroy()
+                worker.join(max(0.0, deadline - time.monotonic()))
+            cleaned.wait(max(0.0, deadline - time.monotonic()))
+            # Do not acquire application/UI locks or enter interpreter finalization:
+            # a stuck callback must not defeat the single shared quit deadline.
+            exit_if_allowed()
 
         Thread(target=finish_quit, name="mailarchiver-quit", daemon=True).start()
 
     def prepare_quit(self) -> bool:
-        """Keep windows and services alive until every import has completed."""
-        with self._lock:
-            if any(document.ingest_job for document in self.controller.documents()):
+        """Reserve a known job-free Quit without waiting on application state."""
+        if not self._lock.acquire(blocking=False):
+            return False
+        try:
+            if self.controller.has_jobs(blocking=False) is not False:
                 return False
             self._quitting = True
             return True
+        finally:
+            self._lock.release()
 
     def shutdown(self) -> None:
         """Release non-document resources after the native event loop exits."""

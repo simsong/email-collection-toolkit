@@ -30,11 +30,16 @@ class ObservedSetupApplication(PyWebViewApplication):
     """Inspect real native menu state at both Cancel lock transitions."""
 
     def __init__(self, controller: ApplicationController, server: LoopbackAssetServer) -> None:
-        super().__init__(controller, server)
+        self.exit_requested = Event()
+        super().__init__(controller, server, exit_process=self.record_exit)
         self.before_quit: Callable[[], None] | None = None
         self.observe_cancel = False
         self.cancel_menu_states: list[bool] = []
         self.cancel_menu_errors: list[str] = []
+
+    def record_exit(self, _code: int) -> None:
+        """Let this probe finish its UI assertions; real process exit has separate tests."""
+        self.exit_requested.set()
 
     def prepare_quit(self) -> bool:
         # Place a real competing job just before the atomic quit decision.
@@ -44,6 +49,16 @@ class ObservedSetupApplication(PyWebViewApplication):
         return super().prepare_quit()
 
     def _refresh_menus(self) -> None:
+        if self.observe_cancel and self._setup_api is not None:
+            window = self._setup_api.window
+
+            def focus() -> None:
+                import_module("AppKit").NSApplication.sharedApplication().activateIgnoringOtherApps_(True)
+                native = window.native
+                assert native is not None
+                native.makeKeyAndOrderFront_(None)
+
+            import_module("PyObjCTools.AppHelper").callAfter(focus)
         super()._refresh_menus()
         if not self.observe_cancel or self._setup_api is None:
             return
@@ -143,17 +158,34 @@ def main() -> None:
 
     def check_close_enabled() -> None:
         inspected = Event()
+        deadline = time.monotonic() + 4
 
         def inspect() -> None:
             try:
                 native = appkit.NSApplication.sharedApplication()
-                assert native.mainMenu().itemWithTitle_("File").submenu().itemWithTitle_("Close").isEnabled()
+                enabled = native.mainMenu().itemWithTitle_("File").submenu().itemWithTitle_("Close").isEnabled()
+                if not enabled and time.monotonic() < deadline:
+                    app_helper.callLater(0.05, inspect)
+                    return
+                active = webview.active_window()
+                assert enabled, (f"Close stayed disabled: active={active.uid if active else None}, "
+                    f"setup={setup.uid}, key={setup.native.isKeyWindow() if setup.native else None}, "
+                    f"busy={application._setup_api._lock.locked() if application._setup_api else None}, "
+                    f"autoenable={native.mainMenu().itemWithTitle_('File').submenu().autoenablesItems()}")
             except Exception:  # pylint: disable=broad-exception-caught
                 errors.append(traceback.format_exc())
-            finally:
-                inspected.set()
-        application._refresh_menus()  # pylint: disable=protected-access
-        app_helper.callAfter(inspect)
+            inspected.set()
+        def focus() -> None:
+            # Close applies to the key window. Another desktop app may have
+            # taken focus while this native probe was loading or using panels.
+            appkit.NSApplication.sharedApplication().activateIgnoringOtherApps_(True)
+            native_window = setup.native
+            assert native_window is not None
+            native_window.makeKeyAndOrderFront_(None)
+            application._refresh_menus()  # pylint: disable=protected-access
+            app_helper.callAfter(inspect)
+
+        app_helper.callAfter(focus)
         assert inspected.wait(5)
         assert not errors, errors
 
@@ -252,10 +284,8 @@ def main() -> None:
                         foundation.NSRunLoop.mainRunLoop().addTimer_forMode_(timer, appkit.NSModalPanelRunLoopMode)
                     app_helper.callAfter(schedule_quit_confirmation)
                 application.observe_cancel = not quit_race
-                windows_before_cancel = tuple(webview.windows)
                 setup.evaluate_js("document.getElementById('cancel').click()")
-                for window in windows_before_cancel:
-                    assert window.events.closed.wait(10), f"Cancel did not close {window.title}"
+                assert application.exit_requested.wait(10), "Cancel did not request process exit"
                 if not quit_race:
                     assert application.cancel_menu_states == [False, True], application.cancel_menu_states
                     assert not application.cancel_menu_errors, application.cancel_menu_errors

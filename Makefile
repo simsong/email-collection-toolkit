@@ -403,6 +403,14 @@ update-corpus-expectations:
 test-application:
 	uv run pytest -q tests/test_application.py tests/test_writer_lock.py tests/test_loopback.py
 
+.PHONY: test-quit test-native-quit
+test-quit: ruff
+	uv run --locked pytest -q tests/test_quit.py tests/test_quit_writes.py tests/test_quit_processing.py tests/test_quit_import.py tests/test_application.py tests/test_gui_processing.py tests/test_updates.py tests/test_publication.py
+
+# MAILARCHIVER_NATIVE_GUI_E2E enables real macOS windows in the disposable quit probe.
+test-native-quit: ruff
+	MAILARCHIVER_NATIVE_GUI_E2E=1 uv run --locked pytest -q tests/test_quit.py::test_native_quit_during_status_polling
+
 test-apple-mail-compare:
 	uv run pytest -q tests/test_apple_mail_compare.py
 
