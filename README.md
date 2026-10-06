@@ -62,7 +62,9 @@ verified MIME/HTML display, attachments and native reader actions. The local
 migration build uses a supervised Python archive-service helper for creation,
 imports, recovery, owner rules and identity edits; it never starts pywebview.
 The original Python GUI remains available until native migration acceptance.
-Rust 1.95+ and the prepared project Python environment are required for all workflows.
+Rust 1.95+ is required to build the desktop. Reading/searching existing archives
+needs no Python; archive-service operations require the prepared project Python
+environment. Archive writing remains unsupported on Windows.
 `ECT_RUST_ENGINE_PYTHON` optionally selects that environment's Python executable;
 the default is this checkout's `.venv/bin/python` (`.venv/Scripts/python.exe` on
 Windows). There is no HTTP service. See the [migration status](doc/RUST_GUI_MIGRATION.md)

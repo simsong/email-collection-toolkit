@@ -8,6 +8,7 @@ import subprocess
 import sys
 import xml.etree.ElementTree as xml
 from pathlib import Path
+from typing import Literal
 
 import pytest
 from pydantic import SecretStr
@@ -197,7 +198,7 @@ def test_release_waits_for_exact_dmg_before_checksumming() -> None:
         assert CONDITION not in job
     preflight = jobs[PREFLIGHT]
     assert macos[STEPS][0][WITH][REF] == "${{ needs.preflight.outputs.commit }}"
-    assert preflight[STEPS][0][WITH][REF] == "${{ github.ref_name }}"
+    assert preflight[STEPS][0][WITH][REF] == "${{ github.sha }}"
     assert preflight[STEPS][-1][RUN] == 'make release-tag-check GITHUB_REF_NAME="$RELEASE_TAG" ARGS=--require-annotated'
     assert set(assembly[NEEDS]) == {MACOS, "rust-reader"}
     assert assembly[STEPS][0][WITH][REF] == "${{ needs.macos.outputs.commit }}"
@@ -224,15 +225,16 @@ def test_release_waits_for_exact_dmg_before_checksumming() -> None:
     assert uploads == ["dist/*.dmg", "dist/*.json"]
 
 
-@pytest.mark.parametrize("tag,annotated,move_head,off_main,accepted", [
-    ("v1.2.3", True, False, False, True),
-    ("v1.2.3", False, False, False, False),
-    ("v1.2.4", True, False, False, False),
-    ("v1.2.3", True, True, False, False),
-    ("v1.2.3", True, False, True, False),
+@pytest.mark.parametrize("tag,annotated,commit_change,accepted", [
+    ("v1.2.3", True, "none", True),
+    ("v1.2.3", False, "none", False),
+    ("v1.2.4", True, "none", False),
+    ("v1.2.3", True, "head", False),
+    ("v1.2.3", True, "off-main", False),
+    ("v1.2.3", True, "tag", False),
 ])
 def test_release_accepts_unsigned_annotated_tags_and_checks_commit_and_version(
-    tmp_path: Path, tag: str, annotated: bool, move_head: bool, off_main: bool, accepted: bool,
+    tmp_path: Path, tag: str, annotated: bool, commit_change: Literal["none", "head", "off-main", "tag"], accepted: bool,
 ) -> None:
     """Release delivery: no signing keys are needed; annotation, version and commit must match."""
     def run(*args: str) -> str:
@@ -246,11 +248,19 @@ def test_release_accepts_unsigned_annotated_tags_and_checks_commit_and_version(
     run(*git, "init")
     run(*git, "commit", "--allow-empty", "-m", "fixture")
     run(*git, "update-ref", "refs/remotes/origin/main", "HEAD")
-    if off_main:
+    if commit_change == "off-main":
         run(*git, "commit", "--allow-empty", "-m", "unmerged fixture")
+    triggering_commit = run(*git, "rev-parse", "HEAD").strip()
     run(*git, "tag", *(["-a", tag, "-m", "fixture"] if annotated else [tag]))
-    if move_head:
+    if commit_change == "head":
         run(*git, "commit", "--allow-empty", "-m", "different release commit")
+    elif commit_change == "tag":
+        # Simulate a moved remote tag after its event SHA was recorded. Both
+        # commits are on main, so only the tag/event equality can reject it.
+        run(*git, "commit", "--allow-empty", "-m", "new tag target")
+        run(*git, "update-ref", "refs/remotes/origin/main", "HEAD")
+        run(*git, "tag", "-f", "-a", tag, "-m", "moved fixture")
+        run(*git, "checkout", "--detach", triggering_commit)
     (tmp_path / "pyproject.toml").write_text('[project]\nversion = "1.2.3"\n')
     root = Path(__file__).parents[1]
     workflow = safe_load((root / ".github/workflows/release.yml").read_text())
@@ -260,7 +270,7 @@ def test_release_accepts_unsigned_annotated_tags_and_checks_commit_and_version(
         result = subprocess.run(["bash", "-e", "-o", "pipefail", "-c", command], cwd=tmp_path,
                                 env={**os.environ, RELEASE_TAG: tag, GITHUB_OUTPUT: str(output)},
                                 capture_output=True, text=True, check=False)
-        assert (result.returncode == 0) == (not move_head and not off_main), result.stderr
+        assert (result.returncode == 0) == (commit_change == "none"), result.stderr
         if result.returncode == 0:
             if job in (PREFLIGHT, MACOS):
                 assert output.read_text() == f"commit={run('git', 'rev-parse', 'HEAD').strip()}\n"

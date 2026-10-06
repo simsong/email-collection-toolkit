@@ -5,7 +5,8 @@
 ## Unreleased
 
 - Validate annotated release tags, version and `main` ancestry in a shared
-  preflight before starting macOS packaging or cross-platform Rust builds.
+  preflight pinned to the triggering commit before starting macOS packaging
+  or cross-platform Rust builds; reject tags moved after the event.
 
 - Gate unsupported Windows archive writes before entry into import or editing,
   preserving read-only status/history. Report post-import source-directory

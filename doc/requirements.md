@@ -1482,6 +1482,8 @@ ancestry on `main` before installing project dependencies, building artifacts,
 or executing their entry points. Tag/version validation must not install the
 project itself. A shared identity preflight must succeed before either the
 macOS packaging job or the cross-platform Rust reader matrix starts.
+Preflight must check out the triggering commit, rejecting a tag that has moved
+instead of validating a different revision from the Rust build.
 Pages deploys on every `main` push and after a tagged release
 publishes, using the release run's signed appcast rather than a release-list
 query for that new asset; the two deployment paths are serialized.
