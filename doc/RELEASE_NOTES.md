@@ -4,6 +4,9 @@
 
 ## Unreleased
 
+- Extend macOS native acceptance to real Preferences Save/Reopen with isolated
+  settings, both with and without the Python helper, preserving archive bytes.
+
 - Merge only edited Rust preference fields under a stable process lock. Preserve
   other windows' independent changes, reject conflicting font-size edits, and
   refresh preferences from disk when reopening the dialog.

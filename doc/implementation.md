@@ -3123,6 +3123,12 @@ Python application, and Windows/Linux runtime parity is unverified.
 The follow-on `mailsearch-webview` binary embeds the existing frontend assets
 unchanged and serves only an explicit asset allowlist through `ect://localhost`.
 On macOS, Wry hosts the system webview and Tao owns the window/event loop.
+The feature-gated macOS native driver also opens Preferences, edits text size,
+clicks Save, checks the applied CSS and backend value, and reopens the dialog.
+Its test uses a private HOME for both helper-present/absent runs and verifies
+the resulting settings file outside the unchanged synthetic archive/source.
+These checks require an unlocked native runner; their compilation is not runtime
+acceptance and the remaining desktop actions stay separate gates.
 `bridge.js` adapts the existing `window.pywebview.api` calls to request-ID-based
 Rust IPC. Reading/searching use Rust; archive workflow calls lazily start the private Python service helper. A bounded channel
 feeds a foreground `Bridge` worker for message reads and short search-control

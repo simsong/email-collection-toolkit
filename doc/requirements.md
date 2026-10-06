@@ -2460,6 +2460,9 @@ foreground elapsed time, waits beyond 30 seconds, Abort and successful later Ope
 Native drag-out, file associations, packaged delivery, Windows writer support and
 full native acceptance remain gates before Python-GUI deprecation; compilation
 or headless success must not mark those gates complete.
+Native preference acceptance must use isolated user settings and the real dialog
+Save/Reopen controls, verify applied and persisted values, and preserve source
+and archive inventories. Compilation alone does not satisfy this gate.
 
 Interactive Rust search must publish two bounded ordered catalog windows before
 running one comprehensive query over the remainder. Each window must be painted

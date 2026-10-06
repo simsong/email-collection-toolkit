@@ -2,7 +2,7 @@
 /* Drive the actual native webview through its shipped search form and rows.
  * A CLI-created synthetic archive supplies the expected message and body.
  * Native IPC and Rust workers answer every query without substituted results.
- * Wait for visible content and a completed search before requesting a snapshot.
+ * Verify visible search, About health and persisted native preference dialogs.
  * Failures return through the same origin-checked IPC to fail the native process.
  * This driver is embedded only with the explicit native-smoke Cargo feature.
  */
@@ -41,6 +41,21 @@ window.addEventListener("DOMContentLoaded", async () => {
     await wait("About health",()=>document.getElementById("rust-antivirus-status") || dialog.querySelector('[role="alert"]').textContent);
     const refresh=[...dialog.querySelectorAll("button")].some(button=>button.textContent==="Update virus definitions");
     if (refresh !== Boolean(capabilities.available && capabilities.write_available)) throw new Error("Definition refresh capability mismatch");
+    dialog.close();
+    window.__rustShellAction("preferences");
+    await wait("Preferences loaded",()=>dialog.querySelector('input[type="number"]'));
+    const size=dialog.querySelector('input[type="number"]');
+    const edited=Number(size.value)===18?16:18;
+    size.value=String(edited);
+    [...dialog.querySelectorAll("button")].find(button=>button.textContent==="Save").click();
+    await wait("Preferences saved",()=>!dialog.open);
+    if(document.documentElement.style.getPropertyValue("--rust-message-font-size")!==`${edited}px`)
+      throw new Error("Saved message font size was not applied");
+    const saved=await api.shell_status();
+    if(saved.preferences.message_font_size!==edited) throw new Error("Native preferences did not persist");
+    window.__rustShellAction("preferences");
+    await wait("Preferences reopened",()=>dialog.querySelector('input[type="number"]'));
+    if(Number(dialog.querySelector('input[type="number"]').value)!==edited) throw new Error("Reopened Preferences show stale settings");
     dialog.close();
     await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
     send("native_smoke_ready");

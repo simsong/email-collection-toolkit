@@ -77,6 +77,7 @@ with `make rust-gui-demo` and then run
 earlier widget prototype for comparison.
 
 `make test-rust-gui` runs headless Rust and widget tests;
+`make check-rust-gui-native-build` compiles native acceptance without opening windows;
 `make test-rust-gui-interop` checks a Python-created archive.
 `make test-rust-recovery` tests foreground hot-journal repair, elapsed time,
 long waits, Abort and later recovery through the real Rust/Python opening path.

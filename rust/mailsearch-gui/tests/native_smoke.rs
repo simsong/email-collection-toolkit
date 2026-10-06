@@ -3,7 +3,7 @@
 // Synthetic EML inputs go through the real ingest CLI and portable verifier.
 // The feature-enabled application drives its real DOM and native IPC, then snapshots WebKit.
 // Every subprocess has a deadline and retained logs; failures preserve the fixture.
-// Archive and source hashes must remain unchanged throughout native reading.
+// Preferences use a private HOME; archive/source hashes stay unchanged throughout.
 // Run explicitly with make test-rust-gui-native on a logged-in macOS runner.
 #![cfg(all(target_os = "macos", feature = "native-smoke"))]
 
@@ -158,8 +158,11 @@ fn cli_archive_native_search_and_screenshot() -> Result<()> {
         "Startup capability probe created archive files"
     );
     let screenshot = work.join("rust-gui.png");
+    let home = work.join("home");
+    fs::create_dir(&home)?;
     run(
         Command::new(env!("CARGO_BIN_EXE_mailsearch-webview"))
+            .env("HOME", &home)
             .arg("--native-smoke")
             .arg(&archive)
             .arg(&screenshot),
@@ -173,11 +176,19 @@ fn cli_archive_native_search_and_screenshot() -> Result<()> {
     run(
         Command::new(env!("CARGO_BIN_EXE_mailsearch-webview"))
             .env("ECT_RUST_ENGINE_PYTHON", work.join("missing-python"))
+            .env("HOME", &home)
             .arg("--native-smoke")
             .arg(&archive)
             .arg(work.join("rust-gui-no-python.png")),
         &work.join("native-no-python.log"),
     )?;
+    let preferences = mailsearch_rust::preferences::Preferences::load(
+        &home.join("Library/Application Support/Email Collection Toolkit/rust-reader.json"),
+    )?;
+    ensure!(
+        preferences.message_font_size == 16 && !preferences.automatic_updates,
+        "Native preference Save/Reopen did not persist the two real UI edits"
+    );
     ensure!(
         inventory(&archive)? == before,
         "Native GUI changed archive files"
@@ -190,6 +201,6 @@ fn cli_archive_native_search_and_screenshot() -> Result<()> {
         work.join("archive-sha256.json"),
         serde_json::to_vec_pretty(&before)?,
     )?;
-    fs::write(work.join("success.txt"), "Native WKWebView startup, one-result search, selected message body, PNG snapshot and source/archive fixity passed.\n")?;
+    fs::write(work.join("success.txt"), "Native WKWebView startup, one-result search, selected message body, About health, real Preferences Save/Reopen with/without helper, PNG snapshot and source/archive fixity passed.\n")?;
     Ok(())
 }

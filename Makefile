@@ -771,6 +771,13 @@ test-rust-gui-native:
 	$(CARGO_RUN) clippy --locked -p mailsearch-rust --features native-smoke --all-targets -- -D warnings
 	RUST_GUI_ARTIFACT_DIR="$(RUST_GUI_ARTIFACT_DIR)" $(CARGO_RUN) reader-native-check
 
+# Compile native acceptance without claiming an unlocked desktop runtime check.
+.PHONY: check-rust-gui-native-build
+check-rust-gui-native-build:
+	$(CARGO_RUN) fmt -p mailsearch-rust -- --check
+	$(CARGO_RUN) clippy --locked -p mailsearch-rust --features native-smoke --all-targets -- -D warnings
+	$(CARGO_RUN) test --locked -p mailsearch-rust --features native-smoke --test native_smoke --test native_windows --no-run
+
 # ECT_WINSPARKLE_TEST_DLL points to the staged checksum-verified native SDK DLL.
 # ECT_RELEASE_VERSION/BUILD/CHANNEL come from the shared release mapper.
 # ECT_WINSPARKLE_APPCAST_URL/PUBLIC_KEY are optional public build configuration.
