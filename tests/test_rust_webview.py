@@ -211,20 +211,40 @@ def test_rust_archive_editors_use_real_services(page: Page, tmp_path: Path) -> N
     serving.start()
     process = subprocess.Popen([binary, "--rpc", str(archive)], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                                stderr=subprocess.PIPE, text=True)
+    invoked: list[str] = []
     try:
         def transport(request: str) -> object:
+            invoked.append(json.loads(request)["method"])
             assert process.stdin is not None and process.stdout is not None
             process.stdin.write(request + "\n")
             process.stdin.flush()
             return json.loads(process.stdout.readline())
         page.expose_function("__rustTestTransport", transport)
         page.add_init_script(path=ROOT / "rust/mailsearch-gui/bridge.js")
+        # Observe the actual port transfer so a compromised editor can forge a call.
+        page.add_init_script("""window.addEventListener('message', event => {
+            if(event.data?.type === 'ect-editor') window.editorPort = event.ports[0];
+        });""")
         page.goto(f"http://127.0.0.1:{server.server_port}/index.html")
         expect(page.get_by_role("button", name="Owner emails…", exact=True)).to_be_enabled(timeout=15000)
         # Native menus use the same promise-returning action as the toolbar.
         assert page.evaluate("window.pywebview.api.open_options().catch(error => { throw error; })") is True
         editor = page.frame_locator(".rust-workflow iframe")
         expect(editor.locator("#owner-include")).to_be_enabled()
+        expect(page.get_by_role("dialog", name="Owner emails", exact=True)).to_be_visible()
+        # IPC isolation: scripts run, but cannot access the main document/API.
+        assert editor.locator("body").evaluate("""() => {
+            try { return Boolean(parent.pywebview.api); } catch(error) { return error.name; }
+        }""") == "SecurityError"
+        assert editor.locator("body").evaluate("Object.keys(window.pywebview.api).sort()") == ["status", "update"]
+        rejected = editor.locator("body").evaluate("""() => new Promise(resolve => {
+            window.editorPort.addEventListener('message', event => {
+                if(event.data.id === 999999) resolve(event.data.error);
+            });
+            window.editorPort.postMessage({id:999999,method:'identity_update',args:[]});
+        })""")
+        assert rejected == "Editor method is not allowed."
+        assert "identity_update" not in invoked
         editor.locator("#owner-include").fill("fixture@example.test")
         editor.locator("#save").click()
         expect(editor.locator("#saved")).to_be_visible()

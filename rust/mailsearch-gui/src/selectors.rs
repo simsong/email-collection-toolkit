@@ -39,11 +39,17 @@ impl Selection {
     }
 }
 pub(crate) fn date_bounds(value: &str) -> Result<(String, String)> {
-    let value = value.replace(',', "");
-    let date = ["%Y-%m-%d", "%m/%d/%Y", "%B %d %Y", "%b %d %Y"]
-        .iter()
-        .find_map(|format| NaiveDate::parse_from_str(&value, format).ok())
-        .context("Invalid calendar date; use YYYY-MM-DD, M/D/YYYY, or Month D, YYYY")?;
+    let date = [
+        "%Y-%m-%d",
+        "%m/%d/%Y",
+        "%B %d %Y",
+        "%b %d %Y",
+        "%B %d, %Y",
+        "%b %d, %Y",
+    ]
+    .iter()
+    .find_map(|format| NaiveDate::parse_from_str(value, format).ok())
+    .context("Invalid calendar date; use YYYY-MM-DD, M/D/YYYY, or Month D, YYYY")?;
     let midnight = date.and_hms_opt(0, 0, 0).context("Invalid date")?;
     let start = midnight
         .checked_sub_signed(Duration::hours(14))
@@ -215,6 +221,16 @@ mod tests {
         }
         assert!(date_bounds("2023-02-29").is_err());
         assert!(date_bounds("2024-02-29").is_ok());
+        // Shared selector syntax rejects punctuation embedded in numeric dates.
+        for input in [
+            "1,2/3/2020",
+            "2020,-01-05",
+            "January 5,, 2020",
+            "Jan, 5 2020",
+        ] {
+            assert!(date_bounds(input).is_err(), "{input}");
+            assert!(query_parts(&format!("date:\"{input}\"")).is_err());
+        }
         assert_eq!(
             date_bounds("2020-01-01").unwrap().0,
             "2019-12-31T10:00:00+00:00"

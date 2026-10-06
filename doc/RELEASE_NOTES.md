@@ -4,6 +4,10 @@
 
 ## Unreleased
 
+- Isolate Rust workflow editors behind sandboxed message ports, label their
+  dialogs for assistive technology, reject concurrent owner-policy overwrites
+  during import setup, and reject malformed comma-bearing numeric dates.
+
 - Add independent Rust catalog/MBOX/search verification with `make verify-database`.
   Move complete-corpus and synthetic import/database end-to-end assertions to
   Rust, including corruption rejection and explicit golden maintenance. The

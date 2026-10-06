@@ -186,9 +186,9 @@ class Engine:
         if method == "import_defaults":
             source = Path(str(args[0])).resolve(strict=True)
             SetupSelection(source=source, destination=self.archive).validate_paths()
-            rules = options.defaults([source])
-            return ImportDefaults(source=str(source), include=rules.include, exclude=rules.exclude,
-                                  revision=options.state().revision, antivirus=scanner_availability().model_dump(mode="json")).model_dump(mode="json")
+            state = options.state([source])
+            return ImportDefaults(source=str(source), include=state.include, exclude=state.exclude,
+                                  revision=state.revision, antivirus=scanner_availability().model_dump(mode="json")).model_dump(mode="json")
         if method == "start_import":
             selection = ImportSelection.model_validate(args[0])
             SetupSelection(source=selection.source, destination=self.archive).validate_paths()

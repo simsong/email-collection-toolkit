@@ -3069,6 +3069,14 @@ closing asks the foreground worker to drop its engine pipe and has an independen
 five-second event-loop deadline. Only the exact local main document can invoke
 native IPC. Allowlisted editor frames get narrow APIs from their parent; MIME
 frames remain isolated and cannot obtain those APIs.
+Editor frames use `sandbox="allow-scripts allow-forms"` and `rust-panel.js` receives a private
+MessageChannel from the parent. The parent validates request IDs, argument arrays
+and panel-specific methods; frames cannot read the parent API. Dialogs carry an
+accessible title. `DocumentOptions.state(roots)` derives defaults and the base
+archive revision from one read, keeping source seed rules out of the saved-policy
+revision. The real FIFO regression changes policy during source-default reading
+and confirms import rejects the stale snapshot. Rust dates parse explicit
+comma-bearing month formats instead of removing punctuation from arbitrary input.
 
 The Rust dispatcher uses one selector plan for preview and comprehensive queries:
 FTS words/phrases, subject/address/name/institution/date selectors, attachment text

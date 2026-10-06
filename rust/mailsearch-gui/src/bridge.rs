@@ -622,6 +622,10 @@ pub fn asset(path: &str) -> Option<(&'static str, &'static [u8])> {
         ),
         "/options.html" => ("text/html", include_bytes!("../../../gui/options.html")),
         "/options.css" => ("text/css", include_bytes!("../../../gui/options.css")),
+        "/rust-panel.js" => (
+            "text/javascript",
+            include_bytes!("../../../gui/rust-panel.js"),
+        ),
         "/options.js" => ("text/javascript", include_bytes!("../../../gui/options.js")),
         "/ingests.html" => ("text/html", include_bytes!("../../../gui/ingests.html")),
         "/ingests.css" => ("text/css", include_bytes!("../../../gui/ingests.css")),

@@ -2454,6 +2454,12 @@ on macOS and WebView2's `http://ect.localhost/index.html` on Windows. Only embed
 frames, with a constrained parent-provided API. They must not invoke native IPC
 directly. Other origins, asset paths, query strings and fragments must not gain
 backend access. MIME frames remain script-disabled and cannot receive editor APIs. Validate the actual callback URLs in the native runtime.
+Editor dialogs must have accessible names. Their frames use opaque-origin
+sandboxing and a private message port; the parent validates requests against each
+panel's method allowlist. Import defaults and their archive-policy revision must
+come from one configuration snapshot, including legacy source defaults, so a
+concurrent rule change is rejected at confirmation. Date selectors allow commas
+only after the day in month-name dates; malformed numeric dates are errors.
 The shared reader must accept Ctrl shortcuts for find, find-next, selection and
 MIME-part navigation on Windows while preserving Command shortcuts on macOS.
 

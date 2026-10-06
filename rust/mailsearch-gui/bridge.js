@@ -58,6 +58,7 @@
   const element = (tag, text) => { const node=document.createElement(tag); if(text) node.textContent=text; return node; };
   function modal(title) {
     const dialog=element("dialog"); dialog.className="rust-workflow no-print";
+    dialog.setAttribute("aria-label",title);
     const heading=element("h2",title), close=element("button","Close"); close.type="button";
     close.addEventListener("click",()=>dialog.close());
     dialog.append(heading,close); document.body.append(dialog);
@@ -65,10 +66,23 @@
   }
   function panel(page, title, methods, query="") {
     const dialog=modal(title), frame=element("iframe"); frame.title=title;
+    frame.setAttribute("sandbox","allow-scripts allow-forms");
     frame.src=page+query;
     frame.addEventListener("load",()=>{
-      frame.contentWindow.pywebview={api:methods};
-      frame.contentWindow.dispatchEvent(new frame.contentWindow.Event("pywebviewready"));
+      const channel=new MessageChannel();
+      channel.port1.onmessage=async event=>{
+        const request=event.data;
+        if(!request || !Number.isSafeInteger(request.id) || !Array.isArray(request.args)) return;
+        const reply={id:request.id};
+        try {
+          if(typeof request.method!=="string" || !Object.hasOwn(methods,request.method)) throw new Error("Editor method is not allowed.");
+          reply.result=await methods[request.method](...request.args);
+        }catch(error){reply.error=error.message || String(error);}
+        channel.port1.postMessage(reply);
+      };
+      dialog.addEventListener("close",()=>channel.port1.close(),{once:true});
+      // Only this opaque-origin child receives the capability port.
+      frame.contentWindow.postMessage({type:"ect-editor",methods:Object.keys(methods)},"*",[channel.port2]);
     },{once:true});
     dialog.append(frame); return true;
   }

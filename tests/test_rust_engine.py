@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 from contextlib import contextmanager
+from concurrent.futures import ThreadPoolExecutor
 from hashlib import sha256
 import os
 from pathlib import Path
@@ -19,7 +20,9 @@ from typing import Iterator
 from pydantic import JsonValue
 import pytest
 
-from mailarchiver.rust_engine import Reply, Request
+from mailarchiver.document_options import DocumentOptions
+from mailarchiver.owner_rules import OwnerRules
+from mailarchiver.rust_engine import Engine, ImportDefaults, Reply, Request
 from mailarchiver.writer_lock import WriterLease
 
 
@@ -41,6 +44,36 @@ class Peer:
         if reply.error:
             raise ValueError(reply.error)
         return reply.result
+
+
+@pytest.mark.skipif(os.name != "posix", reason="real FIFO coordinates the configuration read")
+def test_import_defaults_keep_the_revision_of_the_displayed_rules(tmp_path: Path) -> None:
+    """Owner policy: a concurrent edit while reading source defaults must block import."""
+    source = tmp_path / "source"
+    source.mkdir()
+    names = source / "owner-names.txt"
+    os.mkfifo(names)
+    engine = Engine(tmp_path / "snapshot.mailarchive")
+    engine.call(Request(id=1, method="create"))
+    options = DocumentOptions(engine.archive)
+    revision = options.state().revision
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        result = pool.submit(engine.call, Request(id=2, method="import_defaults", args=[str(source)]))
+        # Opening the real FIFO waits until config.yaml has already been read.
+        with names.open("w", encoding="utf-8") as output:
+            with WriterLease.acquire(engine.archive, str(engine.archive), "concurrent edit", "snapshot", "test") as lease:
+                options.save(OwnerRules(include=["new@example.test"]), lease, revision)
+            output.write("old@example.test\n")
+        defaults = ImportDefaults.model_validate(result.result(timeout=10))
+    assert defaults.include == ["old@example.test"]
+    assert defaults.revision == revision
+    with pytest.raises(ValueError, match="changed in another window"):
+        engine.call(Request(id=3, method="start_import", args=[{
+            "source": str(source), "include": "old@example.test", "revision": defaults.revision,
+            "scan_policy": "not-scanned",
+        }]))
+    assert options.state().include == ["new@example.test"]
+    assert not engine.job.active
 
 
 @contextmanager
