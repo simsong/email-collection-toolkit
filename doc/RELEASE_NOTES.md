@@ -4,6 +4,9 @@
 
 ## Unreleased
 
+- Serialize recent-archive updates across Rust window processes to retain
+  concurrent opens while preserving atomic settings replacement.
+
 - Offer startup archive creation only after a real writable-helper handshake;
   synchronize owner-loss/recovery acceptance at a held processing boundary.
 

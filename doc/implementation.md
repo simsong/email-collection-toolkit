@@ -3128,7 +3128,12 @@ before offering Create. A feature-gated startup probe used by native acceptance
 checks this decision with working/missing helpers and Windows write restrictions;
 the handshake requests only ping/capabilities and creates no archive files.
 Recent menu actions carry the path captured with their label, avoiding shared-list
-index races. Demo generation creates missing parents while refusing replacement.
+index races. Recent updates hold an exclusive OS file lock on a persistent
+companion file outside archives, reload under that lock, then sync and atomically
+replace JSON. The lock file is never removed; process exit releases ownership.
+A real two-child regression holds the lock, publishes a baseline while both
+children wait, then verifies all three entries survive without touching archives.
+Demo generation creates missing parents while refusing replacement.
 Staged searches publish and acknowledge both windows even after input is exhausted;
 small/empty regressions verify neither stage can prematurely report completion.
 Windows native startup opens existing archives only; write menus and frontend

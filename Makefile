@@ -727,6 +727,7 @@ rust-gui-smoke: rust-gui-build
 	@test -n "$(ARCHIVE)" || { echo 'usage: make rust-gui-smoke ARCHIVE=/path/to/archive QUERY=words'; exit 2; }
 	$(CARGO_RUN) reader-smoke "$(ARCHIVE)" "$(QUERY)"
 
+# ECT_RUST_RECENT_TEST_ROOT/NAME are internal child-process fixture paths set by Rust tests.
 test-rust-gui:
 	$(CARGO_RUN) reader-check
 

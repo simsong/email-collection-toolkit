@@ -472,6 +472,8 @@ WAL databases and journal/sidecar files are rejected without creating new files.
 `CARGO` selects Cargo and `RUST_TARGET_DIR` its build-output directory (defaults:
 `cargo` and checkout `target/`). `uv run` supplies Python only for the application
 under test and its portable verifier; import/database test logic runs in Rust.
+Rust tests internally set `ECT_RUST_RECENT_TEST_ROOT` and
+`ECT_RUST_RECENT_TEST_NAME` for an isolated recent-list fixture and child archive name.
 Existing `MAILARCHIVER_CLAMAV_LIBRARY`, `MAILARCHIVER_CLAMAV_DATABASE`,
 `MAILARCHIVER_CLAMAV_UPDATES`, `MAILARCHIVER_FRESHCLAM` and
 `MAILARCHIVER_CLAMAV_CERTIFICATES` select the native engine, bundled definitions,
