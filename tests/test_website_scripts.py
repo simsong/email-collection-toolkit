@@ -163,7 +163,9 @@ def test_release_workflow_validates_built_distributions() -> None:
     assert any(step.get("run") == "make test-sparkle-signing" for step in ci[JOBS]["python-browser"]["steps"])
     triggers = configuration.get(WORKFLOW_ON, configuration.get(True))
     assert triggers == {"push": {"tags": ["v*"]}}
-    assert set(configuration[JOBS]) == {"assemble", "macos", "rust-reader"}
+    assert set(configuration[JOBS]) == {"assemble", "macos", "rust-reader", "preflight"}
+    assert configuration[JOBS]["macos"][NEEDS] == "preflight"
+    assert configuration[JOBS]["rust-reader"][NEEDS] == "preflight"
     assert "git merge-base --is-ancestor HEAD refs/remotes/origin/main" in text
     assert ('gh workflow run pages.yml --repo "$GITHUB_REPOSITORY" '
             '--ref main -f release_tag="$RELEASE_TAG"') in text

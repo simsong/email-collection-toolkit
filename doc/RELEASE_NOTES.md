@@ -4,6 +4,9 @@
 
 ## Unreleased
 
+- Validate annotated release tags, version and `main` ancestry in a shared
+  preflight before starting macOS packaging or cross-platform Rust builds.
+
 - Gate unsupported Windows archive writes before entry into import or editing,
   preserving read-only status/history. Report post-import source-directory
   preference failures separately from successful canonical import outcomes.

@@ -2785,9 +2785,13 @@ and explicitly skip Windows before importing the `fcntl`-based scanner. They do 
 scanner support. Pages release-trigger checks parse YAML rather than relying on
 indentation, accepting PyYAML's YAML 1.1 interpretation of an unquoted `on` key.
 
-Release assembly checks the tag's commit, then runs the standard-library
+Release preflight checks the tag's commit and `main` ancestry, then runs the standard-library
 tag/version validator through `make release-tag-check` with `uv --no-project`.
-Only afterward does it install project dependencies and smoke built artifacts.
+Both macOS packaging and the reusable Rust reader matrix require successful
+preflight; macOS checks out its validated commit. Assembly retains its own
+identity checks. Real Git fixtures reject lightweight tags, version/commit
+mismatches and unmerged commits; workflow checks enforce both build dependencies.
+Only afterward do build jobs install project dependencies and smoke artifacts.
 The website header and navigation wrap without positional hiding rules.
 Browser geometry checks allow pixel rounding; GUI selection assertions locate
 the live virtual-table row by message ID after asynchronous preview redraws.

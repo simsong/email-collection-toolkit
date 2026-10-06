@@ -24,7 +24,7 @@ from scripts.update_appcast import AppcastRelease, SignedArchive, append_item
 FINGERPRINT = "0123456789ABCDEF0123456789ABCDEF01234567"
 IDENTITY_LINE = f'  1) {FINGERPRINT} "Developer ID Application: Fixture (ABCDEFGHIJ)"'
 JOBS, STEPS, NEEDS, WITH, REF, ENV, USES, RUN = "jobs", "steps", "needs", "with", "ref", "env", "uses", "run"
-ASSEMBLE, MACOS, PATH, NAME = "assemble", "macos", "path", "name"
+ASSEMBLE, MACOS, PREFLIGHT, PATH, NAME = "assemble", "macos", "preflight", "path", "name"
 RUNS_ON, CONDITION = "runs-on", "if"
 RELEASE_TAG, GITHUB_OUTPUT = "RELEASE_TAG", "GITHUB_OUTPUT"
 COMMIT_STEP = "Verify release commit"
@@ -191,6 +191,14 @@ def test_release_waits_for_exact_dmg_before_checksumming() -> None:
     workflow = safe_load((Path(__file__).parents[1] / ".github/workflows/release.yml").read_text())
     jobs = workflow[JOBS]
     assembly, macos = jobs[ASSEMBLE], jobs[MACOS]
+    # Release identity must gate both expensive build paths, including reuse.
+    for job in (macos, jobs["rust-reader"]):
+        assert job[NEEDS] == PREFLIGHT
+        assert CONDITION not in job
+    preflight = jobs[PREFLIGHT]
+    assert macos[STEPS][0][WITH][REF] == "${{ needs.preflight.outputs.commit }}"
+    assert preflight[STEPS][0][WITH][REF] == "${{ github.ref_name }}"
+    assert preflight[STEPS][-1][RUN] == 'make release-tag-check GITHUB_REF_NAME="$RELEASE_TAG" ARGS=--require-annotated'
     assert set(assembly[NEEDS]) == {MACOS, "rust-reader"}
     assert assembly[STEPS][0][WITH][REF] == "${{ needs.macos.outputs.commit }}"
     steps = assembly[STEPS]
@@ -216,14 +224,15 @@ def test_release_waits_for_exact_dmg_before_checksumming() -> None:
     assert uploads == ["dist/*.dmg", "dist/*.json"]
 
 
-@pytest.mark.parametrize("tag,annotated,move_head,accepted", [
-    ("v1.2.3", True, False, True),
-    ("v1.2.3", False, False, False),
-    ("v1.2.4", True, False, False),
-    ("v1.2.3", True, True, False),
+@pytest.mark.parametrize("tag,annotated,move_head,off_main,accepted", [
+    ("v1.2.3", True, False, False, True),
+    ("v1.2.3", False, False, False, False),
+    ("v1.2.4", True, False, False, False),
+    ("v1.2.3", True, True, False, False),
+    ("v1.2.3", True, False, True, False),
 ])
 def test_release_accepts_unsigned_annotated_tags_and_checks_commit_and_version(
-    tmp_path: Path, tag: str, annotated: bool, move_head: bool, accepted: bool,
+    tmp_path: Path, tag: str, annotated: bool, move_head: bool, off_main: bool, accepted: bool,
 ) -> None:
     """Release delivery: no signing keys are needed; annotation, version and commit must match."""
     def run(*args: str) -> str:
@@ -237,21 +246,23 @@ def test_release_accepts_unsigned_annotated_tags_and_checks_commit_and_version(
     run(*git, "init")
     run(*git, "commit", "--allow-empty", "-m", "fixture")
     run(*git, "update-ref", "refs/remotes/origin/main", "HEAD")
+    if off_main:
+        run(*git, "commit", "--allow-empty", "-m", "unmerged fixture")
     run(*git, "tag", *(["-a", tag, "-m", "fixture"] if annotated else [tag]))
     if move_head:
         run(*git, "commit", "--allow-empty", "-m", "different release commit")
     (tmp_path / "pyproject.toml").write_text('[project]\nversion = "1.2.3"\n')
     root = Path(__file__).parents[1]
     workflow = safe_load((root / ".github/workflows/release.yml").read_text())
-    for job in (MACOS, ASSEMBLE):
+    for job in (PREFLIGHT, MACOS, ASSEMBLE):
         output = tmp_path / f"{job}-output"
         command = next(step[RUN] for step in workflow[JOBS][job][STEPS] if step[NAME] == COMMIT_STEP)
         result = subprocess.run(["bash", "-e", "-o", "pipefail", "-c", command], cwd=tmp_path,
                                 env={**os.environ, RELEASE_TAG: tag, GITHUB_OUTPUT: str(output)},
                                 capture_output=True, text=True, check=False)
-        assert (result.returncode == 0) == (not move_head), result.stderr
+        assert (result.returncode == 0) == (not move_head and not off_main), result.stderr
         if result.returncode == 0:
-            if job == MACOS:
+            if job in (PREFLIGHT, MACOS):
                 assert output.read_text() == f"commit={run('git', 'rev-parse', 'HEAD').strip()}\n"
             result = subprocess.run([sys.executable, str(root / "scripts/release_tag.py"),
                                      "--tag", tag, "--require-annotated"], cwd=tmp_path,
