@@ -23,6 +23,8 @@ from playwright.sync_api import Page, expect
 from pydantic import BaseModel, Field
 import pytest
 from mailarchiver.mailbox_tree import FilterSet, FilterSetPreferences, FilterSetStore, preferences_lock
+from mailarchiver.catalog import create_search
+from mailarchiver.search import index_message
 
 from test_mailsearch import make_archive
 from test_gui_service import make_gui_archive
@@ -127,12 +129,31 @@ else:
     assert after == before
 
 
-def test_reader_remains_usable_without_the_optional_archive_engine(page: Page, tmp_path: Path) -> None:
+@pytest.mark.parametrize("mixed", [False, True])
+def test_reader_remains_usable_without_the_optional_archive_engine(page: Page, tmp_path: Path, mixed: bool) -> None:
     """Capabilities: unavailable writers cannot prompt or break real Rust search/read."""
     binary = environ.get("RUST_WEBVIEW_BINARY")
     if not binary:
         pytest.skip("run make test-rust-webview")
-    archive, _ = make_archive(tmp_path)
+    archive, raw = make_archive(tmp_path)
+    if mixed:
+        # Legacy mboxo only quoted bare From lines; already-quoted lines stayed intact.
+        raw += b"From plain\n>From retained\n>>From nested"
+        record = b"From fixture Thu Jan 1 00:00:00 1970\n" + b"".join(
+            (b">" if line.startswith(b"From ") else b"") + line for line in raw.splitlines(keepends=True)
+        ) + b"\n"
+        with sqlite3.connect(archive / "archive.sqlite3") as database:
+            filename = database.execute("SELECT filename FROM mbox_generations").fetchone()[0]
+            database.execute("UPDATE messages SET sha256=?", (sha256(raw).hexdigest(),))
+            database.execute("UPDATE locations SET byte_offset=0,byte_length=?", (len(record),))
+        (archive / "data/mbox" / filename).write_bytes(record)
+        (archive / "search.sqlite3").unlink()
+        search = create_search(archive / "search.sqlite3")
+        try:
+            index_message(search, raw, False)
+            search.commit()
+        finally:
+            search.close()
     before = [(p.relative_to(archive), sha256(p.read_bytes()).hexdigest()) for p in sorted(archive.rglob("*")) if p.is_file()]
     process = subprocess.Popen([binary, "--rpc", str(archive)], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                                stderr=subprocess.PIPE, text=True,
@@ -157,6 +178,8 @@ def test_reader_remains_usable_without_the_optional_archive_engine(page: Page, t
         page.locator("#result-list .result").first.click()
         expect(page.locator("#message-subject")).to_have_text("planning meeting")
         expect(page.locator("#body-view")).to_contain_text("Meeting agenda.")
+        if mixed:
+            expect(page.locator("#body-view")).to_contain_text("From plain\n>From retained\n>>From nested")
         expect(page.locator("#error")).to_be_hidden()
     finally:
         assert process.stdin is not None

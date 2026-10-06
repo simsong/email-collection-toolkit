@@ -4,7 +4,7 @@
 //! Try reversible mboxrd and the documented bounded legacy mboxo ambiguity.
 //! Adopted envelopes and writer-added terminal newlines are hash-selected.
 //! This module reads only; it neither parses MIME nor rewrites stored mail.
-//! It supplies the byte-preservation check used by the catalog verifier.
+//! It supplies catalog verification and bounded reader byte recovery.
 
 use anyhow::{ensure, Result};
 use sha2::{Digest, Sha256};
@@ -24,6 +24,15 @@ struct Hashes {
     hash: Sha256,
     tail: [u8; 2],
     tail_len: usize,
+    adopted: bool,
+    quoted: u16,
+}
+
+struct Recovery {
+    quoting: Quoting,
+    adopted: bool,
+    quoted: u16,
+    trim: usize,
 }
 
 impl Hashes {
@@ -32,6 +41,8 @@ impl Hashes {
             hash: Sha256::new(),
             tail: [0; 2],
             tail_len: 0,
+            adopted: false,
+            quoted: 0,
         };
         value.write(prefix);
         value
@@ -56,7 +67,7 @@ impl Hashes {
         }
     }
 
-    fn matches(&self, expected: &str) -> bool {
+    fn matched_trim(&self, expected: &str) -> Option<usize> {
         let tail = &self.tail[..self.tail_len];
         let mut lengths = vec![tail.len()];
         if tail.ends_with(b"\n") {
@@ -65,10 +76,10 @@ impl Hashes {
         if tail.ends_with(b"\r\n") {
             lengths.push(tail.len() - 2);
         }
-        lengths.into_iter().any(|length| {
+        lengths.into_iter().find_map(|length| {
             let mut hash = self.hash.clone();
             hash.update(&self.tail[..length]);
-            format!("{:x}", hash.finalize()) == expected
+            (format!("{:x}", hash.finalize()) == expected).then_some(tail.len() - length)
         })
     }
 }
@@ -98,7 +109,7 @@ fn candidate(
     prefixes: &[Hashes],
     mode: Quoting,
     expected: &str,
-) -> Result<(bool, usize)> {
+) -> Result<(Option<Recovery>, usize)> {
     file.seek(SeekFrom::Start(start))?;
     let mut input = file.take(length);
     let mut hashes = prefixes.to_vec();
@@ -129,12 +140,15 @@ fn candidate(
                     }
                     if matches!(mode, Quoting::MboxoMixed) && greater == 1 {
                         if ambiguous > 12 {
-                            return Ok((false, ambiguous));
+                            return Ok((None, ambiguous));
                         }
                         // Hash the common prefix once, then fork only this quote decision.
                         write_hashes(&mut hashes, &output);
                         output.clear();
                         let mut quoted = hashes.clone();
+                        for hash in &mut quoted {
+                            hash.quoted |= 1 << (ambiguous - 1);
+                        }
                         write_hashes(&mut quoted, b">From ");
                         write_hashes(&mut hashes, b"From ");
                         hashes.extend(quoted);
@@ -172,15 +186,25 @@ fn candidate(
         output.extend_from_slice(&b"From "[..matched]);
     }
     write_hashes(&mut hashes, &output);
-    Ok((hashes.iter().any(|hash| hash.matches(expected)), ambiguous))
+    Ok((
+        hashes.iter().find_map(|hash| {
+            hash.matched_trim(expected).map(|trim| Recovery {
+                quoting: mode,
+                adopted: hash.adopted,
+                quoted: hash.quoted,
+                trim,
+            })
+        }),
+        ambiguous,
+    ))
 }
 
-pub fn verify_record(
+fn record_recovery(
     file: &mut (impl Read + Seek),
     offset: u64,
     length: u64,
     expected: &str,
-) -> Result<()> {
+) -> Result<(u64, Recovery)> {
     ensure!(
         expected.len() == 64
             && expected
@@ -190,7 +214,7 @@ pub fn verify_record(
     );
     file.seek(SeekFrom::Start(offset))?;
     // Bound reads by the catalogued record, not an arbitrary envelope length.
-    let (envelope_size, envelope) = {
+    let (envelope_size, mut envelope) = {
         let mut input = BufReader::new(file.take(length));
         let mut prefix = [0; 5];
         input.read_exact(&mut prefix)?;
@@ -215,6 +239,7 @@ pub fn verify_record(
         .checked_add(envelope_size)
         .ok_or_else(|| anyhow::anyhow!("offset overflow"))?;
     let size = length - envelope_size;
+    envelope.adopted = true;
     let prefixes = [Hashes::new(&[]), envelope];
     let mut ambiguous = 0;
     for prefix in &prefixes {
@@ -227,18 +252,75 @@ pub fn verify_record(
                 mode,
                 expected,
             )?;
-            if matched {
-                return Ok(());
+            if let Some(recovery) = matched {
+                return Ok((envelope_size, recovery));
             }
             ambiguous = count;
         }
     }
-    if (2..=12).contains(&ambiguous)
-        && candidate(file, start, size, &prefixes, Quoting::MboxoMixed, expected)?.0
-    {
-        return Ok(());
+    if (2..=12).contains(&ambiguous) {
+        if let Some(recovery) =
+            candidate(file, start, size, &prefixes, Quoting::MboxoMixed, expected)?.0
+        {
+            return Ok((envelope_size, recovery));
+        }
     }
     anyhow::bail!("MBOX record raw SHA-256 mismatch")
+}
+
+pub fn verify_record(
+    file: &mut (impl Read + Seek),
+    offset: u64,
+    length: u64,
+    expected: &str,
+) -> Result<()> {
+    record_recovery(file, offset, length, expected).map(|_| ())
+}
+
+/// Recover one caller-bounded record using exactly the verifier's hash-selected plan.
+pub fn recover_bytes(record: &[u8], expected: &str) -> Result<Vec<u8>> {
+    let (split, recovery) = record_recovery(
+        &mut std::io::Cursor::new(record),
+        0,
+        record.len() as u64,
+        expected,
+    )?;
+    let split = usize::try_from(split)?;
+    let mut output = Vec::with_capacity(record.len());
+    if recovery.adopted {
+        output.extend_from_slice(&record[..split]);
+    }
+    let mut ambiguous = 0;
+    for line in record[split..].split_inclusive(|byte| *byte == b'\n') {
+        let depth = line.iter().take_while(|byte| **byte == b'>').count();
+        let remove = if line[depth..].starts_with(b"From ") {
+            match recovery.quoting {
+                Quoting::Stored => false,
+                Quoting::Mboxrd => depth > 0,
+                Quoting::MboxoAll => depth == 1,
+                Quoting::MboxoMixed if depth == 1 => {
+                    let remove = recovery.quoted & (1 << ambiguous) == 0;
+                    ambiguous += 1;
+                    remove
+                }
+                Quoting::MboxoMixed => false,
+            }
+        } else {
+            false
+        };
+        output.extend_from_slice(&line[usize::from(remove)..]);
+    }
+    output.truncate(
+        output
+            .len()
+            .checked_sub(recovery.trim)
+            .ok_or_else(|| anyhow::anyhow!("invalid recovered MBOX framing"))?,
+    );
+    ensure!(
+        format!("{:x}", Sha256::digest(&output)) == expected,
+        "recovered MBOX bytes do not match raw SHA-256"
+    );
+    Ok(output)
 }
 
 #[cfg(test)]
@@ -271,11 +353,42 @@ mod tests {
             file.write_all(stored)?;
             let length = envelope.len() + stored.len();
             for prefix in [&[][..], &envelope[..]] {
-                let digest = format!("{:x}", Sha256::digest([prefix, original].concat()));
+                let recovered = [prefix, original].concat();
+                let digest = format!("{:x}", Sha256::digest(&recovered));
                 verify_record(&mut file, 0, length as u64, &digest)?;
+                assert_eq!(
+                    recover_bytes(&[envelope.as_slice(), stored].concat(), &digest)?,
+                    recovered
+                );
             }
             assert!(verify_record(&mut file, 0, length as u64, &"0".repeat(64)).is_err());
+            assert!(
+                recover_bytes(&[envelope.as_slice(), stored].concat(), &"0".repeat(64)).is_err()
+            );
         }
+        Ok(())
+    }
+
+    #[test]
+    fn mixed_recovery_refuses_more_than_twelve_ambiguous_lines() -> Result<()> {
+        // Byte recovery must retain the verifier's bounded ambiguity policy.
+        let mut record = b"From fixture\n".to_vec();
+        let mut original = Vec::new();
+        for index in 0..13 {
+            record.extend_from_slice(format!(">From {index}\n").as_bytes());
+            original.extend_from_slice(
+                format!("{}From {index}\n", if index == 12 { ">" } else { "" }).as_bytes(),
+            );
+        }
+        let digest = format!("{:x}", Sha256::digest(original));
+        assert!(verify_record(
+            &mut std::io::Cursor::new(&record),
+            0,
+            record.len() as u64,
+            &digest
+        )
+        .is_err());
+        assert!(recover_bytes(&record, &digest).is_err());
         Ok(())
     }
 
@@ -316,13 +429,18 @@ mod tests {
         let length = file.stream_position()?;
         let mut measured = Measured { file, bytes: 0 };
         for prefix in [&[][..], envelope.as_slice()] {
-            let expected = format!("{:x}", Sha256::digest([prefix, &original].concat()));
+            let recovered = [prefix, &original].concat();
+            let expected = format!("{:x}", Sha256::digest(&recovered));
             measured.bytes = 0;
             verify_record(&mut measured, 0, length, &expected)?;
             assert!(
                 measured.bytes <= 7 * length + 8192,
                 "{} bytes reread",
                 measured.bytes
+            );
+            assert_eq!(
+                recover_bytes(&[envelope.as_slice(), &stored].concat(), &expected)?,
+                recovered
             );
         }
         measured.bytes = 0;

@@ -3061,9 +3061,15 @@ joining a worker, whose operations cannot write archive data.
 
 The catalog joins a read-only attached FTS database; literal tokens are quoted
 and bound as SQL parameters. A SQLite progress handler limits search duration.
-Selection reads one bounded location in `data/mbox`, tries reversible mboxrd and
-simple legacy interpretations plus terminal-newline/envelope variants, and
-accepts only an original SHA-256 match. MIME display prefers plain alternatives,
+Selection reads one bounded location in `data/mbox` and uses the shared
+`archive-verifier::recover_bytes` decoder. Its streamed SHA-256 candidates retain
+the matched framing, adopted-envelope choice and up-to-twelve per-line legacy
+quote decisions. The reader reconstructs only the selected interpretation and
+checks its exact bytes again before MIME parsing; it does not allocate a message
+buffer per candidate. The standalone verifier remains streaming and discards the
+recovery plan without reconstructing a record. Real fixtures exercise mixed
+display, adopted envelopes, terminal newlines, corruption refusal and byte fixity.
+MIME display prefers plain alternatives,
 ignores attachment parts, and converts HTML locally to text. Databases and MBOX
 paths resolving outside the archive are rejected. WAL-mode database headers are rejected before SQLite opens them, avoiding
 shared-memory sidecar creation. The prototype does not repair

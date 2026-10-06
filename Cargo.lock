@@ -2804,6 +2804,7 @@ dependencies = [
  "ammonia",
  "anyhow",
  "arboard",
+ "archive-verifier",
  "base64",
  "block2 0.6.2",
  "chrono",

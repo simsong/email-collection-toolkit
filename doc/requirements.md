@@ -2413,6 +2413,10 @@ processes using a persistent companion-file OS lock held before loading through
 synced atomic replacement. Waiting writers must reload the latest snapshot;
 neither successful concurrent mutations nor intervening updates may be lost.
 Read-only listing may use the atomically published snapshot without a lock.
+GUI message recovery must use the verifier's bounded per-line legacy quoting
+choices, including adopted envelopes and terminal-newline variants. Display only
+the exact original bytes selected by the recorded SHA-256; reject corruption
+and mixed ambiguity beyond the twelve-line bound without rewriting an archive.
 Rich MIME viewing includes sanitized HTML, CID raster images, per-message remote-content
 consent, raw source, attachment previews, parent-message provenance and computed-date
 notices. Native actions include safe file exports, attachment open confirmation,

@@ -19,7 +19,8 @@ pub mod shell;
 pub mod updater;
 pub mod worker;
 
-use anyhow::{bail, ensure, Context, Result};
+use anyhow::{ensure, Context, Result};
+use archive_verifier::recover_bytes as verified_bytes;
 use mailparse::{DispositionType, MailHeaderMap, ParsedMail};
 use rusqlite::{Connection, OpenFlags};
 use sha2::{Digest, Sha256};
@@ -319,51 +320,6 @@ pub fn sha256(bytes: &[u8]) -> String {
     format!("{:x}", Sha256::digest(bytes))
 }
 
-fn verified_bytes(record: &[u8], expected: &str) -> Result<Vec<u8>> {
-    let split = record
-        .iter()
-        .position(|b| *b == b'\n')
-        .context("Missing MBOX envelope")?
-        + 1;
-    ensure!(record.starts_with(b"From "), "Invalid MBOX envelope");
-    let stored = &record[split..];
-    let mut rd = Vec::with_capacity(stored.len());
-    let mut legacy = Vec::with_capacity(stored.len());
-    for line in stored.split_inclusive(|b| *b == b'\n') {
-        let depth = line.iter().take_while(|b| **b == b'>').count();
-        rd.extend_from_slice(if depth > 0 && line[depth..].starts_with(b"From ") {
-            &line[1..]
-        } else {
-            line
-        });
-        legacy.extend_from_slice(if line.starts_with(b">From ") {
-            &line[1..]
-        } else {
-            line
-        });
-    }
-    // Hash distinguishes writer-added LF/CRLF and adopted source envelopes.
-    for prefix in [&[][..], &record[..split]] {
-        for content in [rd.as_slice(), legacy.as_slice(), stored] {
-            let candidate = [prefix, content].concat();
-            for trim in [0, 1, 2] {
-                if trim == 1 && !candidate.ends_with(b"\n")
-                    || trim == 2 && !candidate.ends_with(b"\r\n")
-                {
-                    continue;
-                }
-                let bytes = &candidate[..candidate.len() - trim];
-                if sha256(bytes) == expected {
-                    return Ok(bytes.to_vec());
-                }
-            }
-        }
-    }
-    bail!(
-        "SHA-256 mismatch or unsupported ambiguous legacy MBOX quoting; message was not displayed"
-    )
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -552,6 +508,52 @@ mod tests {
                 .is_empty());
             assert_eq!(sha256(raw), before);
         }
+    }
+
+    #[test]
+    fn mixed_legacy_record_displays_only_hash_selected_original_bytes() {
+        // Reader/verifier parity: per-line legacy decisions and adopted framing.
+        let (_dir, path) = fixture();
+        let envelope = b"From fixture Thu Jan 1 00:00:00 1970\r\n";
+        let body = b"Subject: mixed legacy\r\n\r\nFrom unquoted\r\n>From originally quoted\r\n>>From nested\r\nlast";
+        let stored = b"Subject: mixed legacy\r\n\r\n>From unquoted\r\n>From originally quoted\r\n>>From nested\r\nlast\r\n";
+        let record = [envelope.as_slice(), stored.as_slice()].concat();
+        let mbox = path.join("data/mbox/DEMO.mbox");
+        fs::write(&mbox, &record).unwrap();
+        let catalog = Connection::open(path.join("archive.sqlite3")).unwrap();
+        catalog
+            .execute(
+                "UPDATE locations SET byte_offset=0,byte_length=? WHERE message_pk=1",
+                [record.len()],
+            )
+            .unwrap();
+        for prefix in [&[][..], envelope.as_slice()] {
+            let original = [prefix, body].concat();
+            let digest = sha256(&original);
+            catalog
+                .execute("UPDATE messages SET sha256=? WHERE message_pk=1", [&digest])
+                .unwrap();
+            let before = fs::read(path.join("archive.sqlite3")).unwrap();
+            let archive = Archive::open(&path).unwrap();
+            assert_eq!(archive.raw_message(1).unwrap(), original);
+            let shown = archive.message(1).unwrap();
+            assert!(shown.body.contains("From unquoted"));
+            assert!(shown.body.contains(">From originally quoted"));
+            assert!(shown.body.contains(">>From nested"));
+            assert_eq!(shown.sha256, digest);
+            assert_eq!(fs::read(path.join("archive.sqlite3")).unwrap(), before);
+            assert_eq!(fs::read(&mbox).unwrap(), record);
+        }
+        let mut corrupt = record.clone();
+        *corrupt.last_mut().unwrap() = b'x';
+        fs::write(&mbox, &corrupt).unwrap();
+        let archive = Archive::open(&path).unwrap();
+        assert!(archive
+            .message(1)
+            .unwrap_err()
+            .to_string()
+            .contains("SHA-256"));
+        assert_eq!(fs::read(&mbox).unwrap(), corrupt);
     }
 
     #[test]

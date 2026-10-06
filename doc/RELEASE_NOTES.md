@@ -4,6 +4,9 @@
 
 ## Unreleased
 
+- Share bounded hash-selected MBOX byte recovery between the Rust GUI and
+  independent verifier so mixed legacy quoting remains readable and verified.
+
 - Open the first usable recent archive, skipping missing or invalid newer entries.
 
 - Serialize shared saved-filter mutations across Rust and Python processes;
