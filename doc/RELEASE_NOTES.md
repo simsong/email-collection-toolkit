@@ -4,6 +4,9 @@
 
 ## Unreleased
 
+- Route Windows native menu accelerators through Tao's Win32 message loop;
+  shortcut labels alone do not enable their actions.
+
 - Add the missing macOS native Edit menu and native Open/Preferences/Quit
   shortcuts, including when keyboard focus is inside a sandboxed workflow editor.
 

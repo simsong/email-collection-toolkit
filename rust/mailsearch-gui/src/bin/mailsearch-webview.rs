@@ -276,7 +276,25 @@ fn native(path: PathBuf, smoke_output: Option<PathBuf>, parameters: Option<Strin
         #[cfg(feature = "native-smoke")]
         SmokeFinished(Result<()>),
     }
-    let events = EventLoopBuilder::<NativeEvent>::with_user_event().build();
+    let mut event_builder = EventLoopBuilder::<NativeEvent>::with_user_event();
+    #[cfg(target_os = "windows")]
+    let accelerators = std::rc::Rc::new(std::cell::Cell::new((0isize, 0isize)));
+    #[cfg(target_os = "windows")]
+    {
+        use tao::platform::windows::EventLoopBuilderExtWindows;
+        use windows_sys::Win32::UI::WindowsAndMessaging::{TranslateAcceleratorW, MSG};
+        let handles = accelerators.clone();
+        event_builder.with_msg_hook(move |message| {
+            let (window, menu) = handles.get();
+            if window == 0 || menu == 0 || message.is_null() {
+                return false;
+            }
+            // Tao supplies the live MSG on this GUI thread. The window and menu
+            // own these handles until LoopDestroyed clears them before disposal.
+            unsafe { TranslateAcceleratorW(window as _, menu as _, message.cast::<MSG>()) != 0 }
+        });
+    }
+    let events = event_builder.build();
     let window = WindowBuilder::new()
         .with_title(format!(
             "Email Collection Toolkit — {} · Rust",
@@ -285,6 +303,11 @@ fn native(path: PathBuf, smoke_output: Option<PathBuf>, parameters: Option<Strin
         .with_inner_size(tao::dpi::LogicalSize::new(1250.0, 850.0))
         .build(&events)?;
     let mut menu = Some(mailsearch_rust::shell::menu(&window)?);
+    #[cfg(target_os = "windows")]
+    {
+        use tao::platform::windows::WindowExtWindows;
+        accelerators.set((window.hwnd() as isize, menu.as_ref().unwrap().haccel()));
+    }
     let menu_proxy = events.create_proxy();
     muda::MenuEvent::set_event_handler(Some(move |event| {
         let _ = menu_proxy.send_event(NativeEvent::Menu(event));
@@ -580,6 +603,8 @@ fn native(path: PathBuf, smoke_output: Option<PathBuf>, parameters: Option<Strin
             }
             Event::LoopDestroyed => {
                 // Stop WinSparkle callbacks before dropping its DLL and native menu.
+                #[cfg(target_os = "windows")]
+                accelerators.set((0, 0));
                 shell.take();
                 menu.take();
             }

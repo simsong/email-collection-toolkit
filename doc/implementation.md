@@ -3153,6 +3153,11 @@ Native Open, Preferences and Quit carry platform command accelerators rather
 than relying on parent-page key events; iframe keystrokes do not bubble to that
 parent. Quit uses the existing supervised shutdown event. Keyboard acceptance
 uses actual native input, separately from DOM-driven smoke checks.
+On Windows, Tao's pre-dispatch message hook calls `TranslateAcceleratorW` with
+the owning window and Muda menu's accelerator table, consuming handled messages.
+The table stays owned by the native menu and the hook's handles are cleared before
+menu disposal. Cross-platform compilation/ordinary smoke does not establish
+Windows keyboard acceptance; that still requires native shortcut trials.
 Native `shell_status` reloads reader preferences from disk. A preference Save
 includes the displayed baseline; `Preferences::merge_save` takes a nonblocking
 stable companion-file OS lock, reloads, merges only changed font/update fields

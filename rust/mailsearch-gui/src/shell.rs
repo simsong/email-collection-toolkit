@@ -94,6 +94,10 @@ pub struct NativeMenu {
 }
 #[cfg(any(target_os = "macos", target_os = "windows"))]
 impl NativeMenu {
+    #[cfg(target_os = "windows")]
+    pub fn haccel(&self) -> isize {
+        self._menu.haccel()
+    }
     pub fn recent_path(&self, index: usize) -> Option<&std::path::Path> {
         self.recent.recent_path(index)
     }

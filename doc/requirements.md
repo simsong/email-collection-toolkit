@@ -2523,6 +2523,8 @@ The macOS native Edit menu must provide responder-chain Undo/Redo, Cut, Copy,
 Paste and Select All, including in sandboxed workflow fields. Native Open,
 Preferences and Quit accelerators must work while an editor has keyboard focus;
 Quit must retain supervised helper shutdown.
+Windows must route native accelerators through its Win32 message loop, consuming
+handled messages and retaining valid menu/window handles throughout dispatch.
 
 Explicit pre-merge Windows CI is opt-in via `[windows-ci]` in the pushed head
 commit message; ordinary pushes must skip both Windows runners. Reuse the
