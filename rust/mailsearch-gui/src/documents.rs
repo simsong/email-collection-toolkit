@@ -25,7 +25,7 @@ impl Default for Documents {
         }
     }
 }
-pub(crate) fn preferences_lock(path: &Path) -> Result<std::fs::File> {
+fn preferences_lock_file(path: &Path) -> Result<std::fs::File> {
     std::fs::create_dir_all(path.parent().context("Missing preferences directory")?)?;
     // Keep the companion inode stable across atomic JSON replacements.
     let lock = std::fs::File::options()
@@ -34,7 +34,17 @@ pub(crate) fn preferences_lock(path: &Path) -> Result<std::fs::File> {
         .create(true)
         .truncate(false)
         .open(path.with_extension("lock"))?;
+    Ok(lock)
+}
+pub(crate) fn preferences_lock(path: &Path) -> Result<std::fs::File> {
+    let lock = preferences_lock_file(path)?;
     lock.lock()?;
+    Ok(lock)
+}
+pub(crate) fn preferences_try_lock(path: &Path) -> Result<std::fs::File> {
+    let lock = preferences_lock_file(path)?;
+    lock.try_lock()
+        .context("Preferences are being saved in another window; retry Save")?;
     Ok(lock)
 }
 impl Documents {

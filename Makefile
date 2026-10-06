@@ -711,6 +711,7 @@ test-pff-converter: pff-converter
 # Rust GUI experiment: ARCHIVE is an existing archive directory; QUERY is literal search text.
 # RUST_GUI_DEMO selects a new synthetic fixture directory; no real mail is imported.
 # ECT_RUST_WEBVIEW_DIAGNOSTICS enables native navigation/IPC URL diagnostics.
+# ECT_RUST_PREFERENCES_TEST_ROOT/EDIT coordinate isolated child-process fixtures only.
 # ECT_RUST_ENGINE_PYTHON selects the prepared Python archive-service interpreter;
 # default: this checkout .venv/bin/python (Windows .venv/Scripts/python.exe).
 RUST_GUI_DEMO ?= $(CURDIR)/.tmp/rust-gui-demo

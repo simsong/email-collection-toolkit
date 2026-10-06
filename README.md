@@ -87,6 +87,9 @@ archive path and `QUERY` supplies words to `make rust-gui-smoke`.
 `RUST_GUI_DEMO` overrides the new synthetic fixture destination; creation refuses
 an existing directory. `RUST_GUI_BINARY` selects the compiled executable for the
 Python interoperability test and is set automatically by its Makefile target.
+`ECT_RUST_PREFERENCES_TEST_ROOT` and `ECT_RUST_PREFERENCES_TEST_EDIT` are internal
+Rust preference fixtures: a private directory and the font/update edit performed
+by a test child. They are not application settings.
 Set `ECT_RUST_WEBVIEW_DIAGNOSTICS=1` to log native navigation and IPC document
 URLs to stderr while diagnosing the shell. It does not log request bodies or
 message contents. Leave it unset for ordinary use.

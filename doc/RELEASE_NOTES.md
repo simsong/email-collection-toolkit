@@ -4,6 +4,10 @@
 
 ## Unreleased
 
+- Merge only edited Rust preference fields under a stable process lock. Preserve
+  other windows' independent changes, reject conflicting font-size edits, and
+  refresh preferences from disk when reopening the dialog.
+
 - Make Rust database recovery a responsive foreground opening job with elapsed
   time and Abort, without a 30-second repair cutoff. Revalidate before opening;
   aborted or failed recovery leaves the archive unopened and preserves journals

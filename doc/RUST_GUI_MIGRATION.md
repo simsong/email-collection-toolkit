@@ -32,7 +32,7 @@ window that started them, with cross-process writer leases preventing conflicts.
 | Documents | Empty archive creation, Open, recent archives and native folder/file dialogs |
 | Archive services | Owner rules with revision conflicts, name/address and institution editors, persistent manual decisions |
 | Import | Source selection, owner rules, scanner policy, attachment indexing, start, progress/history, stop after current message, failures and Continue Processing |
-| Recovery | Existing lease-protected journal recovery when opening; interrupted import resume; helper pipe-close cancellation and five-second shutdown deadline |
+| Recovery | Read-only probe, foreground lease-protected journal recovery with elapsed time and Abort; revalidation before opening, unopened state on failure/Abort; interrupted import resume and bounded helper shutdown |
 | Health | About/Preferences, scanner status and explicit background definition refresh; update availability remains platform/build dependent |
 
 Try imports only into a disposable archive until you have reviewed the native
@@ -49,6 +49,7 @@ Headless targets use real services and synthetic bytes:
 make test-rust-gui
 make test-rust-webview
 make test-rust-engine
+make test-rust-recovery
 make test-gui
 ```
 
@@ -58,6 +59,11 @@ The browser tests exercise the shared widgets through actual Rust RPC. They
 never start native windows. Native file dialogs, clipboard, printing, external
 attachment opening, WKWebView editor frames and Windows job objects still need
 platform trials; these tests are not native acceptance.
+The recovery target creates genuine catalog/search/processing rollback journals,
+checks writer exclusion, renders the foreground timer while holding the real
+helper beyond 30 seconds, aborts/reaps it and verifies successful later recovery.
+Preference regressions use two real window-process writers, preserve independent
+stale-dialog edits and reject conflicting font changes without blocking on a lock.
 
 Local validation on macOS (October 5, 2026): Rust build and 24 tests passed;
 three Rust-backed browser tests and two archive-service tests passed. The shared

@@ -52,20 +52,28 @@ impl Shell {
 
     fn call(&mut self, method: &str, args: &[Value]) -> Result<Value> {
         match method {
-            "shell_status" => Ok(json!({
+            "shell_status" => {
+                self.preferences = Preferences::load(&self.path)?;
+                self.updater.configure(self.preferences.automatic_updates);
+                Ok(json!({
                 "version": env!("ECT_APP_VERSION"),
                 "platform": std::env::consts::OS,
                 "architecture": std::env::consts::ARCH,
                 "preferences": self.preferences,
                 "updates_available": self.updater.available(),
                 "update_detail": self.updater.detail,
-            })),
+                }))
+            }
             "preferences_save" => {
                 let preferences: Preferences =
                     serde_json::from_value(args.first().context("Missing preferences")?.clone())?;
-                preferences.save(&self.path)?;
-                self.updater.configure(preferences.automatic_updates);
-                self.preferences = preferences;
+                let baseline: Preferences = serde_json::from_value(
+                    args.get(1)
+                        .context("Missing displayed preference baseline")?
+                        .clone(),
+                )?;
+                self.preferences = preferences.merge_save(&self.path, &baseline)?;
+                self.updater.configure(self.preferences.automatic_updates);
                 self.call("shell_status", &[])
             }
             "check_updates" => {

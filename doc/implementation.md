@@ -3132,6 +3132,13 @@ closing asks the foreground worker to drop its engine pipe and has an independen
 five-second event-loop deadline. Only the exact local main document can invoke
 native IPC. Allowlisted editor frames get narrow APIs from their parent; MIME
 frames remain isolated and cannot obtain those APIs.
+Native `shell_status` reloads reader preferences from disk. A preference Save
+includes the displayed baseline; `Preferences::merge_save` takes a nonblocking
+stable companion-file OS lock, reloads, merges only changed font/update fields
+and syncs/atomically replaces the file. Unrelated stale-dialog edits survive;
+competing font-size changes return an explicit conflict. Lock contention returns
+a retry message without blocking the window event loop. The updater is configured
+from the merged/reloaded settings, not an old window snapshot.
 Editor frames use `sandbox="allow-scripts allow-forms"` and `rust-panel.js` receives a private
 MessageChannel from the parent. The parent validates request IDs, argument arrays
 and panel-specific methods; frames cannot read the parent API. Dialogs carry an

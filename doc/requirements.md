@@ -2413,6 +2413,11 @@ processes using a persistent companion-file OS lock held before loading through
 synced atomic replacement. Waiting writers must reload the latest snapshot;
 neither successful concurrent mutations nor intervening updates may be lost.
 Read-only listing may use the atomically published snapshot without a lock.
+Rust preference dialogs must submit the snapshot originally displayed. Saving
+must hold a stable OS lock while reloading and merging only changed fields, so
+another window's unrelated font/update edits survive. Conflicting text-size edits
+must fail without replacing the file. Native callbacks must report lock contention
+promptly instead of waiting; reopening Preferences reads the latest disk settings.
 GUI message recovery must use the verifier's bounded per-line legacy quoting
 choices, including adopted envelopes and terminal-newline variants. Display only
 the exact original bytes selected by the recorded SHA-256; reject corruption

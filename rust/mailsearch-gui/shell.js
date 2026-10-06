@@ -75,7 +75,7 @@
             if (!size.reportValidity()) return;
             save.disabled = true;
             try {
-              apply(await api.preferences_save({message_font_size:Number(size.value), automatic_updates:automatic.checked}));
+              apply(await api.preferences_save({message_font_size:Number(size.value), automatic_updates:automatic.checked}, status.preferences));
               dialog.close();
             } catch (failure) { error.textContent = failure.message; }
             finally { save.disabled = false; }
