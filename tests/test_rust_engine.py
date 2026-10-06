@@ -3,7 +3,8 @@
 # Synthetic inputs pass through production creation, import and identity services.
 # The tests verify byte preservation, owner-policy conflicts and writer exclusion.
 # Pipe closure must reap the helper without a Python GUI or visible windows.
-# No mocking, real mail, scanner installation or external accounts are involved.
+# A narrow post-import filesystem fault tests ancillary failures after real ingest.
+# No real mail, scanner installation or external accounts are involved.
 from __future__ import annotations
 
 from contextlib import contextmanager
@@ -22,7 +23,11 @@ import pytest
 
 from mailarchiver.document_options import DocumentOptions
 from mailarchiver.owner_rules import OwnerRules
-from mailarchiver.rust_engine import Engine, ImportDefaults, Reply, Request
+from mailarchiver import rust_engine
+from mailarchiver.__main__ import IngestRequest
+from mailarchiver.archive_config import remember_import_directory
+from mailarchiver.ingest_status import latest_ingest_status
+from mailarchiver.rust_engine import Capabilities, Engine, ImportDefaults, Reply, Request
 from mailarchiver.writer_lock import WriterLease
 
 
@@ -76,6 +81,45 @@ def test_import_defaults_keep_the_revision_of_the_displayed_rules(tmp_path: Path
     assert not engine.job.active
 
 
+def test_completed_import_retains_success_when_directory_preference_fails(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Import outcome: an ancillary configuration failure is a warning, not data loss."""
+    source = tmp_path / "source"
+    source.mkdir()
+    raw = b"From: alice@example.test\nSubject: completed fixture\nDate: Tue, 3 Jan 2023 12:00:00 +0000\n\nOriginal bytes.\n"
+    input_path = source / "fixture.eml"
+    input_path.write_bytes(raw)
+    archive = tmp_path / "completed.mailarchive"
+    engine = Engine(archive)
+    engine.call(Request(id=1, method="create"))
+
+    def fail_preference(destination: Path, roots: list[Path]) -> Path | None:
+        # Fault injection is confined to the post-import boundary: changing this
+        # path earlier could fail canonical publication instead of the preference.
+        # The real filesystem and preference writer produce the actual error.
+        config = destination / "config.yaml"
+        saved = config.read_bytes()
+        config.unlink()
+        config.mkdir()
+        try:
+            return remember_import_directory(destination, roots)
+        finally:
+            config.rmdir()
+            config.write_bytes(saved)
+
+    monkeypatch.setattr(rust_engine, "remember_import_directory", fail_preference)
+    engine.start(IngestRequest(archive=archive, roots=[str(source)], owner_rules=OwnerRules(include=["alice@example.test"]),
+                               scan_policy="not-scanned"))
+    assert engine.finished.wait(60)
+    assert engine.job.error is None
+    assert engine.job.warning and engine.job.warning.startswith("Import completed, but the source directory could not be saved:")
+    assert not engine.job.active and engine.job.generation == 1
+    status = latest_ingest_status(archive)
+    assert status is not None and status.state == "completed"
+    with sqlite3.connect(archive / "archive.sqlite3") as database:
+        assert database.execute("SELECT sha256,category FROM messages").fetchall() == [(sha256(raw).hexdigest(), "Sent")]
+    assert input_path.read_bytes() == raw
+
+
 @contextmanager
 def peer(archive: Path, tmp_path: Path) -> Iterator[Peer]:
     with (tmp_path / "engine.log").open("w", encoding="utf-8") as log:
@@ -102,6 +146,8 @@ def test_archive_engine_import_policy_identity_and_shutdown(tmp_path: Path) -> N
     archive = tmp_path / "new.mailarchive"
     with peer(archive, tmp_path) as engine:
         assert engine.call("ping") is True
+        capabilities = Capabilities.model_validate(engine.call("capabilities"))
+        assert capabilities.available and capabilities.write_available
         assert engine.call("create") is True
         defaults = engine.call("import_defaults", str(source))
         assert isinstance(defaults, dict)

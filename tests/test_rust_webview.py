@@ -25,6 +25,45 @@ from test_gui_service import make_gui_archive
 ROOT = Path(__file__).resolve().parents[1]
 
 
+def test_reader_remains_usable_without_the_optional_archive_engine(page: Page, tmp_path: Path) -> None:
+    """Capabilities: unavailable writers cannot prompt or break real Rust search/read."""
+    binary = environ.get("RUST_WEBVIEW_BINARY")
+    if not binary:
+        pytest.skip("run make test-rust-webview")
+    archive, _ = make_archive(tmp_path)
+    before = [(p.relative_to(archive), sha256(p.read_bytes()).hexdigest()) for p in sorted(archive.rglob("*")) if p.is_file()]
+    process = subprocess.Popen([binary, "--rpc", str(archive)], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                               stderr=subprocess.PIPE, text=True,
+                               env={**environ, "ECT_RUST_ENGINE_PYTHON": str(tmp_path / "missing-python")})
+    try:
+        def transport(request: str) -> object:
+            assert process.stdin is not None and process.stdout is not None
+            process.stdin.write(request + "\n")
+            process.stdin.flush()
+            return json.loads(process.stdout.readline())
+        page.expose_function("__rustTestTransport", transport)
+        page.add_init_script(path=ROOT / "rust/mailsearch-gui/bridge.js")
+        page.goto((ROOT / "gui/index.html").as_uri())
+        expect(page.locator(".archive-tools .status")).to_have_text("Archive engine unavailable")
+        for label in ["Import…", "Owner emails…", "Import history", "Names and addresses", "Institutions", "Continue Processing"]:
+            expect(page.get_by_role("button", name=label, exact=True)).to_be_disabled()
+        assert page.evaluate("window.pywebview.api.new_archive().then(()=>false,error=>error.message)")
+        assert not page.locator("dialog[open]").count()
+        page.locator("#search").fill("meeting agenda")
+        page.locator("#search").press("Enter")
+        expect(page.locator("#result-status")).to_have_text("1 message")
+        page.locator("#result-list .result").first.click()
+        expect(page.locator("#message-subject")).to_have_text("planning meeting")
+        expect(page.locator("#body-view")).to_contain_text("Meeting agenda.")
+        expect(page.locator("#error")).to_be_hidden()
+    finally:
+        assert process.stdin is not None
+        process.stdin.close()
+        process.wait(timeout=6)
+    after = [(p.relative_to(archive), sha256(p.read_bytes()).hexdigest()) for p in sorted(archive.rglob("*")) if p.is_file()]
+    assert after == before
+
+
 def test_existing_interface_with_rust_backend(page: Page, tmp_path: Path) -> None:
     """Rust UI requirement: preserve original interactions using real archive data."""
     binary = environ.get("RUST_WEBVIEW_BINARY")

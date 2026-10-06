@@ -4,6 +4,10 @@
 
 ## Unreleased
 
+- Gate unsupported Windows archive writes before entry into import or editing,
+  preserving read-only status/history. Report post-import source-directory
+  preference failures separately from successful canonical import outcomes.
+
 - Isolate Rust workflow editors behind sandboxed message ports, label their
   dialogs for assistive technology, reject concurrent owner-policy overwrites
   during import setup, and reject malformed comma-bearing numeric dates.

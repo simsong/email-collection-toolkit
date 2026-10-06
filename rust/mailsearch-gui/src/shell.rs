@@ -97,9 +97,10 @@ pub fn menu(window: &tao::window::Window) -> Result<muda::Menu> {
             None,
         ))?;
     }
-    let new = MenuItem::with_id("new_archive", "New Archive…", true, None);
-    let import = MenuItem::with_id("import_directory", "Import…", true, None);
-    let options = MenuItem::with_id("open_options", "Owner Emails…", true, None);
+    let writes = crate::engine::ARCHIVE_WRITING_SUPPORTED;
+    let new = MenuItem::with_id("new_archive", "New Archive…", writes, None);
+    let import = MenuItem::with_id("import_directory", "Import…", writes, None);
+    let options = MenuItem::with_id("open_options", "Owner Emails…", writes, None);
     let history = MenuItem::with_id("open_ingest_window", "Import History", true, None);
     let file_menu = Submenu::with_items(
         "File",

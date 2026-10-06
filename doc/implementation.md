@@ -3102,6 +3102,15 @@ Owner options, identity and history pages are reused in trusted embedded dialogs
 Native file dialogs select source/destination; explicit import confirmation
 collects owner rules, scanning policy and attachment indexing. Missing helpers and
 service errors are reported without disabling the Rust search/message reader.
+The helper reports separate `available` and `write_available` capabilities.
+Windows native startup opens existing archives only; write menus and frontend
+controls are disabled, and Rust/Python reject write requests before prompts or
+mutations. Unavailable processing does not open a resume dialog; history/status
+remain readable. Job warnings are separate from ingest errors: a post-ingest
+source-directory preference failure preserves completed status and refreshes the
+reader while displaying a warning. Its regression imports real synthetic bytes;
+a narrow fault injection at that ancillary boundary creates a real filesystem
+error without perturbing canonical publication.
 
 Current limitations and unverified native/release gates are maintained in
 [RUST_GUI_MIGRATION.md](RUST_GUI_MIGRATION.md). The original egui binary remains available through

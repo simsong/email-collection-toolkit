@@ -13,6 +13,7 @@ window.addEventListener("pywebviewready", () => {
     if (!api.processing_work) return;
     try {
       const work = await api.processing_work();
+      if (work.available === false) return;
       if (work.active || (!always && !(work.ingest || work.content || work.source_roots.length))) return;
       document.getElementById("processing-detail").textContent =
         `${work.ingest} ingest jobs, ${work.content} message/content jobs, ${work.failed || 0} failed jobs; ${work.source_roots.length} unfinished source imports. Saved import settings will be used.`;

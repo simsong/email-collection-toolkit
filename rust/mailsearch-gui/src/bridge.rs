@@ -86,6 +86,18 @@ impl Bridge {
         Ok(result)
     }
     fn call(&mut self, method: &str, args: &[Value]) -> Result<Value> {
+        if matches!(
+            method,
+            "prepare_import"
+                | "start_import"
+                | "new_archive"
+                | "resume_processing"
+                | "options_update"
+                | "identity_update"
+                | "refresh_definitions"
+        ) {
+            crate::engine::require_archive_writing()?;
+        }
         // The previous query's progress deadline must never affect another method.
         self.archive.db.progress_handler(0, None::<fn() -> bool>);
         if matches!(
@@ -118,9 +130,17 @@ impl Bridge {
                 )
             }
             "activate" | "request_previews" => Ok(json!(true)),
-            "engine_status" => match self.engine_call("ping", &[]) {
-                Ok(_) => Ok(json!({"available":true})),
-                Err(error) => Ok(json!({"available":false,"detail":format!("{error:#}")})),
+            "engine_status" => match self.engine_call("capabilities", &[]) {
+                Ok(mut status) => {
+                    if !crate::engine::ARCHIVE_WRITING_SUPPORTED {
+                        status["write_available"] = json!(false);
+                        status["write_detail"] = json!(crate::engine::WRITE_UNAVAILABLE);
+                    }
+                    Ok(status)
+                }
+                Err(error) => Ok(
+                    json!({"available":false,"write_available":false,"detail":format!("{error:#}")}),
+                ),
             },
             "processing_work"
             | "resume_processing"
@@ -653,6 +673,41 @@ pub fn asset(path: &str) -> Option<(&'static str, &'static [u8])> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(windows)]
+    #[test]
+    fn windows_rejects_archive_writes_before_picker_or_engine_start() {
+        // Windows reader contract: reject before user input, retaining catalog bytes.
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("readonly");
+        crate::demo::create(&path).unwrap();
+        let before = std::fs::read(path.join("archive.sqlite3")).unwrap();
+        let mut bridge = Bridge::open(&path).unwrap();
+        bridge.enable_desktop();
+        for method in [
+            "prepare_import",
+            "start_import",
+            "new_archive",
+            "resume_processing",
+            "options_update",
+            "identity_update",
+            "refresh_definitions",
+        ] {
+            assert!(bridge
+                .call(method, &[])
+                .unwrap_err()
+                .to_string()
+                .contains("Windows archive writing is not supported"));
+            assert!(bridge.engine.is_none());
+        }
+        assert!(
+            !bridge.call("search", &[json!("observatory")]).unwrap()["results"]
+                .as_array()
+                .unwrap()
+                .is_empty()
+        );
+        drop(bridge);
+        assert_eq!(std::fs::read(path.join("archive.sqlite3")).unwrap(), before);
+    }
     #[test]
     fn quarantine_is_excluded_from_every_search_path() {
         // Ordinary reader searches expose only Archive/Sent, even if FTS contains quarantine.

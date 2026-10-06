@@ -2414,6 +2414,11 @@ cancellation; both Rust close and helper owner-loss handling have five-second
 bounds independent of UI callbacks. Import and definition work run outside the
 request loop. Rust reads stay read-only; explicitly opening an archive may use
 lease-protected recovery of hot journals. No automatic source ingest is allowed.
+Engine availability must be separate from archive-write capability. Windows
+startup, menus, import, processing and owner/identity editors must not offer
+unsupported writes; history/status and Rust readers remain usable. Import job
+errors describe ingest failures. Failure to remember the source directory after
+successful ingest must surface as a separate warning and retain completed status.
 
 Headless acceptance uses the real frontend and service boundary, synthetic
 archives, writer-conflict checks, cancellation/resume and byte inventories.

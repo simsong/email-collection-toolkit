@@ -15,6 +15,14 @@ use std::{
     time::{Duration, Instant},
 };
 
+pub const ARCHIVE_WRITING_SUPPORTED: bool = !cfg!(windows);
+pub const WRITE_UNAVAILABLE: &str =
+    "Windows archive writing is not supported. Open an existing archive for reading.";
+pub fn require_archive_writing() -> Result<()> {
+    ensure!(ARCHIVE_WRITING_SUPPORTED, WRITE_UNAVAILABLE);
+    Ok(())
+}
+
 pub struct Engine {
     child: Child,
     input: Option<ChildStdin>,

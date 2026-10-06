@@ -34,7 +34,7 @@ from .writer_lock import WriterLease
 
 class Request(BaseModel):
     id: int
-    method: Literal["ping", "recover", "create", "options_status", "options_update", "identity_query", "identity_update",
+    method: Literal["ping", "capabilities", "recover", "create", "options_status", "options_update", "identity_query", "identity_update",
                     "processing_work", "resume_processing", "ingest_overview", "history", "antivirus", "import_defaults",
                     "start_import", "stop_import", "job_status", "refresh_definitions"]
     args: list[JsonValue] = Field(default_factory=list)
@@ -60,6 +60,7 @@ class JobState(BaseModel):
     active: bool = False
     stopping: bool = False
     error: str | None = None
+    warning: str | None = None
     generation: int = 0
 
 
@@ -82,6 +83,15 @@ class ImportDefaults(BaseModel):
     exclude: list[str]
     revision: str
     antivirus: JsonValue
+
+
+class Capabilities(BaseModel):
+    available: bool = True
+    write_available: bool = os.name != "nt"
+    write_detail: str = "" if os.name != "nt" else "Windows archive writing is not supported. Open an existing archive for reading."
+
+
+WRITE_METHODS = ("create", "recover", "options_update", "identity_update", "start_import", "resume_processing", "refresh_definitions")
 
 
 class Engine:
@@ -113,8 +123,11 @@ class Engine:
         def work() -> None:
             try:
                 run_ingest(request, lease, terminal=False, stop_event=self.stop)
-                if request.roots:
-                    remember_import_directory(self.archive, [Path(root) for root in request.roots])
+                try:
+                    if request.roots:
+                        remember_import_directory(self.archive, [Path(root) for root in request.roots])
+                except (OSError, ValueError) as error:
+                    self.job.warning = f"Import completed, but the source directory could not be saved: {error}"
             except IngestInterrupted:
                 pass
             except Exception as error:
@@ -129,6 +142,11 @@ class Engine:
 
     def call(self, request: Request) -> JsonValue:
         method, args = request.method, request.args
+        capabilities = Capabilities()
+        if method == "capabilities":
+            return capabilities.model_dump(mode="json")
+        if method in WRITE_METHODS and not capabilities.write_available:
+            raise ValueError(capabilities.write_detail)
         options = DocumentOptions(self.archive)
         if method == "refresh_definitions":
             if not self.finished.is_set():
@@ -156,7 +174,7 @@ class Engine:
             return True
         if method == "options_status":
             state = options.state()
-            state.editable = self.finished.is_set()
+            state.editable = self.finished.is_set() and capabilities.write_available
             return state.model_dump(mode="json")
         if method == "options_update":
             include, exclude, revision = args
@@ -172,7 +190,7 @@ class Engine:
             return True
         if method == "processing_work":
             work = unfinished_work(self.archive)
-            return WorkState(available=work.available, ingest=work.ingest, content=work.content, failed=work.failed,
+            return WorkState(available=work.available and capabilities.write_available, ingest=work.ingest, content=work.content, failed=work.failed,
                              source_roots=work.source_roots, active=self.job.active).model_dump(mode="json")
         if method == "resume_processing":
             return self.start(resume_request(self.archive, args[0] is True, args[1] is True))

@@ -34,6 +34,16 @@
     "suggestions", "ingest_overview", "saved_filter_sets", "save_filter_set", "rename_filter_set", "delete_filter_set", "mailbox_tree", "attachment", "open_link", "copy_source_path", "save_message", "save_attachment", "open_attachment", "open_message_window", "new_search_window", "open_archive", "open_recent",
     "shell_status", "preferences_save", "check_updates", "engine_status", "processing_work", "resume_processing", "history", "antivirus", "options_status", "options_update", "identity_query", "identity_update", "job_status", "stop_import", "prepare_import", "start_import", "new_archive", "refresh_definitions"];
   const api = Object.fromEntries(names.map(name => [name, (...args) => invoke(name, args)]));
+  const engineStatus=api.engine_status;
+  let capabilities;
+  api.engine_status=()=>capabilities ||= engineStatus();
+  const processingWork=api.processing_work, ingestOverview=api.ingest_overview;
+  api.processing_work=async()=>{
+    const status=await api.engine_status();
+    return status.available && status.write_available ? processingWork() :
+      {available:false,active:false,ingest:0,content:0,failed:0,source_roots:[]};
+  };
+  api.ingest_overview=async()=>(await api.engine_status()).available ? ingestOverview() : {status:null};
   async function copy(text) {
     const field = document.createElement("textarea");
     field.value = text;
@@ -55,6 +65,12 @@
     }
   });
   function notice(error) { window.mailArchiverNotice?.(error.message || String(error)); }
+  async function requireWriting() {
+    const status=await api.engine_status();
+    if(!status.available || !status.write_available) throw new Error(status.detail || status.write_detail || "Archive writing is unavailable.");
+  }
+  const newArchive=api.new_archive;
+  api.new_archive=async()=>{await requireWriting(); return newArchive();};
   const element = (tag, text) => { const node=document.createElement(tag); if(text) node.textContent=text; return node; };
   function modal(title) {
     const dialog=element("dialog"); dialog.className="rust-workflow no-print";
@@ -86,17 +102,18 @@
     },{once:true});
     dialog.append(frame); return true;
   }
-  api.open_picker=async kind=>panel("identity.html",kind==="institution"?"Institutions":"Names and addresses",{
+  api.open_picker=async kind=>{await requireWriting(); return panel("identity.html",kind==="institution"?"Institutions":"Names and addresses",{
     query: filters=>api.identity_query(kind,filters), update: decision=>api.identity_update(decision)
-  },"?kind="+(kind==="institution"?"institution":"name"));
-  api.open_options=async()=>panel("options.html","Owner emails",{status:api.options_status,update:api.options_update});
+  },"?kind="+(kind==="institution"?"institution":"name"));};
+  api.open_options=async()=>{await requireWriting(); return panel("options.html","Owner emails",{status:api.options_status,update:api.options_update});};
   api.open_ingest_window=async()=>panel("ingests.html","Import history",{
     history:api.history,antivirus:api.antivirus,
-    can_import_directory:async()=>!(await api.job_status()).active,
+    can_import_directory:async()=>(await api.engine_status()).write_available && !(await api.job_status()).active,
     import_directory:()=>api.import_directory(),
     install_antivirus:()=>api.open_link("https://www.clamav.net/downloads")
   });
   api.import_directory=async()=>{
+    await requireWriting();
     const defaults=await api.prepare_import(); if(!defaults) return false;
     const dialog=modal("Import mail"), form=element("form"), error=element("p"); error.setAttribute("role","alert");
     form.append(element("p",`Read from: ${defaults.source}`));
@@ -128,17 +145,22 @@
     const toolbar=document.querySelector(".archive-tools");
     for(const [method,label] of [["import_directory","Import…"],["open_options","Owner emails…"],["open_ingest_window","Import history"]]) {
       const button=element("button",label); button.type="button"; button.dataset.engineControl="true";
+      if(method!=="open_ingest_window") button.dataset.engineWrite="true";
       button.addEventListener("click",()=>Promise.resolve(api[method]()).catch(notice)); toolbar.append(button);
     }
     const stop=element("button","Stop after current message"); stop.hidden=true; stop.type="button";
     stop.addEventListener("click",()=>api.stop_import().catch(notice)); toolbar.append(stop);
     const badge=element("span","Rust desktop"); badge.className="status"; toolbar.append(badge);
     const controls=[...toolbar.querySelectorAll("[data-engine-control],#name-picker,#institution-picker,#processing-open")];
+    for(const control of toolbar.querySelectorAll("#name-picker,#institution-picker,#processing-open")) control.dataset.engineWrite="true";
     controls.forEach(control=>{control.disabled=true;});
     let generation=0, polling=false;
     api.engine_status().then(status=>{
-      controls.forEach(control=>{control.disabled=!status.available;control.title=status.available?"":status.detail;});
-      badge.textContent=status.available?"Rust preview":"Archive engine unavailable";
+      controls.forEach(control=>{
+        control.disabled=!status.available || (control.dataset.engineWrite==="true" && !status.write_available);
+        control.title=control.disabled?(status.detail || status.write_detail || ""):"";
+      });
+      badge.textContent=status.available?(status.write_available?"Rust preview":"Rust read-only"):"Archive engine unavailable";
       if(!status.available) return;
       window.setInterval(async()=>{
         if(polling) return; polling=true;
@@ -147,6 +169,7 @@
           if(job.generation!==generation) {
             generation=job.generation;
             if(job.error) notice(new Error(job.error));
+            if(job.warning) notice(new Error(job.warning));
             // Explicit user search refreshes the catalog after a completed writer run.
             document.getElementById("search-form").requestSubmit();
           }

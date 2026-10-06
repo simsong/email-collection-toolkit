@@ -34,13 +34,17 @@ fn main() -> Result<()> {
             {
                 return native(path.clone(), None, None);
             }
-            let decision=rfd::MessageDialog::new().set_title("Email Collection Toolkit")
+            let create = if mailsearch_rust::engine::ARCHIVE_WRITING_SUPPORTED {
+                let decision=rfd::MessageDialog::new().set_title("Email Collection Toolkit")
                 .set_description("Create a new archive? Choose Yes to create an empty archive, No to open an existing archive, or Cancel to exit.")
                 .set_buttons(rfd::MessageButtons::YesNoCancel).show();
-            if decision == rfd::MessageDialogResult::Cancel {
-                return Ok(());
-            }
-            let create = decision == rfd::MessageDialogResult::Yes;
+                if decision == rfd::MessageDialogResult::Cancel {
+                    return Ok(());
+                }
+                decision == rfd::MessageDialogResult::Yes
+            } else {
+                false
+            };
             if let Some(path) = rfd::FileDialog::new()
                 .set_title(if create {
                     "Choose empty destination for new archive"
@@ -210,6 +214,7 @@ fn native(path: PathBuf, smoke_output: Option<PathBuf>, parameters: Option<Strin
     }
     if smoke_output.is_none() {
         if mailsearch_rust::Archive::open(&path).is_err() {
+            mailsearch_rust::engine::require_archive_writing()?;
             mailsearch_rust::engine::Engine::open(&path)?.call("recover", &[])?;
             mailsearch_rust::Archive::open(&path)?;
         }
