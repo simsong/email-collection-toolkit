@@ -2633,6 +2633,24 @@ it acquires the writer lease, rejects database/sidecar symlinks and hardlinks,
 opens the existing database read-write for rollback, and repeats validation.
 This also checks and recovers the optional `processing.sqlite3`, without creating
 or migrating it, before the GUI reads pending work or the saved resume request.
+The Rust webview creates its window before opening. Its dedicated `opening.html`
+page sends `opening_start` to the worker; `opening::open` first uses read-only
+Rust validation. Only `SQLITE_READONLY_ROLLBACK` starts the private Python helper
+for the existing lease-protected recovery above. Invalid and busy databases are
+opening failures, not implicit repair requests. Open and Open Recent launch this
+same path instead of recovering invisibly in the caller.
+The page announces "Recovery in progress…" and uses `performance.now()` for an
+elapsed counter, with no percentage or estimated completion time. Helper startup
+and recovery poll replies while checking an atomic Abort flag, without a fixed
+wall-clock cutoff. Abort is handled directly on the native event loop, independent
+of the busy worker; it closes the owner pipe and applies the existing five-second
+supervisor shutdown. SQLite remains responsible for its journals. Success must
+pass Rust validation again before publishing a reader. Abort or failure leaves
+the opening page visible with Close; a later Open probes afresh. Recent-document
+registration and archive actions occur only after validation, and the opening
+origin has a narrow IPC allowlist. `--opening-rpc` exposes this same worker for
+the real `make test-rust-recovery` SQLite/Chromium acceptance, without a native
+window or simulated recovery replies.
 Processing validation requires the complete V2 table set. New processing databases
 are initialized transactionally in a private sibling file and renamed into place
 only after closing the complete schema; interruption before publication can leave

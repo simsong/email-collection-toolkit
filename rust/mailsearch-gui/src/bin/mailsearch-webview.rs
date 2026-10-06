@@ -66,6 +66,7 @@ fn main() -> Result<()> {
             }
             Ok(())
         }
+        [flag, path] if flag == "--opening-rpc" => opening_rpc(PathBuf::from(path)),
         [flag, path, query] if flag == "--probe" => {
             let mut bridge = Bridge::open(&PathBuf::from(path))?;
             let start = std::time::Instant::now();
@@ -149,6 +150,48 @@ fn main() -> Result<()> {
     }
 }
 
+fn opening_rpc(path: PathBuf) -> Result<()> {
+    use std::sync::{
+        atomic::{AtomicBool, Ordering},
+        mpsc, Arc,
+    };
+    let abort = Arc::new(AtomicBool::new(false));
+    let reader_abort = abort.clone();
+    let (sender, receiver) = mpsc::sync_channel(1);
+    std::thread::spawn(move || {
+        for line in io::stdin().lock().lines() {
+            let Ok(request) = line
+                .and_then(|line| serde_json::from_str::<Request>(&line).map_err(io::Error::other))
+            else {
+                break;
+            };
+            if matches!(request.method.as_str(), "opening_abort" | "quit") {
+                reader_abort.store(true, Ordering::Release);
+            } else if sender.try_send(request).is_err() {
+                break;
+            }
+        }
+        reader_abort.store(true, Ordering::Release);
+    });
+    let request = receiver.recv()?;
+    anyhow::ensure!(request.method == "opening_start", "Expected opening_start");
+    let result = mailsearch_rust::opening::open(&path, &abort, || {
+        println!(
+            "{}",
+            serde_json::json!({"id":0,"result":"recovering","error":null})
+        );
+        let _ = io::stdout().flush();
+    });
+    let reply = mailsearch_rust::bridge::Reply {
+        id: request.id,
+        result: result.as_ref().ok().map(|_| serde_json::json!(true)),
+        error: result.err().map(|error| format!("{error:#}")),
+    };
+    println!("{}", serde_json::to_string(&reply)?);
+    io::stdout().flush()?;
+    Ok(())
+}
+
 fn startup_writes_available() -> bool {
     mailsearch_rust::engine::ARCHIVE_WRITING_SUPPORTED
         && mailsearch_rust::engine::Engine::open(std::path::Path::new("."))
@@ -173,6 +216,15 @@ fn trusted_document(url: &str, windows: bool) -> bool {
         "http://ect.localhost/index.html"
     } else {
         "ect://localhost/index.html"
+    }
+}
+
+#[cfg(any(target_os = "macos", target_os = "windows", test))]
+fn trusted_opening(url: &str, windows: bool) -> bool {
+    url == if windows {
+        "http://ect.localhost/opening.html"
+    } else {
+        "ect://localhost/opening.html"
     }
 }
 
@@ -211,6 +263,7 @@ fn native(path: PathBuf, smoke_output: Option<PathBuf>, parameters: Option<Strin
     enum NativeEvent {
         Reply(Reply),
         Capabilities(serde_json::Value),
+        Recovering,
         Shell(Request),
         Menu(muda::MenuEvent),
         Quit,
@@ -222,17 +275,6 @@ fn native(path: PathBuf, smoke_output: Option<PathBuf>, parameters: Option<Strin
         ResizeSmoke,
         #[cfg(feature = "native-smoke")]
         SmokeFinished(Result<()>),
-    }
-    if smoke_output.is_none() {
-        if mailsearch_rust::Archive::open(&path).is_err() {
-            mailsearch_rust::engine::require_archive_writing()?;
-            mailsearch_rust::engine::Engine::open(&path)?.call("recover", &[])?;
-            mailsearch_rust::Archive::open(&path)?;
-        }
-        mailsearch_rust::documents::Documents::remember(
-            &mailsearch_rust::documents::Documents::path()?,
-            &path,
-        )?;
     }
     let events = EventLoopBuilder::<NativeEvent>::with_user_event().build();
     let window = WindowBuilder::new()
@@ -253,28 +295,57 @@ fn native(path: PathBuf, smoke_output: Option<PathBuf>, parameters: Option<Strin
     })?);
     let proxy = events.create_proxy();
     let (sender, receiver) = mpsc::sync_channel::<Request>(64);
+    let abort = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let worker_abort = abort.clone();
+    let remember = smoke_output.is_none();
     thread::Builder::new()
         .name("archive-web-reader".into())
         .spawn(move || {
-            let mut bridge = Bridge::open(&path)
-                .map(|mut bridge| {
-                    bridge.enable_desktop();
-                    bridge
-                })
-                .map_err(|e| format!("{e:#}"));
+            let mut bridge = None;
             while let Ok(request) = receiver.recv() {
                 if request.method == "shutdown" {
                     drop(bridge);
                     let _ = proxy.send_event(NativeEvent::QuitFinished);
                     return;
                 }
+                if request.method == "opening_start" {
+                    if bridge.is_some() {
+                        continue;
+                    }
+                    let result = mailsearch_rust::opening::open(&path, &worker_abort, || {
+                        let _ = proxy.send_event(NativeEvent::Recovering);
+                    })
+                    .and_then(|mut bridge| {
+                        if remember {
+                            mailsearch_rust::documents::Documents::remember(
+                                &mailsearch_rust::documents::Documents::path()?,
+                                &path,
+                            )?;
+                        }
+                        anyhow::ensure!(
+                            !worker_abort.load(std::sync::atomic::Ordering::Acquire),
+                            "Opening aborted. The archive cannot be opened."
+                        );
+                        bridge.enable_desktop();
+                        Ok(bridge)
+                    })
+                    .map_err(|error| format!("{error:#}"));
+                    let reply = Reply {
+                        id: request.id,
+                        result: result.as_ref().ok().map(|_| serde_json::json!(true)),
+                        error: result.as_ref().err().cloned(),
+                    };
+                    bridge = Some(result);
+                    let _ = proxy.send_event(NativeEvent::Reply(reply));
+                    continue;
+                }
                 let capabilities = request.method == "engine_status";
                 let reply = match &mut bridge {
-                    Ok(bridge) => bridge.reply(request),
-                    Err(error) => Reply {
+                    Some(Ok(bridge)) => bridge.reply(request),
+                    _ => Reply {
                         id: request.id,
                         result: None,
-                        error: Some(error.clone()),
+                        error: Some("The archive has not been opened.".into()),
                     },
                 };
                 if capabilities {
@@ -292,6 +363,7 @@ fn native(path: PathBuf, smoke_output: Option<PathBuf>, parameters: Option<Strin
         })?;
     let shutdown_sender = sender.clone();
     let ipc_proxy = events.create_proxy();
+    let ipc_abort = abort.clone();
     let diagnostics = std::env::var_os("ECT_RUST_WEBVIEW_DIAGNOSTICS").is_some();
     let smoke_enabled = smoke_output.is_some();
     let window_parameters = format!(
@@ -315,6 +387,7 @@ fn native(path: PathBuf, smoke_output: Option<PathBuf>, parameters: Option<Strin
         .with_initialization_script(mailsearch_rust::shell::SCRIPT)
         .with_navigation_handler(move |url| {
             let trusted = trusted_document(&url, cfg!(target_os = "windows"))
+                || trusted_opening(&url, cfg!(target_os = "windows"))
                 || trusted_panel(&url, cfg!(target_os = "windows"));
             if diagnostics {
                 eprintln!("Webview navigation: {url:?}, trusted={trusted}");
@@ -323,7 +396,8 @@ fn native(path: PathBuf, smoke_output: Option<PathBuf>, parameters: Option<Strin
         })
         .with_ipc_handler(move |request| {
             let url = request.uri().to_string();
-            let trusted = trusted_document(&url, cfg!(target_os = "windows"));
+            let opening = trusted_opening(&url, cfg!(target_os = "windows"));
+            let trusted = trusted_document(&url, cfg!(target_os = "windows")) || opening;
             if diagnostics {
                 eprintln!("Webview IPC: {url:?}, trusted={trusted}");
             }
@@ -331,6 +405,13 @@ fn native(path: PathBuf, smoke_output: Option<PathBuf>, parameters: Option<Strin
                 return;
             }
             if let Ok(message) = serde_json::from_str::<Request>(request.body()) {
+                if opening && message.method == "opening_abort" {
+                    ipc_abort.store(true, std::sync::atomic::Ordering::Release);
+                    return;
+                }
+                if opening && !matches!(message.method.as_str(), "opening_start" | "quit") {
+                    return;
+                }
                 #[cfg(feature = "native-smoke")]
                 if smoke_enabled {
                     match message.method.as_str() {
@@ -381,7 +462,7 @@ fn native(path: PathBuf, smoke_output: Option<PathBuf>, parameters: Option<Strin
                 }
             }
         })
-        .with_url("ect://localhost/index.html");
+        .with_url("ect://localhost/opening.html");
     #[cfg(feature = "native-smoke")]
     let builder = if smoke_enabled {
         {
@@ -419,6 +500,7 @@ fn native(path: PathBuf, smoke_output: Option<PathBuf>, parameters: Option<Strin
     }
     let reply_proxy = events.create_proxy();
     let mut quitting = false;
+    let mut reader_ready = false;
     events.run(move |event, _, flow| {
         *flow = ControlFlow::Wait;
         match event {
@@ -429,6 +511,7 @@ fn native(path: PathBuf, smoke_output: Option<PathBuf>, parameters: Option<Strin
             | Event::UserEvent(NativeEvent::Quit) => {
                 if !quitting {
                     quitting=true;
+                    abort.store(true, std::sync::atomic::Ordering::Release);
                     let _=shutdown_sender.try_send(Request{id:0,method:"shutdown".into(),args:vec![]});
                     let watchdog=reply_proxy.clone();
                     thread::spawn(move||{thread::sleep(std::time::Duration::from_secs(5));let _=watchdog.send_event(NativeEvent::QuitFinished);});
@@ -474,6 +557,8 @@ fn native(path: PathBuf, smoke_output: Option<PathBuf>, parameters: Option<Strin
                 let action = event.id.as_ref();
                 if action == "quit" {
                     let _=reply_proxy.send_event(NativeEvent::Quit);
+                } else if !reader_ready || abort.load(std::sync::atomic::Ordering::Acquire) {
+                    // Opening owns this window until recovery and validation finish.
                 } else if let Some(index)=action.strip_prefix("recent-").and_then(|value|value.parse::<usize>().ok()) {
                     if let Some(path) = menu.as_ref().and_then(|menu|menu.recent_path(index)) {
                         let path = serde_json::to_string(&path.to_string_lossy()).unwrap();
@@ -505,7 +590,13 @@ fn native(path: PathBuf, smoke_output: Option<PathBuf>, parameters: Option<Strin
                     let _ = view.evaluate_script(&format!("window.__rustMenuState={}",menu.state()));
                 }
             }
+            Event::UserEvent(NativeEvent::Recovering) => {
+                let _ = view.evaluate_script("window.__rustOpening?.()");
+            }
             Event::UserEvent(NativeEvent::Reply(reply)) => {
+                if reply.id == 1 && reply.error.is_none() && !quitting {
+                    reader_ready = true;
+                }
                 if let Ok(value) = serde_json::to_string(&reply) {
                     if let Err(error) =
                         view.evaluate_script(&format!("window.__rustReply({value})"))
@@ -522,6 +613,27 @@ fn native(path: PathBuf, smoke_output: Option<PathBuf>, parameters: Option<Strin
 #[cfg(test)]
 mod tests {
     use super::{trusted_document, trusted_panel};
+
+    #[test]
+    fn opening_origin_is_exact_and_separate_from_reader_editors() {
+        for windows in [false, true] {
+            let origin = if windows {
+                "http://ect.localhost/opening.html"
+            } else {
+                "ect://localhost/opening.html"
+            };
+            assert!(super::trusted_opening(origin, windows));
+            assert!(!super::trusted_opening(origin, !windows));
+            assert!(!trusted_document(origin, windows));
+            assert!(!trusted_panel(origin, windows));
+            for suffix in ["?q=1", "#hash", "/evil", ".evil"] {
+                assert!(!super::trusted_opening(
+                    &format!("{origin}{suffix}"),
+                    windows
+                ));
+            }
+        }
+    }
 
     #[test]
     fn editor_navigation_does_not_grant_direct_ipc() {

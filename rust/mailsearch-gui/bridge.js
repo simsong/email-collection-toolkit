@@ -7,7 +7,7 @@
  * No archive data is stored in JavaScript persistence or sent to remote services.
  */
 (() => {
-  if (window !== window.top) return;
+  if (window !== window.top || location.pathname === "/opening.html") return;
   const pending = new Map();
   let nextId = 0;
   window.__rustReply = reply => {

@@ -78,6 +78,8 @@ earlier widget prototype for comparison.
 
 `make test-rust-gui` runs headless Rust and widget tests;
 `make test-rust-gui-interop` checks a Python-created archive.
+`make test-rust-recovery` tests foreground hot-journal repair, elapsed time,
+long waits, Abort and later recovery through the real Rust/Python opening path.
 `make test-rust-webview` tests the reused page against the real Rust dispatcher
 in headless Chromium. `make test-rust-engine` exercises synthetic import, cancellation, resume, writer exclusion and identity edits. `RUST_WEBVIEW_BINARY` selects that dispatcher for the test
 and is set automatically by its Makefile target. `ARCHIVE` is the

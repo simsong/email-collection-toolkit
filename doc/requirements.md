@@ -2430,6 +2430,14 @@ cancellation; both Rust close and helper owner-loss handling have five-second
 bounds independent of UI callbacks. Import and definition work run outside the
 request loop. Rust reads stay read-only; explicitly opening an archive may use
 lease-protected recovery of hot journals. No automatic source ingest is allowed.
+Rust archive opening must probe read-only and distinguish SQLite rollback-required
+errors from invalid or busy databases. Recovery is a foreground opening job: show
+"Recovery in progress…", monotonic elapsed time and Abort while keeping the
+native event loop responsive. No fixed elapsed-time deadline may terminate repair.
+Only successful recovery followed by validation permits opening the reader.
+Abort explicitly closes the helper pipe, bounds shutdown, and leaves the archive
+unopened; a later Open probes again. Failure shows the diagnostic and Close,
+without offering access to the failed archive. Never manually delete journals.
 Engine availability must be separate from archive-write capability. Windows
 startup, menus, import, processing and owner/identity editors must not offer
 unsupported writes, including About-dialog virus-definition refresh; history/status
@@ -2442,6 +2450,8 @@ the speed of a synthetic import, and verify bounded exit, recovery and source fi
 
 Headless acceptance uses the real frontend and service boundary, synthetic
 archives, writer-conflict checks, cancellation/resume and byte inventories.
+`make test-rust-recovery` exercises real crashed-writer journals, writer exclusion,
+foreground elapsed time, waits beyond 30 seconds, Abort and successful later Open.
 Native drag-out, file associations, packaged delivery, Windows writer support and
 full native acceptance remain gates before Python-GUI deprecation; compilation
 or headless success must not mark those gates complete.

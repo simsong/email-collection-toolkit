@@ -1,7 +1,7 @@
 // Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved.
 // Supervise the transitional Python archive engine behind a private JSON pipe.
 // Reading and searching stay in Rust; explicit processing operations use this peer.
-// Responses have deadlines and matching IDs; stderr remains separate diagnostics.
+// Short responses have deadlines; recovery waits for completion or explicit abort.
 // EOF cancels imports at message boundaries, followed by a five-second exit bound.
 // Unix process groups and Windows job objects contain ordinary helper descendants.
 // No shell interprets archive paths, executable names, or request arguments.
@@ -11,7 +11,10 @@ use std::{
     io::{BufRead, BufReader, Write},
     path::{Path, PathBuf},
     process::{Child, ChildStdin, Command, Stdio},
-    sync::mpsc::{self, Receiver},
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        mpsc::{self, Receiver, RecvTimeoutError},
+    },
     time::{Duration, Instant},
 };
 
@@ -34,6 +37,12 @@ pub struct Engine {
 }
 impl Engine {
     pub fn open(archive: &Path) -> Result<Self> {
+        Self::spawn(archive, None)
+    }
+    pub fn for_recovery(archive: &Path, abort: &AtomicBool) -> Result<Self> {
+        Self::spawn(archive, Some(abort))
+    }
+    fn spawn(archive: &Path, abort: Option<&AtomicBool>) -> Result<Self> {
         let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
         let python = std::env::var_os("ECT_RUST_ENGINE_PYTHON")
             .map(PathBuf::from)
@@ -96,10 +105,31 @@ impl Engine {
             #[cfg(target_os = "windows")]
             _job: job,
         };
-        engine.call("ping", &[])?;
+        engine.request("ping", &[], abort)?;
         Ok(engine)
     }
     pub fn call(&mut self, method: &str, args: &[Value]) -> Result<Value> {
+        ensure!(
+            method != "recover",
+            "Recovery requires a supervised opening job"
+        );
+        self.request(method, args, None)
+    }
+    pub fn recover(&mut self, abort: &AtomicBool) -> Result<Value> {
+        self.request("recover", &[], Some(abort))
+    }
+    fn request(
+        &mut self,
+        method: &str,
+        args: &[Value],
+        abort: Option<&AtomicBool>,
+    ) -> Result<Value> {
+        if let Some(abort) = abort {
+            ensure!(
+                !abort.load(Ordering::Acquire),
+                "Recovery aborted. The archive cannot be opened."
+            );
+        }
         ensure!(!self.failed,"Archive engine connection failed; close and reopen this window before retrying archive operations");
         self.failed = true;
         self.next_id += 1;
@@ -110,10 +140,25 @@ impl Engine {
             json!({"id":self.next_id,"method":method,"args":args})
         )?;
         input.flush()?;
-        let line = self
-            .replies
-            .recv_timeout(Duration::from_secs(30))
-            .context("Archive engine did not respond within 30 seconds")?;
+        let line = if let Some(abort) = abort {
+            loop {
+                ensure!(
+                    !abort.load(Ordering::Acquire),
+                    "Recovery aborted. The archive cannot be opened."
+                );
+                match self.replies.recv_timeout(Duration::from_millis(50)) {
+                    Ok(line) => break line,
+                    Err(RecvTimeoutError::Timeout) => (),
+                    Err(error) => {
+                        return Err(error).context("Archive recovery engine disconnected")
+                    }
+                }
+            }
+        } else {
+            self.replies
+                .recv_timeout(Duration::from_secs(30))
+                .context("Archive engine did not respond within 30 seconds")?
+        };
         let reply: crate::bridge::Reply = serde_json::from_str(&line)?;
         ensure!(
             reply.id == self.next_id,

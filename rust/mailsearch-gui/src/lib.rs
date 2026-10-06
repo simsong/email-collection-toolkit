@@ -12,6 +12,7 @@ mod desktop;
 pub mod documents;
 pub mod engine;
 mod mime;
+pub mod opening;
 pub mod preferences;
 mod search;
 mod selectors;

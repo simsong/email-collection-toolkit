@@ -148,6 +148,7 @@ check-static:
 
 check-tests:
 	$(MAKE) test
+	$(MAKE) test-rust-recovery
 	$(MAKE) test-e2e
 	$(MAKE) website-check
 
@@ -746,6 +747,12 @@ rust-gui-egui: rust-gui-build
 .PHONY: test-rust-webview
 test-rust-webview: rust-gui-build
 	RUST_WEBVIEW_BINARY="$(RUST_TARGET_DIR)/debug/mailsearch-webview$(RUST_EXE_SUFFIX)" uv run --locked pytest -q tests/test_rust_webview.py --browser chromium
+
+# Real hot-journal recovery, foreground timer, >30-second wait and owner Abort.
+# RUST_WEBVIEW_BINARY selects the same native opening worker's diagnostic pipe.
+.PHONY: test-rust-recovery
+test-rust-recovery: rust-gui-build
+	RUST_WEBVIEW_BINARY="$(RUST_TARGET_DIR)/debug/mailsearch-webview$(RUST_EXE_SUFFIX)" uv run --locked pytest -q tests/test_rust_recovery.py --browser chromium
 
 # Read-only timing probe: prints counts/timings only, never message contents.
 .PHONY: rust-webview-probe

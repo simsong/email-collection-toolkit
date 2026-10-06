@@ -7,6 +7,7 @@
  * This driver is embedded only with the explicit native-smoke Cargo feature.
  */
 window.addEventListener("DOMContentLoaded", async () => {
+  if(location.pathname === "/opening.html") return;
   const send = (method, args = []) => window.ipc.postMessage(JSON.stringify({id: 0, method, args}));
   const wait = async (label, predicate) => {
     const deadline = Date.now() + 30000;

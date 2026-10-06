@@ -331,10 +331,6 @@ impl Bridge {
                             .and_then(Value::as_str)
                             .context("Missing recent archive path")?,
                     );
-                    if Archive::open(&path).is_err() {
-                        crate::engine::Engine::open(&path)?.call("recover", &[])?;
-                    }
-                    Archive::open(&path)?;
                     path
                 } else if method == "open_archive" {
                     let Some(path) = rfd::FileDialog::new()
@@ -343,10 +339,6 @@ impl Bridge {
                     else {
                         return Ok(json!(false));
                     };
-                    if Archive::open(&path).is_err() {
-                        crate::engine::Engine::open(&path)?.call("recover", &[])?;
-                    }
-                    Archive::open(&path)?;
                     path
                 } else {
                     self.archive.root.clone()
@@ -627,6 +619,8 @@ pub const SCRIPT: &str = include_str!("../bridge.js");
 pub fn asset(path: &str) -> Option<(&'static str, &'static [u8])> {
     Some(match path {
         "/" | "/index.html" => ("text/html", include_bytes!("../../../gui/index.html")),
+        "/opening.html" => ("text/html", include_bytes!("../opening.html")),
+        "/opening.js" => ("text/javascript", include_bytes!("../opening.js")),
         "/identity.html" => ("text/html", include_bytes!("../../../gui/identity.html")),
         "/identity.js" => (
             "text/javascript",

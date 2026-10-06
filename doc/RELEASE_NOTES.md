@@ -4,6 +4,11 @@
 
 ## Unreleased
 
+- Make Rust database recovery a responsive foreground opening job with elapsed
+  time and Abort, without a 30-second repair cutoff. Revalidate before opening;
+  aborted or failed recovery leaves the archive unopened and preserves journals
+  for SQLite. Open and Open Recent use the same visible recovery path.
+
 - Share bounded hash-selected MBOX byte recovery between the Rust GUI and
   independent verifier so mixed legacy quoting remains readable and verified.
 

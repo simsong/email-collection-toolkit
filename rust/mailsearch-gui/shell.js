@@ -7,7 +7,7 @@
  * All displayed metadata uses textContent; no mail or URLs become executable HTML.
  */
 (() => {
-  if (window !== window.top) return;
+  if (window !== window.top || location.pathname === "/opening.html") return;
   window.addEventListener("DOMContentLoaded", () => {
     const dialog = document.createElement("dialog");
     dialog.id = "rust-shell-dialog";
