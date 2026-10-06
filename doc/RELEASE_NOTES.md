@@ -4,6 +4,8 @@
 
 ## Unreleased
 
+- Open the first usable recent archive, skipping missing or invalid newer entries.
+
 - Serialize shared saved-filter mutations across Rust and Python processes;
   retain concurrent save, rename and delete updates without writing archives.
 

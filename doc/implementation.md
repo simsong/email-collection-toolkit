@@ -3131,6 +3131,10 @@ service errors are reported without disabling the Rust search/message reader.
 The helper reports separate `available` and `write_available` capabilities.
 Native menus start disabled and receive that capability result on the UI thread;
 native smoke checks actual enabled states with and without the Python helper.
+Startup checks recent paths in order with the read-only `Archive::open` validator
+and uses the first valid path, skipping missing or damaged newer entries.
+Real demo archives verify ordered fallback and unchanged database/MBOX bytes;
+missing paths and empty invalid directories are never created or repaired.
 Startup without a usable recent archive performs the same real helper handshake
 before offering Create. A feature-gated startup probe used by native acceptance
 checks this decision with working/missing helpers and Windows write restrictions;

@@ -27,12 +27,8 @@ fn main() -> Result<()> {
             let recent = mailsearch_rust::documents::Documents::load(
                 &mailsearch_rust::documents::Documents::path()?,
             )?;
-            if let Some(path) = recent
-                .recent
-                .first()
-                .filter(|path| mailsearch_rust::Archive::open(path).is_ok())
-            {
-                return native(path.clone(), None, None);
+            if let Some(path) = recent.first_valid_archive() {
+                return native(path.to_owned(), None, None);
             }
             let create = if startup_writes_available() {
                 let decision=rfd::MessageDialog::new().set_title("Email Collection Toolkit")

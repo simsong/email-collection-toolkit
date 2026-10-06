@@ -2456,6 +2456,8 @@ Small and empty searches must acknowledge both preview windows before completion
 Native recent-menu actions must retain the displayed path despite another window
 reordering the saved list. Recent-list updates from separate processes must
 serialize the complete load/update/replace sequence and retain concurrent opens.
+Startup must choose the first usable archive in recent order, skipping missing
+or invalid entries; only an entirely unusable list may fall back to prompting.
 Native workflow menus must reflect helper capability,
 including disabled writes/history when the helper is unavailable. Synthetic demo
 creation must create missing parents and refuse an existing destination.

@@ -38,6 +38,12 @@ pub(crate) fn preferences_lock(path: &Path) -> Result<std::fs::File> {
     Ok(lock)
 }
 impl Documents {
+    pub fn first_valid_archive(&self) -> Option<&Path> {
+        self.recent
+            .iter()
+            .find(|path| crate::Archive::open(path).is_ok())
+            .map(PathBuf::as_path)
+    }
     pub fn recent_path(&self, index: usize) -> Option<&Path> {
         self.recent.get(index).map(PathBuf::as_path)
     }
@@ -86,6 +92,51 @@ mod tests {
             let _ = self.0.kill();
             let _ = self.0.wait();
         }
+    }
+
+    #[test]
+    fn startup_skips_invalid_recent_entries_in_order_without_writes() {
+        // Startup must reach older usable archives after missing/damaged entries.
+        let dir = tempfile::tempdir().unwrap();
+        let missing = dir.path().join("missing");
+        let invalid = dir.path().join("invalid");
+        std::fs::create_dir(&invalid).unwrap();
+        let first = dir.path().join("first");
+        let second = dir.path().join("second");
+        crate::demo::create(&first).unwrap();
+        crate::demo::create(&second).unwrap();
+        let before: Vec<_> = [&first, &second]
+            .into_iter()
+            .flat_map(|root| {
+                ["archive.sqlite3", "search.sqlite3", "data/mbox/DEMO.mbox"]
+                    .map(|name| std::fs::read(root.join(name)).unwrap())
+            })
+            .collect();
+        let mut value = Documents {
+            version: 1,
+            recent: vec![
+                missing.clone(),
+                invalid.clone(),
+                first.clone(),
+                second.clone(),
+            ],
+        };
+        assert_eq!(value.first_valid_archive(), Some(first.as_path()));
+        value.recent = vec![invalid.clone(), missing.clone(), second.clone()];
+        assert_eq!(value.first_valid_archive(), Some(second.as_path()));
+        value.recent = vec![missing.clone(), invalid.clone()];
+        assert_eq!(value.first_valid_archive(), None);
+        assert_eq!(Documents::default().first_valid_archive(), None);
+        let after: Vec<_> = [&first, &second]
+            .into_iter()
+            .flat_map(|root| {
+                ["archive.sqlite3", "search.sqlite3", "data/mbox/DEMO.mbox"]
+                    .map(|name| std::fs::read(root.join(name)).unwrap())
+            })
+            .collect();
+        assert_eq!(after, before);
+        assert!(!missing.exists());
+        assert_eq!(std::fs::read_dir(invalid).unwrap().count(), 0);
     }
 
     #[test]
