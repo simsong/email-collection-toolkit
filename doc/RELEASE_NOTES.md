@@ -4,6 +4,10 @@
 
 ## Unreleased
 
+- Preserve both preview stages for small/empty searches, bind recent-menu actions
+  to displayed paths, gate native menus on helper capabilities, and create
+  missing demo-directory parents without replacing existing archives.
+
 - Validate annotated release tags, version and `main` ancestry in a shared
   preflight pinned to the triggering commit before starting macOS packaging
   or cross-platform Rust builds; reject tags moved after the event.

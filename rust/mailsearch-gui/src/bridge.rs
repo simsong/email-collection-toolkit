@@ -326,13 +326,11 @@ impl Bridge {
             }
             "open_message_window" | "new_search_window" | "open_archive" | "open_recent" => {
                 let path = if method == "open_recent" {
-                    let recent =
-                        crate::documents::Documents::load(&crate::documents::Documents::path()?)?;
-                    let path = recent
-                        .recent
-                        .get(number(args, 0)? as usize)
-                        .context("Unknown recent archive")?
-                        .clone();
+                    let path = std::path::PathBuf::from(
+                        args.first()
+                            .and_then(Value::as_str)
+                            .context("Missing recent archive path")?,
+                    );
                     if Archive::open(&path).is_err() {
                         crate::engine::Engine::open(&path)?.call("recover", &[])?;
                     }
@@ -673,6 +671,47 @@ pub fn asset(path: &str) -> Option<(&'static str, &'static [u8])> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn small_and_empty_searches_wait_for_both_preview_acknowledgements() {
+        // Two-window requirement applies even when the first scan exhausts input.
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("small");
+        crate::demo::create(&path).unwrap();
+        let mut bridge = Bridge::open(&path).unwrap();
+        for (query, count) in [("observatory", 2), ("notpresent", 0)] {
+            let generation =
+                bridge.call("search_start", &[json!(query)]).unwrap()["generation"].clone();
+            let deadline = Instant::now() + Duration::from_secs(5);
+            for window in 1..=2 {
+                loop {
+                    let status = bridge
+                        .call("search_status", std::slice::from_ref(&generation))
+                        .unwrap();
+                    assert!(status["error"].is_null(), "{status}");
+                    assert_eq!(status["complete"], false);
+                    if status["window"] == window {
+                        assert_eq!(status["count"], count);
+                        break;
+                    }
+                    assert!(Instant::now() < deadline);
+                    std::thread::sleep(Duration::from_millis(1));
+                }
+                bridge
+                    .call("search_advance", &[generation.clone(), json!(window)])
+                    .unwrap();
+            }
+            loop {
+                let status = bridge
+                    .call("search_status", std::slice::from_ref(&generation))
+                    .unwrap();
+                if status["complete"] == true {
+                    break;
+                }
+                assert!(Instant::now() < deadline);
+                std::thread::sleep(Duration::from_millis(1));
+            }
+        }
+    }
     #[cfg(windows)]
     #[test]
     fn windows_rejects_archive_writes_before_picker_or_engine_start() {

@@ -3109,6 +3109,12 @@ Native file dialogs select source/destination; explicit import confirmation
 collects owner rules, scanning policy and attachment indexing. Missing helpers and
 service errors are reported without disabling the Rust search/message reader.
 The helper reports separate `available` and `write_available` capabilities.
+Native menus start disabled and receive that capability result on the UI thread;
+native smoke checks actual enabled states with and without the Python helper.
+Recent menu actions carry the path captured with their label, avoiding shared-list
+index races. Demo generation creates missing parents while refusing replacement.
+Staged searches publish and acknowledge both windows even after input is exhausted;
+small/empty regressions verify neither stage can prematurely report completion.
 Windows native startup opens existing archives only; write menus and frontend
 controls are disabled, and Rust/Python reject write requests before prompts or
 mutations. Unavailable processing does not open a resume dialog; history/status

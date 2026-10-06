@@ -25,6 +25,9 @@ impl Default for Documents {
     }
 }
 impl Documents {
+    pub fn recent_path(&self, index: usize) -> Option<&Path> {
+        self.recent.get(index).map(PathBuf::as_path)
+    }
     pub fn path() -> Result<PathBuf> {
         Ok(crate::preferences::settings_path()?.with_file_name("recent-archives.json"))
     }
@@ -74,6 +77,13 @@ mod tests {
         assert_eq!(
             value.recent[0],
             dir.path().join("5").canonicalize().unwrap()
+        );
+        let displayed = value.recent[0].clone();
+        Documents::remember(&path, &dir.path().join("6")).unwrap();
+        assert_eq!(value.recent_path(0), Some(displayed.as_path()));
+        assert_eq!(
+            Documents::load(&path).unwrap().recent_path(0),
+            Some(dir.path().join("6").canonicalize().unwrap().as_path())
         );
     }
 }

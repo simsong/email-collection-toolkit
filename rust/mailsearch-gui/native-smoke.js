@@ -11,13 +11,21 @@ window.addEventListener("DOMContentLoaded", async () => {
   const wait = async (label, predicate) => {
     const deadline = Date.now() + 30000;
     while (!predicate()) {
-      if (Date.now() > deadline) throw new Error(`Timed out: ${label}; status=${document.getElementById("result-status").textContent}; error=${document.getElementById("error").textContent}`);
+      if (Date.now() > deadline) throw new Error(`Timed out: ${label}; status=${document.getElementById("result-status").textContent}; error=${document.getElementById("error").textContent}; staged=${JSON.stringify(window.__ectStageStatus)}; advances=${JSON.stringify(window.__ectStageAdvances)}; visible=${document.visibilityState}; focused=${document.hasFocus()}`);
       await new Promise(resolve => setTimeout(resolve, 50));
     }
   };
   try {
     const input = document.getElementById("search");
     await wait("startup", () => !input.disabled && document.querySelector(".tabulator"));
+    const api=window.pywebview.api, status=api.search_status, advance=api.search_advance;
+    window.__ectStageAdvances=[];
+    api.search_status=async(...args)=>{const result=await status(...args);window.__ectStageStatus=result;return result;};
+    api.search_advance=async(...args)=>{window.__ectStageAdvances.push(args);return advance(...args);};
+    const capabilities = await window.pywebview.api.engine_status();
+    await wait("native menu capabilities", () => window.__rustMenuState);
+    if (window.__rustMenuState.writes !== Boolean(capabilities.available && capabilities.write_available)
+      || window.__rustMenuState.history !== Boolean(capabilities.available)) throw new Error("Native menu capability mismatch");
     input.value = "observatory";
     document.getElementById("search-form").requestSubmit();
     await wait("search", () => document.getElementById("result-status").textContent === "1 message");

@@ -145,6 +145,14 @@ fn cli_archive_native_search_and_screenshot() -> Result<()> {
         png.len() > 10000 && png.starts_with(b"\x89PNG\r\n\x1a\n"),
         "Missing or invalid PNG snapshot"
     );
+    run(
+        Command::new(env!("CARGO_BIN_EXE_mailsearch-webview"))
+            .env("ECT_RUST_ENGINE_PYTHON", work.join("missing-python"))
+            .arg("--native-smoke")
+            .arg(&archive)
+            .arg(work.join("rust-gui-no-python.png")),
+        &work.join("native-no-python.log"),
+    )?;
     ensure!(
         inventory(&archive)? == before,
         "Native GUI changed archive files"

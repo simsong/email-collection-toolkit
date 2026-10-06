@@ -200,6 +200,7 @@ fn native(path: PathBuf, smoke_output: Option<PathBuf>, parameters: Option<Strin
     use wry::WebViewBuilder;
     enum NativeEvent {
         Reply(Reply),
+        Capabilities(serde_json::Value),
         Shell(Request),
         Menu(muda::MenuEvent),
         Quit,
@@ -257,6 +258,7 @@ fn native(path: PathBuf, smoke_output: Option<PathBuf>, parameters: Option<Strin
                     let _ = proxy.send_event(NativeEvent::QuitFinished);
                     return;
                 }
+                let capabilities = request.method == "engine_status";
                 let reply = match &mut bridge {
                     Ok(bridge) => bridge.reply(request),
                     Err(error) => Reply {
@@ -265,6 +267,14 @@ fn native(path: PathBuf, smoke_output: Option<PathBuf>, parameters: Option<Strin
                         error: Some(error.clone()),
                     },
                 };
+                if capabilities {
+                    let _ = proxy.send_event(NativeEvent::Capabilities(
+                        reply
+                            .result
+                            .clone()
+                            .unwrap_or(serde_json::json!({"available":false})),
+                    ));
+                }
                 if proxy.send_event(NativeEvent::Reply(reply)).is_err() {
                     break;
                 }
@@ -455,7 +465,10 @@ fn native(path: PathBuf, smoke_output: Option<PathBuf>, parameters: Option<Strin
                 if action == "quit" {
                     let _=reply_proxy.send_event(NativeEvent::Quit);
                 } else if let Some(index)=action.strip_prefix("recent-").and_then(|value|value.parse::<usize>().ok()) {
-                    let _=view.evaluate_script(&format!("window.pywebview.api.open_recent({index}).catch(e=>window.mailArchiverNotice(e.message))"));
+                    if let Some(path) = menu.as_ref().and_then(|menu|menu.recent_path(index)) {
+                        let path = serde_json::to_string(&path.to_string_lossy()).unwrap();
+                        let _=view.evaluate_script(&format!("window.pywebview.api.open_recent({path}).catch(e=>window.mailArchiverNotice(e.message))"));
+                    }
                 } else if matches!(action, "open_archive" | "new_search_window" | "new_archive" | "import_directory" | "open_options" | "open_ingest_window") {
                     let _ = view.evaluate_script(&format!(
                         "window.pywebview.api[{}]().catch(e=>window.mailArchiverNotice(e.message))",
@@ -474,6 +487,13 @@ fn native(path: PathBuf, smoke_output: Option<PathBuf>, parameters: Option<Strin
                 // Stop WinSparkle callbacks before dropping its DLL and native menu.
                 shell.take();
                 menu.take();
+            }
+            Event::UserEvent(NativeEvent::Capabilities(status)) => {
+                if let Some(menu) = &menu {
+                    menu.capabilities(&status);
+                    #[cfg(feature = "native-smoke")]
+                    let _ = view.evaluate_script(&format!("window.__rustMenuState={}",menu.state()));
+                }
             }
             Event::UserEvent(NativeEvent::Reply(reply)) => {
                 if let Ok(value) = serde_json::to_string(&reply) {

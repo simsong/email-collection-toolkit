@@ -372,7 +372,8 @@ mod tests {
 
     fn fixture() -> (tempfile::TempDir, PathBuf) {
         let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("reader # café");
+        // Fresh-checkout demo destinations may have several missing parents.
+        let path = dir.path().join("missing/parents/reader # café");
         demo::create(&path).unwrap();
         (dir, path)
     }

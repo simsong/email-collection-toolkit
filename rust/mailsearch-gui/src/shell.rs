@@ -78,7 +78,34 @@ impl Shell {
 }
 
 #[cfg(any(target_os = "macos", target_os = "windows"))]
-pub fn menu(window: &tao::window::Window) -> Result<muda::Menu> {
+pub struct NativeMenu {
+    _menu: muda::Menu,
+    recent: crate::documents::Documents,
+    writes: [muda::MenuItem; 3],
+    history: muda::MenuItem,
+}
+#[cfg(any(target_os = "macos", target_os = "windows"))]
+impl NativeMenu {
+    pub fn recent_path(&self, index: usize) -> Option<&std::path::Path> {
+        self.recent.recent_path(index)
+    }
+    pub fn capabilities(&self, status: &Value) {
+        let available = status["available"] == true;
+        let writes = available
+            && status["write_available"] == true
+            && crate::engine::ARCHIVE_WRITING_SUPPORTED;
+        for item in &self.writes {
+            item.set_enabled(writes);
+        }
+        self.history.set_enabled(available);
+    }
+    #[cfg(feature = "native-smoke")]
+    pub fn state(&self) -> Value {
+        json!({"writes":self.writes.iter().all(muda::MenuItem::is_enabled),"history":self.history.is_enabled()})
+    }
+}
+#[cfg(any(target_os = "macos", target_os = "windows"))]
+pub fn menu(window: &tao::window::Window) -> Result<NativeMenu> {
     use muda::{Menu, MenuItem, PredefinedMenuItem, Submenu};
     let about = MenuItem::with_id("about", "About Email Collection Toolkit", true, None);
     let preferences = MenuItem::with_id("preferences", "Preferences…", true, None);
@@ -97,11 +124,11 @@ pub fn menu(window: &tao::window::Window) -> Result<muda::Menu> {
             None,
         ))?;
     }
-    let writes = crate::engine::ARCHIVE_WRITING_SUPPORTED;
+    let writes = false; // Enable only after the archive helper reports capabilities.
     let new = MenuItem::with_id("new_archive", "New Archive…", writes, None);
     let import = MenuItem::with_id("import_directory", "Import…", writes, None);
     let options = MenuItem::with_id("open_options", "Owner Emails…", writes, None);
-    let history = MenuItem::with_id("open_ingest_window", "Import History", true, None);
+    let history = MenuItem::with_id("open_ingest_window", "Import History", false, None);
     let file_menu = Submenu::with_items(
         "File",
         true,
@@ -143,5 +170,10 @@ pub fn menu(window: &tao::window::Window) -> Result<muda::Menu> {
         let _ = window;
         menu.init_for_nsapp();
     }
-    Ok(menu)
+    Ok(NativeMenu {
+        _menu: menu,
+        recent: documents,
+        writes: [new, import, options],
+        history,
+    })
 }

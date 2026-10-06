@@ -164,19 +164,24 @@ impl Drop for Search {
 fn run(bridge: &mut Bridge, shared: &Shared, job: &Job) -> Result<()> {
     bridge.cancellation = Some((Arc::clone(&shared.generation), job.generation));
     let mut cursor = Value::Null;
+    let mut exhausted = false;
     for window in 1..=2 {
         ensure!(
             shared.generation.load(Ordering::SeqCst) == job.generation,
             "Search cancelled"
         );
-        let batch = bridge.search_batch(&[
-            json!(job.query),
-            cursor,
-            json!(job.sort),
-            json!(job.direction),
-            json!(job.attachments),
-            job.selections.clone(),
-        ])?;
+        let batch = if exhausted {
+            json!({"results":[],"has_more":false,"cursor":null})
+        } else {
+            bridge.search_batch(&[
+                json!(job.query),
+                cursor,
+                json!(job.sort),
+                json!(job.direction),
+                json!(job.attachments),
+                job.selections.clone(),
+            ])?
+        };
         let mut state = shared.state.lock().unwrap();
         if state.generation != job.generation {
             return Ok(());
@@ -189,9 +194,7 @@ fn run(bridge: &mut Bridge, shared: &Shared, job: &Job) -> Result<()> {
                 .map(|r| r["message_pk"].as_i64().unwrap()),
         );
         state.window = window;
-        if batch["has_more"] == false {
-            return Ok(());
-        }
+        exhausted = batch["has_more"] == false;
         cursor = batch["cursor"].clone();
         while state.generation == job.generation && state.acknowledged < window && !state.stop {
             state = shared.wake.wait(state).unwrap();
@@ -199,6 +202,9 @@ fn run(bridge: &mut Bridge, shared: &Shared, job: &Job) -> Result<()> {
         if state.generation != job.generation || state.stop {
             return Ok(());
         }
+    }
+    if exhausted {
+        return Ok(());
     }
     // A single FTS-driven query completes the remaining set. Only IDs are kept;
     // display columns and previews are fetched on the independent foreground DB.

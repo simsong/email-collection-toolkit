@@ -23,6 +23,8 @@ window.addEventListener("DOMContentLoaded", async () => {
     const api = window.pywebview.api;
     const capabilities=await api.engine_status();
     check(capabilities.write_available===false,"Windows writer capability must be false");
+    await wait("native menu capabilities",()=>window.__rustMenuState);
+    check(!window.__rustMenuState.writes,"Windows native write menu enabled");
     await wait("read-only controls",()=>[...document.querySelectorAll("[data-engine-write]")].every(control=>control.disabled));
     check(!el("processing-dialog").open,"unsupported processing prompt opened");
     try { await api.new_archive(); throw new Error("Windows creation was offered"); }

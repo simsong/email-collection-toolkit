@@ -2440,6 +2440,11 @@ work; stale results and failures must never alter the replacement search.
 The backend retains complete ordered message IDs and sends bounded display pages
 on scroll. Completion reports the total count separately from loaded rows and
 preserves selection and scroll position. No partial search may claim completeness.
+Small and empty searches must acknowledge both preview windows before completion.
+Native recent-menu actions must retain the displayed path despite another window
+reordering the saved list. Native workflow menus must reflect helper capability,
+including disabled writes/history when the helper is unavailable. Synthetic demo
+creation must create missing parents and refuse an existing destination.
 Headless tests must exercise both preview stages, full completion, sparse matches,
 all sort orders, cancellation, paging, message reads, and unchanged archive bytes.
 

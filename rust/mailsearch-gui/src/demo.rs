@@ -17,6 +17,12 @@ pub const MESSAGES: [&[u8]; 3] = [
 ];
 
 pub fn create(path: &Path) -> Result<()> {
+    if let Some(parent) = path
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+    {
+        fs::create_dir_all(parent)?;
+    }
     fs::create_dir(path)?;
     fs::create_dir_all(path.join("data/mbox"))?;
     let db = Connection::open(path.join("archive.sqlite3"))?;
