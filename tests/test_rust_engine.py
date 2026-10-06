@@ -189,34 +189,85 @@ def test_archive_engine_import_policy_identity_and_shutdown(tmp_path: Path) -> N
 
 
 def test_pipe_close_cancels_import_and_allows_recovery(tmp_path: Path) -> None:
-    """Owner loss: stop between messages, release the writer, and resume preserved inputs."""
+    """Owner loss: bound shutdown of blocked processing, release the writer and recover."""
     source = tmp_path / "source"
     source.mkdir()
-    raws = [f"From: alice@example.test\nTo: bob@example.test\nSubject: original {i}\nMessage-ID: <cancel-{i}@example.test>\nDate: Tue, 3 Jan 2023 12:00:00 +0000\n\n".encode() + b"Preserve this original line.\n" * 100 for i in range(300)]
+    raws = [f"From: alice@example.test\nTo: bob@example.test\nSubject: original {i}\nMessage-ID: <cancel-{i}@example.test>\nDate: Tue, 3 Jan 2023 12:00:00 +0000\n\n".encode() + b"Preserve this original line.\n" * 100 for i in range(3)]
     for index, raw in enumerate(raws):
         (source / f"message-{index}.eml").write_bytes(raw)
     archive = tmp_path / "interrupted.mailarchive"
-    with peer(archive, tmp_path) as engine:
-        engine.call("create")
-        defaults = engine.call("import_defaults", str(source))
-        assert isinstance(defaults, dict)
-        engine.call("start_import", {"source": str(source), "include": "alice@example.test", "revision": defaults["revision"], "scan_policy": "not-scanned"})
-        deadline = time.monotonic() + 15
-        while True:
-            history = engine.call("ingest_overview")
-            assert isinstance(history, dict)
-            status = history["status"]
-            if isinstance(status, dict) and int(str(status["processed_messages"])) > 0:
-                assert int(str(status["processed_messages"])) < len(raws)
-                break
-            assert time.monotonic() < deadline
+    plugins = tmp_path / "plugins"
+    processor = plugins / "processors" / "owner-boundary"
+    processor.mkdir(parents=True)
+    (processor / "plugin.toml").write_text('''api_version=2
+plugin_type="processor"
+kind="owner-boundary"
+name="Owner pipe boundary fixture"
+implementation_version="1"
+entrypoint="plugin:Processor"
+pipeline="ingest"
+rank=1
+timeout_seconds=120
+subscribes=["application/x-mailarchiver-raw-message"]
+''')
+    (processor / "plugin.py").write_text('''# Coordinate owner loss at a real unfinished message in synthetic ingest.
+# The first message publishes normally; the second waits at its processor.
+# Marker files let the parent observe that exact boundary without timing import.
+# This same plugin is retained in the production request and replayed by the helper.
+# The parent releases it only after bounded owner-loss shutdown, before recovery.
+from pathlib import Path
+from time import sleep
+from mailarchiver.processing.api import ProcessingResult
+
+class Processor:
+    def process(self, item):
+        root = Path(__file__).parents[3]
+        if item.message_id == (root / "blocked-sha256").read_text():
+            (root / "entered").touch()
+            while not (root / "release").exists():
+                item.check_cancelled()
+                sleep(0.01)
+        return ProcessingResult()
+''')
+    (tmp_path / "blocked-sha256").write_text(sha256(raws[1]).hexdigest())
+    owner = tmp_path / "owner-names.txt"
+    owner.write_text("alice@example.test\n")
+
+    def wait_for_boundary(process: subprocess.Popen[str]) -> None:
+        deadline = time.monotonic() + 30
+        while not (tmp_path / "entered").exists():
+            assert process.poll() is None, "Importer exited before the message boundary"
+            assert time.monotonic() < deadline, "Importer did not reach the message boundary"
             time.sleep(.01)
+
+    # The real CLI persists a request with the processor, then crashes at the
+    # second message. The ordinary helper resume path must load that request.
+    with (tmp_path / "prepare.log").open("w", encoding="utf-8") as log:
+        with subprocess.Popen([sys.executable, "-m", "mailarchiver", "--archive", str(archive), "ingest",
+                               "--no-scan", "--workers", "1", "--defer-content", "--plugin-dir", str(plugins),
+                               "--owner-names-file", str(owner), str(source)], stdout=log, stderr=log, text=True) as child:
+            try:
+                wait_for_boundary(child)
+            finally:
+                if child.poll() is None:
+                    child.kill()
+                child.wait(5)
+    (tmp_path / "entered").unlink()
+    with peer(archive, tmp_path) as engine:
+        assert engine.call("recover")
+        assert engine.call("resume_processing", True, False)
+        wait_for_boundary(engine.process)
+        state = engine.call("job_status")
+        assert isinstance(state, dict) and state["active"] is True
+        with sqlite3.connect(archive / "archive.sqlite3") as database:
+            assert database.execute("SELECT sha256 FROM messages").fetchall() == [(sha256(raws[0]).hexdigest(),)]
         # Context closes the real owner pipe while import is active; it must exit <=6s.
     with WriterLease.acquire(archive, str(archive), "post-exit verification", "verify", "test"):
         with sqlite3.connect(archive / "archive.sqlite3") as database:
             hashes = {row[0] for row in database.execute("SELECT sha256 FROM messages")}
-            assert hashes <= {sha256(raw).hexdigest() for raw in raws}
+            assert hashes == {sha256(raws[0]).hexdigest()}
             assert database.execute("PRAGMA integrity_check").fetchone() == ("ok",)
+    (tmp_path / "release").touch()
     with peer(archive, tmp_path) as engine:
         assert engine.call("recover")
         assert engine.call("resume_processing", True, True)
@@ -231,4 +282,5 @@ def test_pipe_close_cancels_import_and_allows_recovery(tmp_path: Path) -> None:
             time.sleep(.05)
     with sqlite3.connect(archive / "archive.sqlite3") as database:
         assert database.execute("SELECT count(*) FROM messages").fetchone() == (len(raws),)
+        assert {row[0] for row in database.execute("SELECT sha256 FROM messages")} == {sha256(raw).hexdigest() for raw in raws}
     assert all((source / f"message-{index}.eml").read_bytes() == raw for index, raw in enumerate(raws))

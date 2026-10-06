@@ -96,6 +96,16 @@ fn webview2_search_dialogs_and_fixity() -> Result<()> {
         INSERT INTO locations SELECT message_pk,1,(SELECT byte_offset FROM locations WHERE message_pk=1),(SELECT byte_length FROM locations WHERE message_pk=1) FROM messages WHERE message_pk>3;")?;
     drop(db);
     let before = inventory(&archive)?;
+    let startup_log = work.join("startup.log");
+    run(
+        Command::new(env!("CARGO_BIN_EXE_mailsearch-webview")).arg("--startup-smoke"),
+        &startup_log,
+        0,
+    )?;
+    ensure!(
+        fs::read_to_string(startup_log)?.trim() == "false",
+        "Windows startup offered unsupported archive creation"
+    );
     let screenshot = work.join("webview2.png");
     run(
         Command::new(env!("CARGO_BIN_EXE_mailsearch-webview"))

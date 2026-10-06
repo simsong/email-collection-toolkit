@@ -2426,6 +2426,10 @@ startup, menus, import, processing and owner/identity editors must not offer
 unsupported writes, including About-dialog virus-definition refresh; history/status
 and Rust readers remain usable. Import job errors describe ingest failures. Failure to remember the source directory after
 successful ingest must surface as a separate warning and retain completed status.
+With no usable recent archive, startup must check actual helper availability and
+write capability before offering Create; an unavailable helper offers Open only.
+Owner-loss acceptance must synchronize unfinished processing rather than race
+the speed of a synthetic import, and verify bounded exit, recovery and source fixity.
 
 Headless acceptance uses the real frontend and service boundary, synthetic
 archives, writer-conflict checks, cancellation/resume and byte inventories.

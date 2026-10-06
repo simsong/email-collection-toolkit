@@ -3112,6 +3112,10 @@ job objects supervise ordinary descendants; existing owned native helpers retain
 their own parent-death handling. Windows execution of this new boundary is unverified.
 `make test-rust-engine` exercises actual import, owner rules, identity edits,
 writer exclusion, pipe-close cancellation and resume using synthetic sources.
+Its owner-loss case uses a real CLI-persisted processor that holds the second
+message after the first publishes. Helper replay reaches that same boundary;
+EOF must exit within six seconds while blocked, release the lease and retain
+pending work. Releasing the fixture then permits complete recovery/reimport.
 Owner options, identity and history pages are reused in trusted embedded dialogs.
 Native file dialogs select source/destination; explicit import confirmation
 collects owner rules, scanning policy and attachment indexing. Missing helpers and
@@ -3119,6 +3123,10 @@ service errors are reported without disabling the Rust search/message reader.
 The helper reports separate `available` and `write_available` capabilities.
 Native menus start disabled and receive that capability result on the UI thread;
 native smoke checks actual enabled states with and without the Python helper.
+Startup without a usable recent archive performs the same real helper handshake
+before offering Create. A feature-gated startup probe used by native acceptance
+checks this decision with working/missing helpers and Windows write restrictions;
+the handshake requests only ping/capabilities and creates no archive files.
 Recent menu actions carry the path captured with their label, avoiding shared-list
 index races. Demo generation creates missing parents while refusing replacement.
 Staged searches publish and acknowledge both windows even after input is exhausted;

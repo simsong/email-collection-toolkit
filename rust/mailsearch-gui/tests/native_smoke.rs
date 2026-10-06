@@ -132,6 +132,31 @@ fn cli_archive_native_search_and_screenshot() -> Result<()> {
         &work.join("verify.log"),
     )?;
     let before = inventory(&archive)?;
+    let startup_directory = work.join("startup-directory");
+    fs::create_dir(&startup_directory)?;
+    for (name, python, expected) in [
+        ("available", None, "true"),
+        ("missing", Some(work.join("missing-python")), "false"),
+        ("failed", Some(PathBuf::from("/usr/bin/false")), "false"),
+    ] {
+        let mut command = Command::new(env!("CARGO_BIN_EXE_mailsearch-webview"));
+        command
+            .arg("--startup-smoke")
+            .current_dir(&startup_directory);
+        if let Some(python) = python {
+            command.env("ECT_RUST_ENGINE_PYTHON", python);
+        }
+        let log = work.join(format!("startup-{name}.log"));
+        run(&mut command, &log)?;
+        ensure!(
+            fs::read_to_string(log)?.trim() == expected,
+            "Startup offered archive creation with the wrong helper capability"
+        );
+    }
+    ensure!(
+        fs::read_dir(startup_directory)?.next().is_none(),
+        "Startup capability probe created archive files"
+    );
     let screenshot = work.join("rust-gui.png");
     run(
         Command::new(env!("CARGO_BIN_EXE_mailsearch-webview"))

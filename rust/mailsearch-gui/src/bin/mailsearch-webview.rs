@@ -34,7 +34,7 @@ fn main() -> Result<()> {
             {
                 return native(path.clone(), None, None);
             }
-            let create = if mailsearch_rust::engine::ARCHIVE_WRITING_SUPPORTED {
+            let create = if startup_writes_available() {
                 let decision=rfd::MessageDialog::new().set_title("Email Collection Toolkit")
                 .set_description("Create a new archive? Choose Yes to create an empty archive, No to open an existing archive, or Cancel to exit.")
                 .set_buttons(rfd::MessageButtons::YesNoCancel).show();
@@ -139,6 +139,11 @@ fn main() -> Result<()> {
             native(PathBuf::from(path), None, Some(parameters.finish()))
         }
         #[cfg(feature = "native-smoke")]
+        [flag] if flag == "--startup-smoke" => {
+            println!("{}", startup_writes_available());
+            Ok(())
+        }
+        #[cfg(feature = "native-smoke")]
         [flag, path, output] if flag == "--native-smoke" => {
             native(PathBuf::from(path), Some(PathBuf::from(output)), None)
         }
@@ -146,6 +151,15 @@ fn main() -> Result<()> {
             "Usage: mailsearch-webview --archive DIRECTORY (or --rpc DIRECTORY for headless tests)"
         ),
     }
+}
+
+fn startup_writes_available() -> bool {
+    mailsearch_rust::engine::ARCHIVE_WRITING_SUPPORTED
+        && mailsearch_rust::engine::Engine::open(std::path::Path::new("."))
+            .and_then(|mut engine| engine.call("capabilities", &[]))
+            .is_ok_and(|capabilities| {
+                capabilities["available"] == true && capabilities["write_available"] == true
+            })
 }
 
 #[cfg(not(any(target_os = "macos", target_os = "windows")))]

@@ -4,6 +4,9 @@
 
 ## Unreleased
 
+- Offer startup archive creation only after a real writable-helper handshake;
+  synchronize owner-loss/recovery acceptance at a held processing boundary.
+
 - Verify mixed legacy MBOX quoting with shared streamed hash candidates instead
   of thousands of full-record rereads; retain existing ambiguity/framing checks.
 
