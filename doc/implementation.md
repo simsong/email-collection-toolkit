@@ -115,6 +115,44 @@ not a crash-atomic transaction across two directory entries.
 resources, and invokes console entry points without a GUI. This smoke does not
 validate installed GUI resources; separate DMG tests exercise the desktop bundle.
 
+## Rust import verification and lifecycle tests
+
+`rust/archive-verifier` independently checks imported archives. Its
+`archive-verifier ARCHIVE` executable opens schema-v1 `archive.sqlite3` and
+`search.sqlite3` read-only, checks SQLite/foreign-key integrity and publication
+observations, streams MBOX files, and verifies each location against its raw
+SHA-256. A streaming framing decoder tries reversible mboxrd, stored/fully decoded
+legacy mboxo and mixed legacy interpretations for at most twelve ambiguous lines,
+with adopted-envelope and writer-added LF/CRLF candidates. Catalogued offsets
+must cover every record and separating LF; generation counts, sizes and whole-file
+hashes must agree. Envelope lines above 64 KiB are rejected explicitly by the
+bounded reader. Search checks compare normal-message digest membership, FTS row
+links, quarantine exclusion and attachment metadata counts. Missing databases
+are never created. The command reports counts only after every check passes.
+
+This is consistency verification, not authenticity or a replacement for the
+installed `verify_mail_archive.py`: semantic digests, parsed fields, full BagIt
+metadata, extracted index text and `processing.sqlite3` are outside this first
+component. Run against an idle archive; transactions cannot snapshot MBOX files
+and both databases together. WAL headers and journal/sidecar files are rejected
+before SQLite opens them, preventing read-only verification from creating shared-memory files. Unfinished
+runs are rejected.
+
+`make test-import-e2e` runs Rust-owned real-process acceptance tests, migrated
+from `tests/test_corpus_import.py` and the lifecycle assertion in
+`e2e_tests/test_ingest_verify.py`. The latter retains its Python fixture and
+browser/native tests until their separate migration. `uv run` provides the
+application interpreter; Rust launches `python -m mailarchiver` and the installed
+portable verifier without importing Python test helpers. ClamAV is the existing
+embedded engine, not a new service. Rust checks the reviewed corpus, reimport,
+source fixity, status, synthetic EICAR routing, search and corruption failures.
+Failures retain private artifacts below `.tmp/rust-import-tests/`; successful
+runs delete them. Golden updates require `make update-corpus-expectations` and
+still separate public tracked inputs from ignored private additions. Normal
+Cargo tests exercise framing, diagnostics and timeout logic without real imports;
+`make test-e2e` explicitly runs the external-prerequisite Rust tests before pytest
+browser tests, so local and existing CI `make check-tests` gates include them.
+
 ## Technology decision
 
 Implement the normalizer in Python 3.12+.  It needs reliable streaming I/O,
@@ -2581,19 +2619,19 @@ duplicate-free restart. `make test-native-quit` tests the real Cocoa About windo
 during periodic status polling. Its existing `MAILARCHIVER_NATIVE_GUI_E2E` opt-in
 flag requires a macOS GUI session. These tests use only disposable archives.
 
-`make test-corpus-import` runs the single full-directory regression in
-`tests/test_corpus_import.py`, also included in `make test`. It imports the
-actual `tests/data` directory with `--clamav`, compares subjects/raw SHA-256
+`make test-corpus-import` runs the single full-directory Rust regression in
+`rust/archive-verifier/tests/imports.rs`, also required by `make test-import-e2e`
+and `make check`. It imports the actual `tests/data` directory with `--clamav`, compares subjects/raw SHA-256
 and per-source accounting against `tests/expected-corpus.json`, independently
 checks canonical locations and the installed verifier, then reimports and
 checks unchanged-source skipping. Each subprocess has a 600-second deadline
-and a retained pytest-temporary log. The test fingerprints all input files
-before/after; it never changes sources.
-The configured on-demand ClamAV installation is required, just as for the other
+and a retained failure log under `.tmp/rust-import-tests`. The test fingerprints
+all input files before/after; it never changes sources.
+The configured ClamAV engine is required, just as for the other
 scanner integration tests. Expectations include infected mail without fixing
 its signature-dependent destination; new signatures cannot excuse lost bytes.
-`make update-corpus-expectations` passes `--update-corpus-expectations` to
-pytest and regenerates the expected JSON only after those integrity checks.
+`make update-corpus-expectations` explicitly selects the Rust golden-maintenance
+test and regenerates the expected JSON only after those integrity checks.
 Review the generated diff: updating a golden file is not proof of correctness.
 Git-ignored local additions are recorded separately in a private expectation
 file under the checkout root; neither their mail nor their subjects belong

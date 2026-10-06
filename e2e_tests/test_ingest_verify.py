@@ -35,11 +35,9 @@ from mailarchiver.gui_app import (
     NativeSmokeReport,
     PyWebViewApplication,
 )
-from mailarchiver.ingest_status import read_ingest_history
 from mailarchiver.search import index_message
 
 DATA = Path(__file__).parent / "data"
-NORMAL_MESSAGE_COUNT = 207
 PROCESSED_MESSAGE_COUNT = 210
 GUI_API_METHODS = (
     "activate", "attachment", "choose_archive", "delete_filter_set", "mailbox_tree", "message",
@@ -134,79 +132,6 @@ def native_smoke_archive(tmp_path_factory: pytest.TempPathFactory) -> Path:
         catalog.close()
         search.close()
     return archive
-
-
-def test_fresh_ingest_builds_an_independently_verifiable_archive(built_archive: BuiltArchive) -> None:
-    """Prove discovery, dedupe, quarantine, indexing, fixity, and standalone verification."""
-    archive = built_archive.archive
-    assert "completed:" in built_archive.ingest_stderr
-    assert f"processed={PROCESSED_MESSAGE_COUNT}" in built_archive.ingest_stderr
-    assert "infected=1" in built_archive.ingest_stderr
-    assert "autosaved=1" in built_archive.ingest_stderr
-    assert "seen_skipped=1" in built_archive.ingest_stderr
-    assert "waiting for ClamAV startup:" in built_archive.ingest_stderr
-    assert not any(path.name.endswith("runtime-infected.emlx") for path in built_archive.source.rglob("*"))
-    assert (archive / "manifest-sha256.txt").is_file()
-    assert (archive / "tagmanifest-sha256.txt").is_file()
-    assert (archive / "mailbag.csv").is_file()
-    history = read_ingest_history(archive)
-    assert history.errors == []
-    assert len(history.statuses) == 1
-    ingest_status = history.statuses[0]
-    assert ingest_status.state == "completed"
-    assert ingest_status.processed_messages == PROCESSED_MESSAGE_COUNT
-    assert ingest_status.counts.infected == 1
-    assert ingest_status.counts.autosaves == 1
-    assert "status/" not in (archive / "tagmanifest-sha256.txt").read_text(encoding="utf-8")
-    assert "Mailarchiver-Message-Newline-Policy: preserve-source; add-final-LF-for-MBOX-framing\n" in (
-        archive / "bag-info.txt"
-    ).read_text(encoding="utf-8")
-
-    catalog = sqlite3.connect(f"file:{archive / 'archive.sqlite3'}?mode=ro", uri=True)
-    try:
-        assert catalog.execute("SELECT count(*) FROM messages").fetchone() == (NORMAL_MESSAGE_COUNT + 1,)
-        assert catalog.execute("SELECT count(*) FROM observations").fetchone() == (PROCESSED_MESSAGE_COUNT,)
-        assert catalog.execute("SELECT count(*) FROM source_files").fetchone() == (7,)
-        assert catalog.execute("SELECT count(*) FROM messages WHERE category = 'INFECTED'").fetchone() == (1,)
-        assert catalog.execute(
-            "SELECT count(*) FROM observations WHERE disposition = 'duplicate'"
-        ).fetchone() == (1,)
-        assert catalog.execute(
-            "SELECT count(*) FROM observations WHERE disposition = 'autosave-excluded'"
-        ).fetchone() == (1,)
-        assert catalog.execute(
-            "SELECT date_utc, date_source FROM messages WHERE message_id_normalized = 'rich-e2e@example'"
-        ).fetchone() == ("2024-02-02T00:00:00+00:00", "received-median")
-        infected_hash = catalog.execute(
-            "SELECT sha256 FROM messages WHERE message_id_normalized = 'infected-e2e@example'"
-        ).fetchone()
-        assert infected_hash == (hashlib.sha256(built_archive.infected_raw).hexdigest(),)
-        no_newline = (DATA / "source/Professional/Projects/no-final-newline.eml").read_bytes()
-        assert not no_newline.endswith(b"\n")
-        assert catalog.execute(
-            "SELECT sha256 FROM messages WHERE message_id_normalized = 'no-final-newline-e2e@example'"
-        ).fetchone() == (hashlib.sha256(no_newline).hexdigest(),)
-    finally:
-        catalog.close()
-
-    search = sqlite3.connect(f"file:{archive / 'search.sqlite3'}?mode=ro", uri=True)
-    try:
-        assert search.execute("SELECT count(*) FROM message_fts").fetchone() == (NORMAL_MESSAGE_COUNT,)
-        assert search.execute("SELECT count(*) FROM attachment_fts").fetchone() == (1,)
-        assert search.execute("SELECT count(*) FROM attachment_fts WHERE attachment_fts MATCH 'Appendixquartz'").fetchone() == (1,)
-    finally:
-        search.close()
-
-    verified = subprocess.run(
-        [sys.executable, "-I", str(archive / "verify_mail_archive.py"), str(archive)],
-        check=False,
-        capture_output=True,
-        text=True,
-    )
-    assert verified.returncode == 0, verified.stdout + verified.stderr
-    assert f"OK 2024-Archive1.mbox: {NORMAL_MESSAGE_COUNT} messages\n" in verified.stdout
-    assert "OK INFECTED1.mbox: 1 messages\n" in verified.stdout
-    assert verified.stdout.endswith("Archive integrity verified.\n")
 
 
 def test_search_ui_end_to_end_without_a_window(

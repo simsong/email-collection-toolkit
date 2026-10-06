@@ -1,0 +1,26 @@
+# Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved.
+# Independently verify archive records and search mappings against canonical bytes.
+# The library streams MBOX records and opens existing SQLite databases read-only.
+# The executable reports consistency without repairing or importing any archive.
+# Real-process tests invoke the existing importer and portable verifier.
+# Explicit Make targets select scanner-dependent imports and golden maintenance.
+
+[package]
+name = "archive-verifier"
+version = "0.1.0"
+edition = "2021"
+publish = false
+license = "GPL-2.0-only"
+
+[dependencies]
+anyhow = "1.0.100"
+rusqlite = { version = "0.37", features = ["bundled"] }
+sha2 = "0.10.9"
+url = "2.5.7"
+
+[dev-dependencies]
+base64 = "0.22.1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tempfile = "3.23.0"
+libc = "0.2"

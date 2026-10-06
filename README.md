@@ -452,6 +452,29 @@ From this checkout, the equivalent command is:
 make verify ARCHIVE=/path/to/mail-archive
 ```
 
+For an independent Rust check of imported catalog records and search membership:
+
+```console
+make verify-database ARCHIVE=/path/to/mail-archive
+make test-import-e2e
+```
+
+`ARCHIVE` selects an existing, idle archive. The Rust verifier checks every MBOX
+location/raw SHA-256, mailbox coverage and hashes, database relationships and
+search digest/FTS mappings without repairing data. It supplements the portable
+verifier: semantic hashes, parsed fields, extracted index text, processing/manual
+state and source completeness are not yet checked in Rust. Stop all writers first;
+WAL databases and journal/sidecar files are rejected without creating new files.
+`CARGO` selects Cargo and `RUST_TARGET_DIR` its build-output directory (defaults:
+`cargo` and checkout `target/`). `uv run` supplies Python only for the application
+under test and its portable verifier; import/database test logic runs in Rust.
+Existing `MAILARCHIVER_CLAMAV_LIBRARY`, `MAILARCHIVER_CLAMAV_DATABASE`,
+`MAILARCHIVER_CLAMAV_UPDATES`, `MAILARCHIVER_FRESHCLAM` and
+`MAILARCHIVER_CLAMAV_CERTIFICATES` select the native engine, bundled definitions,
+per-user definition updates, updater executable and signature certificates.
+The tests require the configured real scanner and Poppler for the PDF corpus.
+Failures retain local artifacts in `.tmp/rust-import-tests/`.
+
 `bag-info.txt` explicitly records that MBOX framing adds a final LF when a
 source message lacks one. The original source-byte SHA-256 disambiguates stored and recovered newline
 representations. Narrow double-envelope normalization can add literal `X-From:`;
@@ -656,11 +679,12 @@ The full test architecture and its explicit browser/Cocoa coverage boundary are
 documented in [`doc/END_TO_END_TESTING.md`](doc/END_TO_END_TESTING.md).
 
 The ordinary suite uses static MBOX and `.emlx` fixtures. Antivirus tests build
-the EICAR signature from fragments only inside a pytest temporary directory,
-ingest it with the real on-demand ClamAV daemon, and immediately delete the
+the EICAR signature from fragments only inside a disposable test directory,
+ingest it with the real embedded ClamAV engine, and immediately delete the
 generated source; no complete virus-test signature is tracked in Git. The
 separate end-to-end suite copies its tracked, virus-free source corpus, ingests
-110 discoveries, verifies deduplication, autosave exclusion, quarantine,
+210 observations with Rust-owned lifecycle assertions, and verifies deduplication,
+autosave exclusion, quarantine,
 newline preservation, attachment indexing, BagIt fixity, and the installed
 standalone verifier. Headless Chromium drives the shipped HTML and JavaScript
 through the real Python service bridge, including empty-query suppression, complete searches,

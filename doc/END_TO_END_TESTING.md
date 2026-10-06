@@ -60,13 +60,16 @@ fixture change.
 `make test-corpus-import` runs a single complete import of `tests/data/`, with
 the configured on-demand ClamAV scanner, a ten-minute subprocess deadline,
 byte verification, installed archive verification, and a second idempotent
-import. It is also part of ordinary pytest (`make test` / `make check`).
+import. The orchestration and database assertions run in Rust through
+`make test-import-e2e`, required by `make test-e2e` / `make check`.
+Python remains the application under test and the installed portable verifier,
+not the lifecycle test runner.
 The reviewed `tests/expected-corpus.json` lists source fingerprints and retained
 subjects/raw SHA-256 hashes. Failures list both found-but-unexpected and
 expected-but-missing emails, including their subjects and hashes.
 
 After an intentional fixture change, run `make update-corpus-expectations`
-(pytest's explicit `--update-corpus-expectations` option), then review the JSON
+(the explicitly selected Rust golden-maintenance test), then review the JSON
 diff. The updater requires a successful import, verification, and reimport;
 never accept its output merely to make a failing test green. Git-ignored local
 mailboxes have a separate expectation file in ignored checkout-root output
@@ -75,8 +78,8 @@ local runs also test the additional files present locally.
 
 ### Synthetic lifecycle and browser acceptance
 
-The platform-independent part of the suite performs a real CLI ingest with the
-configured on-demand ClamAV daemon. It checks all of these boundaries together:
+The Rust lifecycle test performs a real CLI ingest with the
+configured embedded ClamAV engine. It checks all of these boundaries together:
 
 * discovery of MBOX, EML, and EMLX sources;
 * exact and semantic deduplication, autosave exclusion, and source provenance;
@@ -91,6 +94,22 @@ The complete EICAR signature is never stored in Git. The test constructs it
 from separate fragments inside its private temporary source tree, ingests it,
 and deletes that generated source immediately. The quarantine copy exists only
 inside the disposable test archive.
+
+The independent Rust `archive-verifier` also checks catalog/MBOX byte locations,
+SHA-256, coverage, observations and search mappings. Deliberately altered SQL rows
+and MBOX bytes must fail, including changes that preserve row counts. WAL headers
+and database journals are refused before opening SQLite, preserving file
+inventories. Run it with
+`make verify-database ARCHIVE=...` after all writers stop. It supplements the
+portable verifier; it does not recompute semantic hashes, parsed metadata or
+search text, and does not validate processing/manual state or source completeness.
+The Rust test process has a ten-minute child deadline. Failure artifacts remain
+under `.tmp/rust-import-tests/`; success removes the disposable archive.
+`make test-import-e2e` runs both migrated lifecycle tests. `make test-corpus-import`
+runs only the golden corpus. Ordinary `make test-rust` leaves real-import and
+explicit golden-update tests ignored; the required E2E gate selects imports and
+always excludes golden updates. Browser tests still use their existing Python
+fixture and pytest runner; their JavaScript migration is a separate step.
 
 ## Search-interface test layers
 
@@ -232,7 +251,7 @@ file-open events, and dispatch in packaged applications under issues 72 and 76.
 
 ## Coverage boundaries
 
-| Behavior | Lifecycle pytest | Playwright | Native WKWebView | XCUITest |
+| Behavior | Lifecycle Rust / existing Python logic tests | Playwright | Native WKWebView | XCUITest |
 |---|---:|---:|---:|---:|
 | Ingest, ClamAV, BagIt, standalone verification | Yes | No | No | No |
 | Real Python search and message services | Yes | Yes | Smoke | Optional |

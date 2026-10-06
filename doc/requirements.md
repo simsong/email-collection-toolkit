@@ -340,17 +340,17 @@ Processing database initialization must publish a complete schema atomically;
 a version marker alone is insufficient for validation. Message-boundary replay
 must not repeat archive-wide recovery or aggregate-report scans for every message.
 
-The default pytest suite must import the entire local `tests/data/` directory
-through the CLI into a disposable archive, with a ten-minute subprocess
-deadline. A reviewed expectation file lists source fingerprints and every
+The required Rust import gate in `make check` must import the entire local
+`tests/data/` directory through the CLI into a disposable archive, with a
+ten-minute subprocess deadline. A reviewed expectation file lists source fingerprints and every
 retained email's subject and raw SHA-256, plus observation/exclusion counts.
 Failures report both unexpected and missing messages. Verification must read
 canonical bytes, run the installed validator, confirm source immutability, and
 repeat ingest to establish idempotence. Updating expectations requires the
-explicit `--update-corpus-expectations` pytest option. Tracked fixture expectations
-are public; ignored local mailbox expectations remain in an ignored local
-overlay. Unknown local files fail comparison until explicitly reviewed.
-This test uses the real on-demand ClamAV path, as the GUI does. Its subject/hash
+explicit `make update-corpus-expectations` Rust maintenance target. Tracked
+fixture expectations are public; ignored local mailbox expectations remain in
+an ignored local overlay. Unknown local files fail comparison until explicitly reviewed.
+This test uses the real configured ClamAV engine, as the GUI does. Its subject/hash
 expectations include quarantined mail and do not depend on signature-dependent
 mailbox destinations. Dedicated EICAR tests also verify infected routing.
 
@@ -586,6 +586,37 @@ recorded in THIRD_PARTY_NOTICES.md.
   from the disposable search index, ordinary search listings, reports, and
   correspondent statistics. Its canonical MBOX content remains available for
   an explicit future quarantine-review workflow.
+
+## Independent Rust import verification
+
+`make verify-database ARCHIVE=...` shall read existing catalog/search databases
+without SQL writes and independently verify every catalogued MBOX location.
+For a quiescent, checkpointed schema-v1 archive, require SQLite integrity and
+foreign-key consistency; complete message/location coverage; whole-MBOX byte
+counts and SHA-256; nonoverlapping, gap-free records; and raw message SHA-256
+recovery using mboxrd, bounded legacy mboxo, adopted envelopes and final-newline
+candidates. Reject pending publications, unfinished runs, unsafe mailbox paths,
+unregistered MBOX files, inconsistent publication observations, missing/extra
+search digests, quarantine leakage, and broken FTS/attachment metadata mappings.
+Reject WAL headers and database journals/sidecars before SQLite opens them,
+without creating shared-memory files. Stream mailbox and message bytes with
+bounded buffers. Fail rather than repair.
+
+This first Rust verifier does not recompute semantic hashes, parsed metadata,
+extracted search text, or processing/manual-decision data; it does not establish
+source completeness. The separate installed Python verifier continues to check
+BagIt/Mailbag and semantic fixity. Stop all writers before either verifier runs;
+a read transaction does not synchronize independent databases and MBOX files.
+
+Rust owns the complete-corpus and synthetic import/database end-to-end assertions.
+Tests invoke the real Python importer and installed portable verifier as child
+programs, use the real embedded scanner, compare reviewed source/hash expectations,
+check source preservation and repeat-import idempotence, and reject deliberate
+catalog/MBOX/search corruption. A subprocess deadline must terminate test-owned
+children. Golden updates remain an explicit, reviewed maintenance action with
+private expectations in ignored output. Browser/native test migration is deferred.
+`make test-import-e2e` is required by `make test-e2e` and therefore `make check`;
+plain Cargo tests report these external-prerequisite tests as ignored.
 
 ## Primary metadata database
 

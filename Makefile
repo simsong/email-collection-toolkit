@@ -39,6 +39,7 @@ runtime-license-bundle:
 	uv run python scripts/check_runtime_licenses.py --output "$(LICENSE_OUTPUT)"
 
 TIKA_VERSION ?= 4.0.0
+# CARGO selects Cargo; RUST_TARGET_DIR keeps compiled artifacts in this checkout.
 CARGO ?= cargo
 RUST_EXE_SUFFIX := $(if $(filter Windows_NT,$(OS)),.exe,)
 RUST_TARGET_DIR ?= $(CURDIR)/target
@@ -50,7 +51,7 @@ CARGO_RUN = $(CARGO)
 rust-programs:
 	$(CARGO_RUN) build --locked --release --workspace --bins
 
-mdti-validator mcti-generator pst-importer pst-downloader mcti-scan:
+mdti-validator mcti-generator pst-importer pst-downloader mcti-scan archive-verifier:
 	$(CARGO_RUN) build --locked --release --bin $@
 
 rust-toolchain:
@@ -393,12 +394,22 @@ test-workflow-gates:
 test: pst-importer mcti-scan pff-converter test-pff-converter
 	uv run pytest -q
 
-.PHONY: test-corpus-import update-corpus-expectations
+.PHONY: archive-verifier verify-database test-import-e2e test-corpus-import update-corpus-expectations
+# ARCHIVE selects the quiescent archive; verification never repairs it.
+verify-database: archive-verifier
+	@test -n "$(ARCHIVE)" || { echo 'usage: make verify-database ARCHIVE=/path/to/archive'; exit 2; }
+	"$(RUST_TARGET_DIR)/release/archive-verifier$(RUST_EXE_SUFFIX)" "$(ARCHIVE)"
+
+# uv supplies the application Python executable; all test assertions run in Rust.
+# MAILARCHIVER_CLAMAV_* retain their existing scanner meanings (README.md).
+test-import-e2e:
+	uv run --locked $(CARGO_RUN) test --locked -p archive-verifier --test imports -- --ignored --skip update_corpus_expectations
+
 test-corpus-import:
-	uv run pytest -q tests/test_corpus_import.py
+	uv run --locked $(CARGO_RUN) test --locked -p archive-verifier --test imports complete_corpus_import -- --ignored --exact
 
 update-corpus-expectations:
-	uv run pytest -q -s tests/test_corpus_import.py --update-corpus-expectations
+	uv run --locked $(CARGO_RUN) test --locked -p archive-verifier --test imports update_corpus_expectations -- --ignored --exact --nocapture
 
 test-application:
 	uv run pytest -q tests/test_application.py tests/test_writer_lock.py tests/test_loopback.py
@@ -415,6 +426,7 @@ test-apple-mail-compare:
 	uv run pytest -q tests/test_apple_mail_compare.py
 
 test-e2e:
+	$(MAKE) test-import-e2e
 	uv run pytest -q --browser chromium --tracing=retain-on-failure e2e_tests
 
 test-encoding:

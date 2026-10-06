@@ -4,6 +4,11 @@
 
 ## Unreleased
 
+- Add independent Rust catalog/MBOX/search verification with `make verify-database`.
+  Move complete-corpus and synthetic import/database end-to-end assertions to
+  Rust, including corruption rejection and explicit golden maintenance. The
+  existing Python importer, portable BagIt verifier and browser tests remain.
+
 - Extend the Rust desktop migration with date/name/institution search, autocomplete,
   attachment-text and original-folder filters, compatible saved filters, rich MIME
   display, CID images, exports, print, clipboard, native file selection and extra
