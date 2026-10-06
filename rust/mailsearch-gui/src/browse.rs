@@ -118,6 +118,11 @@ struct Filters {
     filter_sets: Vec<Filter>,
 }
 pub(crate) fn filters(path: &Path, method: &str, args: &[Value]) -> Result<Value> {
+    let _lock = if method == "saved_filter_sets" {
+        None
+    } else {
+        Some(crate::documents::preferences_lock(path)?)
+    };
     let mut store: Filters = match std::fs::read(path) {
         Ok(bytes) => serde_json::from_slice(&bytes).context("Invalid saved filters")?,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Filters {

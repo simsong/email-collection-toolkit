@@ -8,6 +8,7 @@
 from functools import partial
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from threading import Thread
+from queue import Queue
 from hashlib import sha256
 import json
 from os import environ
@@ -15,14 +16,115 @@ from pathlib import Path
 import subprocess
 import sqlite3
 import sys
+import time
+from typing import Literal
 
 from playwright.sync_api import Page, expect
+from pydantic import BaseModel, Field
 import pytest
+from mailarchiver.mailbox_tree import FilterSet, FilterSetPreferences, FilterSetStore, preferences_lock
 
 from test_mailsearch import make_archive
 from test_gui_service import make_gui_archive
 
 ROOT = Path(__file__).resolve().parents[1]
+
+
+class FilterRequest(BaseModel):
+    id: int = 1
+    method: str
+    args: list[str | bool | list[str]] = Field(default_factory=list)
+
+
+class FilterReply(BaseModel):
+    id: int
+    result: FilterSetPreferences | None
+    error: str | None
+
+
+@pytest.mark.parametrize("operation", ["save", "rename", "delete"])
+def test_shared_filter_mutations_reload_after_python_rust_lock(tmp_path: Path, operation: Literal["save", "rename", "delete"]) -> None:
+    """Shared-filter requirement: real writers retain updates published while waiting."""
+    binary = environ.get("RUST_WEBVIEW_BINARY")
+    if not binary:
+        pytest.skip("run make test-rust-webview")
+    archive, _ = make_archive(tmp_path)
+    before = [(p.relative_to(archive), sha256(p.read_bytes()).hexdigest()) for p in sorted(archive.rglob("*")) if p.is_file()]
+    home = tmp_path / "home"
+    root = home / "Library/Preferences" if sys.platform == "darwin" else home
+    path = root / "mailarchiver/filter-sets.json"
+    store = FilterSetStore(path)
+    for name in ["Rust-old", "Python-old"]:
+        store.save(FilterSet(name=name))
+    process = subprocess.Popen([binary, "--rpc", str(archive)], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                               stderr=subprocess.PIPE, text=True,
+                               env={**environ, "HOME": str(home), "APPDATA": str(home), "XDG_CONFIG_HOME": str(home),
+                                    "ECT_RUST_ENGINE_PYTHON": str(tmp_path / "missing-helper")})
+    writer: subprocess.Popen[str] | None = None
+    replies: Queue[str] = Queue()
+    try:
+        assert process.stdin is not None and process.stdout is not None
+
+        def receive() -> None:
+            assert process.stdout is not None
+            replies.put(process.stdout.readline())
+
+        def send(request: FilterRequest) -> None:
+            assert process.stdin is not None
+            process.stdin.write(request.model_dump_json() + "\n")
+            process.stdin.flush()
+            Thread(target=receive, daemon=True).start()
+
+        send(FilterRequest(method="saved_filter_sets"))
+        initial = FilterReply.model_validate_json(replies.get(timeout=10))
+        assert initial.error is None and initial.result is not None
+        assert len(initial.result.filter_sets) == 2
+        with preferences_lock(path):
+            args: list[str | bool | list[str]] = (["Rust", False, []] if operation == "save"
+                                                 else ["Rust-old", "Rust"] if operation == "rename" else ["Rust-old"])
+            send(FilterRequest(method=f"{operation}_filter_set", args=args))
+            ready = tmp_path / "python.ready"
+            writer = subprocess.Popen([sys.executable, "-c", """
+from pathlib import Path
+import sys
+from mailarchiver.mailbox_tree import FilterSet, FilterSetStore
+path, ready, operation = sys.argv[1:]
+store = FilterSetStore(Path(path))
+Path(ready).touch()
+if operation == "save":
+    store.save(FilterSet(name="Python"))
+elif operation == "rename":
+    store.rename("Python-old", "Python")
+else:
+    store.delete("Python-old")
+""", str(path), str(ready), operation], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+            deadline = time.monotonic() + 10
+            while not ready.exists():
+                assert writer.poll() is None, "Python writer exited before entering mutation"
+                assert time.monotonic() < deadline, "Python writer did not start"
+                time.sleep(0.01)
+            time.sleep(0.2)
+            assert replies.empty(), "Rust mutation bypassed the shared lock"
+            assert process.poll() is None and writer.poll() is None
+            baseline = store.read()
+            baseline.filter_sets.append(FilterSet(name="Baseline"))
+            path.write_text(baseline.model_dump_json(), encoding="utf-8")
+        reply = FilterReply.model_validate_json(replies.get(timeout=10))
+        assert reply.error is None, reply.error
+        _, errors = writer.communicate(timeout=10)
+        assert writer.returncode == 0, errors
+        expected = ({"Rust-old", "Python-old", "Rust", "Python", "Baseline"} if operation == "save"
+                    else {"Rust", "Python", "Baseline"} if operation == "rename" else {"Baseline"})
+        assert {item.name for item in store.read().filter_sets} == expected
+        assert path.with_suffix(".lock").exists()
+    finally:
+        for child in [writer, process]:
+            if child is not None:
+                if child.poll() is None:
+                    child.kill()
+                child.communicate(timeout=10)
+    after = [(p.relative_to(archive), sha256(p.read_bytes()).hexdigest()) for p in sorted(archive.rglob("*")) if p.is_file()]
+    assert after == before
 
 
 def test_reader_remains_usable_without_the_optional_archive_engine(page: Page, tmp_path: Path) -> None:

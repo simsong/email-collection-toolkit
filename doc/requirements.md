@@ -2407,8 +2407,13 @@ query has a 120-second safety limit and must report incomplete results on
 failure. Deadlines must be cleared after each request.
 The Wry desktop shell targets macOS and Windows. Search includes date selectors,
 header/manual identity and institution names, autocomplete, attachment text,
-original folders and version-1 saved filter sets shared with Python. Rich MIME
-viewing includes sanitized HTML, CID raster images, per-message remote-content
+original folders and version-1 saved filter sets shared with Python.
+Saved-filter save, rename and delete must serialize across Rust and Python
+processes using a persistent companion-file OS lock held before loading through
+synced atomic replacement. Waiting writers must reload the latest snapshot;
+neither successful concurrent mutations nor intervening updates may be lost.
+Read-only listing may use the atomically published snapshot without a lock.
+Rich MIME viewing includes sanitized HTML, CID raster images, per-message remote-content
 consent, raw source, attachment previews, parent-message provenance and computed-date
 notices. Native actions include safe file exports, attachment open confirmation,
 clipboard, links, print and additional reader/message windows.

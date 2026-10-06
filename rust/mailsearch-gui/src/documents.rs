@@ -25,6 +25,18 @@ impl Default for Documents {
         }
     }
 }
+pub(crate) fn preferences_lock(path: &Path) -> Result<std::fs::File> {
+    std::fs::create_dir_all(path.parent().context("Missing preferences directory")?)?;
+    // Keep the companion inode stable across atomic JSON replacements.
+    let lock = std::fs::File::options()
+        .read(true)
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .open(path.with_extension("lock"))?;
+    lock.lock()?;
+    Ok(lock)
+}
 impl Documents {
     pub fn recent_path(&self, index: usize) -> Option<&Path> {
         self.recent.get(index).map(PathBuf::as_path)
@@ -46,16 +58,7 @@ impl Documents {
     pub fn remember(path: &Path, archive: &Path) -> Result<()> {
         let archive = archive.canonicalize()?;
         let parent = path.parent().context("Missing preferences directory")?;
-        std::fs::create_dir_all(parent)?;
-        // Lock a stable inode, not the JSON file replaced by persist below.
-        // Closing the handle releases ownership, including after a crash.
-        let lock = std::fs::File::options()
-            .read(true)
-            .write(true)
-            .create(true)
-            .truncate(false)
-            .open(path.with_extension("lock"))?;
-        lock.lock()?;
+        let _lock = preferences_lock(path)?;
         let mut value = Self::load(path)?;
         value.recent.retain(|p| p != &archive);
         value.recent.insert(0, archive);

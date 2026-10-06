@@ -4,6 +4,9 @@
 
 ## Unreleased
 
+- Serialize shared saved-filter mutations across Rust and Python processes;
+  retain concurrent save, rename and delete updates without writing archives.
+
 - Serialize recent-archive updates across Rust window processes to retain
   concurrent opens while preserving atomic settings replacement.
 

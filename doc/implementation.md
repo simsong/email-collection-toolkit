@@ -1693,7 +1693,15 @@ uses `observations_message_pk`, so multiple source observations provide union
 semantics without duplicating a canonical result. Hiding the explorer sends no
 selection while retaining its browser state. Versioned Pydantic filter sets
 are fsynced to a temporary file and atomically replaced in the platform's
-per-user preferences directory; the archive is never written.
+per-user preferences directory; the archive is never written. Both Python
+`FilterSetStore` and Rust `browse::filters` acquire the persistent `.lock`
+companion before loading for save/rename/delete and hold it through replacement.
+Unix uses `flock`; Windows locks overlap on byte zero (Rust `File::lock`, Python
+`msvcrt.locking`). Closing releases ownership; the lock file is never removed.
+Read-only listing reads a complete published JSON snapshot. Real Rust RPC and
+Python subprocess tests hold the shared lock, publish an intervening baseline,
+then verify that save, rename and delete retain all expected changes and leave
+archive bytes unchanged.
 
 MIME descriptions and API responses are Pydantic models.  Body content is
 loaded only for the selected part.  HTML parsing removes active elements,
