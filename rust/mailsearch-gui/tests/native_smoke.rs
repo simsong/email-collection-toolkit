@@ -1,5 +1,5 @@
 // Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved.
-// Prove native Rust GUI startup, search and verified display on a CLI-built archive.
+// Prove native Rust reading and sandboxed workflow loading on a CLI-built archive.
 // Synthetic EML inputs go through the real ingest CLI and portable verifier.
 // The feature-enabled application drives its real DOM and native IPC, then snapshots WebKit.
 // Every subprocess has a deadline and retained logs; failures preserve the fixture.
@@ -201,6 +201,6 @@ fn cli_archive_native_search_and_screenshot() -> Result<()> {
         work.join("archive-sha256.json"),
         serde_json::to_vec_pretty(&before)?,
     )?;
-    fs::write(work.join("success.txt"), "Native WKWebView startup, one-result search, selected message body, About health, real Preferences Save/Reopen with/without helper, PNG snapshot and source/archive fixity passed.\n")?;
+    fs::write(work.join("success.txt"), "Native WKWebView startup, search/read, About health, Preferences Save/Reopen with/without helper, real isolated owner/identity/history loading, PNG snapshot and source/archive fixity passed.\n")?;
     Ok(())
 }

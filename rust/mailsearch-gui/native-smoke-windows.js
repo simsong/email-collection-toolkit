@@ -7,7 +7,7 @@
  * This driver is absent from ordinary builds and uses only synthetic mail.
  */
 window.addEventListener("DOMContentLoaded", async () => {
-  if(location.pathname === "/opening.html") return;
+  if(window !== window.top || location.pathname === "/opening.html") return;
   const send = (method, args = []) => window.ipc.postMessage(JSON.stringify({id:0, method, args}));
   const el = id => document.getElementById(id);
   const wait = async (label, predicate) => {

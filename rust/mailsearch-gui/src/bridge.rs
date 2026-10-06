@@ -616,6 +616,48 @@ fn number(args: &[Value], index: usize) -> Result<i64> {
 }
 
 pub const SCRIPT: &str = include_str!("../bridge.js");
+pub fn native_asset(
+    path: &str,
+    windows: bool,
+) -> Option<(&'static str, std::borrow::Cow<'static, [u8]>)> {
+    let (mime, bytes) = asset(path)?;
+    let (scripts, style) = match path {
+        "/identity.html" => (
+            &[
+                "rust-panel.js",
+                "matcher.js",
+                "matcher-types.js",
+                "identity.js",
+            ][..],
+            "matcher.css",
+        ),
+        "/options.html" => (&["rust-panel.js", "options.js"][..], "options.css"),
+        "/ingests.html" => (&["rust-panel.js", "ingests.js"][..], "ingests.css"),
+        _ => return Some((mime, std::borrow::Cow::Borrowed(bytes))),
+    };
+    // Opaque editor origins cannot use CSP 'self' in WKWebView. Permit only the
+    // selected page's bundled files, retaining sandbox/port/native IPC isolation.
+    let origin = if windows {
+        "http://ect.localhost"
+    } else {
+        "ect://localhost"
+    };
+    let scripts = scripts
+        .iter()
+        .map(|file| format!("{origin}/{file}"))
+        .collect::<Vec<_>>()
+        .join(" ");
+    let html = std::str::from_utf8(bytes)
+        .expect("Embedded editor HTML is UTF-8")
+        .replace("default-src 'self'", "default-src 'none'")
+        .replace(
+            "script-src 'self' 'unsafe-eval'",
+            &format!("script-src {scripts}"),
+        )
+        .replace("style-src 'self'", &format!("style-src {origin}/{style}"))
+        .replace("connect-src 'self'", "connect-src 'none'");
+    Some((mime, std::borrow::Cow::Owned(html.into_bytes())))
+}
 pub fn asset(path: &str) -> Option<(&'static str, &'static [u8])> {
     Some(match path {
         "/" | "/index.html" => ("text/html", include_bytes!("../../../gui/index.html")),

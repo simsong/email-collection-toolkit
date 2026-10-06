@@ -2508,7 +2508,12 @@ directly. Other origins, asset paths, query strings and fragments must not gain
 backend access. MIME frames remain script-disabled and cannot receive editor APIs. Validate the actual callback URLs in the native runtime.
 Editor dialogs must have accessible names. Their frames use opaque-origin
 sandboxing and a private message port; the parent validates requests against each
-panel's method allowlist. Import defaults and their archive-policy revision must
+panel's method allowlist. Native editor content policies must permit only each
+page's named bundled scripts and stylesheet at its platform's local origin;
+opaque WKWebView origins must not rely on `self`. Remote content and eval stay
+blocked. Real native tests must load owner rules, identities and history through
+their service port while proving that parent API access remains denied.
+Import defaults and their archive-policy revision must
 come from one configuration snapshot, including legacy source defaults, so a
 concurrent rule change is rejected at confirmation. Date selectors allow commas
 only after the day in month-name dates; malformed numeric dates are errors.

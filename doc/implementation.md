@@ -3138,6 +3138,15 @@ closing asks the foreground worker to drop its engine pipe and has an independen
 five-second event-loop deadline. Only the exact local main document can invoke
 native IPC. Allowlisted editor frames get narrow APIs from their parent; MIME
 frames remain isolated and cannot obtain those APIs.
+`native_asset` specializes only the three embedded editor HTML policies for the
+platform's local origin. WKWebView treats the sandboxed editor origin as opaque,
+so `self` blocked its external scripts and styles. Each policy now names only
+that page's bundled scripts and stylesheet, defaults to no resources and denies
+network connections/eval. The opaque sandbox, private port and exact native IPC
+checks remain in place. The native driver loads real owner rules, identity rows
+and history, and verifies that each frame cannot read its parent's API. Removing
+the specialization reproduces the native owner-editor loading failure; Chromium
+alone did not expose this WKWebView defect.
 Native `shell_status` reloads reader preferences from disk. A preference Save
 includes the displayed baseline; `Preferences::merge_save` takes a nonblocking
 stable companion-file OS lock, reloads, merges only changed font/update fields

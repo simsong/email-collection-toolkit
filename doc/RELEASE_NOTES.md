@@ -4,6 +4,10 @@
 
 ## Unreleased
 
+- Fix empty Rust workflow editors on WKWebView by allowing only each sandboxed
+  page's bundled scripts/styles. Native tests load real owner rules, identities
+  and history while verifying that parent API access remains denied.
+
 - Extend macOS native acceptance to real Preferences Save/Reopen with isolated
   settings, both with and without the Python helper, preserving archive bytes.
 

@@ -252,7 +252,7 @@ fn trusted_panel(value: &str, windows: bool) -> bool {
 
 #[cfg(any(target_os = "macos", target_os = "windows"))]
 fn native(path: PathBuf, smoke_output: Option<PathBuf>, parameters: Option<String>) -> Result<()> {
-    use mailsearch_rust::bridge::{asset, Reply, SCRIPT};
+    use mailsearch_rust::bridge::{native_asset, Reply, SCRIPT};
     use std::{borrow::Cow, sync::mpsc, thread};
     use tao::{
         event::{Event, WindowEvent},
@@ -373,14 +373,14 @@ fn native(path: PathBuf, smoke_output: Option<PathBuf>, parameters: Option<Strin
     let builder = WebViewBuilder::new()
         .with_initialization_script(&window_parameters)
         .with_custom_protocol("ect".into(), |_, request| {
-            let (status, mime, bytes) = match asset(request.uri().path()) {
+            let (status, mime, bytes) = match native_asset(request.uri().path(), cfg!(windows)) {
                 Some((mime, bytes)) => (200, mime, bytes),
-                None => (404, "text/plain", b"Not found".as_slice()),
+                None => (404, "text/plain", Cow::Borrowed(b"Not found".as_slice())),
             };
             wry::http::Response::builder()
                 .status(status)
                 .header("Content-Type", mime)
-                .body(Cow::Borrowed(bytes))
+                .body(bytes)
                 .unwrap()
         })
         .with_initialization_script(SCRIPT)
@@ -471,7 +471,7 @@ fn native(path: PathBuf, smoke_output: Option<PathBuf>, parameters: Option<Strin
             #[cfg(target_os = "windows")]
             let driver = include_str!("../../native-smoke-windows.js");
             builder
-                .with_initialization_script(driver)
+                .with_initialization_script_for_main_only(driver, false)
                 .with_initialization_script(
                     if std::env::var_os("ECT_RUST_NATIVE_CLOSE_SMOKE").is_some() {
                         "window.__ectCloseSmoke = true;"

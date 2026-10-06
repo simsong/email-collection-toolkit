@@ -2,12 +2,42 @@
 /* Drive the actual native webview through its shipped search form and rows.
  * A CLI-created synthetic archive supplies the expected message and body.
  * Native IPC and Rust workers answer every query without substituted results.
- * Verify visible search, About health and persisted native preference dialogs.
+ * Verify search, preferences and live sandboxed workflow editors on WKWebView.
  * Failures return through the same origin-checked IPC to fail the native process.
  * This driver is embedded only with the explicit native-smoke Cargo feature.
  */
 window.addEventListener("DOMContentLoaded", async () => {
   if(location.pathname === "/opening.html") return;
+  if(window !== window.top) {
+    if(!["/identity.html","/options.html","/ingests.html"].includes(location.pathname)) return;
+    let reported=false;
+    const report=async()=>{
+      if(reported) return;
+      reported=true;
+      try {
+        if(!window.pywebview?.api) throw new Error("Editor capability port was not initialized");
+        let isolated=false;
+        try { void parent.pywebview.api; } catch(error) { isolated=error.name === "SecurityError"; }
+        if(!isolated) throw new Error("Editor can access the parent API");
+        let evalBlocked=false;
+        try { window.eval("1+1"); } catch(error) { evalBlocked=error.name === "EvalError"; }
+        if(!evalBlocked) throw new Error("Editor policy permits eval");
+        const deadline=Date.now()+10000;
+        const ready=()=>location.pathname === "/options.html" ? !document.getElementById("save").disabled :
+          location.pathname === "/identity.html" ? document.getElementById("status").textContent.startsWith("Loaded archive identities") :
+          document.getElementById("history-count").textContent === "1 run";
+        while(!ready()) {
+          if(Date.now()>deadline) throw new Error(`Editor did not load: ${document.body.textContent}`);
+          await new Promise(resolve=>setTimeout(resolve,50));
+        }
+        parent.postMessage({type:"ect-native-editor",path:location.pathname},"*");
+      } catch(error) { parent.postMessage({type:"ect-native-editor",path:location.pathname,error:String(error)},"*"); }
+    };
+    if(window.pywebview?.api) void report();
+    else window.addEventListener("pywebviewready",report,{once:true});
+    window.setTimeout(()=>{ if(!reported) void report(); },10000);
+    return;
+  }
   const send = (method, args = []) => window.ipc.postMessage(JSON.stringify({id: 0, method, args}));
   const wait = async (label, predicate) => {
     const deadline = Date.now() + 30000;
@@ -57,6 +87,26 @@ window.addEventListener("DOMContentLoaded", async () => {
     await wait("Preferences reopened",()=>dialog.querySelector('input[type="number"]'));
     if(Number(dialog.querySelector('input[type="number"]').value)!==edited) throw new Error("Reopened Preferences show stale settings");
     dialog.close();
+    if(capabilities.available && capabilities.write_available) {
+      for(const [action,path] of [[()=>api.open_options(),"/options.html"],
+        [()=>api.open_picker("name"),"/identity.html"],[()=>api.open_ingest_window(),"/ingests.html"]]) {
+        let result;
+        const received=event=>{
+          const frame=document.querySelector(".rust-workflow iframe");
+          if(event.source===frame?.contentWindow && event.data?.type==="ect-native-editor" && event.data.path===path)
+            result=event.data;
+        };
+        window.addEventListener("message",received);
+        try {
+          await action();
+          await wait(`native editor ${path}`,()=>result);
+          if(result.error) throw new Error(result.error);
+        } finally {
+          window.removeEventListener("message",received);
+          document.querySelector(".rust-workflow")?.close();
+        }
+      }
+    }
     await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
     send("native_smoke_ready");
   } catch (error) {

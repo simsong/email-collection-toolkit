@@ -57,7 +57,7 @@ The engine tests import and verify hashes, reject competing writers, edit
 identities, stop an active import by closing its owner pipe, and resume it.
 The browser tests exercise the shared widgets through actual Rust RPC. They
 never start native windows. Native file dialogs, clipboard, printing, external
-attachment opening, WKWebView editor frames and Windows job objects still need
+attachment opening, editor mutations and Windows job objects still need
 platform trials; these tests are not native acceptance.
 The recovery target creates genuine catalog/search/processing rollback journals,
 checks writer exclusion, renders the foreground timer while holding the real
@@ -81,6 +81,11 @@ visually inspected. This does not exercise native file dialogs, clipboard,
 printing, attachment launch, drag-out or embedded workflow editors; those remain
 acceptance work. The earlier locked-desktop attempt could not acknowledge paint
 and is not passing evidence.
+The native regression also loads owner rules, identities and import history
+through the real service, with opaque-frame parent access denied. It reproduced
+and repaired WKWebView's rejection of `self` script/style sources in sandboxed
+editors by allowing only the page's named bundled assets. Editor save/move and
+drag operations still need separate native acceptance.
 
 The broader [issue #49 checklist](https://github.com/simsong/email-collection-toolkit/issues/49)
 remains open. Specifically, this local build does **not** complete:
