@@ -86,6 +86,10 @@ through the real service, with opaque-frame parent access denied. It reproduced
 and repaired WKWebView's rejection of `self` script/style sources in sandboxed
 editors by allowing only the page's named bundled assets. Editor save/move and
 drag operations still need separate native acceptance.
+Manual native acceptance also verifies message exports against original RFC 5322
+bytes and macOS Select All, Copy/Paste, Cut and Undo in the search and editor
+fields. Native Edit actions and Open/Preferences/Quit shortcuts use the OS menu
+responder chain rather than parent-page keyboard listeners.
 
 The broader [issue #49 checklist](https://github.com/simsong/email-collection-toolkit/issues/49)
 remains open. Specifically, this local build does **not** complete:

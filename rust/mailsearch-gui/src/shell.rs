@@ -114,13 +114,24 @@ impl NativeMenu {
 }
 #[cfg(any(target_os = "macos", target_os = "windows"))]
 pub fn menu(window: &tao::window::Window) -> Result<NativeMenu> {
+    use muda::accelerator::{Accelerator, Code, Modifiers};
     use muda::{Menu, MenuItem, PredefinedMenuItem, Submenu};
+    let shortcut = |code| {
+        Some(Accelerator::new(
+            if cfg!(target_os = "macos") {
+                Modifiers::META
+            } else {
+                Modifiers::CONTROL
+            },
+            code,
+        ))
+    };
     let about = MenuItem::with_id("about", "About Email Collection Toolkit", true, None);
-    let preferences = MenuItem::with_id("preferences", "Preferences…", true, None);
+    let preferences = MenuItem::with_id("preferences", "Preferences…", true, shortcut(Code::Comma));
     let updates = MenuItem::with_id("updates", "Check for Updates…", true, None);
-    let quit = MenuItem::with_id("quit", "Quit", true, None);
+    let quit = MenuItem::with_id("quit", "Quit", true, shortcut(Code::KeyQ));
     let separator = PredefinedMenuItem::separator();
-    let open = MenuItem::with_id("open_archive", "Open Archive…", true, None);
+    let open = MenuItem::with_id("open_archive", "Open Archive…", true, shortcut(Code::KeyO));
     let new_search = MenuItem::with_id("new_search_window", "New Search Window", true, None);
     let recent = Submenu::new("Open Recent", true);
     let documents = crate::documents::Documents::load(&crate::documents::Documents::path()?)?;
@@ -151,6 +162,20 @@ pub fn menu(window: &tao::window::Window) -> Result<NativeMenu> {
         ],
     )?;
     #[cfg(target_os = "macos")]
+    let edit_menu = Submenu::with_items(
+        "Edit",
+        true,
+        &[
+            &PredefinedMenuItem::undo(None),
+            &PredefinedMenuItem::redo(None),
+            &PredefinedMenuItem::separator(),
+            &PredefinedMenuItem::cut(None),
+            &PredefinedMenuItem::copy(None),
+            &PredefinedMenuItem::paste(None),
+            &PredefinedMenuItem::select_all(None),
+        ],
+    )?;
+    #[cfg(target_os = "macos")]
     let menu = Menu::with_items(&[
         &Submenu::with_items(
             "Email Collection Toolkit",
@@ -158,6 +183,7 @@ pub fn menu(window: &tao::window::Window) -> Result<NativeMenu> {
             &[&about, &preferences, &updates, &separator, &quit],
         )?,
         &file_menu,
+        &edit_menu,
     ])?;
     #[cfg(target_os = "windows")]
     let menu = Menu::with_items(&[

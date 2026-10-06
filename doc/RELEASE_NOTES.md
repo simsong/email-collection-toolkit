@@ -4,6 +4,9 @@
 
 ## Unreleased
 
+- Add the missing macOS native Edit menu and native Open/Preferences/Quit
+  shortcuts, including when keyboard focus is inside a sandboxed workflow editor.
+
 - Fix empty Rust workflow editors on WKWebView by allowing only each sandboxed
   page's bundled scripts/styles. Native tests load real owner rules, identities
   and history while verifying that parent API access remains denied.

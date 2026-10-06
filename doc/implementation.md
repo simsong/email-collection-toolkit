@@ -3147,6 +3147,12 @@ checks remain in place. The native driver loads real owner rules, identity rows
 and history, and verifies that each frame cannot read its parent's API. Removing
 the specialization reproduces the native owner-editor loading failure; Chromium
 alone did not expose this WKWebView defect.
+The macOS menu uses Muda's predefined responder-chain Edit actions, so native
+Undo/Redo, Cut/Copy/Paste and Select All reach both main and opaque editor fields.
+Native Open, Preferences and Quit carry platform command accelerators rather
+than relying on parent-page key events; iframe keystrokes do not bubble to that
+parent. Quit uses the existing supervised shutdown event. Keyboard acceptance
+uses actual native input, separately from DOM-driven smoke checks.
 Native `shell_status` reloads reader preferences from disk. A preference Save
 includes the displayed baseline; `Preferences::merge_save` takes a nonblocking
 stable companion-file OS lock, reloads, merges only changed font/update fields

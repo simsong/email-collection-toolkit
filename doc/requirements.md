@@ -2519,6 +2519,10 @@ concurrent rule change is rejected at confirmation. Date selectors allow commas
 only after the day in month-name dates; malformed numeric dates are errors.
 The shared reader must accept Ctrl shortcuts for find, find-next, selection and
 MIME-part navigation on Windows while preserving Command shortcuts on macOS.
+The macOS native Edit menu must provide responder-chain Undo/Redo, Cut, Copy,
+Paste and Select All, including in sandboxed workflow fields. Native Open,
+Preferences and Quit accelerators must work while an editor has keyboard focus;
+Quit must retain supervised helper shutdown.
 
 Explicit pre-merge Windows CI is opt-in via `[windows-ci]` in the pushed head
 commit message; ordinary pushes must skip both Windows runners. Reuse the
