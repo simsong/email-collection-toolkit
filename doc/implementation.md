@@ -10,6 +10,23 @@ metadata, and reports other unrecognized files as skipped inputs. Directory
 enumeration errors propagate. The Windows archive-writer guard remains in
 place; the Rust GUI cannot yet import a drive into a canonical archive.
 
+## Theory of operation: Rust desktop and Python ingest
+
+Ingest currently remains in Python. The Rust GUI starts a private
+`mailarchiver.rust_engine` process and sends import requests over stdin/stdout.
+That helper calls the existing ingest engine (`run_ingest`) to preserve message
+bytes, write MBOX and manifests, update databases/indexes, and handle recovery.
+Rust manages the window, progress, cancellation, search, reading, and independent
+verification.
+
+The helper is bound to one archive and exchanges request-ID-based JSON lines
+through private pipes. Python writer leases serialize archive mutations; Rust
+supervises the helper's lifetime. It does not load the Python GUI. Development
+builds use the checkout's Python environment or `ECT_RUST_ENGINE_PYTHON`;
+self-contained delivery with a bundled private Python runtime remains pending.
+Protocol and cancellation details appear under
+[Rust desktop migration](#rust-desktop-migration-and-reader-prototype).
+
 [DEVOPS.md](DEVOPS.md) records the agreed macOS-focused CI and coordinated
 Mac/Windows release design. It is not yet fully implemented: Windows reader CI is opt-in/release-only, while combined Windows
 installer packaging, shared-feed publication, and static dual-platform download

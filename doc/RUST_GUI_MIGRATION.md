@@ -6,6 +6,9 @@ The Rust/Wry desktop owns the existing interface, search and message reader.
 A transitional Python **archive service** handles import, recovery, options and
 identity operations without importing the Python GUI. The project environment
 must be available; this is not a self-contained release package.
+The [theory of operation](implementation.md#theory-of-operation-rust-desktop-and-python-ingest)
+explains how the Rust GUI supervises the private Python ingest process and which
+parts run in each language.
 
 From the repository root:
 
