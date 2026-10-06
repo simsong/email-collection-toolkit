@@ -601,7 +601,9 @@ search digests, quarantine leakage, and broken FTS/attachment metadata mappings.
 Reject WAL headers and database journals/sidecars before SQLite opens them,
 without creating shared-memory files. Stream mailbox and message bytes with
 bounded buffers, including arbitrarily long adopted envelope lines, while staying
-within each catalogued record. Fail rather than repair.
+within each catalogued record. Mixed legacy interpretations must share a streamed
+pass instead of rereading the record for every quote mask; retain the twelve-line
+ambiguity bound and bounded candidate hash memory. Fail rather than repair.
 
 This first Rust verifier does not recompute semantic hashes, parsed metadata,
 extracted search text, or processing/manual-decision data; it does not establish

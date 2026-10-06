@@ -123,7 +123,14 @@ validate installed GUI resources; separate DMG tests exercise the desktop bundle
 observations, streams MBOX files, and verifies each location against its raw
 SHA-256. A streaming framing decoder tries reversible mboxrd, stored/fully decoded
 legacy mboxo and mixed legacy interpretations for at most twelve ambiguous lines,
-with adopted-envelope and writer-added LF/CRLF candidates. Catalogued offsets
+with adopted-envelope and writer-added LF/CRLF candidates. Up to six fast framing passes
+are followed, when needed, by one shared mixed-legacy pass: incremental hash states
+fork only at ambiguous quote decisions, with at most 8,192 states for twelve lines
+and both envelope variants. Fixed two-byte tails keep per-state memory bounded;
+shared prefixes are hashed before forking. Candidate hashing still costs work
+proportional to the bounded state count, but record rereads never grow per mask.
+A measured real-file regression checks late-mask/adopted recovery and corruption
+within seven body passes. Catalogued offsets
 must cover every record and separating LF; generation counts, sizes and whole-file
 hashes must agree. Envelope lines are scanned within the catalogued record in
 bounded chunks; the adopted-envelope SHA-256 state is fed incrementally, with no

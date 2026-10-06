@@ -8,7 +8,6 @@
 
 use anyhow::{ensure, Result};
 use sha2::{Digest, Sha256};
-use std::fs::File;
 use std::io::{BufRead, BufReader, Read, Seek, SeekFrom};
 
 #[derive(Clone, Copy)]
@@ -16,40 +15,55 @@ enum Quoting {
     Stored,
     Mboxrd,
     MboxoAll,
-    MboxoMask(u16),
+    MboxoMixed,
 }
 
 // Keep the final two bytes unhashed so LF/CRLF removal needs no second buffer.
 #[derive(Clone)]
 struct Hashes {
     hash: Sha256,
-    tail: Vec<u8>,
+    tail: [u8; 2],
+    tail_len: usize,
 }
 
 impl Hashes {
     fn new(prefix: &[u8]) -> Self {
-        Self {
+        let mut value = Self {
             hash: Sha256::new(),
-            tail: prefix.to_vec(),
-        }
+            tail: [0; 2],
+            tail_len: 0,
+        };
+        value.write(prefix);
+        value
     }
 
     fn write(&mut self, bytes: &[u8]) {
-        self.tail.extend_from_slice(bytes);
-        if self.tail.len() > 2 {
-            let end = self.tail.len() - 2;
-            self.hash.update(&self.tail[..end]);
-            self.tail.drain(..end);
+        if bytes.len() >= 2 {
+            self.hash.update(&self.tail[..self.tail_len]);
+            let end = bytes.len() - 2;
+            self.hash.update(&bytes[..end]);
+            self.tail.copy_from_slice(&bytes[end..]);
+            self.tail_len = 2;
+        } else if let Some(&byte) = bytes.first() {
+            if self.tail_len == 2 {
+                self.hash.update(&self.tail[..1]);
+                self.tail[0] = self.tail[1];
+                self.tail[1] = byte;
+            } else {
+                self.tail[self.tail_len] = byte;
+                self.tail_len += 1;
+            }
         }
     }
 
     fn matches(&self, expected: &str) -> bool {
-        let mut lengths = vec![self.tail.len()];
-        if self.tail.ends_with(b"\n") {
-            lengths.push(self.tail.len() - 1);
+        let tail = &self.tail[..self.tail_len];
+        let mut lengths = vec![tail.len()];
+        if tail.ends_with(b"\n") {
+            lengths.push(tail.len() - 1);
         }
-        if self.tail.ends_with(b"\r\n") {
-            lengths.push(self.tail.len() - 2);
+        if tail.ends_with(b"\r\n") {
+            lengths.push(tail.len() - 2);
         }
         lengths.into_iter().any(|length| {
             let mut hash = self.hash.clone();
@@ -59,29 +73,35 @@ impl Hashes {
     }
 }
 
-fn append_quotes(output: &mut Vec<u8>, hashes: &mut Hashes, mut count: usize) {
+fn write_hashes(hashes: &mut [Hashes], bytes: &[u8]) {
+    for hash in hashes {
+        hash.write(bytes);
+    }
+}
+
+fn append_quotes(output: &mut Vec<u8>, hashes: &mut [Hashes], mut count: usize) {
     while count > 0 {
         let added = count.min(65536 - output.len());
         output.resize(output.len() + added, b'>');
         count -= added;
         if output.len() == 65536 {
-            hashes.write(output);
+            write_hashes(hashes, output);
             output.clear();
         }
     }
 }
 
 fn candidate(
-    file: &mut File,
+    file: &mut (impl Read + Seek),
     start: u64,
     length: u64,
-    prefix: &Hashes,
+    prefixes: &[Hashes],
     mode: Quoting,
     expected: &str,
 ) -> Result<(bool, usize)> {
     file.seek(SeekFrom::Start(start))?;
     let mut input = file.take(length);
-    let mut hashes = prefix.clone();
+    let mut hashes = prefixes.to_vec();
     let mut buffer = [0; 65536];
     let mut output = Vec::with_capacity(65536);
     let mut at_start = true;
@@ -104,19 +124,29 @@ fn candidate(
                     if matched < 5 {
                         continue;
                     }
-                    let remove = match mode {
-                        Quoting::Stored => false,
-                        Quoting::Mboxrd => greater > 0,
-                        Quoting::MboxoAll => greater == 1,
-                        Quoting::MboxoMask(mask) => {
-                            greater == 1 && ambiguous < 12 && mask & (1 << ambiguous) != 0
-                        }
-                    };
                     if greater == 1 {
                         ambiguous += 1;
                     }
-                    append_quotes(&mut output, &mut hashes, greater - usize::from(remove));
-                    output.extend_from_slice(b"From ");
+                    if matches!(mode, Quoting::MboxoMixed) && greater == 1 {
+                        if ambiguous > 12 {
+                            return Ok((false, ambiguous));
+                        }
+                        // Hash the common prefix once, then fork only this quote decision.
+                        write_hashes(&mut hashes, &output);
+                        output.clear();
+                        let mut quoted = hashes.clone();
+                        write_hashes(&mut quoted, b">From ");
+                        write_hashes(&mut hashes, b"From ");
+                        hashes.extend(quoted);
+                    } else {
+                        let remove = match mode {
+                            Quoting::Stored | Quoting::MboxoMixed => false,
+                            Quoting::Mboxrd => greater > 0,
+                            Quoting::MboxoAll => greater == 1,
+                        };
+                        append_quotes(&mut output, &mut hashes, greater - usize::from(remove));
+                        output.extend_from_slice(b"From ");
+                    }
                 } else {
                     append_quotes(&mut output, &mut hashes, greater);
                     output.extend_from_slice(&b"From "[..matched]);
@@ -132,7 +162,7 @@ fn candidate(
                 matched = 0;
             }
             if output.len() >= 65536 {
-                hashes.write(&output);
+                write_hashes(&mut hashes, &output);
                 output.clear();
             }
         }
@@ -141,11 +171,16 @@ fn candidate(
         append_quotes(&mut output, &mut hashes, greater);
         output.extend_from_slice(&b"From "[..matched]);
     }
-    hashes.write(&output);
-    Ok((hashes.matches(expected), ambiguous))
+    write_hashes(&mut hashes, &output);
+    Ok((hashes.iter().any(|hash| hash.matches(expected)), ambiguous))
 }
 
-pub fn verify_record(file: &mut File, offset: u64, length: u64, expected: &str) -> Result<()> {
+pub fn verify_record(
+    file: &mut (impl Read + Seek),
+    offset: u64,
+    length: u64,
+    expected: &str,
+) -> Result<()> {
     ensure!(
         expected.len() == 64
             && expected
@@ -180,33 +215,28 @@ pub fn verify_record(file: &mut File, offset: u64, length: u64, expected: &str) 
         .checked_add(envelope_size)
         .ok_or_else(|| anyhow::anyhow!("offset overflow"))?;
     let size = length - envelope_size;
-    for prefix in [Hashes::new(&[]), envelope] {
-        let (matched, ambiguous) =
-            candidate(file, start, size, &prefix, Quoting::Mboxrd, expected)?;
-        if matched {
-            return Ok(());
-        }
-        for mode in [Quoting::Stored, Quoting::MboxoAll] {
-            if candidate(file, start, size, &prefix, mode, expected)?.0 {
+    let prefixes = [Hashes::new(&[]), envelope];
+    let mut ambiguous = 0;
+    for prefix in &prefixes {
+        for mode in [Quoting::Mboxrd, Quoting::Stored, Quoting::MboxoAll] {
+            let (matched, count) = candidate(
+                file,
+                start,
+                size,
+                std::slice::from_ref(prefix),
+                mode,
+                expected,
+            )?;
+            if matched {
                 return Ok(());
             }
+            ambiguous = count;
         }
-        if ambiguous <= 12 {
-            for mask in 1..(1_u16 << ambiguous).saturating_sub(1) {
-                if candidate(
-                    file,
-                    start,
-                    size,
-                    &prefix,
-                    Quoting::MboxoMask(mask),
-                    expected,
-                )?
-                .0
-                {
-                    return Ok(());
-                }
-            }
-        }
+    }
+    if (2..=12).contains(&ambiguous)
+        && candidate(file, start, size, &prefixes, Quoting::MboxoMixed, expected)?.0
+    {
+        return Ok(());
     }
     anyhow::bail!("MBOX record raw SHA-256 mismatch")
 }
@@ -214,6 +244,7 @@ pub fn verify_record(file: &mut File, offset: u64, length: u64, expected: &str) 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::fs::File;
     use std::io::Write;
 
     #[test]
@@ -245,6 +276,62 @@ mod tests {
             }
             assert!(verify_record(&mut file, 0, length as u64, &"0".repeat(64)).is_err());
         }
+        Ok(())
+    }
+
+    #[test]
+    fn mixed_legacy_hashes_share_reads_and_reject_corruption() -> Result<()> {
+        // requirements.md: bounded legacy recovery must not reread once per interpretation.
+        // Count real file reads; the adapter never substitutes data or I/O behavior.
+        struct Measured {
+            file: File,
+            bytes: u64,
+        }
+        impl Read for Measured {
+            fn read(&mut self, buffer: &mut [u8]) -> std::io::Result<usize> {
+                let count = self.file.read(buffer)?;
+                self.bytes += count as u64;
+                Ok(count)
+            }
+        }
+        impl Seek for Measured {
+            fn seek(&mut self, position: SeekFrom) -> std::io::Result<u64> {
+                self.file.seek(position)
+            }
+        }
+        let envelope = b"From fixture\n";
+        let mut original = vec![b'x'; 2 * 1024 * 1024];
+        original.push(b'\n');
+        let mut stored = original.clone();
+        for index in 0..12 {
+            stored.extend_from_slice(format!(">From line {index}\n").as_bytes());
+            // A late legacy mask: decode the first eleven lines, retain the last.
+            original.extend_from_slice(
+                format!("{}From line {index}\n", if index == 11 { ">" } else { "" }).as_bytes(),
+            );
+        }
+        let mut file = tempfile::tempfile()?;
+        file.write_all(envelope)?;
+        file.write_all(&stored)?;
+        let length = file.stream_position()?;
+        let mut measured = Measured { file, bytes: 0 };
+        for prefix in [&[][..], envelope.as_slice()] {
+            let expected = format!("{:x}", Sha256::digest([prefix, &original].concat()));
+            measured.bytes = 0;
+            verify_record(&mut measured, 0, length, &expected)?;
+            assert!(
+                measured.bytes <= 7 * length + 8192,
+                "{} bytes reread",
+                measured.bytes
+            );
+        }
+        measured.bytes = 0;
+        assert!(verify_record(&mut measured, 0, length, &"0".repeat(64)).is_err());
+        assert!(
+            measured.bytes <= 7 * length + 8192,
+            "{} bytes reread",
+            measured.bytes
+        );
         Ok(())
     }
 

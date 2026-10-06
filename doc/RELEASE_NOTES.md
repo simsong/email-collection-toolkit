@@ -4,6 +4,9 @@
 
 ## Unreleased
 
+- Verify mixed legacy MBOX quoting with shared streamed hash candidates instead
+  of thousands of full-record rereads; retain existing ambiguity/framing checks.
+
 - Stream long adopted MBOX envelopes during independent verification and hide
   definition refresh when the archive helper cannot perform writes.
 
