@@ -4,6 +4,9 @@
 
 ## Unreleased
 
+- Stream long adopted MBOX envelopes during independent verification and hide
+  definition refresh when the archive helper cannot perform writes.
+
 - Preserve both preview stages for small/empty searches, bind recent-menu actions
   to displayed paths, gate native menus on helper capabilities, and create
   missing demo-directory parents without replacing existing archives.

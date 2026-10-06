@@ -20,6 +20,7 @@ enum Quoting {
 }
 
 // Keep the final two bytes unhashed so LF/CRLF removal needs no second buffer.
+#[derive(Clone)]
 struct Hashes {
     hash: Sha256,
     tail: Vec<u8>,
@@ -74,13 +75,13 @@ fn candidate(
     file: &mut File,
     start: u64,
     length: u64,
-    prefix: &[u8],
+    prefix: &Hashes,
     mode: Quoting,
     expected: &str,
 ) -> Result<(bool, usize)> {
     file.seek(SeekFrom::Start(start))?;
     let mut input = file.take(length);
-    let mut hashes = Hashes::new(prefix);
+    let mut hashes = prefix.clone();
     let mut buffer = [0; 65536];
     let mut output = Vec::with_capacity(65536);
     let mut at_start = true;
@@ -153,23 +154,40 @@ pub fn verify_record(file: &mut File, offset: u64, length: u64, expected: &str) 
         "invalid raw SHA-256"
     );
     file.seek(SeekFrom::Start(offset))?;
-    let mut envelope = Vec::new();
-    BufReader::new(file.take(length.min(65536))).read_until(b'\n', &mut envelope)?;
-    ensure!(
-        envelope.starts_with(b"From ") && envelope.ends_with(b"\n"),
-        "invalid MBOX envelope"
-    );
+    // Bound reads by the catalogued record, not an arbitrary envelope length.
+    let (envelope_size, envelope) = {
+        let mut input = BufReader::new(file.take(length));
+        let mut prefix = [0; 5];
+        input.read_exact(&mut prefix)?;
+        ensure!(&prefix == b"From ", "invalid MBOX envelope");
+        let mut hashes = Hashes::new(&prefix);
+        let mut size = 5_u64;
+        loop {
+            let bytes = input.fill_buf()?;
+            ensure!(!bytes.is_empty(), "unterminated MBOX envelope");
+            let end = bytes.iter().position(|&byte| byte == b'\n');
+            let consumed = end.map_or(bytes.len(), |index| index + 1);
+            hashes.write(&bytes[..consumed]);
+            size += consumed as u64;
+            input.consume(consumed);
+            if end.is_some() {
+                break;
+            }
+        }
+        (size, hashes)
+    };
     let start = offset
-        .checked_add(envelope.len() as u64)
+        .checked_add(envelope_size)
         .ok_or_else(|| anyhow::anyhow!("offset overflow"))?;
-    let size = length - envelope.len() as u64;
-    for prefix in [&[][..], envelope.as_slice()] {
-        let (matched, ambiguous) = candidate(file, start, size, prefix, Quoting::Mboxrd, expected)?;
+    let size = length - envelope_size;
+    for prefix in [Hashes::new(&[]), envelope] {
+        let (matched, ambiguous) =
+            candidate(file, start, size, &prefix, Quoting::Mboxrd, expected)?;
         if matched {
             return Ok(());
         }
         for mode in [Quoting::Stored, Quoting::MboxoAll] {
-            if candidate(file, start, size, prefix, mode, expected)?.0 {
+            if candidate(file, start, size, &prefix, mode, expected)?.0 {
                 return Ok(());
             }
         }
@@ -179,7 +197,7 @@ pub fn verify_record(file: &mut File, offset: u64, length: u64, expected: &str) 
                     file,
                     start,
                     size,
-                    prefix,
+                    &prefix,
                     Quoting::MboxoMask(mask),
                     expected,
                 )?
@@ -227,6 +245,33 @@ mod tests {
             }
             assert!(verify_record(&mut file, 0, length as u64, &"0".repeat(64)).is_err());
         }
+        Ok(())
+    }
+
+    #[test]
+    fn long_envelopes_are_streamed_and_confined_to_the_record() -> Result<()> {
+        // requirements.md: adopted source bytes remain verifiable without envelope limits.
+        let envelope = [b"From ".as_slice(), &vec![b'x'; 200000], b"\r\n"].concat();
+        let body = b"Subject: long envelope\n\nbody";
+        let mut file = tempfile::tempfile()?;
+        file.write_all(b"previous record\n")?;
+        let offset = file.stream_position()?;
+        file.write_all(&envelope)?;
+        file.write_all(body)?;
+        file.write_all(b"\n")?;
+        let length = file.stream_position()? - offset;
+        file.write_all(b"From following\nnext record\n")?;
+        for original in [body.to_vec(), [&envelope[..], body].concat()] {
+            verify_record(
+                &mut file,
+                offset,
+                length,
+                &format!("{:x}", Sha256::digest(original)),
+            )?;
+        }
+        let digest = format!("{:x}", Sha256::digest(body));
+        assert!(verify_record(&mut file, offset, 65536, &digest).is_err());
+        assert!(verify_record(&mut file, offset, length, &"0".repeat(64)).is_err());
         Ok(())
     }
 

@@ -35,6 +35,12 @@ window.addEventListener("DOMContentLoaded", async () => {
     await wait("message display", () => document.getElementById("message-subject").textContent === "Observatory planning"
       && document.getElementById("body-view").textContent.includes("Meet at the observatory on Friday."));
     if (!document.getElementById("error").hidden) throw new Error(document.getElementById("error").textContent);
+    window.__rustShellAction("about");
+    const dialog=document.getElementById("rust-shell-dialog");
+    await wait("About health",()=>document.getElementById("rust-antivirus-status") || dialog.querySelector('[role="alert"]').textContent);
+    const refresh=[...dialog.querySelectorAll("button")].some(button=>button.textContent==="Update virus definitions");
+    if (refresh !== Boolean(capabilities.available && capabilities.write_available)) throw new Error("Definition refresh capability mismatch");
+    dialog.close();
     await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
     send("native_smoke_ready");
   } catch (error) {

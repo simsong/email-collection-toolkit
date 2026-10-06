@@ -125,9 +125,10 @@ SHA-256. A streaming framing decoder tries reversible mboxrd, stored/fully decod
 legacy mboxo and mixed legacy interpretations for at most twelve ambiguous lines,
 with adopted-envelope and writer-added LF/CRLF candidates. Catalogued offsets
 must cover every record and separating LF; generation counts, sizes and whole-file
-hashes must agree. Envelope lines above 64 KiB are rejected explicitly by the
-bounded reader. Search checks compare normal-message digest membership, FTS row
-links, quarantine exclusion and attachment metadata counts. Missing databases
+hashes must agree. Envelope lines are scanned within the catalogued record in
+bounded chunks; the adopted-envelope SHA-256 state is fed incrementally, with no
+line-length limit or whole-envelope allocation. Search checks compare normal-message
+digest membership, FTS row links, quarantine exclusion and attachment metadata counts. Missing databases
 are never created. The command reports counts only after every check passes.
 
 This is consistency verification, not authenticity or a replacement for the
@@ -3116,7 +3117,8 @@ index races. Demo generation creates missing parents while refusing replacement.
 Staged searches publish and acknowledge both windows even after input is exhausted;
 small/empty regressions verify neither stage can prematurely report completion.
 Windows native startup opens existing archives only; write menus and frontend
-controls are disabled, and Rust/Python reject write requests before prompts or
+controls, including About-dialog definition refresh, are gated on helper write
+capability, and Rust/Python reject write requests before prompts or
 mutations. Unavailable processing does not open a resume dialog; history/status
 remain readable. Job warnings are separate from ingest errors: a post-ingest
 source-directory preference failure preserves completed status and refreshes the

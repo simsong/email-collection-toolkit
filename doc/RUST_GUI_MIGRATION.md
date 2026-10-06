@@ -64,6 +64,15 @@ passed. Synthetic website screenshots were regenerated and the homepage,
 Searching and Importing pages visually inspected. No native windows were run;
 these results establish local validation only, pending CI and native trials.
 
+On October 6, 2026, `make test-rust-gui-native` passed on an unlocked macOS
+desktop with and without the Python helper: real staged search, message reading,
+native menu capability state and About-dialog definition-refresh gating. The
+synthetic archive/source byte inventories stayed unchanged, and PNGs were
+visually inspected. This does not exercise native file dialogs, clipboard,
+printing, attachment launch, drag-out or embedded workflow editors; those remain
+acceptance work. The earlier locked-desktop attempt could not acknowledge paint
+and is not passing evidence.
+
 The broader [issue #49 checklist](https://github.com/simsong/email-collection-toolkit/issues/49)
 remains open. Specifically, this local build does **not** complete:
 

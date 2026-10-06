@@ -96,6 +96,8 @@ window.addEventListener("DOMContentLoaded", async () => {
     await wait("final display", () => el("body-view").textContent.includes("Jupiter"));
     window.__rustShellAction("about");
     await wait("about", () => el("rust-shell-dialog").textContent.includes("Version"));
+    await wait("About health",()=>el("rust-antivirus-status") || el("rust-shell-dialog").querySelector('[role="alert"]').textContent);
+    check(![...el("rust-shell-dialog").querySelectorAll("button")].some(button=>button.textContent==="Update virus definitions"),"unsupported definition refresh offered");
     el("rust-shell-dialog").close();
     window.__rustShellAction("preferences");
     await wait("preferences", () => el("rust-shell-dialog").querySelector('input[type="number"]'));

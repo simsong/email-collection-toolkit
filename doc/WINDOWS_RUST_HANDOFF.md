@@ -274,7 +274,7 @@ make rust-gui ARCHIVE=.tmp/windows-reader-demo
 ```
 
 Create `.tmp` first if absent; the current demo helper creates the destination
-directory but not a missing parent. The equivalent Windows launch is `cargo run-ect --archive PATH`. The demo
+directory and creates missing parents. The equivalent Windows launch is `cargo run-ect --archive PATH`. The demo
 creation target must not be rerun against an existing directory. Reuse that
 fixture for later reader runs, or choose a fresh directory; never delete an
 unknown archive to make fixture creation pass.

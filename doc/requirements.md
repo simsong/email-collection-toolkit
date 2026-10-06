@@ -600,7 +600,8 @@ unregistered MBOX files, inconsistent publication observations, missing/extra
 search digests, quarantine leakage, and broken FTS/attachment metadata mappings.
 Reject WAL headers and database journals/sidecars before SQLite opens them,
 without creating shared-memory files. Stream mailbox and message bytes with
-bounded buffers. Fail rather than repair.
+bounded buffers, including arbitrarily long adopted envelope lines, while staying
+within each catalogued record. Fail rather than repair.
 
 This first Rust verifier does not recompute semantic hashes, parsed metadata,
 extracted search text, or processing/manual-decision data; it does not establish
@@ -2420,8 +2421,8 @@ request loop. Rust reads stay read-only; explicitly opening an archive may use
 lease-protected recovery of hot journals. No automatic source ingest is allowed.
 Engine availability must be separate from archive-write capability. Windows
 startup, menus, import, processing and owner/identity editors must not offer
-unsupported writes; history/status and Rust readers remain usable. Import job
-errors describe ingest failures. Failure to remember the source directory after
+unsupported writes, including About-dialog virus-definition refresh; history/status
+and Rust readers remain usable. Import job errors describe ingest failures. Failure to remember the source directory after
 successful ingest must surface as a separate warning and retain completed status.
 
 Headless acceptance uses the real frontend and service boundary, synthetic
