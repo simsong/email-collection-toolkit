@@ -122,8 +122,10 @@ key; never embed a private signing key. Until the shared feed is migrated and
 Windows installers are published, development builds leave updates unavailable.
 `ECT_WINSPARKLE_TEST_DLL` selects the staged, checksum-verified native DLL for
 `cargo reader-updater-check`. `scripts/prepare_winsparkle.ps1` stages that DLL
-and license notices without a system installation. `CARGO_TARGET_DIR` overrides
-Cargo build output; macOS Make passes its `RUST_TARGET_DIR` there automatically.
+and license notices without a system installation. `CARGO_TARGET_DIR` selects
+build output for direct Cargo invocations. For Make targets, set
+`RUST_TARGET_DIR` (default: checkout `target/`); Make exports it as
+`CARGO_TARGET_DIR`, replacing the inherited environment value.
 
 ## Windows development
 
