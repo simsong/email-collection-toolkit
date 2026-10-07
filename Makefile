@@ -761,6 +761,11 @@ rust-gui-egui: rust-gui-build
 test-rust-webview: rust-gui-build
 	RUST_WEBVIEW_BINARY="$(RUST_TARGET_DIR)/debug/mailsearch-webview$(RUST_EXE_SUFFIX)" uv run --locked pytest -q tests/test_rust_webview.py --browser chromium
 
+# Check startup button-to-IPC wiring without native windows or simulated archive replies.
+.PHONY: test-rust-startup
+test-rust-startup:
+	uv run --locked pytest -q tests/test_rust_webview.py -k startup_buttons --browser chromium
+
 # Real hot-journal recovery, foreground timer, >30-second wait and owner Abort.
 # RUST_WEBVIEW_BINARY selects the same native opening worker's diagnostic pipe.
 .PHONY: test-rust-recovery

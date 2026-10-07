@@ -790,3 +790,6 @@ Packaged macOS uses only its own archive service, ignoring
 `ECT_RUST_ENGINE_PYTHON`; development builds and the Windows prototype retain
 their documented interpreter selection. `make test-rust-dmg` checks the frozen
 service entry-point dispatch without opening an app.
+`make test-rust-startup` checks startup button IPC and JavaScript initialization
+in a headless browser; `make test-rust-webview` includes it with the real Rust
+reader integration tests. Native Open/New panels and Quit need native validation.

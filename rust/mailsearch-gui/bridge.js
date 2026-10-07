@@ -30,6 +30,13 @@
       } else window.ipc.postMessage(request);
     });
   }
+  // Startup has no archive toolbar or reader API; expose only its native actions.
+  if (location.pathname === "/welcome.html") {
+    window.pywebview = {api: Object.fromEntries(
+      ["welcome_open", "welcome_new", "welcome_status", "quit"].map(name => [name, (...args) => invoke(name, args)])
+    )};
+    return;
+  }
   const names = ["status", "activate", "search", "search_start", "search_status", "search_advance", "search_page", "search_cancel", "message", "part", "request_previews", "take_previews",
     "suggestions", "ingest_overview", "saved_filter_sets", "save_filter_set", "rename_filter_set", "delete_filter_set", "mailbox_tree", "attachment", "open_link", "copy_source_path", "save_message", "save_attachment", "prepare_drag", "open_attachment", "open_message_window", "new_search_window", "open_archive", "open_recent",
     "shell_status", "preferences_save", "check_updates", "engine_status", "processing_work", "resume_processing", "history", "antivirus", "options_status", "options_update", "identity_query", "identity_update", "job_status", "stop_import", "prepare_import", "start_import", "new_archive", "refresh_definitions"];

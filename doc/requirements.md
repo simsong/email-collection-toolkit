@@ -2485,6 +2485,9 @@ events. Packaged previews must declare archive document support and use their
 bundled application name/icon. Programmatic panel/metadata checks support these
 requirements; physical selection, Dock drops and displayed identity require
 human acceptance.
+The startup page must expose its Open/New/status/Quit native IPC methods without
+initializing archive-only toolbar or shell controls. Every enabled button must
+send its corresponding request; JavaScript failures must be visible to the user.
 Owner-loss acceptance must synchronize unfinished processing rather than race
 the speed of a synthetic import, and verify bounded exit, recovery and source fixity.
 Owner EOF must remain latched across import startup; resetting a previous user

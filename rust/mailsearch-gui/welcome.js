@@ -11,13 +11,13 @@ window.__rustWelcomeCapabilities = status => {
 document.addEventListener('DOMContentLoaded', () => {
     for (const [id, method] of [['open', 'welcome_open'], ['new', 'welcome_new'], ['quit', 'quit']]) {
         document.getElementById(id).addEventListener('click', () => {
-            window.pywebview.api[method]().catch(error => {
+            Promise.resolve().then(() => window.pywebview.api[method]()).catch(error => {
                 document.getElementById('detail').textContent = error.message;
             });
         });
     }
     window.__rustWelcomeCapabilities({write_available: window.__rustWelcomeWritable});
-    window.pywebview.api.welcome_status().then(window.__rustWelcomeCapabilities).catch(error => {
+    Promise.resolve().then(() => window.pywebview.api.welcome_status()).then(window.__rustWelcomeCapabilities).catch(error => {
         document.getElementById('detail').textContent = error.message;
     });
 });

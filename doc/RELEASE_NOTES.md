@@ -4,6 +4,10 @@
 
 ## Unreleased
 
+- Wire Rust startup Open/New/Quit buttons into the native IPC adapter and skip
+  archive-only toolbar/shell initialization before an archive opens. Add a real
+  frontend regression for startup requests and JavaScript errors.
+
 - Make Rust macOS Open select `.mailarchive` packages as documents; handle native
   Dock/Finder document events, retain a responsive startup selection page, and
   explicitly load the preview bundle's application icon/name. Mounted checks

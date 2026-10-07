@@ -4,7 +4,8 @@
 # Playwright provides only the transport connection and a headless browser.
 # The test searches, sorts, selects, resizes, and finds text through real widgets.
 # A Python-created archive proves compatibility and stays byte-for-byte unchanged.
-# No native windows, private email, or simulated backend responses participate.
+# No native windows or private email participate. The startup boundary test
+# observes outgoing IPC without simulating native dialog or archive responses.
 from functools import partial
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from threading import Thread
@@ -42,6 +43,36 @@ class FilterReply(BaseModel):
     id: int
     result: FilterSetPreferences | None
     error: str | None
+
+
+def test_startup_buttons_send_native_requests_without_reader_initialization(page: Page) -> None:
+    """Startup requirement: every action reaches IPC without archive toolbar errors."""
+    errors: list[str] = []
+    page.on("pageerror", lambda error: errors.append(str(error)))
+    # Observe the native wire boundary; no dialogs or backend replies are faked.
+    page.add_init_script("window.sentRequests=[]; window.ipc={postMessage:request=>window.sentRequests.push(JSON.parse(request))};")
+    for script in ["bridge.js", "shell.js"]:
+        page.add_init_script(path=ROOT / "rust/mailsearch-gui" / script)
+    server = ThreadingHTTPServer(("127.0.0.1", 0), partial(SimpleHTTPRequestHandler, directory=str(ROOT / "rust/mailsearch-gui")))
+    Thread(target=server.serve_forever, daemon=True).start()
+    try:
+        page.goto(f"http://127.0.0.1:{server.server_port}/welcome.html")
+        expect(page.get_by_role("button", name="New archive…", exact=True)).to_be_disabled()
+        page.get_by_role("button", name="Open archive…", exact=True).click()
+        page.get_by_role("button", name="Quit", exact=True).click()
+        # Exercise the production capability callback that enables the third control.
+        page.evaluate("window.__rustWelcomeCapabilities({write_available:true})")
+        page.get_by_role("button", name="New archive…", exact=True).click()
+        requests = [FilterRequest.model_validate(value) for value in page.evaluate("window.sentRequests")]
+        assert [request.method for request in requests] == ["welcome_status", "welcome_open", "quit", "welcome_new"]
+        assert [request.id for request in requests] == [1, 2, 3, 4]
+        assert all(not request.args for request in requests)
+        assert page.evaluate("Object.keys(window.pywebview.api).sort()") == ["quit", "welcome_new", "welcome_open", "welcome_status"]
+        assert not page.locator("#rust-shell-dialog").count()
+        assert not errors
+    finally:
+        server.shutdown()
+        server.server_close()
 
 
 @pytest.mark.parametrize("operation", ["save", "rename", "delete"])

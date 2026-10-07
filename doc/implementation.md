@@ -2204,6 +2204,12 @@ matching the current archive focuses its window; other documents spawn independe
 reader processes. Application-wide coordination remains a separate acceptance gate.
 The native application explicitly loads its bundled icon and display name rather
 than inheriting an acceptance wrapper's identity. No Dock settings are modified.
+The JavaScript adapter exposes only Open/New/status/Quit on the welcome page and
+returns before reader toolbar initialization; shell dialogs also skip that page.
+`make test-rust-startup` loads the production startup HTML and adapters in a
+headless browser, checks all three button-to-IPC paths and capability gating, and
+rejects JavaScript errors. It observes outgoing requests without simulating native
+dialogs or archive responses; actual panel/exit behavior remains native validation.
 
 `make dmg-signed` calls `make dmg` with `--signing-identity` in `ARGS`, selecting
 the first Developer ID Application certificate hash from
