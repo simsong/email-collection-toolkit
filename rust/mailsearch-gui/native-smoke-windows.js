@@ -100,8 +100,8 @@ window.addEventListener("DOMContentLoaded", async () => {
     await wait("About health",()=>el("rust-antivirus-status") || el("rust-shell-dialog").querySelector('[role="alert"]').textContent);
     check(![...el("rust-shell-dialog").querySelectorAll("button")].some(button=>button.textContent==="Update virus definitions"),"unsupported definition refresh offered");
     el("rust-shell-dialog").close();
-    window.__rustShellAction("preferences");
-    await wait("preferences", () => el("rust-shell-dialog").querySelector('input[type="number"]'));
+    send("native_smoke_accelerator");
+    await wait("native Preferences accelerator", () => window.__rustNativeAcceleratorHandled && el("rust-shell-dialog").querySelector('input[type="number"]'));
     const size = el("rust-shell-dialog").querySelector('input[type="number"]');
     size.value = "18";
     [...el("rust-shell-dialog").querySelectorAll("button")].find(button => button.textContent === "Save").click();

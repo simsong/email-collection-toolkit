@@ -138,6 +138,11 @@ fn webview2_search_dialogs_and_fixity() -> Result<()> {
     );
     let png = fs::read(&screenshot).context("Missing native screenshot")?;
     ensure!(
+        fs::read_to_string(work.join("native.log"))?
+            .contains("verified Preferences through TranslateAcceleratorW"),
+        "Preferences did not traverse the native accelerator hook"
+    );
+    ensure!(
         png.len() > 10000 && png.starts_with(b"\x89PNG\r\n\x1a\n"),
         "Invalid PNG"
     );
@@ -149,7 +154,7 @@ fn webview2_search_dialogs_and_fixity() -> Result<()> {
         work.join("archive-sha256.json"),
         serde_json::to_vec_pretty(&before)?,
     )?;
-    fs::write(work.join("success.txt"), "Native WebView2 search, both stages, six sorts, paging, cancellation, message display, dialogs and fixity passed.\n")?;
+    fs::write(work.join("success.txt"), "Native WebView2 search, both stages, six sorts, paging, cancellation, message display, Preferences through TranslateAcceleratorW, dialogs and fixity passed.\n")?;
     println!("Windows evidence: {}", work.display());
     Ok(())
 }

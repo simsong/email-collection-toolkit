@@ -4,6 +4,9 @@
 
 ## Unreleased
 
+- Require Windows native smoke to open Preferences through the real Win32
+  accelerator hook, then save and reload the preference across application runs.
+
 - Preserve edited owner defaults when CLI or GUI processing replays an earlier
   ingest policy; existing message classifications keep their recorded rules.
 

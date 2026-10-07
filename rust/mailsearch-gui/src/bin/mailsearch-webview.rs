@@ -292,17 +292,23 @@ fn native(path: PathBuf, smoke_output: Option<PathBuf>, parameters: Option<Strin
         Snapshot,
         #[cfg(feature = "native-smoke")]
         ResizeSmoke,
+        #[cfg(all(target_os = "windows", feature = "native-smoke"))]
+        AcceleratorSmoke,
         #[cfg(feature = "native-smoke")]
         SmokeFinished(Result<()>),
     }
     let mut event_builder = EventLoopBuilder::<NativeEvent>::with_user_event();
     #[cfg(target_os = "windows")]
     let accelerators = std::rc::Rc::new(std::cell::Cell::new((0isize, 0isize)));
+    #[cfg(all(target_os = "windows", feature = "native-smoke"))]
+    let translated = std::rc::Rc::new(std::cell::Cell::new(0usize));
     #[cfg(target_os = "windows")]
     {
         use tao::platform::windows::EventLoopBuilderExtWindows;
         use windows_sys::Win32::UI::WindowsAndMessaging::{TranslateAcceleratorW, MSG};
         let handles = accelerators.clone();
+        #[cfg(feature = "native-smoke")]
+        let translated = translated.clone();
         event_builder.with_msg_hook(move |message| {
             let (window, menu) = handles.get();
             if window == 0 || menu == 0 || message.is_null() {
@@ -310,7 +316,14 @@ fn native(path: PathBuf, smoke_output: Option<PathBuf>, parameters: Option<Strin
             }
             // Tao supplies the live MSG on this GUI thread. The window and menu
             // own these handles until LoopDestroyed clears them before disposal.
-            unsafe { TranslateAcceleratorW(window as _, menu as _, message.cast::<MSG>()) != 0 }
+            let handled = unsafe {
+                TranslateAcceleratorW(window as _, menu as _, message.cast::<MSG>()) != 0
+            };
+            #[cfg(feature = "native-smoke")]
+            if handled {
+                translated.set(translated.get() + 1);
+            }
+            handled
         });
     }
     let events = event_builder.build();
@@ -466,6 +479,11 @@ fn native(path: PathBuf, smoke_output: Option<PathBuf>, parameters: Option<Strin
                             let _ = ipc_proxy.send_event(NativeEvent::ResizeSmoke);
                             return;
                         }
+                        #[cfg(target_os = "windows")]
+                        "native_smoke_accelerator" => {
+                            let _ = ipc_proxy.send_event(NativeEvent::AcceleratorSmoke);
+                            return;
+                        }
                         "native_smoke_ready" => {
                             let _ = ipc_proxy.send_event(NativeEvent::Snapshot);
                             return;
@@ -543,6 +561,8 @@ fn native(path: PathBuf, smoke_output: Option<PathBuf>, parameters: Option<Strin
     let reply_proxy = events.create_proxy();
     let mut quitting = false;
     let mut reader_ready = false;
+    #[cfg(all(target_os = "windows", feature = "native-smoke"))]
+    let mut accelerator_trial = None;
     events.run(move |event, _, flow| {
         *flow = ControlFlow::Wait;
         match event {
@@ -565,6 +585,13 @@ fn native(path: PathBuf, smoke_output: Option<PathBuf>, parameters: Option<Strin
             #[cfg(feature = "native-smoke")]
             Event::UserEvent(NativeEvent::ResizeSmoke) => {
                 window.set_inner_size(tao::dpi::LogicalSize::new(1100.0, 740.0));
+            }
+            #[cfg(all(target_os = "windows", feature = "native-smoke"))]
+            Event::UserEvent(NativeEvent::AcceleratorSmoke) => {
+                match native_smoke::KeyboardState::preferences(&window) {
+                    Ok(guard) => accelerator_trial = Some((guard, translated.get())),
+                    Err(error) => { let _ = reply_proxy.send_event(NativeEvent::SmokeFinished(Err(error))); }
+                }
             }
             #[cfg(feature = "native-smoke")]
             Event::UserEvent(NativeEvent::Snapshot) => {
@@ -597,6 +624,18 @@ fn native(path: PathBuf, smoke_output: Option<PathBuf>, parameters: Option<Strin
             }
             Event::UserEvent(NativeEvent::Menu(event)) => {
                 let action = event.id.as_ref();
+                #[cfg(all(target_os = "windows", feature = "native-smoke"))]
+                if action == "preferences" {
+                    if let Some((guard, baseline)) = accelerator_trial.take() {
+                        drop(guard);
+                        if translated.get() <= baseline {
+                            let _ = reply_proxy.send_event(NativeEvent::SmokeFinished(Err(anyhow::anyhow!("Preferences bypassed TranslateAcceleratorW"))));
+                            return;
+                        }
+                        eprintln!("Native smoke: verified Preferences through TranslateAcceleratorW");
+                        let _ = view.evaluate_script("window.__rustNativeAcceleratorHandled=true");
+                    }
+                }
                 if action == "quit" {
                     let _=reply_proxy.send_event(NativeEvent::Quit);
                 } else if !reader_ready || abort.load(std::sync::atomic::Ordering::Acquire) {
@@ -621,6 +660,8 @@ fn native(path: PathBuf, smoke_output: Option<PathBuf>, parameters: Option<Strin
                 }
             }
             Event::LoopDestroyed => {
+                #[cfg(all(target_os = "windows", feature = "native-smoke"))]
+                drop(accelerator_trial.take());
                 // Stop WinSparkle callbacks before dropping its DLL and native menu.
                 #[cfg(target_os = "windows")]
                 accelerators.set((0, 0));

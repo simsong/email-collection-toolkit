@@ -2536,6 +2536,9 @@ Preferences and Quit accelerators must work while an editor has keyboard focus;
 Quit must retain supervised helper shutdown.
 Windows must route native accelerators through its Win32 message loop, consuming
 handled messages and retaining valid menu/window handles throughout dispatch.
+The Windows native test must queue a real Preferences key message, observe its
+translation and menu event, and save/reload the resulting dialog's preference.
+Direct JavaScript dialog calls do not establish that routing requirement.
 
 Explicit pre-merge Windows CI is opt-in via `[windows-ci]` in the pushed head
 commit message; ordinary pushes must skip both Windows runners. Reuse the

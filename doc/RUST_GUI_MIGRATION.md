@@ -95,6 +95,10 @@ fields. Native Edit actions and Open/Preferences/Quit shortcuts use the OS menu
 responder chain rather than parent-page keyboard listeners.
 Native printing to a local PDF was visually inspected for selected-message
 headers/body/provenance; no physical printer job was submitted.
+Windows native smoke queues Ctrl-comma through the real Win32 accelerator hook
+and requires Preferences to open and save, with the setting retained on restart.
+This test covers message-loop routing; physical-keyboard/editor-focus trials
+still require separate acceptance.
 The native target also exercises owner Save/Reopen and identity
 Rename/Move/Separate/Reopen through sandboxed editor controls. A real
 `process --reprocess` and another app process must retain those decisions while

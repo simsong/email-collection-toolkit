@@ -3171,8 +3171,11 @@ uses actual native input, separately from DOM-driven smoke checks.
 On Windows, Tao's pre-dispatch message hook calls `TranslateAcceleratorW` with
 the owning window and Muda menu's accelerator table, consuming handled messages.
 The table stays owned by the native menu and the hook's handles are cleared before
-menu disposal. Cross-platform compilation/ordinary smoke does not establish
-Windows keyboard acceptance; that still requires native shortcut trials.
+menu disposal. Feature-gated Windows smoke temporarily sets only the GUI thread's
+keyboard table, posts Ctrl-comma to its owned window, requires a successful hook
+translation and Muda Preferences event, then saves the actual dialog. The key
+table is restored on delivery or exit. This establishes queue/menu routing;
+physical keyboard layout and editor-focus shortcut trials remain separate.
 Native `shell_status` reloads reader preferences from disk. A preference Save
 includes the displayed baseline; `Preferences::merge_save` takes a nonblocking
 stable companion-file OS lock, reloads, merges only changed font/update fields

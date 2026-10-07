@@ -5,7 +5,8 @@
 // Completion returns through Tao so capture errors fail the native process.
 // This implementation is excluded from ordinary application builds.
 // macOS retains its existing independent WKWebView capture implementation.
-use anyhow::Result;
+// Accelerator trials post to the owned window and restore thread-local key state.
+use anyhow::{ensure, Result};
 use std::{path::PathBuf, rc::Rc};
 use webview2_com::{
     CapturePreviewCompletedHandler,
@@ -18,7 +19,68 @@ use windows::{
         UI::Shell::SHCreateStreamOnFileEx,
     },
 };
+use windows_sys::Win32::UI::{
+    Input::KeyboardAndMouse::{
+        GetKeyboardState, SetKeyboardState, VK_CONTROL, VK_LCONTROL, VK_LMENU, VK_LSHIFT, VK_LWIN,
+        VK_MENU, VK_OEM_COMMA, VK_RCONTROL, VK_RMENU, VK_RSHIFT, VK_RWIN, VK_SHIFT,
+    },
+    WindowsAndMessaging::{PostMessageW, WM_KEYDOWN},
+};
 use wry::{WebView, WebViewExtWindows};
+
+pub struct KeyboardState([u8; 256]);
+
+impl KeyboardState {
+    pub fn preferences(window: &tao::window::Window) -> Result<Self> {
+        use tao::platform::windows::WindowExtWindows;
+        let mut original = [0; 256];
+        // SAFETY: runs on the owning GUI thread. These APIs affect only its
+        // keyboard table; the posted message targets its live HWND, not global input.
+        unsafe {
+            ensure!(
+                GetKeyboardState(original.as_mut_ptr()) != 0,
+                "Read keyboard state failed"
+            );
+            let mut keys = original;
+            for key in [
+                VK_CONTROL,
+                VK_LCONTROL,
+                VK_RCONTROL,
+                VK_SHIFT,
+                VK_LSHIFT,
+                VK_RSHIFT,
+                VK_MENU,
+                VK_LMENU,
+                VK_RMENU,
+                VK_LWIN,
+                VK_RWIN,
+            ] {
+                keys[key as usize] = 0;
+            }
+            keys[VK_CONTROL as usize] = 0x80;
+            keys[VK_LCONTROL as usize] = 0x80;
+            ensure!(
+                SetKeyboardState(keys.as_ptr()) != 0,
+                "Set keyboard state failed"
+            );
+            let guard = Self(original);
+            ensure!(
+                PostMessageW(window.hwnd() as _, WM_KEYDOWN, VK_OEM_COMMA as usize, 1) != 0,
+                "Queue Preferences accelerator failed"
+            );
+            Ok(guard)
+        }
+    }
+}
+
+impl Drop for KeyboardState {
+    fn drop(&mut self) {
+        // SAFETY: guard stays on the same GUI thread and retains the original table.
+        if unsafe { SetKeyboardState(self.0.as_ptr()) } == 0 {
+            eprintln!("Restore native smoke keyboard state failed");
+        }
+    }
+}
 
 pub fn snapshot(view: &WebView, output: PathBuf, complete: impl Fn(Result<()>) + 'static) {
     let complete = Rc::new(complete);

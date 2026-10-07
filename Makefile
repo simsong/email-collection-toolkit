@@ -766,6 +766,7 @@ rust-webview-probe: rust-gui-build
 # Exercises real owner/identity edits and processor-rerun persistence on that fixture.
 RUST_GUI_ARTIFACT_DIR ?= $(CURDIR)/.tmp/rust-gui-native
 .PHONY: test-rust-gui-native
+# Windows CI's Cargo native target also checks Ctrl-comma through the menu hook.
 test-rust-gui-native:
 	@test "$$(uname -s)" = Darwin || { echo 'native Rust GUI smoke currently requires macOS'; exit 2; }
 	$(CARGO_RUN) fmt -p mailsearch-rust -- --check
