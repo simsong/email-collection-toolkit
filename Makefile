@@ -227,6 +227,18 @@ sign-historical-appcast: sparkle-tools
 dmg: ruff syntax-check sparkle-tools pst-importer mcti-scan pff-converter-bundle
 	uv run --group packaging python scripts/build_macos.py $(ARGS)
 
+# Rust Preview is a separate local app; SIGNING_IDENTITY selects Developer ID
+# (default ad-hoc), RUST_TARGET_DIR selects its release binary build directory.
+# Mounted acceptance is headless; interaction testing belongs to the user.
+.PHONY: rust-dmg
+rust-dmg: ruff syntax-check sparkle-tools pst-importer mcti-scan pff-converter-bundle
+	$(CARGO_RUN) build --locked --release -p mailsearch-rust --bin mailsearch-webview
+	uv run --locked --group packaging python scripts/build_macos.py --rust-binary "$(RUST_TARGET_DIR)/release/mailsearch-webview" --signing-identity "$(or $(SIGNING_IDENTITY),-)"
+
+.PHONY: test-rust-dmg
+test-rust-dmg: ruff
+	uv run --locked --group packaging pytest -q tests/test_packaging.py -k frozen_entry_dispatches_private_rust_service
+
 # APPLE_CERTIFICATE_P12_BASE64 and APPLE_CERTIFICATE_PASSWORD import the
 # Developer ID identity on hosted release runners; local builds use Keychain.
 # Use the first valid Developer ID Application identity in the Keychain search list.
@@ -792,3 +804,12 @@ test-rust-updater:
 .PHONY: test-rust-engine
 test-rust-engine:
 	uv run --locked pytest -q tests/test_rust_engine.py
+
+# Windows-only local prototype; CARGO_TARGET_DIR selects the reusable Cargo cache.
+# MSIX_PACKAGE and MSIX_EVIDENCE name a test artifact and a new evidence directory.
+.PHONY: msix-test test-msix
+msix-test:
+	cargo msix-test
+
+test-msix:
+	uv run --locked python scripts/win/test_windows_msix.py "$(MSIX_PACKAGE)" "$(MSIX_EVIDENCE)"

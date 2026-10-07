@@ -10,6 +10,7 @@ import plistlib
 import sqlite3
 import subprocess
 import sys
+from concurrent.futures import ThreadPoolExecutor
 from importlib import import_module
 from pathlib import Path
 
@@ -22,6 +23,35 @@ from mailarchiver.self_test import SelfTestReport
 from mailarchiver.standalone_verify import verify_archive
 
 ROOT = Path(__file__).resolve().parents[1]
+
+
+def test_frozen_entry_dispatches_private_rust_service(tmp_path: Path) -> None:
+    """Rust preview: service dispatch preserves JSON stdout without importing GUI."""
+    from mailarchiver.rust_engine import Reply, Request
+
+    request = Request(id=1, method="ping")
+    process = subprocess.Popen(
+        [sys.executable, str(ROOT / "scripts/desktop_entry.py"), "--rust-engine", str(tmp_path / "missing.mailarchive")],
+        stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        text=True, cwd=tmp_path,
+    )
+    assert process.stdin is not None and process.stdout is not None
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        response = pool.submit(process.stdout.readline)
+        try:
+            process.stdin.write(request.model_dump_json() + "\n")
+            process.stdin.flush()
+            reply = Reply.model_validate_json(response.result(timeout=10))
+        finally:
+            process.stdin.close()
+            try:
+                process.wait(timeout=6)
+            except subprocess.TimeoutExpired:
+                process.kill()
+                process.wait(timeout=2)
+    assert process.returncode == 0
+    assert reply.id == 1 and not reply.error
+    assert not (tmp_path / "missing.mailarchive").exists()
 
 
 def test_historical_notice_gate_matches_the_shipped_release(tmp_path: Path) -> None:

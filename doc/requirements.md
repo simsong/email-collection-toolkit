@@ -1948,6 +1948,15 @@ instructions.
 `make dmg-signed` must invoke the same build with the first valid Developer ID
 Application identity in the local Keychain search list, overridable with
 `SIGNING_IDENTITY`. An absent identity or `-` must fail before building.
+
+The local `make rust-dmg` preview uses the same resource, signing and mounted
+validation gates, with Rust as the application executable and the frozen Python
+archive service beside it. It must run off-checkout without an installed Python,
+ignore development interpreter overrides on macOS, and retain the existing
+Python app as a separate product. Preview builds do not install, register document
+associations, publish releases, notarize or claim updater/native interaction
+acceptance. Mounted synthetic ingest and Rust service/search/message checks
+must preserve source bytes and canonical manifests without opening GUI windows.
 `make list-signatures` must list valid local code-signing identities and their
 certificate hashes. `make notarize-dmg DMG=...` submits an already Developer ID
 signed DMG with protected App Store Connect API-key credentials, waits for
@@ -2568,12 +2577,14 @@ Explicit pre-merge Windows CI is opt-in via `[windows-ci]` in the pushed head
 commit message; ordinary pushes must skip both Windows runners. Reuse the
 reader workflow without duplicating the normal macOS native job.
 
-Windows WinSparkle and macOS Sparkle must share the existing appcast URL.
-Publication must use separate items with explicit enclosure `sparkle:os` values
-`macos` and `windows` (a combined installer), retaining platform-specific minimum
-OS versions and signed payloads. Derive release versions and builds through the
-shared mapper. Validate the complete mixed feed and re-sign it before publication;
-do not enable Windows updates against historical unclassified macOS entries.
+Windows distribution uses MSIX with separately installed WebView2. Missing
+runtime detection must provide native installation guidance without downloading
+or installing WebView2. Keep macOS Sparkle separate from Windows App Installer.
+Installer CI builds x64/ARM64 payloads once, assembles one signed bundle, and
+installs the same artifact on Windows Server x64 and Windows 11 ARM64. Run only
+on explicit dispatch or release calls. Test private Python discovery, native
+launch, synthetic search/fixity, upgrade and uninstall. Test signing keys must
+never enter uploaded artifacts. Windows 10 testing is not a release gate.
 
 Ordinary Rust search exposes only Archive/Sent categories, including blank,
 structured, preview and comprehensive queries; quarantined rows must never
@@ -2588,3 +2599,33 @@ Windows writer restrictions must not be bypassed to manufacture acceptance.
 Rust attachment opening must render an accessible confirmation dialog rather
 than rely on webview JavaScript confirm support. Cancel/Escape must leave the
 attachment unopened; only explicit Open may launch its exported temporary copy.
+
+## Local Windows MSIX prototype (2026-10-06)
+
+See [Windows MSIX test packaging](WINDOWS_MSIX_TEST.md) for automated build/sign/test commands,
+private Python helper discovery, external WebView2 detection, native Windows
+evidence and unresolved installation/import/scanner/converter requirements.
+This local prototype is not a released or fully validated Windows application.
+
+The downloadable `windows-msix-install-test` artifact contains exactly one installer,
+`base.msixbundle`, plus its public test certificate and checksum inventory. The
+higher-version bundle is isolated in `ci-only-msix-upgrade-fixture`; installation
+CI downloads both artifacts into the same directory to retain upgrade coverage.
+Users downloading the installer do not need the upgrade fixture.
+
+The installer artifact includes README.txt with certificate installation into
+Local Machine/Trusted People using elevated PowerShell (Current User trust is
+insufficient), installation and launch steps, and external WebView2 guidance.
+
+The test installer ZIP includes `Install-Test-Certificate.ps1`: right-click Run
+with PowerShell requests elevation, installs the adjacent public certificate in
+Local Machine/Trusted People, verifies its presence, and displays the outcome.
+The README documents this path and a command fallback without changing the
+machine execution policy. The helper does not install the application.
+
+Windows installation registers the display name **Email Collector Toolkit (ECT)**.
+The installation matrix verifies that Start menu entry and activates its app ID
+using IApplicationActivationManager. The activated Rust executable runs the
+bundled Python self-test in package context, then CI activates the native reader
+on the synthetic archive before testing upgrade and uninstall. Taskbar pinning
+is a user choice, not an installation requirement.

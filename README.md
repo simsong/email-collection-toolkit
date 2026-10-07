@@ -127,7 +127,7 @@ shared release mapper. Optional build-time `ECT_WINSPARKLE_APPCAST_URL` and
 key; never embed a private signing key. Until the shared feed is migrated and
 Windows installers are published, development builds leave updates unavailable.
 `ECT_WINSPARKLE_TEST_DLL` selects the staged, checksum-verified native DLL for
-`cargo reader-updater-check`. `scripts/prepare_winsparkle.ps1` stages that DLL
+`cargo reader-updater-check`. `scripts/win/prepare_winsparkle.ps1` stages that DLL
 and license notices without a system installation. `CARGO_TARGET_DIR` selects
 build output for direct Cargo invocations. For Make targets, set
 `RUST_TARGET_DIR` (default: checkout `target/`); Make exports it as
@@ -754,3 +754,33 @@ license bundle produced by `make runtime-license-bundle LICENSE_OUTPUT=PATH`.
 
 Development PST/OST imports require `make pst-importer mcti-scan pff-converter`.
 The DMG bundles these executables; the host never loads libpff.
+
+## Local Windows MSIX prototype (2026-10-06)
+
+See [Windows MSIX test packaging](doc/WINDOWS_MSIX_TEST.md) for automated build/sign/test commands,
+private Python helper discovery, external WebView2 detection, native Windows
+evidence and unresolved installation/import/scanner/converter requirements.
+This local prototype is not a released or fully validated Windows application.
+
+`CARGO_TARGET_DIR` optionally selects a reusable Cargo build cache.
+`ECT_RUST_ENGINE_PYTHON` remains a development interpreter override; packaged
+builds otherwise discover their private Python beside the executable.
+
+## Local macOS Rust Preview DMG
+
+`make rust-dmg` builds a separate **Email Collection Toolkit Rust Preview.app**
+and DMG in `dist/`, with a release Rust executable and private frozen Python
+archive service, schemas, plugins, ClamAV and importer tools. It runs outside
+the checkout without Python/uv/Cargo installed. `SIGNING_IDENTITY` selects a
+local Developer ID identity; omitting it produces an ad-hoc preview. The build
+does not notarize, install, publish a release or register file associations.
+The supported Python app and release targets retain their existing entry point.
+
+The mounted checks use synthetic mail and run ingest, helper discovery, search,
+message reading and preservation checks without windows. `make test-dmg DMG=...`
+repeats these checks. Interaction and window/document acceptance belong to the
+user; macOS updates and document activation remain unqualified in this preview.
+Packaged macOS uses only its own archive service, ignoring
+`ECT_RUST_ENGINE_PYTHON`; development builds and the Windows prototype retain
+their documented interpreter selection. `make test-rust-dmg` checks the frozen
+service entry-point dispatch without opening an app.

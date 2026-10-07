@@ -44,19 +44,41 @@ impl Engine {
     }
     fn spawn(archive: &Path, abort: Option<&AtomicBool>) -> Result<Self> {
         let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let executable = std::env::current_exe()?;
+        let directory = executable
+            .parent()
+            .context("Missing executable directory")?;
+        let frozen = cfg!(target_os = "macos")
+            && directory
+                .parent()
+                .is_some_and(|contents| contents.join("Info.plist").is_file());
+        let service = directory.join("archive-service");
+        let packaged = directory.join("python/python.exe");
         let python = std::env::var_os("ECT_RUST_ENGINE_PYTHON")
             .map(PathBuf::from)
             .unwrap_or_else(|| {
+                if cfg!(windows) && packaged.is_file() {
+                    return packaged;
+                }
                 root.join(if cfg!(windows) {
                     ".venv/Scripts/python.exe"
                 } else {
                     ".venv/bin/python"
                 })
             });
-        ensure!(python.is_file(), "Archive engine is unavailable. Run uv sync --locked, or set ECT_RUST_ENGINE_PYTHON to the project Python executable.");
-        let mut command = Command::new(python);
+        // A macOS bundle never falls back to the build machine's checkout.
+        let mut command = if frozen {
+            ensure!(service.is_file(), "Bundled archive service is missing");
+            let mut command = Command::new(service);
+            command.arg("--rust-engine");
+            command
+        } else {
+            ensure!(python.is_file(), "Archive engine is unavailable. Run uv sync --locked, or set ECT_RUST_ENGINE_PYTHON to the project Python executable.");
+            let mut command = Command::new(python);
+            command.args(["-m", "mailarchiver.rust_engine"]);
+            command
+        };
         command
-            .args(["-m", "mailarchiver.rust_engine"])
             .arg(archive)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())

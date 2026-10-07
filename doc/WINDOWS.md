@@ -464,3 +464,10 @@ After setup, take a second VM snapshot named `Windows development tools`.
 Record OS version/architecture, Python path, uv version, source commit, commands,
 failures, and skipped tests with each validation run. Keep the initial clean
 snapshot available for installer testing.
+
+## Local Windows MSIX prototype (2026-10-06)
+
+See [Windows MSIX test packaging](WINDOWS_MSIX_TEST.md) for automated build/sign/test commands,
+private Python helper discovery, external WebView2 detection, native Windows
+evidence and unresolved installation/import/scanner/converter requirements.
+This local prototype is not a released or fully validated Windows application.

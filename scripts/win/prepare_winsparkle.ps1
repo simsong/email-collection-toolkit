@@ -15,7 +15,7 @@ param(
 $ErrorActionPreference = 'Stop'
 $sdkVersion = '0.9.4'
 $sdkSha256 = '6037df37fc263bd1650a1c4949681a9d40ffe991d01f35892a406cb5d103c976'
-$projectRoot = Split-Path -Parent $PSScriptRoot
+$projectRoot = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
 $sdkCache = Join-Path $projectRoot ".tools/winsparkle/$sdkVersion"
 New-Item -ItemType Directory -Force -Path $sdkCache | Out-Null
 $sdkArchive = Join-Path $sdkCache "WinSparkle-$sdkVersion.zip"

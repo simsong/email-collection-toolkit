@@ -1,0 +1,125 @@
+# Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved.
+# Build each native payload once, then share one bundle between install-test VMs.
+# Explicit dispatch and reusable calls keep Windows packaging out of ordinary CI.
+# Ephemeral signing keys stay in the assembly job; only the public certificate ships.
+# Installation jobs consume the same artifact without checkout toolchains or rebuilds.
+# This test identity and synthetic upgrade fixture must never become a release.
+name: Windows MSIX installation tests
+on:
+  push:
+    branches: [codex/windows-msix-ci]
+  workflow_dispatch:
+  workflow_call:
+permissions:
+  contents: read
+jobs:
+  payload:
+    if: github.event_name != 'push' || contains(github.event.head_commit.message, '[msix-ci]')
+    name: Build payload (${{ matrix.arch }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            arch: x64
+          - os: windows-11-arm
+            arch: arm64
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: astral-sh/setup-uv@v10.0.1
+      - name: Set up Rust
+        run: rustup toolchain install stable --profile minimal
+      - name: Build and package once per architecture
+        env:
+          RUSTUP_TOOLCHAIN: stable
+        run: cargo msix-test -Architecture ${{ matrix.arch }} -CreateUpgradeTest
+      - uses: actions/upload-artifact@v7.0.1
+        with:
+          name: msix-payload-${{ matrix.arch }}
+          path: |
+            dist/windows-msix-test/*.msix
+            dist/windows-msix-test/upgrade/*.msix
+          if-no-files-found: error
+          retention-days: 7
+      - uses: actions/upload-artifact@v7.0.1
+        if: always()
+        with:
+          name: msix-build-logs-${{ matrix.arch }}
+          path: dist/windows-msix-test/*.log
+          retention-days: 7
+  bundle:
+    needs: payload
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/download-artifact@v8.0.1
+        with:
+          name: msix-payload-x64
+          path: dist/payloads/x64
+      - uses: actions/download-artifact@v8.0.1
+        with:
+          name: msix-payload-arm64
+          path: dist/payloads/arm64
+      - name: Assemble and test-sign shared bundles
+        shell: pwsh
+        run: ./scripts/win/bundle_test_msix.ps1 -InputDirectory dist/payloads
+      - uses: actions/upload-artifact@v7.0.1
+        with:
+          name: windows-msix-install-test
+          path: |
+            dist/bundle/base.msixbundle
+            dist/bundle/*.cer
+            dist/bundle/sha256.json
+            dist/bundle/README.txt
+            dist/bundle/Install-Test-Certificate.ps1
+          if-no-files-found: error
+          retention-days: 7
+      - uses: actions/upload-artifact@v7.0.1
+        with:
+          name: ci-only-msix-upgrade-fixture
+          path: dist/bundle/upgrade.msixbundle
+          if-no-files-found: error
+          retention-days: 7
+  install:
+    name: Install same bundle (${{ matrix.arch }})
+    needs: bundle
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            arch: x64
+          - os: windows-11-arm
+            arch: arm64
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/download-artifact@v8.0.1
+        with:
+          name: windows-msix-install-test
+          path: dist/bundle
+      - uses: actions/download-artifact@v8.0.1
+        with:
+          name: ci-only-msix-upgrade-fixture
+          path: dist/bundle
+      - name: Install, launch, upgrade and uninstall
+        shell: powershell
+        run: ./scripts/win/test_installed_msix.ps1 -BundleDirectory dist/bundle -Architecture ${{ matrix.arch }}
+      - uses: actions/upload-artifact@v7.0.1
+        if: always()
+        with:
+          name: msix-installed-evidence-${{ matrix.arch }}
+          path: |
+            dist/installed-evidence/install.log
+            dist/installed-evidence/*/report.json
+            dist/installed-evidence/*-window.txt
+            dist/installed-evidence/success.txt
+          if-no-files-found: error
+          retention-days: 7

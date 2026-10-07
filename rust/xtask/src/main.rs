@@ -12,6 +12,16 @@ use std::{
 
 fn main() -> ExitCode {
     let args: Vec<String> = env::args().skip(1).collect();
+    if args.first().is_some_and(|arg| arg == "msix-test") {
+        return match Command::new("pwsh")
+            .args(["-NoProfile", "-File", "scripts/win/build_windows_msix.ps1"])
+            .args(&args[1..])
+            .status()
+        {
+            Ok(status) if status.success() => ExitCode::SUCCESS,
+            _ => ExitCode::FAILURE,
+        };
+    }
     let scope = match args.as_slice() {
         [command, scope]
             if command == "check" && matches!(scope.as_str(), "reader" | "workspace") =>

@@ -22,6 +22,48 @@ mod native_smoke;
 
 fn main() -> Result<()> {
     let args: Vec<String> = std::env::args().skip(1).collect();
+    #[cfg(target_os = "windows")]
+    {
+        if args.first().is_some_and(|arg| arg == "--check-webview") {
+            println!("WebView2 {}", wry::webview_version()?);
+            return Ok(());
+        }
+        let graphical = args.is_empty()
+            || args.first().is_some_and(|arg| {
+                arg == "--archive" || arg == "--native-smoke" || arg == "--startup-smoke"
+            });
+        if graphical {
+            if let Err(error) = wry::webview_version() {
+                rfd::MessageDialog::new()
+                    .set_title("Email Collection Toolkit — WebView2 required")
+                    .set_level(rfd::MessageLevel::Error)
+                    .set_description(format!("Microsoft Edge WebView2 Runtime is missing or unavailable.\n\nInstall the WebView2 Evergreen Runtime from:\nhttps://developer.microsoft.com/microsoft-edge/webview2/\n\nFor a disconnected computer, download the Standalone Installer for this computer's architecture on another computer and transfer it using approved media. Contact your IT administrator if installation is restricted.\n\nECT does not install WebView2 automatically.\n\nDetails: {error}"))
+                    .show();
+                bail!("WebView2 Runtime is unavailable: {error}");
+            }
+        }
+    }
+    #[cfg(target_os = "windows")]
+    if let [flag, output] = args.as_slice() {
+        if flag == "--msix-test" {
+            let executable = std::env::current_exe()?;
+            let root = executable.parent().unwrap();
+            let result = std::process::Command::new(root.join("python/python.exe"))
+                .arg("-I")
+                .arg(root.join("test_windows_msix.py"))
+                .arg(&executable)
+                .arg(output)
+                .arg("--installed-root")
+                .arg(root)
+                .output()?;
+            let log = PathBuf::from(output).with_extension("log");
+            let mut contents = result.stdout;
+            contents.extend_from_slice(&result.stderr);
+            std::fs::write(log, contents)?;
+            anyhow::ensure!(result.status.success(), "Packaged self-test failed");
+            return Ok(());
+        }
+    }
     match args.as_slice() {
         [] => {
             if let Some(path) = startup_archive()? {
@@ -429,7 +471,21 @@ fn native(path: PathBuf, smoke_output: Option<PathBuf>, parameters: Option<Strin
         "window.__rustWindowParameters={};",
         serde_json::to_string(&parameters.unwrap_or_default())?
     );
-    let builder = WebViewBuilder::new()
+    #[cfg(target_os = "windows")]
+    let mut context = {
+        let directory = PathBuf::from(
+            std::env::var_os("LOCALAPPDATA")
+                .ok_or_else(|| anyhow::anyhow!("LOCALAPPDATA is unavailable"))?,
+        )
+        .join("Email Collection Toolkit/WebView2");
+        std::fs::create_dir_all(&directory)?;
+        wry::WebContext::new(Some(directory))
+    };
+    #[cfg(target_os = "windows")]
+    let builder = WebViewBuilder::new_with_web_context(&mut context);
+    #[cfg(not(target_os = "windows"))]
+    let builder = WebViewBuilder::new();
+    let builder = builder
         .with_initialization_script(&window_parameters)
         .with_custom_protocol("ect".into(), |_, request| {
             let (status, mime, bytes) = match native_asset(request.uri().path(), cfg!(windows)) {

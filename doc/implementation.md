@@ -23,7 +23,11 @@ The helper is bound to one archive and exchanges request-ID-based JSON lines
 through private pipes. Python writer leases serialize archive mutations; Rust
 supervises the helper's lifetime. It does not load the Python GUI. Development
 builds use the checkout's Python environment or `ECT_RUST_ENGINE_PYTHON`;
-self-contained delivery with a bundled private Python runtime remains pending.
+the local Rust Preview DMG bundles a private frozen Python archive service.
+On macOS the Rust executable detects its bundle and starts adjacent
+`archive-service --rust-engine ARCHIVE`, ignoring development interpreter
+overrides and refusing a missing bundled service. This helper uses the same
+private protocol; it does not load the Python GUI.
 Protocol and cancellation details appear under
 [Rust desktop migration](#rust-desktop-migration-and-reader-prototype).
 
@@ -2173,6 +2177,19 @@ documentation adds no Windows runtime or packaging support.
 
 ## macOS packaging
 
+`make rust-dmg` adds a local preview path to the existing builder. PyInstaller
+collects the archive service/runtime and resources; `rust_bundle.py` preserves
+that layout, makes the release Rust binary the bundle entry point and renames
+the Python executable `archive-service`. Preview identity/name are separate,
+document declarations and inactive Sparkle settings are omitted, and both
+executables and the final app are sealed. The DMG filename identifies Rust
+Preview; source revision/diff and binary provenance plus Rust dependency license
+texts are included. `test_mounted_image` detects this app and runs frozen core
+checks plus off-checkout synthetic ingest, Rust RPC helper/options/search/reader,
+repeat-ingest and source/archive fixity with a nonexistent interpreter override.
+All checks are headless. Interaction acceptance is delegated to the user.
+This is a local test package, not a notarized release or qualified default GUI.
+
 `make dmg-signed` calls `make dmg` with `--signing-identity` in `ARGS`, selecting
 the first Developer ID Application certificate hash from
 `security find-identity -v -p codesigning`. `SIGNING_IDENTITY` overrides this
@@ -3373,3 +3390,62 @@ close are failures. The test compares source/archive inventories and SHA-256
 hashes and retains logs, the synthetic `.mailarchive`, PNG and success evidence
 under `RUST_GUI_ARTIFACT_DIR`. CI uploads these even on failure. Automation and
 snapshot dependencies are isolated behind the `native-smoke` Cargo feature.
+
+## Local Windows MSIX prototype (2026-10-06)
+
+See [Windows MSIX test packaging](WINDOWS_MSIX_TEST.md) for automated build/sign/test commands,
+private Python helper discovery, external WebView2 detection, native Windows
+evidence and unresolved installation/import/scanner/converter requirements.
+This local prototype is not a released or fully validated Windows application.
+
+## MSIX installation matrix (2026-10-07)
+
+The MSIX decision supersedes the older shared WinSparkle feed/EXE plan.
+`windows-msix.yml` supports explicit dispatch and reusable release calls; ordinary
+pushes do not run it. Two native build jobs produce x64 and ARM64 payloads once.
+One assembly job creates a signed common bundle and a higher-version upgrade
+fixture with identical application bytes. Both installation VMs download that
+same artifact: Windows Server x64 (`windows-latest`) and Windows 11 ARM64
+(`windows-11-arm`). Installation jobs do not rebuild. Private signing keys remain
+outside uploaded artifacts. Test packages are never published as release assets.
+The release caller waits for this gate after tag preflight. Windows 10 testing
+is not required. No GitHub Team or AWS provisioning is needed.
+
+Installed checks exercise private Python discovery, synthetic search/fixity,
+a native window, upgrade and uninstall, removing test packages and added trust
+in cleanup. WebView2 remains external and its absence fails this positive test.
+Its writable user-data directory is outside the immutable package. Hosted
+execution is pending; earlier local prototype results do not validate this head.
+Start-menu activation, missing-runtime UI, Windows imports/scanner/converters,
+and physical interaction remain separate acceptance gaps.
+
+The downloadable `windows-msix-install-test` artifact contains exactly one installer,
+`base.msixbundle`, plus its public test certificate and checksum inventory. The
+higher-version bundle is isolated in `ci-only-msix-upgrade-fixture`; installation
+CI downloads both artifacts into the same directory to retain upgrade coverage.
+Users downloading the installer do not need the upgrade fixture.
+
+The installer artifact includes README.txt with certificate installation into
+Local Machine/Trusted People using elevated PowerShell (Current User trust is
+insufficient), installation and launch steps, and external WebView2 guidance.
+
+The test installer ZIP includes `Install-Test-Certificate.ps1`: right-click Run
+with PowerShell requests elevation, installs the adjacent public certificate in
+Local Machine/Trusted People, verifies its presence, and displays the outcome.
+The README documents this path and a command fallback without changing the
+machine execution policy. The helper does not install the application.
+
+Windows installation registers the display name **Email Collector Toolkit (ECT)**.
+The installation matrix verifies that Start menu entry and activates its app ID
+using IApplicationActivationManager. The activated Rust executable runs the
+bundled Python self-test in package context, then CI activates the native reader
+on the synthetic archive before testing upgrade and uninstall. Taskbar pinning
+is a user choice, not an installation requirement.
+
+Native installed-package evidence: GitHub Actions run 37677162147 passed all
+five jobs on commit `4912379`: both payload builds, bundle assembly, and install/
+registered activation/private helper/search/native window/upgrade/uninstall
+checks on Windows Server x64 and Windows 11 ARM64. The same bundle was tested
+on both machines; synthetic archive fixity checks passed. Ordinary CI run
+37677162905 also passed. This does not establish Windows import support or
+resolve the initial archive-picker UX.

@@ -5,7 +5,10 @@
 The Rust/Wry desktop owns the existing interface, search and message reader.
 A transitional Python **archive service** handles import, recovery, options and
 identity operations without importing the Python GUI. The project environment
-must be available; this is not a self-contained release package.
+must be available for checkout launches. `make rust-dmg` instead creates a local
+self-contained Rust Preview DMG with its private Python archive service; this
+is not a qualified/notarized release package. The user performs interaction
+testing, including physical drag gestures and window/document coordination.
 The [theory of operation](implementation.md#theory-of-operation-rust-desktop-and-python-ingest)
 explains how the Rust GUI supervises the private Python ingest process and which
 parts run in each language.
@@ -129,6 +132,8 @@ remains open. Specifically, this local build does **not** complete:
   macOS/Windows acceptance. Preserve the existing Windows writer restriction.
 - Self-contained resources, installers/signing/notarization, macOS updater wiring,
   coordinated release-feed publication and migration of the default entry point.
+  The local macOS preview now bundles its runtime and has headless mounted checks;
+  user interaction acceptance and the remaining release gates are still pending.
 - Full database rebuild/reprocess acceptance, large-message streaming and IMAP.
 
 Do not deprecate the Python GUI or mark v1.0 complete until these gates pass.
