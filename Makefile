@@ -767,6 +767,7 @@ test-rust-startup:
 	uv run --locked pytest -q tests/test_rust_webview.py -k startup_buttons --browser chromium
 
 # Real hot-journal recovery, foreground timer, >30-second wait and owner Abort.
+# Also exercises worker-owned startup initialization with an OS-stopped real helper.
 # RUST_WEBVIEW_BINARY selects the same native opening worker's diagnostic pipe.
 .PHONY: test-rust-recovery
 test-rust-recovery: rust-gui-build

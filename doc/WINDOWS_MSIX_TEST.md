@@ -73,7 +73,9 @@ fixture with identical application bytes. Both installation VMs download that
 same artifact: Windows Server x64 (`windows-latest`) and Windows 11 ARM64
 (`windows-11-arm`). Installation jobs do not rebuild. Private signing keys remain
 outside uploaded artifacts. Test packages are never published as release assets.
-The release caller waits for this gate after tag preflight. Windows 10 testing
+The release caller waits for this gate after tag preflight. Tag-push calls bypass
+the branch opt-in marker because reusable workflows inherit the caller event;
+otherwise a skipped MSIX dependency would also skip macOS release assembly. Windows 10 testing
 is not required. No GitHub Team or AWS provisioning is needed.
 
 Installed checks exercise private Python discovery, synthetic search/fixity,

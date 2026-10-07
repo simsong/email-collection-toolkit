@@ -86,13 +86,13 @@ os._exit(0)
 
 @contextmanager
 def opener(archive: Path, tmp_path: Path, held: bool = False,
-           recent: list[Path] | None = None) -> Iterator[tuple[subprocess.Popen[str], Queue[OpeningReply]]]:
+           recent: list[Path] | None = None, create: bool = False) -> Iterator[tuple[subprocess.Popen[str], Queue[OpeningReply]]]:
     binary = os.environ.get(BINARY_ENV)
     if not binary:
         pytest.skip("run make test-rust-recovery")
     environment = os.environ.copy()
     environment[PYTHON_ENV] = sys.executable
-    arguments = [binary, "--opening-rpc"]
+    arguments = [binary, "--creation-rpc" if create else "--opening-rpc"]
     if recent is None:
         arguments.append(str(archive))
     else:
@@ -306,3 +306,28 @@ setInterval(async()=>{
                 pass
         server.shutdown()
         server.server_close()
+
+
+@pytest.mark.skipif(os.name != "posix", reason="real SIGSTOP helper scheduling")
+def test_startup_creation_is_supervised_and_abort_keeps_destination_empty(tmp_path: Path) -> None:
+    """Startup requirement: the actual initialization peer is interruptible off the UI thread."""
+    archive = tmp_path / "new.mailarchive"
+    archive.mkdir()
+    with opener(archive, tmp_path, held=True, create=True) as (process, replies):
+        send(process, "opening_start")
+        child = held_child(process)
+        start = time.monotonic()
+        send(process, "opening_abort")
+        failed = replies.get(timeout=7)
+        assert failed.error and "aborted" in failed.error and failed.result is None
+        assert time.monotonic() - start < 7
+        process.wait(timeout=2)
+        with pytest.raises(ProcessLookupError):
+            os.kill(child, 0)
+    assert not list(archive.iterdir())
+    with opener(archive, tmp_path, create=True) as (process, replies):
+        send(process, "opening_start")
+        assert replies.get(timeout=15).result is True
+    validate_archive(archive)
+    with sqlite3.connect(archive / "archive.sqlite3") as database:
+        assert database.execute("SELECT count(*) FROM messages").fetchone() == (0,)

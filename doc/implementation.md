@@ -3170,7 +3170,10 @@ acceptance and the remaining desktop actions stay separate gates.
 `bridge.js` adapts the existing `window.pywebview.api` calls to request-ID-based
 Rust IPC. Reading/searching use Rust; archive workflow calls lazily start the private Python service helper. A bounded channel
 feeds a foreground `Bridge` worker for message reads and short search-control
-requests. A separate worker owns the search connection. Replies are delivered as
+requests. Startup New passes the selected destination to this worker for supervised
+initialization and validation; helper waits and cleanup never run in the native
+event callback. Its Abort flag also interrupts startup handshake/creation.
+A separate worker owns the search connection. Replies are delivered as
 native user events, and
 closing asks the foreground worker to drop its engine pipe and has an independent
 five-second event-loop deadline. Only the exact local main document can invoke

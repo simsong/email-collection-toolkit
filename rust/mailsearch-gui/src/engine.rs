@@ -39,6 +39,13 @@ impl Engine {
     pub fn open(archive: &Path) -> Result<Self> {
         Self::spawn(archive, None)
     }
+    pub fn create_archive(archive: &Path, abort: &AtomicBool) -> Result<()> {
+        require_archive_writing()?;
+        let mut engine = Self::spawn(archive, Some(abort))?;
+        engine.request("create", &[], Some(abort))?;
+        ensure!(!abort.load(Ordering::Acquire), "Archive creation aborted");
+        Ok(())
+    }
     pub fn for_recovery(archive: &Path, abort: &AtomicBool) -> Result<Self> {
         Self::spawn(archive, Some(abort))
     }
@@ -149,7 +156,7 @@ impl Engine {
         if let Some(abort) = abort {
             ensure!(
                 !abort.load(Ordering::Acquire),
-                "Recovery aborted. The archive cannot be opened."
+                "Opening aborted. The archive cannot be opened."
             );
         }
         ensure!(!self.failed,"Archive engine connection failed; close and reopen this window before retrying archive operations");
@@ -166,14 +173,12 @@ impl Engine {
             loop {
                 ensure!(
                     !abort.load(Ordering::Acquire),
-                    "Recovery aborted. The archive cannot be opened."
+                    "Opening aborted. The archive cannot be opened."
                 );
                 match self.replies.recv_timeout(Duration::from_millis(50)) {
                     Ok(line) => break line,
                     Err(RecvTimeoutError::Timeout) => (),
-                    Err(error) => {
-                        return Err(error).context("Archive recovery engine disconnected")
-                    }
+                    Err(error) => return Err(error).context("Archive opening engine disconnected"),
                 }
             }
         } else {

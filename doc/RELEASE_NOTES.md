@@ -4,6 +4,10 @@
 
 ## Unreleased
 
+- Run startup Rust archive initialization on its supervised worker so helper
+  waits cannot block native Quit/document events. Exempt release tag calls from
+  the MSIX branch opt-in condition so macOS release assembly remains runnable.
+
 - Keep optional Rust autocomplete timeouts out of search errors and complete
   sparse full-text searches through indexed hash lookups. Render sandboxed HTML
   in native WebKit and retain explicitly selected Plain Text/HTML/Raw Source

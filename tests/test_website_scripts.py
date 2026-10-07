@@ -345,3 +345,27 @@ def test_msix_same_bundle_is_installed_without_rebuilding() -> None:
     release = safe_load((root / ".github/workflows/release.yml").read_text(encoding="utf-8"))
     assert release[JOBS]["windows-msix"][NEEDS] == "preflight"
     assert "windows-msix" in release[JOBS]["assemble"][NEEDS]
+
+
+@pytest.mark.parametrize("event,reference,message,expected", [
+    ("push", "branch", "ordinary change", False),
+    ("push", "branch", "explicit [msix-ci] build", True),
+    ("push", "tag", "ordinary release", True),
+    ("workflow_dispatch", "branch", "ordinary change", True),
+])
+def test_msix_payload_guard_keeps_release_dependencies_runnable(event: str, reference: str, message: str, expected: bool) -> None:
+    """Release requirement: a reusable tag-push call cannot skip macOS assembly's dependency."""
+    workflow = safe_load((Path(__file__).parents[1] / ".github/workflows/windows-msix.yml").read_text())
+    condition = workflow[JOBS]["payload"]["if"]
+    outcomes = []
+    for term in condition.split(" || "):
+        comparison = re.fullmatch(r"github\.(event_name|ref_type) (==|!=) '([^']*)'", term)
+        if comparison:
+            field, operator, value = comparison.groups()
+            actual = event if field == "event_name" else reference
+            outcomes.append((actual == value) if operator == "==" else (actual != value))
+        else:
+            contains = re.fullmatch(r"contains\(github\.event\.head_commit\.message, '([^']*)'\)", term)
+            assert contains, f"Unsupported CI condition: {term}"
+            outcomes.append(contains[1] in message)
+    assert any(outcomes) is expected

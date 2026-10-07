@@ -80,9 +80,12 @@ fn main() -> Result<()> {
             }
             Ok(())
         }
-        [flag, path] if flag == "--opening-rpc" => opening_rpc(PathBuf::from(path)),
+        [flag, path] if flag == "--opening-rpc" || flag == "--creation-rpc" => {
+            opening_rpc(PathBuf::from(path), flag == "--creation-rpc")
+        }
         [flag] if flag == "--opening-rpc" => opening_rpc(
             startup_archive()?.ok_or_else(|| anyhow::anyhow!("No usable recent archive"))?,
+            false,
         ),
         [flag, path, query] if flag == "--probe" => {
             let mut bridge = Bridge::open(&PathBuf::from(path))?;
@@ -186,7 +189,7 @@ fn startup_archive() -> Result<Option<PathBuf>> {
         .map(std::path::Path::to_owned))
 }
 
-fn opening_rpc(path: PathBuf) -> Result<()> {
+fn opening_rpc(path: PathBuf, create: bool) -> Result<()> {
     use std::sync::{
         atomic::{AtomicBool, Ordering},
         mpsc, Arc,
@@ -211,13 +214,18 @@ fn opening_rpc(path: PathBuf) -> Result<()> {
     });
     let request = receiver.recv()?;
     anyhow::ensure!(request.method == "opening_start", "Expected opening_start");
-    let result = mailsearch_rust::opening::open(&path, &abort, || {
-        println!(
-            "{}",
-            serde_json::json!({"id":0,"result":"recovering","error":null})
-        );
-        let _ = io::stdout().flush();
-    });
+    let result = (|| {
+        if create {
+            mailsearch_rust::engine::Engine::create_archive(&path, &abort)?;
+        }
+        mailsearch_rust::opening::open(&path, &abort, || {
+            println!(
+                "{}",
+                serde_json::json!({"id":0,"result":"recovering","error":null})
+            );
+            let _ = io::stdout().flush();
+        })
+    })();
     let reply = mailsearch_rust::bridge::Reply {
         id: request.id,
         result: result.as_ref().ok().map(|_| serde_json::json!(true)),
@@ -333,7 +341,7 @@ fn native(
         ExportCleanup(anyhow::Result<()>),
         Print(u64),
         Welcome(Request),
-        SelectArchive(PathBuf),
+        SelectArchive(PathBuf, bool),
         Notice(String),
         #[cfg(feature = "native-smoke")]
         Snapshot,
@@ -421,6 +429,7 @@ fn native(
         .spawn(move || {
             let mut bridge = None;
             let mut selected_path = path;
+            let mut create = false;
             while let Ok(request) = receiver.recv() {
                 if request.method == "shutdown" {
                     drop(bridge);
@@ -428,6 +437,11 @@ fn native(
                     return;
                 }
                 if request.method == "opening_select" {
+                    create = request
+                        .args
+                        .get(1)
+                        .and_then(|value| value.as_bool())
+                        .unwrap_or(false);
                     selected_path = request
                         .args
                         .first()
@@ -443,6 +457,12 @@ fn native(
                         .as_ref()
                         .ok_or_else(|| anyhow::anyhow!("No archive selected"))
                         .and_then(|path| {
+                            if create {
+                                mailsearch_rust::engine::Engine::create_archive(
+                                    path,
+                                    &worker_abort,
+                                )?;
+                            }
                             mailsearch_rust::opening::open(path, &worker_abort, || {
                                 let _ = proxy.send_event(NativeEvent::Recovering);
                             })
@@ -695,7 +715,7 @@ fn native(
             Event::Opened { urls } if !quitting => {
                 match mailsearch_rust::documents::opened_paths(&urls) {
                     Ok(paths) => for path in paths {
-                        let _ = reply_proxy.send_event(NativeEvent::SelectArchive(path));
+                        let _ = reply_proxy.send_event(NativeEvent::SelectArchive(path, false));
                     },
                     Err(error) => { let _=reply_proxy.send_event(NativeEvent::Notice(format!("{error:#}"))); }
                 }
@@ -712,19 +732,16 @@ fn native(
                     }
                     anyhow::ensure!(welcome_writable,"Archive creation is unavailable");
                     let path = rfd::FileDialog::new().set_title("Choose empty destination for new archive").pick_folder();
-                    if let Some(path) = &path {
-                        mailsearch_rust::engine::Engine::open(path)?.call("create", &[])?;
-                    }
                     Ok(path)
                 })();
                 match result {
-                    Ok(Some(path)) => {let _=reply_proxy.send_event(NativeEvent::SelectArchive(path));},
+                    Ok(Some(path)) => {let _=reply_proxy.send_event(NativeEvent::SelectArchive(path, request.method == "welcome_new"));},
                     result => {let _=reply_proxy.send_event(NativeEvent::Reply(Reply{id:request.id,result:Some(serde_json::json!(false)),error:result.err().map(|error|format!("{error:#}"))}));}
                 }
             }
-            Event::UserEvent(NativeEvent::SelectArchive(path)) if !quitting => {
+            Event::UserEvent(NativeEvent::SelectArchive(path, create)) if !quitting => {
                 if welcome {
-                    let request=Request{id:0,method:"opening_select".into(),args:vec![serde_json::json!(path)]};
+                    let request=Request{id:0,method:"opening_select".into(),args:vec![serde_json::json!(path),serde_json::json!(create)]};
                     let result = shutdown_sender.try_send(request).map_err(anyhow::Error::from)
                         .and_then(|()| view.load_url(if cfg!(windows){"http://ect.localhost/opening.html"}else{"ect://localhost/opening.html"}).map_err(anyhow::Error::from));
                     match result {
@@ -842,7 +859,7 @@ fn native(
                         let method=if action=="open_archive"{"welcome_open"}else{"welcome_new"};
                         let _=reply_proxy.send_event(NativeEvent::Welcome(Request{id:0,method:method.into(),args:vec![]}));
                     } else if let Some(index)=action.strip_prefix("recent-").and_then(|value|value.parse::<usize>().ok()) {
-                        if let Some(path)=menu.as_ref().and_then(|menu|menu.recent_path(index)) {let _=reply_proxy.send_event(NativeEvent::SelectArchive(path.to_owned()));}
+                        if let Some(path)=menu.as_ref().and_then(|menu|menu.recent_path(index)) {let _=reply_proxy.send_event(NativeEvent::SelectArchive(path.to_owned(), false));}
                     }
                 } else if !reader_ready || abort.load(std::sync::atomic::Ordering::Acquire) {
                     // Opening owns this window until recovery and validation finish.
