@@ -4,6 +4,10 @@
 
 ## Unreleased
 
+- Use the shared `@simsong-agent` GitHub account for Codex and Claude Code,
+  retain their separate commit identities and signing keys, and prohibit
+  personal-account fallbacks for agent writes.
+
 - Fix Quit hanging on pywebview callback threads (#150). Idle Quit exits
   immediately. Active native/local and API imports stop after their current
   message, with one five-second deadline before forced exit. Interrupted writes

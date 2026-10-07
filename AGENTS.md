@@ -129,8 +129,10 @@ push, or modify PRs without a user request. Do not approve or merge a
 PR, close an issue or superseded PR, or change remote services without explicit
 user authorization for that action.
 
-All Codex GitHub writes and browser actions use `@simsong-codex`, except
-that `@simsong` is authorized solely for requesting Copilot reviews when needed.
+Codex and Claude Code use the shared `@simsong-agent` account for all GitHub
+writes and browser actions; never use the personal `@simsong` account.
+Each agent uses its own commit email. Claude must not claim to be Codex or
+use the Codex signing key. Codex retains its existing commit identity and key.
 Verify the CLI identity, SSH push identity, and browser login separately. Before committing, configure and verify author and committer as
 `Codex AI Assistant <simsong+codex@acm.org>` and verify the signing key belongs to
 that identity. Sign every Codex commit. Verify the result before pushing with
@@ -142,9 +144,8 @@ existing commit, use `git commit --amend --reset-author -S`.
 Follow the shared workflow with these mail-archiver requirements:
 
 - Request and re-request Copilot review through `gh pr edit <number>
-  --add-reviewer '@copilot'`, authenticated as `simsong`. This personal-account
-  exception covers only Copilot review requests; restore `simsong-codex`
-  afterward, including on failure, for all other GitHub writes. Verify the
+  --add-reviewer '@copilot'`, authenticated as `simsong-agent`. Never use the
+  personal `simsong` account as a fallback. Verify the
   request through reviewer or timeline evidence, not command success alone.
   Do not control the browser or post an `@copilot` comment to request review.
   Unavailable authentication or a failed request is a reported blocker; keep
