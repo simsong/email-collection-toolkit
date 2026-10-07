@@ -765,3 +765,10 @@ This local prototype is not a released or fully validated Windows application.
 `CARGO_TARGET_DIR` optionally selects a reusable Cargo build cache.
 `ECT_RUST_ENGINE_PYTHON` remains a development interpreter override; packaged
 builds otherwise discover their private Python beside the executable.
+
+Windows test signing uses the GitHub Actions secret/environment variable
+`MSIX_TEST_CERT_PFX_BASE64`, containing the base64-encoded persistent test PFX.
+Only the signing step receives it. Local signing requires the same variable;
+missing or mismatched keys fail rather than creating a new certificate. The
+public identity is `scripts/win/test-signing.cer`; private keys never belong in
+Git or artifacts. Testers trust it once, until expiration or deliberate rotation.

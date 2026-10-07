@@ -1,7 +1,7 @@
 # Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved.
 # Build each native payload once, then share one bundle between install-test VMs.
 # Explicit dispatch and reusable calls keep Windows packaging out of ordinary CI.
-# Ephemeral signing keys stay in the assembly job; only the public certificate ships.
+# The persistent signing secret stays in assembly; only the public certificate ships.
 # Installation jobs consume the same artifact without checkout toolchains or rebuilds.
 # This test identity and synthetic upgrade fixture must never become a release.
 name: Windows MSIX installation tests
@@ -10,6 +10,9 @@ on:
     branches: [codex/windows-msix-ci]
   workflow_dispatch:
   workflow_call:
+    secrets:
+      MSIX_TEST_CERT_PFX_BASE64:
+        required: true
 permissions:
   contents: read
 jobs:
@@ -67,6 +70,8 @@ jobs:
           name: msix-payload-arm64
           path: dist/payloads/arm64
       - name: Assemble and test-sign shared bundles
+        env:
+          MSIX_TEST_CERT_PFX_BASE64: ${{ secrets.MSIX_TEST_CERT_PFX_BASE64 }}
         shell: pwsh
         run: ./scripts/win/bundle_test_msix.ps1 -InputDirectory dist/payloads
       - uses: actions/upload-artifact@v7.0.1

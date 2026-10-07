@@ -793,6 +793,7 @@ test-rust-updater:
 test-rust-engine:
 	uv run --locked pytest -q tests/test_rust_engine.py
 
+# Signing uses MSIX_TEST_CERT_PFX_BASE64 for the persistent private test PFX.
 # Windows-only local prototype; CARGO_TARGET_DIR selects the reusable Cargo cache.
 # MSIX_PACKAGE and MSIX_EVIDENCE name a test artifact and a new evidence directory.
 .PHONY: msix-test test-msix
