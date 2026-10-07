@@ -4,6 +4,9 @@
 
 ## Unreleased
 
+- Latch Rust helper owner-pipe loss across import startup; a prior Stop can be
+  reset for a new job, but owner loss cannot be cleared or publish another message.
+
 - Require Windows native smoke to open Preferences through the real Win32
   accelerator hook, then save and reload the preference across application runs.
 

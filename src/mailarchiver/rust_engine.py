@@ -100,6 +100,7 @@ class Engine:
     def __init__(self, archive: Path) -> None:
         self.archive = Path(os.path.abspath(archive.expanduser()))
         self.stop = Event()
+        self.owner_lost = Event()
         self.finished = Event()
         self.finished.set()
         self.idle = Event()
@@ -107,16 +108,21 @@ class Engine:
         self.job = JobState()
 
     def start(self, request: IngestRequest, revision: str | None = None) -> bool:
+        if self.owner_lost.is_set():
+            raise ValueError("The owning window has closed.")
         if not self.finished.is_set():
             raise ValueError("This window already has an active import or processing job.")
         lease = WriterLease.acquire(self.archive, os.path.normcase(str(self.archive)), "Rust desktop import", uuid4().hex, "rust-engine")
         try:
             if revision is not None and request.owner_rules is not None:
                 DocumentOptions(self.archive).save(request.owner_rules, lease, revision)
+            self.stop.clear()  # Reset only a prior user stop; owner loss is latched.
+            if self.owner_lost.is_set():
+                self.stop.set()
+                raise ValueError("The owning window has closed.")
         except Exception:
             lease.release()
             raise
-        self.stop.clear()
         self.finished.clear()
         self.job = JobState(active=True, generation=self.job.generation)
 
@@ -237,11 +243,15 @@ def main() -> None:
             for line in sys.stdin:
                 requests.put(line)
         finally:
+            engine.owner_lost.set()
             engine.stop.set()
+            print("Owner pipe closed: cancelling archive work", file=sys.stderr, flush=True)
             # This thread cannot wait on a service lock or a blocked callback.
             deadline = time.monotonic() + 5
-            engine.finished.wait(5)
-            engine.idle.wait(max(0, deadline - time.monotonic()))
+            # A startup handler may not yet have cleared finished. Wait for its
+            # return before waiting for the worker it might have just started.
+            engine.idle.wait(5)
+            engine.finished.wait(max(0, deadline - time.monotonic()))
             if os.name == "posix" and os.getpgrp() == os.getpid():
                 os.killpg(os.getpid(), signal.SIGKILL)
             os._exit(0)
@@ -258,9 +268,11 @@ def main() -> None:
             reply = Reply(id=identifier, result=engine.call(request))
         except Exception as error:
             reply = Reply(id=identifier, error=f"{type(error).__name__}: {error}")
-        engine.idle.set()
-        channel.write(reply.model_dump_json() + "\n")
-        channel.flush()
+        try:
+            channel.write(reply.model_dump_json() + "\n")
+            channel.flush()
+        finally:
+            engine.idle.set()
 
 
 if __name__ == "__main__":

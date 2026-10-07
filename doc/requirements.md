@@ -2455,6 +2455,9 @@ With no usable recent archive, startup must check actual helper availability and
 write capability before offering Create; an unavailable helper offers Open only.
 Owner-loss acceptance must synchronize unfinished processing rather than race
 the speed of a synthetic import, and verify bounded exit, recovery and source fixity.
+Owner EOF must remain latched across import startup; resetting a previous user
+Stop must never clear owner-loss cancellation. Startup held before that reset
+must reject the job, release its lease and publish no new canonical message.
 
 Headless acceptance uses the real frontend and service boundary, synthetic
 archives, writer-conflict checks, cancellation/resume and byte inventories.

@@ -3207,7 +3207,12 @@ and safe external links. Additional windows currently use separate Rust processe
 `DocumentOptions`, identity services, status history and lease-protected recovery.
 Import/definition work runs in a background thread; reader work remains in Rust.
 The helper pipe watcher signals cancellation on EOF and exits within five seconds,
-even if a service request is blocked. Unix process groups and Windows kill-on-close
+even if a service request is blocked. Owner loss is latched separately from a user
+Stop. Import startup clears only
+the user-stop event and rechecks the owner latch before creating its worker.
+Shutdown waits for the active handler/reply flush, then for any worker it started;
+an initially set completion flag must not permit premature forced termination.
+Unix process groups and Windows kill-on-close
 job objects supervise ordinary descendants; existing owned native helpers retain
 their own parent-death handling. Windows execution of this new boundary is unverified.
 `make test-rust-engine` exercises actual import, owner rules, identity edits,
@@ -3216,6 +3221,9 @@ Its owner-loss case uses a real CLI-persisted processor that holds the second
 message after the first publishes. Helper replay reaches that same boundary;
 EOF must exit within six seconds while blocked, release the lease and retain
 pending work. Releasing the fixture then permits complete recovery/reimport.
+A second real-pipe case holds startup's owner-rule read on a FIFO, observes EOF,
+releases the read and requires an owner-closed reply, zero published messages,
+an available writer lease and unchanged source bytes.
 Owner options, identity and history pages are reused in trusted embedded dialogs.
 Native file dialogs select source/destination; explicit import confirmation
 collects owner rules, scanning policy and attachment indexing. Missing helpers and

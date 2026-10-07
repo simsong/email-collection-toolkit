@@ -10,6 +10,7 @@ from __future__ import annotations
 from contextlib import contextmanager
 from concurrent.futures import ThreadPoolExecutor
 from hashlib import sha256
+import errno
 import os
 from pathlib import Path
 import sqlite3
@@ -284,3 +285,56 @@ class Processor:
         assert database.execute("SELECT count(*) FROM messages").fetchone() == (len(raws),)
         assert {row[0] for row in database.execute("SELECT sha256 FROM messages")} == {sha256(raw).hexdigest() for raw in raws}
     assert all((source / f"message-{index}.eml").read_bytes() == raw for index, raw in enumerate(raws))
+
+
+@pytest.mark.skipif(os.name != "posix", reason="uses a real FIFO to hold startup before cancellation reset")
+def test_owner_eof_during_import_startup_is_latched(tmp_path: Path) -> None:
+    """Owner loss during startup must not be reset or publish a new message."""
+    archive = tmp_path / "startup.mailarchive"
+    source = tmp_path / "source"
+    source.mkdir()
+    raw = b"From: alice@example.test\nSubject: startup cancellation\n\nOriginal fixture bytes.\n"
+    input_path = source / "fixture.eml"
+    input_path.write_bytes(raw)
+    with peer(archive, tmp_path) as engine:
+        assert engine.call("create")
+        revision = DocumentOptions(archive).state().revision
+        names = archive / "owner-names.txt"
+        os.mkfifo(names)
+        request = Request(id=2, method="start_import", args=[{
+            "source": str(source), "include": "alice@example.test", "revision": revision,
+            "scan_policy": "not-scanned",
+        }])
+        assert engine.process.stdin is not None
+        engine.process.stdin.write(request.model_dump_json() + "\n")
+        engine.process.stdin.flush()
+        # The genuine options reader blocks on this FIFO inside start(), before
+        # resetting cancellation. Opening its writer proves it reached that point.
+        deadline = time.monotonic() + 3
+        while True:
+            try:
+                descriptor = os.open(names, os.O_WRONLY | os.O_NONBLOCK)
+                break
+            except OSError as error:
+                assert error.errno == errno.ENXIO
+                assert engine.process.poll() is None
+                assert time.monotonic() < deadline, "Import startup did not reach its owner-rule read"
+                time.sleep(.01)
+        with os.fdopen(descriptor, "w", encoding="utf-8"):
+            engine.process.stdin.close()
+            deadline = time.monotonic() + 3
+            while "Owner pipe closed: cancelling archive work" not in (tmp_path / "engine.log").read_text():
+                assert engine.process.poll() is None
+                assert time.monotonic() < deadline, "Owner EOF was not observed while startup was held"
+                time.sleep(.01)
+        engine.process.wait(timeout=6)
+        assert engine.process.stdout is not None
+        reply = Reply.model_validate_json(engine.process.stdout.readline())
+        assert reply.id == 2 and reply.error == "ValueError: The owning window has closed."
+        names.unlink()
+    with WriterLease.acquire(archive, str(archive), "post-startup cancellation", "verify", "test"):
+        with sqlite3.connect(archive / "archive.sqlite3") as database:
+            assert database.execute("SELECT count(*) FROM messages").fetchone() == (0,)
+            assert database.execute("PRAGMA integrity_check").fetchone() == ("ok",)
+    assert input_path.read_bytes() == raw
+    assert not list((archive / "data/mbox").glob("*.mbox"))
