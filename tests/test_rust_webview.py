@@ -28,7 +28,7 @@ from mailarchiver.catalog import create_search
 from mailarchiver.search import index_message
 
 from test_mailsearch import make_archive
-from test_gui_service import make_gui_archive
+from test_gui_service import MULTI_HTML_MESSAGE, make_gui_archive
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -340,7 +340,7 @@ def test_rust_mime_filters_and_dates_in_shared_widgets(page: Page, tmp_path: Pat
     binary = environ.get("RUST_WEBVIEW_BINARY")
     if not binary:
         pytest.skip("run make test-rust-webview")
-    archive = make_gui_archive(tmp_path)
+    archive = make_gui_archive(tmp_path, ((MULTI_HTML_MESSAGE, "multi-html@example", "multi HTML message", "2024-01-04T11:00:00+00:00"),))
     before = [(p.relative_to(archive), sha256(p.read_bytes()).hexdigest()) for p in sorted(archive.rglob("*")) if p.is_file()]
     process = subprocess.Popen([binary, "--rpc", str(archive)], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                                stderr=subprocess.PIPE, text=True)
@@ -392,7 +392,7 @@ def test_rust_mime_filters_and_dates_in_shared_widgets(page: Page, tmp_path: Pat
         expect(page.locator("#body-view iframe")).to_have_count(0)
         page.locator("#search").fill("from:sender")
         page.locator("#search").press("Enter")
-        expect(page.locator("#result-status")).to_have_text("2 messages")
+        expect(page.locator("#result-status")).to_have_text("3 messages")
         page.locator("#result-list .result").filter(has_text="multipart message").click()
         expect(page.locator("#message-content")).to_be_visible()
         expect(page.locator("#part-select")).to_have_value(plain)
@@ -402,11 +402,31 @@ def test_rust_mime_filters_and_dates_in_shared_widgets(page: Page, tmp_path: Pat
         expect(page.locator("#message-subject")).to_have_text("multipart message")
         expect(page.locator("#body-view iframe")).to_have_count(0)
         expect(page.locator("#part-select")).to_have_value(plain)
+        # Missing Plain Text falls back without forgetting the choice, and retained
+        # HTML must prefer the complete part over a preceding short alternative.
+        page.locator("#result-list").dispatch_event("keydown", {"key": "ArrowUp", "bubbles": True})
+        expect(page.locator("#message-subject")).to_have_text("multi HTML message")
+        expect(page.frame_locator("#body-view iframe").locator("body")).to_contain_text("Complete web report")
+        page.locator("#result-list").dispatch_event("keydown", {"key": "ArrowDown", "bubbles": True})
+        expect(page.locator("#message-subject")).to_have_text("multipart message")
+        expect(page.locator("#part-select")).to_have_value(plain)
+        expect(page.locator("#body-view iframe")).to_have_count(0)
+        html = page.locator("#part-select option").filter(has_text="HTML").first.get_attribute("value")
+        assert html is not None
+        page.locator("#part-select").select_option(html)
+        expect(page.frame_locator("#body-view iframe").locator("body")).to_contain_text("HTML version.")
+        page.locator("#result-list").dispatch_event("keydown", {"key": "ArrowUp", "bubbles": True})
+        expect(page.locator("#message-subject")).to_have_text("multi HTML message")
+        expect(page.frame_locator("#body-view iframe").locator("body")).to_contain_text("Complete web report")
+        expect(page.locator("#part-select")).to_have_value("2")
+        page.locator("#result-list").dispatch_event("keydown", {"key": "ArrowDown", "bubbles": True})
+        expect(page.locator("#message-subject")).to_have_text("multipart message")
+        expect(page.frame_locator("#body-view iframe").locator("body")).to_contain_text("HTML version.")
         page.locator("#part-select").select_option("-1")
         expect(page.locator("#body-view")).to_contain_text("Content-Type: multipart/mixed")
         page.locator("#search").fill('date:"January 3, 2024"')
         page.locator("#search").press("Enter")
-        expect(page.locator("#result-status")).to_have_text("2 messages")
+        expect(page.locator("#result-status")).to_have_text("3 messages")
         page.locator("#search").fill("after:1/3/2024")
         page.locator("#search").press("Enter")
         expect(page.locator("#result-status")).to_have_text("0 messages")

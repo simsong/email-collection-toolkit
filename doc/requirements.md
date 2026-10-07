@@ -2531,7 +2531,9 @@ the catalog to enumerate matches. Autocomplete deadlines are optional incomplete
 suggestions, never a failed search or fabricated count; stale suggestion errors
 must not affect a replacement query. Explicit Plain Text, HTML, or Raw Source
 selection persists within a reader window across message navigation, using the
-message default only when that representation is absent. HTML must render in
+message default only when that representation is absent. Retained mode must
+honor the backend preferred body when its type matches, preserving substantive
+HTML rather than selecting an earlier short alternative. HTML must render in
 native sandboxed frames without acquiring scripts, remote-content consent, or
 native IPC privileges.
 Native recent-menu actions must retain the displayed path despite another window

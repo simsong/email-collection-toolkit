@@ -1362,8 +1362,9 @@ async function selectMessage(messagePk) {
   updateMessageFileWell();
   renderMessageHeaders(view);
   elements["part-select"].replaceChildren(...view.body_parts.map(partOption));
-  const partId = view.body_parts.find(part => part.content_type === state.preferredBodyType)?.part_id
-    ?? view.preferred_part_id;
+  const defaultPart = view.body_parts.find(part => part.part_id === view.preferred_part_id);
+  const partId = defaultPart?.content_type === state.preferredBodyType ? view.preferred_part_id
+    : (view.body_parts.find(part => part.content_type === state.preferredBodyType)?.part_id ?? view.preferred_part_id);
   elements["part-select"].value = String(partId);
   renderAttachments(view.attachments);
   renderLocations(view);

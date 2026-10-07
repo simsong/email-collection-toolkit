@@ -3184,6 +3184,8 @@ MIME frames, independently of IPC trust. Message sanitization, no-script sandbox
 and content security policy still control resources. Each reader window retains
 the explicitly selected MIME content type across messages; unavailable types use
 the message default without forgetting the preference or carrying remote consent.
+When that default matches the retained type it takes precedence over the first
+same-type alternative, so a short HTML notice cannot hide the complete HTML body.
 The native synthetic multipart trial exercises HTML rendering, sanitization and
 keyboard navigation back to Plain Text; Chromium checks the shared widget path.
 `native_asset` specializes only the three embedded editor HTML policies for the
