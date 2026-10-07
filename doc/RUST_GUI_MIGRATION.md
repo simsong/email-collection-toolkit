@@ -82,7 +82,7 @@ synthetic archive/source byte inventories stayed unchanged, and PNGs were
 visually inspected. Those initial checks did not exercise native file dialogs,
 clipboard, printing, attachment launch, drag-out or embedded workflow editors.
 The subsequent editor and manual trials below extend that evidence;
-attachment launch and drag-out remain pending. The earlier locked-desktop attempt could not acknowledge paint
+drag-out remains pending. The earlier locked-desktop attempt could not acknowledge paint
 and is not passing evidence.
 The native regression also loads owner rules, identities and import history
 through the real service, with opaque-frame parent access denied. It reproduced
@@ -104,6 +104,13 @@ Rename/Move/Separate/Reopen through sandboxed editor controls. A real
 `process --reprocess` and another app process must retain those decisions while
 canonical mail/source hashes remain fixed. These are explicit mutations of the
 disposable fixture's settings/derived database, separate from read-only fixity.
+Subsequent macOS attachment trials used a synthetic MIME message: the actual Save
+dialog retained all payload bytes, Cancel returned without opening, and explicit
+Open launched the identical temporary text file in TextEdit. The full archive
+inventory and source hash remained fixed; closing the reader removed its temporary
+copy. Rust now supplies the confirmation modal because WKWebView did not show the
+shared page's JavaScript confirm. Browser regressions cover Cancel, Escape and the
+headless dispatcher's continued refusal to launch even after confirmation.
 
 The broader [issue #49 checklist](https://github.com/simsong/email-collection-toolkit/issues/49)
 remains open. Specifically, this local build does **not** complete:

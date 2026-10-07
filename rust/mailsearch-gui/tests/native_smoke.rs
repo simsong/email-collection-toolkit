@@ -2,7 +2,7 @@
 // Prove native Rust reading and persisted workflow edits on a CLI-built archive.
 // Synthetic EML inputs go through the real ingest CLI and portable verifier.
 // The feature-enabled application drives its real DOM and native IPC, then snapshots WebKit.
-// Every subprocess has a deadline and retained logs; failures preserve the fixture.
+// Each subprocess has a deadline and distinct stdout/stderr logs; failures retain fixtures.
 // Preferences use a private HOME; read-only trials preserve the full archive.
 // Explicit editor trials persist decisions while canonical mail/source hashes stay fixed.
 // A real processor rerun and another app launch must retain the manual decisions.
@@ -24,7 +24,7 @@ fn run(command: &mut Command, log: &Path) -> Result<()> {
     let output = File::create(log)?;
     let mut child = command
         .stdout(output.try_clone()?)
-        .stderr(output)
+        .stderr(File::create(log.with_extension("stderr.log"))?)
         .stdin(Stdio::null())
         .spawn()?;
     let deadline = Instant::now() + Duration::from_secs(120);
@@ -32,7 +32,7 @@ fn run(command: &mut Command, log: &Path) -> Result<()> {
         if let Some(status) = child.try_wait()? {
             ensure!(
                 status.success(),
-                "{command:?} failed: {status}; see {}",
+                "{command:?} failed: {status}; see {} and its stderr.log",
                 log.display()
             );
             return Ok(());
@@ -102,8 +102,13 @@ fn cli_archive_native_search_and_screenshot() -> Result<()> {
         ),
         ("garden", "Garden update", "The roses are blooming."),
     ] {
+        let content = if filename == "observatory" {
+            format!("MIME-Version: 1.0\r\nContent-Type: multipart/mixed; boundary=native-fixture\r\n\r\n--native-fixture\r\nContent-Type: text/plain; charset=utf-8\r\n\r\n{body}\r\n--native-fixture\r\nContent-Type: text/plain\r\nContent-Disposition: attachment; filename=native-acceptance.txt\r\n\r\nNative attachment fixture.\r\n--native-fixture--\r\n")
+        } else {
+            format!("Content-Type: text/plain; charset=utf-8\r\n\r\n{body}\r\n")
+        };
         fs::write(source.join(format!("{filename}.eml")), format!(
-            "From: Alice <alice@example.test>\r\nTo: Bob <bob@example.test>\r\nSubject: {subject}\r\nDate: Tue, 02 Jan 2024 10:00:00 +0000\r\nMessage-ID: <{filename}@example.test>\r\nContent-Type: text/plain; charset=utf-8\r\n\r\n{body}\r\n"
+            "From: Alice <alice@example.test>\r\nTo: Bob <bob@example.test>\r\nSubject: {subject}\r\nDate: Tue, 02 Jan 2024 10:00:00 +0000\r\nMessage-ID: <{filename}@example.test>\r\n{content}"
         ))?;
     }
     let source_before = inventory(&source)?;

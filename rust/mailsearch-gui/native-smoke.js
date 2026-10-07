@@ -121,6 +121,16 @@ window.addEventListener("DOMContentLoaded", async () => {
     await wait("message display", () => document.getElementById("message-subject").textContent === "Observatory planning"
       && document.getElementById("body-view").textContent.includes("Meet at the observatory on Friday."));
     if (!document.getElementById("error").hidden) throw new Error(document.getElementById("error").textContent);
+    const attachmentOpen=[...document.querySelectorAll("#attachment-list button")].find(button=>button.textContent==="Open");
+    if(!attachmentOpen) throw new Error("Native attachment control missing");
+    attachmentOpen.click();
+    await wait("attachment confirmation",()=>document.querySelector('dialog[aria-label="Open attachment"]'));
+    const confirmation=document.querySelector('dialog[aria-label="Open attachment"]');
+    if(!confirmation.textContent.includes("native-acceptance.txt may contain active or unrecognized content"))
+      throw new Error("Attachment confirmation lost its filename or warning");
+    [...confirmation.querySelectorAll("button")].find(button=>button.textContent==="Cancel").click();
+    await wait("attachment Cancel",()=>!confirmation.isConnected);
+    if (!document.getElementById("error").hidden) throw new Error(document.getElementById("error").textContent);
     window.__rustShellAction("about");
     const dialog=document.getElementById("rust-shell-dialog");
     await wait("About health",()=>document.getElementById("rust-antivirus-status") || dialog.querySelector('[role="alert"]').textContent);

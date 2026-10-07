@@ -337,6 +337,20 @@ def test_rust_mime_filters_and_dates_in_shared_widgets(page: Page, tmp_path: Pat
         expect(page.frame_locator("#body-view iframe").locator("body")).to_contain_text("HTML version.")
         expect(page.locator("#remote-content")).to_be_visible()
         expect(page.locator("#attachment-list")).to_contain_text("report.pdf")
+        # Rust attachment opening must use a rendered dialog, never WKWebView confirm().
+        open_pdf = page.locator("#attachment-list .attachment").filter(has_text="report.pdf").get_by_role("button", name="Open", exact=True)
+        open_pdf.click()
+        confirmation = page.get_by_role("dialog", name="Open attachment", exact=True)
+        expect(confirmation).to_be_visible()
+        expect(confirmation).to_contain_text("report.pdf may contain active or unrecognized content")
+        confirmation.get_by_role("button", name="Cancel", exact=True).click()
+        expect(confirmation).to_have_count(0)
+        expect(page.locator("#error")).to_be_hidden()
+        open_pdf.click()
+        expect(confirmation).to_be_visible()
+        confirmation.press("Escape")
+        expect(confirmation).to_have_count(0)
+        expect(page.locator("#error")).to_be_hidden()
         assert page.frame_locator("#body-view iframe").locator("script").count() == 0
         assert page.frame_locator("#body-view iframe").locator("img[src^='https://']").count() == 0
         assert page.frame_locator("#body-view iframe").locator("img[src^='data:image/png;']").count() == 1
@@ -351,6 +365,15 @@ def test_rust_mime_filters_and_dates_in_shared_widgets(page: Page, tmp_path: Pat
         page.locator("#show-original-folders").check()
         expect(page.locator("#mailbox-tree")).to_contain_text("mail")
         expect(page.locator("#error")).to_be_hidden()
+        page.locator("#search").fill("Appendixquartz")
+        page.locator("#search").press("Enter")
+        expect(page.locator("#result-status")).to_have_text("1 message")
+        page.locator("#result-list .result").first.click()
+        open_pdf.click()
+        confirmation.get_by_role("button", name="Open", exact=True).click()
+        expect(confirmation).to_have_count(0)
+        # The real headless dispatcher must still prohibit the approved OS launch.
+        expect(page.locator("#error")).to_contain_text("requires the native desktop window")
     finally:
         if process.stdin is not None:
             process.stdin.close()

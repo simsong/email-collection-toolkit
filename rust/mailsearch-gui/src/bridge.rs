@@ -104,7 +104,6 @@ impl Bridge {
             method,
             "save_message"
                 | "save_attachment"
-                | "open_attachment"
                 | "open_message_window"
                 | "new_search_window"
                 | "open_archive"
@@ -113,7 +112,9 @@ impl Bridge {
                 | "copy_source_path"
                 | "copy_visible_text"
                 | "copy_link"
-        ) {
+        ) || (method == "open_attachment"
+            && args.get(2).and_then(Value::as_bool).unwrap_or(false))
+        {
             ensure!(
                 self.desktop_enabled,
                 "This operation requires the native desktop window"
@@ -393,7 +394,7 @@ impl Bridge {
                 let raw = self.archive.raw_message(number(args, 0)?)?;
                 let (name, _, bytes) = crate::mime::payload(&raw, number(args, 1)?)?;
                 if !args.get(2).and_then(Value::as_bool).unwrap_or(false) {
-                    return Ok(json!({"requires_confirmation":true}));
+                    return Ok(json!({"requires_confirmation":true,"filename":name}));
                 }
                 if self.exports.is_none() {
                     self.exports = Some(tempfile::tempdir()?);

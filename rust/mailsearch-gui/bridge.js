@@ -80,6 +80,23 @@
     dialog.append(heading,close); document.body.append(dialog);
     dialog.addEventListener("close",()=>dialog.remove(),{once:true}); dialog.showModal(); return dialog;
   }
+  const openAttachment=api.open_attachment;
+  api.open_attachment=async(message, part, confirmed=false)=>{
+    const result=await openAttachment(message,part,confirmed);
+    if(!result?.requires_confirmation) return result;
+    const accepted=await new Promise(resolve=>{
+      const dialog=modal("Open attachment");
+      dialog.querySelector("button").textContent="Cancel";
+      dialog.append(element("p",`${result.filename} may contain active or unrecognized content. Open it anyway?`));
+      const open=element("button","Open"); open.type="button";
+      let accepted=false;
+      open.addEventListener("click",()=>{accepted=true; dialog.close();});
+      dialog.addEventListener("close",()=>resolve(accepted),{once:true});
+      dialog.append(open);
+      dialog.querySelector("button").focus();
+    });
+    return accepted ? openAttachment(message,part,true) : {requires_confirmation:false,cancelled:true};
+  };
   function panel(page, title, methods, query="") {
     const dialog=modal(title), frame=element("iframe"); frame.title=title;
     frame.setAttribute("sandbox","allow-scripts allow-forms");

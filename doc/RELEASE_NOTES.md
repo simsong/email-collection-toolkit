@@ -4,6 +4,9 @@
 
 ## Unreleased
 
+- Show an accessible Rust attachment Open confirmation; Cancel leaves the
+  attachment unopened instead of silently relying on unsupported WKWebView confirm.
+
 - Latch Rust helper owner-pipe loss across import startup; a prior Stop can be
   reset for a new job, but owner loss cannot be cleared or publish another message.
 

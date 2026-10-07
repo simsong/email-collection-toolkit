@@ -3183,6 +3183,11 @@ and syncs/atomically replaces the file. Unrelated stale-dialog edits survive;
 competing font-size changes return an explicit conflict. Lock contention returns
 a retry message without blocking the window event loop. The updater is configured
 from the merged/reloaded settings, not an old window snapshot.
+For attachment opening, the Rust bridge renders its own modal confirmation,
+showing the backend's sanitized filename. Cancel/Escape returns without export or
+launch; explicit Open sends the confirmed request. The read-only preflight works
+in headless RPC, but the confirmed action still requires native desktop capability.
+This avoids WKWebView's absent JavaScript confirm UI.
 Editor frames use `sandbox="allow-scripts allow-forms"` and `rust-panel.js` receives a private
 MessageChannel from the parent. The parent validates request IDs, argument arrays
 and panel-specific methods; frames cannot read the parent API. Dialogs carry an

@@ -2564,3 +2564,6 @@ text when decoding fails. Display recovery must not rewrite archive bytes.
 Windows native smoke must retain a real WebView2 PNG and unchanged archive
 inventory/hash evidence. Use synthetic fixtures only and isolate preferences;
 Windows writer restrictions must not be bypassed to manufacture acceptance.
+Rust attachment opening must render an accessible confirmation dialog rather
+than rely on webview JavaScript confirm support. Cancel/Escape must leave the
+attachment unopened; only explicit Open may launch its exported temporary copy.
