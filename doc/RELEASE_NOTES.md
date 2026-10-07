@@ -753,3 +753,31 @@ Recovered work from historical development checkouts:
 Contacts/geography GUI, live IMAP sources, and Refresh/Rebuild are documented
 plans, not newly implemented features. No source mailbox or real archive is
 changed by reconciliation or its fixture tests.
+
+## Local Windows MSIX prototype (2026-10-06)
+
+See [Windows MSIX test packaging](WINDOWS_MSIX_TEST.md) for automated build/sign/test commands,
+private Python helper discovery, external WebView2 detection, native Windows
+evidence and unresolved installation/import/scanner/converter requirements.
+This local prototype is not a released or fully validated Windows application.
+
+## MSIX installation matrix (2026-10-07)
+
+The MSIX decision supersedes the older shared WinSparkle feed/EXE plan.
+`windows-msix.yml` supports explicit dispatch and reusable release calls; ordinary
+pushes do not run it. Two native build jobs produce x64 and ARM64 payloads once.
+One assembly job creates a signed common bundle and a higher-version upgrade
+fixture with identical application bytes. Both installation VMs download that
+same artifact: Windows Server x64 (`windows-latest`) and Windows 11 ARM64
+(`windows-11-arm`). Installation jobs do not rebuild. Private signing keys remain
+outside uploaded artifacts. Test packages are never published as release assets.
+The release caller waits for this gate after tag preflight. Windows 10 testing
+is not required. No GitHub Team or AWS provisioning is needed.
+
+Installed checks exercise private Python discovery, synthetic search/fixity,
+a native window, upgrade and uninstall, removing test packages and added trust
+in cleanup. WebView2 remains external and its absence fails this positive test.
+Its writable user-data directory is outside the immutable package. Hosted
+execution is pending; earlier local prototype results do not validate this head.
+Start-menu activation, missing-runtime UI, Windows imports/scanner/converters,
+and physical interaction remain separate acceptance gaps.

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import copy
-import fcntl
 import hashlib
 import json
 import os
@@ -167,6 +166,10 @@ def _prepare(archive: Path, transaction: ConfigTransaction) -> list[PreparedConf
 
 
 def _commit_config_transaction(archive: Path, transaction: ConfigTransaction) -> None:
+    if os.name == "nt":
+        raise OSError("Windows plugin configuration transactions are not supported")
+    import fcntl
+
     paths = {config_path(archive) if write.scope == "archive" else transaction.installation
              for entry in transaction.namespaces for write in entry.writes}
     if not paths:

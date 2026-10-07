@@ -44,9 +44,16 @@ impl Engine {
     }
     fn spawn(archive: &Path, abort: Option<&AtomicBool>) -> Result<Self> {
         let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let packaged = std::env::current_exe()?
+            .parent()
+            .context("Missing executable directory")?
+            .join("python/python.exe");
         let python = std::env::var_os("ECT_RUST_ENGINE_PYTHON")
             .map(PathBuf::from)
             .unwrap_or_else(|| {
+                if cfg!(windows) && packaged.is_file() {
+                    return packaged;
+                }
                 root.join(if cfg!(windows) {
                     ".venv/Scripts/python.exe"
                 } else {

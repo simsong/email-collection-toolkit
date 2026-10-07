@@ -91,7 +91,7 @@ def test_ci_runs_parallel_branch_jobs_without_building_a_dmg() -> None:
     makefile = (workflow.parents[2] / "Makefile").read_text(encoding="utf-8")
     assert "check:\n\t$(MAKE) check-static\n\t$(MAKE) check-tests" in makefile
     for definition in workflow.parent.glob("*.yml"):
-        if definition.name == "rust-reader.yml":
+        if definition.name in {"rust-reader.yml", "windows-msix.yml"}:
             continue  # Its explicit multi-platform build matrix is checked below.
         configuration = safe_load(definition.read_text())
         for name, job in configuration[JOBS].items():
@@ -163,7 +163,7 @@ def test_release_workflow_validates_built_distributions() -> None:
     assert any(step.get("run") == "make test-sparkle-signing" for step in ci[JOBS]["python-browser"]["steps"])
     triggers = configuration.get(WORKFLOW_ON, configuration.get(True))
     assert triggers == {"push": {"tags": ["v*"]}}
-    assert set(configuration[JOBS]) == {"assemble", "macos", "rust-reader", "preflight"}
+    assert set(configuration[JOBS]) == {"assemble", "macos", "rust-reader", "windows-msix", "preflight"}
     assert configuration[JOBS]["macos"][NEEDS] == "preflight"
     assert configuration[JOBS]["rust-reader"][NEEDS] == "preflight"
     assert "git merge-base --is-ancestor HEAD refs/remotes/origin/main" in text
@@ -312,3 +312,30 @@ def test_zola_config_reports_read_failures(tmp_path: Path, failure: str) -> None
     assert result.returncode != 0
     assert result.stderr.startswith(f"invalid Zola configuration {config}:")
     assert "Traceback" not in result.stderr
+
+
+def test_msix_same_bundle_is_installed_without_rebuilding() -> None:
+    """Windows release policy: explicit runs, shared artifact, two installs, no key upload."""
+    root = Path(__file__).parents[1]
+    workflow = safe_load((root / ".github/workflows/windows-msix.yml").read_text(encoding="utf-8"))
+    triggers = workflow.get("on", workflow.get(True))
+    assert set(triggers) == {"workflow_dispatch", "workflow_call", "push"}
+    assert triggers["push"]["branches"] == ["codex/windows-msix-ci"]
+    assert "[msix-ci]" in workflow[JOBS]["payload"]["if"]
+    jobs = workflow[JOBS]
+    assert jobs["bundle"][NEEDS] == "payload"
+    assert jobs["install"][NEEDS] == "bundle"
+    assert jobs["install"]["strategy"]["matrix"]["include"] == [
+        {"os": "windows-latest", "arch": "x64"}, {"os": "windows-11-arm", "arch": "arm64"}]
+    install = jobs["install"][STEPS]
+    downloads = [step for step in install if step.get("uses", "").startswith("actions/download-artifact@")]
+    assert len(downloads) == 1
+    assert downloads[0]["with"]["name"] == "windows-msix-install-test"
+    assert not any("cargo " in step.get(RUN, "") or "uv sync" in step.get(RUN, "") for step in install)
+    upload = next(step for step in jobs["bundle"][STEPS] if step.get("uses", "").startswith("actions/upload-artifact@"))
+    assert upload["with"]["name"] == downloads[0]["with"]["name"]
+    assert set(upload["with"]["path"].splitlines()) == {
+        "dist/bundle/*.msixbundle", "dist/bundle/*.cer", "dist/bundle/sha256.json"}
+    release = safe_load((root / ".github/workflows/release.yml").read_text(encoding="utf-8"))
+    assert release[JOBS]["windows-msix"][NEEDS] == "preflight"
+    assert "windows-msix" in release[JOBS]["assemble"][NEEDS]

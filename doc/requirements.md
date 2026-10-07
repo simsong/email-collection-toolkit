@@ -2547,12 +2547,14 @@ Explicit pre-merge Windows CI is opt-in via `[windows-ci]` in the pushed head
 commit message; ordinary pushes must skip both Windows runners. Reuse the
 reader workflow without duplicating the normal macOS native job.
 
-Windows WinSparkle and macOS Sparkle must share the existing appcast URL.
-Publication must use separate items with explicit enclosure `sparkle:os` values
-`macos` and `windows` (a combined installer), retaining platform-specific minimum
-OS versions and signed payloads. Derive release versions and builds through the
-shared mapper. Validate the complete mixed feed and re-sign it before publication;
-do not enable Windows updates against historical unclassified macOS entries.
+Windows distribution uses MSIX with separately installed WebView2. Missing
+runtime detection must provide native installation guidance without downloading
+or installing WebView2. Keep macOS Sparkle separate from Windows App Installer.
+Installer CI builds x64/ARM64 payloads once, assembles one signed bundle, and
+installs the same artifact on Windows Server x64 and Windows 11 ARM64. Run only
+on explicit dispatch or release calls. Test private Python discovery, native
+launch, synthetic search/fixity, upgrade and uninstall. Test signing keys must
+never enter uploaded artifacts. Windows 10 testing is not a release gate.
 
 Ordinary Rust search exposes only Archive/Sent categories, including blank,
 structured, preview and comprehensive queries; quarantined rows must never
@@ -2567,3 +2569,10 @@ Windows writer restrictions must not be bypassed to manufacture acceptance.
 Rust attachment opening must render an accessible confirmation dialog rather
 than rely on webview JavaScript confirm support. Cancel/Escape must leave the
 attachment unopened; only explicit Open may launch its exported temporary copy.
+
+## Local Windows MSIX prototype (2026-10-06)
+
+See [Windows MSIX test packaging](WINDOWS_MSIX_TEST.md) for automated build/sign/test commands,
+private Python helper discovery, external WebView2 detection, native Windows
+evidence and unresolved installation/import/scanner/converter requirements.
+This local prototype is not a released or fully validated Windows application.

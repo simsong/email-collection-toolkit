@@ -127,7 +127,7 @@ shared release mapper. Optional build-time `ECT_WINSPARKLE_APPCAST_URL` and
 key; never embed a private signing key. Until the shared feed is migrated and
 Windows installers are published, development builds leave updates unavailable.
 `ECT_WINSPARKLE_TEST_DLL` selects the staged, checksum-verified native DLL for
-`cargo reader-updater-check`. `scripts/prepare_winsparkle.ps1` stages that DLL
+`cargo reader-updater-check`. `scripts/win/prepare_winsparkle.ps1` stages that DLL
 and license notices without a system installation. `CARGO_TARGET_DIR` selects
 build output for direct Cargo invocations. For Make targets, set
 `RUST_TARGET_DIR` (default: checkout `target/`); Make exports it as
@@ -754,3 +754,14 @@ license bundle produced by `make runtime-license-bundle LICENSE_OUTPUT=PATH`.
 
 Development PST/OST imports require `make pst-importer mcti-scan pff-converter`.
 The DMG bundles these executables; the host never loads libpff.
+
+## Local Windows MSIX prototype (2026-10-06)
+
+See [Windows MSIX test packaging](doc/WINDOWS_MSIX_TEST.md) for automated build/sign/test commands,
+private Python helper discovery, external WebView2 detection, native Windows
+evidence and unresolved installation/import/scanner/converter requirements.
+This local prototype is not a released or fully validated Windows application.
+
+`CARGO_TARGET_DIR` optionally selects a reusable Cargo build cache.
+`ECT_RUST_ENGINE_PYTHON` remains a development interpreter override; packaged
+builds otherwise discover their private Python beside the executable.

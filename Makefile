@@ -792,3 +792,12 @@ test-rust-updater:
 .PHONY: test-rust-engine
 test-rust-engine:
 	uv run --locked pytest -q tests/test_rust_engine.py
+
+# Windows-only local prototype; CARGO_TARGET_DIR selects the reusable Cargo cache.
+# MSIX_PACKAGE and MSIX_EVIDENCE name a test artifact and a new evidence directory.
+.PHONY: msix-test test-msix
+msix-test:
+	cargo msix-test
+
+test-msix:
+	uv run --locked python scripts/win/test_windows_msix.py "$(MSIX_PACKAGE)" "$(MSIX_EVIDENCE)"
