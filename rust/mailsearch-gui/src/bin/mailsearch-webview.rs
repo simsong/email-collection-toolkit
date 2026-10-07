@@ -280,6 +280,8 @@ fn native(path: PathBuf, smoke_output: Option<PathBuf>, parameters: Option<Strin
     };
     use wry::WebViewBuilder;
     enum NativeEvent {
+        #[cfg(all(target_os = "macos", feature = "native-smoke"))]
+        DragSmoke(Vec<String>),
         Reply(Reply),
         Capabilities(serde_json::Value),
         Recovering,
@@ -287,6 +289,7 @@ fn native(path: PathBuf, smoke_output: Option<PathBuf>, parameters: Option<Strin
         Menu(muda::MenuEvent),
         Quit,
         QuitFinished,
+        ExportCleanup(anyhow::Result<()>),
         Print(u64),
         #[cfg(feature = "native-smoke")]
         Snapshot,
@@ -420,6 +423,7 @@ fn native(path: PathBuf, smoke_output: Option<PathBuf>, parameters: Option<Strin
     let ipc_proxy = events.create_proxy();
     let ipc_abort = abort.clone();
     let diagnostics = std::env::var_os("ECT_RUST_WEBVIEW_DIAGNOSTICS").is_some();
+    #[cfg(feature = "native-smoke")]
     let smoke_enabled = smoke_output.is_some();
     let window_parameters = format!(
         "window.__rustWindowParameters={};",
@@ -470,6 +474,15 @@ fn native(path: PathBuf, smoke_output: Option<PathBuf>, parameters: Option<Strin
                 #[cfg(feature = "native-smoke")]
                 if smoke_enabled {
                     match message.method.as_str() {
+                        #[cfg(target_os = "macos")]
+                        "native_smoke_drag" => {
+                            if let Ok(tokens) =
+                                serde_json::from_value(serde_json::Value::Array(message.args))
+                            {
+                                let _ = ipc_proxy.send_event(NativeEvent::DragSmoke(tokens));
+                            }
+                            return;
+                        }
                         "native_smoke_close_ready" => {
                             eprintln!("Native smoke: verified quit during unfinished search");
                             let _ = ipc_proxy.send_event(NativeEvent::Quit);
@@ -544,6 +557,8 @@ fn native(path: PathBuf, smoke_output: Option<PathBuf>, parameters: Option<Strin
         builder
     };
     let view = builder.build(&window)?;
+    #[cfg(target_os = "macos")]
+    mailsearch_rust::drag::install(&view)?;
     #[cfg(feature = "native-smoke")]
     let snapshot_proxy = events.create_proxy();
     #[cfg(feature = "native-smoke")]
@@ -560,7 +575,12 @@ fn native(path: PathBuf, smoke_output: Option<PathBuf>, parameters: Option<Strin
     }
     let reply_proxy = events.create_proxy();
     let mut quitting = false;
+    let mut worker_finished = false;
+    let mut exports_cleaned = false;
+    let mut cleanup_failed = false;
     let mut reader_ready = false;
+    #[cfg(feature = "native-smoke")]
+    let mut smoke_passed = false;
     #[cfg(all(target_os = "windows", feature = "native-smoke"))]
     let mut accelerator_trial = None;
     events.run(move |event, _, flow| {
@@ -573,6 +593,10 @@ fn native(path: PathBuf, smoke_output: Option<PathBuf>, parameters: Option<Strin
             | Event::UserEvent(NativeEvent::Quit) => {
                 if !quitting {
                     quitting=true;
+                    let cleanup_proxy = reply_proxy.clone();
+                    mailsearch_rust::drag::close(move |result| {
+                        let _ = cleanup_proxy.send_event(NativeEvent::ExportCleanup(result));
+                    });
                     abort.store(true, std::sync::atomic::Ordering::Release);
                     let _=shutdown_sender.try_send(Request{id:0,method:"shutdown".into(),args:vec![]});
                     let watchdog=reply_proxy.clone();
@@ -580,7 +604,22 @@ fn native(path: PathBuf, smoke_output: Option<PathBuf>, parameters: Option<Strin
                 }
             }
             Event::UserEvent(NativeEvent::QuitFinished) => {
-                *flow = ControlFlow::ExitWithCode(if smoke_enabled { 1 } else { 0 });
+                worker_finished = true;
+            }
+            Event::UserEvent(NativeEvent::ExportCleanup(result)) => {
+                exports_cleaned = true;
+                if let Err(error) = result {
+                    eprintln!("{error:#}");
+                    cleanup_failed = true;
+                }
+            }
+            #[cfg(all(target_os = "macos", feature = "native-smoke"))]
+            Event::UserEvent(NativeEvent::DragSmoke(tokens)) => {
+                let result = tokens.iter().try_for_each(|token| mailsearch_rust::drag::inspect(token));
+                match result {
+                    Ok(()) => { let _ = view.evaluate_script("window.__rustDragVerified=true;"); }
+                    Err(error) => { let _ = reply_proxy.send_event(NativeEvent::SmokeFinished(Err(error))); }
+                }
             }
             #[cfg(feature = "native-smoke")]
             Event::UserEvent(NativeEvent::ResizeSmoke) => {
@@ -607,7 +646,8 @@ fn native(path: PathBuf, smoke_output: Option<PathBuf>, parameters: Option<Strin
                 if let Err(error) = &result {
                     eprintln!("{error:#}");
                 }
-                *flow = ControlFlow::ExitWithCode(if result.is_ok() { 0 } else { 1 });
+                smoke_passed = result.is_ok();
+                let _ = reply_proxy.send_event(NativeEvent::Quit);
             }
             Event::UserEvent(NativeEvent::Shell(request)) => {
                 if let Some(shell) = &mut shell {
@@ -691,6 +731,13 @@ fn native(path: PathBuf, smoke_output: Option<PathBuf>, parameters: Option<Strin
                 }
             }
             _ => (),
+        }
+        if quitting && worker_finished && exports_cleaned {
+            #[cfg(feature = "native-smoke")]
+            let failed = cleanup_failed || (smoke_enabled && !smoke_passed);
+            #[cfg(not(feature = "native-smoke"))]
+            let failed = cleanup_failed;
+            *flow = ControlFlow::ExitWithCode(i32::from(failed));
         }
     });
 }

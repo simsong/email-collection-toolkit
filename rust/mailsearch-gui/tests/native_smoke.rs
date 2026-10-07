@@ -4,7 +4,7 @@
 // The feature-enabled application drives its real DOM and native IPC, then snapshots WebKit.
 // Each subprocess has a deadline and distinct stdout/stderr logs; failures retain fixtures.
 // Preferences use a private HOME; read-only trials preserve the full archive.
-// Explicit editor trials persist decisions while canonical mail/source hashes stay fixed.
+// Explicit editor button/HTML drag trials persist decisions while mail/source hashes stay fixed.
 // A real processor rerun and another app launch must retain the manual decisions.
 // Run explicitly with make test-rust-gui-native on a logged-in macOS runner.
 #![cfg(all(target_os = "macos", feature = "native-smoke"))]
@@ -192,6 +192,21 @@ fn cli_archive_native_search_and_screenshot() -> Result<()> {
     let preferences = mailsearch_rust::preferences::Preferences::load(
         &home.join("Library/Application Support/Email Collection Toolkit/rust-reader.json"),
     )?;
+    for name in ["native.log", "native-no-python.log"] {
+        let text = fs::read_to_string(work.join(name))?;
+        let paths: Vec<_> = text
+            .lines()
+            .filter_map(|line| line.strip_prefix("Native drag export: "))
+            .collect();
+        ensure!(
+            paths.len() == 2,
+            "Missing native EML/ZIP drag writer evidence"
+        );
+        ensure!(
+            paths.iter().all(|path| !Path::new(path).exists()),
+            "Closed native reader retained drag exports"
+        );
+    }
     ensure!(
         preferences.message_font_size == 16 && !preferences.automatic_updates,
         "Native preference Save/Reopen did not persist the two real UI edits"
@@ -295,7 +310,16 @@ fn cli_archive_native_search_and_screenshot() -> Result<()> {
             .query_map([], |row| row.get(0))?
             .collect::<rusqlite::Result<_>>()?;
         ensure!(
-            decisions == ["rename-person", "move-address", "separate-address"],
+            decisions
+                == [
+                    "rename-person",
+                    "move-address",
+                    "separate-address",
+                    "move-address",
+                    "separate-address",
+                    "merge-person",
+                    "separate-address"
+                ],
             "Manual decision history changed: {decisions:?}"
         );
     }
@@ -306,6 +330,6 @@ fn cli_archive_native_search_and_screenshot() -> Result<()> {
             .arg(&archive),
         &work.join("verify-editors.log"),
     )?;
-    fs::write(work.join("success.txt"), "Native WKWebView startup, search/read, About health, Preferences Save/Reopen with/without helper, isolated owner/identity/history loading, owner Save/Reopen, identity Rename/Move/Separate/Reopen, real processor rerun and independent app relaunch persistence, PNG snapshots and canonical mail/source fixity passed.\n")?;
+    fs::write(work.join("success.txt"), "Native WKWebView startup, search/read, About health, Preferences Save/Reopen with/without helper, isolated owner/identity/history loading, owner Save/Reopen, identity Rename/Move/HTML address drag/person merge/Separate/Reopen, real processor rerun and independent app relaunch persistence, PNG snapshots and canonical mail/source fixity passed. Physical pointer gestures and OS file drag-out are separate acceptance gates.\n")?;
     Ok(())
 }

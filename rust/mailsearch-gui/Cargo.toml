@@ -13,7 +13,7 @@ publish = false
 license = "GPL-2.0-only"
 
 [features]
-native-smoke = ["dep:block2", "dep:objc2", "dep:objc2-app-kit", "dep:objc2-foundation", "dep:objc2-web-kit", "dep:webview2-com", "dep:windows"]
+native-smoke = ["dep:block2", "dep:webview2-com", "dep:windows"]
 
 [dependencies]
 archive-verifier = { path = "../archive-verifier" }
@@ -33,6 +33,7 @@ ammonia = "4"
 encoding_rs = "0.8"
 rfd = "0.15"
 arboard = "3.6"
+zip = { version = "2.4", default-features = false }
 
 [build-dependencies]
 toml = "1.1"
@@ -48,10 +49,10 @@ muda = { version = "0.20", default-features = false }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 block2 = { version = "0.6", optional = true }
-objc2 = { version = "0.6", optional = true }
-objc2-app-kit = { version = "0.3", default-features = false, features = ["NSBitmapImageRep", "NSImage", "NSImageRep"], optional = true }
-objc2-foundation = { version = "0.3", default-features = false, features = ["NSData", "NSDictionary", "NSError"], optional = true }
-objc2-web-kit = { version = "0.3", default-features = false, features = ["WKSnapshotConfiguration", "WKWebView", "block2"], optional = true }
+objc2 = "0.6"
+objc2-app-kit = { version = "0.3", default-features = false, features = ["NSApplication", "NSBitmapImageRep", "NSImage", "NSImageRep", "NSDragging", "NSDraggingItem", "NSDraggingSession", "NSPasteboard", "NSPasteboardItem", "NSWorkspace", "NSEvent", "NSView"] }
+objc2-foundation = { version = "0.3", default-features = false, features = ["NSData", "NSDictionary", "NSError", "NSArray", "NSString", "NSRunLoop"] }
+objc2-web-kit = { version = "0.3", default-features = false, features = ["WKSnapshotConfiguration", "WKWebView", "block2"] }
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"

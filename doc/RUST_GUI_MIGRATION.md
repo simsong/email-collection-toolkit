@@ -30,7 +30,7 @@ window that started them, with cross-process writer leases preventing conflicts.
 | --- | --- |
 | Search | Two painted previews followed by comprehensive search; cancellation, paging, sorting, selection; dates, phrases, names/institutions, role-count autocomplete, attachment text, original folders and shared saved filters |
 | Reading | Hash-verified source; decoded headers/text, HTML sanitization, CID images, remote-image consent, MIME alternatives/raw source, attachment previews and parent/source provenance |
-| Actions | Save message and attachment to new files, confirmed attachment opening, clipboard, approved links, print, separate message and search windows |
+| Actions | Save message and attachment to new files, macOS verified EML/ZIP drag preparation and Cocoa file writers, confirmed attachment opening, clipboard, approved links, print, separate message and search windows |
 | Documents | Empty archive creation, Open, recent archives and native folder/file dialogs |
 | Archive services | Owner rules with revision conflicts, name/address and institution editors, persistent manual decisions |
 | Import | Source selection, owner rules, scanner policy, attachment indexing, start, progress/history, stop after current message, failures and Continue Processing |
@@ -42,6 +42,10 @@ behavior. Source selections are read-only. Save refuses existing targets and
 paths inside the archive. Reads retain the prototype's 16 MiB record bound and
 256 KiB plain/raw display bound; HTML formatting is sanitized and may differ from
 the original mail. These restrictions are visible errors, not dropped messages.
+On macOS, the first message/file-icon drag prepares a private verified export;
+the next drag offers its file URL. Multiple selected messages use a ZIP, with
+at most 1000 selected IDs. This export path runs entirely in Rust, including
+with no Python helper. Physical copying to Finder still needs acceptance.
 
 ## Validation and remaining acceptance
 
@@ -87,8 +91,10 @@ and is not passing evidence.
 The native regression also loads owner rules, identities and import history
 through the real service, with opaque-frame parent access denied. It reproduced
 and repaired WKWebView's rejection of `self` script/style sources in sandboxed
-editors by allowing only the page's named bundled assets. Editor drag interactions
-still need acceptance beyond the tested Move/Separate buttons.
+editors by allowing only the page's named bundled assets. Native regressions now
+drive the real HTML address-drop and whole-person merge handlers, verify their
+audit records, and repeat checks after processor replay and a fresh app launch.
+Physical pointer gestures remain separate from these injected native DOM events.
 Manual native acceptance also verifies message exports against original RFC 5322
 bytes and macOS Select All, Copy/Paste, Cut and Undo in the search and editor
 fields. Native Edit actions and Open/Preferences/Quit shortcuts use the OS menu
@@ -115,7 +121,8 @@ headless dispatcher's continued refusal to launch even after confirmation.
 The broader [issue #49 checklist](https://github.com/simsong/email-collection-toolkit/issues/49)
 remains open. Specifically, this local build does **not** complete:
 
-- Native drag-out and multi-message ZIP dragging (controls remain hidden).
+- Physical file dragging to Finder/Desktop, including EML and multi-message ZIP
+  copies. Rust preparation and Cocoa writer checks do not establish that OS gesture.
 - One application-wide window coordinator, file associations and Finder/Explorer
   document activation. Additional windows currently run separate processes.
 - Windows archive-writing support, scanner/converter execution and full native

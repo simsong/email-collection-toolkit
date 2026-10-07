@@ -34,6 +34,7 @@ pub struct Bridge {
     pub(crate) cancellation: Option<(std::sync::Arc<std::sync::atomic::AtomicU64>, u64)>,
     selected: Option<(i64, Vec<u8>)>,
     exports: Option<tempfile::TempDir>,
+    drags: Option<crate::drag::Exports>,
     desktop_enabled: bool,
     engine: Option<crate::engine::Engine>,
     engine_generation: u64,
@@ -45,6 +46,7 @@ impl Bridge {
             archive: Archive::open(path)?,
             selected: None,
             exports: None,
+            drags: None,
             desktop_enabled: false,
             engine: None,
             engine_generation: 0,
@@ -103,6 +105,7 @@ impl Bridge {
         if matches!(
             method,
             "save_message"
+                | "prepare_drag"
                 | "save_attachment"
                 | "open_message_window"
                 | "new_search_window"
@@ -127,7 +130,7 @@ impl Bridge {
                         .db
                         .query_row("SELECT count(*) FROM messages", [], |r| r.get(0))?;
                 Ok(
-                    json!({"archive":self.archive.root,"ready":true,"message_count":count,"file_drag_supported":false,"configuration":{"search_highlight_background":"#fff0a6"}}),
+                    json!({"archive":self.archive.root,"ready":true,"message_count":count,"file_drag_supported":self.desktop_enabled && crate::drag::available(),"configuration":{"search_highlight_background":"#fff0a6"}}),
                 )
             }
             "activate" | "request_previews" => Ok(json!(true)),
@@ -374,6 +377,19 @@ impl Bridge {
             "open_link" => {
                 crate::desktop::open_link(text(args, 0, ""))?;
                 Ok(json!(true))
+            }
+            "prepare_drag" => {
+                ensure!(
+                    crate::drag::available(),
+                    "File dragging is unavailable on this platform"
+                );
+                let ids: Vec<i64> = serde_json::from_value(
+                    args.first().context("Missing drag selection")?.clone(),
+                )?;
+                if self.drags.is_none() {
+                    self.drags = Some(crate::drag::Exports::new(&self.archive)?);
+                }
+                self.drags.as_mut().unwrap().prepare(&self.archive, &ids)
             }
             "save_message" | "save_attachment" => {
                 let raw = self.archive.raw_message(number(args, 0)?)?;
@@ -997,6 +1013,7 @@ mod tests {
             true
         );
         let deadline = Instant::now() + Duration::from_secs(10);
+        let mut acknowledged = 0;
         loop {
             let status = bridge
                 .call("search_status", std::slice::from_ref(&new))
@@ -1006,16 +1023,19 @@ mod tests {
                 assert_eq!(status["count"], 1);
                 break;
             }
-            if status["window"].as_u64().unwrap() > 0 {
+            let window = status["window"].as_u64().unwrap();
+            if window > acknowledged {
                 // Both windows are empty; the comprehensive query must still run.
                 assert_eq!(status["count"], 0);
                 bridge
                     .call("search_advance", &[new.clone(), status["window"].clone()])
                     .unwrap();
+                acknowledged = window;
             }
             assert!(Instant::now() < deadline);
             std::thread::sleep(Duration::from_millis(1));
         }
+        assert_eq!(acknowledged, 2);
         assert_eq!(
             bridge
                 .call("search_page", &[new.clone(), json!(0)])

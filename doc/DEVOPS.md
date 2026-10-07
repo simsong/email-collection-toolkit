@@ -37,6 +37,10 @@ Do not run duplicate push/PR jobs or create a Windows build for every macOS
 iteration. Explicit test releases are an intentional packaging cost. Build each
 architecture once per run and pass those artifacts forward to packaging and
 release assembly rather than rebuilding them in the publisher.
+Ordinary branch CI assigns the Rust workspace suite to `static-rust`. The
+macOS native job runs `make test-rust-gui-native` directly; that target builds
+and checks native-feature code and exercises the actual window. It does not
+repeat `test-rust-gui` or a separate ordinary reader build.
 
 ### Windows distribution and evidence
 

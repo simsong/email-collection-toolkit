@@ -10,6 +10,7 @@ mod browse;
 pub mod demo;
 mod desktop;
 pub mod documents;
+pub mod drag;
 pub mod engine;
 mod mime;
 pub mod opening;

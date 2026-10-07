@@ -2,7 +2,8 @@
 /* Drive the actual native webview through its shipped search form and rows.
  * A CLI-created synthetic archive supplies the expected message and body.
  * Native IPC and Rust workers answer every query without substituted results.
- * Verify search, preferences and sandboxed editor Save/Move/Separate/Reopen on WKWebView.
+ * Verify search, preferences and sandboxed editor Save/Move/Drag/Separate/Reopen on WKWebView.
+ * Native HTML drag events use the shipped handlers; no backend responses are replaced.
  * Editor mutation phases operate only on the integration test's disposable archive.
  * Failures return through the same origin-checked IPC to fail the native process.
  * This driver is embedded only with the explicit native-smoke Cargo feature.
@@ -80,6 +81,31 @@ window.addEventListener("DOMContentLoaded", async () => {
             if(get("separate").disabled) throw new Error("Make separate unavailable after Move");
             get("separate").click();
             await saved(()=>row("bob@example.test").dataset.groupId!==group(label).dataset.groupId);
+            // Exercise both address moves and whole-person merges through the
+            // real HTML drag handlers in the opaque WKWebView editor frame.
+            const drag=source=>{
+              const target=group(label),dataTransfer=new DataTransfer();
+              if(!source?.draggable || !target) throw new Error("Identity drag controls unavailable");
+              source.dispatchEvent(new DragEvent("dragstart",{bubbles:true,cancelable:true,dataTransfer}));
+              const over=new DragEvent("dragover",{bubbles:true,cancelable:true,dataTransfer});
+              target.dispatchEvent(over);
+              // WebKit does not grant synthetic events the native drag session's
+              // effectAllowed write permission. Verify its real handlers and data;
+              // physical pointer/copy-mask acceptance remains a separate gate.
+              if(!over.defaultPrevented || !target.classList.contains("drop-target")
+                || dataTransfer.getData("text/plain")!==source.querySelector(".row-label").textContent)
+                throw new Error(`Identity drag was not accepted by the target: prevented=${over.defaultPrevented}, target=${target.classList.contains("drop-target")}, allowed=${dataTransfer.effectAllowed}, text=${dataTransfer.getData("text/plain")}, connected=${source.isConnected}/${target.isConnected}`);
+              target.dispatchEvent(new DragEvent("drop",{bubbles:true,cancelable:true,dataTransfer}));
+              source.dispatchEvent(new DragEvent("dragend",{bubbles:true,dataTransfer}));
+            };
+            for(const wholePerson of [false,true]) {
+              const bob=row("bob@example.test");
+              drag(wholePerson ? bob.previousElementSibling : bob);
+              await saved(()=>row("bob@example.test").dataset.groupId===group(label).dataset.groupId);
+              if(document.querySelector(".drop-target")) throw new Error("Identity drop target was not cleared");
+              row("bob@example.test").click();get("separate").click();
+              await saved(()=>row("bob@example.test").dataset.groupId!==group(label).dataset.groupId);
+            }
           }
           const alice=row("alice@example.test"),bob=row("bob@example.test");
           if(!group(label) || !alice || !bob || alice.dataset.groupId!==group(label).dataset.groupId
@@ -121,6 +147,41 @@ window.addEventListener("DOMContentLoaded", async () => {
     await wait("message display", () => document.getElementById("message-subject").textContent === "Observatory planning"
       && document.getElementById("body-view").textContent.includes("Meet at the observatory on Friday."));
     if (!document.getElementById("error").hidden) throw new Error(document.getElementById("error").textContent);
+    // First drag prepares verified files on the Rust worker; the next supplies
+    // an opaque token to Cocoa, never a file/link pathname supplied by the page.
+    const fileWell=document.getElementById("message-file-well");
+    if(!row.draggable || !fileWell.draggable) throw new Error("Native file drag controls missing");
+    const drag=element=>{
+      const dataTransfer=new DataTransfer();
+      const event=new DragEvent("dragstart",{bubbles:true,cancelable:true,dataTransfer});
+      element.dispatchEvent(event);
+      return {dataTransfer,prevented:event.defaultPrevented};
+    };
+    if(!drag(row).prevented) throw new Error("First drag did not defer for file preparation");
+    await wait("EML drag prepared",()=>/^Message-\d+\.eml$/.test(document.getElementById("message-file-name").textContent));
+    const eml=drag(fileWell).dataTransfer.getData("text/plain");
+    if(!eml.startsWith("mailarchiver-export:")) throw new Error("EML drag did not supply a registered token");
+    input.value="from:alice@example.test";document.getElementById("search-form").requestSubmit();
+    await wait("all drag messages",()=>document.getElementById("result-status").textContent==="2 messages");
+    const cards=[...document.querySelectorAll("#result-list .result")];
+    cards[0].click();
+    // Let the ordinary row click's queued selection callback finish before the
+    // modifier click, matching separate user input events rather than one JS task.
+    await new Promise(resolve=>setTimeout(resolve,0));
+    cards[1].dispatchEvent(new MouseEvent("click",{bubbles:true,metaKey:true,ctrlKey:true}));
+    await wait("multiple drag selection",()=>!document.getElementById("message-selection-summary").hidden);
+    if(!drag(fileWell).prevented) throw new Error("First ZIP drag did not defer for preparation");
+    await wait("ZIP drag prepared",()=>document.getElementById("message-file-name").textContent==="Email Collection Toolkit Messages (2).zip");
+    const zip=drag(fileWell).dataTransfer.getData("text/plain");
+    if(!zip.startsWith("mailarchiver-export:") || zip===eml) throw new Error("ZIP drag token missing or reused");
+    send("native_smoke_drag",[eml,zip]);
+    await wait("Cocoa file URL writers",()=>window.__rustDragVerified);
+    input.value="observatory";document.getElementById("search-form").requestSubmit();
+    await wait("restore search",()=>document.getElementById("result-status").textContent==="1 message");
+    document.querySelector("#result-list .result").click();
+    await wait("restore message",()=>!document.getElementById("message-content").hidden
+      && document.getElementById("message-subject").textContent==="Observatory planning"
+      && document.getElementById("body-view").textContent.includes("Meet at the observatory on Friday."));
     const attachmentOpen=[...document.querySelectorAll("#attachment-list button")].find(button=>button.textContent==="Open");
     if(!attachmentOpen) throw new Error("Native attachment control missing");
     attachmentOpen.click();

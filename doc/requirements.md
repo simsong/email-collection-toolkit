@@ -2429,6 +2429,20 @@ Rich MIME viewing includes sanitized HTML, CID raster images, per-message remote
 consent, raw source, attachment previews, parent-message provenance and computed-date
 notices. Native actions include safe file exports, attachment open confirmation,
 clipboard, links, print and additional reader/message windows.
+The macOS Rust reader must prepare EML/ZIP drags itself, without the Python
+helper. Verify every record's SHA-256 before publishing its export token; refuse
+empty selections, more than 1000 selected IDs, and any corrupt/missing record.
+Deduplicate IDs and write one bounded record at a time to private files outside
+the archive. Cocoa must replace registered tokens with file-URL-only writers,
+preserve the drag frame and keep ordinary unregistered drags unchanged.
+Closing must revoke tokens, cancel preparation and remove private drag files
+without waiting on the archive worker. Shutdown must await cleanup completion,
+including when the worker watchdog fires; cleanup errors must produce a diagnostic
+and failed exit status. Handle modern WebKit's placeholder and later legacy
+pasteboard restoration without altering an unrelated drag. Other platforms hide
+and reject file dragging.
+Native regression must exercise the real first-drag/second-drag controls and
+actual Cocoa writers; physical Finder copying remains a separate acceptance gate.
 
 During migration, a private, archive-bound Python helper may provide creation,
 owner-rule editing, identity decisions, imports, processing resume/history and
@@ -2461,6 +2475,9 @@ must reject the job, release its lease and publish no new canonical message.
 
 Headless acceptance uses the real frontend and service boundary, synthetic
 archives, writer-conflict checks, cancellation/resume and byte inventories.
+Ordinary branch CI must run the Rust workspace suite once, in `static-rust`.
+The separate macOS native job must exercise the native-feature build and real
+window without repeating the ordinary reader test suite or a separate build.
 `make test-rust-recovery` exercises real crashed-writer journals, writer exclusion,
 foreground elapsed time, waits beyond 30 seconds, Abort and successful later Open.
 Native drag-out, file associations, packaged delivery, Windows writer support and
@@ -2473,6 +2490,9 @@ Native owner/identity acceptance must use actual sandboxed editor controls for
 owner Save/Reopen and identity Rename/Move/Separate/Reopen. Manual decisions must
 survive a real processor rerun and a fresh app process. Only explicit fixture
 settings/derived-state writes are permitted; canonical mail and sources stay fixed.
+Native HTML address drags and person-merge drops must also reach the real service
+and persist their distinct audit operations. Injected DOM drag events do not
+establish physical pointer or operating-system file-drag acceptance.
 
 Interactive Rust search must publish two bounded ordered catalog windows before
 running one comprehensive query over the remainder. Each window must be painted
@@ -2507,8 +2527,9 @@ full Windows application parity includes imports, processing, attachments,
 output operations, and packaged execution. Track evidence and remaining gaps
 using [WINDOWS_RUST_HANDOFF.md](WINDOWS_RUST_HANDOFF.md).
 
-The Rust GUI CI matrix must initially contain only `macos-latest` and explicitly
-build/test the reader. Native acceptance must create a synthetic `.mailarchive`
+The Rust GUI CI matrix must initially contain only `macos-latest` and build/test
+native-feature code; the separate static job owns the ordinary reader suite.
+Native acceptance must create a synthetic `.mailarchive`
 through the real ingest CLI, verify it, boot the actual Wry/WKWebView shell,
 submit a simple search, select the expected result, and verify its body before
 capturing a PNG of the native webview. Missing results, startup/callback timeouts,

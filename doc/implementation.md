@@ -3149,7 +3149,10 @@ the specialization reproduces the native owner-editor loading failure; Chromium
 alone did not expose this WKWebView defect.
 After the full read-only inventory check, the native test saves owner rules,
 renames Alice, moves Bob's address to Alice and separates it again through real
-editor controls/private IPC, reopening each panel to verify persistence.
+editor controls/private IPC. It then drives address and whole-person HTML drops
+inside WKWebView and checks separate `move-address` and `merge-person` audit
+records, reopening each panel to verify persistence. These injected DOM events
+exercise production handlers; they do not establish physical pointer gestures.
 It then runs the production CLI's `process --reprocess`, launches a fresh app
 in verification-only mode and checks both visible decisions and persisted identity
 rows. Canonical MBOX/integrity/object/manifest/CSV hashes and source inventories
@@ -3205,6 +3208,34 @@ text, sanitizes HTML with Ammonia and applies a restrictive CSP. CID raster imag
 are embedded; network images require explicit consent. `desktop.rs` exports only
 to new paths outside the archive, opens confirmed copies and handles clipboard
 and safe external links. Additional windows currently use separate Rust processes.
+
+`drag.rs` prepares message exports only for an explicit `prepare_drag` request.
+One unique ID writes an exact hash-verified `Message-ID.eml`; multiple IDs write
+an uncompressed ZIP with distinct `Message-ID.eml` entries, processing one bounded
+record at a time. IDs here are numeric catalog keys, not RFC Message-ID headers.
+Selections are deduplicated and limited to 1000 IDs. Every preparation has a
+private directory; failures remove incomplete files before any token is registered.
+`drag_macos.rs` adds modern/legacy NSView drag-method overrides to the application's
+Wry class without changing an initialized WKWebView's class. Modern WebKit
+may pass a placeholder item while retaining the token on the named drag pasteboard;
+the adapter reads that board and defers a token-matched repair until WebKit has
+restored its legacy contents, including during the drag tracking run-loop mode.
+Registered opaque
+tokens become pasteboard items advertising only `public.file-url`; WebKit retains
+its gesture/source, and Cocoa supplies the file icon at the original drag frame.
+The first frontend drag prepares the file; the next transfers its token. This
+path needs no Python service. Non-macOS and headless transports hide/refuse it.
+The process-wide registry owns only this reader's private exports. Quit latches
+closing, revokes tokens and removes directories on a separate cleanup thread;
+preparation checks that latch between records and before publication. Normal
+worker teardown also removes its exports. Exit waits for cleanup completion even
+when the five-second watchdog releases a blocked worker; deletion failures are
+reported on stderr and give a failed exit status. Native smoke uses the same graceful
+shutdown as the application, verifying EML/ZIP temporary files are absent afterward.
+Its real Cocoa checks include the placeholder/legacy-restoration sequence and
+ordinary-drag isolation on a private named pasteboard. Cocoa automatically adds
+file compatibility aliases; each supplied writer still advertises only a file URL.
+These checks are narrower than a Finder copy with a physical gesture.
 
 `engine.rs` launches `mailarchiver.rust_engine` via a private JSON-line pipe using
 `ECT_RUST_ENGINE_PYTHON` or the checkout interpreter. The helper does not import
@@ -3327,8 +3358,10 @@ installers remain release work. Builds without explicit updater feed/key/build
 configuration leave update checks unavailable rather than contact that legacy
 feed prematurely.
 
-The independent `rust-gui` matrix job explicitly builds/tests the reader and
-runs `make test-rust-gui-native`. Its Rust integration test creates two synthetic
+The independent `rust-gui` matrix job runs only `make test-rust-gui-native`;
+`static-rust` owns the ordinary workspace format, Clippy and reader test suite.
+The native target builds the feature-enabled executable and checks native-only
+code, without repeating the ordinary reader suite. Its integration test creates two synthetic
 EML messages, invokes the real CLI with explicit `--no-scan`, runs the portable
 archive verifier, then launches the feature-enabled native executable. The
 injected test driver submits the actual form, waits for a complete one-result

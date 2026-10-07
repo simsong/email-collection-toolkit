@@ -81,8 +81,9 @@ def test_ci_runs_parallel_branch_jobs_without_building_a_dmg() -> None:
     assert native["strategy"]["matrix"] == {"os": ["macos-latest"]}
     assert native[RUNS_ON] == "${{ matrix.os }}"
     native_runs = [step.get(RUN, "") for step in native[STEPS]]
-    assert "make rust-gui-build test-rust-gui" in native_runs
-    assert "make test-rust-gui-native" in native_runs
+    assert native_runs.count("make test-rust-gui-native") == 1
+    assert all("rust-gui-build" not in run and "test-rust-gui " not in f"{run} "
+               and "check-static" not in run for run in native_runs)
     upload = next(step for step in native[STEPS] if step.get("uses", "").startswith("actions/upload-artifact@"))
     assert upload["if"] == "always()"
     assert upload["with"]["path"] == ".tmp/rust-gui-native"
