@@ -16,8 +16,10 @@ From the repository root:
 make rust-gui ARCHIVE="/path/to/archive.mailarchive"
 ```
 
-Without `ARCHIVE`, the app opens the most recent valid archive or offers creation
-and opening. File → New Archive chooses an empty destination. File → Open and
+Without `ARCHIVE`, the app selects the first valid or recoverable recent archive,
+opening foreground recovery when required; missing/invalid entries are skipped.
+With no eligible recent archive it offers creation and opening.
+File → New Archive chooses an empty destination. File → Open and
 Open Recent open additional reader processes. Closing one closes that window's
 engine; other reader windows remain independent. Import jobs belong to the
 window that started them, with cross-process writer leases preventing conflicts.

@@ -48,6 +48,11 @@ class OpeningReply(BaseModel):
     error: str | None = None
 
 
+class RecentArchives(BaseModel):
+    version: int = 1
+    recent: list[Path]
+
+
 def crash_writer(archive: Path) -> None:
     """Recovery requirement: spill genuine uncommitted catalog and FTS pages."""
     subprocess.run([sys.executable, "-c", """
@@ -80,12 +85,22 @@ os._exit(0)
 
 
 @contextmanager
-def opener(archive: Path, tmp_path: Path, held: bool = False) -> Iterator[tuple[subprocess.Popen[str], Queue[OpeningReply]]]:
+def opener(archive: Path, tmp_path: Path, held: bool = False,
+           recent: list[Path] | None = None) -> Iterator[tuple[subprocess.Popen[str], Queue[OpeningReply]]]:
     binary = os.environ.get(BINARY_ENV)
     if not binary:
         pytest.skip("run make test-rust-recovery")
     environment = os.environ.copy()
     environment[PYTHON_ENV] = sys.executable
+    arguments = [binary, "--opening-rpc"]
+    if recent is None:
+        arguments.append(str(archive))
+    else:
+        home = tmp_path / "home"
+        environment["HOME"] = environment["LOCALAPPDATA"] = environment["XDG_CONFIG_HOME"] = str(home)
+        settings = home / ("Library/Application Support" if sys.platform == "darwin" else ".") / "Email Collection Toolkit"
+        settings.mkdir(parents=True, exist_ok=True)
+        (settings / "recent-archives.json").write_text(RecentArchives(recent=recent).model_dump_json(), encoding="utf-8")
     if held:
         launcher = tmp_path / "held-python"
         launcher.write_text("#!/bin/sh\n"
@@ -99,7 +114,7 @@ def opener(archive: Path, tmp_path: Path, held: bool = False) -> Iterator[tuple[
         environment[PYTHON_ENV] = str(launcher)
     replies: Queue[OpeningReply] = Queue()
     with (tmp_path / "opening.log").open("w", encoding="utf-8") as log:
-        process = subprocess.Popen([binary, "--opening-rpc", str(archive)], stdin=subprocess.PIPE,
+        process = subprocess.Popen(arguments, stdin=subprocess.PIPE,
                                    stdout=subprocess.PIPE, stderr=log, text=True, env=environment)
 
         def read() -> None:
@@ -180,6 +195,43 @@ def test_only_hot_journals_trigger_recovery_and_writer_failure_keeps_archive_clo
         failed = replies.get(timeout=10)
         assert failed.id == 1 and failed.error and failed.result is None
         assert replies.empty()
+
+
+def test_startup_recovers_newest_recoverable_recent_archive(tmp_path: Path) -> None:
+    """Recent-opening requirement: hot journals retain precedence over older readers."""
+    newest = tmp_path / "newest"
+    older = tmp_path / "older"
+    newest.mkdir()
+    older.mkdir()
+    archive, _ = make_archive(newest)
+    old_archive, _ = make_archive(older)
+    with WriterLease.acquire(archive, str(archive), "create synthetic processing schema", "startup-fixture", "test"):
+        processing_connect(archive, create=True, production=True).close()
+    mbox = next(archive.rglob("*.mbox"))
+    mboxes = [(mbox, mbox.read_bytes())]
+    old_before = [(path, path.read_bytes()) for path in old_archive.rglob("*") if path.is_file()]
+    corrupt = tmp_path / "corrupt"
+    corrupt.mkdir()
+    (corrupt / "archive.sqlite3").write_bytes(b"invalid database")
+    missing = tmp_path / "missing"
+    crash_writer(archive)
+    recent = [missing, corrupt, archive, old_archive]
+    with WriterLease.acquire(archive, str(archive), "test active writer", "startup-conflict", "test"):
+        with opener(archive, tmp_path, recent=recent) as (process, replies):
+            send(process, "opening_start")
+            assert replies.get(timeout=10).result == "recovering"
+            failed = replies.get(timeout=10)
+            assert failed.result is None and failed.error and "busy with another writer" in failed.error
+    assert (archive / "archive.sqlite3-journal").exists()
+    with opener(archive, tmp_path, recent=recent) as (process, replies):
+        send(process, "opening_start")
+        assert replies.get(timeout=10).result == "recovering"
+        assert replies.get(timeout=15).result is True
+    assert_recovered(archive, mboxes)
+    assert all(path.read_bytes() == content for path, content in old_before)
+    assert not missing.exists()
+    assert list(corrupt.iterdir()) == [corrupt / "archive.sqlite3"]
+    assert (corrupt / "archive.sqlite3").read_bytes() == b"invalid database"
 
 
 @pytest.mark.skipif(os.name != "posix", reason="real SIGSTOP/SIGCONT helper scheduling")

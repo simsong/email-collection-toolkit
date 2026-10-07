@@ -2480,6 +2480,10 @@ reordering the saved list. Recent-list updates from separate processes must
 serialize the complete load/update/replace sequence and retain concurrent opens.
 Startup must choose the first usable archive in recent order, skipping missing
 or invalid entries; only an entirely unusable list may fall back to prompting.
+A rollback-required recent archive remains eligible ahead of older valid entries
+and must enter foreground recovery. Read-only selection must never repair it;
+recovery failure or Abort leaves that selected archive unopened rather than
+silently switching to another recent archive.
 Native workflow menus must reflect helper capability,
 including disabled writes/history when the helper is unavailable. Synthetic demo
 creation must create missing parents and refuse an existing destination.

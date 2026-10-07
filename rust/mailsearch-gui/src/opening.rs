@@ -12,6 +12,16 @@ use std::{
     sync::atomic::{AtomicBool, Ordering},
 };
 
+pub(crate) fn requires_recovery(error: &anyhow::Error) -> bool {
+    error.chain().any(|cause| {
+        matches!(
+            cause.downcast_ref::<rusqlite::Error>(),
+            Some(rusqlite::Error::SqliteFailure(code, _))
+                if code.extended_code == rusqlite::ffi::SQLITE_READONLY_ROLLBACK
+        )
+    })
+}
+
 pub fn open(path: &Path, abort: &AtomicBool, recovering: impl FnOnce()) -> Result<Bridge> {
     ensure!(
         !abort.load(Ordering::Acquire),
@@ -20,14 +30,7 @@ pub fn open(path: &Path, abort: &AtomicBool, recovering: impl FnOnce()) -> Resul
     let bridge = match Bridge::open(path) {
         Ok(bridge) => bridge,
         Err(error) => {
-            let rollback = error.chain().any(|cause| {
-                matches!(
-                    cause.downcast_ref::<rusqlite::Error>(),
-                    Some(rusqlite::Error::SqliteFailure(code, _))
-                        if code.extended_code == rusqlite::ffi::SQLITE_READONLY_ROLLBACK
-                )
-            });
-            if !rollback {
+            if !requires_recovery(&error) {
                 return Err(error);
             }
             crate::engine::require_archive_writing()?;

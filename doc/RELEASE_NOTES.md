@@ -4,6 +4,9 @@
 
 ## Unreleased
 
+- Preserve recoverable recent archives during Rust startup selection; hot SQLite
+  journals enter foreground recovery instead of silently opening an older archive.
+
 - Route Windows native menu accelerators through Tao's Win32 message loop;
   shortcut labels alone do not enable their actions.
 

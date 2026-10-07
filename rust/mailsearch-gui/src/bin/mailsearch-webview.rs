@@ -24,11 +24,8 @@ fn main() -> Result<()> {
     let args: Vec<String> = std::env::args().skip(1).collect();
     match args.as_slice() {
         [] => {
-            let recent = mailsearch_rust::documents::Documents::load(
-                &mailsearch_rust::documents::Documents::path()?,
-            )?;
-            if let Some(path) = recent.first_valid_archive() {
-                return native(path.to_owned(), None, None);
+            if let Some(path) = startup_archive()? {
+                return native(path, None, None);
             }
             let create = if startup_writes_available() {
                 let decision=rfd::MessageDialog::new().set_title("Email Collection Toolkit")
@@ -67,6 +64,9 @@ fn main() -> Result<()> {
             Ok(())
         }
         [flag, path] if flag == "--opening-rpc" => opening_rpc(PathBuf::from(path)),
+        [flag] if flag == "--opening-rpc" => opening_rpc(
+            startup_archive()?.ok_or_else(|| anyhow::anyhow!("No usable recent archive"))?,
+        ),
         [flag, path, query] if flag == "--probe" => {
             let mut bridge = Bridge::open(&PathBuf::from(path))?;
             let start = std::time::Instant::now();
@@ -148,6 +148,15 @@ fn main() -> Result<()> {
             "Usage: mailsearch-webview --archive DIRECTORY (or --rpc DIRECTORY for headless tests)"
         ),
     }
+}
+
+fn startup_archive() -> Result<Option<PathBuf>> {
+    let recent = mailsearch_rust::documents::Documents::load(
+        &mailsearch_rust::documents::Documents::path()?,
+    )?;
+    Ok(recent
+        .first_openable_archive()
+        .map(std::path::Path::to_owned))
 }
 
 fn opening_rpc(path: PathBuf) -> Result<()> {

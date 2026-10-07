@@ -4,7 +4,8 @@
 // An OS lock serializes load/update/synced atomic replacement across processes.
 // Its stable companion file remains outside archives and is never unlinked.
 // Unreadable or unknown preferences are reported instead of silently reset.
-// Opening still validates an archive through the normal reader before use.
+// Read-only selection retains rollback-required candidates for foreground recovery.
+// Opening still validates or recovers the selected archive before reader use.
 // Tests use private settings files and do not touch the user's recent documents.
 use anyhow::{ensure, Context, Result};
 use serde::{Deserialize, Serialize};
@@ -48,10 +49,13 @@ pub(crate) fn preferences_try_lock(path: &Path) -> Result<std::fs::File> {
     Ok(lock)
 }
 impl Documents {
-    pub fn first_valid_archive(&self) -> Option<&Path> {
+    pub fn first_openable_archive(&self) -> Option<&Path> {
         self.recent
             .iter()
-            .find(|path| crate::Archive::open(path).is_ok())
+            .find(|path| match crate::Archive::open(path) {
+                Ok(_) => true,
+                Err(error) => crate::opening::requires_recovery(&error),
+            })
             .map(PathBuf::as_path)
     }
     pub fn recent_path(&self, index: usize) -> Option<&Path> {
@@ -131,12 +135,12 @@ mod tests {
                 second.clone(),
             ],
         };
-        assert_eq!(value.first_valid_archive(), Some(first.as_path()));
+        assert_eq!(value.first_openable_archive(), Some(first.as_path()));
         value.recent = vec![invalid.clone(), missing.clone(), second.clone()];
-        assert_eq!(value.first_valid_archive(), Some(second.as_path()));
+        assert_eq!(value.first_openable_archive(), Some(second.as_path()));
         value.recent = vec![missing.clone(), invalid.clone()];
-        assert_eq!(value.first_valid_archive(), None);
-        assert_eq!(Documents::default().first_valid_archive(), None);
+        assert_eq!(value.first_openable_archive(), None);
+        assert_eq!(Documents::default().first_openable_archive(), None);
         let after: Vec<_> = [&first, &second]
             .into_iter()
             .flat_map(|root| {

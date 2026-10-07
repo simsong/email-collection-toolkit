@@ -3206,7 +3206,12 @@ The helper reports separate `available` and `write_available` capabilities.
 Native menus start disabled and receive that capability result on the UI thread;
 native smoke checks actual enabled states with and without the Python helper.
 Startup checks recent paths in order with the read-only `Archive::open` validator
-and uses the first valid path, skipping missing or damaged newer entries.
+and selects the first valid or rollback-required path, skipping missing or invalid
+entries. Selection and opening share the exact SQLite error-chain classifier;
+hot journals route to the visible opening worker before any older archive.
+`--opening-rpc` without a path uses this same startup selector. The real recovery
+regression places missing/corrupt entries before a crashed catalog/search/processing
+archive and an older valid archive, then verifies recovery and older-archive fixity.
 Real demo archives verify ordered fallback and unchanged database/MBOX bytes;
 missing paths and empty invalid directories are never created or repaired.
 Startup without a usable recent archive performs the same real helper handshake
