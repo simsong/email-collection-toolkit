@@ -8,7 +8,7 @@
 use anyhow::{ensure, Context, Result};
 use std::{io::Write, path::Path, process::Command};
 
-pub(crate) fn spawn(command: &mut Command) -> Result<()> {
+pub fn spawn(command: &mut Command) -> Result<()> {
     let mut child = command.spawn()?;
     std::thread::spawn(move || {
         let _ = child.wait();
@@ -36,6 +36,18 @@ pub(crate) fn export(root: &Path, destination: &Path, bytes: &[u8]) -> Result<()
         .persist_noclobber(destination)
         .context("Save export without overwriting an existing file")?;
     Ok(())
+}
+pub fn pick_archive() -> Option<std::path::PathBuf> {
+    #[cfg(target_os = "macos")]
+    {
+        crate::macos::pick_archive()
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        rfd::FileDialog::new()
+            .set_title("Open email archive")
+            .pick_folder()
+    }
 }
 pub(crate) fn open_link(value: &str) -> Result<()> {
     let url = url::Url::parse(value)?;

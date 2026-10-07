@@ -8,10 +8,12 @@
 pub mod bridge;
 mod browse;
 pub mod demo;
-mod desktop;
+pub mod desktop;
 pub mod documents;
 pub mod drag;
 pub mod engine;
+#[cfg(target_os = "macos")]
+pub mod macos;
 mod mime;
 pub mod opening;
 pub mod preferences;

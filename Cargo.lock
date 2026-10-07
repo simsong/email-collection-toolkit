@@ -2808,6 +2808,7 @@ dependencies = [
  "base64",
  "block2 0.6.2",
  "chrono",
+ "dispatch2",
  "eframe",
  "egui_kittest",
  "encoding_rs",

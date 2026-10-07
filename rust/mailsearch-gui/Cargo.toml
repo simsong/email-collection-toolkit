@@ -48,10 +48,11 @@ tao = "0.37"
 muda = { version = "0.20", default-features = false }
 
 [target.'cfg(target_os = "macos")'.dependencies]
+dispatch2 = "0.3"
 block2 = { version = "0.6", optional = true }
 objc2 = "0.6"
-objc2-app-kit = { version = "0.3", default-features = false, features = ["NSApplication", "NSBitmapImageRep", "NSImage", "NSImageRep", "NSDragging", "NSDraggingItem", "NSDraggingSession", "NSPasteboard", "NSPasteboardItem", "NSWorkspace", "NSEvent", "NSView"] }
-objc2-foundation = { version = "0.3", default-features = false, features = ["NSData", "NSDictionary", "NSError", "NSArray", "NSString", "NSRunLoop"] }
+objc2-app-kit = { version = "0.3", default-features = false, features = ["NSApplication", "NSBitmapImageRep", "NSImage", "NSImageRep", "NSDragging", "NSDraggingItem", "NSDraggingSession", "NSPasteboard", "NSPasteboardItem", "NSWorkspace", "NSEvent", "NSView", "NSOpenPanel", "NSSavePanel"] }
+objc2-foundation = { version = "0.3", default-features = false, features = ["NSData", "NSDictionary", "NSError", "NSArray", "NSString", "NSRunLoop", "NSBundle", "NSProcessInfo", "NSURL"] }
 objc2-web-kit = { version = "0.3", default-features = false, features = ["WKSnapshotConfiguration", "WKWebView", "block2"] }
 
 [target.'cfg(unix)'.dependencies]

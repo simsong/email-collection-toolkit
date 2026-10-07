@@ -776,10 +776,16 @@ local Developer ID identity; omitting it produces an ad-hoc preview. The build
 does not notarize, install, publish a release or register file associations.
 The supported Python app and release targets retain their existing entry point.
 
+File → Open selects `.mailarchive` packages as documents or ordinary archive
+directories. Explicit Dock/Finder opens enter archive validation/recovery;
+opening the current archive focuses it, while others use independent readers.
+The preview declares an alternate document handler and loads its bundled icon/name.
+
 The mounted checks use synthetic mail and run ingest, helper discovery, search,
-message reading and preservation checks without windows. `make test-dmg DMG=...`
+message reading, preservation and native panel/icon configuration checks without
+windows. `make test-dmg DMG=...`
 repeats these checks. Interaction and window/document acceptance belong to the
-user; macOS updates and document activation remain unqualified in this preview.
+user; macOS updates and physical document activation remain unqualified in this preview.
 Packaged macOS uses only its own archive service, ignoring
 `ECT_RUST_ENGINE_PYTHON`; development builds and the Windows prototype retain
 their documented interpreter selection. `make test-rust-dmg` checks the frozen

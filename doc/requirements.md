@@ -2476,6 +2476,15 @@ and Rust readers remain usable. Import job errors describe ingest failures. Fail
 successful ingest must surface as a separate warning and retain completed status.
 With no usable recent archive, startup must check actual helper availability and
 write capability before offering Create; an unavailable helper offers Open only.
+macOS File → Open must select `.mailarchive` directory packages as documents,
+as well as ordinary archive directories. Explicit Finder/Dock document opens
+must retain the package root, validate/recover it before reader access, and
+focus the current archive or open an independent reader for another archive.
+Startup without an archive must keep its native event loop available for these
+events. Packaged previews must declare archive document support and use their
+bundled application name/icon. Programmatic panel/metadata checks support these
+requirements; physical selection, Dock drops and displayed identity require
+human acceptance.
 Owner-loss acceptance must synchronize unfinished processing rather than race
 the speed of a synthetic import, and verify bounded exit, recovery and source fixity.
 Owner EOF must remain latched across import startup; resetting a previous user

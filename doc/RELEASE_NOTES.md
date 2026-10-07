@@ -4,6 +4,12 @@
 
 ## Unreleased
 
+- Make Rust macOS Open select `.mailarchive` packages as documents; handle native
+  Dock/Finder document events, retain a responsive startup selection page, and
+  explicitly load the preview bundle's application icon/name. Mounted checks
+  inspect actual panel configuration and identity without showing windows;
+  physical gestures remain human acceptance.
+
 - Add a separately named macOS Rust Preview DMG with a bundled private Python
   archive service. Headless mounted checks exercise frozen ingest, Rust helper
   discovery, search/reading and byte preservation without checkout dependencies.

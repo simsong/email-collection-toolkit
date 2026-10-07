@@ -26,6 +26,24 @@ impl Default for Documents {
         }
     }
 }
+pub fn opened_paths(urls: &[url::Url]) -> Result<Vec<PathBuf>> {
+    let mut paths = Vec::new();
+    for url in urls {
+        let path = url
+            .to_file_path()
+            .map_err(|_| anyhow::anyhow!("Only local archive documents can be opened"))?
+            .canonicalize()
+            .context("Archive document does not exist")?;
+        ensure!(
+            path.is_dir(),
+            "An archive document must be a directory package"
+        );
+        if !paths.contains(&path) {
+            paths.push(path);
+        }
+    }
+    Ok(paths)
+}
 fn preferences_lock_file(path: &Path) -> Result<std::fs::File> {
     std::fs::create_dir_all(path.parent().context("Missing preferences directory")?)?;
     // Keep the companion inode stable across atomic JSON replacements.
@@ -99,6 +117,31 @@ mod tests {
         thread,
         time::{Duration, Instant},
     };
+
+    #[test]
+    fn document_urls_preserve_package_roots_deduplicate_and_reject_nonlocal_inputs() {
+        // Document activation: roots, not package children, go to foreground opening.
+        let fixture = tempfile::tempdir().unwrap();
+        let package = fixture.path().join("Existing archive.mailarchive");
+        std::fs::create_dir(&package).unwrap();
+        let original = package.join("original.eml");
+        std::fs::write(&original, b"Subject: original\n\nUnchanged bytes\n").unwrap();
+        let url = url::Url::from_directory_path(&package).unwrap();
+        assert_eq!(
+            opened_paths(&[url.clone(), url]).unwrap(),
+            vec![package.canonicalize().unwrap()]
+        );
+        assert!(
+            opened_paths(&[url::Url::parse("https://example.test/a.mailarchive").unwrap()])
+                .is_err()
+        );
+        assert!(opened_paths(&[url::Url::from_file_path(&original).unwrap()]).is_err());
+        assert_eq!(
+            std::fs::read(original).unwrap(),
+            b"Subject: original\n\nUnchanged bytes\n"
+        );
+        assert_eq!(std::fs::read_dir(package).unwrap().count(), 1);
+    }
 
     struct Child(std::process::Child);
     impl Drop for Child {

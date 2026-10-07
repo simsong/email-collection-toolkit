@@ -1,0 +1,13 @@
+<!-- Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved. -->
+<!-- Keep the native event loop available before an archive is selected.
+     The user may choose Open/New or send a document through Finder/Dock.
+     This page exposes only startup selection and Quit, never archive data.
+     New is enabled after the real private helper capability check completes.
+     Selected archives enter the same foreground validation/recovery page. -->
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>Email Collection Toolkit</title>
+<style>body{font:17px system-ui;color:CanvasText;background:Canvas;margin:0}main{max-width:36rem;margin:15vh auto;padding:2rem}button{font:inherit;padding:.5rem 1.2rem;margin:1rem .5rem 0 0}#detail{white-space:pre-wrap}</style>
+<script src="welcome.js" defer></script></head>
+<body><main><h1>Email Collection Toolkit</h1><p>Open an email archive or create a new one.</p>
+<button id="open" type="button">Open archive…</button><button id="new" type="button" disabled>New archive…</button>
+<button id="quit" type="button">Quit</button><p id="detail" role="alert"></p></main></body></html>

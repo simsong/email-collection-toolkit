@@ -21,11 +21,16 @@ make rust-gui ARCHIVE="/path/to/archive.mailarchive"
 
 Without `ARCHIVE`, the app selects the first valid or recoverable recent archive,
 opening foreground recovery when required; missing/invalid entries are skipped.
-With no eligible recent archive it offers creation and opening.
+With no eligible recent archive a welcome page offers opening and, when the
+helper supports writes, creation while keeping Dock document events available.
 File → New Archive chooses an empty destination. File → Open and
 Open Recent open additional reader processes. Closing one closes that window's
 engine; other reader windows remain independent. Import jobs belong to the
 window that started them, with cross-process writer leases preventing conflicts.
+On macOS the Open panel selects `.mailarchive` packages as documents. Explicit
+Dock/Finder opens focus a matching archive or open another reader; the local DMG
+declares this document support and uses its bundled application icon/name.
+Physical selection/drop/display behavior remains for the user to verify.
 
 ## Implemented for local trials
 

@@ -337,10 +337,7 @@ impl Bridge {
                     );
                     path
                 } else if method == "open_archive" {
-                    let Some(path) = rfd::FileDialog::new()
-                        .set_title("Open email archive")
-                        .pick_folder()
-                    else {
+                    let Some(path) = crate::desktop::pick_archive() else {
                         return Ok(json!(false));
                     };
                     path
@@ -680,6 +677,8 @@ pub fn asset(path: &str) -> Option<(&'static str, &'static [u8])> {
         "/" | "/index.html" => ("text/html", include_bytes!("../../../gui/index.html")),
         "/opening.html" => ("text/html", include_bytes!("../opening.html")),
         "/opening.js" => ("text/javascript", include_bytes!("../opening.js")),
+        "/welcome.html" => ("text/html", include_bytes!("../welcome.html")),
+        "/welcome.js" => ("text/javascript", include_bytes!("../welcome.js")),
         "/identity.html" => ("text/html", include_bytes!("../../../gui/identity.html")),
         "/identity.js" => (
             "text/javascript",

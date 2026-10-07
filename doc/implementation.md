@@ -2180,15 +2180,30 @@ documentation adds no Windows runtime or packaging support.
 `make rust-dmg` adds a local preview path to the existing builder. PyInstaller
 collects the archive service/runtime and resources; `rust_bundle.py` preserves
 that layout, makes the release Rust binary the bundle entry point and renames
-the Python executable `archive-service`. Preview identity/name are separate,
-document declarations and inactive Sparkle settings are omitted, and both
+the Python executable `archive-service`. Preview identity/name are separate;
+archive package document declarations use the Alternate handler rank, and inactive
+Sparkle settings are omitted. Both
 executables and the final app are sealed. The DMG filename identifies Rust
 Preview; source revision/diff and binary provenance plus Rust dependency license
 texts are included. `test_mounted_image` detects this app and runs frozen core
 checks plus off-checkout synthetic ingest, Rust RPC helper/options/search/reader,
 repeat-ingest and source/archive fixity with a nonexistent interpreter override.
-All checks are headless. Interaction acceptance is delegated to the user.
+The mounted binary also constructs the production AppKit Open panel without
+showing it, checking file/directory selection, package treatment, bundle icon
+loading and process name. All checks are headless. Interaction acceptance is
+delegated to the user.
 This is a local test package, not a notarized release or qualified default GUI.
+
+Rust File → Open uses an AppKit panel that selects files and directories while
+treating `.mailarchive` packages as documents, matching the Python picker.
+Tao's native open-document events decode local file URLs, canonicalize and
+deduplicate archive directory roots, then enter foreground validation/recovery.
+With no selected archive, a welcome page keeps the event loop running for Dock
+drops; New becomes available after the actual helper capability check. A document
+matching the current archive focuses its window; other documents spawn independent
+reader processes. Application-wide coordination remains a separate acceptance gate.
+The native application explicitly loads its bundled icon and display name rather
+than inheriting an acceptance wrapper's identity. No Dock settings are modified.
 
 `make dmg-signed` calls `make dmg` with `--signing-identity` in `ARGS`, selecting
 the first Developer ID Application certificate hash from

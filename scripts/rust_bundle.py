@@ -31,6 +31,12 @@ PLIST_DISPLAY = "CFBundleDisplayName"
 PLIST_IDENTIFIER = "CFBundleIdentifier"
 PLIST_DOCUMENTS = "CFBundleDocumentTypes"
 PLIST_TYPES = "UTExportedTypeDeclarations"
+PLIST_HANDLER_RANK = "LSHandlerRank"
+PLIST_CONTENT_TYPES = "LSItemContentTypes"
+PLIST_IS_PACKAGE = "LSTypeIsPackage"
+PLIST_UTI = "UTTypeIdentifier"
+PLIST_TAGS = "UTTypeTagSpecification"
+PLIST_EXTENSION = "public.filename-extension"
 REVISION = "revision"
 
 
@@ -81,6 +87,16 @@ class BodyPart(BaseModel):
     content: str
 
 
+class MacIntegration(BaseModel):
+    choose_files: bool
+    choose_directories: bool
+    packages_as_directories: bool
+    multiple: bool
+    create_directories: bool
+    bundle_icon_loaded: bool
+    process_name: str
+
+
 def prepare(app: Path, binary: Path, root: Path) -> Path:
     """Replace the launch executable while retaining PyInstaller's runtime layout."""
     plist = app / "Contents/Info.plist"
@@ -91,9 +107,9 @@ def prepare(app: Path, binary: Path, root: Path) -> Path:
     info[PLIST_EXECUTABLE] = EXECUTABLE
     info[PLIST_NAME] = info[PLIST_DISPLAY] = APP_NAME
     info[PLIST_IDENTIFIER] += ".rust-preview"
-    # Document activation and the Rust macOS updater are not qualified yet.
-    info.pop(PLIST_DOCUMENTS, None)
-    info.pop(PLIST_TYPES, None)
+    # Accept explicit document opens without replacing the supported app as owner.
+    for document in info.get(PLIST_DOCUMENTS, []):
+        document[PLIST_HANDLER_RANK] = "Alternate"
     for key in tuple(info):
         if key.startswith("SU"):
             del info[key]
@@ -129,6 +145,20 @@ def check(app: Path, environment: dict[str, str]) -> list[str]:
     """Use frozen CLI ingest and Rust's actual private service discovery off-checkout."""
     service = app / "Contents/MacOS" / SERVICE
     binary = app / "Contents/MacOS" / EXECUTABLE
+    info = plistlib.loads((app / "Contents/Info.plist").read_bytes())
+    archive_types = {declaration[PLIST_UTI] for declaration in info.get(PLIST_TYPES, [])
+                     if "mailarchive" in declaration.get(PLIST_TAGS, {}).get(PLIST_EXTENSION, [])}
+    if not any(document.get(PLIST_IS_PACKAGE) and document.get(PLIST_HANDLER_RANK) == "Alternate"
+               and archive_types.intersection(document.get(PLIST_CONTENT_TYPES, []))
+               for document in info.get(PLIST_DOCUMENTS, [])):
+        raise RuntimeError("Rust Preview does not declare .mailarchive package document support")
+    inspection = subprocess.run([str(binary), "--check-macos-integration"], cwd=app.parent, env=environment,
+                                capture_output=True, text=True, check=True, timeout=30)
+    native = MacIntegration.model_validate_json(inspection.stdout)
+    if not (native.choose_files and native.choose_directories and native.bundle_icon_loaded
+            and not native.packages_as_directories and not native.multiple and not native.create_directories
+            and native.process_name == APP_NAME):
+        raise RuntimeError(f"Packaged native document picker or application identity is incorrect: {native}")
     with tempfile.TemporaryDirectory(prefix="rust-dmg-check-") as temporary:
         work = Path(temporary)
         home = work / "home"
@@ -191,6 +221,7 @@ def check(app: Path, environment: dict[str, str]) -> list[str]:
         if source.read_bytes() != raw or verify_archive(archive):
             raise RuntimeError("frozen repeat ingest failed byte preservation")
     return ["Rust packaged helper discovery with no checkout interpreter",
+            "Native package-aware Open panel and bundled application name/icon (no windows)",
             "Rust packaged owner-options service and search/message reading",
             "Frozen synthetic ingest and idempotent repeat ingest",
             "Rust reader archive fixity and original source/manifest hashes"]
