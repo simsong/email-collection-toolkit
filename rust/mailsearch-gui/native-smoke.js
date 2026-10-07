@@ -147,17 +147,45 @@ window.addEventListener("DOMContentLoaded", async () => {
     await wait("message display", () => document.getElementById("message-subject").textContent === "Observatory planning"
       && document.getElementById("body-view").textContent.includes("Meet at the observatory on Friday."));
     if (!document.getElementById("error").hidden) throw new Error(document.getElementById("error").textContent);
+    // Native WKWebView must render srcdoc, retain explicit Plain Text across
+    // result navigation, and keep mail scripts/remote images out of the frame.
+    input.value="from:alice@example.test";document.getElementById("search-form").requestSubmit();
+    await wait("reader messages",()=>document.getElementById("result-status").textContent==="2 messages");
+    const garden=[...document.querySelectorAll("#result-list .result")].find(item=>item.textContent.includes("Garden update"));
+    garden.click();
+    await wait("native HTML body",()=>document.querySelector("#body-view iframe")?.contentDocument?.body?.textContent.includes("The roses are blooming."));
+    const bodyDocument=document.querySelector("#body-view iframe").contentDocument;
+    if(bodyDocument.querySelector('script,img[src^="https:"]')) throw new Error("Unsafe message content survived sanitization");
+    const parts=document.getElementById("part-select");
+    parts.value=[...parts.options].find(option=>option.textContent.startsWith("Plain")).value;
+    parts.dispatchEvent(new Event("change"));
+    await wait("native Plain Text",()=>document.getElementById("body-view").textContent.includes("The roses are blooming."));
+    const gardenFirst=document.querySelector("#result-list .result")===garden;
+    for(const [key,subject] of [[gardenFirst?"ArrowDown":"ArrowUp","Observatory planning"],
+      [gardenFirst?"ArrowUp":"ArrowDown","Garden update"]]) {
+      document.getElementById("result-list").dispatchEvent(new KeyboardEvent("keydown",{key,bubbles:true}));
+      await wait(`navigate to ${subject}`,()=>document.getElementById("message-subject").textContent===subject
+        && document.getElementById("body-view").textContent.includes(subject==="Garden update"?"The roses are blooming.":"Meet at the observatory on Friday."));
+    }
+    await wait("native retained Plain Text",()=>document.getElementById("message-subject").textContent==="Garden update"
+      && document.getElementById("body-view").textContent.includes("The roses are blooming.")
+      && !document.querySelector("#body-view iframe"));
+    input.value="observatory";document.getElementById("search-form").requestSubmit();
+    await wait("restore initial search",()=>document.getElementById("result-status").textContent==="1 message");
+    const dragRow=document.querySelector("#result-list .result");
+    dragRow.click();
+    await wait("restore initial message",()=>document.getElementById("body-view").textContent.includes("Meet at the observatory on Friday."));
     // First drag prepares verified files on the Rust worker; the next supplies
     // an opaque token to Cocoa, never a file/link pathname supplied by the page.
     const fileWell=document.getElementById("message-file-well");
-    if(!row.draggable || !fileWell.draggable) throw new Error("Native file drag controls missing");
+    if(!dragRow.draggable || !fileWell.draggable) throw new Error("Native file drag controls missing");
     const drag=element=>{
       const dataTransfer=new DataTransfer();
       const event=new DragEvent("dragstart",{bubbles:true,cancelable:true,dataTransfer});
       element.dispatchEvent(event);
       return {dataTransfer,prevented:event.defaultPrevented};
     };
-    if(!drag(row).prevented) throw new Error("First drag did not defer for file preparation");
+    if(!drag(dragRow).prevented) throw new Error("First drag did not defer for file preparation");
     await wait("EML drag prepared",()=>/^Message-\d+\.eml$/.test(document.getElementById("message-file-name").textContent));
     const eml=drag(fileWell).dataTransfer.getData("text/plain");
     if(!eml.startsWith("mailarchiver-export:")) throw new Error("EML drag did not supply a registered token");

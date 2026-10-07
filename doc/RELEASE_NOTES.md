@@ -4,6 +4,11 @@
 
 ## Unreleased
 
+- Keep optional Rust autocomplete timeouts out of search errors and complete
+  sparse full-text searches through indexed hash lookups. Render sandboxed HTML
+  in native WebKit and retain explicitly selected Plain Text/HTML/Raw Source
+  across message navigation. Add real SQLite, native MIME and browser regressions.
+
 - Wire Rust startup Open/New/Quit buttons into the native IPC adapter and skip
   archive-only toolbar/shell initialization before an archive opens. Add a real
   frontend regression for startup requests and JavaScript errors.

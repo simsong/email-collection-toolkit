@@ -105,7 +105,7 @@ fn cli_archive_native_search_and_screenshot() -> Result<()> {
         let content = if filename == "observatory" {
             format!("MIME-Version: 1.0\r\nContent-Type: multipart/mixed; boundary=native-fixture\r\n\r\n--native-fixture\r\nContent-Type: text/plain; charset=utf-8\r\n\r\n{body}\r\n--native-fixture\r\nContent-Type: text/plain\r\nContent-Disposition: attachment; filename=native-acceptance.txt\r\n\r\nNative attachment fixture.\r\n--native-fixture--\r\n")
         } else {
-            format!("Content-Type: text/plain; charset=utf-8\r\n\r\n{body}\r\n")
+            format!("MIME-Version: 1.0\r\nContent-Type: multipart/alternative; boundary=garden-fixture\r\n\r\n--garden-fixture\r\nContent-Type: text/plain; charset=utf-8\r\n\r\n{body}\r\n--garden-fixture\r\nContent-Type: text/html; charset=utf-8\r\n\r\n<html><body><p>{body}</p><script>window.compromised=true</script><img src=\"https://example.test/tracker\"></body></html>\r\n--garden-fixture--\r\n")
         };
         fs::write(source.join(format!("{filename}.eml")), format!(
             "From: Alice <alice@example.test>\r\nTo: Bob <bob@example.test>\r\nSubject: {subject}\r\nDate: Tue, 02 Jan 2024 10:00:00 +0000\r\nMessage-ID: <{filename}@example.test>\r\n{content}"

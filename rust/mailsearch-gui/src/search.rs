@@ -208,27 +208,7 @@ fn run(bridge: &mut Bridge, shared: &Shared, job: &Job) -> Result<()> {
     }
     // A single FTS-driven query completes the remaining set. Only IDs are kept;
     // display columns and previews are fetched on the independent foreground DB.
-    let sort = match job.sort.as_str() {
-        "subject" => "lower(m.subject)",
-        "sender" => "lower(a.address)",
-        _ => "m.date_utc",
-    };
-    let (direction, comparison) = if job.direction == "ascending" {
-        ("ASC", ">")
-    } else {
-        ("DESC", "<")
-    };
-    let (mut clauses, mut values, _) =
-        crate::selectors::plan(&job.query, job.attachments, Some(&job.selections))?;
-    for clause in &mut clauses {
-        if clause.starts_with("m.sha256 IN(") {
-            *clause = "mm.message_fts_rowid IN(SELECT rowid FROM search.message_fts WHERE message_fts MATCH ?)".into();
-        }
-    }
-    clauses.push(format!("({sort},m.message_pk) {comparison} (?,?)"));
-    values.push(cursor["key"].as_str().unwrap().to_string().into());
-    values.push(cursor["id"].as_i64().unwrap().into());
-    let sql = format!("SELECT m.message_pk FROM messages m JOIN email_addresses a ON a.address_pk=m.sender_address_pk LEFT JOIN search.message_metadata mm USING(sha256) WHERE {} ORDER BY {sort} {direction},m.message_pk {direction}", clauses.join(" AND "));
+    let (sql, values) = remainder_query(job, &cursor)?;
     bridge.search_guard(Duration::from_secs(120));
     let result = (|| -> Result<Vec<i64>> {
         let mut statement = bridge.archive.db.prepare(&sql)?;
@@ -246,4 +226,101 @@ fn run(bridge: &mut Bridge, shared: &Shared, job: &Job) -> Result<()> {
         state.ids.extend(ids);
     }
     Ok(())
+}
+
+fn remainder_query(job: &Job, cursor: &Value) -> Result<(String, Vec<rusqlite::types::Value>)> {
+    let sort = match job.sort.as_str() {
+        "subject" => "lower(m.subject)",
+        "sender" => "lower(a.address)",
+        _ => "m.date_utc",
+    };
+    let (direction, comparison) = if job.direction == "ascending" {
+        ("ASC", ">")
+    } else {
+        ("DESC", "<")
+    };
+    let (mut clauses, mut values, _) =
+        crate::selectors::plan(&job.query, job.attachments, Some(&job.selections))?;
+    // Sparse FTS terms must drive hash lookups, rather than a category index
+    // scanning every catalog row. IN also deduplicates matching FTS rows.
+    let index = if clauses
+        .iter()
+        .any(|clause| clause.starts_with("m.sha256 IN("))
+    {
+        " INDEXED BY messages_sha256"
+    } else {
+        ""
+    };
+    clauses.push(format!("({sort},m.message_pk) {comparison} (?,?)"));
+    values.push(cursor["key"].as_str().unwrap().to_string().into());
+    values.push(cursor["id"].as_i64().unwrap().into());
+    let sql = format!("SELECT m.message_pk FROM messages m{index} JOIN email_addresses a ON a.address_pk=m.sender_address_pk LEFT JOIN search.message_metadata mm USING(sha256) WHERE {} ORDER BY {sort} {direction},m.message_pk {direction}", clauses.join(" AND "));
+    Ok((sql, values))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn sparse_fts_search_visits_matches_instead_of_the_whole_catalog() {
+        // Sparse-search requirement: complete ordered results scale with FTS hits.
+        let work = tempfile::tempdir().unwrap();
+        let root = work.path().join("archive");
+        crate::demo::create(&root).unwrap();
+        let db = rusqlite::Connection::open(root.join("archive.sqlite3")).unwrap();
+        db.execute_batch("WITH RECURSIVE n(x) AS(VALUES(4) UNION ALL SELECT x+1 FROM n WHERE x<50003) INSERT INTO messages SELECT x,printf('bulk%d',x),printf('%064d',x),1,'Sparse fixture','2025-01-01','header','Archive' FROM n;").unwrap();
+        let mut fts = rusqlite::Connection::open(root.join("search.sqlite3")).unwrap();
+        let transaction = fts.transaction().unwrap();
+        for id in 4..514 {
+            transaction
+                .execute(
+                    "INSERT INTO message_fts(sha256,content) VALUES(?1,'mushrooms')",
+                    [format!("{id:064}")],
+                )
+                .unwrap();
+        }
+        // Duplicate FTS observations cannot duplicate a canonical catalog result.
+        transaction
+            .execute(
+                "INSERT INTO message_fts(sha256,content) VALUES(?1,'mushrooms')",
+                [format!("{:064}", 4)],
+            )
+            .unwrap();
+        transaction.commit().unwrap();
+        drop(db);
+        let bridge = Bridge::open(&root).unwrap();
+        let job = Job {
+            generation: 1,
+            query: "mushrooms".into(),
+            sort: "date".into(),
+            direction: "descending".into(),
+            attachments: false,
+            selections: json!([]),
+        };
+        let (sql, values) = remainder_query(&job, &json!({"key":"2025-01-01","id":50004})).unwrap();
+        let ticks = Arc::new(AtomicU64::new(0));
+        let counter = Arc::clone(&ticks);
+        bridge.archive.db.progress_handler(
+            100,
+            Some(move || {
+                counter.fetch_add(1, Ordering::Relaxed);
+                false
+            }),
+        );
+        let ids: Vec<i64> = bridge
+            .archive
+            .db
+            .prepare(&sql)
+            .unwrap()
+            .query_map(rusqlite::params_from_iter(values), |row| row.get(0))
+            .unwrap()
+            .collect::<rusqlite::Result<_>>()
+            .unwrap();
+        assert_eq!(ids, (4..514).rev().collect::<Vec<_>>());
+        assert!(
+            ticks.load(Ordering::Relaxed) < 1000,
+            "Sparse lookup scanned the catalog: {} VM instructions",
+            ticks.load(Ordering::Relaxed) * 100
+        );
+    }
 }

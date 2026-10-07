@@ -3176,6 +3176,13 @@ closing asks the foreground worker to drop its engine pipe and has an independen
 five-second event-loop deadline. Only the exact local main document can invoke
 native IPC. Allowlisted editor frames get narrow APIs from their parent; MIME
 frames remain isolated and cannot obtain those APIs.
+Navigation permits exact `about:blank` and `about:srcdoc` destinations for passive
+MIME frames, independently of IPC trust. Message sanitization, no-script sandbox,
+and content security policy still control resources. Each reader window retains
+the explicitly selected MIME content type across messages; unavailable types use
+the message default without forgetting the preference or carrying remote consent.
+The native synthetic multipart trial exercises HTML rendering, sanitization and
+keyboard navigation back to Plain Text; Chromium checks the shared widget path.
 `native_asset` specializes only the three embedded editor HTML policies for the
 platform's local origin. WKWebView treats the sandboxed editor origin as opaque,
 so `self` blocked its external scripts and styles. Each policy now names only
@@ -3358,13 +3365,22 @@ read-only connections. Closing signals cancellation without joining the worker.
 The worker scans two ordered 512-entry catalog windows, probing indexed FTS row
 IDs. A sort-value/message-ID cursor advances across empty windows and tied values.
 Each window waits for the frontend's acknowledgement after painting. One full
-FTS query then returns the remaining ordered IDs, using the metadata FTS-row-ID
-mapping and the cursor boundary. The backend retains IDs, not all display records;
+FTS query then returns the remaining ordered IDs, using FTS hash membership,
+forced `messages_sha256` lookups for ordinary body-text terms, and the cursor
+boundary. This avoids the category index scanning the catalog for sparse terms;
+`IN` deduplicates repeated FTS rows. Attachment/selector-only plans retain their
+existing semantics. The backend retains IDs, not all display records;
 `search_page` hydrates at most 512 rows on the foreground connection. The browser
 loads up to 1,024 initial rows and requests further pages near the scroll bottom.
 Completion preserves existing rows/selection and distinguishes total matches from
 loaded rows. Partial failures remain explicitly incomplete. Preview queries have
 15-second limits; the full query has a 120-second safety limit.
+Optional autocomplete has a 150-millisecond VM deadline on the foreground
+connection. SQLite interruption returns empty, explicitly incomplete suggestions;
+other errors remain errors. The handler is removed before subsequent reads, and
+the frontend rejects obsolete suggestion failures before displaying them.
+A real 50,000-row fixture checks ordered sparse results and SQLite VM work;
+another fixture forces an actual autocomplete interrupt and checks later reads.
 
 Python keeps its existing API path. `make rust-webview-probe ARCHIVE=... QUERY=...`
 measures both windows and complete search, printing only counts and timings.

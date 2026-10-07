@@ -209,14 +209,7 @@ impl Bridge {
                     args.first().and_then(Value::as_bool).unwrap_or(false),
                 )
             }
-            "suggestions" => {
-                self.search_guard(Duration::from_secs(2));
-                crate::browse::suggestions(
-                    &self.archive.db,
-                    text(args, 0, ""),
-                    args.get(1).and_then(Value::as_u64).unwrap_or(20) as usize,
-                )
-            }
+            "suggestions" => self.suggestions(args, Duration::from_millis(150)),
             "search" => self.search(args),
             "search_batch" => self.search_batch(args),
             "search_start" => {
@@ -456,6 +449,30 @@ impl Bridge {
             )
         });
         Ok(json!(locations))
+    }
+
+    fn suggestions(&self, args: &[Value], budget: Duration) -> Result<Value> {
+        self.search_guard(budget);
+        let query = text(args, 0, "");
+        let result = crate::browse::suggestions(
+            &self.archive.db,
+            query,
+            args.get(1).and_then(Value::as_u64).unwrap_or(20) as usize,
+        );
+        self.archive.db.progress_handler(0, None::<fn() -> bool>);
+        match result {
+            Err(error)
+                if error
+                    .downcast_ref::<rusqlite::Error>()
+                    .and_then(rusqlite::Error::sqlite_error_code)
+                    == Some(rusqlite::ErrorCode::OperationInterrupted) =>
+            {
+                // Autocomplete is optional. Never publish partially computed counts
+                // or turn its expected deadline into a failed archive search.
+                Ok(json!({"query":query,"prefix":"","items":[],"incomplete":true}))
+            }
+            result => result,
+        }
     }
 
     pub(crate) fn search_guard(&self, duration: Duration) {
@@ -723,6 +740,36 @@ pub fn asset(path: &str) -> Option<(&'static str, &'static [u8])> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn autocomplete_deadline_is_optional_and_does_not_poison_the_reader() {
+        // A real SQLite interrupt is an incomplete suggestion, never failed search.
+        let work = tempfile::tempdir().unwrap();
+        let root = work.path().join("archive");
+        crate::demo::create(&root).unwrap();
+        let db = rusqlite::Connection::open(root.join("archive.sqlite3")).unwrap();
+        db.execute_batch("WITH RECURSIVE n(x) AS(VALUES(4) UNION ALL SELECT x+1 FROM n WHERE x<10003) INSERT INTO messages SELECT x,printf('bulk%d',x),printf('%064d',x),1,'autocomplete fixture','2025-01-01','header','Archive' FROM n;").unwrap();
+        drop(db);
+        let mut bridge = Bridge::open(&root).unwrap();
+        let result = bridge
+            .suggestions(&[json!("alice")], Duration::ZERO)
+            .unwrap();
+        assert_eq!(result["incomplete"], true);
+        assert_eq!(result["items"], json!([]));
+        assert_eq!(
+            bridge.call("message", &[json!(1)]).unwrap()["message_pk"],
+            1
+        );
+        assert!(bridge
+            .suggestions(&[json!("alice"), json!(0)], Duration::ZERO)
+            .is_err());
+        rusqlite::Connection::open(root.join("archive.sqlite3"))
+            .unwrap()
+            .execute_batch("DROP TABLE recipients")
+            .unwrap();
+        assert!(bridge
+            .suggestions(&[json!("alice")], Duration::from_secs(1))
+            .is_err());
+    }
     #[test]
     fn small_and_empty_searches_wait_for_both_preview_acknowledgements() {
         // Two-window requirement applies even when the first scan exhausts input.

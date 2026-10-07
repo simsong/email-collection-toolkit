@@ -31,6 +31,7 @@ const state = {
   searchRequest: 0,
   rustSearch: null,
   partRequest: 0,
+  preferredBodyType: null,
   remoteContentAuthorizedMessage: null,
   remoteContentAuthorizedPart: null,
   view: null,
@@ -778,9 +779,13 @@ function scheduleSuggestions() {
 }
 
 async function loadSuggestions(query, request) {
-  const suggestions = await call(() => window.pywebview.api.suggestions(query, SUGGESTION_LIMIT));
-  if (!suggestions || request !== state.suggestionRequest || elements.search.value.trim() !== query) return;
-  renderSuggestions(suggestions);
+  try {
+    const suggestions = await window.pywebview.api.suggestions(query, SUGGESTION_LIMIT);
+    if (!suggestions || request !== state.suggestionRequest || elements.search.value.trim() !== query) return;
+    renderSuggestions(suggestions);
+  } catch (error) {
+    if (request === state.suggestionRequest && elements.search.value.trim() === query) showError(error);
+  }
 }
 
 function renderSuggestions(suggestions) {
@@ -1357,10 +1362,12 @@ async function selectMessage(messagePk) {
   updateMessageFileWell();
   renderMessageHeaders(view);
   elements["part-select"].replaceChildren(...view.body_parts.map(partOption));
-  elements["part-select"].value = String(view.preferred_part_id);
+  const partId = view.body_parts.find(part => part.content_type === state.preferredBodyType)?.part_id
+    ?? view.preferred_part_id;
+  elements["part-select"].value = String(partId);
   renderAttachments(view.attachments);
   renderLocations(view);
-  const displayed = await showPart(view.preferred_part_id, false);
+  const displayed = await showPart(partId, false);
   if (state.selectionRequest !== messagePk || state.selected !== messagePk || !displayed) return;
   if (state.messageFindQuery) await moveMessageFind(1);
 }
@@ -1808,6 +1815,8 @@ async function showPart(partId, allowRemote) {
 
 async function selectMessagePart(partId, allowRemote) {
   if (state.selected === null || state.selectionRequest !== state.selected) return;
+  const chosenPart = state.view?.body_parts.find(part => part.part_id === partId);
+  if (chosenPart && !allowRemote) state.preferredBodyType = chosenPart.content_type;
   if (allowRemote && state.selected !== null) {
     state.remoteContentAuthorizedMessage = state.selected;
     state.remoteContentAuthorizedPart = partId;

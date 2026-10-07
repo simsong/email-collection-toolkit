@@ -385,6 +385,23 @@ def test_rust_mime_filters_and_dates_in_shared_widgets(page: Page, tmp_path: Pat
         assert page.frame_locator("#body-view iframe").locator("script").count() == 0
         assert page.frame_locator("#body-view iframe").locator("img[src^='https://']").count() == 0
         assert page.frame_locator("#body-view iframe").locator("img[src^='data:image/png;']").count() == 1
+        # Explicit MIME preference survives keyboard selection and different part IDs.
+        plain = page.locator("#part-select option").filter(has_text="Plain Text").first.get_attribute("value")
+        assert plain is not None
+        page.locator("#part-select").select_option(plain)
+        expect(page.locator("#body-view iframe")).to_have_count(0)
+        page.locator("#search").fill("from:sender")
+        page.locator("#search").press("Enter")
+        expect(page.locator("#result-status")).to_have_text("2 messages")
+        page.locator("#result-list .result").filter(has_text="multipart message").click()
+        expect(page.locator("#message-content")).to_be_visible()
+        expect(page.locator("#part-select")).to_have_value(plain)
+        page.locator("#result-list").dispatch_event("keydown", {"key": "ArrowDown", "bubbles": True})
+        expect(page.locator("#message-subject")).to_have_text("annual plan")
+        page.locator("#result-list").dispatch_event("keydown", {"key": "ArrowUp", "bubbles": True})
+        expect(page.locator("#message-subject")).to_have_text("multipart message")
+        expect(page.locator("#body-view iframe")).to_have_count(0)
+        expect(page.locator("#part-select")).to_have_value(plain)
         page.locator("#part-select").select_option("-1")
         expect(page.locator("#body-view")).to_contain_text("Content-Type: multipart/mixed")
         page.locator("#search").fill('date:"January 3, 2024"')

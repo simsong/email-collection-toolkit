@@ -247,6 +247,16 @@ fn native(
 }
 
 #[cfg(any(target_os = "macos", target_os = "windows", test))]
+fn allowed_navigation(url: &str, windows: bool) -> bool {
+    // Sandboxed MIME frames navigate to these inert internal documents. They
+    // remain excluded from IPC trust, as do remote/file/data destinations.
+    matches!(url, "about:blank" | "about:srcdoc")
+        || trusted_document(url, windows)
+        || trusted_welcome(url, windows)
+        || trusted_opening(url, windows)
+        || trusted_panel(url, windows)
+}
+
 fn trusted_document(url: &str, windows: bool) -> bool {
     url == if windows {
         "http://ect.localhost/index.html"
@@ -526,10 +536,7 @@ fn native(
         .with_initialization_script(SCRIPT)
         .with_initialization_script(mailsearch_rust::shell::SCRIPT)
         .with_navigation_handler(move |url| {
-            let trusted = trusted_document(&url, cfg!(target_os = "windows"))
-                || trusted_welcome(&url, cfg!(target_os = "windows"))
-                || trusted_opening(&url, cfg!(target_os = "windows"))
-                || trusted_panel(&url, cfg!(target_os = "windows"));
+            let trusted = allowed_navigation(&url, cfg!(target_os = "windows"));
             if diagnostics {
                 eprintln!("Webview navigation: {url:?}, trusted={trusted}");
             }
@@ -906,6 +913,28 @@ fn native(
 #[cfg(test)]
 mod tests {
     use super::{trusted_document, trusted_panel, trusted_welcome};
+
+    #[test]
+    fn passive_mime_frames_can_load_without_native_ipc_trust() {
+        for windows in [false, true] {
+            for url in ["about:blank", "about:srcdoc"] {
+                assert!(super::allowed_navigation(url, windows));
+                assert!(!trusted_document(url, windows));
+                assert!(!trusted_welcome(url, windows));
+                assert!(!trusted_panel(url, windows));
+            }
+            for url in [
+                "about:blank?evil",
+                "about:srcdoc#evil",
+                "file:///tmp/mail.html",
+                "data:text/html,evil",
+                "javascript:alert(1)",
+                "https://example.test/mail.html",
+            ] {
+                assert!(!super::allowed_navigation(url, windows));
+            }
+        }
+    }
 
     #[test]
     fn welcome_ipc_requires_the_exact_local_page() {

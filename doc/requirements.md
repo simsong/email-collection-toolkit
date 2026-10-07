@@ -2526,6 +2526,14 @@ The backend retains complete ordered message IDs and sends bounded display pages
 on scroll. Completion reports the total count separately from loaded rows and
 preserves selection and scroll position. No partial search may claim completeness.
 Small and empty searches must acknowledge both preview windows before completion.
+Sparse full-text terms must use indexed canonical-hash lookups rather than scan
+the catalog to enumerate matches. Autocomplete deadlines are optional incomplete
+suggestions, never a failed search or fabricated count; stale suggestion errors
+must not affect a replacement query. Explicit Plain Text, HTML, or Raw Source
+selection persists within a reader window across message navigation, using the
+message default only when that representation is absent. HTML must render in
+native sandboxed frames without acquiring scripts, remote-content consent, or
+native IPC privileges.
 Native recent-menu actions must retain the displayed path despite another window
 reordering the saved list. Recent-list updates from separate processes must
 serialize the complete load/update/replace sequence and retain concurrent opens.
