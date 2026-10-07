@@ -31,7 +31,7 @@ For a disconnected machine, transfer the appropriate standalone installer
 from a connected computer and install it before running ECT.
 
 This is a reader test build; Windows importing is not yet enabled.
-The automated installed-application tests have not passed yet.
+See the associated GitHub Actions run for this build's installation test results.
 
 Files: base.msixbundle is the only installer; local-test.cer is its public
 certificate; sha256.json contains checksums. No upgrade fixture is needed

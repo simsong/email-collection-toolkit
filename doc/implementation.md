@@ -3391,3 +3391,11 @@ using IApplicationActivationManager. The activated Rust executable runs the
 bundled Python self-test in package context, then CI activates the native reader
 on the synthetic archive before testing upgrade and uninstall. Taskbar pinning
 is a user choice, not an installation requirement.
+
+Native installed-package evidence: GitHub Actions run 37677162147 passed all
+five jobs on commit `4912379`: both payload builds, bundle assembly, and install/
+registered activation/private helper/search/native window/upgrade/uninstall
+checks on Windows Server x64 and Windows 11 ARM64. The same bundle was tested
+on both machines; synthetic archive fixity checks passed. Ordinary CI run
+37677162905 also passed. This does not establish Windows import support or
+resolve the initial archive-picker UX.
