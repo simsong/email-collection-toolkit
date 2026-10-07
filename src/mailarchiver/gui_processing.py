@@ -80,6 +80,7 @@ def resume_request(archive: Path, ingest: bool, content: bool) -> IngestRequest:
     else:
         raise ValueError("No saved import policy. Use File → Import to continue the source import.")
     return request.model_copy(update={"archive": archive, "roots": unfinished_work(archive).source_roots if ingest else [],
+                                      "save_owner_defaults": False,
                                       "continue_ingest": ingest, "continue_content": content,
                                       "max_content_jobs": None, "reprocess": False})
 

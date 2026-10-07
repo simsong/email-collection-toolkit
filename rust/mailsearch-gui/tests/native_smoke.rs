@@ -1,9 +1,11 @@
 // Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved.
-// Prove native Rust reading and sandboxed workflow loading on a CLI-built archive.
+// Prove native Rust reading and persisted workflow edits on a CLI-built archive.
 // Synthetic EML inputs go through the real ingest CLI and portable verifier.
 // The feature-enabled application drives its real DOM and native IPC, then snapshots WebKit.
 // Every subprocess has a deadline and retained logs; failures preserve the fixture.
-// Preferences use a private HOME; archive/source hashes stay unchanged throughout.
+// Preferences use a private HOME; read-only trials preserve the full archive.
+// Explicit editor trials persist decisions while canonical mail/source hashes stay fixed.
+// A real processor rerun and another app launch must retain the manual decisions.
 // Run explicitly with make test-rust-gui-native on a logged-in macOS runner.
 #![cfg(all(target_os = "macos", feature = "native-smoke"))]
 
@@ -201,6 +203,104 @@ fn cli_archive_native_search_and_screenshot() -> Result<()> {
         work.join("archive-sha256.json"),
         serde_json::to_vec_pretty(&before)?,
     )?;
-    fs::write(work.join("success.txt"), "Native WKWebView startup, search/read, About health, Preferences Save/Reopen with/without helper, real isolated owner/identity/history loading, PNG snapshot and source/archive fixity passed.\n")?;
+    for phase in ["mutate", "verify"] {
+        if phase == "verify" {
+            run(
+                Command::new("uv")
+                    .current_dir(&repository)
+                    .args(["run", "--locked", "mailarchiver", "--archive"])
+                    .arg(&archive)
+                    .args(["process", "--reprocess"]),
+                &work.join("reprocess.log"),
+            )?;
+        }
+        run(
+            Command::new(env!("CARGO_BIN_EXE_mailsearch-webview"))
+                .env("HOME", &home)
+                .arg("--native-editor-smoke")
+                .arg(&archive)
+                .arg(phase)
+                .arg(work.join(format!("editors-{phase}.png"))),
+            &work.join(format!("editors-{phase}.log")),
+        )?;
+        let after = inventory(&archive)?;
+        let stable = |items: &[(PathBuf, String)]| {
+            items
+                .iter()
+                .filter(|(name, _)| {
+                    !matches!(
+                        name.to_str(),
+                        Some("config.yaml" | "processing.sqlite3" | "status/archive-write.lock")
+                    )
+                })
+                .cloned()
+                .collect::<Vec<_>>()
+        };
+        if phase == "mutate" {
+            ensure!(
+                stable(&after) == stable(&before),
+                "Editor changed unexpected archive files"
+            );
+        }
+        let canonical = |items: &[(PathBuf, String)]| {
+            items
+                .iter()
+                .filter(|(name, _)| {
+                    name.starts_with("data/mbox")
+                        || name.starts_with("integrity")
+                        || name.starts_with("objects")
+                        || name == Path::new("manifest-sha256.txt")
+                        || name == Path::new("mailbag.csv")
+                })
+                .cloned()
+                .collect::<Vec<_>>()
+        };
+        ensure!(
+            canonical(&after) == canonical(&before),
+            "Editor/processing changed canonical files"
+        );
+        ensure!(
+            inventory(&source)? == source_before,
+            "Editor/processing changed source files"
+        );
+        let database = rusqlite::Connection::open_with_flags(
+            archive.join("processing.sqlite3"),
+            rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
+        )?;
+        let identities: Vec<(String, String, i64, i64)> = database.prepare(
+            "SELECT a.address,p.canonical_name,pa.manual,p.manual FROM addresses a \
+             JOIN person_addresses pa USING(address_id) JOIN persons p USING(person_id) ORDER BY a.address"
+        )?.query_map([], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)))?
+          .collect::<rusqlite::Result<_>>()?;
+        ensure!(
+            identities
+                == vec![
+                    (
+                        "alice@example.test".into(),
+                        "Native Harness Alice".into(),
+                        0,
+                        1
+                    ),
+                    ("bob@example.test".into(), "bob@example.test".into(), 1, 1)
+                ],
+            "Manual identity decisions did not persist: {identities:?}"
+        );
+        let decisions: Vec<String> = database
+            .prepare("SELECT operation FROM manual_decisions ORDER BY decision_id")?
+            .query_map([], |row| row.get(0))?
+            .collect::<rusqlite::Result<_>>()?;
+        ensure!(
+            decisions == ["rename-person", "move-address", "separate-address"],
+            "Manual decision history changed: {decisions:?}"
+        );
+    }
+    run(
+        Command::new("uv")
+            .current_dir(&repository)
+            .args(["run", "--locked", "verify-mail-archive"])
+            .arg(&archive),
+        &work.join("verify-editors.log"),
+    )?;
+    fs::write(work.join("success.txt"), "Native WKWebView startup, search/read, About health, Preferences Save/Reopen with/without helper, isolated owner/identity/history loading, owner Save/Reopen, identity Rename/Move/Separate/Reopen, real processor rerun and independent app relaunch persistence, PNG snapshots and canonical mail/source fixity passed.\n")?;
     Ok(())
 }

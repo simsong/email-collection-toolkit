@@ -144,6 +144,16 @@ fn main() -> Result<()> {
         [flag, path, output] if flag == "--native-smoke" => {
             native(PathBuf::from(path), Some(PathBuf::from(output)), None)
         }
+        #[cfg(all(target_os = "macos", feature = "native-smoke"))]
+        [flag, path, phase, output]
+            if flag == "--native-editor-smoke" && matches!(phase.as_str(), "mutate" | "verify") =>
+        {
+            native(
+                PathBuf::from(path),
+                Some(PathBuf::from(output)),
+                Some(format!("native-editors={phase}")),
+            )
+        }
         _ => bail!(
             "Usage: mailsearch-webview --archive DIRECTORY (or --rpc DIRECTORY for headless tests)"
         ),

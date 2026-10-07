@@ -3147,6 +3147,21 @@ checks remain in place. The native driver loads real owner rules, identity rows
 and history, and verifies that each frame cannot read its parent's API. Removing
 the specialization reproduces the native owner-editor loading failure; Chromium
 alone did not expose this WKWebView defect.
+After the full read-only inventory check, the native test saves owner rules,
+renames Alice, moves Bob's address to Alice and separates it again through real
+editor controls/private IPC, reopening each panel to verify persistence.
+It then runs the production CLI's `process --reprocess`, launches a fresh app
+in verification-only mode and checks both visible decisions and persisted identity
+rows. Canonical MBOX/integrity/object/manifest/CSV hashes and source inventories
+remain fixed; the portable verifier checks the edited fixture afterward.
+`IngestRequest.save_owner_defaults` separates explicit import settings from a
+saved processing policy: CLI processing and both GUI resume paths set it false.
+Replay still uses the recorded classification/scanner policy but cannot overwrite
+owner defaults edited after that import. The CLI and native regressions exercise
+this boundary with later owner edits and unchanged canonical messages.
+`--native-editor-smoke` exists only in macOS native-smoke builds and operates on
+the integration test's disposable archive, using a phase message validated
+against the parent/frame window. No service results or saves are substituted.
 The macOS menu uses Muda's predefined responder-chain Edit actions, so native
 Undo/Redo, Cut/Copy/Paste and Select All reach both main and opaque editor fields.
 Native Open, Preferences and Quit carry platform command accelerators rather

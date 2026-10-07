@@ -4,6 +4,12 @@
 
 ## Unreleased
 
+- Preserve edited owner defaults when CLI or GUI processing replays an earlier
+  ingest policy; existing message classifications keep their recorded rules.
+
+- Automate native owner/identity Save, Rename, Move, Separate and Reopen trials;
+  verify persisted decisions after real processor reruns and a fresh app launch.
+
 - Preserve recoverable recent archives during Rust startup selection; hot SQLite
   journals enter foreground recovery instead of silently opening an older archive.
 

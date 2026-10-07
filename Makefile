@@ -763,6 +763,7 @@ rust-webview-probe: rust-gui-build
 
 # RUST_GUI_ARTIFACT_DIR retains the synthetic .mailarchive, native PNG, hashes and logs.
 # Requires a logged-in macOS GUI session; uses explicitly unscanned synthetic EML only.
+# Exercises real owner/identity edits and processor-rerun persistence on that fixture.
 RUST_GUI_ARTIFACT_DIR ?= $(CURDIR)/.tmp/rust-gui-native
 .PHONY: test-rust-gui-native
 test-rust-gui-native:

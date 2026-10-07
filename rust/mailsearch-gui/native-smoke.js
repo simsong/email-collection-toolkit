@@ -2,7 +2,8 @@
 /* Drive the actual native webview through its shipped search form and rows.
  * A CLI-created synthetic archive supplies the expected message and body.
  * Native IPC and Rust workers answer every query without substituted results.
- * Verify search, preferences and live sandboxed workflow editors on WKWebView.
+ * Verify search, preferences and sandboxed editor Save/Move/Separate/Reopen on WKWebView.
+ * Editor mutation phases operate only on the integration test's disposable archive.
  * Failures return through the same origin-checked IPC to fail the native process.
  * This driver is embedded only with the explicit native-smoke Cargo feature.
  */
@@ -29,6 +30,60 @@ window.addEventListener("DOMContentLoaded", async () => {
         while(!ready()) {
           if(Date.now()>deadline) throw new Error(`Editor did not load: ${document.body.textContent}`);
           await new Promise(resolve=>setTimeout(resolve,50));
+        }
+        const phase=await new Promise((resolve,reject)=>{
+          const timer=setTimeout(()=>{window.removeEventListener("message",receive);reject(new Error("Missing native editor test phase"));},10000);
+          function receive(event) {
+            if(event.source!==parent || event.data?.type!=="ect-native-editor-phase"
+              || !["read","mutate","verify"].includes(event.data.phase)) return;
+            clearTimeout(timer);window.removeEventListener("message",receive);resolve(event.data.phase);
+          }
+          window.addEventListener("message",receive);
+          parent.postMessage({type:"ect-native-editor",path:location.pathname,ready:true},"*");
+        });
+        const wait=async(label,predicate)=>{
+          const deadline=Date.now()+10000;
+          while(!predicate()) {
+            if(Date.now()>deadline) throw new Error(`Editor ${label}: ${document.body.textContent}`);
+            await new Promise(resolve=>setTimeout(resolve,50));
+          }
+        };
+        const get=id=>document.getElementById(id);
+        const set=(id,value)=>{get(id).value=value;get(id).dispatchEvent(new Event("input",{bubbles:true}));};
+        if(phase!=="read" && location.pathname==="/options.html") {
+          const expected="bob@example.test\nnative-harness@example.test";
+          if(phase==="mutate") {
+            set("owner-include",expected);
+            get("owner-form").requestSubmit();
+            await wait("owner Save",()=>!get("saved").hidden && !get("save").disabled);
+          }
+          if(get("owner-include").value!==expected || get("owner-exclude").value!=="")
+            throw new Error("Owner Save/Reopen lost rules");
+        }
+        if(phase!=="read" && location.pathname==="/identity.html") {
+          const label="Native Harness Alice";
+          const row=email=>[...document.querySelectorAll("tr.address")].find(item=>item.querySelector(".row-label").textContent===email);
+          const group=name=>[...document.querySelectorAll("tr.group")].find(item=>item.querySelector(".row-label").textContent===name);
+          const saved=predicate=>wait("identity Save",()=>get("status").textContent.startsWith("Saved to the archive") && predicate());
+          if(phase==="mutate") {
+            const alice=group("Alice");
+            if(!alice) throw new Error("Original Alice identity missing");
+            alice.click();set("canonical-name",label);get("rename").click();
+            await saved(()=>group(label));
+            row("bob@example.test").click();
+            get("destination").value=group(label).dataset.groupId;
+            get("destination").dispatchEvent(new Event("change",{bubbles:true}));
+            if(get("move").disabled) throw new Error("Move unavailable for selected address");
+            get("move").click();
+            await saved(()=>row("bob@example.test").dataset.groupId===group(label).dataset.groupId);
+            row("bob@example.test").click();
+            if(get("separate").disabled) throw new Error("Make separate unavailable after Move");
+            get("separate").click();
+            await saved(()=>row("bob@example.test").dataset.groupId!==group(label).dataset.groupId);
+          }
+          const alice=row("alice@example.test"),bob=row("bob@example.test");
+          if(!group(label) || !alice || !bob || alice.dataset.groupId!==group(label).dataset.groupId
+            || alice.dataset.groupId===bob.dataset.groupId) throw new Error("Identity edits did not persist");
         }
         parent.postMessage({type:"ect-native-editor",path:location.pathname},"*");
       } catch(error) { parent.postMessage({type:"ect-native-editor",path:location.pathname,error:String(error)},"*"); }
@@ -87,14 +142,24 @@ window.addEventListener("DOMContentLoaded", async () => {
     await wait("Preferences reopened",()=>dialog.querySelector('input[type="number"]'));
     if(Number(dialog.querySelector('input[type="number"]').value)!==edited) throw new Error("Reopened Preferences show stale settings");
     dialog.close();
+    const phase=new URLSearchParams(window.__rustWindowParameters || location.search).get("native-editors") || "read";
+    if(phase!=="read" && !(capabilities.available && capabilities.write_available))
+      throw new Error("Native editor acceptance requires the real writable helper");
     if(capabilities.available && capabilities.write_available) {
-      for(const [action,path] of [[()=>api.open_options(),"/options.html"],
-        [()=>api.open_picker("name"),"/identity.html"],[()=>api.open_ingest_window(),"/ingests.html"]]) {
+      const actions=[];
+      for(const [action,path] of [[()=>api.open_options(),"/options.html"],[()=>api.open_picker("name"),"/identity.html"]]) {
+        actions.push([action,path,phase]);
+        if(phase==="mutate") actions.push([action,path,"verify"]);
+      }
+      if(phase==="read") actions.push([()=>api.open_ingest_window(),"/ingests.html","read"]);
+      for(const [action,path,editorPhase] of actions) {
         let result;
         const received=event=>{
           const frame=document.querySelector(".rust-workflow iframe");
-          if(event.source===frame?.contentWindow && event.data?.type==="ect-native-editor" && event.data.path===path)
-            result=event.data;
+          if(event.source===frame?.contentWindow && event.data?.type==="ect-native-editor" && event.data.path===path) {
+            if(event.data.ready) frame.contentWindow.postMessage({type:"ect-native-editor-phase",phase:editorPhase},"*");
+            else result=event.data;
+          }
         };
         window.addEventListener("message",received);
         try {

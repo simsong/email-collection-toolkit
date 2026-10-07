@@ -79,19 +79,27 @@ On October 6, 2026, `make test-rust-gui-native` passed on an unlocked macOS
 desktop with and without the Python helper: real staged search, message reading,
 native menu capability state and About-dialog definition-refresh gating. The
 synthetic archive/source byte inventories stayed unchanged, and PNGs were
-visually inspected. This does not exercise native file dialogs, clipboard,
-printing, attachment launch, drag-out or embedded workflow editors; those remain
-acceptance work. The earlier locked-desktop attempt could not acknowledge paint
+visually inspected. Those initial checks did not exercise native file dialogs,
+clipboard, printing, attachment launch, drag-out or embedded workflow editors.
+The subsequent editor and manual trials below extend that evidence;
+attachment launch and drag-out remain pending. The earlier locked-desktop attempt could not acknowledge paint
 and is not passing evidence.
 The native regression also loads owner rules, identities and import history
 through the real service, with opaque-frame parent access denied. It reproduced
 and repaired WKWebView's rejection of `self` script/style sources in sandboxed
-editors by allowing only the page's named bundled assets. Editor save/move and
-drag operations still need separate native acceptance.
+editors by allowing only the page's named bundled assets. Editor drag interactions
+still need acceptance beyond the tested Move/Separate buttons.
 Manual native acceptance also verifies message exports against original RFC 5322
 bytes and macOS Select All, Copy/Paste, Cut and Undo in the search and editor
 fields. Native Edit actions and Open/Preferences/Quit shortcuts use the OS menu
 responder chain rather than parent-page keyboard listeners.
+Native printing to a local PDF was visually inspected for selected-message
+headers/body/provenance; no physical printer job was submitted.
+The native target also exercises owner Save/Reopen and identity
+Rename/Move/Separate/Reopen through sandboxed editor controls. A real
+`process --reprocess` and another app process must retain those decisions while
+canonical mail/source hashes remain fixed. These are explicit mutations of the
+disposable fixture's settings/derived database, separate from read-only fixity.
 
 The broader [issue #49 checklist](https://github.com/simsong/email-collection-toolkit/issues/49)
 remains open. Specifically, this local build does **not** complete:

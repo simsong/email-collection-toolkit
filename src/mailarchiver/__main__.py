@@ -148,6 +148,7 @@ class IngestRequest(BaseModel):
     archive: Path
     owner_names_file: Path | None = None
     owner_rules: OwnerRules | None = None
+    save_owner_defaults: bool = True
     roots: list[str] = Field(default_factory=list)
     earliest_year: int = Field(default=1900, ge=1)
     workers: int = Field(default_factory=lambda: min(os.cpu_count() or 1, 8), ge=1)
@@ -1058,7 +1059,7 @@ def process_archive(args: argparse.Namespace) -> None:
     if row is None:
         raise ValueError("archive has no saved processor policy; ingest a source first")
     policy = ProcessingPolicy.model_validate_json(row[0])
-    run_ingest(IngestRequest(archive=archive, owner_rules=policy.owners,
+    run_ingest(IngestRequest(archive=archive, owner_rules=policy.owners, save_owner_defaults=False,
         earliest_year=policy.earliest_year, index_attachments=policy.index_attachments,
         scan_policy=policy.scan_policy, continue_ingest=args.phase in ("ingest", "all"),
         continue_content=args.phase in ("content", "all"), max_content_jobs=args.max_jobs,
@@ -1202,7 +1203,8 @@ def _run_ingest(request: IngestRequest, writer_lease: WriterLease, outcome: Inge
         outcome.published = True
         checkpoint_archive()
         print(f"recovered: pending message publication {recovery.value}", file=sys.stderr)
-    options.save(owners, writer_lease)
+    if request.save_owner_defaults:
+        options.save(owners, writer_lease)
     options.record_import(owners, writer_lease)
     started_at = datetime.now(UTC)
     run_pk = catalog.execute(

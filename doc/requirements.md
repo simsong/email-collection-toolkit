@@ -1161,6 +1161,9 @@ including senders from prior imports and applying exclusions. Detected addresses
 are derived evidence, never expanded into YAML or reused as implicit owner rules.
 Existing Sent/Archive classifications remain unchanged by rule edits or
 reindexing; correcting historical misclassification requires a fresh rebuild.
+CLI processing, Continue Processing and explicit reprocessing replay their saved
+ingest policy without overwriting later owner defaults in `config.yaml`.
+Only an explicitly requested import saves its owner rules as document defaults.
 
 Only a saved document holding the matching cross-process writer lease may
 start ingest. The process-local document registry prevents duplicate UI jobs
@@ -2463,6 +2466,10 @@ or headless success must not mark those gates complete.
 Native preference acceptance must use isolated user settings and the real dialog
 Save/Reopen controls, verify applied and persisted values, and preserve source
 and archive inventories. Compilation alone does not satisfy this gate.
+Native owner/identity acceptance must use actual sandboxed editor controls for
+owner Save/Reopen and identity Rename/Move/Separate/Reopen. Manual decisions must
+survive a real processor rerun and a fresh app process. Only explicit fixture
+settings/derived-state writes are permitted; canonical mail and sources stay fixed.
 
 Interactive Rust search must publish two bounded ordered catalog windows before
 running one comprehensive query over the remainder. Each window must be painted
