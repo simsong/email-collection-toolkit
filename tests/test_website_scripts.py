@@ -329,13 +329,18 @@ def test_msix_same_bundle_is_installed_without_rebuilding() -> None:
         {"os": "windows-latest", "arch": "x64"}, {"os": "windows-11-arm", "arch": "arm64"}]
     install = jobs["install"][STEPS]
     downloads = [step for step in install if step.get("uses", "").startswith("actions/download-artifact@")]
-    assert len(downloads) == 1
+    assert len(downloads) == 2
     assert downloads[0]["with"]["name"] == "windows-msix-install-test"
     assert not any("cargo " in step.get(RUN, "") or "uv sync" in step.get(RUN, "") for step in install)
     upload = next(step for step in jobs["bundle"][STEPS] if step.get("uses", "").startswith("actions/upload-artifact@"))
     assert upload["with"]["name"] == downloads[0]["with"]["name"]
     assert set(upload["with"]["path"].splitlines()) == {
-        "dist/bundle/*.msixbundle", "dist/bundle/*.cer", "dist/bundle/sha256.json"}
+        "dist/bundle/base.msixbundle", "dist/bundle/*.cer", "dist/bundle/sha256.json",
+        "dist/bundle/README.txt", "dist/bundle/Install-Test-Certificate.ps1"}
+    fixture = jobs["bundle"][STEPS][-1]["with"]
+    assert fixture["name"] == downloads[1]["with"]["name"] == "ci-only-msix-upgrade-fixture"
+    assert fixture["path"] == "dist/bundle/upgrade.msixbundle"
+    assert downloads[1]["with"]["path"] == downloads[0]["with"]["path"]
     release = safe_load((root / ".github/workflows/release.yml").read_text(encoding="utf-8"))
     assert release[JOBS]["windows-msix"][NEEDS] == "preflight"
     assert "windows-msix" in release[JOBS]["assemble"][NEEDS]

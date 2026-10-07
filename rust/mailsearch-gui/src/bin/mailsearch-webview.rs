@@ -43,6 +43,27 @@ fn main() -> Result<()> {
             }
         }
     }
+    #[cfg(target_os = "windows")]
+    if let [flag, output] = args.as_slice() {
+        if flag == "--msix-test" {
+            let executable = std::env::current_exe()?;
+            let root = executable.parent().unwrap();
+            let result = std::process::Command::new(root.join("python/python.exe"))
+                .arg("-I")
+                .arg(root.join("test_windows_msix.py"))
+                .arg(&executable)
+                .arg(output)
+                .arg("--installed-root")
+                .arg(root)
+                .output()?;
+            let log = PathBuf::from(output).with_extension("log");
+            let mut contents = result.stdout;
+            contents.extend_from_slice(&result.stderr);
+            std::fs::write(log, contents)?;
+            anyhow::ensure!(result.status.success(), "Packaged self-test failed");
+            return Ok(());
+        }
+    }
     match args.as_slice() {
         [] => {
             if let Some(path) = startup_archive()? {

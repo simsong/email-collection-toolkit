@@ -18,6 +18,28 @@ $addedTrust = $false
 $installed = $false
 $originalLocalAppData=$env:LOCALAPPDATA
 if (Get-AppxPackage -Name ECT.LocalTest) { throw 'Existing ECT.LocalTest installation must be preserved; use a clean VM.' }
+# Activate the registered desktop application with its package identity.
+Add-Type -TypeDefinition @"
+using System;
+using System.Runtime.InteropServices;
+[ComImport, Guid("2e941141-7f97-4756-ba1d-9decde894a3d"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+interface IECTActivationManager {
+    void ActivateApplication([MarshalAs(UnmanagedType.LPWStr)] string appId,
+        [MarshalAs(UnmanagedType.LPWStr)] string arguments, uint options, out uint processId);
+    void ActivateForFile(IntPtr appId, IntPtr items, IntPtr verb, out uint processId);
+    void ActivateForProtocol(IntPtr appId, IntPtr items, out uint processId);
+}
+public static class ECTActivation {
+    public static uint Launch(string appId, string arguments) {
+        object manager = Activator.CreateInstance(Type.GetTypeFromCLSID(new Guid("45BA127D-10A8-46EA-8AB7-56EA9078943C")));
+        try {
+            uint processId;
+            ((IECTActivationManager)manager).ActivateApplication(appId, arguments, 0, out processId);
+            return processId;
+        } finally { Marshal.ReleaseComObject(manager); }
+    }
+}
+"@
 try {
     if (-not (Test-Path $storePath)) {
         Import-Certificate -FilePath $certPath -CertStoreLocation Cert:/LocalMachine/TrustedPeople | Out-Null
@@ -43,14 +65,27 @@ try {
         if ($kind -eq 'upgrade' -and [version]$package.Version -le $baseVersion) { throw 'Package did not upgrade' }
         $baseVersion=[version]$package.Version
         $location=$package.InstallLocation
-        $python=Join-Path $location 'python/python.exe'
-        & $python -I (Join-Path $PSScriptRoot 'test_windows_msix.py') $bundle (Join-Path $evidence $kind) --installed-root $location
-        if ($LASTEXITCODE) { throw 'Installed helper/search/fixity test failed' }
+        $appId=$package.PackageFamilyName + '!ECT'
+        $startEntry=Get-StartApps | Where-Object AppID -EQ $appId
+        if ($startEntry.Name -ne 'Email Collector Toolkit (ECT)') { throw 'Expected Start menu application name is missing' }
+        $testOutput=Join-Path $evidence $kind
+        $testPid=[ECTActivation]::Launch($appId, ('--msix-test "'+$testOutput+'"'))
+        $testProcess=Get-Process -Id $testPid -ErrorAction SilentlyContinue
+        if ($testProcess -and -not $testProcess.WaitForExit(120000)) {
+            $testProcess.Kill()
+            throw 'Packaged self-test timed out'
+        }
+        $testLog=$testOutput + '.log'
+        if (Test-Path $testLog) { Get-Content $testLog }
+        $report=Join-Path $testOutput 'report.json'
+        if (-not (Test-Path $report)) { throw 'Packaged self-test did not produce its success report' }
+        if (-not (Get-Content $report -Raw | ConvertFrom-Json).installed_msix_tested) { throw 'Self-test did not exercise installed package' }
         $archive=Join-Path $evidence "$kind/synthetic.mailarchive"
         $guiFiles=@(Get-ChildItem $archive -Recurse -File)
         $guiBefore=@($guiFiles | Get-FileHash -Algorithm SHA256 | ForEach-Object { $_.Path + ':' + $_.Hash })
         $env:LOCALAPPDATA=Join-Path $evidence "$kind/profile"
-        $process=Start-Process -FilePath (Join-Path $location 'mailsearch-webview.exe') -ArgumentList @('--archive', ('"'+$archive+'"')) -WindowStyle Hidden -PassThru
+        $guiPid=[ECTActivation]::Launch($appId, ('--archive "'+$archive+'"'))
+        $process=Get-Process -Id $guiPid
         try {
             $deadline=[DateTime]::UtcNow.AddSeconds(45)
             do {

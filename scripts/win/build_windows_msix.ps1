@@ -52,6 +52,7 @@ foreach ($name in @('mailsearch-webview.exe','mailsearch-rust.exe')) {
 foreach ($name in @('LICENSE','COPYRIGHT','THIRD_PARTY_NOTICES.md')) {
     Copy-Item -LiteralPath (Join-Path $root $name) -Destination $stage
 }
+Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'test_windows_msix.py') -Destination $stage
 Copy-Item -LiteralPath (Join-Path $root 'licenses') -Destination $stage -Recurse
 New-Item -ItemType Directory -Path (Join-Path $stage 'Assets') | Out-Null
 Copy-Item -LiteralPath (Join-Path $root 'gui/icons/rainbow-post-48.png') -Destination (Join-Path $stage 'Assets/Logo.png')
@@ -60,10 +61,10 @@ $manifest = @"
 <?xml version="1.0" encoding="utf-8"?>
 <Package xmlns="http://schemas.microsoft.com/appx/manifest/foundation/windows10" xmlns:uap="http://schemas.microsoft.com/appx/manifest/uap/windows10" xmlns:rescap="http://schemas.microsoft.com/appx/manifest/foundation/windows10/restrictedcapabilities" IgnorableNamespaces="uap rescap">
  <Identity Name="ECT.LocalTest" Publisher="CN=ECT Local Test" Version="$($metadata.version)" ProcessorArchitecture="$Architecture" />
- <Properties><DisplayName>ECT Local Test</DisplayName><PublisherDisplayName>ECT Local Test</PublisherDisplayName><Logo>Assets/Logo.png</Logo></Properties>
+ <Properties><DisplayName>Email Collector Toolkit (ECT)</DisplayName><PublisherDisplayName>ECT Local Test</PublisherDisplayName><Logo>Assets/Logo.png</Logo></Properties>
  <Dependencies><TargetDeviceFamily Name="Windows.Desktop" MinVersion="10.0.19041.0" MaxVersionTested="10.0.26100.0" /></Dependencies>
  <Resources><Resource Language="en-us" /></Resources>
- <Applications><Application Id="ECT" Executable="mailsearch-webview.exe" EntryPoint="Windows.FullTrustApplication"><uap:VisualElements DisplayName="ECT Local Test" Description="Hybrid Rust/Python test package" BackgroundColor="transparent" Square150x150Logo="Assets/Tile.png" Square44x44Logo="Assets/Logo.png" /></Application></Applications>
+ <Applications><Application Id="ECT" Executable="mailsearch-webview.exe" EntryPoint="Windows.FullTrustApplication"><uap:VisualElements DisplayName="Email Collector Toolkit (ECT)" Description="Hybrid Rust/Python test package" BackgroundColor="transparent" Square150x150Logo="Assets/Tile.png" Square44x44Logo="Assets/Logo.png" /></Application></Applications>
  <Capabilities><rescap:Capability Name="runFullTrust" /></Capabilities>
 </Package>
 "@

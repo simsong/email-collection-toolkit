@@ -87,3 +87,26 @@ and physical interaction remain separate acceptance gaps.
 Before the new workflow is available for dispatch, an explicit `[msix-ci]` commit
 message on `codex/windows-msix-ci` starts the same run. Other push messages skip
 payload building; this exception is limited to the packaging development branch.
+
+The downloadable `windows-msix-install-test` artifact contains exactly one installer,
+`base.msixbundle`, plus its public test certificate and checksum inventory. The
+higher-version bundle is isolated in `ci-only-msix-upgrade-fixture`; installation
+CI downloads both artifacts into the same directory to retain upgrade coverage.
+Users downloading the installer do not need the upgrade fixture.
+
+The installer artifact includes README.txt with certificate installation into
+Local Machine/Trusted People using elevated PowerShell (Current User trust is
+insufficient), installation and launch steps, and external WebView2 guidance.
+
+The test installer ZIP includes `Install-Test-Certificate.ps1`: right-click Run
+with PowerShell requests elevation, installs the adjacent public certificate in
+Local Machine/Trusted People, verifies its presence, and displays the outcome.
+The README documents this path and a command fallback without changing the
+machine execution policy. The helper does not install the application.
+
+Windows installation registers the display name **Email Collector Toolkit (ECT)**.
+The installation matrix verifies that Start menu entry and activates its app ID
+using IApplicationActivationManager. The activated Rust executable runs the
+bundled Python self-test in package context, then CI activates the native reader
+on the synthetic archive before testing upgrade and uninstall. Taskbar pinning
+is a user choice, not an installation requirement.

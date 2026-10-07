@@ -781,3 +781,20 @@ Its writable user-data directory is outside the immutable package. Hosted
 execution is pending; earlier local prototype results do not validate this head.
 Start-menu activation, missing-runtime UI, Windows imports/scanner/converters,
 and physical interaction remain separate acceptance gaps.
+
+Windows test installer downloads now contain one MSIX bundle and a README
+explaining machine-level test certificate trust, installation, and WebView2.
+The synthetic upgrade bundle is a separate CI-only artifact.
+
+The test installer ZIP includes `Install-Test-Certificate.ps1`: right-click Run
+with PowerShell requests elevation, installs the adjacent public certificate in
+Local Machine/Trusted People, verifies its presence, and displays the outcome.
+The README documents this path and a command fallback without changing the
+machine execution policy. The helper does not install the application.
+
+Windows installation registers the display name **Email Collector Toolkit (ECT)**.
+The installation matrix verifies that Start menu entry and activates its app ID
+using IApplicationActivationManager. The activated Rust executable runs the
+bundled Python self-test in package context, then CI activates the native reader
+on the synthetic archive before testing upgrade and uninstall. Taskbar pinning
+is a user choice, not an installation requirement.

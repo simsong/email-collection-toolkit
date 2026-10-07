@@ -39,4 +39,6 @@ if ($LASTEXITCODE) { throw 'Upgrade bundle signing failed' }
 foreach ($name in @('base.msixbundle','upgrade.msixbundle','local-test.cer')) {
     Copy-Item -LiteralPath (Join-Path $work $name) -Destination $OutputDirectory
 }
-Get-ChildItem $OutputDirectory -File | Get-FileHash -Algorithm SHA256 | ConvertTo-Json | Set-Content (Join-Path $OutputDirectory 'sha256.json')
+Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'MSIX_README.txt') -Destination (Join-Path $OutputDirectory 'README.txt')
+Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'Install-Test-Certificate.ps1') -Destination $OutputDirectory
+Get-Item (Join-Path $OutputDirectory 'base.msixbundle'), (Join-Path $OutputDirectory 'local-test.cer') | Get-FileHash -Algorithm SHA256 | ConvertTo-Json | Set-Content (Join-Path $OutputDirectory 'sha256.json')
