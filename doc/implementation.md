@@ -2376,7 +2376,10 @@ After GUI shutdown, it joins non-daemon workers within one five-second budget.
 Remaining workers produce a failed JSON report with their names, a Python thread
 dump, and immediate nonzero test-process exit. The 120-second watchdog also
 marks failure and dumps stacks. `make test-self-test` validates the worker gate
-with real finishing and blocked threads plus the existing packaging tests.
+with real finishing, blocked and daemon threads in spawned child processes,
+while an idle parent executor reproduces suite thread contamination. The parent
+requires bounded successful child exit; the production worker gate is unchanged.
+The target also runs the existing packaging tests.
 The builder announces each mounted test, including its visible windows, and
 requires the subprocess to exit successfully before accepting its report.
 The DMG build stages the app, Applications symlink, and instructions, mounts

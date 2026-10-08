@@ -2104,6 +2104,9 @@ background workers that block process exit to stop within a five-second grace
 period after GUI shutdown. A remaining worker must produce a failed report,
 thread stacks, and a nonzero exit rather than a successful report followed by
 an interpreter-shutdown hang. The parent must still require successful process exit.
+Worker-gate regression tests must run in fresh processes so unrelated test-suite
+executors cannot contaminate the desktop shutdown result; they must retain real
+finishing/blocked-worker assertions and bounded child exit.
 The bundled-library audit must distinguish `LC_ID_DYLIB` metadata from actual
 load commands; a binary's own install name is not an imported dependency.
 Unresolved imported libraries must still fail validation.
