@@ -61,11 +61,19 @@ impl Bridge {
         // cleanup; retain the reader so canceled installation can restore the UI.
         self.search.take();
         self.engine.take();
-        self.drags.take();
-        if let Some(exports) = self.exports.take() {
-            exports
-                .close()
-                .context("Clean temporary message/attachment exports")?;
+        if let Some(drags) = &mut self.drags {
+            drags.close()?;
+            self.drags.take();
+        }
+        if let Some(exports) = &self.exports {
+            match std::fs::remove_dir_all(exports.path()) {
+                Ok(()) => (),
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => (),
+                Err(error) => {
+                    return Err(error).context("Clean temporary message/attachment exports")
+                }
+            }
+            self.exports.take();
         }
         Ok(())
     }
@@ -759,6 +767,34 @@ pub fn asset(path: &str) -> Option<(&'static str, &'static [u8])> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn quiesce_retains_failed_export_directory_until_retry_succeeds() {
+        // Update cleanup requirement: a real failed deletion must remain retryable.
+        let fixture = tempfile::tempdir().unwrap();
+        let archive = fixture.path().join("archive");
+        crate::demo::create(&archive).unwrap();
+        let before = std::fs::read(archive.join("data/mbox/DEMO.mbox")).unwrap();
+        let mut bridge = Bridge::open(&archive).unwrap();
+        let exports = tempfile::tempdir_in(fixture.path()).unwrap();
+        let path = exports.path().to_owned();
+        std::fs::write(path.join("attachment"), b"Private exported bytes").unwrap();
+        let saved = fixture.path().join("saved-exports");
+        std::fs::rename(&path, &saved).unwrap();
+        std::fs::write(&path, b"Deletion obstruction").unwrap();
+        bridge.exports = Some(exports);
+        assert!(bridge.quiesce().is_err());
+        assert_eq!(bridge.exports.as_ref().unwrap().path(), path);
+        assert_eq!(std::fs::read(&path).unwrap(), b"Deletion obstruction");
+        assert!(bridge.call("message", &[json!(1)]).is_ok());
+        std::fs::remove_file(&path).unwrap();
+        std::fs::rename(saved, &path).unwrap();
+        bridge.quiesce().unwrap();
+        assert!(bridge.exports.is_none() && !path.exists());
+        assert_eq!(
+            std::fs::read(archive.join("data/mbox/DEMO.mbox")).unwrap(),
+            before
+        );
+    }
     #[test]
     fn autocomplete_deadline_is_optional_and_does_not_poison_the_reader() {
         // A real SQLite interrupt is an incomplete suggestion, never failed search.

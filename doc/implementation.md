@@ -3449,7 +3449,9 @@ cycle completes, even with nil error. Dismiss with nil completion retains
 installation-on-Quit state; reported native cycle failures clear it. Local cleanup,
 reservation or continuation failures release Rust's reservation and restore the
 reader but retain staged state, since they cannot cancel Sparkle's external installer.
-A later Quit repeats cleanup and fence acquisition. Failure while closing suppresses the ordinary
+A later Quit repeats cleanup and fence acquisition with fresh cleanup-result state. Failed drag roots
+remain registered and the bridge retains failed attachment-export ownership until
+deletion succeeds; retry cannot skip leftover private files. Failure while closing suppresses the ordinary
 watchdog until the worker acknowledges cleanup and the reader can be restored. An added, ABI-compatible
 `applicationShouldTerminate:` method on the pinned Tao delegate returns Cocoa's
 `TerminateLater`; Rust replies only after cleanup and native installer handoff.

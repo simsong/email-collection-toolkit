@@ -900,6 +900,9 @@ fn native(
             | Event::UserEvent(NativeEvent::Quit) => {
                 if !quitting {
                     quitting=true;
+                    // Cleanup results belong to this attempt. Failed paths remain
+                    // owned by the bridge/registry and must be retried below.
+                    cleanup_failed=false;
                     if let Some(shell) = &shell { shell.updater().begin_shutdown(); }
                     quit_epoch += 1;
                     closing.store(true, std::sync::atomic::Ordering::Release);

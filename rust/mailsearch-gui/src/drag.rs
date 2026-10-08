@@ -3,7 +3,7 @@
 // One message becomes an exact verified EML; multiple messages become a ZIP.
 // Read and verify one bounded record at a time, writing into private temporary files.
 // Opaque tokens resolve only to exports registered by this process, never arbitrary paths.
-// The owning bridge revokes its tokens and removes files when the reader closes.
+// The bridge and cleanup registry retain failed paths until deletion succeeds.
 // The macOS adapter replaces WebKit text writers with a single file URL writer.
 use crate::Archive;
 use anyhow::{ensure, Context, Result};
@@ -61,6 +61,26 @@ pub(crate) struct Exports {
     tokens: Vec<String>,
 }
 impl Exports {
+    pub fn close(&mut self) -> Result<()> {
+        let mut paths = registry()
+            .lock()
+            .map_err(|_| anyhow::anyhow!("Drag registry unavailable"))?;
+        for token in &self.tokens {
+            paths.tokens.remove(token);
+        }
+        drop(paths);
+        match std::fs::remove_dir_all(self.directory.path()) {
+            Ok(()) => (),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => (),
+            Err(error) => return Err(error).context("Clean temporary drag exports"),
+        }
+        registry()
+            .lock()
+            .map_err(|_| anyhow::anyhow!("Drag registry unavailable"))?
+            .roots
+            .remove(self.directory.path());
+        Ok(())
+    }
     pub fn new(archive: &Archive) -> Result<Self> {
         let temporary = std::env::temp_dir().canonicalize()?;
         ensure!(
@@ -138,11 +158,8 @@ impl Exports {
 }
 impl Drop for Exports {
     fn drop(&mut self) {
-        if let Ok(mut paths) = registry().lock() {
-            for token in &self.tokens {
-                paths.tokens.remove(token);
-            }
-            paths.roots.remove(self.directory.path());
+        if let Err(error) = self.close() {
+            eprintln!("{error:#}");
         }
     }
 }
@@ -158,7 +175,7 @@ pub fn close(finished: impl FnOnce(Result<()>) + Send + 'static) {
     let roots = if let Ok(mut paths) = registry().lock() {
         CLOSING.store(true, Ordering::Release);
         paths.tokens.clear();
-        paths.roots.drain().collect::<Vec<_>>()
+        paths.roots.iter().cloned().collect::<Vec<_>>()
     } else {
         finished(Err(anyhow::anyhow!("Temporary drag registry lock failed")));
         return;
@@ -169,7 +186,14 @@ pub fn close(finished: impl FnOnce(Result<()>) + Send + 'static) {
             if let Err(error) = std::fs::remove_dir_all(&root) {
                 if error.kind() != std::io::ErrorKind::NotFound {
                     errors.push(format!("{}: {error}", root.display()));
+                    continue;
                 }
+            }
+            match registry().lock() {
+                Ok(mut paths) => {
+                    paths.roots.remove(&root);
+                }
+                Err(_) => errors.push("Temporary drag registry lock failed".into()),
             }
         }
         finished(if errors.is_empty() {
@@ -215,13 +239,46 @@ mod tests {
             .recv_timeout(std::time::Duration::from_secs(10))
             .unwrap()
             .unwrap();
-        // Keep the worker-owned Exports alive through cleanup completion.
+        // Keep the worker-owned Exports alive through successful cleanup.
         assert!(!exported.exists() && !owner.directory.path().exists());
         assert!(resolve(token).is_none());
         assert!(owner.prepare(&archive, &[1]).is_err());
         assert!(Exports::new(&archive).is_err());
-        // A canceled update resumes a new owner, never the revoked export token.
         drop(owner);
+        resume();
+        let mut owner = Exports::new(&archive).unwrap();
+        let prepared = owner.prepare(&archive, &[1, 2, 3]).unwrap();
+        let token = prepared["token"].as_str().unwrap();
+        let exported = resolve(token).unwrap();
+        // Actual deletion failure retains the root even after its owner is dropped.
+        let failed = owner.directory.path().to_owned();
+        let saved = fixture.path().join("saved-drag-root");
+        std::fs::rename(&failed, &saved).unwrap();
+        std::fs::write(&failed, b"Deletion obstruction").unwrap();
+        let (sender, receiver) = std::sync::mpsc::channel();
+        close(move |result| sender.send(result).unwrap());
+        assert!(receiver
+            .recv_timeout(std::time::Duration::from_secs(10))
+            .unwrap()
+            .is_err());
+        assert!(registry().lock().unwrap().roots.contains(&failed));
+        assert!(resolve(token).is_none());
+        assert!(owner.close().is_err());
+        drop(owner);
+        assert!(registry().lock().unwrap().roots.contains(&failed));
+        std::fs::remove_file(&failed).unwrap();
+        std::fs::rename(saved, &failed).unwrap();
+        let (sender, receiver) = std::sync::mpsc::channel();
+        close(move |result| sender.send(result).unwrap());
+        receiver
+            .recv_timeout(std::time::Duration::from_secs(10))
+            .unwrap()
+            .unwrap();
+        assert!(!exported.exists() && !failed.exists());
+        assert!(!registry().lock().unwrap().roots.contains(&failed));
+        assert!(resolve(token).is_none());
+        assert!(Exports::new(&archive).is_err());
+        // A canceled update resumes a new owner, never the revoked export token.
         resume();
         let mut recovered = Exports::new(&archive).unwrap();
         let replacement = recovered.prepare(&archive, &[1, 2, 3]).unwrap();
