@@ -1371,6 +1371,8 @@ Current application development and all GitHub workflow jobs are macOS-only.
 Continuous integration runs on non-`main` repository branch pushes that change
 files outside `README.md` and `doc/`, not again on its PR or merged `main` push;
 it does not build a DMG. Forked PRs currently need a separate CI policy.
+The Pages workflow also skips `main` pushes that change only those documentation
+paths.
 Release CI alone runs headless `make dmg` after a `v*` tag push; visible native
 release testing is an explicit local `make check-release` action. Website and
 release-assembly jobs also use macOS,

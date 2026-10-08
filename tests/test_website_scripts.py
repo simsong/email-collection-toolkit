@@ -48,6 +48,7 @@ def test_pages_workflow_pins_and_checks_the_zola_archive() -> None:
     # PyYAML's YAML 1.1 resolver treats an unquoted "on" key as boolean True.
     triggers = configuration.get(WORKFLOW_ON, configuration.get(True))
     assert triggers["push"]["branches"] == ["main"]
+    assert triggers["push"]["paths-ignore"] == ["README.md", "doc/**"]
     assert "workflow_dispatch" in triggers
     assert triggers["workflow_dispatch"]["inputs"]["release_tag"]["required"] is False
     assert "workflow_call" not in triggers

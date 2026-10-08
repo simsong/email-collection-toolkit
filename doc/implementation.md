@@ -45,7 +45,8 @@ All runner jobs use macos-15. Continuous integration runs `make check-static`
 and `make check-tests` in parallel jobs on non-`main` branch pushes that change
 files outside `README.md` and `doc/`; local `make check` retains their order.
 CI has no PR/main duplicates or a DMG smoke job. Forked PRs are not covered by
-that push trigger. Release packaging runs only for a pushed, version-matching
+that push trigger. Pages also skips `main` pushes limited to those paths.
+Release packaging runs only for a pushed, version-matching
 annotated `v*` tag on `main` and invokes
 `make dmg`, which mounts the candidate and runs its headless installed-app
 self-test. Native GUI release checks remain an explicit local
