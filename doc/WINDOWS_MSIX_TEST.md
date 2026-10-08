@@ -1,6 +1,6 @@
 <!-- Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved. -->
 
-# Local Windows MSIX prototype
+# Windows MSIX packaging and alpha delivery
 
 This isolated prototype starts at PR #153 commit `e1b4170`. It does not modify
 the Mac's branch or publish a release. The selected distribution is MSIX;
@@ -65,14 +65,16 @@ release, branch push, certificate trust change or package installation occurred.
 
 ## MSIX installation matrix (2026-10-07)
 
-The MSIX decision supersedes the older shared WinSparkle feed/EXE plan.
+MSIX is the installer format; WinSparkle supplies native update discovery and
+confirmation, with Rust authentication/channel filtering of the shared feed.
 `windows-msix.yml` supports explicit dispatch and reusable release calls; ordinary
 pushes do not run it. Two native build jobs produce x64 and ARM64 payloads once.
 One assembly job creates a signed common bundle and a higher-version upgrade
 fixture with identical application bytes. Both installation VMs download that
 same artifact: Windows Server x64 (`windows-latest`) and Windows 11 ARM64
 (`windows-11-arm`). Installation jobs do not rebuild. Private signing keys remain
-outside uploaded artifacts. Test packages are never published as release assets.
+outside uploaded artifacts. Only the tested base bundle may become an alpha asset, with its persistent
+public certificate and explicit trust instructions; upgrade fixtures never ship.
 The release caller waits for this gate after tag preflight. Tag-push calls bypass
 the branch opt-in marker because reusable workflows inherit the caller event;
 otherwise a skipped MSIX dependency would also skip macOS release assembly. Windows 10 testing
@@ -128,3 +130,16 @@ key and current validity, and removes temporary PFX material on success/failure.
 No fallback certificate is generated. This supersedes the ephemeral test-key
 policy; testers trust the public certificate once until expiration (2028-10-07)
 or deliberate rotation. Production trusted signing remains separate.
+
+## Primary alpha package
+
+The packager now embeds mapped update metadata in optimized Rust executables,
+stages the checksum-pinned WinSparkle DLL/notices, and tests actual native updater
+startup without network checks or windows. It retains the agreed persistent
+`ECT.LocalTest` package identity for this alpha. Native update confirmation opens
+the verified bundle in Windows App Installer. `[release-ci]` runs both installed
+architectures before tagging; `release.yml` repeats installation and publishes
+only the tested base bundle, never the higher-version fixture. `release-files`
+checks downloaded hashes and the pinned certificate before staging a versioned
+bundle and ZIP with trust instructions. The earlier prototype evidence above
+must not be mistaken for validation of a later candidate.

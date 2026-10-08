@@ -20,7 +20,11 @@ pub mod preferences;
 mod search;
 mod selectors;
 pub mod shell;
+pub mod update_policy;
 pub mod updater;
+pub mod updater_feed;
+#[cfg(any(target_os = "windows", test))]
+mod updater_gateway;
 pub mod worker;
 
 use anyhow::{ensure, Context, Result};

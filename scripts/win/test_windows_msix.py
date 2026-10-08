@@ -60,11 +60,13 @@ def main() -> None:
     assert reply["result"]["write_available"] is False, reply
     runtime = subprocess.run([gui, "--check-webview"], capture_output=True, text=True,
                              check=True, timeout=30, env=environment)
+    updater = subprocess.run([gui, "--check-updater"], capture_output=True, text=True,
+                             check=True, timeout=30, env=environment)
     search = subprocess.run([gui, "--probe", archive, "observatory"], capture_output=True,
                             text=True, check=True, timeout=30, cwd=output, env=environment)
     assert "complete=true" in search.stdout, search.stdout
     assert inventory(archive) == before, "Packaged reader changed synthetic archive bytes"
-    report = {"runtime": runtime.stdout, "helper": replies, "search": search.stdout,
+    report = {"runtime": runtime.stdout, "updater": updater.stdout, "helper": replies, "search": search.stdout,
               "archive_sha256": before, "installed_msix_tested": args.installed_root is not None}
     (output / "report.json").write_text(json.dumps(report, indent=2), encoding="utf-8")
     print(output / "report.json")

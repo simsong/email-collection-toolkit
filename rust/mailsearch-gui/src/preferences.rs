@@ -18,13 +18,16 @@ use std::{
 pub struct Preferences {
     pub message_font_size: u16,
     pub automatic_updates: bool,
+    #[serde(default)]
+    pub update_channel: crate::update_policy::Channel,
 }
 
 impl Default for Preferences {
     fn default() -> Self {
         Self {
             message_font_size: 14,
-            automatic_updates: false,
+            automatic_updates: option_env!("ECT_RELEASE_BUILD").is_some(),
+            update_channel: crate::update_policy::Channel::default(),
         }
     }
 }
@@ -46,7 +49,44 @@ impl Preferences {
                 preferences.validate()?;
                 Ok(preferences)
             }
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(Self::default()),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                #[derive(Deserialize)]
+                struct Legacy {
+                    update_channel: Option<crate::update_policy::Channel>,
+                    #[serde(default = "legacy_automatic")]
+                    automatic_update_checks: bool,
+                }
+                fn legacy_automatic() -> bool {
+                    true
+                }
+                let parent = path
+                    .parent()
+                    .context("Preferences need a parent directory")?
+                    .to_owned();
+                #[cfg(target_os = "windows")]
+                let parent = if settings_path().is_ok_and(|current| current == path) {
+                    PathBuf::from(env::var_os("APPDATA").context("APPDATA is unavailable")?)
+                        .join("Email Collection Toolkit")
+                } else {
+                    parent
+                };
+                let legacy = legacy_preferences_path(&parent)?;
+                match fs::read(legacy) {
+                    Ok(bytes) => {
+                        let old: Legacy = serde_json::from_slice(&bytes)
+                            .context("Invalid previous update preferences")?;
+                        Ok(Self {
+                            automatic_updates: old.automatic_update_checks,
+                            update_channel: old.update_channel.unwrap_or_default(),
+                            ..Self::default()
+                        })
+                    }
+                    Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                        Ok(Self::default())
+                    }
+                    Err(error) => Err(error).context("Read previous update preferences"),
+                }
+            }
             Err(error) => Err(error).context("Read reader preferences"),
         }
     }
@@ -81,9 +121,34 @@ impl Preferences {
         if self.automatic_updates != baseline.automatic_updates {
             current.automatic_updates = self.automatic_updates;
         }
+        ensure!(
+            current.update_channel == baseline.update_channel
+                || self.update_channel == baseline.update_channel
+                || self.update_channel == current.update_channel,
+            "Update channel changed in another window; reopen Preferences"
+        );
+        if self.update_channel != baseline.update_channel {
+            current.update_channel = self.update_channel;
+        }
         current.save(path)?;
         Ok(current)
     }
+}
+
+fn legacy_preferences_path(parent: &Path) -> Result<PathBuf> {
+    let current = parent.join("preferences.json");
+    if !current.exists()
+        && parent
+            .file_name()
+            .is_some_and(|name| name == "Email Collection Toolkit")
+        && !parent.join("auth").exists()
+    {
+        return Ok(parent
+            .parent()
+            .context("Missing settings root")?
+            .join("Mail Archiver/preferences.json"));
+    }
+    Ok(current)
 }
 
 pub fn settings_path() -> Result<PathBuf> {
@@ -114,6 +179,43 @@ mod tests {
         thread,
         time::{Duration, Instant},
     };
+
+    #[test]
+    fn migration_retains_python_update_choices_and_old_rust_settings() {
+        // Migration requirement: primary Rust delivery preserves an explicit
+        // Python opt-out/channel, including settings under the previous name.
+        let dir = tempfile::tempdir().unwrap();
+        let current = dir.path().join("Email Collection Toolkit");
+        let legacy = dir.path().join("Mail Archiver");
+        std::fs::create_dir_all(&legacy).unwrap();
+        let path = current.join("rust-reader.json");
+        std::fs::write(legacy.join("preferences.json"), br#"{"automatic_update_checks":false,"update_channel":"release","unrelated":"retained"}"#).unwrap();
+        let imported = Preferences::load(&path).unwrap();
+        assert!(!imported.automatic_updates);
+        assert_eq!(
+            imported.update_channel,
+            crate::update_policy::Channel::Release
+        );
+        assert!(!current.exists());
+        // A current auth directory takes precedence over pre-rename settings,
+        // matching Python discovery without modifying either directory.
+        std::fs::create_dir_all(current.join("auth")).unwrap();
+        assert_eq!(
+            legacy_preferences_path(&current).unwrap(),
+            current.join("preferences.json")
+        );
+        std::fs::remove_dir(current.join("auth")).unwrap();
+        imported.save(&path).unwrap();
+        std::fs::write(
+            &path,
+            br#"{"message_font_size":18,"automatic_updates":false}"#,
+        )
+        .unwrap();
+        let old_rust = Preferences::load(&path).unwrap();
+        assert_eq!(old_rust.message_font_size, 18);
+        assert!(!old_rust.automatic_updates);
+        assert_eq!(old_rust.update_channel, Default::default());
+    }
 
     #[test]
     #[ignore = "fixture entry point invoked by concurrent_preference_dialogs_merge_under_process_lock"]
@@ -223,7 +325,8 @@ mod tests {
             Preferences::load(&path).unwrap(),
             Preferences {
                 message_font_size: 18,
-                automatic_updates: true
+                automatic_updates: true,
+                update_channel: Default::default()
             }
         );
         assert!(path.with_extension("lock").exists());
@@ -249,7 +352,8 @@ mod tests {
             font.merge_save(&path, &baseline).unwrap(),
             Preferences {
                 message_font_size: 18,
-                automatic_updates: true
+                automatic_updates: true,
+                update_channel: Default::default()
             }
         );
         // Saving an unchanged stale dialog must retain every intervening edit.
@@ -283,6 +387,7 @@ mod tests {
         let mut preferences = Preferences {
             message_font_size: 18,
             automatic_updates: true,
+            update_channel: Default::default(),
         };
         preferences.save(&path).unwrap();
         assert_eq!(Preferences::load(&path).unwrap(), preferences);

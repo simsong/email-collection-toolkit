@@ -69,7 +69,9 @@ def test_ci_runs_parallel_branch_jobs_without_building_a_dmg() -> None:
     triggers = configuration.get(WORKFLOW_ON, configuration.get(True))
     assert triggers == {"push": {"branches": ["**", "!main"]}}
     jobs = configuration[JOBS]
-    assert set(jobs) == {"static-rust", "python-browser", "rust-gui", "rust-reader"}
+    assert set(jobs) == {"static-rust", "python-browser", "rust-gui", "rust-reader", "release-candidate"}
+    assert jobs["release-candidate"]["if"] == "github.ref == 'refs/heads/work-rust-gui' && contains(github.event.head_commit.message, '[release-ci]')"
+    assert jobs["release-candidate"]["uses"] == "./.github/workflows/release-candidate.yml"
     assert all(NEEDS not in job for job in jobs.values())
     static_runs = [step.get(RUN, "") for step in jobs["static-rust"][STEPS]]
     test_runs = [step.get(RUN, "") for step in jobs["python-browser"][STEPS]]
@@ -142,7 +144,7 @@ def test_release_workflow_validates_built_distributions() -> None:
         "name: Validate distributions",
         "name: Build source distribution",
         "name: Prepare appcast update",
-        "name: Sign the final notarized DMG's appcast item",
+        "name: Sign and verify both final installers and XML",
         "name: Validate signed appcast",
         "name: Create complete draft release",
         "name: Publish complete release",
@@ -152,10 +154,10 @@ def test_release_workflow_validates_built_distributions() -> None:
     assert [text.index(gate) for gate in gates] == sorted(text.index(gate) for gate in gates)
     makefile = (workflow.parents[2] / "Makefile").read_text(encoding="utf-8")
     assert "uv run --no-project --with packaging --python '>=3.12' python scripts/release_tag.py" in makefile
-    signing_step = text[text.index("name: Sign the final notarized DMG's appcast item"):
+    signing_step = text[text.index("name: Sign and verify both final installers and XML"):
                         text.index("name: Validate signed appcast")]
     assert "SPARKLE_ED25519_PRIVATE_KEY_BASE64" in signing_step
-    assert text.index('dist/* "$APPCAST"') < text.index('gh release edit "$RELEASE_TAG"')
+    assert text.index('dist/SHA256SUMS "$APPCAST"') < text.index('gh release edit "$RELEASE_TAG"')
     configuration = safe_load(text)
     macos_steps = [step["name"] for step in configuration[JOBS]["macos"]["steps"]]
     assert macos_steps.index("Verify Sparkle release signer") < macos_steps.index("Verify signed update history")
@@ -182,7 +184,7 @@ def test_release_workflow_validates_built_distributions() -> None:
     assert '"$(git tag --list \'v*\')" != "$candidate_tag"' in history
     previous_gate = 'make check-appcast APPCAST="$appcast_path" RELEASE_TAG="$previous_tag" ARGS=--require-signed-feed'
     assert previous_gate.replace('$appcast_path', '$output') in history
-    assert text.index('make release-appcast-base APPCAST="$appcast_path"') < text.index("name: Sign the final notarized DMG's appcast item")
+    assert text.index('make release-appcast-base APPCAST="$appcast_path"') < text.index("name: Sign and verify both final installers and XML")
     pages_configuration = safe_load(pages)
     validation_runs = [step.get("run", "") for step in pages_configuration[JOBS]["build"]["steps"]]
     validation_runs = [run for run in validation_runs if "make check-appcast" in run]

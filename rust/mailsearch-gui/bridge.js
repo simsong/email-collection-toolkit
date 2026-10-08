@@ -30,10 +30,10 @@
       } else window.ipc.postMessage(request);
     });
   }
-  // Startup has no archive toolbar or reader API; expose only its native actions.
+  // Startup exposes application settings/actions, never archive reader services.
   if (location.pathname === "/welcome.html") {
     window.pywebview = {api: Object.fromEntries(
-      ["welcome_open", "welcome_new", "welcome_status", "quit"].map(name => [name, (...args) => invoke(name, args)])
+      ["welcome_open", "welcome_new", "welcome_status", "quit", "shell_status", "preferences_save", "check_updates"].map(name => [name, (...args) => invoke(name, args)])
     )};
     return;
   }

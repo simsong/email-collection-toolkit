@@ -20,7 +20,7 @@ try {
         throw 'The certificate was not found in Local Machine/Trusted People after import.'
     }
     Write-Host 'Success: the test certificate is installed in Local Machine > Trusted People.'
-    Write-Host 'Now double-click base.msixbundle to install Email Collector Toolkit (ECT).'
+    Write-Host 'Now double-click the supplied .msixbundle to install Email Collection Toolkit (ECT).'
     Read-Host 'Press Enter to close' | Out-Null
 } catch {
     Write-Host ('Certificate installation failed: ' + $_.Exception.Message) -ForegroundColor Red

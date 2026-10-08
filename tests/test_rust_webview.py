@@ -64,11 +64,12 @@ def test_startup_buttons_send_native_requests_without_reader_initialization(page
         page.evaluate("window.__rustWelcomeCapabilities({write_available:true})")
         page.get_by_role("button", name="New archive…", exact=True).click()
         requests = [FilterRequest.model_validate(value) for value in page.evaluate("window.sentRequests")]
-        assert [request.method for request in requests] == ["welcome_status", "welcome_open", "quit", "welcome_new"]
-        assert [request.id for request in requests] == [1, 2, 3, 4]
+        assert {request.method for request in requests[:2]} == {"shell_status", "welcome_status"}
+        assert [request.method for request in requests[2:]] == ["welcome_open", "quit", "welcome_new"]
+        assert [request.id for request in requests] == [1, 2, 3, 4, 5]
         assert all(not request.args for request in requests)
-        assert page.evaluate("Object.keys(window.pywebview.api).sort()") == ["quit", "welcome_new", "welcome_open", "welcome_status"]
-        assert not page.locator("#rust-shell-dialog").count()
+        assert page.evaluate("Object.keys(window.pywebview.api).sort()") == ["check_updates", "preferences_save", "quit", "shell_status", "welcome_new", "welcome_open", "welcome_status"]
+        expect(page.locator("#rust-shell-dialog")).not_to_be_visible()
         assert not errors
     finally:
         server.shutdown()

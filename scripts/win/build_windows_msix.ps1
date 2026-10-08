@@ -1,8 +1,8 @@
 # Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved.
-# Assemble a native hybrid Rust/Python test package using the Windows SDK.
+# Assemble the native hybrid Rust/Python alpha package using the Windows SDK.
 # The private CPython installation and locked runtime dependencies travel together.
 # Python's isolated path file excludes checkout paths and user-installed modules.
-# This prototype is not a release and does not install certificates or packages.
+# Assembly never installs certificates or packages; separate CI validates those.
 # WebView2 remains external; the Rust entry point diagnoses a missing runtime.
 # Native writer/scanner/converter parity is deliberately not claimed by packaging.
 param(
@@ -20,10 +20,10 @@ if (-not $SdkDirectory) { $SdkDirectory = Get-WindowsSdkTools }
 if (-not $RustBinaryDirectory) {
     & uv sync --locked --no-dev --python 3.12
     if ($LASTEXITCODE) { throw 'Locked Python dependency setup failed' }
-    & cargo build --locked -p mailsearch-rust --bin mailsearch-webview --bin mailsearch-rust
+    & uv run --locked --no-dev python scripts/rust_release_metadata.py --build-command cargo build --locked --release -p mailsearch-rust --bin mailsearch-webview --bin mailsearch-rust
     if ($LASTEXITCODE) { throw 'Rust build failed' }
     $target = if ($env:CARGO_TARGET_DIR) { $env:CARGO_TARGET_DIR } else { Join-Path $root 'target' }
-    $RustBinaryDirectory = Join-Path $target 'debug'
+    $RustBinaryDirectory = Join-Path $target 'release'
 }
 $python = Join-Path $root '.venv/Scripts/python.exe'
 $machine = & $python -c 'import platform; print(platform.machine())'
@@ -49,11 +49,14 @@ Copy-Item -LiteralPath (Join-Path $root 'src/mailarchiver') -Destination $site -
 foreach ($name in @('mailsearch-webview.exe','mailsearch-rust.exe')) {
     Copy-Item -LiteralPath (Join-Path $RustBinaryDirectory $name) -Destination $stage
 }
+& (Join-Path $PSScriptRoot 'prepare_winsparkle.ps1') -Architecture $Architecture -OutputDirectory $stage
 foreach ($name in @('LICENSE','COPYRIGHT','THIRD_PARTY_NOTICES.md')) {
     Copy-Item -LiteralPath (Join-Path $root $name) -Destination $stage
 }
 Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'test_windows_msix.py') -Destination $stage
 Copy-Item -LiteralPath (Join-Path $root 'licenses') -Destination $stage -Recurse
+& $python -c 'import sys; from pathlib import Path; from scripts.rust_bundle import copy_cargo_notices; copy_cargo_notices(Path(sys.argv[1]), Path.cwd())' (Join-Path $stage 'licenses/Rust')
+if ($LASTEXITCODE) { throw 'Rust dependency notices failed' }
 New-Item -ItemType Directory -Path (Join-Path $stage 'Assets') | Out-Null
 Copy-Item -LiteralPath (Join-Path $root 'gui/icons/rainbow-post-48.png') -Destination (Join-Path $stage 'Assets/Logo.png')
 Copy-Item -LiteralPath (Join-Path $root 'gui/icons/rainbow-post-192.png') -Destination (Join-Path $stage 'Assets/Tile.png')

@@ -720,7 +720,7 @@ pub fn asset(path: &str) -> Option<(&'static str, &'static [u8])> {
         "/rust-workflow.css" => ("text/css", include_bytes!("../../../gui/rust-workflow.css")),
         "/app.js" => ("text/javascript", include_bytes!("../../../gui/app.js")),
         "/style.css" => ("text/css", include_bytes!("../../../gui/style.css")),
-        "/rust-shell.css" => ("text/css", include_bytes!("../shell.css")),
+        "/rust-shell.css" | "/shell.css" => ("text/css", include_bytes!("../shell.css")),
         "/processing.js" => (
             "text/javascript",
             include_bytes!("../../../gui/processing.js"),

@@ -241,13 +241,13 @@ def test_mounted_image(mount: Path, dmg: Path, *, gui: bool = False,
     manifest = manifest_path or ROOT / "dist" / f"{dmg.stem}.contents.json"
     record_image_contents(mount, manifest, log_entries=log_contents)
     app = mount / f"{APP_NAME}.app"
-    from rust_bundle import APP_NAME as preview_name, SERVICE, check as check_rust
-    preview = mount / f"{preview_name}.app"
-    is_rust = preview.is_dir()
+    from rust_bundle import EXECUTABLE, SERVICE, check as check_rust
+    with (app / "Contents/Info.plist").open("rb") as source:
+        is_rust = plistlib.load(source).get("CFBundleExecutable") == EXECUTABLE
     if is_rust:
-        if gui:
-            raise ValueError("Rust preview interaction acceptance is performed by the user")
-        app = preview
+        # The user owns physical interaction acceptance. Release automation
+        # validates the actual primary bundle, private service and native updater.
+        gui = False
     verify_mounted_notices(app, historical_tag)
     library = app / "Contents/Frameworks/clamav/libclamav.dylib"
     if not library.is_file():
@@ -299,7 +299,7 @@ def test_mounted_image(mount: Path, dmg: Path, *, gui: bool = False,
         rust_report = SelfTestReport.model_validate_json(rust_report_path.read_text(encoding="utf-8"))
         rust_report.checks.extend(check_rust(app, environment))
         rust_report_path.write_text(rust_report.model_dump_json(indent=2) + "\n", encoding="utf-8")
-        print("Mounted Rust preview ingest/helper/search/reader/fixity checks passed (no windows).", flush=True)
+        print("Mounted Rust primary app ingest/helper/search/reader/updater/fixity checks passed (no windows).", flush=True)
 
 
 def load_rpaths(commands: str) -> tuple[str, ...]:
@@ -457,8 +457,8 @@ def copy_native_notices(notices: Path) -> None:
 
 def build(signing_identity: str, *, gui: bool = False, log_contents: bool = False,
           rust_binary: Path | None = None) -> Path:
-    if rust_binary is not None and gui:
-        raise ValueError("Rust preview interaction acceptance is performed by the user")
+    if rust_binary is not None:
+        gui = False
     output = ROOT / "dist"
     output.mkdir(exist_ok=True)
     work_root = ROOT / ".tmp"
@@ -531,7 +531,6 @@ def build(signing_identity: str, *, gui: bool = False, log_contents: bool = Fals
                     app / "Contents/MacOS" / name)
             run("/usr/bin/codesign", "--force", "--sign", signing_identity, *options, app)
             run("/usr/bin/codesign", "--verify", "--deep", "--strict", app)
-            dmg = dmg.with_name(dmg.name.replace("Email-Collection-Toolkit-", "Email-Collection-Toolkit-Rust-Preview-", 1))
         candidate = work / "candidate.dmg"
         create_image(app, app_icon, candidate, work)
         # Keep a previous artifact until the requested mounted tests have passed.
@@ -549,7 +548,7 @@ def build(signing_identity: str, *, gui: bool = False, log_contents: bool = Fals
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--rust-binary", type=Path, help="package the Rust preview with the frozen private archive service")
+    parser.add_argument("--rust-binary", type=Path, help="package the primary Rust GUI with the frozen private archive service")
     parser.add_argument("--test-dmg", type=Path, help="mount and retest an existing DMG")
     parser.add_argument("--test-mounted-dmg", type=Path, help="test an existing verified read-only DMG mount")
     parser.add_argument("--source-dmg", type=Path, help="source image for mounted test report names")

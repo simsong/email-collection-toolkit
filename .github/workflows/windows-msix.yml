@@ -3,7 +3,7 @@
 # Explicit dispatch and reusable calls keep Windows packaging out of ordinary CI.
 # The persistent signing secret stays in assembly; only the public certificate ships.
 # Installation jobs consume the same artifact without checkout toolchains or rebuilds.
-# This test identity and synthetic upgrade fixture must never become a release.
+# The alpha may ship with explicit certificate trust; the upgrade fixture never ships.
 name: Windows MSIX installation tests
 on:
   push:
@@ -17,7 +17,7 @@ permissions:
   contents: read
 jobs:
   payload:
-    if: github.event_name != 'push' || github.ref_type == 'tag' || contains(github.event.head_commit.message, '[msix-ci]')
+    if: github.event_name != 'push' || github.ref_type == 'tag' || contains(github.event.head_commit.message, '[msix-ci]') || contains(github.event.head_commit.message, '[release-ci]')
     name: Build payload (${{ matrix.arch }})
     runs-on: ${{ matrix.os }}
     timeout-minutes: 45

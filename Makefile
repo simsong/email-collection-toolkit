@@ -149,6 +149,7 @@ check-static:
 check-tests:
 	$(MAKE) test
 	$(MAKE) test-rust-recovery
+	$(MAKE) test-rust-updates
 	$(MAKE) test-e2e
 	$(MAKE) website-check
 
@@ -202,7 +203,19 @@ sparkle-keys: sparkle-tools
 update-appcast: sparkle-tools
 	@test -n "$(ARCHIVE)" -a -n "$(RELEASE_TAG)" -a -n "$(RELEASE_URL)" || { echo 'usage: make update-appcast ARCHIVE=/path/to/image.dmg RELEASE_TAG=v1.0.0 RELEASE_URL=https://example.invalid/image.dmg'; exit 2; }
 	@test -x "$(SPARKLE_DIR)/bin/sign_update" || { echo 'run make sparkle-tools before update-appcast'; exit 2; }
-	PYTHONPATH="$(CURDIR)/src:$(CURDIR)" uv run --locked --group packaging python scripts/update_appcast.py --appcast "$(or $(APPCAST),website/static/updates/mac/appcast.xml)" --archive "$(ARCHIVE)" --tag "$(RELEASE_TAG)" --url "$(RELEASE_URL)" --signer "$(SPARKLE_DIR)/bin/sign_update"
+	PYTHONPATH="$(CURDIR)/src:$(CURDIR)" uv run --locked --group packaging python scripts/update_appcast.py --appcast "$(or $(APPCAST),website/static/updates/mac/appcast.xml)" --archive "$(ARCHIVE)" --tag "$(RELEASE_TAG)" --url "$(RELEASE_URL)" --signer "$(SPARKLE_DIR)/bin/sign_update" $(if $(WINDOWS_ARCHIVE),--windows-archive "$(WINDOWS_ARCHIVE)" --windows-url "$(WINDOWS_RELEASE_URL)")
+
+# WINDOWS_ARCHIVE/WINDOWS_RELEASE_URL identify the tested MSIX enclosure.
+# APPCAST selects the feed copy; candidate identity comes from pyproject.toml.
+.PHONY: release-files release-candidate-base release-candidate-feed release-package-check
+release-files:
+	uv run --locked python scripts/release_files.py stage
+release-candidate-base:
+	uv run --locked python scripts/release_files.py base --appcast "$(APPCAST)"
+release-candidate-feed:
+	uv run --locked --group packaging python scripts/release_files.py sign --appcast "$(APPCAST)"
+release-package-check: dmg
+	@set -eu; set -- dist/*.dmg; test "$$#" -eq 1; case "$$1" in *_UNSIGNED.dmg) exit 1;; esac; $(MAKE) notarize-dmg DMG="$$1"; $(MAKE) test-dmg DMG="$$1"
 
 .PHONY: release-appcast-base
 # RELEASE_TAG is the candidate tag; APPCAST is the output copy of the prior feed.
@@ -224,16 +237,19 @@ sign-historical-appcast: sparkle-tools
 	PYTHONPATH="$(CURDIR)/src:$(CURDIR)" uv run --locked --group packaging python scripts/sign_historical_appcast.py --appcast "$(APPCAST)" --archive "$(DMG)" --output "$(OUTPUT)" --tag "$(RELEASE_TAG)" --signer "$(SPARKLE_DIR)/bin/sign_update"
 
 .PHONY: dmg dmg-signed notarize-dmg list-signatures check-release test-dmg preview-dmg self-test self-test-gui test-packaging
-dmg: ruff syntax-check sparkle-tools pst-importer mcti-scan pff-converter-bundle
+dmg: rust-dmg
+
+.PHONY: python-dmg
+python-dmg: ruff syntax-check sparkle-tools pst-importer mcti-scan pff-converter-bundle
 	uv run --group packaging python scripts/build_macos.py $(ARGS)
 
-# Rust Preview is a separate local app; SIGNING_IDENTITY selects Developer ID
+# Rust is the primary desktop app; SIGNING_IDENTITY selects Developer ID
 # (default ad-hoc), RUST_TARGET_DIR selects its release binary build directory.
 # Mounted acceptance is headless; interaction testing belongs to the user.
 .PHONY: rust-dmg
 rust-dmg: ruff syntax-check sparkle-tools pst-importer mcti-scan pff-converter-bundle
-	$(CARGO_RUN) build --locked --release -p mailsearch-rust --bin mailsearch-webview
-	uv run --locked --group packaging python scripts/build_macos.py --rust-binary "$(RUST_TARGET_DIR)/release/mailsearch-webview" --signing-identity "$(or $(SIGNING_IDENTITY),-)"
+	uv run --locked python scripts/rust_release_metadata.py --build-command $(CARGO_RUN) build --locked --release -p mailsearch-rust --bin mailsearch-webview
+	uv run --locked --group packaging python scripts/build_macos.py --rust-binary "$(RUST_TARGET_DIR)/release/mailsearch-webview" $(if $(SIGNING_IDENTITY),--signing-identity "$(SIGNING_IDENTITY)") $(ARGS)
 
 .PHONY: test-rust-dmg
 test-rust-dmg: ruff
@@ -256,8 +272,12 @@ notarize-dmg:
 list-signatures:
 	/usr/bin/security find-identity -v -p codesigning
 
-check-release: ruff syntax-check $(if $(DMG),,sparkle-tools pst-importer mcti-scan pff-converter-bundle)
-	uv run --group packaging python scripts/build_macos.py --check-release $(if $(DMG),--test-dmg "$(DMG)") $(ARGS)
+check-release: ruff syntax-check $(if $(DMG),,rust-dmg)
+ifneq ($(strip $(DMG)),)
+	uv run --group packaging python scripts/build_macos.py --check-release --test-dmg "$(DMG)" $(ARGS)
+else
+	@set -eu; set -- dist/*.dmg; test "$$#" -eq 1; uv run --group packaging python scripts/build_macos.py --check-release --test-dmg "$$1" $(ARGS)
+endif
 
 test-dmg:
 	@test -n "$(DMG)" || { echo 'usage: make test-dmg DMG=/path/to/Email-Collection-Toolkit.dmg'; exit 2; }
@@ -299,6 +319,11 @@ test-signing: ruff
 .PHONY: test-sparkle-signing
 test-sparkle-signing: sparkle-tools ruff
 	uv run --locked --group packaging pytest -q tests/test_sparkle_signing.py
+
+.PHONY: test-rust-updates
+test-rust-updates: ruff
+	$(CARGO_RUN) build --locked -p mailsearch-rust --bin mailsearch-webview
+	RUST_WEBVIEW_BINARY="$(RUST_TARGET_DIR)/debug/mailsearch-webview$(RUST_EXE_SUFFIX)" uv run --locked pytest -q tests/test_rust_updates.py
 
 .PHONY: sparkle-probe test-updates
 sparkle-probe: sparkle-tools ruff
@@ -799,8 +824,10 @@ check-rust-gui-native-build:
 	$(CARGO_RUN) test --locked -p mailsearch-rust --features native-smoke --test native_smoke --test native_windows --no-run
 
 # ECT_WINSPARKLE_TEST_DLL points to the staged checksum-verified native SDK DLL.
+# APPDATA locates legacy Python update preferences on Windows; LOCALAPPDATA
+# continues to store Rust reader preferences separately from archives.
 # ECT_RELEASE_VERSION/BUILD/CHANNEL come from the shared release mapper.
-# ECT_WINSPARKLE_APPCAST_URL/PUBLIC_KEY are optional public build configuration.
+# ECT_UPDATE_FEED_URL/PUBLIC_KEY and ECT_RELEASE_* are common public build inputs.
 # ECT_RUST_NATIVE_CLOSE_SMOKE is used only by feature-gated lifecycle tests.
 .PHONY: test-rust-updater
 test-rust-updater:

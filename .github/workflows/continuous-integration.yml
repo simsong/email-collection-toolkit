@@ -18,6 +18,12 @@ env:
   MAILARCHIVER_NATIVE_SETUP_E2E: "0"
 
 jobs:
+  release-candidate:
+    # Consolidation publishes this head to two PRs; run release signing once.
+    if: github.ref == 'refs/heads/work-rust-gui' && contains(github.event.head_commit.message, '[release-ci]')
+    uses: ./.github/workflows/release-candidate.yml
+    secrets: inherit
+
   rust-reader:
     # Explicit opt-in while ordinary Mac development avoids Windows runner costs.
     if: contains(github.event.head_commit.message, '[windows-ci]')

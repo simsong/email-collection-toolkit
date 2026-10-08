@@ -204,10 +204,11 @@ def test_release_waits_for_exact_dmg_before_checksumming() -> None:
     assert assembly[STEPS][0][WITH][REF] == "${{ needs.macos.outputs.commit }}"
     steps = assembly[STEPS]
     download = next(i for i, step in enumerate(steps) if "actions/download-artifact@" in step.get(USES, ""))
-    checksum = next(i for i, step in enumerate(steps) if "shasum -a 256" in step.get(RUN, ""))
-    assert download < checksum
+    checksum = next(i for i, step in enumerate(steps) if step.get(RUN) == "make release-files")
+    windows_download = next(i for i, step in enumerate(steps) if step.get(WITH, {}).get(NAME) == "windows-msix-install-test")
+    assert download < windows_download < checksum
     assert steps[download][WITH][NAME] == "macos-dmg"
-    assert "*.dmg" in steps[checksum][RUN]
+    assert steps[windows_download][WITH][PATH] == "dist/windows"
     secret_steps = [step for step in macos[STEPS] if CERTIFICATE_SECRET in step.get(ENV, {})]
     assert len(secret_steps) == 1
     assert secret_steps[0][RUN].splitlines()[0] == "make dmg ARGS=--log-dmg-contents"

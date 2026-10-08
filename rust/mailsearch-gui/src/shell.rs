@@ -26,7 +26,11 @@ impl Shell {
     pub fn new(quit: impl Fn() + Send + Sync + 'static) -> Result<Self> {
         let path = settings_path()?;
         let preferences = Preferences::load(&path)?;
-        let updater = Updater::new(preferences.automatic_updates, quit);
+        let updater = Updater::new(
+            preferences.automatic_updates,
+            preferences.update_channel,
+            quit,
+        );
         Ok(Self {
             path,
             preferences,
@@ -54,7 +58,10 @@ impl Shell {
         match method {
             "shell_status" => {
                 self.preferences = Preferences::load(&self.path)?;
-                self.updater.configure(self.preferences.automatic_updates);
+                self.updater.configure(
+                    self.preferences.automatic_updates,
+                    self.preferences.update_channel,
+                );
                 Ok(json!({
                 "version": env!("ECT_APP_VERSION"),
                 "platform": std::env::consts::OS,
@@ -73,7 +80,10 @@ impl Shell {
                         .clone(),
                 )?;
                 self.preferences = preferences.merge_save(&self.path, &baseline)?;
-                self.updater.configure(self.preferences.automatic_updates);
+                self.updater.configure(
+                    self.preferences.automatic_updates,
+                    self.preferences.update_channel,
+                );
                 self.call("shell_status", &[])
             }
             "check_updates" => {

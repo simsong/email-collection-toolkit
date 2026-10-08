@@ -2,6 +2,20 @@
 
 # Release notes
 
+## 1.0.0a15 (candidate)
+
+- Make Rust the primary macOS app while retaining the private Python ingest
+  service, existing application identity, document ownership and update feed.
+- Share Rust update preferences and signing metadata across native Sparkle and
+  WinSparkle. Preserve existing update choices, authenticate full feeds and
+  installer signatures, and defer macOS installation while Python writers run.
+- Consolidate Windows packaging into a tested x64/ARM64 MSIX bundle. Alpha
+  installation requires trusting its persistent test certificate; Windows ingest
+  remains disabled. Never distribute synthetic upgrade fixtures or private keys.
+- Validate actual signed/notarized DMG, both Windows installs and complete mixed
+  appcast in explicit branch CI before the immutable release tag. Physical
+  interaction testing remains separately recorded human acceptance.
+
 ## Unreleased
 
 - Run startup Rust archive initialization on its supervised worker so helper

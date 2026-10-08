@@ -1910,7 +1910,7 @@ atomically exclude new writers before relaunch. Resource shutdown must retain
 the installation guard until process exit once relaunch has begun; ordinary
 shutdown releases reservations. Failure, including a raised
 native continuation error, must restore writer access and cancel any Quit waiting
-for that update, allowing new work and a later Quit. Source launches and other platforms must
+for that update, allowing new work and a later Quit. Source launches without mapped updater metadata and unsupported platforms must
 report updates unavailable without starting checks.
 
 The app and publisher share numeric version mapping. Runtime Cocoa metadata
@@ -2020,8 +2020,9 @@ The release parser rejects noncanonical or unsupported versions; only stable
 `preview` channel; stable items use its default channel. The published release
 contains a signed `appcast.xml` asset; the tag workflow dispatches Pages from
 `main` with the exact release tag after publication. Pages verifies and serves that
-asset at the website's fixed HTTPS URL. Only a notarized DMG with a Sparkle Ed25519
-archive signature may enter the feed.
+asset at the website's fixed HTTPS URL. Only a notarized DMG or the tested signed Windows MSIX bundle, each with a
+verified Sparkle Ed25519 enclosure signature, may enter the feed. Authenticate
+the complete mixed XML and preserve historical installer signatures.
 The website's release links use published release tags, recognize the same
 canonical alpha/beta spelling, and never advertise a draft or failed tag.
 The homepage's primary Download action links to the GitHub releases listing.
@@ -2606,12 +2607,19 @@ reader workflow without duplicating the normal macOS native job.
 
 Windows distribution uses MSIX with separately installed WebView2. Missing
 runtime detection must provide native installation guidance without downloading
-or installing WebView2. Keep macOS Sparkle separate from Windows App Installer.
+or installing WebView2. Share Rust updater metadata, channel preferences and
+installation policy across Sparkle and WinSparkle; native adapters retain their
+own confirmation/installation mechanisms. The Windows adapter must authenticate
+complete XML before selecting Windows items and preserve their installer
+signatures. Windows App Installer performs the confirmed MSIX installation.
 Installer CI builds x64/ARM64 payloads once, assembles one signed bundle, and
 installs the same artifact on Windows Server x64 and Windows 11 ARM64. Run only
-on explicit dispatch or release calls. Test private Python discovery, native
+on explicit dispatch, `[release-ci]` candidate checks or release calls. Test private Python discovery, native
 launch, synthetic search/fixity, upgrade and uninstall. Test signing keys must
-never enter uploaded artifacts. Windows 10 testing is not a release gate.
+never enter uploaded artifacts. Windows 10 testing is not a release gate. The alpha may use the persistent
+test certificate with explicit trust instructions; private keys and synthetic
+upgrade fixtures must never be published. Native Rust becomes the primary Mac
+GUI while retaining the bundled Python ingest service and existing update identity.
 
 Ordinary Rust search exposes only Archive/Sent categories, including blank,
 structured, preview and comprehensive queries; quarantined rows must never

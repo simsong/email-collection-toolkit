@@ -1,11 +1,11 @@
 # Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved.
-# Assemble the Rust preview using the existing frozen archive-service runtime.
+# Assemble the primary Rust desktop with the frozen private archive service.
 # Rust becomes the app entry point; the Python executable becomes a private peer.
-# Keep preview identity separate from the supported Python desktop application.
+# Preserve the application's identity, document ownership and Sparkle trust.
 # Copy dependency license texts and record the candidate's source provenance.
 # Mounted checks use only synthetic mail, real helper ingest and Rust RPC reads.
 # No native windows, source mailbox mutations or installation occur here.
-"""Rust preview bundle assembly and headless installed-artifact checks."""
+"""Rust desktop bundle assembly and headless installed-artifact checks."""
 from __future__ import annotations
 
 from hashlib import sha256
@@ -22,7 +22,7 @@ from pydantic import BaseModel, Field, JsonValue
 from mailarchiver.rust_engine import Capabilities
 from mailarchiver.standalone_verify import verify_archive
 
-APP_NAME = "Email Collection Toolkit Rust Preview"
+APP_NAME = "Email Collection Toolkit"
 EXECUTABLE = "mailsearch-webview"
 SERVICE = "archive-service"
 PLIST_EXECUTABLE = "CFBundleExecutable"
@@ -55,7 +55,7 @@ class Provenance(BaseModel):
     baseline: str
     diff_sha256: str
     binary_sha256: str
-    preview: bool = True
+    preview: bool = False
 
 
 class RpcRequest(BaseModel):
@@ -97,25 +97,9 @@ class MacIntegration(BaseModel):
     process_name: str
 
 
-def prepare(app: Path, binary: Path, root: Path) -> Path:
-    """Replace the launch executable while retaining PyInstaller's runtime layout."""
-    plist = app / "Contents/Info.plist"
-    info = plistlib.loads(plist.read_bytes())
-    macos = app / "Contents/MacOS"
-    (macos / info[PLIST_EXECUTABLE]).rename(macos / SERVICE)
-    shutil.copy2(binary, macos / EXECUTABLE)
-    info[PLIST_EXECUTABLE] = EXECUTABLE
-    info[PLIST_NAME] = info[PLIST_DISPLAY] = APP_NAME
-    info[PLIST_IDENTIFIER] += ".rust-preview"
-    # Accept explicit document opens without replacing the supported app as owner.
-    for document in info.get(PLIST_DOCUMENTS, []):
-        document[PLIST_HANDLER_RANK] = "Alternate"
-    for key in tuple(info):
-        if key.startswith("SU"):
-            del info[key]
-    plist.write_bytes(plistlib.dumps(info))
-    notices = app / "Contents/Resources/Third Party Notices/Rust"
-    notices.mkdir()
+def copy_cargo_notices(notices: Path, root: Path) -> None:
+    """Bundle the locked Cargo closure's upstream notices on either platform."""
+    notices.mkdir(parents=True)
     metadata = CargoMetadata.model_validate_json(subprocess.check_output(
         [os.environ.get("CARGO", "cargo"), "metadata", "--locked", "--format-version", "1"], cwd=root,
     ))
@@ -130,15 +114,29 @@ def prepare(app: Path, binary: Path, root: Path) -> Path:
                     shutil.copyfile(entry, target / entry.name)
                 elif entry.is_dir():
                     shutil.copytree(entry, target / entry.name)
+
+
+def prepare(app: Path, binary: Path, root: Path) -> Path:
+    """Replace the launch executable while retaining PyInstaller's runtime layout."""
+    plist = app / "Contents/Info.plist"
+    info = plistlib.loads(plist.read_bytes())
+    macos = app / "Contents/MacOS"
+    (macos / info[PLIST_EXECUTABLE]).rename(macos / SERVICE)
+    shutil.copy2(binary, macos / EXECUTABLE)
+    info[PLIST_EXECUTABLE] = EXECUTABLE
+    info[PLIST_NAME] = info[PLIST_DISPLAY] = APP_NAME
+    # Rust replaces the Python entry point without changing updater identity.
+    for document in info.get(PLIST_DOCUMENTS, []):
+        document[PLIST_HANDLER_RANK] = "Owner"
+    plist.write_bytes(plistlib.dumps(info))
+    copy_cargo_notices(app / "Contents/Resources/Third Party Notices/Rust", root)
     provenance = Provenance(
         baseline=subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=root, text=True).strip(),
         diff_sha256=sha256(subprocess.check_output(["git", "diff", "HEAD", "--binary"], cwd=root)).hexdigest(),
         binary_sha256=sha256(binary.read_bytes()).hexdigest(),
     )
-    (app / "Contents/Resources/rust-preview.json").write_text(provenance.model_dump_json(indent=2) + "\n", encoding="utf-8")
-    preview = app.with_name(APP_NAME + ".app")
-    app.rename(preview)
-    return preview
+    (app / "Contents/Resources/rust-desktop.json").write_text(provenance.model_dump_json(indent=2) + "\n", encoding="utf-8")
+    return app
 
 
 def check(app: Path, environment: dict[str, str]) -> list[str]:
@@ -148,10 +146,10 @@ def check(app: Path, environment: dict[str, str]) -> list[str]:
     info = plistlib.loads((app / "Contents/Info.plist").read_bytes())
     archive_types = {declaration[PLIST_UTI] for declaration in info.get(PLIST_TYPES, [])
                      if "mailarchive" in declaration.get(PLIST_TAGS, {}).get(PLIST_EXTENSION, [])}
-    if not any(document.get(PLIST_IS_PACKAGE) and document.get(PLIST_HANDLER_RANK) == "Alternate"
+    if not any(document.get(PLIST_IS_PACKAGE) and document.get(PLIST_HANDLER_RANK) == "Owner"
                and archive_types.intersection(document.get(PLIST_CONTENT_TYPES, []))
                for document in info.get(PLIST_DOCUMENTS, [])):
-        raise RuntimeError("Rust Preview does not declare .mailarchive package document support")
+        raise RuntimeError("Rust desktop does not declare .mailarchive package document support")
     inspection = subprocess.run([str(binary), "--check-macos-integration"], cwd=app.parent, env=environment,
                                 capture_output=True, text=True, check=True, timeout=30)
     native = MacIntegration.model_validate_json(inspection.stdout)
@@ -220,7 +218,10 @@ def check(app: Path, environment: dict[str, str]) -> list[str]:
                 raise RuntimeError("frozen repeat ingest duplicated the message")
         if source.read_bytes() != raw or verify_archive(archive):
             raise RuntimeError("frozen repeat ingest failed byte preservation")
-    return ["Rust packaged helper discovery with no checkout interpreter",
+    subprocess.run([str(binary), "--check-updater"], cwd=app.parent, env=environment,
+                   capture_output=True, text=True, check=True, timeout=30)
+    return ["Native Sparkle startup with mapped bundle metadata (no network check or windows)",
+            "Rust packaged helper discovery with no checkout interpreter",
             "Native package-aware Open panel and bundled application name/icon (no windows)",
             "Rust packaged owner-options service and search/message reading",
             "Frozen synthetic ingest and idempotent repeat ingest",

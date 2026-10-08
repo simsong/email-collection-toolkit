@@ -65,6 +65,48 @@ fn main() -> Result<()> {
         }
     }
     match args.as_slice() {
+        [flag] if flag == "--check-updater" => {
+            #[cfg(target_os = "macos")]
+            {
+                mailsearch_rust::macos::inspect()?;
+            }
+            let updater = mailsearch_rust::updater::Updater::new(false, Default::default(), || {});
+            anyhow::ensure!(updater.available(), "{}", updater.detail);
+            println!("{}", updater.detail);
+            Ok(())
+        }
+        [flag] if flag == "--updater-fence" => {
+            let installation = mailsearch_rust::update_policy::Installation::default();
+            if installation.reserve()? {
+                println!("reserved");
+                io::stdout().flush()?;
+                let mut line = String::new();
+                io::stdin().read_line(&mut line)?;
+                #[cfg(target_os = "macos")]
+                if line.trim() == "native-error" {
+                    let failure: block2::RcBlock<dyn Fn()> = block2::RcBlock::new(|| {
+                        // Exercise a real Objective-C exception, not a mock SDK.
+                        let object = objc2_foundation::NSObject::new();
+                        let exception = unsafe { objc2::rc::Retained::cast_unchecked(object) };
+                        objc2::exception::throw(exception);
+                    });
+                    anyhow::ensure!(
+                        installation.invoke(&failure).is_err(),
+                        "Expected native continuation failure"
+                    );
+                } else {
+                    installation.cancel();
+                }
+                #[cfg(not(target_os = "macos"))]
+                installation.cancel();
+                println!("released");
+                io::stdout().flush()?;
+                io::stdin().read_line(&mut line)?;
+            } else {
+                println!("blocked");
+            }
+            Ok(())
+        }
         #[cfg(target_os = "macos")]
         [flag] if flag == "--check-macos-integration" => {
             println!("{}", mailsearch_rust::macos::inspect()?);
@@ -583,6 +625,11 @@ fn native(
                         let _ = ipc_proxy.send_event(NativeEvent::Welcome(message));
                     } else if message.method == "quit" {
                         let _ = ipc_proxy.send_event(NativeEvent::Quit);
+                    } else if matches!(
+                        message.method.as_str(),
+                        "shell_status" | "preferences_save" | "check_updates"
+                    ) {
+                        let _ = ipc_proxy.send_event(NativeEvent::Shell(message));
                     }
                     return;
                 }
@@ -854,6 +901,8 @@ fn native(
                 }
                 if action == "quit" {
                     let _=reply_proxy.send_event(NativeEvent::Quit);
+                } else if welcome && matches!(action, "about" | "preferences" | "updates") {
+                    let _ = view.evaluate_script(&format!("window.__rustShellAction({})", serde_json::to_string(action).unwrap()));
                 } else if welcome {
                     if matches!(action,"open_archive"|"new_archive") {
                         let method=if action=="open_archive"{"welcome_open"}else{"welcome_new"};

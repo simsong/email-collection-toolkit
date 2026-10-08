@@ -1,4 +1,4 @@
-Email Collection Toolkit - Windows test installer
+Email Collection Toolkit - Windows alpha installer
 
 1. Extract this entire ZIP into a folder.
 2. Right-click Install-Test-Certificate.ps1 and choose Run with PowerShell.
@@ -32,9 +32,12 @@ https://developer.microsoft.com/microsoft-edge/webview2/#download
 For a disconnected machine, transfer the appropriate standalone installer
 from a connected computer and install it before running ECT.
 
-This is a reader test build; Windows importing is not yet enabled.
-See the associated GitHub Actions run for this build's installation test results.
+Windows importing is not yet enabled. Reading and search run in Rust;
+the isolated bundled Python service supplies archive metadata operations.
+Update discovery authenticates the shared feed; WinSparkle confirms downloads
+and verifies their Ed25519 signatures before opening the Windows installer.
+Read the published release's CI installation evidence for both architectures.
 
 Files: base.msixbundle is the only installer; local-test.cer is its public
 certificate; sha256.json contains checksums. No upgrade fixture is needed
-for manual installation. Production distribution will use trusted signing.
+for manual installation. This alpha uses an explicitly trusted test certificate.

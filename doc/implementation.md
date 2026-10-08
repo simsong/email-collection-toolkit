@@ -23,7 +23,7 @@ The helper is bound to one archive and exchanges request-ID-based JSON lines
 through private pipes. Python writer leases serialize archive mutations; Rust
 supervises the helper's lifetime. It does not load the Python GUI. Development
 builds use the checkout's Python environment or `ECT_RUST_ENGINE_PYTHON`;
-the local Rust Preview DMG bundles a private frozen Python archive service.
+the primary Rust DMG bundles a private frozen Python archive service.
 On macOS the Rust executable detects its bundle and starts adjacent
 `archive-service --rust-engine ARCHIVE`, ignoring development interpreter
 overrides and refusing a missing bundled service. This helper uses the same
@@ -3413,14 +3413,41 @@ An explicit `[windows-ci]` head commit message calls the reusable reader workflo
 with `windows_only: true`; the existing macOS job supplies native Mac coverage.
 Other pushes skip this caller, retaining the ordinary development cost policy.
 
-The WinSparkle client accepts the existing macOS HTTPS appcast URL as the shared
-feed; the `/updates/mac/` path is retained for installed-client compatibility.
-Selection uses `sparkle:os` on separate platform items, not the URL path. The
-current publisher and checker still handle macOS DMGs only; mixed-feed generation,
-historical-entry classification, complete-feed signing, and signed Windows
-installers remain release work. Builds without explicit updater feed/key/build
-configuration leave update checks unavailable rather than contact that legacy
-feed prematurely.
+The primary Rust package retains the previous macOS bundle/update identity and
+bundles the private Python archive service. Ingest remains Python; ordinary
+reading, search, GUI coordination and independent verification remain Rust.
+`make dmg` selects this primary package; `make python-dmg` explicitly selects the
+legacy GUI for developer comparisons.
+
+`update_policy.rs` shares mapped version/feed/key inputs, update channels and
+installation exclusion. Preferences migrate explicit Python daily/channel choices
+from current or pre-rename settings and retain old Rust JSON. The macOS adapter
+loads the pinned framework into `SPUStandardUpdaterController`, disables automatic
+downloads and exposes the selected channels through its native delegate. A copied
+installation continuation waits on a main-thread timer for the same exclusive
+`flock` used by Python's shared application writer leases. No recovery/install
+wait deadline is imposed; cancellation/failure releases the reservation, while
+installation retains it through process exit. `make test-rust-updates` tests both
+directions of exclusion and cancellation using a real Rust process and Python lease.
+
+The Windows adapter loads only the verified sibling WinSparkle DLL. Its private
+loopback discovery gateway fetches bounded HTTPS XML and authenticates the complete
+Sparkle Ed25519 signature before selecting Windows release/preview entries.
+Unchanged signed enclosures reach the native download/confirmation UI; Windows
+opens the verified MSIX bundle through its installer association. Native failure
+and cancellation release installation state. Windows archive writers remain disabled.
+Both adapters check once daily when enabled. Source builds without mapped metadata
+remain unavailable and perform no network discovery.
+
+The shared `/updates/mac/appcast.xml` URL remains for installed-client compatibility.
+The publisher classifies historical DMGs as `sparkle:os="macos"`, appends distinct
+macOS/Windows items for the same mapped release, signs/verifies both final installers,
+and signs/verifies complete XML before atomic feed replacement. Windows CI installs
+one shared test-signed x64/ARM64 bundle on both architectures; only its base payload
+and public certificate/instructions can become alpha assets. Upgrade fixtures stay
+CI-only. `[release-ci]` runs these actual package/signature gates before tagging;
+the immutable tag workflow repeats them before creating or publishing a release.
+Physical update confirmation/relaunch and desktop gestures remain human acceptance.
 
 The independent `rust-gui` matrix job runs only `make test-rust-gui-native`;
 `static-rust` owns the ordinary workspace format, Clippy and reader test suite.

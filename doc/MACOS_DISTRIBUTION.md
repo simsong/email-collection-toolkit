@@ -11,13 +11,11 @@ Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved.
 
 ## Build and test
 
-These instructions build the current Python/pywebview application. The compiled
-replacement candidates are [Dioxus Desktop and Tauri](DIOXUS.md), with the Python archive
-engine bundled alongside it. That migration has not changed `make dmg` or its
-validation; no Dioxus DMG is produced by the current build.
-
-Plan comparable trial implementations in Dioxus and Tauri before choosing a
-framework. Either approach retains the Python archive engine.
+`make dmg` builds the primary Rust/Wry application with its private frozen
+Python archive service. It retains the existing bundle identity and update feed,
+so an approved upgrade replaces the Python GUI. `make python-dmg` retains the
+legacy GUI build for development. [Dioxus and Tauri](DIOXUS.md) describe earlier
+framework comparisons.
 
 On a logged-in Mac with this checkout's development environment and `uv`:
 
@@ -26,9 +24,10 @@ make dmg
 ```
 
 The target installs only project-local packaging dependencies, then uses
-PyInstaller to bundle Python, Python extension libraries, Cocoa/WKWebView
-bindings, SQL/YAML resources, plug-in manifests, GUI assets, and the standalone
-verifier source. It uses the system WebKit, not a downloaded browser. Users
+PyInstaller to bundle the private Python runtime, Python extension libraries,
+SQL/YAML resources, plug-in manifests, and verifier source. Rust supplies the
+entry point and uses system WebKit. The bundle also contains Sparkle and the
+locked Cargo dependency notices. Users
 need no Python, `uv`, Homebrew, or source checkout for the supported local-mail
 GUI. ClamAV is optional. Experimental PDF extraction/OCR, Tika/Java and the
 Apple Intelligence command are not included in this desktop workflow.
@@ -62,21 +61,21 @@ chrome so the footer stays visible. A build-only `dmgbuild` dependency saves thi
 mounted checks verify it. Use `make preview-dmg DMG=/absolute/path/to/image.dmg`
 for visual review in Finder; press Return in the terminal to eject afterward.
 The `.mailarchive` package type is declared in
-Info.plist; the Cocoa delegate handles document-open events and retains
-pywebview's close/ingest safeguards. File Open also accepts extensionless archive
+Info.plist; Rust's native event loop handles document-open events and retains
+the stop/checkpoint safeguards. File Open also accepts extensionless archive
 directories. Installation does not force replacement of another default handler.
 
 Ordinary `make dmg` and `make dmg-signed` mount the candidate DMG read-only and
 run its headless self-test, with a system-only PATH and no Python environment
 overrides. They do not open GUI test windows.
 
-`make check-release` builds and validates a DMG with both headless and GUI tests.
+`make check-release` builds and validates the primary DMG with mounted native
+configuration, actual Sparkle startup and synthetic archive-service/reader tests.
 Use `make check-release DMG=/absolute/path/to/image.dmg` to validate an existing
-build instead. This is an explicitly requested local, interactive validation.
+build instead. Physical interaction acceptance remains a separate human check.
 The GitHub release workflow uses headless `make dmg` on its hosted macOS runner;
 its mounted installed-app self-test runs without opening native windows.
-It announces the GUI self-test before opening synthetic About, search, Ingests,
-and source-picker windows. These windows close automatically. A GUI worker
+Legacy Python GUI self-tests can open synthetic windows. A GUI worker
 that remains after the five-second shutdown grace period fails the build with
 a thread dump; a printed test report alone is not evidence of process exit.
 It verifies the code-signature seal and always attempts to detach the volume.

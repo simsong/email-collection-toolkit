@@ -7,7 +7,7 @@
  * All displayed metadata uses textContent; no mail or URLs become executable HTML.
  */
 (() => {
-  if (window !== window.top || ["/opening.html", "/welcome.html"].includes(location.pathname)) return;
+  if (window !== window.top || location.pathname === "/opening.html") return;
   window.addEventListener("DOMContentLoaded", () => {
     const dialog = document.createElement("dialog");
     dialog.id = "rust-shell-dialog";
@@ -15,7 +15,7 @@
     document.body.append(dialog);
     const style = document.createElement("link");
     style.rel = "stylesheet";
-    style.href = "rust-shell.css";
+    style.href = "shell.css";
     document.head.append(style);
     const apply = status => document.documentElement.style.setProperty("--rust-message-font-size", `${status.preferences.message_font_size}px`);
     const api = window.pywebview.api;
@@ -43,6 +43,7 @@
         if (!dialog.open || !body.isConnected) return;
         if (action === "about") {
           body.append(text("p", `Version ${status.version}\n${status.platform} · ${status.architecture}\nRust / Wry desktop reader`), text("p", "Copyright © 2026 Simson L. Garfinkel.\nLicensed under GPL-2.0-only."), text("p", "Search and message viewing run in Rust. Import, recovery and identity services use the project Python engine during migration."));
+          if (location.pathname === "/welcome.html") return;
           const capabilities=await api.engine_status();
           const antivirus=await api.antivirus();
           const health=text("p",antivirus.detail);
@@ -69,13 +70,21 @@
           automatic.checked = status.preferences.automatic_updates;
           automatic.disabled = !status.updates_available;
           updateLabel.append(automatic, document.createTextNode(" Automatically check for updates"));
-          body.append(sizeLabel, updateLabel, text("p", status.update_detail));
+          const channelLabel = text("label", "Update channel ");
+          const channel = document.createElement("select");
+          for (const [value, label] of [["release", "Release updates"], ["preview", "Preview and release updates"]]) {
+            const option = text("option", label); option.value = value; channel.append(option);
+          }
+          channel.value = status.preferences.update_channel;
+          channel.disabled = !status.updates_available;
+          channelLabel.append(channel);
+          body.append(sizeLabel, channelLabel, updateLabel, text("p", status.update_detail));
           const save = text("button", "Save");
           save.addEventListener("click", async () => {
             if (!size.reportValidity()) return;
             save.disabled = true;
             try {
-              apply(await api.preferences_save({message_font_size:Number(size.value), automatic_updates:automatic.checked}, status.preferences));
+              apply(await api.preferences_save({message_font_size:Number(size.value), automatic_updates:automatic.checked, update_channel:channel.value}, status.preferences));
               dialog.close();
             } catch (failure) { error.textContent = failure.message; }
             finally { save.disabled = false; }

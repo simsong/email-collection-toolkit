@@ -13,7 +13,7 @@ publish = false
 license = "GPL-2.0-only"
 
 [features]
-native-smoke = ["dep:block2", "dep:webview2-com", "dep:windows"]
+native-smoke = ["dep:webview2-com", "dep:windows"]
 
 [dependencies]
 archive-verifier = { path = "../archive-verifier" }
@@ -29,6 +29,9 @@ serde_json = "1"
 tempfile = "3.23"
 chrono = { version = "0.4", default-features = false, features = ["std"] }
 base64 = "0.22"
+ed25519-dalek = "2.2"
+roxmltree = "0.21"
+reqwest = { version = "0.12", default-features = false, features = ["blocking", "rustls-tls"] }
 ammonia = "4"
 encoding_rs = "0.8"
 rfd = "0.15"
@@ -49,10 +52,10 @@ muda = { version = "0.20", default-features = false }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 dispatch2 = "0.3"
-block2 = { version = "0.6", optional = true }
-objc2 = "0.6"
+block2 = "0.6"
+objc2 = { version = "0.6", features = ["exception"] }
 objc2-app-kit = { version = "0.3", default-features = false, features = ["NSApplication", "NSBitmapImageRep", "NSImage", "NSImageRep", "NSDragging", "NSDraggingItem", "NSDraggingSession", "NSPasteboard", "NSPasteboardItem", "NSWorkspace", "NSEvent", "NSView", "NSOpenPanel", "NSSavePanel"] }
-objc2-foundation = { version = "0.3", default-features = false, features = ["NSData", "NSDictionary", "NSError", "NSArray", "NSString", "NSRunLoop", "NSBundle", "NSProcessInfo", "NSURL"] }
+objc2-foundation = { version = "0.3", default-features = false, features = ["NSData", "NSDictionary", "NSError", "NSArray", "NSString", "NSRunLoop", "NSBundle", "NSProcessInfo", "NSURL", "NSSet", "NSTimer"] }
 objc2-web-kit = { version = "0.3", default-features = false, features = ["WKSnapshotConfiguration", "WKWebView", "block2"] }
 
 [target.'cfg(unix)'.dependencies]

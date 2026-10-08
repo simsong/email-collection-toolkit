@@ -5,9 +5,11 @@
 The Rust/Wry desktop owns the existing interface, search and message reader.
 A transitional Python **archive service** handles import, recovery, options and
 identity operations without importing the Python GUI. The project environment
-must be available for checkout launches. `make rust-dmg` instead creates a local
-self-contained Rust Preview DMG with its private Python archive service; this
-is not a qualified/notarized release package. The user performs interaction
+must be available for checkout launches. `make dmg` (also `make rust-dmg`)
+creates the primary self-contained Rust application with its private Python
+archive service. Release CI must sign, notarize and validate that exact candidate
+before publication; a local signed build alone does not establish those gates.
+The user performs interaction
 testing, including physical drag gestures and window/document coordination.
 The [theory of operation](implementation.md#theory-of-operation-rust-desktop-and-python-ingest)
 explains how the Rust GUI supervises the private Python ingest process and which
@@ -135,11 +137,12 @@ remains open. Specifically, this local build does **not** complete:
   document activation. Additional windows currently run separate processes.
 - Windows archive-writing support, scanner/converter execution and full native
   macOS/Windows acceptance. Preserve the existing Windows writer restriction.
-- Self-contained resources, installers/signing/notarization, macOS updater wiring,
-  coordinated release-feed publication and migration of the default entry point.
-  The local macOS preview now bundles its runtime and has headless mounted checks;
-  user interaction acceptance and the remaining release gates are still pending.
+- Complete native upgrade/relaunch interaction acceptance. Packaging now bundles
+  the private runtime and native updaters, uses the existing macOS identity,
+  and publishes a shared signed feed for DMG and MSIX. Exact-candidate branch CI
+  must pass installed-artifact and signing/notarization/feed gates before release.
 - Full database rebuild/reprocess acceptance, large-message streaming and IMAP.
 
-Do not deprecate the Python GUI or mark v1.0 complete until these gates pass.
-The local app does not install anything or register file associations.
+The owner authorized the Rust app as the primary alpha release while recording
+physical interaction acceptance separately. This does not declare v1.0 complete
+or remove the legacy Python GUI source. Local builds do not install the app.
