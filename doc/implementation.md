@@ -31,10 +31,10 @@ private protocol; it does not load the Python GUI.
 Protocol and cancellation details appear under
 [Rust desktop migration](#rust-desktop-migration-and-reader-prototype).
 
-[DEVOPS.md](DEVOPS.md) records the agreed macOS-focused CI and coordinated
-Mac/Windows release design. It is not yet fully implemented: Windows reader CI is opt-in/release-only, while combined Windows
-installer packaging, shared-feed publication, and static dual-platform download
-buttons remain pending.
+[DEVOPS.md](DEVOPS.md) records the macOS-focused CI and coordinated Mac/Windows
+release design. Windows reader CI remains opt-in/release-only. Shared MSIX
+packaging, dual-platform signed-feed publication and download selection are
+implemented; each release candidate must pass its actual hosted package gates.
 
 ## Embedded antivirus migration status
 
@@ -78,9 +78,11 @@ native loader's underlying error (PyInstaller's generic wrapper hides it).
 Existing static/Python runner jobs use macos-15; the Rust GUI matrix uses only
 macos-latest initially. Continuous integration runs `make check-static`
 and `make check-tests` in parallel jobs on each non-`main` repository branch
-push; local `make check` retains their order. CI has no PR/main duplicates or
-a DMG smoke job. Forked PRs are not covered by that push trigger. Release packaging runs
-only for a pushed, version-matching annotated `v*` tag on `main` and invokes
+push; local `make check` retains their order. CI has no PR/main duplicates.
+Forked PRs are not covered by that push trigger. An explicit `[release-ci]` head
+on `work-rust-gui` runs signed/notarized DMG and shared Windows package gates
+without publishing. Release publication requires a pushed, version-matching
+annotated `v*` tag on `main` and invokes
 `make dmg`, which mounts the candidate and runs its headless installed-app
 self-test. Native GUI release checks remain an explicit local
 `make check-release` action. Pages uses the same pinned Darwin Zola
@@ -3433,7 +3435,13 @@ The delegate requests Rust shutdown before invoking the continuation. The archiv
 worker quiesces search, private service and exports but remains available if native
 installation fails. IPC rejects new work while closing; only an actual worker
 acknowledgment plus completed export cleanup enables the install timer. A separate
-five-second watchdog cannot authorize installation. An added, ABI-compatible
+five-second watchdog cannot authorize installation. `willExtractUpdate:` tracks
+staging before the external installer launches, while the standard user-driver
+delegate detects resumed Installing sessions. These ordinary Quit paths wait for
+actual cleanup and reserve the fence even without a relaunch block; only then
+may Rust exit. Nil completion preserves staged installation-on-Quit state;
+reported native failures clear it. Failure while closing suppresses the ordinary
+watchdog until the worker acknowledges cleanup and the reader can be restored. An added, ABI-compatible
 `applicationShouldTerminate:` method on the pinned Tao delegate returns Cocoa's
 `TerminateLater`; Rust replies only after cleanup and native installer handoff.
 The reply runs asynchronously on Cocoa's main queue, outside Tao's locked event
@@ -3441,7 +3449,8 @@ callback; a queued reply keeps the event loop alive until native termination.
 Failure releases the fence and cancels pending termination, restoring the same
 reader (or startup when opening was interrupted). The headless shutdown probe
 exercises the actual Objective-C postpone/resume/error callbacks and Cocoa Quit
-against a real Python writer lease; it does not claim native replacement/relaunch.
+against a real Python writer lease, including staging without postponement; it
+does not claim native replacement/relaunch.
 Mounted updater inspection uses volatile `NSArgumentDomain` overrides for first
 launch and automatic checks, skips all persistent setters, runs the scheduled SDK
 startup cycle and verifies the production bundle's persistent domain is unchanged.
@@ -3490,14 +3499,17 @@ This local prototype is not a released or fully validated Windows application.
 
 ## MSIX installation matrix (2026-10-07)
 
-The MSIX decision supersedes the older shared WinSparkle feed/EXE plan.
-`windows-msix.yml` supports explicit dispatch and reusable release calls; ordinary
-pushes do not run it. Two native build jobs produce x64 and ARM64 payloads once.
+MSIX replaces the older EXE installer plan; WinSparkle discovers the signed
+bundle through the authenticated shared feed. `windows-msix.yml` supports
+explicit dispatch, reusable release calls and `[msix-ci]`/`[release-ci]` pushes
+on the Windows packaging branch; ordinary pushes do not run it. Two native
+build jobs produce x64 and ARM64 payloads once per workflow invocation.
 One assembly job creates a signed common bundle and a higher-version upgrade
 fixture with identical application bytes. Both installation VMs download that
 same artifact: Windows Server x64 (`windows-latest`) and Windows 11 ARM64
 (`windows-11-arm`). Installation jobs do not rebuild. Private signing keys remain
-outside uploaded artifacts. Test packages are never published as release assets.
+outside uploaded artifacts. Only the validated base bundle and public trust
+material may become test-signed Windows alpha assets; upgrade fixtures stay CI-only.
 The release caller waits for this gate after tag preflight. Windows 10 testing
 is not required. No GitHub Team or AWS provisioning is needed.
 

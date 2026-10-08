@@ -91,6 +91,13 @@ impl Updater {
         }
     }
 
+    pub fn begin_shutdown(&self) {
+        #[cfg(target_os = "macos")]
+        if let Some(client) = &self.client {
+            client.begin_shutdown();
+        }
+    }
+
     pub fn shutdown_ready(&self, ready: bool) {
         #[cfg(target_os = "macos")]
         if let Some(client) = &self.client {

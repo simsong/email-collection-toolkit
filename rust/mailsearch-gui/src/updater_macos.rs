@@ -28,6 +28,9 @@ struct DelegateState {
     pending: RefCell<Option<RcBlock<dyn Fn()>>>,
     channel: Cell<Channel>,
     ready: AtomicBool,
+    closing: AtomicBool,
+    staged: Cell<bool>,
+    relaunch: Cell<bool>,
     failure: RefCell<Option<String>>,
     notify: Box<dyn Fn() + Send + Sync>,
 }
@@ -48,8 +51,31 @@ define_class!(
             }
         }
 
+        #[unsafe(method(updater:willExtractUpdate:))]
+        fn extracting(&self, _updater: &AnyObject, _item: &AnyObject) {
+            // Sparkle's external installer may install on application exit even
+            // before a user asks for relaunch. Track that hazard before launch.
+            self.ivars().staged.set(true);
+        }
+
+        #[unsafe(method(standardUserDriverWillHandleShowingUpdate:forUpdate:state:))]
+        fn showing(&self, _show: Bool, _item: &AnyObject, state: &AnyObject) {
+            // Public SPUUserUpdateStageInstalling = 2 (NSInteger), including a
+            // resumed staged session that did not extract in this process.
+            let stage: isize = unsafe { msg_send![state, stage] };
+            if stage == 2 { self.ivars().staged.set(true); }
+        }
+
+        #[unsafe(method(updater:willInstallUpdate:))]
+        fn installing(&self, _updater: &AnyObject, _item: &AnyObject) {
+            self.ivars().staged.set(true);
+        }
+
         #[unsafe(method(updater:shouldPostponeRelaunchForUpdate:untilInvokingBlock:))]
         fn postpone(&self, _updater: &AnyObject, _item: &AnyObject, handler: &Block<dyn Fn()>) -> Bool {
+            self.ivars().staged.set(true);
+            self.ivars().relaunch.set(true);
+            self.ivars().closing.store(true, Ordering::Release);
             self.ivars().ready.store(false, Ordering::Release);
             self.ivars().failure.borrow_mut().take();
             *self.ivars().pending.borrow_mut() = Some(handler.copy());
@@ -59,7 +85,7 @@ define_class!(
 
         #[unsafe(method(ectResumeUpdate:))]
         fn resume(&self, _timer: &NSTimer) {
-            if self.ivars().pending.borrow().is_none() || !self.ivars().ready.load(Ordering::Acquire) { return; }
+            if !self.ivars().staged.get() || !self.ivars().ready.load(Ordering::Acquire) || self.ivars().installation.is_installing() { return; }
             match self.ivars().installation.reserve() {
                 Ok(true) => {
                     // Remove before invoking native code, allowing reentrant failure
@@ -69,6 +95,11 @@ define_class!(
                         if let Err(error) = self.ivars().installation.invoke(&continuation) {
                             self.fail(format!("{error:#}"));
                         }
+                    } else {
+                        // No relaunch callback is needed for installation on Quit.
+                        // Hold the fence and wake Rust to permit ordinary termination.
+                        self.ivars().installation.installing();
+                        (self.ivars().notify)();
                     }
                 }
                 Ok(false) => (),
@@ -79,7 +110,7 @@ define_class!(
         #[unsafe(method(updater:didFinishUpdateCycleForUpdateCheck:error:))]
         fn finished(&self, _updater: &AnyObject, _check: usize, error: Option<&NSError>) {
             if let Some(error) = error {
-                if self.waiting() { self.fail(error.localizedDescription().to_string()); }
+                if self.ivars().staged.get() { self.fail(error.localizedDescription().to_string()); }
             }
         }
     }
@@ -87,13 +118,19 @@ define_class!(
 
 impl ECTRustSparkleDelegate {
     fn waiting(&self) -> bool {
-        self.ivars().pending.borrow().is_some() || self.ivars().installation.is_installing()
+        self.ivars().staged.get()
+            && (!self.ivars().installation.is_installing() || self.ivars().relaunch.get())
     }
     fn fail(&self, message: String) {
         self.ivars().pending.borrow_mut().take();
         self.ivars().installation.cancel();
-        *self.ivars().failure.borrow_mut() = Some(message);
-        (self.ivars().notify)();
+        self.ivars().staged.set(false);
+        self.ivars().relaunch.set(false);
+        self.ivars().ready.store(false, Ordering::Release);
+        if self.ivars().closing.load(Ordering::Acquire) {
+            *self.ivars().failure.borrow_mut() = Some(message);
+            (self.ivars().notify)();
+        }
     }
 }
 
@@ -180,6 +217,9 @@ impl MacSparkle {
             pending: RefCell::new(None),
             channel: Cell::new(channel),
             ready: AtomicBool::new(false),
+            closing: AtomicBool::new(false),
+            staged: Cell::new(false),
+            relaunch: Cell::new(false),
             failure: RefCell::new(None),
             notify: Box::new(notify),
         });
@@ -191,7 +231,7 @@ impl MacSparkle {
         let controller: Retained<AnyObject> = unsafe {
             msg_send![controller,
             initWithStartingUpdater: Bool::NO, updaterDelegate: &*delegate,
-            userDriverDelegate: std::ptr::null::<AnyObject>()]
+            userDriverDelegate: &*delegate]
         };
         let updater: Retained<AnyObject> = unsafe { msg_send![&*controller, updater] };
         if !inspect {
@@ -256,8 +296,20 @@ impl MacSparkle {
     pub fn installing(&self) -> bool {
         self._installation.is_installing()
     }
+    pub fn begin_shutdown(&self) {
+        self._delegate
+            .ivars()
+            .closing
+            .store(true, Ordering::Release);
+    }
     pub fn shutdown_ready(&self, ready: bool) {
         self._delegate.ivars().ready.store(ready, Ordering::Release);
+        if !ready {
+            self._delegate
+                .ivars()
+                .closing
+                .store(false, Ordering::Release);
+        }
     }
     pub fn take_failure(&self) -> Option<String> {
         self._delegate.ivars().failure.borrow_mut().take()
@@ -325,6 +377,9 @@ pub fn inspect_shutdown() -> Result<()> {
         pending: RefCell::new(None),
         channel: Cell::new(Channel::default()),
         ready: AtomicBool::new(false),
+        closing: AtomicBool::new(false),
+        staged: Cell::new(false),
+        relaunch: Cell::new(false),
         failure: RefCell::new(None),
         notify: Box::new(move || {
             state.fetch_add(1, Ordering::AcqRel);
@@ -350,7 +405,16 @@ pub fn inspect_shutdown() -> Result<()> {
     // deliberately ignored; calling the Objective-C method exercises its ABI.
     for line in io::stdin().lock().lines() {
         match line?.as_str() {
+            "stage" => {
+                delegate.ivars().closing.store(false, Ordering::Release);
+                delegate.ivars().failure.borrow_mut().take();
+                unsafe {
+                    let _: () =
+                        msg_send![&*delegate, updater: &*object, willExtractUpdate: &*object];
+                }
+            }
             "ready" => {
+                delegate.ivars().closing.store(true, Ordering::Release);
                 delegate.ivars().ready.store(true, Ordering::Release);
             }
             "attempt" => unsafe {
@@ -386,12 +450,14 @@ pub fn inspect_shutdown() -> Result<()> {
         }
         println!(
             "{}:{}",
-            if delegate.waiting() {
-                if installation.is_installing() {
+            if installation.is_installing() {
+                if delegate.waiting() {
                     "installing"
                 } else {
-                    "waiting"
+                    "reserved-for-quit"
                 }
+            } else if delegate.waiting() {
+                "waiting"
             } else {
                 "canceled"
             },

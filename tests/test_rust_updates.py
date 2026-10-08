@@ -125,6 +125,19 @@ def test_native_deferred_install_waits_for_cleanup_and_recovers_from_failure(tmp
                 reply("fail", "canceled:1")  # actual NSError delegate callback releases reservation
                 lease = WriterLease.acquire(archive, "fixture", "test", "third", "fixture")
                 lease.release()
+                # Staging can install on ordinary Quit without a relaunch block.
+                lease = WriterLease.acquire(archive, "fixture", "test", "staged", "fixture")
+                reply("stage", "waiting:1")
+                reply("attempt", "waiting:1")  # ordinary Quit also requires owner cleanup
+                reply("ready", "waiting:1")
+                reply("attempt", "waiting:1")  # external writer blocks staged termination
+                lease.release()
+                reply("attempt", "reserved-for-quit:1")  # no additional continuation call
+                with pytest.raises(ArchiveBusyError):
+                    WriterLease.acquire(archive, "fixture", "test", "staged-reserved", "fixture")
+                reply("fail", "canceled:1")
+                lease = WriterLease.acquire(archive, "fixture", "test", "staged-released", "fixture")
+                lease.release()
                 reply("quit", "quit-canceled")  # actual NSApplication termination returns to live process
                 assert app.poll() is None
                 _, stderr = app.communicate("done\n", timeout=15)

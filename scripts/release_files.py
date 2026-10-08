@@ -57,12 +57,14 @@ def stage(windows: Path, destination: Path) -> Path:
     bundle = destination / f"ECT-{display}-windows-x64-arm64.msixbundle"
     shutil.copyfile(windows / "base.msixbundle", bundle)
     shutil.copyfile(windows / "local-test.cer", destination / "local-test.cer")
-    readme = (windows / "README.txt").read_text(encoding="utf-8").replace("base.msixbundle", bundle.name)
+    readme = (windows / "README.txt").read_text(encoding="utf-8").replace("base.msixbundle", bundle.name).replace("sha256.json", "SHA256SUMS")
     with zipfile.ZipFile(bundle.with_suffix(".zip"), "w", compression=zipfile.ZIP_DEFLATED) as archive:
         archive.write(bundle, bundle.name)
         archive.write(windows / "local-test.cer", "local-test.cer")
         archive.write(windows / "Install-Test-Certificate.ps1", "Install-Test-Certificate.ps1")
         archive.writestr("README.txt", readme)
+        members = [bundle, windows / "local-test.cer", windows / "Install-Test-Certificate.ps1"]
+        archive.writestr("SHA256SUMS", "".join(f"{digest(path)}  {path.name}\n" for path in members))
     files = sorted(path for path in destination.iterdir()
                    if path.name.endswith((".dmg", ".msixbundle", ".zip", ".tar.gz", ".cer")))
     (destination / "SHA256SUMS").write_text("".join(f"{digest(path)}  {path.name}\n" for path in files), encoding="utf-8")

@@ -2625,6 +2625,9 @@ archive work, await the actual helper checkpoint/owner cleanup and temporary
 export cleanup, then reserve the application writer fence before handing control
 to Sparkle. A watchdog expiration is not a cleanup acknowledgment. Cocoa Quit
 (including Sparkle's native terminate request) must use the same coordination.
+Staged updates that install on ordinary Quit require the same cleanup and fence,
+including resumed sessions without a relaunch callback. Only termination with no
+staged installer may retain the ordinary close watchdog.
 An installation failure/cancellation releases the reservation, restores the reader
 or startup page and allows a subsequent ordinary Quit. Package updater inspection
 must initialize the actual framework without network checks, windows or changes

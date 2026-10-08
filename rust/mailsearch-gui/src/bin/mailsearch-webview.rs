@@ -851,6 +851,7 @@ fn native(
             | Event::UserEvent(NativeEvent::Quit) => {
                 if !quitting {
                     quitting=true;
+                    if let Some(shell) = &shell { shell.updater().begin_shutdown(); }
                     quit_epoch += 1;
                     closing.store(true, std::sync::atomic::Ordering::Release);
                     let cleanup_proxy = reply_proxy.clone();
@@ -1041,7 +1042,7 @@ fn native(
         if quitting && worker_finished && exports_cleaned && !cleanup_failed && updater.is_some_and(|updater| updater.installing()) {
             mailsearch_rust::macos::finish_termination(true);
         }
-        if quitting && (worker_finished || quit_timed_out) && exports_cleaned && !waiting {
+        if quitting && (worker_finished || quit_timed_out) && exports_cleaned && !waiting && update_failure.is_none() {
             #[cfg(target_os = "macos")]
             if mailsearch_rust::macos::finish_termination(true) { return; }
             #[cfg(feature = "native-smoke")]

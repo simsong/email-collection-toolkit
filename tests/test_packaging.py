@@ -378,7 +378,7 @@ def test_release_staging_authenticates_base_bundle_and_excludes_private_files(tm
     windows.mkdir()
     (windows / "base.msixbundle").write_bytes(b"synthetic signed bundle fixture")
     (windows / "local-test.cer").write_bytes((RELEASE_ROOT / "scripts/win/test-signing.cer").read_bytes())
-    (windows / "README.txt").write_text("Install base.msixbundle after trusting local-test.cer.", encoding="utf-8")
+    (windows / "README.txt").write_bytes((RELEASE_ROOT / "scripts/win/MSIX_README.txt").read_bytes())
     (windows / "Install-Test-Certificate.ps1").write_bytes((RELEASE_ROOT / "scripts/win/Install-Test-Certificate.ps1").read_bytes())
     (windows / "upgrade.msixbundle").write_bytes(b"CI-only future-version fixture")
     (windows / "local-test.pfx").write_bytes(b"private-key sentinel")
@@ -389,8 +389,15 @@ def test_release_staging_authenticates_base_bundle_and_excludes_private_files(tm
     bundle = stage(windows, destination)
     assert bundle.read_bytes() == (windows / "base.msixbundle").read_bytes()
     with zipfile.ZipFile(bundle.with_suffix(".zip")) as archive:
-        assert set(archive.namelist()) == {bundle.name, "local-test.cer", "README.txt", "Install-Test-Certificate.ps1"}
-        assert bundle.name in archive.read("README.txt").decode()
+        assert set(archive.namelist()) == {bundle.name, "local-test.cer", "README.txt", "Install-Test-Certificate.ps1", "SHA256SUMS"}
+        readme = archive.read("README.txt").decode()
+        assert bundle.name in readme and "SHA256SUMS" in readme and "sha256.json" not in readme
+        from hashlib import sha256
+        sums = archive.read("SHA256SUMS").decode().splitlines()
+        assert len(sums) == 3
+        for line in sums:
+            expected, name = line.split("  ", 1)
+            assert sha256(archive.read(name)).hexdigest() == expected
     assert not (destination / "upgrade.msixbundle").exists()
     assert not (destination / "local-test.pfx").exists()
     assert f"{digest(bundle)}  {bundle.name}" in (destination / "SHA256SUMS").read_text()
