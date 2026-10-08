@@ -4,7 +4,7 @@
 // JSON requests go to one bounded worker; SQLite never runs on the window thread.
 // Replies return through the native event loop without waiting on JS callbacks.
 // Ordinary close bounds helper shutdown; confirmed updates await actual cleanup.
-// The --rpc mode exercises the same dispatcher headlessly over standard I/O.
+// RPC modes exercise the same opening/reader dispatcher without native windows.
 use anyhow::{bail, Result};
 use mailsearch_rust::bridge::{Bridge, Request};
 use std::{
@@ -129,11 +129,21 @@ fn main() -> Result<()> {
             }
             Ok(())
         }
-        [flag, path] if flag == "--opening-rpc" || flag == "--creation-rpc" => {
-            opening_rpc(PathBuf::from(path), flag == "--creation-rpc")
+        [flag, path]
+            if matches!(
+                flag.as_str(),
+                "--opening-rpc" | "--creation-rpc" | "--opening-reader-rpc"
+            ) =>
+        {
+            opening_rpc(
+                PathBuf::from(path),
+                flag == "--creation-rpc",
+                flag == "--opening-reader-rpc",
+            )
         }
         [flag] if flag == "--opening-rpc" => opening_rpc(
             startup_archive()?.ok_or_else(|| anyhow::anyhow!("No usable recent archive"))?,
+            false,
             false,
         ),
         [flag, path, query] if flag == "--probe" => {
@@ -238,14 +248,14 @@ fn startup_archive() -> Result<Option<PathBuf>> {
         .map(std::path::Path::to_owned))
 }
 
-fn opening_rpc(path: PathBuf, create: bool) -> Result<()> {
+fn opening_rpc(path: PathBuf, create: bool, retain: bool) -> Result<()> {
     use std::sync::{
         atomic::{AtomicBool, Ordering},
         mpsc, Arc,
     };
     let abort = Arc::new(AtomicBool::new(false));
     let reader_abort = abort.clone();
-    let (sender, receiver) = mpsc::sync_channel(1);
+    let (sender, receiver) = mpsc::sync_channel(64);
     std::thread::spawn(move || {
         for line in io::stdin().lock().lines() {
             let Ok(request) = line
@@ -255,6 +265,7 @@ fn opening_rpc(path: PathBuf, create: bool) -> Result<()> {
             };
             if matches!(request.method.as_str(), "opening_abort" | "quit") {
                 reader_abort.store(true, Ordering::Release);
+                break;
             } else if sender.try_send(request).is_err() {
                 break;
             }
@@ -263,7 +274,7 @@ fn opening_rpc(path: PathBuf, create: bool) -> Result<()> {
     });
     let request = receiver.recv()?;
     anyhow::ensure!(request.method == "opening_start", "Expected opening_start");
-    let result = (|| {
+    let mut result = (|| {
         if create {
             mailsearch_rust::engine::Engine::create_archive(&path, &abort)?;
         }
@@ -275,13 +286,31 @@ fn opening_rpc(path: PathBuf, create: bool) -> Result<()> {
             let _ = io::stdout().flush();
         })
     })();
+    if retain {
+        result = result.and_then(|bridge| {
+            finish_opening(bridge, &abort, || {
+                mailsearch_rust::documents::Documents::remember(
+                    &mailsearch_rust::documents::Documents::path()?,
+                    &path,
+                )
+            })
+        });
+    }
     let reply = mailsearch_rust::bridge::Reply {
         id: request.id,
         result: result.as_ref().ok().map(|_| serde_json::json!(true)),
-        error: result.err().map(|error| format!("{error:#}")),
+        error: result.as_ref().err().map(|error| format!("{error:#}")),
     };
     println!("{}", serde_json::to_string(&reply)?);
     io::stdout().flush()?;
+    if retain {
+        if let Ok(mut bridge) = result {
+            for request in receiver {
+                println!("{}", serde_json::to_string(&bridge.reply(request))?);
+                io::stdout().flush()?;
+            }
+        }
+    }
     Ok(())
 }
 
@@ -362,15 +391,13 @@ fn trusted_panel(value: &str, windows: bool) -> bool {
                 && matches!(url.query(), Some("kind=name" | "kind=institution"))))
 }
 
-#[cfg(any(target_os = "macos", target_os = "windows", test))]
 fn finish_opening(
     mut bridge: Bridge,
     abort: &std::sync::atomic::AtomicBool,
     remember: impl FnOnce() -> Result<()>,
-    notice: impl FnOnce(String),
 ) -> Result<Bridge> {
     if let Err(error) = remember() {
-        notice(format!(
+        bridge.opening_notice(format!(
             "Archive opened, but its recent-document preference could not be saved: {error:#}"
         ));
     }
@@ -555,22 +582,15 @@ fn native(
                                 let _ = proxy.send_event(NativeEvent::Recovering);
                             })
                             .and_then(|bridge| {
-                                finish_opening(
-                                    bridge,
-                                    &worker_abort,
-                                    || {
-                                        if !remember {
-                                            return Ok(());
-                                        }
-                                        mailsearch_rust::documents::Documents::remember(
-                                            &mailsearch_rust::documents::Documents::path()?,
-                                            path,
-                                        )
-                                    },
-                                    |message| {
-                                        let _ = proxy.send_event(NativeEvent::Notice(message));
-                                    },
-                                )
+                                finish_opening(bridge, &worker_abort, || {
+                                    if !remember {
+                                        return Ok(());
+                                    }
+                                    mailsearch_rust::documents::Documents::remember(
+                                        &mailsearch_rust::documents::Documents::path()?,
+                                        path,
+                                    )
+                                })
                             })
                         })
                         .map_err(|error| format!("{error:#}"));
@@ -1060,6 +1080,7 @@ fn native(
             abort.store(false, std::sync::atomic::Ordering::Release);
             if let Some(updater) = updater { updater.shutdown_ready(false); }
             if !cleanup_failed { mailsearch_rust::drag::resume(); }
+            let _ = view.evaluate_script("window.dispatchEvent(new Event('mailarchiver-exports-invalidated'))");
             if !reader_ready {
                 welcome = true;
                 archive_path = None;
@@ -1100,16 +1121,27 @@ mod tests {
         let blocked = directory.path().join("preferences");
         std::fs::write(&blocked, b"Existing user-owned file").unwrap();
         let settings = blocked.join("recent.json");
-        let mut notices = Vec::new();
         let mut bridge = super::finish_opening(
             super::Bridge::open(&archive).unwrap(),
             &std::sync::atomic::AtomicBool::new(false),
             || mailsearch_rust::documents::Documents::remember(&settings, &archive),
-            |message| notices.push(message),
         )
         .unwrap();
-        assert_eq!(notices.len(), 1);
-        assert!(notices[0].contains("recent-document preference could not be saved"));
+        let request = || super::Request {
+            id: 2,
+            method: "opening_notices".into(),
+            args: vec![],
+        };
+        let notices = bridge.reply(request()).result.unwrap();
+        assert_eq!(notices.as_array().unwrap().len(), 1);
+        assert!(notices[0]
+            .as_str()
+            .unwrap()
+            .contains("recent-document preference could not be saved"));
+        assert_eq!(
+            bridge.reply(request()).result.unwrap(),
+            serde_json::json!([])
+        );
         let reply = bridge.reply(super::Request {
             id: 1,
             method: "search".into(),
@@ -1124,8 +1156,7 @@ mod tests {
         assert!(super::finish_opening(
             super::Bridge::open(&archive).unwrap(),
             &std::sync::atomic::AtomicBool::new(true),
-            || Ok(()),
-            |_| {}
+            || Ok(())
         )
         .is_err());
     }

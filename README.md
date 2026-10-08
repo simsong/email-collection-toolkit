@@ -816,3 +816,9 @@ APPCAST=...` signs and verifies the candidate. `WINDOWS_ARCHIVE` and
 `WINDOWS_RELEASE_URL` are the final MSIX inputs to `make update-appcast`.
 `make test-rust-updates` tests the real Rust/Python installation exclusion without
 starting update checks. `make test-rust-dmg` checks frozen service dispatch.
+
+`make website-release-data RELEASES_JSON=PATH` derives static download links
+from public GitHub release/asset metadata. `RELEASES_JSON` names that JSON file;
+optional `RELEASE_TAG` requires a complete published release before deployment.
+Headless `mailsearch-webview --opening-reader-rpc ARCHIVE` validates startup and
+serves the reader protocol without showing native windows.

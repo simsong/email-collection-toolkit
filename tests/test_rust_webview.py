@@ -21,7 +21,7 @@ import time
 from typing import Literal
 
 from playwright.sync_api import Page, expect
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, JsonValue
 import pytest
 from mailarchiver.mailbox_tree import FilterSet, FilterSetPreferences, FilterSetStore, preferences_lock
 from mailarchiver.catalog import create_search
@@ -37,6 +37,17 @@ class FilterRequest(BaseModel):
     id: int = 1
     method: str
     args: list[str | bool | list[str]] = Field(default_factory=list)
+
+
+class WireRequest(BaseModel):
+    method: str
+    args: list[JsonValue] = Field(default_factory=list)
+
+
+class StartupReply(BaseModel):
+    id: int
+    result: bool | None
+    error: str | None
 
 
 class FilterReply(BaseModel):
@@ -524,3 +535,67 @@ def test_rust_archive_editors_use_real_services(page: Page, tmp_path: Path) -> N
         server.server_close()
         serving.join(timeout=2)
     assert all(sha256(path.read_bytes()).hexdigest() == digest for path, digest in canonical)
+
+
+def test_opening_warning_survives_reader_handoff_and_drag_cache_is_revoked(page: Page, tmp_path: Path) -> None:
+    """Open/update recovery: real failed preferences survive navigation; stale exports expire."""
+    binary = environ.get("RUST_WEBVIEW_BINARY")
+    if not binary:
+        pytest.skip("run make test-rust-webview")
+    archive, _ = make_archive(tmp_path)
+    home = tmp_path / "home"
+    base = home / "Library/Application Support" if sys.platform == "darwin" else home
+    base.mkdir(parents=True)
+    blocked = base / "Email Collection Toolkit"
+    blocked.write_bytes(b"Existing user-owned preference parent")
+    environment = {**environ, "HOME": str(home), "LOCALAPPDATA": str(home), "XDG_CONFIG_HOME": str(home),
+                   "ECT_RUST_ENGINE_PYTHON": str(tmp_path / "missing-helper")}
+    process = subprocess.Popen([binary, "--opening-reader-rpc", str(archive)], stdin=subprocess.PIPE,
+                               stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, env=environment)
+    methods: list[str] = []
+    try:
+        def transport(request: str) -> object:
+            assert process.stdin is not None and process.stdout is not None
+            methods.append(WireRequest.model_validate_json(request).method)
+            process.stdin.write(request + "\n")
+            process.stdin.flush()
+            response = process.stdout.readline()
+            assert response, "Real opening/reader dispatcher exited"
+            return json.loads(response)
+        reply = transport(FilterRequest(method="opening_start").model_dump_json())
+        startup = StartupReply.model_validate(reply)
+        assert startup.error is None and startup.result is True
+        page.expose_function("__rustTestTransport", transport)
+        page.add_init_script(path=ROOT / "rust/mailsearch-gui/bridge.js")
+        page.goto((ROOT / "gui/index.html").as_uri())
+        expect(page.locator("#error")).to_be_visible()
+        expect(page.locator("#error")).to_contain_text("recent-document preference could not be saved")
+        assert page.evaluate("window.pywebview.api.opening_notices()") == []
+        page.locator("#search").fill("meeting agenda")
+        page.locator("#search").press("Enter")
+        expect(page.locator("#result-status")).to_have_text("1 message")
+        page.locator("#result-list .result").first.click()
+        expect(page.locator("#body-view")).to_contain_text("Meeting agenda.")
+        # Cached values are input state, not fabricated backend responses. The
+        # recovered preparation must reach the actual Rust dispatcher again.
+        page.evaluate("state.dragExports.set('1',{token:'revoked-token'}); state.dragPreparing.add('1')")
+        page.evaluate("window.dispatchEvent(new Event('mailarchiver-exports-invalidated'))")
+        assert page.evaluate("state.dragExports.size + state.dragPreparing.size") == 0
+        page.evaluate("prepareDrag([1])")
+        assert methods.count("prepare_drag") == 1
+        assert page.evaluate("state.dragExports.size") == 0  # Cocoa dragging is unavailable headlessly.
+        # A real late dispatcher reply must not clear a newer generation's lock.
+        assert page.evaluate("""async()=>{
+            const pending=prepareDrag([1]);
+            window.dispatchEvent(new Event('mailarchiver-exports-invalidated'));
+            state.dragPreparing.add('1');
+            await pending;
+            return state.dragPreparing.has('1');
+        }""")
+        assert blocked.read_bytes() == b"Existing user-owned preference parent"
+    finally:
+        assert process.stdin is not None
+        process.stdin.close()
+        process.wait(timeout=6)
+        assert process.stderr is not None
+        assert process.returncode == 0, process.stderr.read()

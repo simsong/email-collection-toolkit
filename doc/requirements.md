@@ -10,7 +10,9 @@ reader and identify the Windows writer restriction and discovery noise.
 The agreed release policy in [DEVOPS.md](DEVOPS.md) requires macOS-focused
 ordinary CI, explicit cross-platform test releases, concurrent Mac/Windows
 installer builds, coordinated publication through one signed appcast, and
-static direct-download buttons derived from complete published releases.
+static direct-download buttons derived from complete published releases. Reject
+draft, absent, duplicate, incomplete-upload or wrong-URL installer metadata; keep
+preview buttons distinct and omit unavailable Windows downloads.
 These are release-workflow requirements, not evidence of Windows feature parity.
 
 ## Manual state and documentation status
@@ -2551,7 +2553,8 @@ publication leaves the selected destination absent or empty and permits retry;
 an Abort after publication leaves the complete archive available through Open.
 Never remove files from an existing destination to roll back creation.
 Failure to save recent-document preferences reports a notice without discarding
-a successfully validated reader.
+a successfully validated reader; retain and display that warning after navigation
+to the ready reader page.
 Startup must choose the first usable archive in recent order, skipping missing
 or invalid entries; only an entirely unusable list may fall back to prompting.
 A rollback-required recent archive remains eligible ahead of older valid entries

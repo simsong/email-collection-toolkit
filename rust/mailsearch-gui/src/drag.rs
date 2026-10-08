@@ -220,6 +220,15 @@ mod tests {
         assert!(resolve(token).is_none());
         assert!(owner.prepare(&archive, &[1]).is_err());
         assert!(Exports::new(&archive).is_err());
+        // A canceled update resumes a new owner, never the revoked export token.
+        drop(owner);
+        resume();
+        let mut recovered = Exports::new(&archive).unwrap();
+        let replacement = recovered.prepare(&archive, &[1, 2, 3]).unwrap();
+        let replacement_token = replacement["token"].as_str().unwrap();
+        assert_ne!(replacement_token, token);
+        assert!(resolve(replacement_token).unwrap().exists());
+        assert!(resolve(token).is_none());
         assert_eq!(
             std::fs::read(path.join("data/mbox/DEMO.mbox")).unwrap(),
             before

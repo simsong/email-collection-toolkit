@@ -405,6 +405,13 @@ check-archive-open:
 	@test -n "$(ARCHIVE)" || { echo 'usage: make check-archive-open ARCHIVE=/path/to/archive'; exit 2; }
 	uv run python -c 'import sys; from pathlib import Path; from mailarchiver.application import validate_archive; print(validate_archive(Path(sys.argv[1]))[0])' "$(ARCHIVE)"
 
+# RELEASES_JSON is public GitHub release/asset metadata, not credentials.
+# RELEASE_TAG optionally requires a complete published release before site deployment.
+.PHONY: website-release-data
+website-release-data:
+	@test -n "$(RELEASES_JSON)" || { echo 'usage: make website-release-data RELEASES_JSON=/path/to/public-releases.json'; exit 2; }
+	uv run --locked python scripts/update_site_releases.py --output website/data/releases.toml --releases-json "$(RELEASES_JSON)" $(if $(RELEASE_TAG),--require-complete-tag "$(RELEASE_TAG)")
+
 website-check:
 	uv run python scripts/check_website.py
 
@@ -412,6 +419,12 @@ website-check:
 WEBSITE_PREVIEW_PORT ?= 1111
 website-preview:
 	zola --root website serve --interface 127.0.0.1 --port $(WEBSITE_PREVIEW_PORT) --output-dir "$(CURDIR)/.tmp/website-preview" --force
+
+# Run rendered release-metadata cases after CI provisions Zola.
+.PHONY: website-download-check
+website-download-check:
+	@command -v zola >/dev/null || { echo 'Zola is required for rendered download validation'; exit 2; }
+	uv run --locked pytest -q tests/test_website_scripts.py::test_static_platform_downloads_render_without_javascript
 
 website-build-check: website-check
 	zola --root website build --output-dir "$(CURDIR)/.tmp/website-check" --force

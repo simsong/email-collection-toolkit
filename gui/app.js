@@ -38,6 +38,7 @@ const state = {
   fileDragSupported: false,
   dragExports: new Map(),
   dragPreparing: new Set(),
+  dragEpoch: 0,
   previewUrl: null,
   ingestStatusText: "",
   linkDestination: "",
@@ -431,8 +432,7 @@ function resetArchiveView() {
   clearMessageFindUpdate();
   state.remoteContentAuthorizedMessage = null;
   state.remoteContentAuthorizedPart = null;
-  state.dragExports.clear();
-  state.dragPreparing.clear();
+  invalidateDragExports();
   clearResultViewport();
   showSingleMessageSelection();
   renderSearchFilters();
@@ -2046,6 +2046,14 @@ function showSingleMessageSelection() {
   elements["message-well"].classList.remove("multi-selection");
 }
 
+function invalidateDragExports() {
+  state.dragEpoch += 1;
+  state.dragExports.clear();
+  state.dragPreparing.clear();
+  if (elements["message-file-well"]) updateMessageFileWell();
+}
+window.addEventListener("mailarchiver-exports-invalidated", invalidateDragExports);
+
 function dragExportKey(messagePks) {
   return [...new Set(messagePks)].sort((left, right) => left - right).join(",");
 }
@@ -2085,8 +2093,10 @@ async function prepareDrag(messagePks) {
   if (!messagePks.length) return;
   const key = dragExportKey(messagePks);
   if (state.dragExports.has(key) || state.dragPreparing.has(key)) return;
+  const epoch = state.dragEpoch;
   state.dragPreparing.add(key);
   const info = await call(() => window.pywebview.api.prepare_drag(messagePks));
+  if (epoch !== state.dragEpoch) return;
   state.dragPreparing.delete(key);
   if (info) {
     state.dragExports.set(key, info);

@@ -13,12 +13,28 @@
       </div>
       <p class="cover-tagline"><span>Email</span> <span>has a history.</span> <span>Keep it</span></p>
     </div>
-    <div class="hero shell">
+    <div class="hero shell release-downloads">
       <p class="lede">Collect, preserve, search, and understand email across old computers, backup drives, and exported accounts — while keeping the archive local and verifiable.</p>
       <div class="actions">
-        <a class="button primary" href="https://github.com/simsong/email-collection-toolkit/releases/">Download</a>
+        {% set primary = releases.stable %}
+        {% if not primary.tag %}{% set primary = releases.preview %}{% endif %}
+        {% if primary.mac_url %}
+        <a class="button primary" href="{{ primary.mac_url }}">Download for Mac (.dmg){% if not releases.stable.tag %} — Preview{% endif %}</a>
+        {% endif %}
+        {% if primary.windows_url %}
+        <a class="button primary" href="{{ primary.windows_url }}">Download for Windows (.msixbundle){% if not releases.stable.tag %} — Preview{% endif %}</a>
+        <a href="{{ primary.windows_help_url }}">Windows certificate and installation instructions</a>
+        {% endif %}
+        <a class="button secondary" href="https://github.com/simsong/email-collection-toolkit/releases/">View all downloads and release notes</a>
         <a class="button secondary" href="{{ config.extra.readme }}">Read the README</a>
       </div>
+      <p>Current release: <a href="{{ releases.current_url }}">{{ releases.current_version }}</a>{% if not releases.stable.tag and releases.preview.tag %} (preview){% endif %}</p>
+      {% if releases.stable.tag and releases.preview.mac_url %}
+      <p>Preview {{ releases.preview.version }}:
+        <a href="{{ releases.preview.mac_url }}">Mac (.dmg)</a>
+        {% if releases.preview.windows_url %} · <a href="{{ releases.preview.windows_url }}">Windows (.msixbundle)</a> · <a href="{{ releases.preview.windows_help_url }}">Certificate and instructions</a>{% endif %}
+      </p>
+      {% endif %}
     </div>
   </section>
 

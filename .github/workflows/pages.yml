@@ -57,11 +57,10 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ inputs.release_tag }}
         run: |
-          {
-            gh api --paginate "repos/${GITHUB_REPOSITORY}/releases?per_page=100" \
-              --jq '.[] | select(.draft == false) | .tag_name'
-            if [[ -n "$RELEASE_TAG" ]]; then printf '%s\n' "$RELEASE_TAG"; fi
-          } | python3 scripts/update_site_releases.py --output website/data/releases.toml
+          gh api --paginate --slurp "repos/${GITHUB_REPOSITORY}/releases?per_page=100" \
+            --jq '[.[][] | select(.draft == false)]' > "$RUNNER_TEMP/published-releases.json"
+          make website-release-data RELEASES_JSON="$RUNNER_TEMP/published-releases.json" \
+            RELEASE_TAG="$RELEASE_TAG"
       - name: Include latest published Sparkle appcast
         env:
           GH_TOKEN: ${{ github.token }}

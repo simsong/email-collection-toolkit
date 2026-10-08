@@ -4,6 +4,9 @@
 
 ## 1.0.0a15 (candidate)
 
+- Display startup preference warnings after the reader opens, invalidate drag
+  exports after canceled updates, and publish static platform download buttons
+  only for uploaded installer assets, with preview labels and Windows trust help.
 - Keep valid readers open when recent preferences cannot be saved. Stage New
   creation before atomic publication so Abort can discard only its own attempt
   and retry without a partial destination.

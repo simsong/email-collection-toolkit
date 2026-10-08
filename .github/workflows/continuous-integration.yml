@@ -149,4 +149,4 @@ jobs:
           tar -xzf "$RUNNER_TEMP/zola.tar.gz" -C "$RUNNER_TEMP/zola"
           echo "$RUNNER_TEMP/zola" >> "$GITHUB_PATH"
       - name: Build website
-        run: make website-build-check
+        run: make website-download-check website-build-check

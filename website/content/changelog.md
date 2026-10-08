@@ -5,6 +5,12 @@ description = "Changes to the Email Collection Toolkit website, separate from ap
 <!-- Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved. -->
 
 
+## 2026-10-08
+
+- Derive static Mac and Windows installer buttons from complete public releases,
+  label previews separately, and include Windows certificate-trust instructions.
+  Historical Mac-only releases do not expose an absent Windows installer.
+
 ## 2026-09-17
 
 - Reconcile local PST/OST support, partial Apple Mail handling, implemented

@@ -3,6 +3,7 @@
 """Verify project-website validation and workflow integrity controls."""
 
 import re
+from html.parser import HTMLParser
 import subprocess
 import sys
 import tomllib
@@ -14,10 +15,11 @@ from yaml import safe_load
 from scripts.check_appcast import MAX_FEED_BYTES, check_appcast
 from scripts.check_website import validate_config, validate_png
 from scripts.update_appcast import AppcastRelease, SignedArchive, append_item
-from scripts.update_site_releases import choose_preview
+from scripts.update_site_releases import Asset, PublishedRelease, choose_preview, installer_links, select_links
 
 ZOLA_SHA256_ARM64 = "303b8e1f3251a6250e47f811eda143316f653c22201faa66777d48ac499c0ee3"
 ZOLA_SHA256_X86_64 = "e79edcba2e8d03d22065c9cb8fa2e3abf07b823ef17f00abdc060188dceabba7"
+HREF = "href"
 WORKFLOW_ON = "on"
 RELEASE = "release"
 TYPES = "types"
@@ -62,7 +64,7 @@ def test_ci_runs_parallel_branch_jobs_without_building_a_dmg() -> None:
     text = workflow.read_text(encoding="utf-8")
 
     assert "run: make distribution-check" in text
-    assert "run: make website-build-check" in text
+    assert "run: make website-download-check website-build-check" in text
     assert "name: Upload Playwright failure traces" in text
     assert "path: test-results" in text
     configuration = safe_load(text)
@@ -174,7 +176,9 @@ def test_release_workflow_validates_built_distributions() -> None:
             '--ref main -f release_tag="$RELEASE_TAG"') in text
     assert configuration[JOBS]["assemble"]["permissions"]["actions"] == "write"
     pages = (workflow.parent / "pages.yml").read_text(encoding="utf-8")
-    assert 'select(.draft == false) | .tag_name' in pages
+    assert "select(.draft == false)" in pages
+    assert '--paginate --slurp' in pages
+    assert 'make website-release-data' in pages
     assert 'appcast_tag="$RELEASE_TAG"' in pages
     assert pages.index("gh release download") < pages.index("name: Build Zola site")
     assert "actions/download-artifact@" not in pages
@@ -376,3 +380,116 @@ def test_msix_payload_guard_keeps_release_dependencies_runnable(event: str, refe
             assert contains, f"Unsupported CI condition: {term}"
             outcomes.append(contains[1] in message)
     assert any(outcomes) is expected
+
+
+def public_release(tag: str, *, windows: bool = True) -> PublishedRelease:
+    """Purpose-made publication metadata, independent of the candidate version."""
+    version = tag.removeprefix("v")
+    names = [f"Email-Collection-Toolkit-{version}-arm64.dmg", "appcast.xml"]
+    if windows:
+        names.extend([f"ECT-{version}-windows-x64-arm64.msixbundle", f"ECT-{version}-windows-x64-arm64.zip"])
+    return PublishedRelease(tag_name=tag, draft=False, prerelease=bool(re.search(r"[ab]\d+$", tag)),
+                            assets=[Asset(name=name, size=123, state="uploaded",
+                                          browser_download_url=f"https://github.com/simsong/email-collection-toolkit/releases/download/{tag}/{name}")
+                                    for name in names])
+
+
+@pytest.mark.parametrize("defect", ["draft", "missing", "empty", "uploading", "wrong-url", "duplicate", "missing-trust", "missing-feed"])
+def test_site_selection_keeps_complete_release_when_newer_upload_is_incomplete(defect: str) -> None:
+    """Release requirement: never replace working platform buttons with partial publication."""
+    older, newer = public_release("v2.0.0a1"), public_release("v2.0.0a2")
+    asset = newer.assets[0]
+    if defect == "draft":
+        newer.draft = True
+    elif defect == "missing":
+        newer.assets.pop(0)
+    elif defect == "empty":
+        asset.size = 0
+    elif defect == "uploading":
+        asset.state = "new"
+    elif defect == "wrong-url":
+        asset.browser_download_url = "https://example.invalid/installer.dmg"
+    elif defect == "duplicate":
+        newer.assets.append(asset.model_copy())
+    elif defect == "missing-trust":
+        newer.assets = [item for item in newer.assets if not item.name.endswith(".zip")]
+    else:
+        newer.assets = [item for item in newer.assets if item.name != "appcast.xml"]
+    assert select_links([older, newer], True) == installer_links(older)
+
+
+def test_site_data_uses_real_uploaded_assets_and_distinguishes_preview(tmp_path: Path) -> None:
+    """Release requirement: stable/preview installers are static, direct, and public."""
+    from pydantic import TypeAdapter
+    releases = [public_release("v2.0.0"), public_release("v2.1.0b1"), public_release("v2.2.0a1", windows=False)]
+    source, output = tmp_path / "public.json", tmp_path / "data.toml"
+    source.write_bytes(TypeAdapter(list[PublishedRelease]).dump_json(releases))
+    command = [sys.executable, str(Path(__file__).parents[1] / "scripts/update_site_releases.py"),
+               "--releases-json", str(source), "--output", str(output)]
+    result = subprocess.run(command + ["--require-complete-tag", "v2.1.0b1"], capture_output=True, text=True, check=False)
+    assert result.returncode == 0, result.stderr
+    data = tomllib.loads(output.read_text())
+    assert data["current_version"] == "v2.0.0"
+    assert data["preview"]["tag"] == "v2.1.0b1"
+    assert data["stable"]["mac_url"].endswith("/Email-Collection-Toolkit-2.0.0-arm64.dmg")
+    assert data["preview"]["windows_url"].endswith("/ECT-2.1.0b1-windows-x64-arm64.msixbundle")
+    assert data["preview"]["windows_help_url"].endswith(".zip")
+    before = output.read_bytes()
+    failure = subprocess.run(command + ["--require-complete-tag", "v2.2.0a1"], capture_output=True, text=True, check=False)
+    assert failure.returncode != 0 and "not public with complete" in failure.stderr
+    assert output.read_bytes() == before
+    assert not installer_links(public_release("v2.0.0a1", windows=False)).windows_url
+    assert not select_links([], False).tag
+    draft = releases[0].model_copy(deep=True)
+    draft.draft = True
+    assert not installer_links(draft).tag
+
+
+class DownloadLinks(HTMLParser):
+    def __init__(self) -> None:
+        super().__init__()
+        self.urls: set[str] = set()
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        if tag == "a":
+            for key, value in attrs:
+                if key == HREF and value:
+                    self.urls.add(value)
+
+
+@pytest.mark.parametrize("tags", [("v2.0.0", "v2.1.0b1"), ("v2.1.0b1",), ("v2.0.0a1",)])
+def test_static_platform_downloads_render_without_javascript(tmp_path: Path, tags: tuple[str, ...]) -> None:
+    """Website requirement: real Zola HTML exposes direct platform assets with preview labels."""
+    import shutil
+    from pydantic import TypeAdapter
+    if not shutil.which("zola"):
+        pytest.skip("Zola is required; run make website-download-check after provisioning the website tool")
+    root = Path(__file__).parents[1]
+    site, output = tmp_path / "site", tmp_path / "public"
+    shutil.copytree(root / "website", site)
+    releases = [public_release(tag, windows=tag != "v2.0.0a1") for tag in tags]
+    source = tmp_path / "public-releases.json"
+    source.write_bytes(TypeAdapter(list[PublishedRelease]).dump_json(releases))
+    subprocess.run([sys.executable, str(root / "scripts/update_site_releases.py"), "--releases-json", str(source),
+                    "--output", str(site / "data/releases.toml")], check=True, capture_output=True, text=True)
+    result = subprocess.run(["zola", "--root", str(site), "build", "--output-dir", str(output)],
+                            check=False, capture_output=True, text=True)
+    assert result.returncode == 0, result.stderr
+    html = (output / "index.html").read_text()
+    anchors = DownloadLinks()
+    anchors.feed(html)
+    for release in releases:
+        links = installer_links(release)
+        assert links.mac_url in anchors.urls
+        if links.windows_url:
+            assert links.windows_url in anchors.urls
+            assert links.windows_help_url in anchors.urls
+    assert "Current release:" in html
+    if tags == ("v2.0.0a1",):
+        assert "Download for Windows" not in html
+        assert "Download for Mac (.dmg) — Preview" in html
+    elif len(tags) == 1:
+        assert "Download for Windows (.msixbundle) — Preview" in html
+    else:
+        assert "Preview v2.1.0b1:" in html
+        assert "Download for Mac (.dmg) — Preview" not in html

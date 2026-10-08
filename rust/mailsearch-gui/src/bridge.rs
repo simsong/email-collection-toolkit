@@ -38,6 +38,7 @@ pub struct Bridge {
     desktop_enabled: bool,
     engine: Option<crate::engine::Engine>,
     engine_generation: u64,
+    opening_notices: Vec<String>,
 }
 
 impl Bridge {
@@ -50,6 +51,7 @@ impl Bridge {
             desktop_enabled: false,
             engine: None,
             engine_generation: 0,
+            opening_notices: vec![],
             search: None,
             cancellation: None,
         })
@@ -66,6 +68,9 @@ impl Bridge {
                 .context("Clean temporary message/attachment exports")?;
         }
         Ok(())
+    }
+    pub fn opening_notice(&mut self, message: String) {
+        self.opening_notices.push(message);
     }
     pub fn enable_desktop(&mut self) {
         self.desktop_enabled = true;
@@ -137,6 +142,7 @@ impl Bridge {
             );
         }
         match method {
+            "opening_notices" => Ok(json!(std::mem::take(&mut self.opening_notices))),
             "status" => {
                 let count: i64 =
                     self.archive

@@ -35,6 +35,11 @@ Protocol and cancellation details appear under
 release design. Windows reader CI remains opt-in/release-only. Shared MSIX
 packaging, dual-platform signed-feed publication and download selection are
 implemented; each release candidate must pass its actual hosted package gates.
+Pages reads public uploaded installer/Windows-trust/appcast metadata through
+`make website-release-data`, selects complete stable and preview releases
+separately, and refuses an incomplete requested publication tag. Static buttons
+link directly to installers; historical Mac-only releases never invent Windows
+assets. Feed authenticity remains a separate mandatory Pages gate.
 
 ## Embedded antivirus migration status
 
@@ -3460,8 +3465,12 @@ The supervisor reaps the helper before removing failed/aborted staging; it never
 deletes destination files. Atomic rename publishes only a complete archive into
 an absent or empty destination. Publication is the commit point: a later Abort
 keeps the reader closed but leaves the complete archive available through Open.
-Recent-document preference failures emit a native notice and retain the opened
-bridge; they remain independent of validation and Abort.
+Recent-document preference failures retain the opened bridge and its warning.
+The reader adapter drains warnings after navigation, so startup cannot erase
+them; they remain independent of validation and Abort. The headless
+`--opening-reader-rpc` path exercises the same opening and reader handoff.
+Canceled updates invalidate frontend drag caches with a generation fence,
+preventing revoked or late export tokens from being reused.
 Mounted updater inspection uses volatile `NSArgumentDomain` overrides for first
 launch and automatic checks, skips all persistent setters, runs the scheduled SDK
 startup cycle and verifies the production bundle's persistent domain is unchanged.

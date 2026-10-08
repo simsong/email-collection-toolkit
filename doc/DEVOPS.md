@@ -105,16 +105,21 @@ its tag, rebuilding installers, or silently resetting the feed.
 
 ### Website downloads
 
-Render both platform buttons in static HTML; JavaScript is not required:
+Generate static platform buttons from public GitHub release metadata through
+`make website-release-data RELEASES_JSON=PATH`; JavaScript is not required:
 
 - **Download for Mac (.dmg)**
-- **Download for Windows (.exe)** — includes native x64 and ARM64 builds
+- **Download for Windows (.msixbundle)** — includes native x64 and ARM64 builds
 - **View all downloads and release notes** — links to the GitHub release listing
 
 Display **Current release: VERSION** beside the primary buttons. Each primary
 button links directly to its installer asset, not an Actions artifact or a
 GitHub release-detail page. Generate version, URLs, and availability at site
 build time from a complete published release; validate that both assets exist.
+Uploaded nonempty, exactly named DMG/MSIX assets, the Windows trust ZIP and
+appcast are required for a complete release. Prefer complete releases over newer
+incomplete uploads; a requested publication tag must be complete or Pages fails.
+Before any complete Windows release, retain historical Mac-only download links.
 Keep preview downloads distinctly labeled and separate from the current stable
 release. If only previews exist, label them as previews. Before the first
 complete Windows release, do not render an active Windows download button for
