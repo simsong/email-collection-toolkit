@@ -1,7 +1,7 @@
 # Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved.
 # Combine architecture payloads built once into a shared test MSIX bundle.
 # Base and upgrade fixtures reuse identical application bytes with mapped versions.
-# Generate one ephemeral signing identity and sign both bundles with it.
+# Sign both bundles using the persistent, pinned repository test identity.
 # Export only signed bundles and the public certificate to the CI artifact directory.
 # The private signing key stays outside that directory and never becomes an artifact.
 param([Parameter(Mandatory=$true)][string]$InputDirectory,
@@ -34,8 +34,7 @@ foreach ($kind in @('base','upgrade')) {
     if ($LASTEXITCODE) { throw 'Bundle creation failed' }
 }
 & (Join-Path $PSScriptRoot 'sign_test_msix.ps1') -Package (Join-Path $work 'base.msixbundle')
-& (Join-Path $sdk 'signtool.exe') sign /fd SHA256 /f (Join-Path $work 'local-test.pfx') (Join-Path $work 'upgrade.msixbundle')
-if ($LASTEXITCODE) { throw 'Upgrade bundle signing failed' }
+& (Join-Path $PSScriptRoot 'sign_test_msix.ps1') -Package (Join-Path $work 'upgrade.msixbundle')
 foreach ($name in @('base.msixbundle','upgrade.msixbundle','local-test.cer')) {
     Copy-Item -LiteralPath (Join-Path $work $name) -Destination $OutputDirectory
 }

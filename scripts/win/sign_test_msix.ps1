@@ -1,26 +1,36 @@
 # Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved.
-# Sign a development MSIX with a new local-only certificate and private key.
-# This certificate identifies test artifacts and is not a public release identity.
-# Keep the private PFX in ignored build output and distribute only the public CER.
-# No certificate store, machine policy, or installed application is changed.
-# Normal installation requires a separate explicit trust decision on the test VM.
+# Sign test MSIX packages with the persistent repository Actions secret.
+# Pin its public certificate to the checked-in test identity before signing.
+# Never generate replacement keys when the secret is missing or invalid.
+# Keep temporary private key material beside private build intermediates only.
+# Remove that material on success and failure; export only the public certificate.
+# Testers explicitly trust this identity once, until expiry or deliberate rotation.
 param([Parameter(Mandatory=$true)][string]$Package)
 $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'sdk.ps1')
+if (-not $env:MSIX_TEST_CERT_PFX_BASE64) { throw 'MSIX_TEST_CERT_PFX_BASE64 is required; no replacement test certificate will be generated.' }
 $directory = Split-Path (Resolve-Path -LiteralPath $Package) -Parent
 $pfx = Join-Path $directory 'local-test.pfx'
 if (Test-Path -LiteralPath $pfx) { throw 'Test signing key already exists; preserve it.' }
-$rsa = [Security.Cryptography.RSA]::Create(3072)
-$request = [Security.Cryptography.X509Certificates.CertificateRequest]::new('CN=ECT Local Test', $rsa, [Security.Cryptography.HashAlgorithmName]::SHA256, [Security.Cryptography.RSASignaturePadding]::Pkcs1)
-$oids = [Security.Cryptography.OidCollection]::new()
-$null = $oids.Add([Security.Cryptography.Oid]::new('1.3.6.1.5.5.7.3.3'))
-$request.CertificateExtensions.Add([Security.Cryptography.X509Certificates.X509EnhancedKeyUsageExtension]::new($oids, $true))
-$request.CertificateExtensions.Add([Security.Cryptography.X509Certificates.X509KeyUsageExtension]::new([Security.Cryptography.X509Certificates.X509KeyUsageFlags]::DigitalSignature, $true))
-$cert = $request.CreateSelfSigned([DateTimeOffset]::UtcNow.AddMinutes(-5), [DateTimeOffset]::UtcNow.AddDays(30))
-[IO.File]::WriteAllBytes($pfx, $cert.Export([Security.Cryptography.X509Certificates.X509ContentType]::Pfx))
-[IO.File]::WriteAllBytes((Join-Path $directory 'local-test.cer'), $cert.Export([Security.Cryptography.X509Certificates.X509ContentType]::Cert))
-& (Join-Path (Get-WindowsSdkTools) 'signtool.exe') sign /fd SHA256 /f $pfx $Package
-if ($LASTEXITCODE) { throw 'Test package signing failed' }
-Get-FileHash -LiteralPath $Package -Algorithm SHA256
-$cert.Dispose()
-$rsa.Dispose()
+$cert = $null
+$expected = $null
+$createdKey = $false
+try {
+    $bytes = [Convert]::FromBase64String($env:MSIX_TEST_CERT_PFX_BASE64)
+    $cert = [Security.Cryptography.X509Certificates.X509Certificate2]::new($bytes, '', [Security.Cryptography.X509Certificates.X509KeyStorageFlags]::EphemeralKeySet)
+    $expected = [Security.Cryptography.X509Certificates.X509Certificate2]::new((Join-Path $PSScriptRoot 'test-signing.cer'))
+    if (-not $cert.HasPrivateKey -or $cert.GetCertHashString('SHA256') -ne $expected.GetCertHashString('SHA256')) {
+        throw 'The signing secret does not match the pinned test certificate/private key.'
+    }
+    if ($cert.NotBefore.ToUniversalTime() -gt [DateTime]::UtcNow -or $cert.NotAfter.ToUniversalTime() -le [DateTime]::UtcNow) { throw 'The persistent test certificate is outside its validity period.' }
+    [IO.File]::WriteAllBytes($pfx, $bytes)
+    $createdKey = $true
+    [IO.File]::WriteAllBytes((Join-Path $directory 'local-test.cer'), $cert.Export([Security.Cryptography.X509Certificates.X509ContentType]::Cert))
+    & (Join-Path (Get-WindowsSdkTools) 'signtool.exe') sign /fd SHA256 /f $pfx $Package
+    if ($LASTEXITCODE) { throw 'Test package signing failed' }
+    Get-FileHash -LiteralPath $Package -Algorithm SHA256
+} finally {
+    if ($createdKey) { Remove-Item -LiteralPath $pfx -Force }
+    if ($cert) { $cert.Dispose() }
+    if ($expected) { $expected.Dispose() }
+}

@@ -6,6 +6,8 @@ Email Collection Toolkit - Windows test installer
    Approve the administrator prompt. Wait for the success message, then press Enter.
    The script installs local-test.cer into Local Machine > Trusted People.
    It does not install the application or change your saved execution policy.
+   This certificate is reused across test builds until October 7, 2028.
+   Install it once; reinstall only after an announced certificate rotation.
    Do not use the certificate wizard defaults: Current User is insufficient.
 
    If Run with PowerShell is unavailable or script execution is blocked, open

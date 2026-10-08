@@ -2656,3 +2656,11 @@ using IApplicationActivationManager. The activated Rust executable runs the
 bundled Python self-test in package context, then CI activates the native reader
 on the synthetic archive before testing upgrade and uninstall. Taskbar pinning
 is a user choice, not an installation requirement.
+
+Windows test signing now requires the persistent `MSIX_TEST_CERT_PFX_BASE64`
+Actions secret, passed only to bundle signing (including reusable release calls).
+The signer checks it against `scripts/win/test-signing.cer`, requires a private
+key and current validity, and removes temporary PFX material on success/failure.
+No fallback certificate is generated. This supersedes the ephemeral test-key
+policy; testers trust the public certificate once until expiration (2028-10-07)
+or deliberate rotation. Production trusted signing remains separate.

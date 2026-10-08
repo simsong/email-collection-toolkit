@@ -345,6 +345,11 @@ def test_msix_same_bundle_is_installed_without_rebuilding() -> None:
     release = safe_load((root / ".github/workflows/release.yml").read_text(encoding="utf-8"))
     assert release[JOBS]["windows-msix"][NEEDS] == "preflight"
     assert "windows-msix" in release[JOBS]["assemble"][NEEDS]
+    secret = "MSIX_TEST_CERT_PFX_BASE64"
+    assert triggers["workflow_call"]["secrets"][secret]["required"] is True
+    signer = next(step for step in jobs["bundle"][STEPS] if "bundle_test_msix.ps1" in step.get(RUN, ""))
+    assert signer["env"][secret] == "${{ secrets.MSIX_TEST_CERT_PFX_BASE64 }}"
+    assert release[JOBS]["windows-msix"]["secrets"][secret] == signer["env"][secret]
 
 
 @pytest.mark.parametrize("event,reference,message,expected", [
