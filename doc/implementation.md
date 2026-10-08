@@ -42,10 +42,11 @@ native loader's underlying error (PyInstaller's generic wrapper hides it).
 ## CI and release validation
 
 All runner jobs use macos-15. Continuous integration runs `make check-static`
-and `make check-tests` in parallel jobs on each non-`main` repository branch
-push; local `make check` retains their order. CI has no PR/main duplicates or
-a DMG smoke job. Forked PRs are not covered by that push trigger. Release packaging runs
-only for a pushed, version-matching annotated `v*` tag on `main` and invokes
+and `make check-tests` in parallel jobs on non-`main` branch pushes that change
+files outside `README.md` and `doc/`; local `make check` retains their order.
+CI has no PR/main duplicates or a DMG smoke job. Forked PRs are not covered by
+that push trigger. Release packaging runs only for a pushed, version-matching
+annotated `v*` tag on `main` and invokes
 `make dmg`, which mounts the candidate and runs its headless installed-app
 self-test. Native GUI release checks remain an explicit local
 `make check-release` action. Pages uses the same pinned Darwin Zola

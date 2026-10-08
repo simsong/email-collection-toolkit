@@ -56,7 +56,7 @@ def test_pages_workflow_pins_and_checks_the_zola_archive() -> None:
 
 
 def test_ci_runs_parallel_branch_jobs_without_building_a_dmg() -> None:
-    """Requirement: each non-main push runs independent static and test jobs without a DMG."""
+    """Requirement: CI ignores documentation-only pushes but tests other non-main pushes."""
     workflow = Path(__file__).parents[1] / ".github/workflows/continuous-integration.yml"
     text = workflow.read_text(encoding="utf-8")
 
@@ -66,7 +66,12 @@ def test_ci_runs_parallel_branch_jobs_without_building_a_dmg() -> None:
     assert "path: test-results" in text
     configuration = safe_load(text)
     triggers = configuration.get(WORKFLOW_ON, configuration.get(True))
-    assert triggers == {"push": {"branches": ["**", "!main"]}}
+    assert triggers == {
+        "push": {
+            "branches": ["**", "!main"],
+            "paths-ignore": ["README.md", "doc/**"],
+        }
+    }
     jobs = configuration[JOBS]
     assert set(jobs) == {"static-rust", "python-browser"}
     assert all(NEEDS not in job for job in jobs.values())
