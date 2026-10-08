@@ -138,6 +138,16 @@ def test_native_deferred_install_waits_for_cleanup_and_recovers_from_failure(tmp
                 reply("fail", "canceled:1")
                 lease = WriterLease.acquire(archive, "fixture", "test", "staged-released", "fixture")
                 lease.release()
+                # Skip cancels the SDK installer, whereas Dismiss keeps install-on-Quit.
+                lease = WriterLease.acquire(archive, "fixture", "test", "skipped", "fixture")
+                reply("stage", "waiting:1")
+                reply("dismiss", "waiting:1")
+                reply("complete", "waiting:1")  # nil completion must retain Dismiss
+                reply("skip", "waiting:1")  # cancellation has not completed yet
+                reply("complete", "canceled:1")  # actual nil completion clears only Skip
+                reply("attempt", "canceled:1")  # external writer cannot stall ordinary Quit
+                reply("quit", "quit-canceled")
+                lease.release()
                 reply("quit", "quit-canceled")  # actual NSApplication termination returns to live process
                 assert app.poll() is None
                 _, stderr = app.communicate("done\n", timeout=15)

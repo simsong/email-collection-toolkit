@@ -31,6 +31,7 @@ struct DelegateState {
     closing: AtomicBool,
     staged: Cell<bool>,
     relaunch: Cell<bool>,
+    skipped: Cell<bool>,
     failure: RefCell<Option<String>>,
     notify: Box<dyn Fn() + Send + Sync>,
 }
@@ -56,6 +57,7 @@ define_class!(
             // Sparkle's external installer may install on application exit even
             // before a user asks for relaunch. Track that hazard before launch.
             self.ivars().staged.set(true);
+            self.ivars().skipped.set(false);
         }
 
         #[unsafe(method(standardUserDriverWillHandleShowingUpdate:forUpdate:state:))]
@@ -69,6 +71,13 @@ define_class!(
         #[unsafe(method(updater:willInstallUpdate:))]
         fn installing(&self, _updater: &AnyObject, _item: &AnyObject) {
             self.ivars().staged.set(true);
+        }
+
+        #[unsafe(method(updater:userDidMakeChoice:forUpdate:state:))]
+        fn choice(&self, _updater: &AnyObject, choice: isize, _item: &AnyObject, _state: &AnyObject) {
+            // SPUUserUpdateChoiceSkip = 0 (NSInteger). Wait for cycle completion:
+            // the SDK still has to cancel its external installer after this call.
+            self.ivars().skipped.set(choice == 0);
         }
 
         #[unsafe(method(updater:shouldPostponeRelaunchForUpdate:untilInvokingBlock:))]
@@ -109,8 +118,11 @@ define_class!(
 
         #[unsafe(method(updater:didFinishUpdateCycleForUpdateCheck:error:))]
         fn finished(&self, _updater: &AnyObject, _check: usize, error: Option<&NSError>) {
+            let skipped = self.ivars().skipped.replace(false);
             if let Some(error) = error {
                 if self.ivars().staged.get() { self.fail(error.localizedDescription().to_string()); }
+            } else if skipped && self.ivars().staged.get() {
+                self.fail("Update skipped.".into());
             }
         }
     }
@@ -126,6 +138,7 @@ impl ECTRustSparkleDelegate {
         self.ivars().installation.cancel();
         self.ivars().staged.set(false);
         self.ivars().relaunch.set(false);
+        self.ivars().skipped.set(false);
         self.ivars().ready.store(false, Ordering::Release);
         if self.ivars().closing.load(Ordering::Acquire) {
             *self.ivars().failure.borrow_mut() = Some(message);
@@ -220,6 +233,7 @@ impl MacSparkle {
             closing: AtomicBool::new(false),
             staged: Cell::new(false),
             relaunch: Cell::new(false),
+            skipped: Cell::new(false),
             failure: RefCell::new(None),
             notify: Box::new(notify),
         });
@@ -380,6 +394,7 @@ pub fn inspect_shutdown() -> Result<()> {
         closing: AtomicBool::new(false),
         staged: Cell::new(false),
         relaunch: Cell::new(false),
+        skipped: Cell::new(false),
         failure: RefCell::new(None),
         notify: Box::new(move || {
             state.fetch_add(1, Ordering::AcqRel);
@@ -404,7 +419,8 @@ pub fn inspect_shutdown() -> Result<()> {
     // Same selector used by the retained production NSTimer. Its argument is
     // deliberately ignored; calling the Objective-C method exercises its ABI.
     for line in io::stdin().lock().lines() {
-        match line?.as_str() {
+        let command = line?;
+        match command.as_str() {
             "stage" => {
                 delegate.ivars().closing.store(false, Ordering::Release);
                 delegate.ivars().failure.borrow_mut().take();
@@ -419,6 +435,15 @@ pub fn inspect_shutdown() -> Result<()> {
             }
             "attempt" => unsafe {
                 let _: () = msg_send![&*delegate, ectResumeUpdate: std::ptr::null::<NSTimer>()];
+            },
+            "skip" | "dismiss" => {
+                let choice = if command == "skip" { 0isize } else { 2isize };
+                unsafe {
+                    let _: () = msg_send![&*delegate, updater: &*object, userDidMakeChoice: choice, forUpdate: &*object, state: &*object];
+                }
+            }
+            "complete" => unsafe {
+                let _: () = msg_send![&*delegate, updater: &*object, didFinishUpdateCycleForUpdateCheck: 0usize, error: std::ptr::null::<NSError>()];
             },
             "fail" => {
                 let class = AnyClass::get(c"NSError").context("Missing NSError")?;

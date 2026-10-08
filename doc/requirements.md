@@ -2629,7 +2629,11 @@ Staged updates that install on ordinary Quit require the same cleanup and fence,
 including resumed sessions without a relaunch callback. Only termination with no
 staged installer may retain the ordinary close watchdog.
 An installation failure/cancellation releases the reservation, restores the reader
-or startup page and allows a subsequent ordinary Quit. Package updater inspection
+or startup page and allows a subsequent ordinary Quit. Shutdown acknowledgment
+must report the worker's retained reader even when opening completes during Quit.
+An explicit Skip followed by nil cycle completion cancels staged installation;
+Dismiss followed by nil completion retains installation on Quit.
+Package updater inspection
 must initialize the actual framework without network checks, windows or changes
 to the app's persistent Sparkle preferences.
 

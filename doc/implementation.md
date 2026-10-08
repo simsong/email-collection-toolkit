@@ -3439,15 +3439,19 @@ five-second watchdog cannot authorize installation. `willExtractUpdate:` tracks
 staging before the external installer launches, while the standard user-driver
 delegate detects resumed Installing sessions. These ordinary Quit paths wait for
 actual cleanup and reserve the fence even without a relaunch block; only then
-may Rust exit. Nil completion preserves staged installation-on-Quit state;
-reported native failures clear it. Failure while closing suppresses the ordinary
+may Rust exit. The explicit Skip choice clears staged state when its cancellation
+cycle completes, even with nil error. Dismiss with nil completion retains
+installation-on-Quit state; reported native failures clear it. Failure while closing suppresses the ordinary
 watchdog until the worker acknowledges cleanup and the reader can be restored. An added, ABI-compatible
 `applicationShouldTerminate:` method on the pinned Tao delegate returns Cocoa's
 `TerminateLater`; Rust replies only after cleanup and native installer handoff.
 The reply runs asynchronously on Cocoa's main queue, outside Tao's locked event
 callback; a queued reply keeps the event loop alive until native termination.
 Failure releases the fence and cancels pending termination, restoring the same
-reader (or startup when opening was interrupted). The headless shutdown probe
+reader (or startup when opening was interrupted).
+The worker acknowledgment reports whether it retained an open reader, including
+opening that completed during Quit; canceled installation cannot return to Welcome
+while leaving that reader hidden in the worker. The headless shutdown probe
 exercises the actual Objective-C postpone/resume/error callbacks and Cocoa Quit
 against a real Python writer lease, including staging without postponement; it
 does not claim native replacement/relaunch.

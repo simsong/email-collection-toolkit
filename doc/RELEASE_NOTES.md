@@ -10,7 +10,9 @@
   WinSparkle. Preserve existing update choices, authenticate full feeds and
   installer signatures, and defer macOS installation until helper/export cleanup
   and Python writer exclusion finish, including staged installation on Quit. Restore the reader after native install
-  failure; keep mounted updater checks out of saved Sparkle preferences.
+  failure, including opening completed during Quit. Distinguish Skip cancellation
+  from Dismiss installation-on-Quit; keep mounted updater checks out of saved
+  Sparkle preferences.
 - Consolidate Windows packaging into a tested x64/ARM64 MSIX bundle. Alpha
   installation requires trusting its persistent test certificate; Windows ingest
   remains disabled. Never distribute synthetic upgrade fixtures or private keys.

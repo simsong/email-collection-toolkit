@@ -362,6 +362,16 @@ fn trusted_panel(value: &str, windows: bool) -> bool {
                 && matches!(url.query(), Some("kind=name" | "kind=institution"))))
 }
 
+#[cfg(any(target_os = "macos", target_os = "windows", test))]
+fn quiesce_reader(bridge: &mut Option<std::result::Result<Bridge, String>>) -> (bool, Result<()>) {
+    if let Some(Ok(bridge)) = bridge {
+        (true, bridge.quiesce())
+    } else {
+        bridge.take();
+        (false, Ok(()))
+    }
+}
+
 #[cfg(any(target_os = "macos", target_os = "windows"))]
 fn native(
     path: Option<PathBuf>,
@@ -386,7 +396,7 @@ fn native(
         Shell(Request),
         Menu(muda::MenuEvent),
         Quit,
-        QuitFinished(Result<()>),
+        QuitFinished(bool, Result<()>),
         QuitTimedOut(u64),
         ExportCleanup(anyhow::Result<()>),
         Print(u64),
@@ -490,13 +500,8 @@ fn native(
             let mut create = false;
             while let Ok(request) = receiver.recv() {
                 if request.method == "shutdown" {
-                    let result = if let Some(Ok(bridge)) = &mut bridge {
-                        bridge.quiesce()
-                    } else {
-                        bridge.take();
-                        Ok(())
-                    };
-                    let _ = proxy.send_event(NativeEvent::QuitFinished(result));
+                    let (ready, result) = quiesce_reader(&mut bridge);
+                    let _ = proxy.send_event(NativeEvent::QuitFinished(ready, result));
                     continue;
                 }
                 if request.method == "opening_select" {
@@ -867,7 +872,10 @@ fn native(
                 }
             }
             Event::UserEvent(NativeEvent::QuitTimedOut(epoch)) if quitting && epoch == quit_epoch => quit_timed_out = true,
-            Event::UserEvent(NativeEvent::QuitFinished(result)) => {
+            Event::UserEvent(NativeEvent::QuitFinished(ready, result)) => {
+                // Opening can finish after Quit hides its ReaderReady event.
+                // The worker owns the retained bridge and reports its actual state.
+                reader_ready = ready;
                 worker_finished = true;
                 if let Err(error) = result { eprintln!("{error:#}"); cleanup_failed = true; }
             }
@@ -1057,6 +1065,53 @@ fn native(
 #[cfg(test)]
 mod tests {
     use super::{trusted_document, trusted_panel, trusted_welcome};
+
+    #[test]
+    fn shutdown_reports_retained_reader_after_opening_finishes_during_quit() {
+        // Canceled-update requirement: actual worker state restores a usable reader
+        // even when the foreground ignored its queued ReaderReady while quitting.
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("Race.mailarchive");
+        mailsearch_rust::demo::create(&path).unwrap();
+        let files = ["archive.sqlite3", "search.sqlite3", "data/mbox/DEMO.mbox"];
+        let before: Vec<_> = files
+            .iter()
+            .map(|file| std::fs::read(path.join(file)).unwrap())
+            .collect();
+        let mut bridge = Some(Ok(super::Bridge::open(&path).unwrap()));
+        let (reader_ready, cleanup) = super::quiesce_reader(&mut bridge);
+        cleanup.unwrap();
+        assert!(
+            reader_ready,
+            "Canceled installation must restore the retained reader"
+        );
+        let reply = bridge
+            .as_mut()
+            .unwrap()
+            .as_mut()
+            .unwrap()
+            .reply(super::Request {
+                id: 1,
+                method: "search".into(),
+                args: vec![serde_json::json!("observatory")],
+            });
+        assert!(reply.error.is_none());
+        assert_eq!(
+            reply.result.unwrap()["results"].as_array().unwrap().len(),
+            2
+        );
+        drop(bridge);
+        for (file, bytes) in files.iter().zip(before) {
+            assert_eq!(std::fs::read(path.join(file)).unwrap(), bytes);
+        }
+        let mut failed = Some(Err("Opening aborted".into()));
+        let (reader_ready, cleanup) = super::quiesce_reader(&mut failed);
+        cleanup.unwrap();
+        assert!(
+            !reader_ready && failed.is_none(),
+            "Welcome must allow another opening attempt"
+        );
+    }
 
     #[test]
     fn passive_mime_frames_can_load_without_native_ipc_trust() {
