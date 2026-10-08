@@ -138,6 +138,34 @@ def test_native_deferred_install_waits_for_cleanup_and_recovers_from_failure(tmp
                 reply("fail", "canceled:1")
                 lease = WriterLease.acquire(archive, "fixture", "test", "staged-released", "fixture")
                 lease.release()
+                # Local cleanup failure never cancels Sparkle's external installer.
+                reply("stage", "waiting:1")
+                reply("local-fail", "waiting:1")
+                lease = WriterLease.acquire(archive, "fixture", "test", "local-failure", "fixture")
+                reply("quit", "quit-canceled")
+                reply("ready", "waiting:1")
+                reply("attempt", "waiting:1")
+                lease.release()
+                # A real filesystem failure opening the fence also retains staging.
+                writer_directory = tmp_path / f"mailarchiver-writers-{os.getuid()}"
+                saved_directory = tmp_path / "saved-writer-directory"
+                writer_directory.rename(saved_directory)
+                writer_directory.write_bytes(b"Existing user-owned file\n")
+                try:
+                    reply("attempt", "waiting:1")
+                    assert writer_directory.read_bytes() == b"Existing user-owned file\n"
+                finally:
+                    writer_directory.unlink()
+                    saved_directory.rename(writer_directory)
+                lease = WriterLease.acquire(archive, "fixture", "test", "after-reservation-error", "fixture")
+                reply("quit", "quit-canceled")
+                reply("ready", "waiting:1")
+                reply("attempt", "waiting:1")
+                lease.release()
+                reply("attempt", "reserved-for-quit:1")
+                with pytest.raises(ArchiveBusyError):
+                    WriterLease.acquire(archive, "fixture", "test", "local-retry-reserved", "fixture")
+                reply("fail", "canceled:1")
                 # Skip cancels the SDK installer, whereas Dismiss keeps install-on-Quit.
                 lease = WriterLease.acquire(archive, "fixture", "test", "skipped", "fixture")
                 reply("stage", "waiting:1")

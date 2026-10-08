@@ -3446,7 +3446,10 @@ delegate detects resumed Installing sessions. These ordinary Quit paths wait for
 actual cleanup and reserve the fence even without a relaunch block; only then
 may Rust exit. The explicit Skip choice clears staged state when its cancellation
 cycle completes, even with nil error. Dismiss with nil completion retains
-installation-on-Quit state; reported native failures clear it. Failure while closing suppresses the ordinary
+installation-on-Quit state; reported native cycle failures clear it. Local cleanup,
+reservation or continuation failures release Rust's reservation and restore the
+reader but retain staged state, since they cannot cancel Sparkle's external installer.
+A later Quit repeats cleanup and fence acquisition. Failure while closing suppresses the ordinary
 watchdog until the worker acknowledges cleanup and the reader can be restored. An added, ABI-compatible
 `applicationShouldTerminate:` method on the pinned Tao delegate returns Cocoa's
 `TerminateLater`; Rust replies only after cleanup and native installer handoff.
@@ -3458,7 +3461,8 @@ The worker acknowledgment reports whether it retained an open reader, including
 opening that completed during Quit; canceled installation cannot return to Welcome
 while leaving that reader hidden in the worker. The headless shutdown probe
 exercises the actual Objective-C postpone/resume/error callbacks and Cocoa Quit
-against a real Python writer lease, including staging without postponement; it
+against a real Python writer lease, including staging without postponement and
+local cleanup/reservation failures followed by guarded Quit; it
 does not claim native replacement/relaunch.
 Startup New initializes and read-validates an owned sibling staging directory.
 The supervisor reaps the helper before removing failed/aborted staging; it never

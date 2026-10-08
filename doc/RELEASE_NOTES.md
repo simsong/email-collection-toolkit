@@ -17,7 +17,8 @@
   installer signatures, and defer macOS installation until helper/export cleanup
   and Python writer exclusion finish, including staged installation on Quit. Restore the reader after native install
   failure, including opening completed during Quit. Distinguish Skip cancellation
-  from Dismiss installation-on-Quit; keep mounted updater checks out of saved
+  from Dismiss installation-on-Quit; retain staged installation guards after
+  local cleanup or reservation failures. Keep mounted updater checks out of saved
   Sparkle preferences.
 - Consolidate Windows packaging into a tested x64/ARM64 MSIX bundle. Alpha
   installation requires trusting its persistent test certificate; Windows ingest

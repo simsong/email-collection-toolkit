@@ -2638,8 +2638,10 @@ to Sparkle. A watchdog expiration is not a cleanup acknowledgment. Cocoa Quit
 Staged updates that install on ordinary Quit require the same cleanup and fence,
 including resumed sessions without a relaunch callback. Only termination with no
 staged installer may retain the ordinary close watchdog.
-An installation failure/cancellation releases the reservation, restores the reader
-or startup page and allows a subsequent ordinary Quit. Shutdown acknowledgment
+An installation failure/cancellation releases the reservation and restores the reader
+or startup page. Local cleanup or fence failures retain the external staged-installer
+hazard: subsequent Quit must still complete cleanup and reserve the writer fence.
+Only confirmed native cancellation clears that hazard. Shutdown acknowledgment
 must report the worker's retained reader even when opening completes during Quit.
 An explicit Skip followed by nil cycle completion cancels staged installation;
 Dismiss followed by nil completion retains installation on Quit.

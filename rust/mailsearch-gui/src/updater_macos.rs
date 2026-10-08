@@ -2,7 +2,8 @@
 // Adapt the packaged Sparkle framework to the Rust desktop on Cocoa's main thread.
 // Keep the standard native controller, delegate and timer alive together.
 // A copied installation block waits without a deadline for the shared writer fence.
-// Native failure callbacks release the reservation and discard the continuation.
+// Local failures restore the reader but retain any external staged-installer hazard.
+// Confirmed native cancellation clears staging; every later Quit still takes the fence.
 // Packaging metadata supplies the existing update identity and public signing key.
 // Source launches never load a framework or start automatic network checks.
 use crate::update_policy::{Channel, Configuration, Installation};
@@ -120,9 +121,9 @@ define_class!(
         fn finished(&self, _updater: &AnyObject, _check: usize, error: Option<&NSError>) {
             let skipped = self.ivars().skipped.replace(false);
             if let Some(error) = error {
-                if self.ivars().staged.get() { self.fail(error.localizedDescription().to_string()); }
+                if self.ivars().staged.get() { self.canceled(error.localizedDescription().to_string()); }
             } else if skipped && self.ivars().staged.get() {
-                self.fail("Update skipped.".into());
+                self.canceled("Update skipped.".into());
             }
         }
     }
@@ -136,7 +137,6 @@ impl ECTRustSparkleDelegate {
     fn fail(&self, message: String) {
         self.ivars().pending.borrow_mut().take();
         self.ivars().installation.cancel();
-        self.ivars().staged.set(false);
         self.ivars().relaunch.set(false);
         self.ivars().skipped.set(false);
         self.ivars().ready.store(false, Ordering::Release);
@@ -144,6 +144,12 @@ impl ECTRustSparkleDelegate {
             *self.ivars().failure.borrow_mut() = Some(message);
             (self.ivars().notify)();
         }
+    }
+    fn canceled(&self, message: String) {
+        // Only SDK cycle completion confirms its external installer is canceled.
+        // A local cleanup/reservation failure cannot make that guarantee.
+        self.ivars().staged.set(false);
+        self.fail(message);
     }
 }
 
@@ -445,6 +451,7 @@ pub fn inspect_shutdown() -> Result<()> {
             "complete" => unsafe {
                 let _: () = msg_send![&*delegate, updater: &*object, didFinishUpdateCycleForUpdateCheck: 0usize, error: std::ptr::null::<NSError>()];
             },
+            "local-fail" => delegate.fail("Local export cleanup failed.".into()),
             "fail" => {
                 let class = AnyClass::get(c"NSError").context("Missing NSError")?;
                 let error: Retained<NSError> = unsafe {
