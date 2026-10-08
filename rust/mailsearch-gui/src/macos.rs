@@ -78,3 +78,97 @@ pub fn inspect() -> Result<serde_json::Value> {
         "process_name":NSProcessInfo::processInfo().processName().to_string()}),
     )
 }
+
+// Defer Cocoa termination too: Sparkle and the application menu call terminate:
+// directly, whereas the Rust window/menu actions use the event-loop Quit event.
+static TERMINATION: std::sync::OnceLock<Box<dyn Fn() + Send + Sync>> = std::sync::OnceLock::new();
+static TERMINATION_REPLY_QUEUED: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
+static TERMINATION_ALLOWED: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
+static TERMINATION_PENDING: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
+
+unsafe extern "C-unwind" fn should_terminate(
+    _delegate: &objc2::runtime::AnyObject,
+    _selector: objc2::runtime::Sel,
+    _application: &NSApplication,
+) -> objc2_app_kit::NSApplicationTerminateReply {
+    TERMINATION_PENDING.store(true, std::sync::atomic::Ordering::Release);
+    if let Some(notify) = TERMINATION.get() {
+        notify();
+    }
+    objc2_app_kit::NSApplicationTerminateReply::TerminateLater
+}
+
+pub fn coordinate_termination(notify: impl Fn() + Send + Sync + 'static) -> Result<()> {
+    use objc2::{
+        runtime::{AnyClass, ClassBuilder},
+        sel,
+    };
+    let marker = MainThreadMarker::new().context("Termination requires the main thread")?;
+    let application = NSApplication::sharedApplication(marker);
+    let delegate = application
+        .delegate()
+        .context("Missing Tao application delegate")?;
+    let object: &objc2::runtime::AnyObject = (*delegate).as_ref();
+    let host = object.class();
+    anyhow::ensure!(
+        host.name().to_bytes() == b"TaoAppDelegateParent",
+        "Unexpected application delegate"
+    );
+    anyhow::ensure!(
+        host.instance_method(sel!(applicationShouldTerminate:))
+            .is_none(),
+        "Existing application termination policy must be preserved"
+    );
+    TERMINATION
+        .set(Box::new(notify))
+        .map_err(|_| anyhow::anyhow!("Termination policy already registered"))?;
+    let mut signatures = ClassBuilder::new(c"ECTTerminationMethods", host)
+        .context("Register termination signature")?;
+    unsafe {
+        signatures.add_method(
+            sel!(applicationShouldTerminate:),
+            should_terminate as unsafe extern "C-unwind" fn(_, _, _) -> _,
+        );
+    }
+    let signatures = signatures.register();
+    let method = signatures
+        .instance_method(sel!(applicationShouldTerminate:))
+        .context("Missing termination signature")?;
+    anyhow::ensure!(
+        unsafe {
+            objc2::ffi::class_addMethod(
+                host as *const AnyClass as *mut AnyClass,
+                sel!(applicationShouldTerminate:),
+                method.implementation(),
+                objc2::ffi::method_getTypeEncoding(method),
+            )
+            .as_bool()
+        },
+        "Could not add termination policy"
+    );
+    Ok(())
+}
+
+pub fn finish_termination(allow: bool) -> bool {
+    use std::sync::atomic::Ordering;
+    if !TERMINATION_PENDING.load(Ordering::Acquire) {
+        return false;
+    }
+    TERMINATION_ALLOWED.store(allow, Ordering::Release);
+    if !TERMINATION_REPLY_QUEUED.swap(true, Ordering::AcqRel) {
+        // Cocoa sends applicationWillTerminate synchronously. Tao's event
+        // callback holds its handler mutex, so reply only after it returns.
+        dispatch2::DispatchQueue::main().exec_async(|| {
+            if let Some(marker) = MainThreadMarker::new() {
+                let allow = TERMINATION_ALLOWED.load(Ordering::Acquire);
+                TERMINATION_PENDING.store(false, Ordering::Release);
+                NSApplication::sharedApplication(marker).replyToApplicationShouldTerminate(allow);
+                TERMINATION_REPLY_QUEUED.store(false, Ordering::Release);
+            }
+        });
+    }
+    true
+}

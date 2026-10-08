@@ -11,6 +11,11 @@ use anyhow::{bail, ensure, Context, Result};
 #[path = "updater_macos.rs"]
 mod macos;
 
+#[cfg(target_os = "macos")]
+pub fn inspect_shutdown() -> Result<()> {
+    macos::inspect_shutdown()
+}
+
 pub fn validate_feed(feed: &str) -> Result<()> {
     let url = url::Url::parse(feed).context("Invalid update feed URL")?;
     ensure!(
@@ -33,6 +38,16 @@ pub struct Updater {
 }
 
 impl Updater {
+    #[cfg(target_os = "macos")]
+    pub fn inspect() -> Result<Self> {
+        let configuration = crate::update_policy::Configuration::embedded()?;
+        let client =
+            macos::MacSparkle::load(&configuration, false, Channel::default(), true, || {})?;
+        Ok(Self {
+            detail: "Sparkle startup verified without changing persistent defaults.".into(),
+            client: Some(client),
+        })
+    }
     pub fn new(automatic: bool, channel: Channel, quit: impl Fn() + Send + Sync + 'static) -> Self {
         #[cfg(target_os = "windows")]
         {
@@ -50,9 +65,8 @@ impl Updater {
         }
         #[cfg(target_os = "macos")]
         {
-            let _ = quit;
             match crate::update_policy::Configuration::embedded().and_then(|configuration| {
-                macos::MacSparkle::load(&configuration, automatic, channel)
+                macos::MacSparkle::load(&configuration, automatic, channel, false, quit)
             }) {
                 Ok(client) => Self {
                     detail:
@@ -75,6 +89,57 @@ impl Updater {
                         .into(),
             }
         }
+    }
+
+    pub fn shutdown_ready(&self, ready: bool) {
+        #[cfg(target_os = "macos")]
+        if let Some(client) = &self.client {
+            client.shutdown_ready(ready);
+        }
+        #[cfg(not(target_os = "macos"))]
+        let _ = ready;
+    }
+    pub fn waiting(&self) -> bool {
+        #[cfg(target_os = "macos")]
+        {
+            self.client.as_ref().is_some_and(|client| client.waiting())
+        }
+        #[cfg(not(target_os = "macos"))]
+        {
+            false
+        }
+    }
+    pub fn installing(&self) -> bool {
+        #[cfg(target_os = "macos")]
+        {
+            self.client
+                .as_ref()
+                .is_some_and(|client| client.installing())
+        }
+        #[cfg(not(target_os = "macos"))]
+        {
+            false
+        }
+    }
+    pub fn take_failure(&self) -> Option<String> {
+        #[cfg(target_os = "macos")]
+        {
+            self.client
+                .as_ref()
+                .and_then(|client| client.take_failure())
+        }
+        #[cfg(not(target_os = "macos"))]
+        {
+            None
+        }
+    }
+    pub fn cancel_installation(&self, message: &str) {
+        #[cfg(target_os = "macos")]
+        if let Some(client) = &self.client {
+            client.cancel(message);
+        }
+        #[cfg(not(target_os = "macos"))]
+        let _ = message;
     }
 
     pub fn available(&self) -> bool {

@@ -3429,6 +3429,22 @@ installation continuation waits on a main-thread timer for the same exclusive
 wait deadline is imposed; cancellation/failure releases the reservation, while
 installation retains it through process exit. `make test-rust-updates` tests both
 directions of exclusion and cancellation using a real Rust process and Python lease.
+The delegate requests Rust shutdown before invoking the continuation. The archive
+worker quiesces search, private service and exports but remains available if native
+installation fails. IPC rejects new work while closing; only an actual worker
+acknowledgment plus completed export cleanup enables the install timer. A separate
+five-second watchdog cannot authorize installation. An added, ABI-compatible
+`applicationShouldTerminate:` method on the pinned Tao delegate returns Cocoa's
+`TerminateLater`; Rust replies only after cleanup and native installer handoff.
+The reply runs asynchronously on Cocoa's main queue, outside Tao's locked event
+callback; a queued reply keeps the event loop alive until native termination.
+Failure releases the fence and cancels pending termination, restoring the same
+reader (or startup when opening was interrupted). The headless shutdown probe
+exercises the actual Objective-C postpone/resume/error callbacks and Cocoa Quit
+against a real Python writer lease; it does not claim native replacement/relaunch.
+Mounted updater inspection uses volatile `NSArgumentDomain` overrides for first
+launch and automatic checks, skips all persistent setters, runs the scheduled SDK
+startup cycle and verifies the production bundle's persistent domain is unchanged.
 
 The Windows adapter loads only the verified sibling WinSparkle DLL. Its private
 loopback discovery gateway fetches bounded HTTPS XML and authenticates the complete

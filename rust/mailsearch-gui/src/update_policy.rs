@@ -122,6 +122,10 @@ impl Installation {
         }
     }
 
+    pub fn is_installing(&self) -> bool {
+        self.installing.load(Ordering::Acquire)
+    }
+
     pub fn installing(&self) {
         self.installing.store(true, Ordering::Release);
     }

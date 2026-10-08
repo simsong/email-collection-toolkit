@@ -2,7 +2,8 @@
 # Test updater exclusion against the real Python writer lease and Rust process.
 # Both implementations use an isolated user's stable application lock file.
 # Exercise blocked installation, installer reservation and cancellation release.
-# No updater is initialized and no application or certificate is installed.
+# Native delegate/termination probes create no windows or updater network checks.
+# No application or certificate is installed.
 # Synthetic archive sentinels establish that the fence does not alter content.
 # The Makefile builds the production Rust executable before running this module.
 import os
@@ -82,3 +83,55 @@ def test_rust_installation_excludes_python_writers_and_cancellation_releases(tmp
                 if installer.poll() is None:
                     installer.kill()
                     installer.wait(timeout=10)
+
+
+@pytest.mark.skipif(sys.platform != "darwin", reason="Cocoa shutdown policy")
+def test_native_deferred_install_waits_for_cleanup_and_recovers_from_failure(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Native update requirement: cleanup and external writers precede install; failure restores Quit."""
+    configured = os.environ.get("RUST_WEBVIEW_BINARY")
+    if not configured:
+        pytest.skip("run make test-rust-updates")
+    monkeypatch.setattr(tempfile, "tempdir", str(tmp_path))
+    archive = tmp_path / "Shutdown.mailarchive"
+    archive.mkdir()
+    original = b"Original archive bytes\n"
+    sentinel = archive / "source.eml"
+    sentinel.write_bytes(original)
+    lease = WriterLease.acquire(archive, "fixture", "test", "first", "fixture")
+    with subprocess.Popen([configured, "--updater-shutdown-probe"], env={**os.environ, "TMPDIR": str(tmp_path)},
+                          stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True) as app:
+        input_pipe, output_pipe = app.stdin, app.stdout
+        assert input_pipe is not None and output_pipe is not None
+        with selectors.DefaultSelector() as ready:
+            ready.register(output_pipe, selectors.EVENT_READ)
+
+            def reply(command: str | None, expected: str) -> None:
+                if command is not None:
+                    input_pipe.write(command + "\n")
+                    input_pipe.flush()
+                assert ready.select(timeout=15), "Native shutdown probe did not reply"
+                result = output_pipe.readline().strip()
+                assert result == expected, (result, app.stderr.read() if app.poll() is not None and app.stderr else "")
+
+            try:
+                reply(None, "waiting")
+                reply("attempt", "waiting:0")  # no owner cleanup acknowledgment
+                reply("ready", "waiting:0")
+                reply("attempt", "waiting:0")  # actual external Python writer still holds fence
+                lease.release()
+                reply("attempt", "installing:1")
+                with pytest.raises(ArchiveBusyError):
+                    WriterLease.acquire(archive, "fixture", "test", "second", "fixture")
+                reply("fail", "canceled:1")  # actual NSError delegate callback releases reservation
+                lease = WriterLease.acquire(archive, "fixture", "test", "third", "fixture")
+                lease.release()
+                reply("quit", "quit-canceled")  # actual NSApplication termination returns to live process
+                assert app.poll() is None
+                _, stderr = app.communicate("done\n", timeout=15)
+                assert app.returncode == 0, stderr
+                assert sentinel.read_bytes() == original
+            finally:
+                lease.release()
+                if app.poll() is None:
+                    app.kill()
+                    app.wait(timeout=15)

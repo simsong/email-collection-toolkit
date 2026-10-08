@@ -1,8 +1,8 @@
 # Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved.
-# Experimental read-only desktop archive reader.
+# Primary native desktop and independent archive reader.
 # The library owns SQLite queries, verified MBOX reads, and display decoding.
 # Binaries connect that library to the existing web UI or an egui comparison.
-# Both use the existing archive format without a Python runtime.
+# Native ingest requests use the separately bundled private Python service.
 # Synthetic fixtures and headless tests share the production read path.
 [package]
 name = "mailsearch-rust"
@@ -55,7 +55,7 @@ dispatch2 = "0.3"
 block2 = "0.6"
 objc2 = { version = "0.6", features = ["exception"] }
 objc2-app-kit = { version = "0.3", default-features = false, features = ["NSApplication", "NSBitmapImageRep", "NSImage", "NSImageRep", "NSDragging", "NSDraggingItem", "NSDraggingSession", "NSPasteboard", "NSPasteboardItem", "NSWorkspace", "NSEvent", "NSView", "NSOpenPanel", "NSSavePanel"] }
-objc2-foundation = { version = "0.3", default-features = false, features = ["NSData", "NSDictionary", "NSError", "NSArray", "NSString", "NSRunLoop", "NSBundle", "NSProcessInfo", "NSURL", "NSSet", "NSTimer"] }
+objc2-foundation = { version = "0.3", default-features = false, features = ["NSData", "NSDate", "NSDictionary", "NSError", "NSArray", "NSString", "NSRunLoop", "NSBundle", "NSProcessInfo", "NSURL", "NSSet", "NSTimer"] }
 objc2-web-kit = { version = "0.3", default-features = false, features = ["WKSnapshotConfiguration", "WKWebView", "block2"] }
 
 [target.'cfg(unix)'.dependencies]

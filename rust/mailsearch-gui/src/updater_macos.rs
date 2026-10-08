@@ -17,13 +17,19 @@ use objc2::{
 use objc2_foundation::{NSBundle, NSError, NSObject, NSObjectProtocol, NSSet, NSString, NSTimer};
 use std::{
     cell::{Cell, RefCell},
-    sync::Arc,
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc,
+    },
 };
 
 struct DelegateState {
     installation: Arc<Installation>,
     pending: RefCell<Option<RcBlock<dyn Fn()>>>,
     channel: Cell<Channel>,
+    ready: AtomicBool,
+    failure: RefCell<Option<String>>,
+    notify: Box<dyn Fn() + Send + Sync>,
 }
 
 define_class!(
@@ -44,13 +50,16 @@ define_class!(
 
         #[unsafe(method(updater:shouldPostponeRelaunchForUpdate:untilInvokingBlock:))]
         fn postpone(&self, _updater: &AnyObject, _item: &AnyObject, handler: &Block<dyn Fn()>) -> Bool {
+            self.ivars().ready.store(false, Ordering::Release);
+            self.ivars().failure.borrow_mut().take();
             *self.ivars().pending.borrow_mut() = Some(handler.copy());
+            (self.ivars().notify)();
             Bool::YES
         }
 
         #[unsafe(method(ectResumeUpdate:))]
         fn resume(&self, _timer: &NSTimer) {
-            if self.ivars().pending.borrow().is_none() { return; }
+            if self.ivars().pending.borrow().is_none() || !self.ivars().ready.load(Ordering::Acquire) { return; }
             match self.ivars().installation.reserve() {
                 Ok(true) => {
                     // Remove before invoking native code, allowing reentrant failure
@@ -58,24 +67,35 @@ define_class!(
                     let continuation = self.ivars().pending.borrow_mut().take();
                     if let Some(continuation) = continuation {
                         if let Err(error) = self.ivars().installation.invoke(&continuation) {
-                            eprintln!("{error:#}");
+                            self.fail(format!("{error:#}"));
                         }
                     }
                 }
                 Ok(false) => (),
-                Err(error) => eprintln!("Update installation is deferred: {error:#}"),
+                Err(error) => self.fail(format!("Update installation failed: {error:#}")),
             }
         }
 
         #[unsafe(method(updater:didFinishUpdateCycleForUpdateCheck:error:))]
         fn finished(&self, _updater: &AnyObject, _check: usize, error: Option<&NSError>) {
-            if error.is_some_and(|error| error.code() != 1001) {
-                self.ivars().pending.borrow_mut().take();
-                self.ivars().installation.cancel();
+            if let Some(error) = error {
+                if self.waiting() { self.fail(error.localizedDescription().to_string()); }
             }
         }
     }
 );
+
+impl ECTRustSparkleDelegate {
+    fn waiting(&self) -> bool {
+        self.ivars().pending.borrow().is_some() || self.ivars().installation.is_installing()
+    }
+    fn fail(&self, message: String) {
+        self.ivars().pending.borrow_mut().take();
+        self.ivars().installation.cancel();
+        *self.ivars().failure.borrow_mut() = Some(message);
+        (self.ivars().notify)();
+    }
+}
 
 pub struct MacSparkle {
     controller: Retained<AnyObject>,
@@ -85,9 +105,46 @@ pub struct MacSparkle {
 }
 
 impl MacSparkle {
-    pub fn load(configuration: &Configuration, automatic: bool, channel: Channel) -> Result<Self> {
+    pub fn load(
+        configuration: &Configuration,
+        automatic: bool,
+        channel: Channel,
+        inspect: bool,
+        notify: impl Fn() + Send + Sync + 'static,
+    ) -> Result<Self> {
         let marker = MainThreadMarker::new().context("Sparkle requires the Cocoa main thread")?;
         let bundle = NSBundle::mainBundle();
+        // Inspection uses Cocoa's command-line argument domain, never setters.
+        // Retain a snapshot to detect even an unexpected SDK defaults write.
+        let defaults_class = AnyClass::get(c"NSUserDefaults").context("Missing Cocoa defaults")?;
+        let defaults: Retained<AnyObject> =
+            unsafe { msg_send![defaults_class, standardUserDefaults] };
+        let identifier = bundle
+            .bundleIdentifier()
+            .context("Missing bundle identity")?;
+        let before: Option<Retained<AnyObject>> =
+            unsafe { msg_send![&*defaults, persistentDomainForName: &*identifier] };
+        if inspect {
+            // Volatile argument defaults override the SDK's first-launch and
+            // automatic-check behavior without touching the persistent domain.
+            let domain = NSString::from_str("NSArgumentDomain");
+            let arguments: Retained<AnyObject> =
+                unsafe { msg_send![&*defaults, volatileDomainForName: &*domain] };
+            let arguments: Retained<AnyObject> = unsafe { msg_send![&*arguments, mutableCopy] };
+            for (key, value) in [
+                ("SUEnableAutomaticChecks", "NO"),
+                ("SUAutomaticallyUpdate", "NO"),
+                ("SUHasLaunchedBefore", "YES"),
+            ] {
+                unsafe {
+                    let _: () = msg_send![&*arguments, setObject: &*NSString::from_str(value), forKey: &*NSString::from_str(key)];
+                }
+            }
+            unsafe {
+                let _: () =
+                    msg_send![&*defaults, setVolatileDomain: &*arguments, forName: &*domain];
+            }
+        }
         for (name, expected) in [
             ("SUFeedURL", configuration.feed),
             ("SUPublicEDKey", configuration.key),
@@ -122,6 +179,9 @@ impl MacSparkle {
             installation: installation.clone(),
             pending: RefCell::new(None),
             channel: Cell::new(channel),
+            ready: AtomicBool::new(false),
+            failure: RefCell::new(None),
+            notify: Box::new(notify),
         });
         // SAFETY: NSObject init and the pinned Sparkle 2 controller selectors use
         // the declared Cocoa object/BOOL/error-pointer ABIs on the main thread.
@@ -134,11 +194,13 @@ impl MacSparkle {
             userDriverDelegate: std::ptr::null::<AnyObject>()]
         };
         let updater: Retained<AnyObject> = unsafe { msg_send![&*controller, updater] };
-        unsafe {
-            let _: () =
-                msg_send![&*updater, setAutomaticallyChecksForUpdates: Bool::from(automatic)];
-            let _: () = msg_send![&*updater, setAutomaticallyDownloadsUpdates: Bool::NO];
-            let _: () = msg_send![&*updater, setUpdateCheckInterval: crate::update_policy::DAILY_SECONDS as f64];
+        if !inspect {
+            unsafe {
+                let _: () =
+                    msg_send![&*updater, setAutomaticallyChecksForUpdates: Bool::from(automatic)];
+                let _: () = msg_send![&*updater, setAutomaticallyDownloadsUpdates: Bool::NO];
+                let _: () = msg_send![&*updater, setUpdateCheckInterval: crate::update_policy::DAILY_SECONDS as f64];
+            }
         }
         let mut error: *mut NSError = std::ptr::null_mut();
         let started: Bool = unsafe { msg_send![&*updater, startUpdater: &mut error] };
@@ -149,8 +211,25 @@ impl MacSparkle {
                 .map(|error| error.localizedDescription().to_string())
                 .unwrap_or_default()
         );
+        if inspect {
+            // Let the SDK perform its scheduled first-launch cycle under the
+            // volatile overrides, then compare the real persistent domain.
+            objc2_foundation::NSRunLoop::currentRunLoop()
+                .runUntilDate(&objc2_foundation::NSDate::dateWithTimeIntervalSinceNow(0.1));
+            let after: Option<Retained<AnyObject>> =
+                unsafe { msg_send![&*defaults, persistentDomainForName: &*identifier] };
+            let unchanged = match (&before, &after) {
+                (None, None) => true,
+                (Some(before), Some(after)) => unsafe {
+                    let equal: Bool = msg_send![&**before, isEqual: &**after];
+                    equal.as_bool()
+                },
+                _ => false,
+            };
+            ensure!(unchanged, "Updater inspection changed persistent defaults");
+        }
         let timer = unsafe {
-            NSTimer::scheduledTimerWithTimeInterval_target_selector_userInfo_repeats(
+            NSTimer::timerWithTimeInterval_target_selector_userInfo_repeats(
                 0.5,
                 &delegate,
                 objc2::sel!(ectResumeUpdate:),
@@ -158,12 +237,33 @@ impl MacSparkle {
                 true,
             )
         };
+        // Continue fence polling while Cocoa is inside a modal update/quit loop.
+        unsafe {
+            objc2_foundation::NSRunLoop::currentRunLoop()
+                .addTimer_forMode(&timer, objc2_foundation::NSRunLoopCommonModes);
+        }
         Ok(Self {
             controller,
             _delegate: delegate,
             timer,
             _installation: installation,
         })
+    }
+
+    pub fn waiting(&self) -> bool {
+        self._delegate.waiting()
+    }
+    pub fn installing(&self) -> bool {
+        self._installation.is_installing()
+    }
+    pub fn shutdown_ready(&self, ready: bool) {
+        self._delegate.ivars().ready.store(ready, Ordering::Release);
+    }
+    pub fn take_failure(&self) -> Option<String> {
+        self._delegate.ivars().failure.borrow_mut().take()
+    }
+    pub fn cancel(&self, message: &str) {
+        self._delegate.fail(message.into());
     }
 
     pub fn configure(&self, automatic: bool, channel: Channel) {
@@ -195,4 +295,110 @@ impl Drop for MacSparkle {
         // Retain any installation reservation through native relaunch/process exit.
         // The standard controller owns its update session and installation helpers.
     }
+}
+
+pub fn inspect_shutdown() -> Result<()> {
+    // Exercise the actual Objective-C delegate and copied block without loading
+    // an updater, making a network request, presenting UI or replacing an app.
+    use std::io::{self, BufRead, Write};
+    use std::sync::atomic::AtomicUsize;
+    use tao::platform::macos::{ActivationPolicy, EventLoopExtMacOS};
+    let mut events = tao::event_loop::EventLoopBuilder::<()>::new().build();
+    events.set_activation_policy(ActivationPolicy::Prohibited);
+    events.set_dock_visibility(false);
+    events.set_activate_ignoring_other_apps(false);
+    objc2_app_kit::NSApplication::sharedApplication(
+        MainThreadMarker::new().context("Missing main thread")?,
+    )
+    .setActivationPolicy(objc2_app_kit::NSApplicationActivationPolicy::Prohibited);
+    let notifications = Arc::new(AtomicUsize::new(0));
+    let termination = notifications.clone();
+    crate::macos::coordinate_termination(move || {
+        termination.fetch_add(1, Ordering::AcqRel);
+        crate::macos::finish_termination(false);
+    })?;
+    let marker = MainThreadMarker::new().context("Shutdown probe requires the main thread")?;
+    let state = notifications.clone();
+    let installation = Arc::new(Installation::default());
+    let delegate = ECTRustSparkleDelegate::alloc(marker).set_ivars(DelegateState {
+        installation: installation.clone(),
+        pending: RefCell::new(None),
+        channel: Cell::new(Channel::default()),
+        ready: AtomicBool::new(false),
+        failure: RefCell::new(None),
+        notify: Box::new(move || {
+            state.fetch_add(1, Ordering::AcqRel);
+        }),
+    });
+    let delegate: Retained<ECTRustSparkleDelegate> = unsafe { msg_send![super(delegate), init] };
+    let calls = Arc::new(AtomicUsize::new(0));
+    let counter = calls.clone();
+    let continuation: RcBlock<dyn Fn()> = RcBlock::new(move || {
+        counter.fetch_add(1, Ordering::AcqRel);
+    });
+    let object = NSObject::new();
+    let postponed: Bool = unsafe {
+        msg_send![&*delegate, updater: &*object, shouldPostponeRelaunchForUpdate: &*object, untilInvokingBlock: &*continuation]
+    };
+    ensure!(
+        postponed.as_bool() && notifications.load(Ordering::Acquire) == 1,
+        "Installation did not request coordinated shutdown"
+    );
+    println!("waiting");
+    io::stdout().flush()?;
+    // Same selector used by the retained production NSTimer. Its argument is
+    // deliberately ignored; calling the Objective-C method exercises its ABI.
+    for line in io::stdin().lock().lines() {
+        match line?.as_str() {
+            "ready" => {
+                delegate.ivars().ready.store(true, Ordering::Release);
+            }
+            "attempt" => unsafe {
+                let _: () = msg_send![&*delegate, ectResumeUpdate: std::ptr::null::<NSTimer>()];
+            },
+            "fail" => {
+                let class = AnyClass::get(c"NSError").context("Missing NSError")?;
+                let error: Retained<NSError> = unsafe {
+                    msg_send![class, errorWithDomain: &*NSString::from_str("ECTShutdownProbe"), code: 42isize, userInfo: std::ptr::null::<AnyObject>()]
+                };
+                unsafe {
+                    let _: () = msg_send![&*delegate, updater: &*object, didFinishUpdateCycleForUpdateCheck: 0usize, error: &*error];
+                }
+                ensure!(
+                    !delegate.waiting() && delegate.ivars().failure.borrow().is_some(),
+                    "Native failure left installation pending"
+                );
+            }
+            "quit" => {
+                let before = notifications.load(Ordering::Acquire);
+                objc2_app_kit::NSApplication::sharedApplication(marker).terminate(None);
+                ensure!(
+                    notifications.load(Ordering::Acquire) == before + 1,
+                    "Cocoa Quit bypassed the shutdown callback"
+                );
+                crate::macos::finish_termination(false);
+                println!("quit-canceled");
+                io::stdout().flush()?;
+                continue;
+            }
+            "done" => break,
+            _ => anyhow::bail!("Unknown shutdown probe command"),
+        }
+        println!(
+            "{}:{}",
+            if delegate.waiting() {
+                if installation.is_installing() {
+                    "installing"
+                } else {
+                    "waiting"
+                }
+            } else {
+                "canceled"
+            },
+            calls.load(Ordering::Acquire)
+        );
+        io::stdout().flush()?;
+    }
+    installation.cancel();
+    Ok(())
 }

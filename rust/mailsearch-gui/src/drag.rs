@@ -147,6 +147,11 @@ impl Drop for Exports {
     }
 }
 
+pub fn resume() {
+    // Called only after both the archive owner and asynchronous cleanup finish.
+    CLOSING.store(false, Ordering::Release);
+}
+
 pub fn close(finished: impl FnOnce(Result<()>) + Send + 'static) {
     // One native reader lives in each process today. Revoke before shutdown and
     // clean private exports independently of a potentially unfinished read worker.
@@ -155,7 +160,8 @@ pub fn close(finished: impl FnOnce(Result<()>) + Send + 'static) {
         paths.tokens.clear();
         paths.roots.drain().collect::<Vec<_>>()
     } else {
-        vec![]
+        finished(Err(anyhow::anyhow!("Temporary drag registry lock failed")));
+        return;
     };
     std::thread::spawn(move || {
         let mut errors = vec![];

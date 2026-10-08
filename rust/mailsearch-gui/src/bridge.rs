@@ -54,6 +54,19 @@ impl Bridge {
             cancellation: None,
         })
     }
+    pub fn quiesce(&mut self) -> Result<()> {
+        // Stop helper writers through owner EOF/checkpointing before acknowledging
+        // cleanup; retain the reader so canceled installation can restore the UI.
+        self.search.take();
+        self.engine.take();
+        self.drags.take();
+        if let Some(exports) = self.exports.take() {
+            exports
+                .close()
+                .context("Clean temporary message/attachment exports")?;
+        }
+        Ok(())
+    }
     pub fn enable_desktop(&mut self) {
         self.desktop_enabled = true;
     }

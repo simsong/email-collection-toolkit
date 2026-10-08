@@ -2620,6 +2620,15 @@ never enter uploaded artifacts. Windows 10 testing is not a release gate. The al
 test certificate with explicit trust instructions; private keys and synthetic
 upgrade fixtures must never be published. Native Rust becomes the primary Mac
 GUI while retaining the bundled Python ingest service and existing update identity.
+Confirmed macOS update installation must request foreground shutdown, reject new
+archive work, await the actual helper checkpoint/owner cleanup and temporary
+export cleanup, then reserve the application writer fence before handing control
+to Sparkle. A watchdog expiration is not a cleanup acknowledgment. Cocoa Quit
+(including Sparkle's native terminate request) must use the same coordination.
+An installation failure/cancellation releases the reservation, restores the reader
+or startup page and allows a subsequent ordinary Quit. Package updater inspection
+must initialize the actual framework without network checks, windows or changes
+to the app's persistent Sparkle preferences.
 
 Ordinary Rust search exposes only Archive/Sent categories, including blank,
 structured, preview and comprehensive queries; quarantined rows must never

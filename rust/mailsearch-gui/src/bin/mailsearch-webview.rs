@@ -3,7 +3,7 @@
 // Embedded application assets are the only files exposed to the webview protocol.
 // JSON requests go to one bounded worker; SQLite never runs on the window thread.
 // Replies return through the native event loop without waiting on JS callbacks.
-// Closing cancels the archive service with an independent five-second exit bound.
+// Ordinary close bounds helper shutdown; confirmed updates await actual cleanup.
 // The --rpc mode exercises the same dispatcher headlessly over standard I/O.
 use anyhow::{bail, Result};
 use mailsearch_rust::bridge::{Bridge, Request};
@@ -70,10 +70,17 @@ fn main() -> Result<()> {
             {
                 mailsearch_rust::macos::inspect()?;
             }
+            #[cfg(target_os = "macos")]
+            let updater = mailsearch_rust::updater::Updater::inspect()?;
+            #[cfg(not(target_os = "macos"))]
             let updater = mailsearch_rust::updater::Updater::new(false, Default::default(), || {});
             anyhow::ensure!(updater.available(), "{}", updater.detail);
             println!("{}", updater.detail);
             Ok(())
+        }
+        #[cfg(target_os = "macos")]
+        [flag] if flag == "--updater-shutdown-probe" => {
+            mailsearch_rust::updater::inspect_shutdown()
         }
         [flag] if flag == "--updater-fence" => {
             let installation = mailsearch_rust::update_policy::Installation::default();
@@ -379,7 +386,8 @@ fn native(
         Shell(Request),
         Menu(muda::MenuEvent),
         Quit,
-        QuitFinished,
+        QuitFinished(Result<()>),
+        QuitTimedOut(u64),
         ExportCleanup(anyhow::Result<()>),
         Print(u64),
         Welcome(Request),
@@ -449,12 +457,20 @@ fn native(
         let _ = menu_proxy.send_event(NativeEvent::Menu(event));
     }));
     let quit_proxy = events.create_proxy();
+    #[cfg(target_os = "macos")]
+    {
+        let termination_proxy = events.create_proxy();
+        mailsearch_rust::macos::coordinate_termination(move || {
+            let _ = termination_proxy.send_event(NativeEvent::Quit);
+        })?;
+    }
     let mut shell = Some(mailsearch_rust::shell::Shell::new(move || {
         let _ = quit_proxy.send_event(NativeEvent::Quit);
     })?);
     let proxy = events.create_proxy();
     let (sender, receiver) = mpsc::sync_channel::<Request>(64);
     let abort = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let closing = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
     let worker_abort = abort.clone();
     if welcome {
         let capability_proxy = events.create_proxy();
@@ -469,14 +485,19 @@ fn native(
     thread::Builder::new()
         .name("archive-web-reader".into())
         .spawn(move || {
-            let mut bridge = None;
+            let mut bridge: Option<std::result::Result<Bridge, String>> = None;
             let mut selected_path = path;
             let mut create = false;
             while let Ok(request) = receiver.recv() {
                 if request.method == "shutdown" {
-                    drop(bridge);
-                    let _ = proxy.send_event(NativeEvent::QuitFinished);
-                    return;
+                    let result = if let Some(Ok(bridge)) = &mut bridge {
+                        bridge.quiesce()
+                    } else {
+                        bridge.take();
+                        Ok(())
+                    };
+                    let _ = proxy.send_event(NativeEvent::QuitFinished(result));
+                    continue;
                 }
                 if request.method == "opening_select" {
                     create = request
@@ -561,6 +582,7 @@ fn native(
     let shutdown_sender = sender.clone();
     let ipc_proxy = events.create_proxy();
     let ipc_abort = abort.clone();
+    let ipc_closing = closing.clone();
     let diagnostics = std::env::var_os("ECT_RUST_WEBVIEW_DIAGNOSTICS").is_some();
     #[cfg(feature = "native-smoke")]
     let smoke_enabled = smoke_output.is_some();
@@ -617,6 +639,16 @@ fn native(
                 return;
             }
             if let Ok(message) = serde_json::from_str::<Request>(request.body()) {
+                if ipc_closing.load(std::sync::atomic::Ordering::Acquire)
+                    && message.method != "quit"
+                {
+                    let _ = ipc_proxy.send_event(NativeEvent::Reply(Reply {
+                        id: message.id,
+                        result: None,
+                        error: Some("Finishing archive work before closing…".into()),
+                    }));
+                    return;
+                }
                 if is_welcome {
                     if matches!(
                         message.method.as_str(),
@@ -749,6 +781,9 @@ fn native(
     let reply_proxy = events.create_proxy();
     let mut quitting = false;
     let mut worker_finished = false;
+    let mut quit_timed_out = false;
+    let mut quit_epoch = 0u64;
+    let mut update_failure = None;
     let mut exports_cleaned = false;
     let mut cleanup_failed = false;
     let mut reader_ready = false;
@@ -816,18 +851,24 @@ fn native(
             | Event::UserEvent(NativeEvent::Quit) => {
                 if !quitting {
                     quitting=true;
+                    quit_epoch += 1;
+                    closing.store(true, std::sync::atomic::Ordering::Release);
                     let cleanup_proxy = reply_proxy.clone();
                     mailsearch_rust::drag::close(move |result| {
                         let _ = cleanup_proxy.send_event(NativeEvent::ExportCleanup(result));
                     });
                     abort.store(true, std::sync::atomic::Ordering::Release);
-                    let _=shutdown_sender.try_send(Request{id:0,method:"shutdown".into(),args:vec![]});
+                    let shutdown = shutdown_sender.clone();
+                    thread::spawn(move || { let _ = shutdown.send(Request{id:0,method:"shutdown".into(),args:vec![]}); });
                     let watchdog=reply_proxy.clone();
-                    thread::spawn(move||{thread::sleep(std::time::Duration::from_secs(5));let _=watchdog.send_event(NativeEvent::QuitFinished);});
+                    let epoch = quit_epoch;
+                    thread::spawn(move||{thread::sleep(std::time::Duration::from_secs(5));let _=watchdog.send_event(NativeEvent::QuitTimedOut(epoch));});
                 }
             }
-            Event::UserEvent(NativeEvent::QuitFinished) => {
+            Event::UserEvent(NativeEvent::QuitTimedOut(epoch)) if quitting && epoch == quit_epoch => quit_timed_out = true,
+            Event::UserEvent(NativeEvent::QuitFinished(result)) => {
                 worker_finished = true;
+                if let Err(error) = result { eprintln!("{error:#}"); cleanup_failed = true; }
             }
             Event::UserEvent(NativeEvent::ExportCleanup(result)) => {
                 exports_cleaned = true;
@@ -872,12 +913,12 @@ fn native(
                 smoke_passed = result.is_ok();
                 let _ = reply_proxy.send_event(NativeEvent::Quit);
             }
-            Event::UserEvent(NativeEvent::Shell(request)) => {
+            Event::UserEvent(NativeEvent::Shell(request)) if !quitting => {
                 if let Some(shell) = &mut shell {
                     let _ = reply_proxy.send_event(NativeEvent::Reply(shell.reply(request)));
                 }
             }
-            Event::UserEvent(NativeEvent::Print(id)) => {
+            Event::UserEvent(NativeEvent::Print(id)) if !quitting => {
                 let result = view.print();
                 let _ = reply_proxy.send_event(NativeEvent::Reply(Reply {
                     id,
@@ -885,7 +926,7 @@ fn native(
                     error: result.err().map(|e| e.to_string()),
                 }));
             }
-            Event::UserEvent(NativeEvent::Menu(event)) => {
+            Event::UserEvent(NativeEvent::Menu(event)) if !quitting => {
                 let action = event.id.as_ref();
                 #[cfg(all(target_os = "windows", feature = "native-smoke"))]
                 if action == "preferences" {
@@ -966,7 +1007,43 @@ fn native(
             }
             _ => (),
         }
-        if quitting && worker_finished && exports_cleaned {
+        let updater = shell.as_ref().map(mailsearch_rust::shell::Shell::updater);
+        if let Some(updater) = updater {
+            if quitting && worker_finished && exports_cleaned {
+                if cleanup_failed && updater.waiting() { updater.cancel_installation("Could not clean temporary exports; update installation canceled."); }
+                updater.shutdown_ready(!cleanup_failed);
+            }
+            if let Some(failure) = updater.take_failure() { update_failure = Some(failure); }
+        }
+        if quitting && worker_finished && exports_cleaned && update_failure.is_some() {
+            // No installer was handed control. Restore the same reader and allow
+            // a later ordinary Quit instead of leaving a dead worker or latch.
+            let failure = update_failure.take().unwrap();
+            quitting = false;
+            worker_finished = false;
+            quit_timed_out = false;
+            exports_cleaned = false;
+            closing.store(false, std::sync::atomic::Ordering::Release);
+            abort.store(false, std::sync::atomic::Ordering::Release);
+            if let Some(updater) = updater { updater.shutdown_ready(false); }
+            if !cleanup_failed { mailsearch_rust::drag::resume(); }
+            if !reader_ready {
+                welcome = true;
+                archive_path = None;
+                let _ = view.load_url(if cfg!(windows) { "http://ect.localhost/welcome.html" } else { "ect://localhost/welcome.html" });
+            }
+            #[cfg(target_os = "macos")]
+            mailsearch_rust::macos::finish_termination(false);
+            let _ = reply_proxy.send_event(NativeEvent::Notice(format!("Update installation canceled: {failure}")));
+        }
+        let waiting = updater.is_some_and(|updater| updater.waiting());
+        #[cfg(target_os = "macos")]
+        if quitting && worker_finished && exports_cleaned && !cleanup_failed && updater.is_some_and(|updater| updater.installing()) {
+            mailsearch_rust::macos::finish_termination(true);
+        }
+        if quitting && (worker_finished || quit_timed_out) && exports_cleaned && !waiting {
+            #[cfg(target_os = "macos")]
+            if mailsearch_rust::macos::finish_termination(true) { return; }
             #[cfg(feature = "native-smoke")]
             let failed = cleanup_failed || (smoke_enabled && !smoke_passed);
             #[cfg(not(feature = "native-smoke"))]

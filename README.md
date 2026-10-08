@@ -793,13 +793,15 @@ directories. Dock/Finder opens enter the same validation/recovery path. Physical
 interaction and window/document coordination remain human acceptance.
 Mounted checks use synthetic mail to exercise frozen ingest, helper discovery,
 search, reading, fixity and native panel/icon configuration without windows.
-They also start the actual bundled Sparkle controller with automatic checks off.
+They also start the actual bundled Sparkle controller under volatile first-launch
+and automatic-check overrides and assert that saved Sparkle preferences stay
+unchanged.
 `make test-dmg DMG=...` repeats those checks. Packaged macOS uses its own service,
 ignoring `ECT_RUST_ENGINE_PYTHON`; the Windows bundle uses isolated private CPython.
 
 Both platforms share Rust release configuration, preferences and installer policy.
-macOS loads the pinned Sparkle framework and waits for the Python writer fence
-before relaunch. Windows authenticates the complete shared feed in Rust and
+macOS loads the pinned Sparkle framework, completes Rust helper/export shutdown,
+and waits for the Python writer fence before relaunch. Windows authenticates the complete shared feed in Rust and
 serves only the chosen Windows channel to WinSparkle over loopback; unchanged
 installer enclosures retain native Ed25519 verification. Its confirmation opens
 the signed MSIX bundle with Windows App Installer. Windows ingest remains disabled.

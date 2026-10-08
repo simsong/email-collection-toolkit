@@ -38,6 +38,10 @@ impl Shell {
         })
     }
 
+    pub fn updater(&self) -> &Updater {
+        &self.updater
+    }
+
     pub fn reply(&mut self, request: Request) -> Reply {
         let result = self.call(&request.method, &request.args);
         match result {

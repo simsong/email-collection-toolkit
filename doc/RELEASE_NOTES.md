@@ -8,7 +8,9 @@
   service, existing application identity, document ownership and update feed.
 - Share Rust update preferences and signing metadata across native Sparkle and
   WinSparkle. Preserve existing update choices, authenticate full feeds and
-  installer signatures, and defer macOS installation while Python writers run.
+  installer signatures, and defer macOS installation until helper/export cleanup
+  and Python writer exclusion finish. Restore the reader after native install
+  failure; keep mounted updater checks out of saved Sparkle preferences.
 - Consolidate Windows packaging into a tested x64/ARM64 MSIX bundle. Alpha
   installation requires trusting its persistent test certificate; Windows ingest
   remains disabled. Never distribute synthetic upgrade fixtures or private keys.
