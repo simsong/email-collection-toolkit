@@ -3,6 +3,7 @@
 # A crashed SQLite writer leaves genuine rollback journals in synthetic databases.
 # Chromium renders the shipped opening page and sends its real Abort request.
 # OS suspension holds the actual helper past the old timeout without fake replies.
+# A channel-only pause after real creation exercises cancellation before acknowledgment.
 # Successful repair must revalidate; abort and failures must never open a reader.
 # Canonical MBOX bytes and committed database rows survive every recovery attempt.
 from __future__ import annotations
@@ -86,7 +87,8 @@ os._exit(0)
 
 @contextmanager
 def opener(archive: Path, tmp_path: Path, held: bool = False,
-           recent: list[Path] | None = None, create: bool = False) -> Iterator[tuple[subprocess.Popen[str], Queue[OpeningReply]]]:
+           recent: list[Path] | None = None, create: bool = False,
+           before_create_reply: bool = False) -> Iterator[tuple[subprocess.Popen[str], Queue[OpeningReply]]]:
     binary = os.environ.get(BINARY_ENV)
     if not binary:
         pytest.skip("run make test-rust-recovery")
@@ -110,6 +112,50 @@ def opener(archive: Path, tmp_path: Path, held: bool = False,
             "# SQLite journals remain genuine and are recovered by production code.\n"
             "# This private fixture tests long waits and explicit owner abort.\n"
             f"kill -STOP $$\nexec {shlex.quote(sys.executable)} \"$@\"\n", encoding="utf-8")
+        launcher.chmod(0o700)
+        environment[PYTHON_ENV] = str(launcher)
+    if before_create_reply:
+        gate = tmp_path / "creation-channel.py"
+        gate.write_text('''# Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved.
+# Run the production private service and forward its actual typed replies.
+# Pause only its stdout channel after successful real archive initialization.
+# The parent observes the completed staging archive before requesting Abort.
+# SIGSTOP prevents acknowledgment; the Rust supervisor must reap this peer.
+# No creation, validation, reply payload or owner-pipe behavior is mocked.
+# The fixture leaves destination cleanup entirely to production code.
+import os
+from pathlib import Path
+import signal
+import sys
+from mailarchiver import rust_engine
+
+marker = Path(sys.argv[1])
+sys.argv = ["rust-engine", sys.argv[-1]]
+channel = sys.stdout
+
+class Output:
+    def write(self, payload: str) -> int:
+        reply = rust_engine.Reply.model_validate_json(payload)
+        if reply.id == 2 and reply.error is None and reply.result is True:
+            marker.write_text(sys.argv[1], encoding="utf-8")
+            os.kill(os.getpid(), signal.SIGSTOP)
+        return channel.write(payload)
+
+    def flush(self) -> None:
+        channel.flush()
+
+sys.stdout = Output()
+rust_engine.main()
+''', encoding="utf-8")
+        launcher = tmp_path / "held-create-python"
+        launcher.write_text("#!/bin/sh\n"
+            "# Launch the actual private service with a channel-only scheduling gate.\n"
+            "# Preserve the production target argument and interpreter environment.\n"
+            "# The gate forwards typed replies without replacing archive operations.\n"
+            "# Its OS pause occurs after real creation but before acknowledgment.\n"
+            "# The parent tests bounded Abort and owned-staging cleanup.\n"
+            f"exec {shlex.quote(sys.executable)} {shlex.quote(str(gate))} "
+            f"{shlex.quote(str(tmp_path / 'creation-ready'))} \"$@\"\n", encoding="utf-8")
         launcher.chmod(0o700)
         environment[PYTHON_ENV] = str(launcher)
     replies: Queue[OpeningReply] = Queue()
@@ -331,3 +377,56 @@ def test_startup_creation_is_supervised_and_abort_keeps_destination_empty(tmp_pa
     validate_archive(archive)
     with sqlite3.connect(archive / "archive.sqlite3") as database:
         assert database.execute("SELECT count(*) FROM messages").fetchone() == (0,)
+
+
+@pytest.mark.skipif(os.name != "posix", reason="real SIGSTOP creation acknowledgment scheduling")
+@pytest.mark.parametrize("existing", [False, True])
+def test_abort_after_real_creation_before_acknowledgment_discards_only_staging(tmp_path: Path, existing: bool) -> None:
+    """New cancellation: completed helper work cannot publish after pre-commit Abort."""
+    archive = tmp_path / "retry.mailarchive"
+    if existing:
+        archive.mkdir()
+    other = tmp_path / "Existing.mailarchive"
+    other.mkdir()
+    sentinel = other / "original.eml"
+    sentinel.write_bytes(b"Original unrelated archive bytes\n")
+    with opener(archive, tmp_path, create=True, before_create_reply=True) as (process, replies):
+        send(process, "opening_start")
+        child = held_child(process)
+        prepared = Path((tmp_path / "creation-ready").read_text(encoding="utf-8"))
+        validate_archive(prepared)  # Actual complete catalog/index, no synthetic reply.
+        assert prepared != archive and prepared.parent.name.startswith(".ect-create-")
+        assert not archive.exists() or not list(archive.iterdir())
+        send(process, "opening_abort")
+        failed = replies.get(timeout=7)
+        assert failed.error and "aborted" in failed.error and failed.result is None
+        process.wait(timeout=2)
+        with pytest.raises(ProcessLookupError):
+            os.kill(child, 0)
+    assert not archive.exists() or not list(archive.iterdir())
+    assert not list(tmp_path.glob(".ect-create-*"))
+    assert sentinel.read_bytes() == b"Original unrelated archive bytes\n"
+    with opener(archive, tmp_path, create=True) as (process, replies):
+        send(process, "opening_start")
+        assert replies.get(timeout=15).result is True
+    validate_archive(archive)
+
+
+@pytest.mark.skipif(os.name != "posix", reason="real SIGSTOP creation acknowledgment scheduling")
+def test_creation_commit_preserves_concurrent_destination_contents(tmp_path: Path) -> None:
+    """Publication safety: another writer's destination files must never be replaced."""
+    archive = tmp_path / "concurrent.mailarchive"
+    archive.mkdir()
+    with opener(archive, tmp_path, create=True, before_create_reply=True) as (process, replies):
+        send(process, "opening_start")
+        child = held_child(process)
+        prepared = Path((tmp_path / "creation-ready").read_text(encoding="utf-8"))
+        validate_archive(prepared)
+        original = archive / "original.eml"
+        original.write_bytes(b"Concurrent user-owned bytes\n")
+        os.kill(child, signal.SIGCONT)
+        failed = replies.get(timeout=15)
+        assert failed.error and "Publish newly created archive" in failed.error and failed.result is None
+    assert original.read_bytes() == b"Concurrent user-owned bytes\n"
+    assert list(archive.iterdir()) == [original]
+    assert not list(tmp_path.glob(".ect-create-*"))

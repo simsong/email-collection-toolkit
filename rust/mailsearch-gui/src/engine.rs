@@ -41,9 +41,37 @@ impl Engine {
     }
     pub fn create_archive(archive: &Path, abort: &AtomicBool) -> Result<()> {
         require_archive_writing()?;
-        let mut engine = Self::spawn(archive, Some(abort))?;
-        engine.request("create", &[], Some(abort))?;
         ensure!(!abort.load(Ordering::Acquire), "Archive creation aborted");
+        let archive = std::path::absolute(archive)?;
+        if let Ok(info) = archive.symlink_metadata() {
+            ensure!(
+                info.is_dir() && !info.is_symlink(),
+                "New archive destination is not a directory"
+            );
+            ensure!(
+                std::fs::read_dir(&archive)?.next().is_none(),
+                "New archive destination is not empty; use Open for an existing archive"
+            );
+        }
+        let parent = archive
+            .parent()
+            .context("Missing archive parent directory")?;
+        std::fs::create_dir_all(parent)?;
+        // Only this owned sibling can contain partial creation. Reap the helper
+        // before deleting it; never clean files from the selected destination.
+        let staging = tempfile::Builder::new()
+            .prefix(".ect-create-")
+            .tempdir_in(parent)?;
+        let prepared = staging.path().join("archive.mailarchive");
+        let mut engine = Self::spawn(&prepared, Some(abort))?;
+        let result = engine.request("create", &[], Some(abort));
+        drop(engine);
+        result?;
+        drop(crate::Archive::open(&prepared).context("Validate prepared archive")?);
+        ensure!(!abort.load(Ordering::Acquire), "Archive creation aborted");
+        // Publishing is the commit point: rename cannot replace a nonempty
+        // directory or a symlink. A later Abort closes the reader, not this archive.
+        std::fs::rename(&prepared, &archive).context("Publish newly created archive")?;
         Ok(())
     }
     pub fn for_recovery(archive: &Path, abort: &AtomicBool) -> Result<Self> {

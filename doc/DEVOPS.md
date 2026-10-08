@@ -9,12 +9,13 @@ keeping ordinary development iterations independent of Windows. Bring Windows
 to the intended macOS feature fidelity when preparing a release, with limited
 local validation on the Windows ARM64 VM and focused release-time checks.
 
-**Implementation status:** this section is the agreed target workflow, not a
-claim that it is deployed. The Windows branch preserves macOS-only ordinary CI and provides explicit
-manual/release Cargo reader builds for macOS, Windows x64 and Windows ARM64. Windows installer packaging, the mixed-platform appcast publisher, and
-the website's two direct-download buttons remain to be implemented. The Rust
-Windows application is currently a reader preview; archive writing/imports
-remain unsupported. Building an installer does not establish feature parity.
+**Implementation status:** ordinary CI remains macOS-focused, with explicit
+Windows reader and shared x64/ARM64 test-MSIX build/install/upgrade/uninstall gates.
+These test-installer gates are implemented; they are distinct from production
+publication. The a15 candidate adds shared-feed signing/publication and download
+selection, which still require its current-head release checks and live release
+verification. Windows archive writing/imports remain unsupported. Building or
+installing a reader package does not establish feature parity.
 
 ### When to spend runner time
 
@@ -202,24 +203,28 @@ until Linux-specific tooling is added.
 
 ## MSIX installation matrix (2026-10-07)
 
-The MSIX decision supersedes the older shared WinSparkle feed/EXE plan.
-`windows-msix.yml` supports explicit dispatch and reusable release calls; ordinary
-pushes do not run it. Two native build jobs produce x64 and ARM64 payloads once.
+MSIX replaces the older EXE installer plan; the a15 Rust WinSparkle adapter
+discovers the bundle through the authenticated shared feed. `windows-msix.yml`
+supports explicit dispatch, reusable release calls and explicit packaging-branch
+`[msix-ci]`/`[release-ci]` pushes; ordinary pushes do not run it. Two native build
+jobs produce x64 and ARM64 payloads once per workflow invocation.
 One assembly job creates a signed common bundle and a higher-version upgrade
 fixture with identical application bytes. Both installation VMs download that
 same artifact: Windows Server x64 (`windows-latest`) and Windows 11 ARM64
 (`windows-11-arm`). Installation jobs do not rebuild. Private signing keys remain
-outside uploaded artifacts. Test packages are never published as release assets.
+outside uploaded artifacts. The authorized alpha may publish the validated base
+test-signed bundle and public trust material; upgrade fixtures stay CI-only.
 The release caller waits for this gate after tag preflight. Windows 10 testing
 is not required. No GitHub Team or AWS provisioning is needed.
 
 Installed checks exercise private Python discovery, synthetic search/fixity,
 a native window, upgrade and uninstall, removing test packages and added trust
 in cleanup. WebView2 remains external and its absence fails this positive test.
-Its writable user-data directory is outside the immutable package. Hosted
-execution is pending; earlier local prototype results do not validate this head.
-Start-menu activation, missing-runtime UI, Windows imports/scanner/converters,
-and physical interaction remain separate acceptance gaps.
+Its writable user-data directory is outside the immutable package. Hosted matrix
+execution is implemented, including Start-menu activation and missing-runtime
+guidance. Results must match the candidate head; earlier package results do not
+clear revised signing or updater code. Windows imports/scanner/converters and
+physical interaction remain separate acceptance gaps.
 
 Windows test signing now requires the persistent `MSIX_TEST_CERT_PFX_BASE64`
 Actions secret, passed only to bundle signing (including reusable release calls).

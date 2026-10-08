@@ -2545,6 +2545,13 @@ reordering the saved list. Recent-list updates from separate processes must
 serialize the complete load/update/replace sequence and retain concurrent opens.
 Startup archive creation and helper cleanup must run on the archive worker,
 leaving Quit/Close and document events responsive; Abort keeps that reader closed.
+New prepares and validates an archive in an owned sibling staging directory,
+reaps its helper before cleanup, and publishes by atomic rename. Abort before
+publication leaves the selected destination absent or empty and permits retry;
+an Abort after publication leaves the complete archive available through Open.
+Never remove files from an existing destination to roll back creation.
+Failure to save recent-document preferences reports a notice without discarding
+a successfully validated reader.
 Startup must choose the first usable archive in recent order, skipping missing
 or invalid entries; only an entirely unusable list may fall back to prompting.
 A rollback-required recent archive remains eligible ahead of older valid entries

@@ -4,6 +4,9 @@
 
 ## 1.0.0a15 (candidate)
 
+- Keep valid readers open when recent preferences cannot be saved. Stage New
+  creation before atomic publication so Abort can discard only its own attempt
+  and retry without a partial destination.
 - Make Rust the primary macOS app while retaining the private Python ingest
   service, existing application identity, document ownership and update feed.
 - Share Rust update preferences and signing metadata across native Sparkle and

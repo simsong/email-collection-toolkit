@@ -3455,6 +3455,13 @@ while leaving that reader hidden in the worker. The headless shutdown probe
 exercises the actual Objective-C postpone/resume/error callbacks and Cocoa Quit
 against a real Python writer lease, including staging without postponement; it
 does not claim native replacement/relaunch.
+Startup New initializes and read-validates an owned sibling staging directory.
+The supervisor reaps the helper before removing failed/aborted staging; it never
+deletes destination files. Atomic rename publishes only a complete archive into
+an absent or empty destination. Publication is the commit point: a later Abort
+keeps the reader closed but leaves the complete archive available through Open.
+Recent-document preference failures emit a native notice and retain the opened
+bridge; they remain independent of validation and Abort.
 Mounted updater inspection uses volatile `NSArgumentDomain` overrides for first
 launch and automatic checks, skips all persistent setters, runs the scheduled SDK
 startup cycle and verifies the production bundle's persistent domain is unchanged.

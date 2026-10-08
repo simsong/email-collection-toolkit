@@ -363,6 +363,26 @@ fn trusted_panel(value: &str, windows: bool) -> bool {
 }
 
 #[cfg(any(target_os = "macos", target_os = "windows", test))]
+fn finish_opening(
+    mut bridge: Bridge,
+    abort: &std::sync::atomic::AtomicBool,
+    remember: impl FnOnce() -> Result<()>,
+    notice: impl FnOnce(String),
+) -> Result<Bridge> {
+    if let Err(error) = remember() {
+        notice(format!(
+            "Archive opened, but its recent-document preference could not be saved: {error:#}"
+        ));
+    }
+    anyhow::ensure!(
+        !abort.load(std::sync::atomic::Ordering::Acquire),
+        "Opening aborted. The archive cannot be opened."
+    );
+    bridge.enable_desktop();
+    Ok(bridge)
+}
+
+#[cfg(any(target_os = "macos", target_os = "windows", test))]
 fn quiesce_reader(bridge: &mut Option<std::result::Result<Bridge, String>>) -> (bool, Result<()>) {
     if let Some(Ok(bridge)) = bridge {
         (true, bridge.quiesce())
@@ -534,19 +554,23 @@ fn native(
                             mailsearch_rust::opening::open(path, &worker_abort, || {
                                 let _ = proxy.send_event(NativeEvent::Recovering);
                             })
-                            .and_then(|mut bridge| {
-                                if remember {
-                                    mailsearch_rust::documents::Documents::remember(
-                                        &mailsearch_rust::documents::Documents::path()?,
-                                        path,
-                                    )?;
-                                }
-                                anyhow::ensure!(
-                                    !worker_abort.load(std::sync::atomic::Ordering::Acquire),
-                                    "Opening aborted. The archive cannot be opened."
-                                );
-                                bridge.enable_desktop();
-                                Ok(bridge)
+                            .and_then(|bridge| {
+                                finish_opening(
+                                    bridge,
+                                    &worker_abort,
+                                    || {
+                                        if !remember {
+                                            return Ok(());
+                                        }
+                                        mailsearch_rust::documents::Documents::remember(
+                                            &mailsearch_rust::documents::Documents::path()?,
+                                            path,
+                                        )
+                                    },
+                                    |message| {
+                                        let _ = proxy.send_event(NativeEvent::Notice(message));
+                                    },
+                                )
                             })
                         })
                         .map_err(|error| format!("{error:#}"));
@@ -1065,6 +1089,46 @@ fn native(
 #[cfg(test)]
 mod tests {
     use super::{trusted_document, trusted_panel, trusted_welcome};
+
+    #[test]
+    fn failed_recent_preference_does_not_discard_a_valid_reader() {
+        // Open requirement: a real ancillary filesystem failure is a notice,
+        // while verified reading remains available and Abort still closes it.
+        let directory = tempfile::tempdir().unwrap();
+        let archive = directory.path().join("Readable.mailarchive");
+        mailsearch_rust::demo::create(&archive).unwrap();
+        let blocked = directory.path().join("preferences");
+        std::fs::write(&blocked, b"Existing user-owned file").unwrap();
+        let settings = blocked.join("recent.json");
+        let mut notices = Vec::new();
+        let mut bridge = super::finish_opening(
+            super::Bridge::open(&archive).unwrap(),
+            &std::sync::atomic::AtomicBool::new(false),
+            || mailsearch_rust::documents::Documents::remember(&settings, &archive),
+            |message| notices.push(message),
+        )
+        .unwrap();
+        assert_eq!(notices.len(), 1);
+        assert!(notices[0].contains("recent-document preference could not be saved"));
+        let reply = bridge.reply(super::Request {
+            id: 1,
+            method: "search".into(),
+            args: vec![serde_json::json!("observatory")],
+        });
+        assert!(reply.error.is_none());
+        assert_eq!(
+            reply.result.unwrap()["results"].as_array().unwrap().len(),
+            2
+        );
+        assert_eq!(std::fs::read(blocked).unwrap(), b"Existing user-owned file");
+        assert!(super::finish_opening(
+            super::Bridge::open(&archive).unwrap(),
+            &std::sync::atomic::AtomicBool::new(true),
+            || Ok(()),
+            |_| {}
+        )
+        .is_err());
+    }
 
     #[test]
     fn shutdown_reports_retained_reader_after_opening_finishes_during_quit() {
