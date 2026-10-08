@@ -1,6 +1,10 @@
 /* Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved. */
 
-/* Requirement: archive searches automatically return matches across the collection's full time span. */
+// Exercise the shipped search and message widgets against real archive services.
+// Searches must cover the collection's full time span and preserve message bytes.
+// Drive rendered controls to check MIME choices, find navigation and exports.
+// Explicit body-mode choices must survive later message selections.
+// This driver supplies shared browser/native acceptance; it does not fake service replies.
 (() => {
   "use strict";
   const checks = [];
@@ -427,8 +431,18 @@
 
     await search("from:curator", 1, false);
     const curatorPk = rows()[0].dataset.messagePk;
+    const previousRawBody = document.querySelector("#body-view .raw");
     rows()[0].click();
-    await waitFor(() => isSelected(rows().find(row => row.dataset.messagePk === curatorPk)) &&
+    await waitFor(() => state.selected === Number(curatorPk) && state.view?.message_pk === Number(curatorPk) &&
+      isSelected(rows().find(row => row.dataset.messagePk === curatorPk)) &&
+      document.querySelector("#body-view .raw") !== previousRawBody &&
+      document.querySelector("#body-view .raw")?.textContent.includes("Curator one"),
+      "selector result retains explicitly selected raw source");
+    assert(parts.selectedOptions[0].textContent.startsWith("Raw"),
+      "message selection retains the explicit body mode");
+    parts.value = [...parts.options].find(option => option.textContent.startsWith("HTML")).value;
+    parts.dispatchEvent(new Event("change", {bubbles: true}));
+    await waitFor(() =>
       document.querySelector("#body-view iframe")?.contentDocument?.body?.textContent.includes("Curator one"),
       "selector result opens for header-to-body find navigation");
     const curatorBody = document.querySelector("#body-view iframe").contentDocument.body.textContent;

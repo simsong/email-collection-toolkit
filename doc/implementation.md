@@ -2380,6 +2380,8 @@ with real finishing, blocked and daemon threads in spawned child processes,
 while an idle parent executor reproduces suite thread contamination. The parent
 requires bounded successful child exit; the production worker gate is unchanged.
 The target also runs the existing packaging tests.
+The shared browser driver asserts Raw Source retention across message selection,
+then explicitly selects HTML before exercising header-to-body find navigation.
 The builder announces each mounted test, including its visible windows, and
 requires the subprocess to exit successfully before accepting its report.
 The DMG build stages the app, Applications symlink, and instructions, mounts
