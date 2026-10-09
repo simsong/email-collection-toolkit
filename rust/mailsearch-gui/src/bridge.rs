@@ -57,8 +57,9 @@ impl Bridge {
         })
     }
     pub fn quiesce(&mut self) -> Result<()> {
-        // Stop helper writers through owner EOF/checkpointing before acknowledging
-        // cleanup; retain the reader so canceled installation can restore the UI.
+        // Owner EOF requests cooperative stop/checkpointing, then reaps the
+        // helper with a bounded fallback. Interrupted checkpoints need recovery;
+        // retain the reader so canceled installation can restore the UI.
         self.search.take();
         self.engine.take();
         if let Some(drags) = &mut self.drags {

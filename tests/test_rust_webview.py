@@ -607,6 +607,10 @@ def test_canceled_shutdown_reloads_blocked_reader_initialization(page: Page, tmp
     if not binary:
         pytest.skip("run make test-rust-webview")
     archive = make_gui_archive(tmp_path)
+    # Real indexed bytes back a result set larger than the first display page.
+    with sqlite3.connect(archive / "archive.sqlite3") as database:
+        database.execute("WITH RECURSIVE seq(x) AS (VALUES(3) UNION ALL SELECT x+1 FROM seq WHERE x<1601) INSERT INTO messages SELECT x,printf('copy%d@example.test',x),sha256,sender_address_pk,subject,date_utc,date_source,category FROM seq CROSS JOIN messages WHERE message_pk=1")
+        database.execute("INSERT INTO locations SELECT message_pk,1,(SELECT byte_offset FROM locations WHERE message_pk=1),(SELECT byte_length FROM locations WHERE message_pk=1) FROM messages WHERE message_pk>2")
     canonical = [(p, sha256(p.read_bytes()).hexdigest()) for p in (archive / "data/mbox").glob("*.mbox")]
     server = ThreadingHTTPServer(("127.0.0.1", 0), partial(SimpleHTTPRequestHandler, directory=str(ROOT / "gui")))
     serving = Thread(target=server.serve_forever, daemon=True)
@@ -641,19 +645,35 @@ def test_canceled_shutdown_reloads_blocked_reader_initialization(page: Page, tmp
             expect(page.get_by_role("button", name=label, exact=True)).to_be_enabled(timeout=15000)
         page.locator("#search").fill("subject:annual report")
         page.locator("#search").press("Enter")
-        expect(page.locator("#result-status")).to_have_text("1 message")
+        expect(page.locator("#result-status")).to_have_text("1,600 messages · 1,024 shown; scroll for more")
         page.locator("#result-list .result").first.click()
         expect(page.locator("#body-view")).to_contain_text("The report is ready.")
         page.get_by_role("button", name="Owner emails…", exact=True).click()
         expect(page.frame_locator(".rust-workflow iframe").locator("#owner-include")).to_have_value("")
         page.locator(".rust-workflow > button").click()
         expect(page.locator("#error")).to_be_hidden()
+        selected = page.evaluate("state.selected")
+        search_request = page.evaluate("state.rustSearch.request")
         # A later attempt with no rejected initialization preserves the current
         # page/selection instead of reloading every restored reader.
         assert StartupReply.model_validate(transport(FilterRequest(method="shutdown_begin").model_dump_json())).result
         restored = StartupReply.model_validate(transport(FilterRequest(method="shutdown_cancel").model_dump_json()))
         assert restored.error is None and restored.result is False
+        page.evaluate("window.dispatchEvent(new Event('mailarchiver-reader-resumed'))")
+        page.wait_for_function("previous => state.rustSearch?.request > previous && state.rustSearch.complete", arg=search_request)
+        assert page.evaluate("state.selected") == selected
         expect(page.locator("#message-subject")).to_have_text("annual plan")
+        for _ in range(3):
+            before = page.evaluate("state.offset")
+            if before == 1600:
+                break
+            page.locator("#result-list .tabulator-tableholder").evaluate("e => { e.scrollTop = e.scrollHeight; }")
+            page.wait_for_function("before => state.offset > before", arg=before)
+        assert page.evaluate("state.offset") == 1600
+        assert page.evaluate("new Set(state.results.map(row => row.message_pk)).size") == 1600
+        assert page.evaluate("state.resultSelection.has(state.selected)")
+        expect(page.locator("#body-view")).to_contain_text("The report is ready.")
+        expect(page.locator("#error")).to_be_hidden()
     finally:
         assert process.stdin is not None
         process.stdin.close()

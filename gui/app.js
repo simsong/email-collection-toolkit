@@ -902,6 +902,32 @@ function renderSearchFilters() {
   elements["search-filters"]?.replaceChildren(...chips);
 }
 
+async function resumeReaderSearch() {
+  if (!state.rustSearch) return;
+  const selected = [...state.resultSelection];
+  const displayed = state.offset;
+  const holder = elements["result-list"].querySelector(".tabulator-tableholder");
+  const scrollTop = holder?.scrollTop || 0;
+  const request = ++state.searchRequest;
+  state.rustSearch = null;
+  // Rebuild only results: keep the message view, part choice and find state.
+  await runCompleteSearch({query: state.query, sortBy: state.sortBy,
+    sortDirection: state.sortDirection, searchAttachments: state.searchAttachments,
+    mailboxSelections: state.showTree ? [...state.mailboxSelections] : [], request});
+  while (request === state.searchRequest && state.rustSearch &&
+    state.offset < Math.min(displayed, state.rustSearch.count)) {
+    const before = state.offset;
+    await loadRustSearchPage(state.rustSearch);
+    if (state.offset === before) break;
+  }
+  if (request !== state.searchRequest) return;
+  state.resultTable.selectRow(selected);
+  if (holder) holder.scrollTop = scrollTop;
+}
+window.addEventListener("mailarchiver-reader-resumed", () => {
+  void resumeReaderSearch().catch(error => showError(error.message));
+});
+
 async function runSearch() {
   const query = effectiveQuery();
   const sortBy = elements["sort-by"].value;

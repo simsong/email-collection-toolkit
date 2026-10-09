@@ -3468,6 +3468,10 @@ also shares an atomic IPC gate with the native host: rejected status/capability
 initialization marks that shutdown attempt for reader-page reload on cancellation.
 Reload clears the one-shot frontend initialization and rejected capability promise;
 ordinary canceled shutdown leaves an already initialized page intact. The
+native resume event rebuilds any discarded incremental search and previously
+displayed result pages without clearing the selected message, MIME mode or find
+state, then restores row selection and scroll position.
+The portable
 `--shutdown-reader-rpc` fixture drives this gate and actual bridge/service cleanup
 through headless browser initialization, cancellation and usable service controls.
 The native updater probe
@@ -3475,6 +3479,9 @@ exercises the actual Objective-C postpone/resume/error callbacks and Cocoa Quit
 against a real Python writer lease, including staging without postponement and
 local cleanup/reservation failures followed by guarded Quit; it
 does not claim native replacement/relaunch.
+Owner EOF requests cooperative stop/checkpointing, with bounded forced termination
+and reaping if necessary. Shutdown acknowledgment proves helper process cleanup,
+not guaranteed clean checkpoint completion; interrupted work uses archive recovery.
 Startup New initializes and read-validates an owned sibling staging directory.
 The supervisor reaps the helper before removing failed/aborted staging; it never
 deletes destination files. Atomic rename publishes only a complete archive into

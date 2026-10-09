@@ -5,7 +5,8 @@
 ## 1.0.0a15 (candidate)
 
 - Reload reader initialization blocked by canceled update shutdown, restoring
-  service controls while preserving already initialized reader pages.
+  service controls while preserving already initialized reader pages. Restart
+  discarded searches so result pagination and selected messages remain usable.
 - Display startup preference warnings after the reader opens, invalidate drag
   exports after canceled updates, and publish static platform download buttons
   only for uploaded installer assets, with preview labels and Windows trust help.

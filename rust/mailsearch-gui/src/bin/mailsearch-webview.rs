@@ -467,7 +467,6 @@ fn finish_opening(
     Ok(bridge)
 }
 
-#[cfg(any(target_os = "macos", target_os = "windows", test))]
 fn quiesce_reader(bridge: &mut Option<std::result::Result<Bridge, String>>) -> (bool, Result<()>) {
     if let Some(Ok(bridge)) = bridge {
         (true, bridge.quiesce())
@@ -1142,6 +1141,8 @@ fn native(
             let _ = view.evaluate_script("window.dispatchEvent(new Event('mailarchiver-exports-invalidated'))");
             if reader_ready && reload_reader {
                 let _ = view.load_url(if cfg!(windows) { "http://ect.localhost/index.html" } else { "ect://localhost/index.html" });
+            } else if reader_ready {
+                let _ = view.evaluate_script("window.dispatchEvent(new Event('mailarchiver-reader-resumed'))");
             } else if !reader_ready {
                 welcome = true;
                 welcome_writable = false;
