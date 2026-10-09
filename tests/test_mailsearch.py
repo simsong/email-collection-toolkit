@@ -65,13 +65,13 @@ def add_catalogued_message(archive: Path, message_pk: int, raw: bytes) -> None:
         catalog.close()
 
 
-def make_archive(tmp_path: Path) -> tuple[Path, bytes]:
+def make_archive(tmp_path: Path, body: bytes = b"Meeting agenda.\n") -> tuple[Path, bytes]:
     archive = tmp_path / "archive"
     initialize_bag(archive)
     raw = (
         b"Message-ID: <one@example>\nFrom: sender@example.net\nTo: recipient@example.net\nCc: copy@example.net\nX-Trace: one\n"
-        b"Subject: planning meeting\nDate: Wed, 03 Jan 2024 10:00:00 +0000\n\nMeeting agenda.\n"
-    )
+        b"Subject: planning meeting\nDate: Wed, 03 Jan 2024 10:00:00 +0000\n\n"
+    ) + body
     catalog = create_catalog(archive / "archive.sqlite3")
     search = create_search(archive / "search.sqlite3")
     try:

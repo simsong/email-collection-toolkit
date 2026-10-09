@@ -49,10 +49,15 @@ Both implementations now probe catalog IDs and processor canonical hash keys
 through existing primary/unique indexes. Real 20,001-state fixtures check the
 production badge query plan and VM budget for sparse and 500-ID batches. No
 archive schema migration is required. Completion additionally tests quoted
-leading/trailing spaces, preserving the exact displayed substring.
+leading/trailing spaces, escaped spaces, joined quoted fragments and Unicode
+casefolding, preserving Python's displayed substring contract. Shared tokenizer
+regressions distinguish ASCII delimiters from nonbreaking/Unicode spaces using
+real indexed source bytes. Institution-name views expand domain suffixes once and
+use indexed joins; both languages test ordinary, targeted and broad institution
+queries with 3,000 unrelated processing addresses/domains and bounded VM work.
 
 Current local validation: `make test-rust-gui` passes format, Clippy and reader
-unit/integration gates; `make test-search-parity` passes **90** Python/parity cases;
+unit/integration gates; `make test-search-parity` passes **91** Python/parity cases;
 `make test-gui` passes **77** GUI-service/completion cases; `make test-rust-webview`
 passes **11** real-service browser regressions. Final Ruff, Pylint, ty and Pyright
 report zero diagnostics. Standalone child harnesses remain ignored in the parent

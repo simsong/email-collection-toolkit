@@ -273,3 +273,72 @@ fn attachment_badges_use_indexed_hash_lookups_with_populated_processing() {
         );
     }
 }
+
+#[test]
+fn institution_names_do_not_cross_join_all_addresses_and_domains() {
+    // Name search must stay selective as independent identities/domains grow.
+    let directory = tempfile::tempdir().unwrap();
+    let root = directory.path().join("archive");
+    crate::demo::create(&root).unwrap();
+    let processing = Connection::open(root.join("processing.sqlite3")).unwrap();
+    processing
+        .execute_batch(include_str!(
+            "../../../src/mailarchiver/processing/sql/V2__processing.sql"
+        ))
+        .unwrap();
+    processing.execute_batch("WITH RECURSIVE n(x) AS(VALUES(1) UNION ALL SELECT x+1 FROM n WHERE x<3000) INSERT INTO organizations SELECT x,'Noise '||x,0 FROM n;
+        INSERT INTO organization_domains SELECT 'noise'||organization_id||'.example.invalid',organization_id,0 FROM organizations;
+        INSERT INTO addresses SELECT organization_id,'reader@noise'||organization_id||'.example.invalid','reader','noise'||organization_id||'.example.invalid' FROM organizations;
+        INSERT INTO organizations VALUES(3001,'Target Institution',1);
+        INSERT INTO organization_domains VALUES('test',3001,0),('example.test',3001,0);
+        INSERT INTO addresses VALUES(3001,'alice@example.test','alice','example.test');").unwrap();
+    drop(processing);
+    let archive = crate::Archive::open(&root).unwrap();
+    for (text, expected) in [
+        ("from:alice", vec![1]),
+        ("from:\"Target Institution\"", vec![1]),
+        ("from:Noise", vec![]),
+    ] {
+        let statement = Query::parse(text, "date", "descending", false, None)
+            .unwrap()
+            .ids(None, None)
+            .unwrap();
+        let plan: Vec<String> = archive
+            .db
+            .prepare(&format!("EXPLAIN QUERY PLAN {}", statement.sql))
+            .unwrap()
+            .query_map(rusqlite::params_from_iter(&statement.values), |row| {
+                row.get(3)
+            })
+            .unwrap()
+            .collect::<rusqlite::Result<_>>()
+            .unwrap();
+        assert!(
+            plan.iter()
+                .any(|p| p.contains("AUTOMATIC") && p.contains("domain=?")),
+            "{plan:?}"
+        );
+        let steps = Arc::new(AtomicU64::new(0));
+        let counter = Arc::clone(&steps);
+        archive.db.progress_handler(
+            100,
+            Some(move || counter.fetch_add(100, Ordering::Relaxed) > 1_000_000),
+        );
+        let result: Vec<i64> = archive
+            .db
+            .prepare(&statement.sql)
+            .unwrap()
+            .query_map(rusqlite::params_from_iter(statement.values), |row| {
+                row.get(0)
+            })
+            .unwrap()
+            .collect::<rusqlite::Result<_>>()
+            .unwrap();
+        archive.db.progress_handler(0, None::<fn() -> bool>);
+        assert_eq!(result, expected, "{text}");
+        assert!(
+            steps.load(Ordering::Relaxed) <= 1_000_000,
+            "{text}: {plan:?}"
+        );
+    }
+}

@@ -3389,6 +3389,13 @@ reader consume that compiler. FTS filters use indexed hash membership, sender
 filters use sender indexes, recipients/folders use indexed rowid membership,
 dates use range indexes, and subject substrings scan the covering subject index.
 Filtering precedes sorting and display aggregation; parameters remain bound.
+Read-only institution names expand each address domain into suffixes once in a
+materialized recursive CTE; SQLite indexes those suffixes for domain joins rather
+than comparing every address with every organization domain. Both languages test
+ordinary, matching and broad institution searches against 3,000 unrelated identities.
+Rust search and completion share the POSIX shlex tokenizer, including its four
+ASCII delimiters, escaped spaces and joined quoted fragments; completion keeps
+the Python fallback for unfinished quotes.
 
 Up to two indexed 513-match lookahead queries publish 512-result batches, then
 finalize their statements before frontend painting waits. Stable keyset cursors

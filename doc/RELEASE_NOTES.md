@@ -12,7 +12,8 @@
   same optimizer matrix plus real cross-language service comparisons. Finalize
   bounded search statements before paint waits so concurrent writers can commit;
   use selective canonical-hash child-badge lookups in both readers, and retain
-  literal spaces in subject completion counts.
+  literal spaces in subject completion counts. Share shlex quoting/escaping with
+  completion and avoid addresses-by-domains Cartesian scans for institution names.
 
 - Reload reader initialization blocked by canceled update shutdown, restoring
   service controls while preserving already initialized reader pages. Restart

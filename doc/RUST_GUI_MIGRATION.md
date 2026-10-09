@@ -38,7 +38,7 @@ Physical selection/drop/display behavior remains for the user to verify.
 
 | Area | Controls and behavior |
 | --- | --- |
-| Search | Two painted previews followed by comprehensive search; cancellation, paging, sorting, selection; dates, phrases, names/institutions, role-count autocomplete, attachment text, original folders and shared saved filters |
+| Search | Indexed matching batches and streamed completion; cancellation, paging, sorting, selection; dates, phrases, names/institutions, role-count autocomplete, attachment text, original folders and shared saved filters |
 | Reading | Hash-verified source; decoded headers/text, HTML sanitization, CID images, remote-image consent, MIME alternatives/raw source, attachment previews and parent/source provenance |
 | Actions | Save message and attachment to new files, macOS verified EML/ZIP drag preparation and Cocoa file writers, confirmed attachment opening, clipboard, approved links, print, separate message and search windows |
 | Documents | Empty archive creation, Open, recent archives and native folder/file dialogs |

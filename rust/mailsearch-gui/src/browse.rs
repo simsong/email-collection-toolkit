@@ -237,7 +237,7 @@ fn completion_input(query: &str) -> (String, String, String) {
             escape = false;
             continue;
         }
-        if ch == '\\' {
+        if ch == '\\' && quote != Some('\'') {
             escape = true;
             continue;
         }
@@ -253,7 +253,11 @@ fn completion_input(query: &str) -> (String, String, String) {
         }
     }
     if let Some(begin) = start {
-        spans.push((begin, query.len()));
+        // Python's completion token spans exclude an unfinished trailing escape.
+        let end = query.len() - usize::from(escape);
+        if begin < end {
+            spans.push((begin, end));
+        }
     }
     let selectors = spans.iter().any(|(a, b)| {
         query[*a..*b]
@@ -274,10 +278,9 @@ fn completion_input(query: &str) -> (String, String, String) {
     (
         prefix.into(),
         tag,
-        value
-            .trim_matches(['\'', '"'])
-            .replace("\\\"", "\"")
-            .replace("\\\\", "\\"),
+        crate::selectors::tokens(value)
+            .map(|tokens| tokens.join(" "))
+            .unwrap_or_else(|_| value.trim_matches(['\'', '"']).into()),
     )
 }
 fn choice(tag: &str, count: i64) -> Value {

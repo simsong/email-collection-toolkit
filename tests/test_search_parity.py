@@ -30,6 +30,8 @@ from mailarchiver.gui_processing import PickerPage, resume_request
 from mailarchiver.__main__ import run_ingest
 from mailarchiver.gui_provenance import ATTACHED_MESSAGES_SQL, attached_messages
 from mailarchiver.processing.store import connect as processing_connect
+from mailarchiver.mailsearch import SortField, _search_statement, parse_query
+from mailarchiver.search_selectors import prepare_names
 from test_mailsearch import SearchPlanCase, make_archive, make_sparse_search_archive
 from test_search_completion import completion_archive
 from test_gui_service import make_gui_archive, add_tree_source
@@ -181,12 +183,13 @@ def test_direct_paging_counts_and_recipient_aggregation(tmp_path: Path) -> None:
 
 def test_parser_results_and_highlights_match(tmp_path: Path) -> None:
     """Quoting, selector normalization, date recognition and highlights are shared."""
-    archive, _ = make_archive(tmp_path)
+    archive, _ = make_archive(tmp_path, b"meeting unrelated agenda\n")
     queries = ["agenda", '"meeting agenda"', "meeting agenda", "subject:PLANNING", 'subject:" planning "',
                "subject:planning subject:planning", '""', "''", "from:sender", "any:copy", "to:copy", "cc:copy", "bcc:blind",
                "subject:planning agenda", "ticket:123", "date:2024-01-03", "date:1/3/2024", 'date:"January 3, 2024"',
                "date:2024-1-3", "date:0000-01-01", "date:2024-02-31", "from:", '"unfinished', 'subject:"say \\"hello\\""',
-               "agenda agenda", 'subject:"STRASSE"', 'subject:"Straße"']
+               "agenda agenda", 'subject:"STRASSE"', 'subject:"Straße"',
+               *(f"meeting{separator}agenda" for separator in (" ", "\t", "\r", "\n", "\u00a0", "\u2003", "\v", "\f"))]
     with reader(archive) as rpc:
         for query in queries:
             expected = search_page(archive, query, limit=0)
@@ -232,7 +235,8 @@ def test_completion_and_live_name_edits_match(tmp_path: Path) -> None:
         for query in ["si", "from:si", "simson", "from:simson", "to:simson", "cc:simson", "bcc:simson", "Hidden",
                       "subject:simson", "2020-01-05", "1/5/2020", "January 5, 2020", "Jan 5, 2020", "date:1/5/2020",
                       'subject:Simson from:"Simson Header"', 'subject:" Simson "', 'subject:"Simson "', "subject:' Simson'",
-                      "subject:Straße", "subject:STRASSE"]:
+                      "subject:Straße", "subject:STRASSE", "subject:Simson\\ subject", 'subject:"Simson "subject',
+                      'subject:Simson" subject"', "Simson\\ Header", 'subject:"Simson\\ subject', "subject:Simson\\"]:
             actual = Suggestions.model_validate(rpc.call("suggestions", query))
             assert not actual.incomplete
             assert SearchSuggestions.model_validate(actual.model_dump(exclude={"incomplete"})) == search_suggestions(archive, query), query
@@ -287,3 +291,42 @@ def test_attached_badges_are_selective_with_populated_processing(tmp_path: Path)
         actual = SearchPage.model_validate(rpc.call("search", "", 0, "date", "ascending", False, [], 512))
         assert actual == search_page(archive, "", limit=512, sort_by="date", direction="ascending")
         assert actual.results[0].attached_message
+
+
+def test_institution_names_do_not_cross_join_all_addresses_and_domains(tmp_path: Path) -> None:
+    """Name lookup expands domain suffixes once and indexes their derived matches."""
+    archive = completion_archive(tmp_path)
+    with closing(processing_connect(archive)) as processing, processing:
+        processing.executemany("INSERT INTO organizations(name) VALUES(?)", ((f"Noise {n}",) for n in range(3000)))
+        noise = processing.execute("SELECT organization_id,name FROM organizations WHERE name LIKE 'Noise %'").fetchall()
+        processing.executemany("INSERT INTO organization_domains(domain,organization_id) VALUES(?,?)",
+                               ((f"noise{n}.example.invalid", org) for n, (org, _) in enumerate(noise)))
+        processing.executemany("INSERT INTO addresses(address,mailbox,domain) VALUES(?,'reader',?)",
+                               ((f"reader@noise{n}.example.invalid", f"noise{n}.example.invalid") for n in range(3000)))
+        processing.execute("INSERT INTO organizations(name) VALUES('Target Institution')")
+        processing.execute("INSERT INTO organization_domains(domain,organization_id) VALUES('test',last_insert_rowid())")
+    with closing(sqlite3.connect(f"{(archive / 'archive.sqlite3').as_uri()}?mode=ro", uri=True)) as catalog:
+        catalog.execute("ATTACH DATABASE ? AS search", (f"{(archive / 'search.sqlite3').as_uri()}?mode=ro",))
+        prepare_names(catalog, archive)
+        for query in ("from:simson", 'from:"Target Institution"', "from:Noise"):
+            terms = parse_query(query).model_copy(update={"address_names": True})
+            statement = _search_statement(terms, 10, sort_by=SortField.DATE)
+            plan = [row[3] for row in catalog.execute("EXPLAIN QUERY PLAN " + statement.sql, statement.parameters)]
+            assert any("AUTOMATIC" in step and "domain=?" in step for step in plan), plan
+            steps = 0
+
+            def budget() -> int:
+                nonlocal steps
+                steps += 100
+                return int(steps > 1_000_000)
+
+            catalog.set_progress_handler(budget, 100)
+            try:
+                actual_ids = [row[0] for row in catalog.execute(statement.sql, statement.parameters)]
+            finally:
+                catalog.set_progress_handler(None, 0)
+            assert actual_ids == [r.message_pk for r in search_page(archive, query, limit=10).results]
+    with reader(archive) as rpc:
+        for query in ("from:simson", 'from:"Target Institution"', "from:Noise"):
+            actual = SearchPage.model_validate(rpc.call("search", query, 0, "date", "descending", False, [], 0))
+            assert actual == search_page(archive, query, limit=0)

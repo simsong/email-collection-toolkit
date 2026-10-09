@@ -2553,6 +2553,11 @@ using existing indexes without scanning all processing states or migrating an ar
 Subject completion counts the literal fragment displayed, including quoted spaces.
 Header, authoritative person and institution-domain names participate in address
 matching without rewriting canonical messages or rebuilding full-text indexes.
+Institution matching must avoid an addresses-by-domains Cartesian scan; real
+populated identity fixtures must check indexed suffix matching and VM budgets.
+Search tokenization uses Python shlex whitespace (space, tab, CR and LF), not
+all Unicode whitespace. Completion shares its quoting/escaping rules while
+retaining unfinished-quote fallback for typing.
 Production API comparisons must cover these contracts, role/attachment/folder
 filters, counts and offsets, while existing real pagination/cancellation tests
 retain broad-result and tied-key acceptance. Autocomplete deadlines are optional incomplete

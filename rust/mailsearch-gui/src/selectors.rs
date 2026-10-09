@@ -12,6 +12,8 @@ use rusqlite::types::Value as SqlValue;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+pub(crate) const ORGANIZATION_NAMES: &str = "CREATE TEMP VIEW organization_address_names AS WITH RECURSIVE suffixes(address,domain) AS MATERIALIZED (SELECT address,domain FROM identities.addresses UNION ALL SELECT address,substr(domain,instr(domain,'.')+1) FROM suffixes WHERE instr(domain,'.')>0) SELECT a.address,o.name FROM identities.organization_domains d CROSS JOIN identities.organizations o ON o.organization_id=d.organization_id CROSS JOIN suffixes a ON a.domain=d.domain";
+
 #[derive(Clone, Copy)]
 pub(crate) enum Filter {
     All,
@@ -125,7 +127,7 @@ pub(crate) fn contains(value: &str) -> String {
             .replace('_', "\\_")
     )
 }
-pub(crate) fn plan(query: &str, attachments: bool, selections: Option<&Value>) -> Result<Plan> {
+pub(crate) fn tokens(query: &str) -> Result<Vec<String>> {
     let mut tokens = Vec::new();
     let mut token = String::new();
     let (mut quoted, mut escaped, mut started) = (None, false, false);
@@ -145,7 +147,7 @@ pub(crate) fn plan(query: &str, attachments: bool, selections: Option<&Value>) -
         } else if quoted.is_none() && matches!(ch, '\'' | '"') {
             started = true;
             quoted = Some(ch);
-        } else if ch.is_whitespace() && quoted.is_none() {
+        } else if matches!(ch, ' ' | '\t' | '\r' | '\n') && quoted.is_none() {
             if started {
                 tokens.push(std::mem::take(&mut token));
                 started = false;
@@ -162,6 +164,10 @@ pub(crate) fn plan(query: &str, attachments: bool, selections: Option<&Value>) -
     if started {
         tokens.push(token);
     }
+    Ok(tokens)
+}
+pub(crate) fn plan(query: &str, attachments: bool, selections: Option<&Value>) -> Result<Plan> {
+    let tokens = tokens(query)?;
     let mut clauses = vec!["m.category IN ('Archive','Sent')".to_string()];
     let mut values = Vec::new();
     let mut terms = Vec::new();
