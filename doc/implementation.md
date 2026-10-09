@@ -3340,8 +3340,10 @@ Real demo archives verify ordered fallback and unchanged database/MBOX bytes;
 missing paths and empty invalid directories are never created or repaired.
 Startup without a usable recent archive performs the same real helper handshake
 before offering Create. A feature-gated startup probe used by native acceptance
-checks this decision with working/missing helpers and Windows write restrictions;
-the handshake requests only ping/capabilities and creates no archive files.
+checks this decision with working/missing helpers and Windows write restrictions.
+The same asynchronous handshake runs when canceled installation restores startup
+after interrupted opening, rather than retaining an uninitialized false capability.
+The handshake requests only ping/capabilities and creates no archive files.
 Recent menu actions carry the path captured with their label, avoiding shared-list
 index races. Recent updates hold an exclusive OS file lock on a persistent
 companion file outside archives, reload under that lock, then sync and atomically

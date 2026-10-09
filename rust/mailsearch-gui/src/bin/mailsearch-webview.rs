@@ -529,14 +529,18 @@ fn native(
     let abort = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
     let closing = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
     let worker_abort = abort.clone();
-    if welcome {
-        let capability_proxy = events.create_proxy();
+    let capability_proxy = events.create_proxy();
+    let probe_startup = move || {
+        let capability_proxy = capability_proxy.clone();
         thread::spawn(move || {
             let available = startup_writes_available();
             let _ = capability_proxy.send_event(NativeEvent::Capabilities(
                 serde_json::json!({"available":available,"write_available":available}),
             ));
         });
+    };
+    if welcome {
+        probe_startup();
     }
     let remember = smoke_output.is_none();
     thread::Builder::new()
@@ -1086,8 +1090,10 @@ fn native(
             let _ = view.evaluate_script("window.dispatchEvent(new Event('mailarchiver-exports-invalidated'))");
             if !reader_ready {
                 welcome = true;
+                welcome_writable = false;
                 archive_path = None;
                 let _ = view.load_url(if cfg!(windows) { "http://ect.localhost/welcome.html" } else { "ect://localhost/welcome.html" });
+                probe_startup();
             }
             #[cfg(target_os = "macos")]
             mailsearch_rust::macos::finish_termination(false);

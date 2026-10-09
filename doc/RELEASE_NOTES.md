@@ -21,6 +21,8 @@
   local cleanup or reservation failures. Retry failed private-export deletions
   on a later Quit without retaining the previous attempt's error. Keep mounted updater checks out of saved
   Sparkle preferences.
+- Refresh the private helper's capabilities when a failed update restores startup
+  after interrupted opening, so New can become available again.
 - Consolidate Windows packaging into a tested x64/ARM64 MSIX bundle. Alpha
   installation requires trusting its persistent test certificate; Windows ingest
   remains disabled. Never distribute synthetic upgrade fixtures or private keys.

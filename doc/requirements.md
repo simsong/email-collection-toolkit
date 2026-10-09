@@ -2482,6 +2482,7 @@ and Rust readers remain usable. Import job errors describe ingest failures. Fail
 successful ingest must surface as a separate warning and retain completed status.
 With no usable recent archive, startup must check actual helper availability and
 write capability before offering Create; an unavailable helper offers Open only.
+Restoring startup after a failed update during opening must repeat that handshake.
 macOS File → Open must select `.mailarchive` directory packages as documents,
 as well as ordinary archive directories. Explicit Finder/Dock document opens
 must retain the package root, validate/recover it before reader access, and
