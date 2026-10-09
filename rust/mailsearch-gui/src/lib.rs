@@ -117,7 +117,7 @@ impl Archive {
             )?;
             names.push_str(" UNION SELECT a.address,p.canonical_name FROM identities.addresses a JOIN identities.person_addresses pa USING(address_id) JOIN identities.persons p USING(person_id) UNION SELECT a.address,n.name FROM identities.addresses a JOIN identities.person_addresses pa USING(address_id) JOIN identities.person_aliases n USING(person_id) UNION SELECT a.address,json_extract(e.value,'$.name') FROM identities.addresses a JOIN identities.evidence e USING(address_id) WHERE e.kind='header' UNION SELECT a.address,o.name FROM identities.addresses a JOIN identities.organization_domains d ON a.domain=d.domain OR a.domain LIKE '%.'||d.domain JOIN identities.organizations o USING(organization_id)");
             db.execute_batch("CREATE TEMP VIEW attached_origins AS SELECT DISTINCT child.catalog_message_pk AS child, parent.catalog_message_pk AS parent_message_pk,o.parent_message_id,o.part_path FROM identities.occurrences o JOIN identities.message_state child ON child.message_id=o.message_id LEFT JOIN identities.message_state parent ON parent.message_id=o.parent_message_id WHERE o.parent_message_id IS NOT NULL")?;
-            db.execute_batch("CREATE TEMP VIEW attached_search_messages AS SELECT s.catalog_message_pk AS message_pk FROM identities.message_state s JOIN identities.message_tags mt USING(message_id) JOIN identities.tags t USING(tagid) WHERE t.name='attachment'")?;
+            db.execute_batch(crate::query::ATTACHED_SEARCH_MESSAGES)?;
         }
         if !root.join("processing.sqlite3").exists() {
             db.execute_batch("CREATE TEMP VIEW attached_origins AS SELECT 0 AS child,0 AS parent_message_pk,'' AS parent_message_id,'[]' AS part_path WHERE 0")?;

@@ -30,6 +30,9 @@ pub(crate) struct Plan {
 pub(crate) fn folded(value: &str) -> String {
     caseless::default_case_fold_str(value)
 }
+pub(crate) fn subject_predicate(value: &str) -> (String, SqlValue) {
+    ("m.message_pk IN(SELECT subject_match.message_pk FROM messages subject_match INDEXED BY messages_subject_message WHERE lower(subject_match.subject) LIKE ? ESCAPE '\\')".into(), contains(value).into())
+}
 
 #[derive(Clone, Deserialize, Serialize)]
 pub(crate) struct Selection {
@@ -199,8 +202,9 @@ pub(crate) fn plan(query: &str, attachments: bool, selections: Option<&Value>) -
                 }
                 "subject" => {
                     membership = true;
-                    clauses.push("m.message_pk IN(SELECT subject_match.message_pk FROM messages subject_match INDEXED BY messages_subject_message WHERE lower(subject_match.subject) LIKE ? ESCAPE '\\')".into());
-                    values.push(contains(&value).into());
+                    let (clause, value) = subject_predicate(&value);
+                    clauses.push(clause);
+                    values.push(value);
                 }
                 "from" | "to" | "cc" | "bcc" | "any" => {
                     membership |= field != "from";

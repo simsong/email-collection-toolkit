@@ -3351,8 +3351,8 @@ replace JSON. The lock file is never removed; process exit releases ownership.
 A real two-child regression holds the lock, publishes a baseline while both
 children wait, then verifies all three entries survive without touching archives.
 Demo generation creates missing parents while refusing replacement.
-Staged searches publish and acknowledge both windows even after input is exhausted;
-small/empty regressions verify neither stage can prematurely report completion.
+Matching searches finalize each bounded statement before paint acknowledgements;
+small/empty regressions finish without unnecessary stages or acknowledgements.
 Windows native startup opens existing archives only; write menus and frontend
 controls, including About-dialog definition refresh, are gated on helper write
 capability, and Rust/Python reject write requests before prompts or
@@ -3390,12 +3390,17 @@ filters use sender indexes, recipients/folders use indexed rowid membership,
 dates use range indexes, and subject substrings scan the covering subject index.
 Filtering precedes sorting and display aggregation; parameters remain bound.
 
-One indexed query streams ordered matching IDs to the search worker. The first
-two full 512-match batches wait for frontend painting; small/empty searches finish
+Up to two indexed 513-match lookahead queries publish 512-result batches, then
+finalize their statements before frontend painting waits. Stable keyset cursors
+feed an indexed streaming remainder after those batches; no paint wait retains
+a SQLite read transaction. Small/empty searches finish
 without scanning unrelated catalog windows or waiting for empty acknowledgements.
 Stable sort-value/message-ID order and membership deduplication preserve ties.
 The backend retains IDs, not all headers. `search_page` hydrates up to 512 rows in
-one bounded header query, then checks derived child tags in batches. Direct search
+one bounded header query, then checks derived child tags in batches through catalog rowid, canonical hash
+(`message_state.message_id`), tag name and message/tag primary indexes. Python
+uses the same selective lookup; neither reader scans the entire processing state.
+Subject completion uses the shared substring predicate without search-only trimming. Direct search
 and the comparison reader share those header statements and distinct recipients.
 The browser initially loads at most 1,024 rows and pages further matches on scroll.
 Completion distinguishes total matches from displayed rows; errors remain incomplete.
@@ -3405,13 +3410,15 @@ acknowledgement waits; direct header/count APIs have
 
 `tests/fixtures/search-contract.json` is the common optimizer case matrix.
 Python acceptance exercises 252 page/count statements and Rust unit tests exercise
-378 header/ID/count statements, each explained and executed with original bindings
+504 header/full-ID/bounded-ID/count statements, each explained and executed with original bindings
 on 20,001-message fixtures from the real schemas. Selective queries have 5,000-VM
 budgets; subject substrings have 130,000-VM covering-scan budgets. The counts sample
 at 100 instructions, so zero means fewer than 100. `make test-search-parity` also
 compares real Python GUI services and the compiled Rust dispatcher, including
 worker results, direct headers/counts, normalization, completion, folder trees,
-body/attachment intersections, live names and real resumed-child badges. The
+body/attachment intersections, live names, literal completion spaces and real
+resumed-child badges. Populated processing-schema regressions check badge plans
+and work budgets; a real catalog writer commits while the worker awaits paint. The
 aggregate `make check-tests` runs this gate; ordinary Python runs skip the binary
 comparisons unless `RUST_WEBVIEW_BINARY` is supplied by that Make target.
 Institution-domain names already supported by Rust are now included in Python's

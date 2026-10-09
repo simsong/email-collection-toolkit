@@ -107,6 +107,7 @@ fn shared_python_optimizer_matrix_for_headers_ids_and_counts() {
                 let mut operations = vec![
                     (query.headers(Some(10), 0, None).unwrap(), false),
                     (query.ids(None, None).unwrap(), false),
+                    (query.id_batch(None).unwrap(), false),
                 ];
                 if direction == "ascending" {
                     operations.extend([
@@ -200,5 +201,75 @@ fn shared_python_optimizer_matrix_for_headers_ids_and_counts() {
             }
         }
     }
-    assert_eq!(statements, 378);
+    assert_eq!(statements, 504);
+}
+
+#[test]
+fn attachment_badges_use_indexed_hash_lookups_with_populated_processing() {
+    // Search responsiveness: badge work scales with displayed IDs, not all states.
+    let fixture = fixture();
+    let path = fixture._directory.path().join("processing.sqlite3");
+    let processing = Connection::open(&path).unwrap();
+    processing
+        .execute_batch(include_str!(
+            "../../../src/mailarchiver/processing/sql/V2__processing.sql"
+        ))
+        .unwrap();
+    drop(processing);
+    let db = &fixture.db;
+    db.execute("ATTACH ? AS identities", [path.to_str().unwrap()])
+        .unwrap();
+    db.execute_batch("INSERT INTO identities.messages SELECT sha256,message_id_normalized,sha256,'' FROM main.messages;
+        INSERT INTO identities.message_state(message_id,root_item_json,catalog_message_pk) SELECT sha256,'{}',message_pk FROM main.messages;
+        INSERT INTO identities.message_tags SELECT sha256,1 FROM main.messages WHERE message_pk IN(1,20001);").unwrap();
+    db.execute_batch(ATTACHED_SEARCH_MESSAGES).unwrap();
+    for ids in [vec![1, 2, 20001], (1..=500).collect()] {
+        let statement = Query::attached_ids(&ids);
+        let plan: Vec<String> = db
+            .prepare(&format!("EXPLAIN QUERY PLAN {}", statement.sql))
+            .unwrap()
+            .query_map(rusqlite::params_from_iter(&statement.values), |row| {
+                row.get(3)
+            })
+            .unwrap()
+            .collect::<rusqlite::Result<_>>()
+            .unwrap();
+        for table in ["m", "s", "t", "mt"] {
+            assert!(
+                plan.iter()
+                    .any(|p| p.starts_with(&format!("SEARCH {table} "))),
+                "{plan:?}"
+            );
+        }
+        let steps = Arc::new(AtomicU64::new(0));
+        let counter = Arc::clone(&steps);
+        db.progress_handler(
+            100,
+            Some(move || {
+                counter.fetch_add(100, Ordering::Relaxed);
+                false
+            }),
+        );
+        let result: Vec<i64> = db
+            .prepare(&statement.sql)
+            .unwrap()
+            .query_map(rusqlite::params_from_iter(statement.values), |row| {
+                row.get(0)
+            })
+            .unwrap()
+            .collect::<rusqlite::Result<_>>()
+            .unwrap();
+        db.progress_handler(0, None::<fn() -> bool>);
+        assert_eq!(
+            result,
+            ids.iter()
+                .copied()
+                .filter(|id| [1, 20001].contains(id))
+                .collect::<Vec<_>>()
+        );
+        assert!(
+            steps.load(Ordering::Relaxed) <= 100 * ids.len() as u64 + 5000,
+            "{plan:?}"
+        );
+    }
 }

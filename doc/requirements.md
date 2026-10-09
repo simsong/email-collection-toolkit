@@ -2533,8 +2533,10 @@ paths and bounded SQLite VM work must be checked on the same language-neutral
 case matrix in Python acceptance tests and Rust unit tests, using unchanged
 production statements and bindings for pages, IDs and counts.
 
-Rust streams ordered matching IDs from one query on its separate read-only search
-connection. The first two full 512-result batches wait for frontend painting;
+Rust selects ordered matching IDs on its separate read-only search connection.
+Up to two bounded matching queries finish and release their read transactions
+before waiting for frontend painting; an indexed query streams the remainder.
+The first two nonfinal 512-result batches wait for frontend painting;
 small and empty searches complete without unrelated catalog windows or empty
 acknowledgements. Results must remain sorted without duplicates or omissions at
 tied keys. Message reads remain usable; changing query/sort, clearing or closing
@@ -2546,6 +2548,9 @@ Common operations must agree on stripped/casefolded selector values, explicit
 empty quoted terms, strict calendar-date recognition and normalized suggestions,
 deduplicated text-first highlights, distinct recipient aggregation, processed
 attached-message badges and collapsed loose-message/Maildir mailbox trees.
+Badge lookup must probe displayed catalog IDs and canonical processor hash keys,
+using existing indexes without scanning all processing states or migrating an archive.
+Subject completion counts the literal fragment displayed, including quoted spaces.
 Header, authoritative person and institution-domain names participate in address
 matching without rewriting canonical messages or rebuilding full-text indexes.
 Production API comparisons must cover these contracts, role/attachment/folder

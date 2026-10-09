@@ -30,7 +30,7 @@ aggregation, limits, offsets and count thresholds.
 
 `tests/fixtures/search-contract.json` now supplies the same 21 optimizer cases
 to both implementations. Python executes **252** production page/count statements;
-Rust unit tests execute **378** production header/ordered-ID/count statements.
+Rust unit tests execute **504** production header/full-ID/bounded-ID/count statements.
 All required filtering SEARCH paths, FTS MATCH paths, covering subject scans,
 results and VM budgets pass on real-schema 20,001-message fixtures. Existing
 broad-result/tied-key/cancellation tests remain in place. `make test-search-parity`
@@ -38,11 +38,21 @@ permanently checks real Python GUI APIs and compiled Rust IPC, including worker
 results and complete display records; the aggregate test gate includes it.
 
 A real worker regression holds each paint acknowledgement longer than its test
-SQL budget. Disabling wait-time exclusion fails the intended assertion; restoring
-the exact source passes. UI painting waits therefore do not consume SQL time.
+SQL budget, while a real concurrent catalog writer commits before either
+acknowledgement. Bounded matching statements finish before waits, releasing
+SQLite read locks; the remainder then streams without paint waits. Disabling
+wait-time exclusion fails the intended timeout assertion; restoring the exact
+source passes. UI painting waits therefore do not consume SQL time.
+
+Review also exposed a badge hydration cost absent from the original matrix.
+Both implementations now probe catalog IDs and processor canonical hash keys
+through existing primary/unique indexes. Real 20,001-state fixtures check the
+production badge query plan and VM budget for sparse and 500-ID batches. No
+archive schema migration is required. Completion additionally tests quoted
+leading/trailing spaces, preserving the exact displayed substring.
 
 Current local validation: `make test-rust-gui` passes format, Clippy and reader
-unit/integration gates; `make test-search-parity` passes **89** Python/parity cases;
+unit/integration gates; `make test-search-parity` passes **90** Python/parity cases;
 `make test-gui` passes **77** GUI-service/completion cases; `make test-rust-webview`
 passes **11** real-service browser regressions. Final Ruff, Pylint, ty and Pyright
 report zero diagnostics. Standalone child harnesses remain ignored in the parent
@@ -53,7 +63,7 @@ the homepage/Searching previews inspected without native app appearances.
 ### Read-only performance check
 
 The optimized count-only probe returned all **510** matches for the user-reported
-query at **234 ms**, without either empty catalog preview. The prior optimized
+query at **270 ms**, without either empty catalog preview. The prior optimized
 probe observed empty windows at 760/979 ms and completion at 1,308 ms. These are
 separate runs, so cache/startup conditions prevent claiming a controlled speedup.
 
@@ -61,9 +71,9 @@ Four alternating Python/Rust pairs then used the actual Python GUI header servic
 and optimized Rust worker/header IPC on the same quiescent archive. They returned
 the same 510 complete header records. Imports/builds and initial dispatcher setup
 were outside those per-query measurements. Subsequent warm Python complete-header
-calls took **9.08–9.64 ms**; Rust matching IDs took **4.44–6.54 ms**, and complete
-header delivery **10.93–13.12 ms**, including IPC/polling. The first Python call
-took 161.90 ms and is reported separately, without describing it as a controlled
+calls took **8.91–12.08 ms**; Rust matching IDs took **5.25–6.60 ms**, and complete
+header delivery **10.99–13.23 ms**, including IPC/polling. The first Python call
+took 391.92 ms and is reported separately, without describing it as a controlled
 cold-cache run. Thus filtering behavior aligns and warm response times are close;
 this does not prove identical whole-window latency. Native WebKit rendering,
 controlled cold-cache performance and physical interaction remain unmeasured.

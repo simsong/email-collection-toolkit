@@ -173,7 +173,13 @@ fn run_with_budget(
     budget: Duration,
 ) -> Result<()> {
     bridge.cancellation = Some((Arc::clone(&shared.generation), job.generation));
-    let (sql, values) = remainder_query(job, &Value::Null)?;
+    let query = crate::query::Query::parse(
+        &job.query,
+        &job.sort,
+        &job.direction,
+        job.attachments,
+        Some(&job.selections),
+    )?;
     let started = Instant::now();
     let paused = Arc::new(AtomicU64::new(0));
     let pause_counter = Arc::clone(&paused);
@@ -190,10 +196,39 @@ fn run_with_budget(
         }),
     );
     let result = (|| -> Result<()> {
+        let mut window = 0;
+        let mut cursor = Value::Null;
+        for _ in 0..2 {
+            let sql = query.id_batch(Some(&cursor))?;
+            let mut batch: Vec<(i64, String)> = {
+                let mut statement = bridge.archive.db.prepare(&sql.sql)?;
+                let rows = statement.query_map(rusqlite::params_from_iter(sql.values), |row| {
+                    Ok((row.get(0)?, row.get(1)?))
+                })?;
+                rows.collect::<rusqlite::Result<_>>()?
+            };
+            // Finalize the read statement before waiting for frontend painting.
+            let more = batch.len() > 512;
+            batch.truncate(512);
+            if let Some((id, key)) = batch.last() {
+                cursor = json!({"key":key,"id":id});
+            }
+            if !publish(
+                shared,
+                job,
+                batch.into_iter().map(|(id, _)| id).collect(),
+                &mut window,
+                more,
+                &paused,
+            ) || !more
+            {
+                return Ok(());
+            }
+        }
+        let (sql, values) = remainder_query(job, &cursor)?;
         let mut statement = bridge.archive.db.prepare(&sql)?;
         let mut rows = statement.query(rusqlite::params_from_iter(values))?;
         let mut batch = Vec::with_capacity(512);
-        let mut window = 0;
         while let Some(row) = rows.next()? {
             batch.push(row.get::<_, i64>(0)?);
             if batch.len() == 512
@@ -264,6 +299,7 @@ mod tests {
         // Responsiveness contract: time waiting for UI painting is not SQLite work.
         let work = tempfile::tempdir().unwrap();
         let path = work.path().join("archive");
+        let catalog = path.join("archive.sqlite3");
         crate::demo::create(&path).unwrap();
         let db = rusqlite::Connection::open(path.join("archive.sqlite3")).unwrap();
         db.execute_batch("WITH RECURSIVE n(x) AS(VALUES(4) UNION ALL SELECT x+1 FROM n WHERE x<3000) INSERT INTO messages SELECT x,printf('bulk%d',x),printf('%064d',x),1,'Paint fixture','2025-01-01','header','Archive' FROM n;").unwrap();
@@ -304,6 +340,11 @@ mod tests {
                 assert!(Instant::now() < deadline);
                 std::thread::sleep(Duration::from_millis(1));
             }
+            // A real writer must commit while the UI has not acknowledged this batch.
+            let writer = rusqlite::Connection::open(&catalog).unwrap();
+            writer.busy_timeout(Duration::from_millis(100)).unwrap();
+            writer.execute_batch("BEGIN IMMEDIATE; UPDATE messages SET date_source='paint writer' WHERE message_pk=1; COMMIT;").unwrap();
+            drop(writer);
             std::thread::sleep(Duration::from_millis(500));
             shared.state.lock().unwrap().acknowledged = window;
             shared.wake.notify_one();

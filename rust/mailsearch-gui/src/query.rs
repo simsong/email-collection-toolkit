@@ -11,6 +11,9 @@ use rusqlite::types::Value as SqlValue;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+// Production processing keys are canonical SHA-256 hashes; catalog IDs are derived.
+pub(crate) const ATTACHED_SEARCH_MESSAGES: &str = "CREATE TEMP VIEW attached_search_messages AS SELECT m.message_pk FROM main.messages m CROSS JOIN identities.message_state s ON s.message_id=m.sha256 AND s.catalog_message_pk=m.message_pk CROSS JOIN identities.tags t ON t.name='attachment' CROSS JOIN identities.message_tags mt ON mt.message_id=s.message_id AND mt.tagid=t.tagid";
+
 pub(crate) struct Statement {
     pub sql: String,
     pub values: Vec<SqlValue>,
@@ -87,6 +90,15 @@ impl Query {
     pub fn terms(&self) -> &[String] {
         &self.plan.terms
     }
+    pub fn subject_completion(value: &str) -> Result<Self> {
+        // Completion counts the literal fragment shown to the user, including spaces.
+        let mut query = Self::parse("", "date", "descending", false, None)?;
+        let (clause, value) = selectors::subject_predicate(&selectors::folded(value));
+        query.plan.clauses.push(clause);
+        query.plan.values.push(value);
+        query.plan.filter = Filter::Membership;
+        Ok(query)
+    }
     fn source(&self) -> String {
         let source = match self.plan.filter {
             Filter::Hash => "messages m INDEXED BY messages_sha256",
@@ -125,9 +137,25 @@ impl Query {
         }
     }
     pub fn ids(&self, cursor: Option<&Value>, limit: Option<usize>) -> Result<Statement> {
+        self.ordered_ids(cursor, limit, false)
+    }
+    pub fn id_batch(&self, cursor: Option<&Value>) -> Result<Statement> {
+        self.ordered_ids(cursor, Some(513), true)
+    }
+    fn ordered_ids(
+        &self,
+        cursor: Option<&Value>,
+        limit: Option<usize>,
+        key: bool,
+    ) -> Result<Statement> {
         let (selection, mut values) = self.selection(cursor)?;
         let limit = Self::limit(&mut values, limit, 0)?;
-        Ok(Statement { sql: format!("SELECT m.message_pk FROM {} WHERE {selection} ORDER BY {} {},m.message_pk {}{limit}",
+        let projection = if key {
+            format!(",{}", self.order.key)
+        } else {
+            String::new()
+        };
+        Ok(Statement { sql: format!("SELECT m.message_pk{projection} FROM {} WHERE {selection} ORDER BY {} {},m.message_pk {}{limit}",
             self.source(), self.order.key, self.order.direction, self.order.direction), values })
     }
     pub fn headers(

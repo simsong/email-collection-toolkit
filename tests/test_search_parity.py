@@ -8,7 +8,7 @@
 """Acceptance contract for the common Python/Rust search operations."""
 from __future__ import annotations
 
-from contextlib import contextmanager
+from contextlib import closing, contextmanager
 from collections.abc import Iterator
 from hashlib import sha256
 from os import environ
@@ -28,6 +28,8 @@ from mailarchiver.search_completion import SearchSuggestions, search_suggestions
 from mailarchiver.gui_app import IdentityPickerApi
 from mailarchiver.gui_processing import PickerPage, resume_request
 from mailarchiver.__main__ import run_ingest
+from mailarchiver.gui_provenance import ATTACHED_MESSAGES_SQL, attached_messages
+from mailarchiver.processing.store import connect as processing_connect
 from test_mailsearch import SearchPlanCase, make_archive, make_sparse_search_archive
 from test_search_completion import completion_archive
 from test_gui_service import make_gui_archive, add_tree_source
@@ -224,10 +226,13 @@ def test_body_attachment_intersection_folder_trees_and_child_badges(tmp_path: Pa
 def test_completion_and_live_name_edits_match(tmp_path: Path) -> None:
     """Completion counts, date values, role choices and authoritative names agree."""
     archive = completion_archive(tmp_path)
+    with sqlite3.connect(archive / "archive.sqlite3") as catalog:
+        catalog.execute("UPDATE messages SET subject='Straße Simson' WHERE message_pk=1")
     with reader(archive) as rpc:
         for query in ["si", "from:si", "simson", "from:simson", "to:simson", "cc:simson", "bcc:simson", "Hidden",
                       "subject:simson", "2020-01-05", "1/5/2020", "January 5, 2020", "Jan 5, 2020", "date:1/5/2020",
-                      'subject:Simson from:"Simson Header"']:
+                      'subject:Simson from:"Simson Header"', 'subject:" Simson "', 'subject:"Simson "', "subject:' Simson'",
+                      "subject:Straße", "subject:STRASSE"]:
             actual = Suggestions.model_validate(rpc.call("suggestions", query))
             assert not actual.incomplete
             assert SearchSuggestions.model_validate(actual.model_dump(exclude={"incomplete"})) == search_suggestions(archive, query), query
@@ -245,3 +250,40 @@ def test_completion_and_live_name_edits_match(tmp_path: Path) -> None:
             expected = search_page(archive, query, limit=0)
             actual = SearchPage.model_validate(rpc.call("search", query, 0, "date", "descending", False, [], 0))
             assert actual == expected
+
+
+def test_attached_badges_are_selective_with_populated_processing(tmp_path: Path) -> None:
+    """Child badges probe canonical hash indexes rather than every processor state."""
+    archive = make_sparse_search_archive(tmp_path)
+    with closing(sqlite3.connect(archive / "archive.sqlite3")) as catalog:
+        with closing(processing_connect(archive, create=True, production=True)) as processing, processing:
+            processing.executemany("INSERT INTO messages VALUES(?,?,?,'')",
+                                   ((digest, normalized, digest) for normalized, digest in
+                                    catalog.execute("SELECT message_id_normalized,sha256 FROM messages")))
+            processing.executemany("INSERT INTO message_state(message_id,root_item_json,catalog_message_pk) VALUES(?,'{}',?)",
+                                   ((digest, pk) for pk, digest in catalog.execute("SELECT message_pk,sha256 FROM messages")))
+            processing.executemany("INSERT INTO message_tags VALUES(?,1)",
+                                   catalog.execute("SELECT sha256 FROM messages WHERE message_pk IN(1,20001)"))
+        catalog.execute("ATTACH DATABASE ? AS identities", (f"{(archive / 'processing.sqlite3').as_uri()}?mode=ro",))
+        for ids in ([1, 2, 20_001], list(range(1, 501))):
+            sql = ATTACHED_MESSAGES_SQL.format(placeholders=','.join('?' for _ in ids))
+            plan = [row[3] for row in catalog.execute("EXPLAIN QUERY PLAN " + sql, ids)]
+            for table in ("m", "s", "t", "mt"):
+                assert any(step.startswith(f"SEARCH {table} ") for step in plan), plan
+            steps = 0
+
+            def budget() -> int:
+                nonlocal steps
+                steps += 100
+                return int(steps > 100 * len(ids) + 5_000)
+
+            catalog.set_progress_handler(budget, 100)
+            try:
+                assert [row[0] for row in catalog.execute(sql, ids)] == [pk for pk in ids if pk in (1, 20_001)]
+            finally:
+                catalog.set_progress_handler(None, 0)
+            assert attached_messages(archive, ids) == {pk for pk in ids if pk in (1, 20_001)}
+    with reader(archive) as rpc:
+        actual = SearchPage.model_validate(rpc.call("search", "", 0, "date", "ascending", False, [], 512))
+        assert actual == search_page(archive, "", limit=512, sort_by="date", direction="ascending")
+        assert actual.results[0].attached_message

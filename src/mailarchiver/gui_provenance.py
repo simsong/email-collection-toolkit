@@ -11,6 +11,13 @@ from pydantic import BaseModel
 
 from .processing.store import DATABASE
 
+# Production processor keys are canonical hashes, permitting primary-key probes.
+ATTACHED_MESSAGES_SQL = """SELECT m.message_pk FROM main.messages m
+    CROSS JOIN identities.message_state s ON s.message_id=m.sha256 AND s.catalog_message_pk=m.message_pk
+    CROSS JOIN identities.tags t ON t.name='attachment'
+    CROSS JOIN identities.message_tags mt ON mt.message_id=s.message_id AND mt.tagid=t.tagid
+    WHERE m.message_pk IN ({placeholders})"""
+
 
 class AttachedOrigin(BaseModel):
     parent_message_pk: int | None
@@ -21,13 +28,13 @@ class AttachedOrigin(BaseModel):
 def attached_messages(archive: Path, message_pks: list[int]) -> set[int]:
     if not message_pks or not (archive / DATABASE).is_file():
         return set()
-    with closing(sqlite3.connect(f"{(archive / DATABASE).resolve().as_uri()}?mode=ro", uri=True)) as database:
+    with closing(sqlite3.connect(f"{(archive / 'archive.sqlite3').resolve().as_uri()}?mode=ro", uri=True)) as database:
+        database.execute("ATTACH DATABASE ? AS identities", (f"{(archive / DATABASE).resolve().as_uri()}?mode=ro",))
         result: set[int] = set()
         for offset in range(0, len(message_pks), 500):
             batch = message_pks[offset:offset + 500]
-            result.update(row[0] for row in database.execute(f"""SELECT DISTINCT s.catalog_message_pk
-                FROM message_state s JOIN message_tags mt USING(message_id) JOIN tags USING(tagid)
-                WHERE tags.name='attachment' AND s.catalog_message_pk IN ({','.join('?' for _ in batch)})""", batch))
+            result.update(row[0] for row in database.execute(
+                ATTACHED_MESSAGES_SQL.format(placeholders=','.join('?' for _ in batch)), batch))
         return result
 
 

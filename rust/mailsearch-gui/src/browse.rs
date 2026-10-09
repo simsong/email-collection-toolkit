@@ -346,13 +346,7 @@ pub(crate) fn suggestions(db: &Connection, query: &str, limit: usize) -> Result<
         items.extend(addresses.into_iter().take(limit + 1).map(|(item, _)| item));
     }
     if tag.is_empty() || tag == "subject" {
-        let search = Query::parse(
-            &format!("subject:{}", quoted(&value)),
-            "date",
-            "descending",
-            false,
-            None,
-        )?;
+        let search = Query::subject_completion(&value)?;
         let statement = search.count(None)?;
         let count: i64 = db.query_row(
             &statement.sql,
