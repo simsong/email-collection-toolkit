@@ -19,6 +19,7 @@ struct Reader {
     path: String,
     query: String,
     rows: Vec<Row>,
+    row_labels: Vec<String>,
     selected: Option<i64>,
     message: Option<Message>,
     busy: bool,
@@ -34,6 +35,7 @@ impl Reader {
             path,
             query: String::new(),
             rows: Vec::new(),
+            row_labels: Vec::new(),
             selected: None,
             message: None,
             busy: false,
@@ -84,6 +86,21 @@ impl Reader {
                     } else {
                         format!("{} messages", rows.len())
                     };
+                    self.row_labels = rows
+                        .iter()
+                        .map(|row| {
+                            format!(
+                                "{}\n{} · {}",
+                                if row.subject.is_empty() {
+                                    "(No subject)"
+                                } else {
+                                    &row.subject
+                                },
+                                row.sender,
+                                row.date
+                            )
+                        })
+                        .collect();
                     self.rows = rows;
                 }
                 Ok(Content::Message(message)) => {
@@ -157,17 +174,7 @@ impl Reader {
                 .id_salt("results")
                 .show(&mut columns[0], |ui| {
                     ui.add_enabled_ui(!self.busy, |ui| {
-                        for row in &self.rows {
-                            let text = format!(
-                                "{}\n{} · {}",
-                                if row.subject.is_empty() {
-                                    "(No subject)"
-                                } else {
-                                    &row.subject
-                                },
-                                row.sender,
-                                row.date
-                            );
+                        for (row, text) in self.rows.iter().zip(&self.row_labels) {
                             if ui
                                 .selectable_label(self.selected == Some(row.id), text)
                                 .clicked()
@@ -210,14 +217,15 @@ impl eframe::App for Reader {
 }
 
 fn main() -> Result<()> {
-    let args: Vec<String> = std::env::args().skip(1).collect();
-    let path = match args.as_slice() {
-        [] => String::new(),
-        [flag,path] if flag=="--archive" => path.clone(),
+    let mut args: Vec<String> = std::env::args().skip(1).collect();
+    match args.as_slice() {
+        [] => "",
+        [flag,path] if flag=="--archive" => path.as_str(),
         [flag,path] if flag=="--create-demo" => { demo::create(&PathBuf::from(path))?; println!("Created synthetic reader fixture: {path}"); return Ok(()); }
         [flag,path,query] if flag=="--smoke" => { return smoke(path,query); }
         _ => bail!("Usage: mailsearch-rust [--archive DIRECTORY | --create-demo NEW_DIRECTORY | --smoke DIRECTORY QUERY]"),
     };
+    let path = args.pop().unwrap_or_default();
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default().with_inner_size([1150.0, 780.0]),
         ..Default::default()

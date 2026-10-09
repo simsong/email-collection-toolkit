@@ -1,0 +1,20 @@
+# Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved.
+# Shared bounded MIME transfer decoding for reader inspection and import validation.
+# Strict and permissive consumers use the same streaming callback interface.
+# Production dependencies supply existing base64 decoding semantics.
+# Reference decoder tests verify malformed input and byte-for-byte compatibility.
+# This workspace library owns no archive paths or persistent state.
+[package]
+name = "mime-transfer"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.99"
+publish = false
+license = "GPL-2.0-only"
+
+[dependencies]
+base64 = "0.22"
+data-encoding = "2.11"
+
+[dev-dependencies]
+quoted_printable = "0.5"

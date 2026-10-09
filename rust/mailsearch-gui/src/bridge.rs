@@ -329,18 +329,21 @@ impl Bridge {
                             .context("Search result no longer available")
                     })
                     .collect::<Result<_>>()?;
-                Ok(json!({"results":rows}))
+                Ok(owned_json!({"results":rows}))
             }
             "take_previews" => {
-                let ids: Vec<i64> =
-                    serde_json::from_value(args.first().cloned().unwrap_or(json!([])))?;
+                let ids: Vec<i64> = args
+                    .first()
+                    .map(Vec::<i64>::deserialize)
+                    .transpose()?
+                    .unwrap_or_default();
                 ensure!(ids.len() <= 2000, "Too many previews");
                 let mut previews = Vec::new();
                 for id in ids {
                     let value=self.archive.db.query_row("SELECT coalesce(mm.preview,'') FROM messages m LEFT JOIN search.message_metadata mm USING(sha256) WHERE message_pk=?1",[id],|r|r.get::<_,String>(0))?;
-                    previews.push(json!({"message_pk":id,"preview":value.chars().take(240).collect::<String>()}));
+                    previews.push(owned_json!({"message_pk":id,"preview":value.chars().take(240).collect::<String>()}));
                 }
-                Ok(json!({"previews":previews,"pending":false,"error":null}))
+                Ok(owned_json!({"previews":previews,"pending":false,"error":Value::Null}))
             }
             "message" => {
                 let id = number(args, 0)?;
@@ -348,7 +351,6 @@ impl Bridge {
                 let mut result = crate::mime::describe(&raw)?;
                 let (date_source,filename,date_utc,offset):(String,String,String,i64)=self.archive.db.query_row("SELECT m.date_source,g.filename,m.date_utc,l.byte_offset FROM messages m JOIN locations l USING(message_pk) JOIN mbox_generations g USING(generation_pk) WHERE message_pk=?1",[id],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?)))?;
                 result["message_pk"] = json!(id);
-                result["date_source"] = json!(date_source);
                 if date_source == "received-median" {
                     let header = result["headers"]
                         .as_array()
@@ -363,9 +365,10 @@ impl Bridge {
                         .unwrap_or(json!("(missing)"));
                     result["date_adjustment"] = json!({"date_header":header,"received_median_utc":date_utc,"archive_routing_utc":date_utc});
                 }
+                result["date_source"] = Value::String(date_source);
                 let mut origins=self.archive.db.prepare("SELECT parent_message_pk,parent_message_id,part_path FROM attached_origins WHERE child=? ORDER BY parent_message_id,part_path")?;
-                result["attached_origins"]=json!(origins.query_map([id],|r| Ok(json!({"parent_message_pk":r.get::<_,Option<i64>>(0)?,"parent_message_id":r.get::<_,String>(1)?,"part_path":serde_json::from_str::<Value>(&r.get::<_,String>(2)?).unwrap_or(json!([]))})))?.collect::<rusqlite::Result<Vec<_>>>()?);
-                result["archive_path"] = json!(format!(
+                result["attached_origins"]=Value::Array(origins.query_map([id],|r| Ok(owned_json!({"parent_message_pk":r.get::<_,Option<i64>>(0)?,"parent_message_id":r.get::<_,String>(1)?,"part_path":serde_json::from_str::<Value>(&r.get::<_,String>(2)?).unwrap_or_else(|_| Value::Array(Vec::new()))})))?.collect::<rusqlite::Result<Vec<_>>>()?);
+                result["archive_path"] = Value::String(format!(
                     "{}?offset={offset}",
                     self.archive.root.join("data/mbox").join(filename).display()
                 ));
@@ -442,9 +445,8 @@ impl Bridge {
                     crate::drag::available(),
                     "File dragging is unavailable on this platform"
                 );
-                let ids: Vec<i64> = serde_json::from_value(
-                    args.first().context("Missing drag selection")?.clone(),
-                )?;
+                let ids: Vec<i64> =
+                    Vec::<i64>::deserialize(args.first().context("Missing drag selection")?)?;
                 if self.drags.is_none() {
                     self.drags = Some(crate::drag::Exports::new(&self.archive)?);
                 }
@@ -507,17 +509,18 @@ impl Bridge {
             let origin=if preferred {format!("Direct {plugin} source")}else if cached{format!("Local cache of {}",metadata["relationship"]["upstream_plugin_kind"].as_str().unwrap_or("upstream account"))}else{"Local source".into()};
             let copy=if plugin=="file-folder"&&kind!="provider"{volume["current_mount_path"].as_str().filter(|v|Path::new(v).is_absolute()).map(|mount|Path::new(mount).join(&path))}else{None};
             let display=if kind=="provider"{metadata["display_name"].as_str().unwrap_or(&path).to_string()}else if kind=="file"&&path.starts_with("Users/"){format!("/{path}")}else{path};
-            Ok(json!({"volume":volume["volume_label"].as_str().or(volume["current_mount_path"].as_str()).unwrap_or("Unknown source volume"),"path":display,"offset":r.get::<_,Option<i64>>(4)?,"raw_sha256":r.get::<_,String>(5)?,"semantic_sha256":r.get::<_,Option<String>>(6)?,"origin":origin,"preferred":preferred,"copy_path":copy}))
+            Ok(owned_json!({"volume":volume["volume_label"].as_str().or(volume["current_mount_path"].as_str()).unwrap_or("Unknown source volume"),"path":display,"offset":r.get::<_,Option<i64>>(4)?,"raw_sha256":r.get::<_,String>(5)?,"semantic_sha256":r.get::<_,Option<String>>(6)?,"origin":origin,"preferred":preferred,"copy_path":serde_json::to_value(copy).map_err(|e| rusqlite::Error::ToSqlConversionFailure(Box::new(e)))?}))
         })?.collect::<rusqlite::Result<Vec<_>>>()?;
-        locations.sort_by_key(|v| {
+        fn key(v: &Value) -> (bool, &str, &str, &str) {
             (
                 !v["preferred"].as_bool().unwrap_or(false),
-                v["origin"].as_str().unwrap_or("").to_string(),
-                v["volume"].as_str().unwrap_or("").to_string(),
-                v["path"].as_str().unwrap_or("").to_string(),
+                v["origin"].as_str().unwrap_or(""),
+                v["volume"].as_str().unwrap_or(""),
+                v["path"].as_str().unwrap_or(""),
             )
-        });
-        Ok(json!(locations))
+        }
+        locations.sort_by(|a, b| key(a).cmp(&key(b)));
+        Ok(Value::Array(locations))
     }
 
     pub(crate) fn suggestions(&self, args: &[Value], budget: Duration) -> Result<Value> {
@@ -558,7 +561,7 @@ impl Bridge {
         );
     }
 
-    fn headers(&self, statement: crate::query::Statement) -> Result<Vec<crate::query::Header>> {
+    fn headers(&self, statement: crate::query::Statement<'_>) -> Result<Vec<crate::query::Header>> {
         let mut prepared = self.archive.db.prepare(&statement.sql)?;
         let mut rows = prepared
             .query_map(
@@ -602,7 +605,7 @@ impl Bridge {
             rows.truncate(512);
             let cursor = rows.last().map(|r| json!({"key":r.key,"id":r.message_pk}));
             Ok(
-                json!({"scanned":rows.len(),"results":rows,"has_more":more,"cursor":cursor,"highlight_terms":query.terms()}),
+                owned_json!({"scanned":rows.len(),"results":rows,"has_more":more,"cursor":cursor,"highlight_terms":json!(query.terms())}),
             )
         })();
         self.archive.db.progress_handler(0, None::<fn() -> bool>);
@@ -631,7 +634,7 @@ impl Bridge {
                 rows.truncate(limit);
             }
             Ok(
-                json!({"results":rows,"offset":offset,"has_more":more,"highlight_terms":query.terms(),"error":null}),
+                owned_json!({"results":rows,"offset":offset,"has_more":more,"highlight_terms":json!(query.terms()),"error":Value::Null}),
             )
         })();
         self.archive.db.progress_handler(0, None::<fn() -> bool>);

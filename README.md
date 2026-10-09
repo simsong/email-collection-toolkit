@@ -80,7 +80,8 @@ with `make rust-gui-demo` and then run
 `make rust-gui ARCHIVE=".tmp/rust-gui-demo"`. `make rust-gui` opens the reused interface; `make rust-gui-egui` opens the
 earlier widget prototype for comparison.
 
-`make test-rust-gui` runs headless Rust and widget tests;
+`make test-mime-transfer` checks bounded strict/permissive transfer decoding against
+the reference libraries. `make test-rust-gui` runs headless Rust and widget tests;
 `make check-rust-gui-native-build` compiles native acceptance without opening windows;
 `make test-rust-gui-interop` checks a Python-created archive.
 `make test-rust-recovery` tests foreground hot-journal repair, elapsed time,

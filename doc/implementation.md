@@ -3152,11 +3152,12 @@ joining a worker, whose operations cannot write archive data.
 The catalog joins a read-only attached FTS database; literal tokens are quoted
 and bound as SQL parameters. A SQLite progress handler limits search duration.
 Selection reads one bounded location in `data/mbox` and uses the shared
-`archive-verifier::recover_bytes` decoder. Its streamed SHA-256 candidates retain
+`archive-verifier::recover_owned` decoder. Its streamed SHA-256 candidates retain
 the matched framing, adopted-envelope choice and up-to-twelve per-line legacy
 quote decisions. The reader reconstructs only the selected interpretation and
-checks its exact bytes again before MIME parsing; it does not allocate a message
-buffer per candidate. The standalone verifier remains streaming and discards the
+checks its exact bytes again before MIME parsing. Recovery compacts framing and
+quoting in the caller-owned buffer; it does not allocate a message buffer per
+candidate. The standalone verifier remains streaming and discards the
 recovery plan without reconstructing a record. Real fixtures exercise mixed
 display, adopted envelopes, terminal newlines, corruption refusal and byte fixity.
 MIME display prefers plain alternatives,
@@ -3165,6 +3166,21 @@ paths resolving outside the archive are rejected. WAL-mode database headers are 
 shared-memory sidecar creation. The prototype does not repair
 hot journals or provide a cross-database snapshot during simultaneous importing;
 use a quiescent archive for the experiment.
+
+MIME inspection borrows unencoded text through the same `charset` decoder used
+by mailparse, decodes displayable root text once, and compares legacy tags/URL prefixes without
+copying complete bodies. Non-display roots use bounded transfer/charset probing,
+including BOMs, UTF-7 and Unicode whitespace, without materializing attachments
+or multipart containers. The shared `mime-transfer` crate counts permissive
+attachment output and validates strict importer output through bounded slices;
+only embedded RFC 822 validation retains decoded bytes. `make test-mime-transfer`
+compares strict/permissive bytes and failures with the original decoder libraries,
+including malformed streams and large payloads. Reader tests verify unchanged
+attachment sizes, UTF-8 display truncation, charset behavior and URL policy.
+Owned JSON fields/trees move into replies, native delivery serializes into its
+final JavaScript buffer, and helper requests serialize a borrowed envelope.
+Folder keys/prefixes and SQL bindings borrow retained rows/plans. Independent
+hash hypotheses, worker inputs and shared handles retain their necessary ownership.
 
 `make test-rust-gui` runs Clippy, formatting, integrity/MIME/worker tests and a
 headless egui Search/select/display test. `make test-rust-gui-interop` builds the

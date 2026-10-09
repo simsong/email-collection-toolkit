@@ -8,7 +8,7 @@
 use anyhow::{ensure, Context, Result};
 use base64::{engine::general_purpose::STANDARD, Engine};
 use mailparse::{DispositionType, MailHeaderMap, ParsedMail};
-use serde_json::{json, Value};
+use serde_json::Value;
 use std::{
     borrow::Cow,
     collections::HashMap,
@@ -41,7 +41,7 @@ pub(crate) fn filename(part: &ParsedMail<'_>, id: i64) -> String {
         .get("filename")
         .or(part.ctype.params.get("name"));
     let fallback = format!("attachment-{id}");
-    let cleaned = name
+    let mut cleaned = name
         .unwrap_or(&fallback)
         .rsplit(['/', '\\'])
         .next()
@@ -55,9 +55,11 @@ pub(crate) fn filename(part: &ParsedMail<'_>, id: i64) -> String {
             }
         })
         .take(180)
-        .collect::<String>()
-        .trim_matches('.')
-        .to_string();
+        .collect::<String>();
+    let start = cleaned.len() - cleaned.trim_start_matches('.').len();
+    let end = cleaned.trim_end_matches('.').len().max(start);
+    cleaned.truncate(end);
+    cleaned.drain(..start);
     if cleaned.is_empty() {
         fallback
     } else {
@@ -70,39 +72,85 @@ fn raster(mime: &str) -> bool {
         "image/png" | "image/jpeg" | "image/gif" | "image/webp" | "image/bmp"
     )
 }
-fn text(part: &ParsedMail<'_>) -> String {
-    part.get_body().unwrap_or_else(|_| {
-        String::from_utf8_lossy(part.get_body_raw().as_deref().unwrap_or(part.raw_bytes))
-            .into_owned()
+fn decoded_text<'a>(part: &'a ParsedMail<'_>) -> Result<Cow<'a, str>, mailparse::MailParseError> {
+    match part.get_body_encoded() {
+        mailparse::body::Body::Base64(_) | mailparse::body::Body::QuotedPrintable(_) => {
+            part.get_body().map(Cow::Owned)
+        }
+        _ => Ok(charset::Charset::for_label(part.ctype.charset.as_bytes())
+            .map(|encoding| encoding.decode(raw_body(part)).0)
+            .unwrap_or_else(|| charset::decode_ascii(raw_body(part)))),
+    }
+}
+fn text<'a>(part: &'a ParsedMail<'_>) -> Cow<'a, str> {
+    decoded_text(part).unwrap_or_else(|_| match part.get_body_raw() {
+        Ok(bytes) => Cow::Owned(String::from_utf8_lossy(&bytes).into_owned()),
+        Err(_) => String::from_utf8_lossy(part.raw_bytes),
     })
 }
-fn decode(raw: &[u8], mail: &ParsedMail<'_>) -> String {
+fn decode<'a>(raw: &'a [u8], mail: &ParsedMail<'_>) -> Cow<'a, str> {
     if let Ok(text) = std::str::from_utf8(raw) {
-        return text.to_owned();
+        return Cow::Borrowed(text);
     }
     if let Some(encoding) = encoding_rs::Encoding::for_label(mail.ctype.charset.as_bytes()) {
-        return encoding.decode(raw).0.into_owned();
+        return encoding.decode(raw).0;
     }
-    String::from_utf8_lossy(raw).into_owned()
+    String::from_utf8_lossy(raw)
 }
 fn header_value(header: &mailparse::MailHeader<'_>, mail: &ParsedMail<'_>) -> String {
     let bytes = header.get_value_raw();
     if !bytes.is_ascii() && std::str::from_utf8(bytes).is_err() {
-        decode(bytes, mail)
+        decode(bytes, mail).into_owned()
     } else {
         header.get_value()
     }
 }
-fn legacy_html(mail: &ParsedMail<'_>) -> Option<String> {
-    let content = text(mail);
+fn starts_ascii(value: &str, prefix: &str) -> bool {
+    value
+        .as_bytes()
+        .get(..prefix.len())
+        .is_some_and(|v| v.eq_ignore_ascii_case(prefix.as_bytes()))
+}
+pub(crate) fn legacy_html(content: &str) -> Option<&str> {
     let trimmed = content.trim();
-    if trimmed.to_lowercase().starts_with("<x-html>")
-        && trimmed.to_lowercase().ends_with("</x-html>")
+    if starts_ascii(trimmed, "<x-html>")
+        && trimmed
+            .as_bytes()
+            .get(trimmed.len().saturating_sub(9)..)
+            .is_some_and(|v| v.eq_ignore_ascii_case(b"</x-html>"))
+        && trimmed.len() >= 17
     {
-        Some(trimmed[8..trimmed.len() - 9].to_owned())
+        Some(&trimmed[8..trimmed.len() - 9])
     } else {
         None
     }
+}
+fn raw_body<'a>(part: &'a ParsedMail<'_>) -> &'a [u8] {
+    match part.get_body_encoded() {
+        mailparse::body::Body::Base64(body) | mailparse::body::Body::QuotedPrintable(body) => {
+            body.get_raw()
+        }
+        mailparse::body::Body::SevenBit(body) | mailparse::body::Body::EightBit(body) => {
+            body.get_raw()
+        }
+        mailparse::body::Body::Binary(body) => body.get_raw(),
+    }
+}
+fn body_bytes<'a>(part: &'a ParsedMail<'_>) -> Result<Cow<'a, [u8]>, mailparse::MailParseError> {
+    match part.get_body_encoded() {
+        mailparse::body::Body::Base64(body) | mailparse::body::Body::QuotedPrintable(body) => {
+            body.get_decoded().map(Cow::Owned)
+        }
+        _ => Ok(Cow::Borrowed(raw_body(part))),
+    }
+}
+fn decoded_length(part: &ParsedMail<'_>) -> usize {
+    let encoding = match part.get_body_encoded() {
+        mailparse::body::Body::Base64(_) => "base64",
+        mailparse::body::Body::QuotedPrintable(_) => "quoted-printable",
+        _ => return raw_body(part).len(),
+    };
+    mime_transfer::decode(raw_body(part), encoding, false, |_| {}).unwrap_or(part.raw_bytes.len())
 }
 pub(crate) fn describe(raw: &[u8]) -> Result<Value> {
     let mail = mailparse::parse_mail(raw)?;
@@ -111,16 +159,34 @@ pub(crate) fn describe(raw: &[u8]) -> Result<Value> {
     let headers: Vec<_> = mail
         .headers
         .iter()
-        .map(|h| json!({"name":h.get_key(),"value":header_value(h,&mail)}))
+        .map(|h| owned_json!({"name":h.get_key(),"value":header_value(h,&mail)}))
         .collect();
     let mut bodies = Vec::new();
     let mut attachments = Vec::new();
+    let root_decoded = (!attachment(&mail)
+        && mail.subparts.is_empty()
+        && matches!(mail.ctype.mimetype.as_str(), "text/plain" | "text/html"))
+    .then(|| decoded_text(&mail));
+    let (legacy, root_length) = match &root_decoded {
+        Some(Ok(body)) => (legacy_html(body).is_some(), None),
+        Some(Err(_)) => (false, None),
+        None => {
+            let transfer = match mail.get_body_encoded() {
+                mailparse::body::Body::Base64(_) => "base64",
+                mailparse::body::Body::QuotedPrintable(_) => "quoted-printable",
+                _ => "binary",
+            };
+            let (legacy, size) =
+                crate::legacy::inspect(raw_body(&mail), transfer, &mail.ctype.charset);
+            (legacy, Some(size.unwrap_or(mail.raw_bytes.len())))
+        }
+    };
     let mut preferred = -1;
     let mut html_length = 0;
     let mut valid_body = false;
     for (id, part) in list.iter().enumerate() {
         let mime = &part.ctype.mimetype;
-        if id == 0 && legacy_html(&mail).is_some() {
+        if id == 0 && legacy {
             continue;
         }
         if attachment(part) {
@@ -132,10 +198,19 @@ pub(crate) fn describe(raw: &[u8]) -> Result<Value> {
             } else {
                 None
             };
-            attachments.push(json!({"part_id":id,"filename":name,"content_type":mime,"byte_length":part.get_body_raw().map(|bytes|bytes.len()).unwrap_or(part.raw_bytes.len()),"inline":part.headers.get_first_value("Content-ID").is_some(),"preview":preview,"risky":true}));
+            attachments.push(owned_json!({"part_id":id,"filename":name,"content_type":mime.as_str(),"byte_length":if id == 0 { root_length.unwrap_or_else(|| decoded_length(part)) } else { decoded_length(part) },"inline":part.headers.get_first_value("Content-ID").is_some(),"preview":preview,"risky":true}));
         } else if matches!(mime.as_str(), "text/plain" | "text/html") && part.subparts.is_empty() {
-            bodies.push(json!({"part_id":id,"content_type":mime,"label":format!("{} — part {id}",if mime=="text/html"{"HTML"}else{"Plain Text"})}));
-            let decoded = part.get_body();
+            bodies.push(owned_json!({"part_id":id,"content_type":mime.as_str(),"label":format!("{} — part {id}",if mime=="text/html"{"HTML"}else{"Plain Text"})}));
+            let decoded = if id == 0 {
+                root_decoded
+                    .as_ref()
+                    .expect("root body classified before decoding")
+                    .as_deref()
+                    .map(Cow::Borrowed)
+                    .map_err(|_| ())
+            } else {
+                decoded_text(part).map_err(|_| ())
+            };
             let usable = decoded.as_ref().is_ok_and(|body| !body.trim().is_empty());
             let length = decoded.as_ref().map(|body| body.trim().len()).unwrap_or(0);
             if (usable && (!valid_body || (mime == "text/html" && length > html_length)))
@@ -149,30 +224,32 @@ pub(crate) fn describe(raw: &[u8]) -> Result<Value> {
             }
         }
     }
-    if legacy_html(&mail).is_some() {
-        bodies
-            .push(json!({"part_id":-2,"content_type":"text/html","label":"HTML — legacy x-html"}));
+    if legacy {
+        bodies.push(
+            owned_json!({"part_id":-2,"content_type":"text/html","label":"HTML — legacy x-html"}),
+        );
         preferred = -2;
     }
-    bodies.push(json!({"part_id":-1,"content_type":"message/rfc822","label":"Raw Source"}));
+    bodies.push(owned_json!({"part_id":-1,"content_type":"message/rfc822","label":"Raw Source"}));
     Ok(
-        json!({"headers":headers,"body_parts":bodies,"preferred_part_id":preferred,"attachments":attachments,"attached_origins":[],"subject":mail.headers.iter().find(|h|h.get_key_ref().eq_ignore_ascii_case("subject")).map(|h|header_value(h,&mail)).unwrap_or_else(||"(no subject)".into())}),
+        owned_json!({"headers":headers,"body_parts":bodies,"preferred_part_id":preferred,"attachments":attachments,"attached_origins":Vec::<Value>::new(),"subject":mail.headers.iter().find(|h|h.get_key_ref().eq_ignore_ascii_case("subject")).map(|h|header_value(h,&mail)).unwrap_or_else(||"(no subject)".into())}),
     )
 }
 pub(crate) fn render(raw: &[u8], id: i64, allow_remote: bool) -> Result<Value> {
     let mail = mailparse::parse_mail(raw)?;
     if id == -1 {
         return Ok(
-            json!({"part_id":id,"kind":"raw","content_type":"message/rfc822","content":crate::limited(decode(raw,&mail)),"remote_content_blocked":false}),
+            owned_json!({"part_id":id,"kind":"raw","content_type":"message/rfc822","content":crate::limited_view(decode(raw,&mail)),"remote_content_blocked":false}),
         );
     }
     let mut list = Vec::new();
     parts(&mail, &mut list);
     if id == -2 {
-        let content = legacy_html(&mail).context("No legacy x-html body")?;
-        let (content, blocked) = safe_html(&content, &list, allow_remote)?;
+        let decoded = text(&mail);
+        let content = legacy_html(&decoded).context("No legacy x-html body")?;
+        let (content, blocked) = safe_html(content, &list, allow_remote)?;
         return Ok(
-            json!({"part_id":id,"kind":"html","content_type":"text/html","content":content,"remote_content_blocked":blocked}),
+            owned_json!({"part_id":id,"kind":"html","content_type":"text/html","content":content,"remote_content_blocked":blocked}),
         );
     }
     let part = list
@@ -181,7 +258,7 @@ pub(crate) fn render(raw: &[u8], id: i64, allow_remote: bool) -> Result<Value> {
     ensure!(!attachment(part), "Select a body part for display");
     let content = text(part);
     let (kind, content, blocked) = match part.ctype.mimetype.as_str() {
-        "text/plain" => ("text", crate::limited(content), false),
+        "text/plain" => ("text", crate::limited_view(content), false),
         "text/html" => {
             let (html, blocked) = safe_html(&content, &list, allow_remote)?;
             ("html", html, blocked)
@@ -189,7 +266,7 @@ pub(crate) fn render(raw: &[u8], id: i64, allow_remote: bool) -> Result<Value> {
         _ => anyhow::bail!("Part is not displayable text"),
     };
     Ok(
-        json!({"part_id":id,"kind":kind,"content_type":part.ctype.mimetype,"content":content,"remote_content_blocked":blocked}),
+        owned_json!({"part_id":id,"kind":kind,"content_type":part.ctype.mimetype.as_str(),"content":content,"remote_content_blocked":blocked}),
     )
 }
 fn safe_html(value: &str, parts: &[&ParsedMail<'_>], allow_remote: bool) -> Result<(String, bool)> {
@@ -197,14 +274,9 @@ fn safe_html(value: &str, parts: &[&ParsedMail<'_>], allow_remote: bool) -> Resu
     for part in parts {
         if raster(&part.ctype.mimetype) {
             if let Some(cid) = part.headers.get_first_value("Content-ID") {
-                images.insert(
-                    cid.trim_matches(['<', '>']).to_lowercase(),
-                    format!(
-                        "data:{};base64,{}",
-                        part.ctype.mimetype,
-                        STANDARD.encode(part.get_body_raw().unwrap_or_default())
-                    ),
-                );
+                let mut data = format!("data:{};base64,", part.ctype.mimetype);
+                STANDARD.encode_string(body_bytes(part).unwrap_or_default().as_ref(), &mut data);
+                images.insert(cid.trim_matches(['<', '>']).to_lowercase(), data);
             }
         }
     }
@@ -219,13 +291,13 @@ fn safe_html(value: &str, parts: &[&ParsedMail<'_>], allow_remote: bool) -> Resu
         .url_relative(ammonia::UrlRelative::Deny)
         .attribute_filter(move |tag, attribute, value| {
             if tag == "img" && attribute == "src" {
-                let lower = value.to_ascii_lowercase();
-                if let Some(cid) = lower.strip_prefix("cid:") {
+                if starts_ascii(value, "cid:") {
+                    let cid = value[4..].to_ascii_lowercase();
                     return images
                         .get(cid.trim_matches(['<', '>']))
                         .map(|v| Cow::Owned(v.clone()));
                 }
-                if lower.starts_with("https:") || lower.starts_with("http:") {
+                if starts_ascii(value, "https:") || starts_ascii(value, "http:") {
                     if !allow_remote {
                         flag.store(true, Ordering::Relaxed);
                         return None;
@@ -238,7 +310,7 @@ fn safe_html(value: &str, parts: &[&ParsedMail<'_>], allow_remote: bool) -> Resu
                     "data:image/bmp;",
                 ]
                 .iter()
-                .any(|s| lower.starts_with(s))
+                .any(|s| starts_ascii(value, s))
                 {
                     return None;
                 }
@@ -246,7 +318,7 @@ fn safe_html(value: &str, parts: &[&ParsedMail<'_>], allow_remote: bool) -> Resu
             if attribute == "href"
                 && !["https:", "http:", "mailto:"]
                     .iter()
-                    .any(|s| value.to_ascii_lowercase().starts_with(s))
+                    .any(|s| starts_ascii(value, s))
             {
                 return None;
             }
@@ -277,11 +349,86 @@ pub(crate) fn payload(raw: &[u8], id: i64) -> Result<(String, String, Vec<u8>)> 
 }
 pub(crate) fn attachment_content(raw: &[u8], id: i64) -> Result<Value> {
     let (name, mime, bytes) = payload(raw, id)?;
-    Ok(json!({"filename":name,"content_type":mime,"content_base64":STANDARD.encode(bytes)}))
+    Ok(owned_json!({"filename":name,"content_type":mime,"content_base64":STANDARD.encode(bytes)}))
 }
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn inspection_borrows_text_and_counts_attachment_bytes() {
+        // requirements.md: MIME display preserves charset and malformed attachment policy.
+        for raw in [b"Content-Type: text/plain; charset=utf-8\r\n\r\nhello".as_slice(), b"Content-Type: multipart/mixed; boundary=x\r\n\r\npreamble\r\n--x\r\n\r\ntext\r\n--x--\r\n"] {
+            let mail = mailparse::parse_mail(raw).unwrap();
+            assert!(matches!(decoded_text(&mail).unwrap(), Cow::Borrowed(_)));
+            assert_eq!(decoded_text(&mail).unwrap(), mail.get_body().unwrap());
+        }
+        for encoding in ["7bit", "8bit", "binary", "base64", "quoted-printable"] {
+            for body in ["YWJj", "YQ==Yg==", "!!!!", "a=3Db\r\n", "=xx", "\r\n", ""] {
+                let raw = format!("Content-Type: application/octet-stream\r\nContent-Transfer-Encoding: {encoding}\r\n\r\n{body}");
+                let mail = mailparse::parse_mail(raw.as_bytes()).unwrap();
+                let expected = mail
+                    .get_body_raw()
+                    .map(|b| b.len())
+                    .unwrap_or(mail.raw_bytes.len());
+                assert_eq!(decoded_length(&mail), expected, "{encoding}: {body:?}");
+                assert_eq!(
+                    describe(raw.as_bytes()).unwrap()["attachments"][0]["byte_length"],
+                    expected
+                );
+            }
+        }
+        for content in ["<X-HTML>body</x-HTML>", " <x-html>é</x-html> "] {
+            let raw = format!("Content-Type: text/plain; charset=utf-8\r\n\r\n{content}");
+            assert_eq!(describe(raw.as_bytes()).unwrap()["preferred_part_id"], -2);
+            assert!(render(raw.as_bytes(), -2, false).unwrap()["content"]
+                .as_str()
+                .unwrap()
+                .contains(legacy_html(content).unwrap()));
+        }
+    }
+    #[test]
+    fn large_root_attachments_use_bounded_legacy_inspection() {
+        // requirements.md: inspecting unopened attachments does not materialize payloads.
+        for encoding in ["base64", "quoted-printable", "binary"] {
+            let mut decoded = b"not legacy ".repeat(200000);
+            decoded.push(b'x');
+            let body = if encoding == "base64" {
+                STANDARD.encode(&decoded).into_bytes()
+            } else {
+                decoded.clone()
+            };
+            let raw = [format!("Content-Type: application/octet-stream; charset=utf-8\r\nContent-Transfer-Encoding: {encoding}\r\n\r\n").as_bytes(), &body].concat();
+            let view = describe(&raw).unwrap();
+            assert_eq!(view["attachments"][0]["byte_length"], decoded.len());
+            assert_eq!(view["preferred_part_id"], -1);
+        }
+        let body = format!(
+            "{}<X-HTML>{}</x-html>{}",
+            "\u{2003}".repeat(20000),
+            "é".repeat(200000),
+            "\u{2003}".repeat(20000)
+        );
+        let raw = format!("Content-Type: multipart/mixed; boundary=x; charset=utf-8\r\n\r\n{body}\r\n--x\r\nContent-Type: text/plain\r\n\r\nsibling\r\n--x--\r\n");
+        let mail = mailparse::parse_mail(raw.as_bytes()).unwrap();
+        assert!(legacy_html(&mail.get_body().unwrap()).is_some());
+        assert_eq!(describe(raw.as_bytes()).unwrap()["preferred_part_id"], -2);
+        let raw = format!("Content-Type: application/octet-stream; charset=utf-8\r\nContent-Transfer-Encoding: base64\r\n\r\n{}", STANDARD.encode(body.as_bytes()));
+        assert_eq!(describe(raw.as_bytes()).unwrap()["preferred_part_id"], -2);
+    }
+    #[test]
+    fn raw_display_borrows_before_bounded_utf8_truncation() {
+        // requirements.md: display truncation is derived; source bytes remain untouched.
+        let raw = format!(
+            "Content-Type: text/plain; charset=utf-8\r\n\r\n{}",
+            "é".repeat(crate::MAX_DISPLAY)
+        );
+        let mail = mailparse::parse_mail(raw.as_bytes()).unwrap();
+        assert!(matches!(decode(raw.as_bytes(), &mail), Cow::Borrowed(_)));
+        let rendered = render(raw.as_bytes(), -1, false).unwrap();
+        let content = rendered["content"].as_str().unwrap();
+        assert!(content.len() < crate::MAX_DISPLAY + 100);
+        assert!(content.ends_with("[Display truncated at 256 KiB; original message is unchanged.]"));
+    }
     #[test]
     fn damaged_attachment_and_html_do_not_hide_plain_sibling() {
         // MIME preservation: malformed derived payloads cannot hide usable content.

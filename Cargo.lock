@@ -2904,6 +2904,7 @@ dependencies = [
  "base64",
  "block2 0.6.2",
  "caseless",
+ "charset",
  "chrono",
  "dispatch2",
  "ed25519-dalek",
@@ -2914,6 +2915,7 @@ dependencies = [
  "libc",
  "libloading",
  "mailparse",
+ "mime-transfer",
  "muda",
  "objc2 0.6.4",
  "objc2-app-kit 0.3.2",
@@ -2975,6 +2977,7 @@ dependencies = [
  "chrono",
  "libloading",
  "mailparse",
+ "mime-transfer",
  "outlook-pst",
  "quoted_printable",
  "sha2",
@@ -3005,6 +3008,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "488016bfae457b036d996092f6cb448677611ce4449e970ceaf42695203f218a"
 dependencies = [
  "autocfg",
+]
+
+[[package]]
+name = "mime-transfer"
+version = "0.1.0"
+dependencies = [
+ "base64",
+ "data-encoding",
+ "quoted_printable",
 ]
 
 [[package]]

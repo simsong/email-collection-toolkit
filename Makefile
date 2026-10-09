@@ -48,7 +48,7 @@ RUST_TARGET_DIR ?= $(CURDIR)/target
 export CARGO_TARGET_DIR := $(RUST_TARGET_DIR)
 CARGO_RUN = $(CARGO)
 
-.PHONY: test-pst pst-import pst-smoke rust-programs mdti-validator mcti-generator pst-importer mcti-scan pst-downloader pst-download pst-download-plan test-pst-downloader rust-toolchain rust-lock rust-fmt rust-check test-rust rust-smoke
+.PHONY: test-pst pst-import pst-smoke rust-programs mdti-validator mcti-generator pst-importer mcti-scan pst-downloader pst-download pst-download-plan test-pst-downloader rust-toolchain rust-lock rust-fmt rust-check test-rust test-mime-transfer rust-smoke
 rust-programs:
 	$(CARGO_RUN) build --locked --release --workspace --bins
 
@@ -67,6 +67,9 @@ rust-fmt:
 
 rust-check:
 	$(CARGO_RUN) workspace-check
+
+test-mime-transfer:
+	$(CARGO_RUN) test --locked -p mime-transfer
 
 test-rust:
 	$(CARGO_RUN) test --locked --workspace

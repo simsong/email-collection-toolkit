@@ -5,6 +5,15 @@
 // MIME and HTML conversion produce display text, never replacement source bytes.
 // Each reader owns its connections; background workers keep database work off the UI.
 // The native UI and headless smoke tests use this same request path.
+// Unlike json!, these fields move already-owned strings and Value trees.
+macro_rules! owned_json {
+    ({$($key:literal : $value:expr),* $(,)?}) => {{
+        let mut object = serde_json::Map::new();
+        $(object.insert($key.into(), serde_json::Value::from($value));)*
+        serde_json::Value::Object(object)
+    }};
+}
+
 pub mod bridge;
 mod browse;
 mod completion;
@@ -13,6 +22,7 @@ pub mod desktop;
 pub mod documents;
 pub mod drag;
 pub mod engine;
+mod legacy;
 #[cfg(target_os = "macos")]
 pub mod macos;
 mod mime;
@@ -30,6 +40,7 @@ mod updater_gateway;
 pub mod worker;
 
 use anyhow::{ensure, Context, Result};
+#[cfg(test)]
 use archive_verifier::recover_bytes as verified_bytes;
 use mailparse::{DispositionType, MailHeaderMap, ParsedMail};
 use rusqlite::{Connection, OpenFlags};
@@ -195,7 +206,7 @@ impl Archive {
         file.seek(SeekFrom::Start(offset))?;
         let mut record = vec![0; length as usize];
         file.read_exact(&mut record)?;
-        verified_bytes(&record, &digest)
+        archive_verifier::recover_owned(record, &digest)
     }
 
     pub fn message(&self, id: i64) -> Result<Message> {
@@ -237,15 +248,26 @@ fn within(root: &Path, relative: &Path) -> Result<PathBuf> {
     Ok(path)
 }
 
-fn limited(mut value: String) -> String {
-    if value.len() > MAX_DISPLAY {
-        let mut end = MAX_DISPLAY;
-        while !value.is_char_boundary(end) {
-            end -= 1;
-        }
-        value.truncate(end);
-        value.push_str("\n[Display truncated at 256 KiB; original message is unchanged.]");
+fn limited(value: String) -> String {
+    limited_view(std::borrow::Cow::Owned(value))
+}
+
+fn limited_view(value: std::borrow::Cow<'_, str>) -> String {
+    if value.len() <= MAX_DISPLAY {
+        return value.into_owned();
     }
+    let mut end = MAX_DISPLAY;
+    while !value.is_char_boundary(end) {
+        end -= 1;
+    }
+    let mut value = match value {
+        std::borrow::Cow::Borrowed(value) => value[..end].to_owned(),
+        std::borrow::Cow::Owned(mut value) => {
+            value.truncate(end);
+            value
+        }
+    };
+    value.push_str("\n[Display truncated at 256 KiB; original message is unchanged.]");
     value
 }
 

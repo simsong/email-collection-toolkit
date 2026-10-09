@@ -67,19 +67,17 @@ impl Hashes {
         }
     }
 
-    fn matched_trim(&self, expected: &str) -> Option<usize> {
+    fn matched_trim(&self, expected: &[u8; 32]) -> Option<usize> {
         let tail = &self.tail[..self.tail_len];
-        let mut lengths = vec![tail.len()];
-        if tail.ends_with(b"\n") {
-            lengths.push(tail.len() - 1);
-        }
-        if tail.ends_with(b"\r\n") {
-            lengths.push(tail.len() - 2);
-        }
-        lengths.into_iter().find_map(|length| {
+        let lengths = [
+            Some(tail.len()),
+            tail.ends_with(b"\n").then(|| tail.len() - 1),
+            tail.ends_with(b"\r\n").then(|| tail.len() - 2),
+        ];
+        lengths.into_iter().flatten().find_map(|length| {
             let mut hash = self.hash.clone();
             hash.update(&self.tail[..length]);
-            (format!("{:x}", hash.finalize()) == expected).then_some(tail.len() - length)
+            (hash.finalize().as_slice() == expected).then_some(tail.len() - length)
         })
     }
 }
@@ -108,7 +106,7 @@ fn candidate(
     length: u64,
     prefixes: &[Hashes],
     mode: Quoting,
-    expected: &str,
+    expected: &[u8; 32],
 ) -> Result<(Option<Recovery>, usize)> {
     file.seek(SeekFrom::Start(start))?;
     let mut input = file.take(length);
@@ -212,6 +210,7 @@ fn record_recovery(
                 .all(|b| b.is_ascii_hexdigit() && !b.is_ascii_uppercase()),
         "invalid raw SHA-256"
     );
+    let expected = digest_bytes(expected);
     file.seek(SeekFrom::Start(offset))?;
     // Bound reads by the catalogued record, not an arbitrary envelope length.
     let (envelope_size, mut envelope) = {
@@ -250,7 +249,7 @@ fn record_recovery(
                 size,
                 std::slice::from_ref(prefix),
                 mode,
-                expected,
+                &expected,
             )?;
             if let Some(recovery) = matched {
                 return Ok((envelope_size, recovery));
@@ -260,7 +259,7 @@ fn record_recovery(
     }
     if (2..=12).contains(&ambiguous) {
         if let Some(recovery) =
-            candidate(file, start, size, &prefixes, Quoting::MboxoMixed, expected)?.0
+            candidate(file, start, size, &prefixes, Quoting::MboxoMixed, &expected)?.0
         {
             return Ok((envelope_size, recovery));
         }
@@ -277,21 +276,42 @@ pub fn verify_record(
     record_recovery(file, offset, length, expected).map(|_| ())
 }
 
-/// Recover one caller-bounded record using exactly the verifier's hash-selected plan.
+fn digest_bytes(expected: &str) -> [u8; 32] {
+    let mut digest = [0; 32];
+    for (byte, pair) in digest
+        .iter_mut()
+        .zip(expected.as_bytes().as_chunks::<2>().0)
+    {
+        let digit = |v: u8| if v <= b'9' { v - b'0' } else { v - b'a' + 10 };
+        *byte = digit(pair[0]) * 16 + digit(pair[1]);
+    }
+    digest
+}
+
+/// Borrowed callers receive independent recovered bytes; owned callers can reuse storage.
 pub fn recover_bytes(record: &[u8], expected: &str) -> Result<Vec<u8>> {
+    recover_owned(record.to_vec(), expected)
+}
+
+/// Compact the hash-selected framing and quoting in the caller's record allocation.
+pub fn recover_owned(mut record: Vec<u8>, expected: &str) -> Result<Vec<u8>> {
     let (split, recovery) = record_recovery(
-        &mut std::io::Cursor::new(record),
+        &mut std::io::Cursor::new(&record),
         0,
         record.len() as u64,
         expected,
     )?;
     let split = usize::try_from(split)?;
-    let mut output = Vec::with_capacity(record.len());
-    if recovery.adopted {
-        output.extend_from_slice(&record[..split]);
-    }
+    let mut write = if recovery.adopted { split } else { 0 };
+    let mut read = split;
     let mut ambiguous = 0;
-    for line in record[split..].split_inclusive(|byte| *byte == b'\n') {
+    while read < record.len() {
+        let end = read
+            + record[read..]
+                .iter()
+                .position(|byte| *byte == b'\n')
+                .map_or(record.len() - read, |i| i + 1);
+        let line = &record[read..end];
         let depth = line.iter().take_while(|byte| **byte == b'>').count();
         let remove = if line[depth..].starts_with(b"From ") {
             match recovery.quoting {
@@ -308,19 +328,21 @@ pub fn recover_bytes(record: &[u8], expected: &str) -> Result<Vec<u8>> {
         } else {
             false
         };
-        output.extend_from_slice(&line[usize::from(remove)..]);
+        let begin = read + usize::from(remove);
+        record.copy_within(begin..end, write);
+        write += end - begin;
+        read = end;
     }
-    output.truncate(
-        output
-            .len()
+    record.truncate(
+        write
             .checked_sub(recovery.trim)
             .ok_or_else(|| anyhow::anyhow!("invalid recovered MBOX framing"))?,
     );
     ensure!(
-        format!("{:x}", Sha256::digest(&output)) == expected,
+        Sha256::digest(&record).as_slice() == digest_bytes(expected),
         "recovered MBOX bytes do not match raw SHA-256"
     );
-    Ok(output)
+    Ok(record)
 }
 
 #[cfg(test)]
@@ -356,6 +378,17 @@ mod tests {
                 let recovered = [prefix, original].concat();
                 let digest = format!("{:x}", Sha256::digest(&recovered));
                 verify_record(&mut file, 0, length as u64, &digest)?;
+                let record = [envelope.as_slice(), stored].concat();
+                let allocation = record.as_ptr();
+                let capacity = record.capacity();
+                let owned = recover_owned(record, &digest)?;
+                assert_eq!(owned, recovered);
+                assert_eq!(
+                    owned.as_ptr(),
+                    allocation,
+                    "recovery must reuse the record allocation"
+                );
+                assert_eq!(owned.capacity(), capacity);
                 assert_eq!(
                     recover_bytes(&[envelope.as_slice(), stored].concat(), &digest)?,
                     recovered

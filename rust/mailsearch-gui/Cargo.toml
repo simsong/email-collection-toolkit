@@ -16,6 +16,7 @@ license = "GPL-2.0-only"
 native-smoke = ["dep:webview2-com", "dep:windows"]
 
 [dependencies]
+mime-transfer = { path = "../mime-transfer" }
 archive-verifier = { path = "../archive-verifier" }
 anyhow = "1.0"
 eframe = { version = "0.36.2", default-features = false, features = ["default_fonts", "glow", "x11", "wayland"] }
@@ -35,6 +36,7 @@ roxmltree = "0.21"
 reqwest = { version = "0.12", default-features = false, features = ["blocking", "rustls-tls"] }
 ammonia = "4"
 encoding_rs = "0.8"
+charset = "0.1"
 rfd = "0.15"
 arboard = "3.6"
 zip = { version = "2.4", default-features = false }

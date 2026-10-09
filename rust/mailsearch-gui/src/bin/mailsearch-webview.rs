@@ -1108,11 +1108,13 @@ fn native(
             }
             Event::UserEvent(NativeEvent::ReaderReady) if !quitting => reader_ready = true,
             Event::UserEvent(NativeEvent::Reply(reply)) => {
-                if let Ok(value) = serde_json::to_string(&reply) {
-                    if let Err(error) =
-                        view.evaluate_script(&format!("window.__rustReply({value})"))
-                    {
-                        eprintln!("Reply delivery failed: {error}");
+                let mut script = b"window.__rustReply(".to_vec();
+                if serde_json::to_writer(&mut script, &reply).is_ok() {
+                    script.push(b')');
+                    if let Ok(script) = String::from_utf8(script) {
+                        if let Err(error) = view.evaluate_script(&script) {
+                            eprintln!("Reply delivery failed: {error}");
+                        }
                     }
                 }
             }

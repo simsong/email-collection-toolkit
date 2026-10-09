@@ -51,63 +51,74 @@ pub(crate) fn tree(db: &Connection, volumes: bool) -> Result<Value> {
     let mut result = Vec::new();
     for (identity, (label, rows)) in groups {
         let volume = volumes.then_some(identity);
-        let children = nodes(db, &rows.iter().collect::<Vec<_>>(), &[], &volume)?;
+        let children = nodes(
+            db,
+            &rows.iter().collect::<Vec<_>>(),
+            &mut Vec::new(),
+            &volume,
+        )?;
         if volumes {
             let selection = Selection {
                 version: 1,
                 path: String::new(),
                 volume_identity: volume,
             };
-            result.push(json!({"selection":selection.token()?,"logical_selection":Selection{volume_identity:None,..selection.clone()}.token()?,"label":label,"kind":"volume","count":count(db,&selection)?,"children":children}));
+            let token = selection.token()?;
+            let count = count(db, &token)?;
+            result.push(owned_json!({"selection":token,"logical_selection":Selection::token_for(1, &selection.path, None)?,"label":label,"kind":"volume","count":count,"children":children}));
         } else {
             result.extend(children);
         }
     }
-    Ok(json!(result))
+    Ok(Value::Array(result))
 }
-fn count(db: &Connection, selection: &Selection) -> Result<i64> {
-    let statement = Query::parse(
-        "",
-        "date",
-        "descending",
-        false,
-        Some(&json!([selection.token()?])),
-    )?
-    .count(None)?;
+fn count(db: &Connection, token: &str) -> Result<i64> {
+    let query = Query::parse("", "date", "descending", false, Some(&json!([token])))?;
+    let statement = query.count(None)?;
     Ok(db.query_row(
         &statement.sql,
         rusqlite::params_from_iter(statement.values),
         |r| r.get(0),
     )?)
 }
-fn nodes(
+fn nodes<'a>(
     db: &Connection,
-    rows: &[&Source],
-    prefix: &[String],
+    rows: &[&'a Source],
+    prefix: &mut Vec<&'a str>,
     volume: &Option<String>,
 ) -> Result<Vec<Value>> {
     let depth = prefix.len();
-    let mut groups = BTreeMap::<String, Vec<&Source>>::new();
-    for row in rows
-        .iter()
-        .filter(|r| r.parts.len() > depth && r.parts.starts_with(prefix))
-    {
-        groups
-            .entry(row.parts[depth].clone())
-            .or_default()
-            .push(row);
+    let mut groups = BTreeMap::<&str, Vec<&Source>>::new();
+    for row in rows.iter().filter(|r| r.parts.len() > depth) {
+        groups.entry(&row.parts[depth]).or_default().push(row);
     }
-    groups.into_iter().map(|(label, rows)| {
-        let mut prefix = prefix.to_vec(); prefix.push(label.clone());
-        let direct = rows.iter().any(|r| r.parts.len()==prefix.len());
-        let single = rows.iter().all(|r| matches!(r.kind.as_str(),"message"|"emlx"));
-        let collapsed = single && (rows.iter().all(|r| r.parts.len()==prefix.len()+1) || rows.iter().all(|r|
-            r.parts.len()==prefix.len()+2 && matches!(r.parts[prefix.len()].as_str(),"cur"|"new")));
+    let mut result = Vec::new();
+    for (label, rows) in groups {
+        prefix.push(label);
+        let direct = rows.iter().any(|r| r.parts.len() == prefix.len());
+        let single = rows
+            .iter()
+            .all(|r| matches!(r.kind.as_str(), "message" | "emlx"));
+        let collapsed = single
+            && (rows.iter().all(|r| r.parts.len() == prefix.len() + 1)
+                || rows.iter().all(|r| {
+                    r.parts.len() == prefix.len() + 2
+                        && matches!(r.parts[prefix.len()].as_str(), "cur" | "new")
+                }));
         let mailbox = direct || collapsed;
-        let children = if mailbox {Vec::new()} else {nodes(db,&rows,&prefix,volume)?};
-        let selection = Selection {version:1,path:prefix.join("/"),volume_identity:volume.clone()};
-        Ok(json!({"selection":selection.token()?,"logical_selection":Selection{volume_identity:None,..selection.clone()}.token()?,"label":label,"kind":if mailbox {"mailbox"} else {"folder"},"count":count(db,&selection)?,"children":children}))
-    }).collect()
+        let children = if mailbox {
+            Vec::new()
+        } else {
+            nodes(db, &rows, prefix, volume)?
+        };
+        let path = prefix.join("/");
+        let token = Selection::token_for(1, &path, volume.as_deref())?;
+        let logical = Selection::token_for(1, &path, None)?;
+        let count = count(db, &token)?;
+        result.push(owned_json!({"selection":token,"logical_selection":logical,"label":label,"kind":if mailbox {"mailbox"} else {"folder"},"count":count,"children":children}));
+        prefix.pop();
+    }
+    Ok(result)
 }
 
 pub(crate) fn preferences_path() -> Result<std::path::PathBuf> {
@@ -168,7 +179,7 @@ pub(crate) fn filters(path: &Path, method: &str, args: &[Value]) -> Result<Value
     match method {
         "save_filter_set" => {
             let selections: Vec<String> =
-                serde_json::from_value(args.get(2).cloned().context("Missing selections")?)?;
+                Vec::<String>::deserialize(args.get(2).context("Missing selections")?)?;
             for token in &selections {
                 Selection::decode(token)?;
             }
@@ -294,7 +305,7 @@ pub(crate) fn suggestions(db: &Connection, query: &str, limit: usize) -> Result<
     let (prefix, tag, value) = completion_input(query);
     let mut items = Vec::new();
     if value.chars().count() < 3 {
-        return Ok(json!({"query":query,"prefix":prefix,"items":items}));
+        return Ok(owned_json!({"query":query,"prefix":prefix,"items":items}));
     }
     let pattern = contains(&folded(&value));
     if tag.is_empty() || TAGS[..5].contains(&tag.as_str()) {
@@ -335,16 +346,25 @@ pub(crate) fn suggestions(db: &Connection, query: &str, limit: usize) -> Result<
                 } else {
                     address
                 };
-                addresses.push((json!({"tag":selected,"value":address,"label":address,"message_count":current["message_count"],"choices":choices}),seen));
+                let selected = selected.to_string();
+                let count = current["message_count"].as_i64().unwrap_or(0);
+                let label = address.clone();
+                addresses.push((owned_json!({"tag":selected,"value":address,"label":label,"message_count":count,"choices":choices}),seen));
             }
         }
-        addresses.sort_by_key(|(v, seen)| {
-            std::cmp::Reverse((
-                v["value"] == value,
-                v["message_count"].as_i64().unwrap_or(0),
-                seen.clone(),
-                v["value"].as_str().unwrap_or("").to_string(),
-            ))
+        addresses.sort_by(|(a, seen_a), (b, seen_b)| {
+            (
+                b["value"] == value,
+                b["message_count"].as_i64().unwrap_or(0),
+                seen_b.as_str(),
+                b["value"].as_str().unwrap_or(""),
+            )
+                .cmp(&(
+                    a["value"] == value,
+                    a["message_count"].as_i64().unwrap_or(0),
+                    seen_a.as_str(),
+                    a["value"].as_str().unwrap_or(""),
+                ))
         });
         items.extend(addresses.into_iter().take(limit + 1).map(|(item, _)| item));
     }
@@ -356,28 +376,29 @@ pub(crate) fn suggestions(db: &Connection, query: &str, limit: usize) -> Result<
             rusqlite::params_from_iter(statement.values),
             |r| r.get(0),
         )?;
-        items.push(json!({"tag":"subject","value":value,"label":format!("Subject contains “{value}”"),"message_count":count,"choices":[choice("subject",count)]}));
+        items.push(owned_json!({"tag":"subject","value":value.as_str(),"label":format!("Subject contains “{value}”"),"message_count":count,"choices":vec![choice("subject",count)]}));
         let query = search.subjects(limit)?;
         let mut statement = db.prepare(&query.sql)?;
         for row in statement.query_map(rusqlite::params_from_iter(query.values), |r| {
             Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?))
         })? {
             let (subject, count) = row?;
-            items.push(json!({"tag":"subject","value":subject,"label":subject,"message_count":count,"choices":[choice("subject",count)]}));
+            let label = subject.clone();
+            items.push(owned_json!({"tag":"subject","value":subject,"label":label,"message_count":count,"choices":vec![choice("subject",count)]}));
         }
     }
     if (tag.is_empty() || TAGS[6..].contains(&tag.as_str())) && normalized_date(&value).is_ok() {
         let normalized = normalized_date(&value)?;
         let mut choices = Vec::new();
         for tag in &TAGS[6..] {
-            let statement = Query::parse(
+            let query = Query::parse(
                 &format!("{tag}:{}", quoted(&normalized)),
                 "date",
                 "descending",
                 false,
                 None,
-            )?
-            .count(None)?;
+            )?;
+            let statement = query.count(None)?;
             let count: i64 = db.query_row(
                 &statement.sql,
                 rusqlite::params_from_iter(statement.values),
@@ -387,11 +408,12 @@ pub(crate) fn suggestions(db: &Connection, query: &str, limit: usize) -> Result<
         }
         for option in &choices {
             if tag.is_empty() || option["tag"] == tag {
+                // Each distinct date suggestion owns the shared choices in the wire shape.
                 items.push(json!({"tag":option["tag"],"value":normalized,"label":normalized,"message_count":option["message_count"],"choices":choices}));
             }
         }
     }
-    Ok(json!({"query":query,"prefix":prefix,"items":items}))
+    Ok(owned_json!({"query":query,"prefix":prefix,"items":items}))
 }
 #[cfg(test)]
 mod tests {

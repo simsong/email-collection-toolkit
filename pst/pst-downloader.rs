@@ -7,6 +7,7 @@ use reqwest::{redirect::Policy, Client, Url};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::{
+    borrow::Cow,
     collections::{BTreeMap, BTreeSet},
     fs::{self, File},
     io::{Read, Seek, Write},
@@ -163,10 +164,10 @@ struct Job {
     inventories: BTreeSet<InventoryRef>,
 }
 #[derive(Serialize, Deserialize)]
-struct Receipt {
-    url: String,
+struct Receipt<'a> {
+    url: Cow<'a, str>,
     final_url: String,
-    sha256: String,
+    sha256: Cow<'a, str>,
     size: u64,
 }
 #[derive(Serialize, Deserialize)]
@@ -503,7 +504,7 @@ fn acquire(
         );
     }
     if path.exists() {
-        let receipt: Receipt = serde_json::from_reader(
+        let receipt: Receipt<'_> = serde_json::from_reader(
             File::open(&receipt_path).context("cannot read cached artifact receipt")?,
         )?;
         ensure!(receipt.url == job.url, "cached receipt URL mismatch");
@@ -565,9 +566,9 @@ fn acquire(
     atomic_json(
         &receipt_path,
         &Receipt {
-            url: job.url.clone(),
+            url: Cow::Borrowed(&job.url),
             final_url,
-            sha256: sha256.clone(),
+            sha256: Cow::Borrowed(&sha256),
             size,
         },
     )?;

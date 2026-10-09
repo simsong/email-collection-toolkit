@@ -2399,6 +2399,14 @@ No Requests-based fetching or public-suffix network update occurs at runtime.
 
 ### Rust desktop migration and retained reader prototype
 
+Reader inspection must borrow unchanged MIME text and count decoded attachment
+sizes with bounded transfer-decoder storage. Strict importer validation keeps its
+existing rejection policy and retains decoded content only for embedded messages.
+Owned MBOX recovery must compact the same hash-selected bytes in the existing
+record allocation. IPC replies move owned text/JSON trees; search statements reuse
+bound plan values. These allocation changes must preserve Python search parity,
+charset/legacy HTML behavior, URL restrictions, and canonical byte verification.
+
 Desktop builds require Rust 1.99 or later. The checkout selects the tested
 1.99.0 compiler with rustfmt and Clippy without changing the global default;
 validation keeps compiler warnings fatal and preserves shutdown atomic ordering.

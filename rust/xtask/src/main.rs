@@ -39,22 +39,22 @@ fn main() -> ExitCode {
     } else {
         vec!["-p", "mailsearch-rust"]
     };
-    let format = if workspace {
-        vec!["--all"]
-    } else {
-        package.clone()
-    };
     let cargo = env::var_os("CARGO").unwrap_or_else(|| "cargo".into());
-    for args in [
-        [vec!["fmt"], format, vec!["--", "--check"]].concat(),
-        [
-            vec!["clippy", "--locked"],
-            package.clone(),
-            vec!["--all-targets", "--", "-D", "warnings"],
-        ]
-        .concat(),
-        [vec!["test", "--locked"], package, vec![]].concat(),
+    for (command, suffix) in [
+        ("fmt", &["--", "--check"][..]),
+        ("clippy", &["--all-targets", "--", "-D", "warnings"][..]),
+        ("test", &[][..]),
     ] {
+        let mut args = vec![command];
+        if command == "fmt" && workspace {
+            args.push("--all");
+        } else {
+            if command != "fmt" {
+                args.push("--locked");
+            }
+            args.extend_from_slice(&package);
+        }
+        args.extend_from_slice(suffix);
         eprintln!("cargo {}", args.join(" "));
         match Command::new(&cargo).args(args).status() {
             Ok(status) if status.success() => (),

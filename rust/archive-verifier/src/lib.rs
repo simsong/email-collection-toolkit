@@ -7,7 +7,7 @@
 //! This first Rust migration leaves semantic and full BagIt checks separate.
 
 mod records;
-pub use records::recover_bytes;
+pub use records::{recover_bytes, recover_owned};
 
 use anyhow::{ensure, Context, Result};
 use rusqlite::{Connection, OpenFlags};

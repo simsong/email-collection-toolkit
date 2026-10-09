@@ -11,6 +11,7 @@ use crate::{
     updater::Updater,
 };
 use anyhow::{bail, Context, Result};
+use serde::Deserialize;
 use serde_json::{json, Value};
 use std::path::PathBuf;
 
@@ -77,11 +78,10 @@ impl Shell {
             }
             "preferences_save" => {
                 let preferences: Preferences =
-                    serde_json::from_value(args.first().context("Missing preferences")?.clone())?;
-                let baseline: Preferences = serde_json::from_value(
+                    Preferences::deserialize(args.first().context("Missing preferences")?)?;
+                let baseline: Preferences = Preferences::deserialize(
                     args.get(1)
-                        .context("Missing displayed preference baseline")?
-                        .clone(),
+                        .context("Missing displayed preference baseline")?,
                 )?;
                 self.preferences = preferences.merge_save(&self.path, &baseline)?;
                 self.updater.configure(

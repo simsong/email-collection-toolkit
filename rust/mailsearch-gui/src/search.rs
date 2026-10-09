@@ -99,7 +99,7 @@ impl Search {
         ensure!(query.len() <= 4096, "Search is limited to 4096 bytes");
         let parsed =
             crate::query::Query::parse(query, sort, direction, attachments, Some(&selections))?;
-        let terms = parsed.terms().to_vec();
+
         ensure!(
             ["date", "subject", "sender"].contains(&sort),
             "Unknown sort field"
@@ -119,7 +119,7 @@ impl Search {
             selections,
         });
         self.shared.wake.notify_one();
-        Ok(json!({"generation":generation,"highlight_terms":terms}))
+        Ok(json!({"generation":generation,"highlight_terms":parsed.terms()}))
     }
     pub fn cancel(&self) {
         let generation = self.shared.generation.fetch_add(1, Ordering::SeqCst) + 1;
@@ -292,7 +292,18 @@ fn remainder_query(job: &Job, cursor: &Value) -> Result<(String, Vec<rusqlite::t
         Some(&job.selections),
     )?;
     let statement = query.ids(Some(cursor), None)?;
-    Ok((statement.sql, statement.values))
+    let sql = statement.sql;
+    let extra = statement
+        .values
+        .into_iter()
+        .filter_map(|value| match value {
+            std::borrow::Cow::Owned(value) => Some(value),
+            std::borrow::Cow::Borrowed(_) => None,
+        })
+        .collect::<Vec<_>>();
+    let mut values = query.into_values();
+    values.extend(extra);
+    Ok((sql, values))
 }
 
 #[cfg(test)]

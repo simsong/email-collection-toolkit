@@ -299,10 +299,8 @@ fn institution_names_do_not_cross_join_all_addresses_and_domains() {
         ("from:\"Target Institution\"", vec![1]),
         ("from:Noise", vec![]),
     ] {
-        let statement = Query::parse(text, "date", "descending", false, None)
-            .unwrap()
-            .ids(None, None)
-            .unwrap();
+        let query = Query::parse(text, "date", "descending", false, None).unwrap();
+        let statement = query.ids(None, None).unwrap();
         let plan: Vec<String> = archive
             .db
             .prepare(&format!("EXPLAIN QUERY PLAN {}", statement.sql))

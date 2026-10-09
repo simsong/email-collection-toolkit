@@ -6,7 +6,7 @@
 // Unix process groups and Windows job objects contain ordinary helper descendants.
 // No shell interprets archive paths, executable names, or request arguments.
 use anyhow::{bail, ensure, Context, Result};
-use serde_json::{json, Value};
+use serde_json::Value;
 use std::{
     io::{BufRead, BufReader, Write},
     path::{Path, PathBuf},
@@ -191,11 +191,21 @@ impl Engine {
         self.failed = true;
         self.next_id += 1;
         let input = self.input.as_mut().context("Engine is shutting down")?;
-        writeln!(
-            input,
-            "{}",
-            json!({"id":self.next_id,"method":method,"args":args})
+        #[derive(serde::Serialize)]
+        struct Request<'a> {
+            id: u64,
+            method: &'a str,
+            args: &'a [Value],
+        }
+        serde_json::to_writer(
+            &mut *input,
+            &Request {
+                id: self.next_id,
+                method,
+                args,
+            },
         )?;
+        input.write_all(b"\n")?;
         input.flush()?;
         let line = if let Some(abort) = abort {
             loop {

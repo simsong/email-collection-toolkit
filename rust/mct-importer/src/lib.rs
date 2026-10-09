@@ -6,7 +6,6 @@
 pub mod antivirus;
 pub mod pst;
 
-use base64::{engine::general_purpose::STANDARD, Engine};
 use mailparse::{MailAddr, MailHeader, MailHeaderMap};
 use std::io::{self, BufRead, Write};
 use uriparse::URI;
@@ -195,7 +194,10 @@ fn one(headers: &[MailHeader<'_>], name: &str) -> Result<String, String> {
     if values.len() != 1 || values[0].trim().is_empty() {
         return Err(format!("expected exactly one nonempty {name} header"));
     }
-    Ok(values[0].clone())
+    Ok(values
+        .into_iter()
+        .next()
+        .expect("exactly one checked value"))
 }
 
 pub(crate) const PST_SENDER_ADDRESS_TYPE: &str = "X-PST-Sender-Address-Type";
@@ -441,35 +443,27 @@ fn validate_entity(raw: &[u8], top: bool, depth: usize) -> Result<(), String> {
         }
         return Err("multipart lacks closing boundary".into());
     }
-    let decoded = match encoding.as_str() {
-        "base64" => {
-            if body
-                .split(|b| *b == b'\n')
-                .any(|l| l.strip_suffix(b"\r").unwrap_or(l).len() > 76)
-            {
-                return Err("base64 line exceeds 76 bytes".into());
-            }
-            let encoded: Vec<_> = body
-                .iter()
-                .copied()
-                .filter(|b| !b" \t\r\n".contains(b))
-                .collect();
-            STANDARD
-                .decode(encoded)
-                .map_err(|_| "invalid base64 body")?
+    let embedded = content_type.mimetype == "message/rfc822";
+    if matches!(encoding.as_str(), "7bit" | "8bit" | "binary") {
+        return if embedded {
+            validate_entity(body, false, depth + 1)
+        } else {
+            Ok(())
+        };
+    }
+    if !matches!(encoding.as_str(), "base64" | "quoted-printable") {
+        return Err("unsupported Content-Transfer-Encoding".into());
+    }
+    let mut decoded = Vec::new();
+    mime_transfer::decode(body, &encoding, true, |bytes| {
+        if embedded {
+            decoded.extend_from_slice(bytes);
         }
-        "quoted-printable" => quoted_printable::decode(body, quoted_printable::ParseMode::Strict)
-            .map_err(|_| "invalid quoted-printable body")?,
-        "7bit" | "8bit" | "binary" => {
-            if content_type.mimetype == "message/rfc822" {
-                return validate_entity(body, false, depth + 1);
-            }
-            return Ok(());
-        }
-        _ => return Err("unsupported Content-Transfer-Encoding".into()),
-    };
-    if content_type.mimetype == "message/rfc822" {
+    })
+    .map_err(String::from)?;
+    if embedded {
         validate_entity(&decoded, false, depth + 1)?;
     }
+
     Ok(())
 }

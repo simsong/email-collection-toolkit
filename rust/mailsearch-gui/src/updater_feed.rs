@@ -148,10 +148,17 @@ pub fn filtered_feed(data: &[u8], public_key: &str, preview: bool) -> Result<Str
 }
 
 fn escape(text: &str) -> String {
-    text.replace('&', "&amp;")
-        .replace('"', "&quot;")
-        .replace('<', "&lt;")
-        .replace('>', "&gt;")
+    let mut escaped = String::with_capacity(text.len());
+    for c in text.chars() {
+        match c {
+            '&' => escaped.push_str("&amp;"),
+            '"' => escaped.push_str("&quot;"),
+            '<' => escaped.push_str("&lt;"),
+            '>' => escaped.push_str("&gt;"),
+            _ => escaped.push(c),
+        }
+    }
+    escaped
 }
 
 #[cfg(test)]

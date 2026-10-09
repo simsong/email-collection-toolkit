@@ -9,7 +9,7 @@ use anyhow::{Context, Result};
 use block2::RcBlock;
 use objc2::AnyThread;
 use objc2_app_kit::{NSBitmapImageFileType, NSBitmapImageRep, NSImage};
-use objc2_foundation::{NSDictionary, NSError};
+use objc2_foundation::{NSDictionary, NSError, NSURL};
 use std::path::PathBuf;
 use wry::{WebView, WebViewExtMacOS};
 
@@ -34,7 +34,11 @@ pub fn snapshot(view: &WebView, output: PathBuf, complete: impl Fn(Result<()>) +
                 )
             }
             .context("Cannot encode snapshot PNG")?;
-            std::fs::write(&output, png.to_vec())?;
+            let url = NSURL::from_file_path(&output).context("Invalid snapshot path")?;
+            anyhow::ensure!(
+                png.writeToURL_atomically(&url, false),
+                "Cannot write snapshot PNG"
+            );
             println!(
                 "Native GUI search and message display passed; screenshot: {}",
                 output.display()

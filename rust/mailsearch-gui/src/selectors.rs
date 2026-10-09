@@ -57,7 +57,22 @@ impl Selection {
         Ok(selection)
     }
     pub fn token(&self) -> Result<String> {
-        Ok(URL_SAFE_NO_PAD.encode(serde_json::to_vec(self)?))
+        Self::token_for(self.version, &self.path, self.volume_identity.as_deref())
+    }
+    pub fn token_for(version: u8, path: &str, volume_identity: Option<&str>) -> Result<String> {
+        #[derive(Serialize)]
+        struct BorrowedSelection<'a> {
+            version: u8,
+            path: &'a str,
+            volume_identity: Option<&'a str>,
+        }
+        Ok(
+            URL_SAFE_NO_PAD.encode(serde_json::to_vec(&BorrowedSelection {
+                version,
+                path,
+                volume_identity,
+            })?),
+        )
     }
 }
 pub(crate) fn date_bounds(value: &str) -> Result<(String, String)> {
@@ -115,17 +130,23 @@ pub(crate) fn normalized_date(value: &str) -> Result<String> {
     let start = chrono::DateTime::parse_from_rfc3339(&start)?;
     Ok((start + Duration::hours(14)).format("%Y-%m-%d").to_string())
 }
+fn escaped(value: &str, escaped: &str, delimiter: char) -> String {
+    let mut output = String::with_capacity(value.len() + 2);
+    output.push(delimiter);
+    for c in value.chars() {
+        if escaped.contains(c) {
+            output.push('\\');
+        }
+        output.push(c);
+    }
+    output.push(delimiter);
+    output
+}
 pub(crate) fn quoted(value: &str) -> String {
-    format!("\"{}\"", value.replace('\\', "\\\\").replace('\"', "\\\""))
+    escaped(value, "\\\"", '"')
 }
 pub(crate) fn contains(value: &str) -> String {
-    format!(
-        "%{}%",
-        value
-            .replace('\\', "\\\\")
-            .replace('%', "\\%")
-            .replace('_', "\\_")
-    )
+    escaped(value, "\\%_", '%')
 }
 pub(crate) fn tokens(query: &str) -> Result<Vec<String>> {
     let mut tokens = Vec::new();
