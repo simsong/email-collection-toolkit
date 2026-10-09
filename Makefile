@@ -148,6 +148,7 @@ check-static:
 
 check-tests:
 	$(MAKE) test
+	$(MAKE) test-search-parity
 	$(MAKE) test-rust-recovery
 	$(MAKE) test-rust-updates
 	$(MAKE) test-e2e
@@ -860,3 +861,15 @@ msix-test:
 
 test-msix:
 	uv run --locked python scripts/win/test_windows_msix.py "$(MSIX_PACKAGE)" "$(MSIX_EVIDENCE)"
+
+# RUST_WEBVIEW_BINARY selects the real dispatcher; tests never launch native windows.
+.PHONY: test-search-parity
+test-search-parity: rust-gui-build
+	RUST_WEBVIEW_BINARY="$(RUST_TARGET_DIR)/debug/mailsearch-webview$(RUST_EXE_SUFFIX)" uv run --locked pytest -q tests/test_mailsearch.py tests/test_search_parity.py
+
+# ARCHIVE/QUERY use the same read-only diagnostic contract as rust-webview-probe.
+.PHONY: rust-webview-release-probe
+rust-webview-release-probe:
+	@test -n "$(ARCHIVE)" || { echo 'usage: make rust-webview-release-probe ARCHIVE=/path QUERY=words'; exit 2; }
+	$(CARGO_RUN) build --locked --release -p mailsearch-rust --bin mailsearch-webview
+	"$(RUST_TARGET_DIR)/release/mailsearch-webview$(RUST_EXE_SUFFIX)" --probe "$(ARCHIVE)" "$(QUERY)"

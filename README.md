@@ -95,9 +95,14 @@ Set `ECT_RUST_WEBVIEW_DIAGNOSTICS=1` to log native navigation and IPC document
 URLs to stderr while diagnosing the shell. It does not log request bodies or
 message contents. Leave it unset for ordinary use.
 `make rust-webview-probe ARCHIVE="/path/to/archive" QUERY=words` prints
-counts and timings for the two preview windows and comprehensive search without
+counts and timings for matching result batches and complete search without
 exposing message text. Results are paged on scroll; message reads remain usable
 while the separate search worker runs, and replacement queries cancel old work.
+`make rust-webview-release-probe ARCHIVE="/path/to/archive" QUERY=words` runs
+the same count/timing probe using the optimized build. `make test-search-parity`
+compares real Python/Rust search services and consumes the same optimizer cases as
+the Rust unit suite: production headers, ordered IDs, counts and useful filtering
+indexes. It opens no native windows. The aggregate test gate includes this target.
 See [scope and limitations](doc/RUST_GUI_EXPERIMENT.md).
 
 `make test-rust-gui-native` builds with the opt-in `native-smoke` feature and

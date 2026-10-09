@@ -1,6 +1,6 @@
 // Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved.
-// Run staged searches independently of message reads and the native event loop.
-// Two bounded catalog windows are published and acknowledged before a full query.
+// Stream indexed matching IDs independently of reads and the native event loop.
+// The first two full result batches are painted before streaming continues.
 // The worker retains ordered message IDs; the foreground fetches bounded pages.
 // A generation counter interrupts obsolete SQLite work and rejects stale pages.
 // One replaceable pending job bounds work even during rapid typing and sorting.
@@ -14,7 +14,7 @@ use std::{
         atomic::{AtomicU64, Ordering},
         Arc, Condvar, Mutex,
     },
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 struct Job {
@@ -93,7 +93,9 @@ impl Search {
         // Cancel before parsing: an invalid replacement must also stop old work.
         self.cancel();
         ensure!(query.len() <= 4096, "Search is limited to 4096 bytes");
-        let (_, _, terms) = crate::selectors::plan(query, attachments, Some(&selections))?;
+        let parsed =
+            crate::query::Query::parse(query, sort, direction, attachments, Some(&selections))?;
+        let terms = parsed.terms().to_vec();
         ensure!(
             ["date", "subject", "sender"].contains(&sort),
             "Unknown sort field"
@@ -162,105 +164,153 @@ impl Drop for Search {
     }
 }
 fn run(bridge: &mut Bridge, shared: &Shared, job: &Job) -> Result<()> {
+    run_with_budget(bridge, shared, job, Duration::from_secs(120))
+}
+fn run_with_budget(
+    bridge: &mut Bridge,
+    shared: &Shared,
+    job: &Job,
+    budget: Duration,
+) -> Result<()> {
     bridge.cancellation = Some((Arc::clone(&shared.generation), job.generation));
-    let mut cursor = Value::Null;
-    let mut exhausted = false;
-    for window in 1..=2 {
-        ensure!(
-            shared.generation.load(Ordering::SeqCst) == job.generation,
-            "Search cancelled"
-        );
-        let batch = if exhausted {
-            json!({"results":[],"has_more":false,"cursor":null})
-        } else {
-            bridge.search_batch(&[
-                json!(job.query),
-                cursor,
-                json!(job.sort),
-                json!(job.direction),
-                json!(job.attachments),
-                job.selections.clone(),
-            ])?
-        };
-        let mut state = shared.state.lock().unwrap();
-        if state.generation != job.generation {
-            return Ok(());
-        }
-        state.ids.extend(
-            batch["results"]
-                .as_array()
-                .unwrap()
-                .iter()
-                .map(|r| r["message_pk"].as_i64().unwrap()),
-        );
-        state.window = window;
-        exhausted = batch["has_more"] == false;
-        cursor = batch["cursor"].clone();
-        while state.generation == job.generation && state.acknowledged < window && !state.stop {
-            state = shared.wake.wait(state).unwrap();
-        }
-        if state.generation != job.generation || state.stop {
-            return Ok(());
-        }
-    }
-    if exhausted {
-        return Ok(());
-    }
-    // A single FTS-driven query completes the remaining set. Only IDs are kept;
-    // display columns and previews are fetched on the independent foreground DB.
-    let (sql, values) = remainder_query(job, &cursor)?;
-    bridge.search_guard(Duration::from_secs(120));
-    let result = (|| -> Result<Vec<i64>> {
+    let (sql, values) = remainder_query(job, &Value::Null)?;
+    let started = Instant::now();
+    let paused = Arc::new(AtomicU64::new(0));
+    let pause_counter = Arc::clone(&paused);
+    let generation = Arc::clone(&shared.generation);
+    let expected = job.generation;
+    bridge.archive.db.progress_handler(
+        1000,
+        Some(move || {
+            generation.load(Ordering::SeqCst) != expected
+                || started
+                    .elapsed()
+                    .saturating_sub(Duration::from_nanos(pause_counter.load(Ordering::Relaxed)))
+                    >= budget
+        }),
+    );
+    let result = (|| -> Result<()> {
         let mut statement = bridge.archive.db.prepare(&sql)?;
-        let rows = statement.query_map(rusqlite::params_from_iter(values), |row| row.get(0))?;
-        Ok(rows.collect::<rusqlite::Result<_>>()?)
+        let mut rows = statement.query(rusqlite::params_from_iter(values))?;
+        let mut batch = Vec::with_capacity(512);
+        let mut window = 0;
+        while let Some(row) = rows.next()? {
+            batch.push(row.get::<_, i64>(0)?);
+            if batch.len() == 512
+                && !publish(
+                    shared,
+                    job,
+                    std::mem::take(&mut batch),
+                    &mut window,
+                    true,
+                    &paused,
+                )
+            {
+                return Ok(());
+            }
+        }
+        publish(shared, job, batch, &mut window, false, &paused);
+        Ok(())
     })();
     bridge.archive.db.progress_handler(0, None::<fn() -> bool>);
-    let ids = result.map_err(|error| {
-        anyhow::anyhow!(
-            "Background search interrupted or failed (120-second safety limit): {error}"
-        )
-    })?;
-    let mut state = shared.state.lock().unwrap();
-    if state.generation == job.generation {
-        state.ids.extend(ids);
-    }
-    Ok(())
+    result.map_err(|error| {
+        anyhow::anyhow!("Search interrupted or failed (120-second safety limit): {error}")
+    })
 }
-
+fn publish(
+    shared: &Shared,
+    job: &Job,
+    ids: Vec<i64>,
+    window: &mut u8,
+    full: bool,
+    paused: &AtomicU64,
+) -> bool {
+    let mut state = shared.state.lock().unwrap();
+    if state.generation != job.generation || state.stop {
+        return false;
+    }
+    state.ids.extend(ids);
+    if full && *window < 2 {
+        *window += 1;
+        state.window = *window;
+        let started = Instant::now();
+        while state.generation == job.generation && state.acknowledged < *window && !state.stop {
+            state = shared.wake.wait(state).unwrap();
+        }
+        paused.fetch_add(
+            u64::try_from(started.elapsed().as_nanos()).unwrap_or(u64::MAX),
+            Ordering::Relaxed,
+        );
+    }
+    state.generation == job.generation && !state.stop
+}
 fn remainder_query(job: &Job, cursor: &Value) -> Result<(String, Vec<rusqlite::types::Value>)> {
-    let sort = match job.sort.as_str() {
-        "subject" => "lower(m.subject)",
-        "sender" => "lower(a.address)",
-        _ => "m.date_utc",
-    };
-    let (direction, comparison) = if job.direction == "ascending" {
-        ("ASC", ">")
-    } else {
-        ("DESC", "<")
-    };
-    let (mut clauses, mut values, _) =
-        crate::selectors::plan(&job.query, job.attachments, Some(&job.selections))?;
-    // Sparse FTS terms must drive hash lookups, rather than a category index
-    // scanning every catalog row. IN also deduplicates matching FTS rows.
-    let index = if clauses
-        .iter()
-        .any(|clause| clause.starts_with("m.sha256 IN("))
-    {
-        " INDEXED BY messages_sha256"
-    } else {
-        ""
-    };
-    clauses.push(format!("({sort},m.message_pk) {comparison} (?,?)"));
-    values.push(cursor["key"].as_str().unwrap().to_string().into());
-    values.push(cursor["id"].as_i64().unwrap().into());
-    let sql = format!("SELECT m.message_pk FROM messages m{index} JOIN email_addresses a ON a.address_pk=m.sender_address_pk LEFT JOIN search.message_metadata mm USING(sha256) WHERE {} ORDER BY {sort} {direction},m.message_pk {direction}", clauses.join(" AND "));
-    Ok((sql, values))
+    let query = crate::query::Query::parse(
+        &job.query,
+        &job.sort,
+        &job.direction,
+        job.attachments,
+        Some(&job.selections),
+    )?;
+    let statement = query.ids(Some(cursor), None)?;
+    Ok((statement.sql, statement.values))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn painting_waits_do_not_consume_the_sql_safety_budget() {
+        // Responsiveness contract: time waiting for UI painting is not SQLite work.
+        let work = tempfile::tempdir().unwrap();
+        let path = work.path().join("archive");
+        crate::demo::create(&path).unwrap();
+        let db = rusqlite::Connection::open(path.join("archive.sqlite3")).unwrap();
+        db.execute_batch("WITH RECURSIVE n(x) AS(VALUES(4) UNION ALL SELECT x+1 FROM n WHERE x<3000) INSERT INTO messages SELECT x,printf('bulk%d',x),printf('%064d',x),1,'Paint fixture','2025-01-01','header','Archive' FROM n;").unwrap();
+        drop(db);
+        let shared = Arc::new(Shared {
+            state: Mutex::new(State {
+                generation: 1,
+                ..State::default()
+            }),
+            wake: Condvar::new(),
+            generation: Arc::new(AtomicU64::new(1)),
+        });
+        let worker = Arc::clone(&shared);
+        let thread = std::thread::spawn(move || {
+            let mut bridge = Bridge::open(&path).unwrap();
+            let job = Job {
+                generation: 1,
+                query: String::new(),
+                sort: "date".into(),
+                direction: "descending".into(),
+                attachments: false,
+                selections: json!([]),
+            };
+            run_with_budget(&mut bridge, &worker, &job, Duration::from_millis(250))
+        });
+        for window in 1..=2 {
+            let deadline = Instant::now() + Duration::from_secs(5);
+            loop {
+                let state = shared.state.lock().unwrap();
+                if state.window == window {
+                    break;
+                }
+                drop(state);
+                assert!(
+                    !thread.is_finished(),
+                    "Search failed before publishing a matching batch"
+                );
+                assert!(Instant::now() < deadline);
+                std::thread::sleep(Duration::from_millis(1));
+            }
+            std::thread::sleep(Duration::from_millis(500));
+            shared.state.lock().unwrap().acknowledged = window;
+            shared.wake.notify_one();
+        }
+        thread.join().unwrap().unwrap();
+        assert_eq!(shared.state.lock().unwrap().ids.len(), 3000);
+    }
     #[test]
     fn sparse_fts_search_visits_matches_instead_of_the_whole_catalog() {
         // Sparse-search requirement: complete ordered results scale with FTS hits.

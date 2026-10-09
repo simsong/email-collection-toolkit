@@ -7,7 +7,6 @@
 // The same dispatcher runs in a native webview and in headless browser tests.
 use crate::Archive;
 use anyhow::{bail, ensure, Context, Result};
-use rusqlite::types::Value as SqlValue;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::{
@@ -239,6 +238,7 @@ impl Bridge {
             }
             "suggestions" => self.suggestions(args, Duration::from_millis(150)),
             "search" => self.search(args),
+            "search_count" => self.search_count(args),
             "search_batch" => self.search_batch(args),
             "search_start" => {
                 if self.search.is_none() {
@@ -286,8 +286,17 @@ impl Bridge {
                 let Some(ids) = search.page(generation, usize::try_from(offset)?, limit) else {
                     return Ok(json!({"stale":true}));
                 };
-                let mut statement = self.archive.db.prepare("SELECT m.message_pk,a.address,m.subject,m.date_utc,coalesce(mm.attachment_count,0),(SELECT group_concat(e.address, ', ') FROM recipients r JOIN email_addresses e USING(address_pk) WHERE r.message_pk=m.message_pk) FROM messages m JOIN email_addresses a ON a.address_pk=m.sender_address_pk LEFT JOIN search.message_metadata mm USING(sha256) WHERE m.message_pk=?1")?;
-                let rows = ids.into_iter().map(|id| statement.query_row([id], |r| Ok(json!({"message_pk":r.get::<_,i64>(0)?,"sender":r.get::<_,String>(1)?,"subject":r.get::<_,String>(2)?,"date_utc":r.get::<_,String>(3)?,"attachment_count":r.get::<_,i64>(4)?,"recipients":r.get::<_,Option<String>>(5)?.unwrap_or_default(),"attached_message":false})))).collect::<rusqlite::Result<Vec<_>>>()?;
+                let rows = self.headers(crate::query::Query::headers_for_ids(&ids)?)?;
+                let mut by_id: std::collections::HashMap<_, _> =
+                    rows.into_iter().map(|row| (row.message_pk, row)).collect();
+                let rows: Vec<_> = ids
+                    .into_iter()
+                    .map(|id| {
+                        by_id
+                            .remove(&id)
+                            .context("Search result no longer available")
+                    })
+                    .collect::<Result<_>>()?;
                 Ok(json!({"results":rows}))
             }
             "take_previews" => {
@@ -517,151 +526,103 @@ impl Bridge {
         );
     }
 
-    pub(crate) fn search_batch(&self, args: &[Value]) -> Result<Value> {
-        const SCAN_SIZE: usize = 512;
-        let query = text(args, 0, "");
-        ensure!(query.len() <= 4096, "Search is limited to 4096 bytes");
-        let (sort, source) = match text(args, 2, "date") {
-            "date" => ("m.date_utc", "messages m INDEXED BY messages_date_message JOIN email_addresses a ON a.address_pk=m.sender_address_pk"),
-            "subject" => ("lower(m.subject)", "messages m INDEXED BY messages_subject_message JOIN email_addresses a ON a.address_pk=m.sender_address_pk"),
-            "sender" => ("lower(a.address)", "email_addresses a INDEXED BY email_addresses_lower_address CROSS JOIN messages m INDEXED BY messages_sender_address_pk ON m.sender_address_pk=a.address_pk"),
-            _ => bail!("Unknown sort field"),
-        };
-        let (direction, comparison) = match text(args, 3, "descending") {
-            "ascending" => ("ASC", ">"),
-            "descending" => ("DESC", "<"),
-            _ => bail!("Unknown sort direction"),
-        };
-        let cursor = args.get(1).filter(|v| !v.is_null());
-        let mut parameters = Vec::<SqlValue>::new();
-        let condition = if let Some(cursor) = cursor {
-            parameters.push(
-                cursor
-                    .get("key")
-                    .and_then(Value::as_str)
-                    .context("Invalid search cursor")?
-                    .to_string()
-                    .into(),
-            );
-            parameters.push(
-                cursor
-                    .get("id")
-                    .and_then(Value::as_i64)
-                    .context("Invalid search cursor")?
-                    .into(),
-            );
-            format!("WHERE m.category IN ('Archive','Sent') AND ({sort},m.message_pk) {comparison} (?,?)")
-        } else {
-            "WHERE m.category IN ('Archive','Sent')".into()
-        };
-        // Scan a bounded ordered catalog slice before testing FTS row IDs. Never
-        // materialize and sort the complete FTS match set for the first response.
-        let candidates_sql = format!("SELECT m.message_pk,{sort} FROM {source} {condition} ORDER BY {sort} {direction},m.message_pk {direction} LIMIT {}", SCAN_SIZE + 1);
-        self.search_guard(Duration::from_secs(15));
-        let result = (|| -> Result<Value> {
-            let mut statement = self.archive.db.prepare(&candidates_sql)?;
-            let mut candidates = statement
-                .query_map(rusqlite::params_from_iter(parameters), |r| {
-                    Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?))
-                })?
-                .collect::<rusqlite::Result<Vec<_>>>()?;
-            let more = candidates.len() > SCAN_SIZE;
-            candidates.truncate(SCAN_SIZE);
-            let next = candidates
-                .last()
-                .map(|(id, key)| json!({"id":id,"key":key}));
-            let (mut clauses, mut values, terms) = crate::selectors::plan(
-                query,
-                args.get(4).and_then(Value::as_bool).unwrap_or(false),
-                args.get(5),
-            )?;
-            for clause in &mut clauses {
-                if clause.starts_with("m.sha256 IN(") {
-                    *clause = "EXISTS(SELECT 1 FROM search.message_fts WHERE rowid=mm.message_fts_rowid AND message_fts MATCH ?)".into();
-                }
-            }
-            let ids = candidates
-                .iter()
-                .map(|(id, _)| id.to_string())
-                .collect::<Vec<_>>()
-                .join(",");
-            if ids.is_empty() {
-                return Ok(
-                    json!({"results":[],"has_more":false,"cursor":null,"highlight_terms":terms,"scanned":0}),
+    fn headers(&self, statement: crate::query::Statement) -> Result<Vec<crate::query::Header>> {
+        let mut prepared = self.archive.db.prepare(&statement.sql)?;
+        let mut rows = prepared
+            .query_map(
+                rusqlite::params_from_iter(statement.values),
+                crate::query::Header::read,
+            )?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        if !rows.is_empty() {
+            let ids: Vec<_> = rows.iter().map(|r| r.message_pk).collect();
+            let mut tagged = std::collections::HashSet::<i64>::new();
+            for ids in ids.chunks(500) {
+                let statement = crate::query::Query::attached_ids(ids);
+                tagged.extend(
+                    self.archive
+                        .db
+                        .prepare(&statement.sql)?
+                        .query_map(rusqlite::params_from_iter(statement.values), |r| {
+                            r.get::<_, i64>(0)
+                        })?
+                        .collect::<rusqlite::Result<Vec<_>>>()?,
                 );
             }
-            clauses.insert(0, format!("m.message_pk IN ({ids})"));
-            let sql = format!("SELECT m.message_pk,a.address,m.subject,m.date_utc,coalesce(mm.attachment_count,0),(SELECT group_concat(e.address, ', ') FROM recipients r JOIN email_addresses e USING(address_pk) WHERE r.message_pk=m.message_pk) FROM messages m JOIN email_addresses a ON a.address_pk=m.sender_address_pk LEFT JOIN search.message_metadata mm USING(sha256) WHERE {} ORDER BY {sort} {direction},m.message_pk {direction}",clauses.join(" AND "));
-            let mut statement = self.archive.db.prepare(&sql)?;
-            let rows = statement.query_map(rusqlite::params_from_iter(values.drain(..)), |r| Ok(json!({"message_pk":r.get::<_,i64>(0)?,"sender":r.get::<_,String>(1)?,"subject":r.get::<_,String>(2)?,"date_utc":r.get::<_,String>(3)?,"attachment_count":r.get::<_,i64>(4)?,"recipients":r.get::<_,Option<String>>(5)?.unwrap_or_default(),"attached_message":false})))?.collect::<rusqlite::Result<Vec<_>>>()?;
-            Ok(
-                json!({"results":rows,"has_more":more,"cursor":next,"highlight_terms":terms,"scanned":candidates.len()}),
-            )
-        })();
-        self.archive.db.progress_handler(0, None::<fn() -> bool>);
-        match result {
-            Err(error) if error.downcast_ref::<rusqlite::Error>().is_some_and(|e|e.sqlite_error_code()==Some(rusqlite::ErrorCode::OperationInterrupted)) => bail!("Search batch timed out after 15 seconds. Results already displayed remain available."),
-            other => other,
+            for row in &mut rows {
+                row.attached_message = tagged.contains(&row.message_pk);
+            }
         }
+        Ok(rows)
     }
-
-    fn search(&self, args: &[Value]) -> Result<Value> {
-        let query = text(args, 0, "");
-        ensure!(query.len() <= 4096, "Search is limited to 4096 bytes");
-        let offset = args
-            .get(1)
-            .and_then(Value::as_u64)
-            .unwrap_or(0)
-            .min(100_000);
-        let sort = match text(args, 2, "date") {
-            "date" => "m.date_utc",
-            "subject" => "lower(m.subject)",
-            "sender" => "lower(a.address)",
-            _ => bail!("Unknown sort field"),
-        };
-        let direction = match text(args, 3, "descending") {
-            "ascending" => "ASC",
-            "descending" => "DESC",
-            _ => bail!("Unknown sort direction"),
-        };
-        let limit = args.get(6).and_then(Value::as_u64).unwrap_or(2000);
-        let limit = if limit == 0 { 100_000 } else { limit.min(2000) };
-        let (clauses, values, terms) = crate::selectors::plan(
-            query,
+    pub(crate) fn search_batch(&self, args: &[Value]) -> Result<Value> {
+        let query = crate::query::Query::parse(
+            text(args, 0, ""),
+            text(args, 2, "date"),
+            text(args, 3, "descending"),
             args.get(4).and_then(Value::as_bool).unwrap_or(false),
             args.get(5),
         )?;
-        let sql=format!("SELECT m.message_pk,a.address,m.subject,m.date_utc,coalesce(mm.attachment_count,0),(SELECT group_concat(e.address, ', ') FROM recipients r JOIN email_addresses e USING(address_pk) WHERE r.message_pk=m.message_pk) FROM messages m JOIN email_addresses a ON a.address_pk=m.sender_address_pk LEFT JOIN search.message_metadata mm USING(sha256) WHERE {} ORDER BY {sort} {direction},m.message_pk {direction} LIMIT {} OFFSET {offset}",if clauses.is_empty(){"1".into()}else{clauses.join(" AND ")},limit+1);
-        let deadline = Instant::now() + Duration::from_secs(15);
-        self.archive
-            .db
-            .progress_handler(1000, Some(move || Instant::now() >= deadline));
-        let result = (|| -> Result<Vec<Value>> {
-            let mut statement = self.archive.db.prepare(&sql)?;
-            let rows=statement.query_map(rusqlite::params_from_iter(values),|r| Ok(json!({"message_pk":r.get::<_,i64>(0)?,"sender":r.get::<_,String>(1)?,"subject":r.get::<_,String>(2)?,"date_utc":r.get::<_,String>(3)?,"attachment_count":r.get::<_,i64>(4)?,"recipients":r.get::<_,Option<String>>(5)?.unwrap_or_default(),"attached_message":false})))?;
-            Ok(rows.collect::<rusqlite::Result<_>>()?)
+        self.search_guard(Duration::from_secs(15));
+        let result = (|| -> Result<Value> {
+            let mut rows = self.headers(query.headers(Some(513), 0, args.get(1))?)?;
+            let more = rows.len() > 512;
+            rows.truncate(512);
+            let cursor = rows.last().map(|r| json!({"key":r.key,"id":r.message_pk}));
+            Ok(
+                json!({"scanned":rows.len(),"results":rows,"has_more":more,"cursor":cursor,"highlight_terms":query.terms()}),
+            )
         })();
         self.archive.db.progress_handler(0, None::<fn() -> bool>);
-        let mut rows = match result {
-            Ok(rows) => rows,
-            Err(error)
-                if error.downcast_ref::<rusqlite::Error>().is_some_and(|e| {
-                    e.sqlite_error_code() == Some(rusqlite::ErrorCode::OperationInterrupted)
-                }) =>
-            {
-                bail!("Search timed out after 15 seconds. Try more specific words.")
-            }
-            Err(error) => return Err(error),
+        result
+    }
+    fn search(&self, args: &[Value]) -> Result<Value> {
+        let query = crate::query::Query::parse(
+            text(args, 0, ""),
+            text(args, 2, "date"),
+            text(args, 3, "descending"),
+            args.get(4).and_then(Value::as_bool).unwrap_or(false),
+            args.get(5),
+        )?;
+        let offset = usize::try_from(args.get(1).and_then(Value::as_u64).unwrap_or(0))?;
+        let limit = usize::try_from(args.get(6).and_then(Value::as_u64).unwrap_or(2000))?;
+        let fetch = if limit == 0 {
+            None
+        } else {
+            Some(limit.checked_add(1).context("Search limit out of range")?)
         };
-        let more = rows.len() > limit as usize;
-        ensure!(
-            !(more && offset > 0),
-            "More than 100,000 additional results; narrow the search."
+        self.search_guard(Duration::from_secs(15));
+        let result = (|| -> Result<Value> {
+            let mut rows = self.headers(query.headers(fetch, offset, None)?)?;
+            let more = limit > 0 && rows.len() > limit;
+            if limit > 0 {
+                rows.truncate(limit);
+            }
+            Ok(
+                json!({"results":rows,"offset":offset,"has_more":more,"highlight_terms":query.terms(),"error":null}),
+            )
+        })();
+        self.archive.db.progress_handler(0, None::<fn() -> bool>);
+        result
+    }
+    fn search_count(&self, args: &[Value]) -> Result<Value> {
+        let query = crate::query::Query::parse(
+            text(args, 0, ""),
+            "date",
+            "descending",
+            args.get(1).and_then(Value::as_bool).unwrap_or(false),
+            args.get(2),
+        )?;
+        let statement = query.count(Some(2001))?;
+        self.search_guard(Duration::from_secs(15));
+        let result = self.archive.db.query_row(
+            &statement.sql,
+            rusqlite::params_from_iter(statement.values),
+            |r| r.get::<_, i64>(0),
         );
-        rows.truncate(limit as usize);
-        Ok(
-            json!({"results":rows,"offset":offset,"has_more":more,"highlight_terms":terms,"error":null}),
-        )
+        self.archive.db.progress_handler(0, None::<fn() -> bool>);
+        let count = result?;
+        Ok(json!({"total":if count <= 2000 { Some(count) } else { None },"immediate_limit":2000}))
     }
 }
 
@@ -827,8 +788,8 @@ mod tests {
             .is_err());
     }
     #[test]
-    fn small_and_empty_searches_wait_for_both_preview_acknowledgements() {
-        // Two-window requirement applies even when the first scan exhausts input.
+    fn small_and_empty_searches_complete_without_catalog_acknowledgements() {
+        // Sparse results must finish without scanning or acknowledging unrelated rows.
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("small");
         crate::demo::create(&path).unwrap();
@@ -837,29 +798,14 @@ mod tests {
             let generation =
                 bridge.call("search_start", &[json!(query)]).unwrap()["generation"].clone();
             let deadline = Instant::now() + Duration::from_secs(5);
-            for window in 1..=2 {
-                loop {
-                    let status = bridge
-                        .call("search_status", std::slice::from_ref(&generation))
-                        .unwrap();
-                    assert!(status["error"].is_null(), "{status}");
-                    assert_eq!(status["complete"], false);
-                    if status["window"] == window {
-                        assert_eq!(status["count"], count);
-                        break;
-                    }
-                    assert!(Instant::now() < deadline);
-                    std::thread::sleep(Duration::from_millis(1));
-                }
-                bridge
-                    .call("search_advance", &[generation.clone(), json!(window)])
-                    .unwrap();
-            }
             loop {
                 let status = bridge
                     .call("search_status", std::slice::from_ref(&generation))
                     .unwrap();
+                assert!(status["error"].is_null(), "{status}");
+                assert_eq!(status["window"], 0);
                 if status["complete"] == true {
+                    assert_eq!(status["count"], count);
                     break;
                 }
                 assert!(Instant::now() < deadline);
@@ -1100,8 +1046,8 @@ mod tests {
         let first = bridge
             .call("search_batch", &[json!("needle"), Value::Null])
             .unwrap();
-        assert!(first["results"].as_array().unwrap().is_empty());
-        assert_eq!(first["has_more"], true);
+        assert_eq!(first["results"][0]["message_pk"], 4);
+        assert_eq!(first["has_more"], false);
         let old = bridge.call("search_start", &[json!("simson")]).unwrap()["generation"].clone();
         let new = bridge.call("search_start", &[json!("needle")]).unwrap()["generation"].clone();
         assert_eq!(
@@ -1115,7 +1061,6 @@ mod tests {
             true
         );
         let deadline = Instant::now() + Duration::from_secs(10);
-        let mut acknowledged = 0;
         loop {
             let status = bridge
                 .call("search_status", std::slice::from_ref(&new))
@@ -1125,19 +1070,10 @@ mod tests {
                 assert_eq!(status["count"], 1);
                 break;
             }
-            let window = status["window"].as_u64().unwrap();
-            if window > acknowledged {
-                // Both windows are empty; the comprehensive query must still run.
-                assert_eq!(status["count"], 0);
-                bridge
-                    .call("search_advance", &[new.clone(), status["window"].clone()])
-                    .unwrap();
-                acknowledged = window;
-            }
+            assert_eq!(status["window"], 0);
             assert!(Instant::now() < deadline);
             std::thread::sleep(Duration::from_millis(1));
         }
-        assert_eq!(acknowledged, 2);
         assert_eq!(
             bridge
                 .call("search_page", &[new.clone(), json!(0)])

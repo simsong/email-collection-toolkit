@@ -1,4 +1,9 @@
 # Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved.
+# Own selector recognition and bound predicates for CLI, GUI and completion.
+# Normalized text and worldwide calendar dates define the common reader contract.
+# Address, recipient, subject and date filters select candidates through indexes.
+# Live header, person and institution names come from read-only derived views.
+# Callers compose complete statements without changing canonical message bytes.
 """Shared selector recognition and indexed SQL for CLI, tiles and completion."""
 from __future__ import annotations
 
@@ -142,5 +147,8 @@ def prepare_names(database: sqlite3.Connection, archive: Path) -> None:
             "JOIN identities.person_addresses pa USING(address_id) JOIN identities.person_aliases n USING(person_id)",
             f"SELECT a.address,json_extract(e.value,'{EVIDENCE_NAME_PATH}') FROM identities.addresses a "
             "JOIN identities.evidence e USING(address_id) WHERE e.kind='header'",
+            "SELECT a.address,o.name FROM identities.addresses a "
+            "JOIN identities.organization_domains d ON a.domain=d.domain OR a.domain LIKE '%.'||d.domain "
+            "JOIN identities.organizations o USING(organization_id)",
         ))
     database.execute("CREATE TEMP VIEW address_search_names AS " + " UNION ".join(sources))

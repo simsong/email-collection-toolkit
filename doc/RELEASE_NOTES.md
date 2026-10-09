@@ -2,7 +2,14 @@
 
 # Release notes
 
-## 1.0.0a15 (candidate)
+## 1.0.0a16 (candidate)
+
+- Align Rust search with Python's indexed filter-before-sort strategy. Stream
+  matching IDs without mandatory catalog-preview scans; share production SQL
+  for pages, counts and suggestions. Match query/date/highlight normalization,
+  recipient aggregation, folder-tree collapsing and attached-message badges.
+  Include institution-domain name matching in both readers and enforce the
+  same optimizer matrix plus real cross-language service comparisons.
 
 - Reload reader initialization blocked by canceled update shutdown, restoring
   service controls while preserving already initialized reader pages. Restart

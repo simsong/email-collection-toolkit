@@ -13,7 +13,7 @@ from os import environ
 from pathlib import Path
 
 import pytest
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, TypeAdapter
 
 from mailarchiver.mailbox_tree import MailboxSelection
 
@@ -495,10 +495,9 @@ def test_mail_archive_dir_defaults_and_archive_option_overrides(tmp_path: Path) 
     assert override.returncode == 0, override.stderr
 
 
-@pytest.fixture(scope="module")
-def sparse_search_archive(tmp_path_factory: pytest.TempPathFactory) -> Path:
+def make_sparse_search_archive(tmp_path: Path) -> Path:
     """One older match among 20,000 unrelated messages, recipients and source files."""
-    archive, _ = make_archive(tmp_path_factory.mktemp("search-plans"))
+    archive, _ = make_archive(tmp_path)
     catalog = create_catalog(archive / "archive.sqlite3")
     try:
         sender = address_pk(catalog, "unrelated@example.net")
@@ -532,6 +531,11 @@ def sparse_search_archive(tmp_path_factory: pytest.TempPathFactory) -> Path:
     return archive
 
 
+@pytest.fixture(scope="module")
+def sparse_search_archive(tmp_path_factory: pytest.TempPathFactory) -> Path:
+    return make_sparse_search_archive(tmp_path_factory.mktemp("search-plans"))
+
+
 class SearchPlanCase(BaseModel):
     """Expected access paths and results, independent of SQLite's full plan text."""
 
@@ -543,32 +547,9 @@ class SearchPlanCase(BaseModel):
     subject_scan: bool = False
 
 
-@pytest.mark.parametrize("case", [
-    SearchPlanCase(query="any:sender", indexes=("messages_sender_address_pk", "recipients_address_pk")),
-    SearchPlanCase(query="any:copy", indexes=("messages_sender_address_pk", "recipients_address_pk")),
-    SearchPlanCase(query="from:sender", indexes=("messages_sender_address_pk",)),
-    SearchPlanCase(query="from:missing", matches=0, indexes=("messages_sender_address_pk",)),
-    *(SearchPlanCase(query=f"{role}:{value}", indexes=("recipients_address_pk",))
-      for role, value in (("to", "recipient"), ("cc", "copy"), ("bcc", "blind"))),
-    SearchPlanCase(query="date:2024-01-03", indexes=("messages_date_message",)),
-    SearchPlanCase(query="before:2025-01-01", indexes=("messages_date_message",)),
-    SearchPlanCase(query="after:2025-01-01", matches=0, indexes=("messages_date_message",)),
-    SearchPlanCase(query="agenda", indexes=("messages_sha256",)),
-    SearchPlanCase(query='"meeting agenda"', indexes=("messages_sha256",)),
-    SearchPlanCase(query="meeting agenda", indexes=("messages_sha256",)),
-    SearchPlanCase(query="agenda", attachments=True, indexes=("messages_sha256",)),
-    SearchPlanCase(query="missing", attachments=True, matches=0, indexes=("messages_sha256",)),
-    SearchPlanCase(query="from:sender to:recipient before:2025-01-01 agenda",
-                   indexes=("messages_sha256", "recipients_address_pk")),
-    SearchPlanCase(query="subject:planning", indexes=(), subject_scan=True),
-    SearchPlanCase(query="subject:missing", matches=0, indexes=(), subject_scan=True),
-    SearchPlanCase(selections=[MailboxSelection(path="mail")],
-                   indexes=("source_files_hierarchy_volume", "observations_source_file_offset")),
-    SearchPlanCase(selections=[MailboxSelection(volume_identity="target")],
-                   indexes=("source_files_volume_hierarchy", "observations_source_file_offset")),
-    SearchPlanCase(selections=[MailboxSelection(path="mail", volume_identity="target")],
-                   indexes=("source_files_volume_hierarchy", "observations_source_file_offset")),
-], ids=lambda case: case.query + ("+attachments" if case.attachments else "") or str(case.selections))
+@pytest.mark.parametrize("case", TypeAdapter(list[SearchPlanCase]).validate_json(
+    (Path(__file__).parent / "fixtures/search-contract.json").read_text(encoding="utf-8")
+), ids=lambda case: case.query + ("+attachments" if case.attachments else "") or str(case.selections))
 @pytest.mark.parametrize("sort_by", list(SortField))
 def test_search_primitives_use_filter_indexes(sparse_search_archive: Path, case: SearchPlanCase, sort_by: SortField) -> None:
     """Requirement: pages/counts filter through indexes before sorting, across all primitives.

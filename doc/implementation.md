@@ -3381,19 +3381,42 @@ A condition variable wakes the search worker; its SQLite progress handler checks
 cancellation every 1,000 VM instructions. Search and message reads use separate
 read-only connections. Closing signals cancellation without joining the worker.
 
-The worker scans two ordered 512-entry catalog windows, probing indexed FTS row
-IDs. A sort-value/message-ID cursor advances across empty windows and tied values.
-Each window waits for the frontend's acknowledgement after painting. One full
-FTS query then returns the remaining ordered IDs, using FTS hash membership,
-forced `messages_sha256` lookups for ordinary body-text terms, and the cursor
-boundary. This avoids the category index scanning the catalog for sparse terms;
-`IN` deduplicates repeated FTS rows. Attachment/selector-only plans retain their
-existing semantics. The backend retains IDs, not all display records;
-`search_page` hydrates at most 512 rows on the foreground connection. The browser
-loads up to 1,024 initial rows and requests further pages near the scroll bottom.
-Completion preserves existing rows/selection and distinguishes total matches from
-loaded rows. Partial failures remain explicitly incomplete. Preview queries have
-15-second limits; the full query has a 120-second safety limit.
+`selectors::plan` recognizes the common query language and returns bound predicates,
+filter family and normalized highlights. `query::Query` owns complete production
+SQL for ordered IDs, keyset batches, header pages, ID hydration, bounded counts
+and subject suggestions. Bridge, worker, folder counts and the egui comparison
+reader consume that compiler. FTS filters use indexed hash membership, sender
+filters use sender indexes, recipients/folders use indexed rowid membership,
+dates use range indexes, and subject substrings scan the covering subject index.
+Filtering precedes sorting and display aggregation; parameters remain bound.
+
+One indexed query streams ordered matching IDs to the search worker. The first
+two full 512-match batches wait for frontend painting; small/empty searches finish
+without scanning unrelated catalog windows or waiting for empty acknowledgements.
+Stable sort-value/message-ID order and membership deduplication preserve ties.
+The backend retains IDs, not all headers. `search_page` hydrates up to 512 rows in
+one bounded header query, then checks derived child tags in batches. Direct search
+and the comparison reader share those header statements and distinct recipients.
+The browser initially loads at most 1,024 rows and pages further matches on scroll.
+Completion distinguishes total matches from displayed rows; errors remain incomplete.
+The worker has a 120-second active SQL safety limit, excluding frontend paint
+acknowledgement waits; direct header/count APIs have
+15-second guards, removed before subsequent reads. No pre-result count is added.
+
+`tests/fixtures/search-contract.json` is the common optimizer case matrix.
+Python acceptance exercises 252 page/count statements and Rust unit tests exercise
+378 header/ID/count statements, each explained and executed with original bindings
+on 20,001-message fixtures from the real schemas. Selective queries have 5,000-VM
+budgets; subject substrings have 130,000-VM covering-scan budgets. The counts sample
+at 100 instructions, so zero means fewer than 100. `make test-search-parity` also
+compares real Python GUI services and the compiled Rust dispatcher, including
+worker results, direct headers/counts, normalization, completion, folder trees,
+body/attachment intersections, live names and real resumed-child badges. The
+aggregate `make check-tests` runs this gate; ordinary Python runs skip the binary
+comparisons unless `RUST_WEBVIEW_BINARY` is supplied by that Make target.
+Institution-domain names already supported by Rust are now included in Python's
+live address-name view. Neither reader modifies canonical archive content.
+
 Optional autocomplete has a 150-millisecond VM deadline on the foreground
 connection. SQLite interruption returns empty, explicitly incomplete suggestions;
 other errors remain errors. The handler is removed before subsequent reads, and
@@ -3402,7 +3425,7 @@ A real 50,000-row fixture checks ordered sparse results and SQLite VM work;
 another fixture forces an actual autocomplete interrupt and checks later reads.
 
 Python keeps its existing API path. `make rust-webview-probe ARCHIVE=... QUERY=...`
-measures both windows and complete search, printing only counts and timings.
+measures matching batches and complete search, printing only counts and timings.
 Headless regressions verify all six sort/direction combinations, sparse searches,
 SQL interruption, obsolete generations, page boundaries, selection during an
 unfinished search, and delayed replies after replacement or clearing.

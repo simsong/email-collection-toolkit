@@ -5,59 +5,60 @@
 // Search suggestions use catalog values with bound queries and finite deadlines.
 // Saved filter sets are typed, versioned per-user preferences outside archives.
 // UI callers receive the same data shapes as the existing Python interface.
-use crate::selectors::{contains, date_bounds, Selection};
+use crate::query::Query;
+use crate::selectors::{contains, folded, normalized_date, quoted, Selection};
 use anyhow::{ensure, Context, Result};
 use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::{collections::BTreeMap, io::Write, path::Path};
 
-#[derive(Default)]
-struct Folder {
-    paths: BTreeMap<String, Folder>,
-}
-impl Folder {
-    fn insert(&mut self, path: &str) {
-        let mut node = self;
-        for part in path.split('/').filter(|s| !s.is_empty()) {
-            node = node.paths.entry(part.to_owned()).or_default();
-        }
-    }
+struct Source {
+    parts: Vec<String>,
+    kind: String,
 }
 pub(crate) fn tree(db: &Connection, volumes: bool) -> Result<Value> {
-    let mut groups = BTreeMap::<String, (String, Folder)>::new();
-    let mut statement = db.prepare("SELECT v.identity_json,v.metadata_json,s.hierarchy_path FROM source_files s JOIN source_volumes v USING(source_volume_pk) WHERE EXISTS(SELECT 1 FROM observations o JOIN messages m USING(message_pk) WHERE o.source_file_pk=s.source_file_pk AND m.category IN ('Archive','Sent'))")?;
+    let mut groups = BTreeMap::<String, (String, Vec<Source>)>::new();
+    let mut statement = db.prepare("SELECT v.identity_json,v.metadata_json,s.hierarchy_path,s.source_kind FROM source_files s JOIN source_volumes v USING(source_volume_pk) WHERE EXISTS(SELECT 1 FROM observations o INDEXED BY observations_source_file_offset JOIN messages m USING(message_pk) WHERE o.source_file_pk=s.source_file_pk AND m.category IN ('Archive','Sent')) ORDER BY v.identity_json,s.source_path")?;
     for row in statement.query_map([], |r| {
         Ok((
             r.get::<_, String>(0)?,
             r.get::<_, String>(1)?,
             r.get::<_, String>(2)?,
+            r.get::<_, String>(3)?,
         ))
     })? {
-        let (identity, metadata, path) = row?;
+        let (identity, metadata, path, kind) = row?;
         let meta: Value = serde_json::from_str(&metadata).unwrap_or(Value::Null);
         let label = meta["volume_label"]
             .as_str()
-            .or(meta["name"].as_str())
-            .unwrap_or("Source volume")
+            .or(meta["current_mount_path"].as_str())
+            .unwrap_or("Unknown source volume")
             .to_string();
         groups
             .entry(if volumes { identity } else { String::new() })
-            .or_insert_with(|| (label, Folder::default()))
+            .or_insert_with(|| (label, Vec::new()))
             .1
-            .insert(&path);
+            .push(Source {
+                parts: path
+                    .split('/')
+                    .filter(|s| !s.is_empty())
+                    .map(String::from)
+                    .collect(),
+                kind,
+            });
     }
     let mut result = Vec::new();
-    for (identity, (label, folder)) in groups {
+    for (identity, (label, rows)) in groups {
         let volume = volumes.then_some(identity);
-        let children = nodes(db, &folder, "", &volume)?;
+        let children = nodes(db, &rows.iter().collect::<Vec<_>>(), &[], &volume)?;
         if volumes {
             let selection = Selection {
                 version: 1,
                 path: String::new(),
                 volume_identity: volume,
             };
-            result.push(json!({"selection":selection.token()?,"logical_selection":Selection{volume_identity:None,..selection.clone()}.token()?,"label":label,"kind":"volume","count":count(db, &selection)?,"children":children}));
+            result.push(json!({"selection":selection.token()?,"logical_selection":Selection{volume_identity:None,..selection.clone()}.token()?,"label":label,"kind":"volume","count":count(db,&selection)?,"children":children}));
         } else {
             result.extend(children);
         }
@@ -65,27 +66,47 @@ pub(crate) fn tree(db: &Connection, volumes: bool) -> Result<Value> {
     Ok(json!(result))
 }
 fn count(db: &Connection, selection: &Selection) -> Result<i64> {
-    let (clauses, values, _) =
-        crate::selectors::plan("", false, Some(&json!([selection.token()?])))?;
+    let statement = Query::parse(
+        "",
+        "date",
+        "descending",
+        false,
+        Some(&json!([selection.token()?])),
+    )?
+    .count(None)?;
     Ok(db.query_row(
-        &format!(
-            "SELECT count(*) FROM messages m WHERE {}",
-            clauses.join(" AND ")
-        ),
-        rusqlite::params_from_iter(values),
+        &statement.sql,
+        rusqlite::params_from_iter(statement.values),
         |r| r.get(0),
     )?)
 }
 fn nodes(
     db: &Connection,
-    folder: &Folder,
-    parent: &str,
+    rows: &[&Source],
+    prefix: &[String],
     volume: &Option<String>,
 ) -> Result<Vec<Value>> {
-    folder.paths.iter().map(|(label, folder)| {
-        let path = if parent.is_empty() { label.clone() } else { format!("{parent}/{label}") };
-        let selection = Selection { version: 1, path: path.clone(), volume_identity: volume.clone() };
-        Ok(json!({"selection":selection.token()?,"logical_selection":Selection{volume_identity:None,..selection.clone()}.token()?,"label":label,"kind":if folder.paths.is_empty(){"mailbox"}else{"folder"},"count":count(db, &selection)?,"children":nodes(db,folder,&path,volume)?}))
+    let depth = prefix.len();
+    let mut groups = BTreeMap::<String, Vec<&Source>>::new();
+    for row in rows
+        .iter()
+        .filter(|r| r.parts.len() > depth && r.parts.starts_with(prefix))
+    {
+        groups
+            .entry(row.parts[depth].clone())
+            .or_default()
+            .push(row);
+    }
+    groups.into_iter().map(|(label, rows)| {
+        let mut prefix = prefix.to_vec(); prefix.push(label.clone());
+        let direct = rows.iter().any(|r| r.parts.len()==prefix.len());
+        let single = rows.iter().all(|r| matches!(r.kind.as_str(),"message"|"emlx"));
+        let collapsed = single && (rows.iter().all(|r| r.parts.len()==prefix.len()+1) || rows.iter().all(|r|
+            r.parts.len()==prefix.len()+2 && matches!(r.parts[prefix.len()].as_str(),"cur"|"new")));
+        let mailbox = direct || collapsed;
+        let children = if mailbox {Vec::new()} else {nodes(db,&rows,&prefix,volume)?};
+        let selection = Selection {version:1,path:prefix.join("/"),volume_identity:volume.clone()};
+        Ok(json!({"selection":selection.token()?,"logical_selection":Selection{volume_identity:None,..selection.clone()}.token()?,"label":label,"kind":if mailbox {"mailbox"} else {"folder"},"count":count(db,&selection)?,"children":children}))
     }).collect()
 }
 
@@ -272,10 +293,10 @@ pub(crate) fn suggestions(db: &Connection, query: &str, limit: usize) -> Result<
     if value.chars().count() < 3 {
         return Ok(json!({"query":query,"prefix":prefix,"items":items}));
     }
-    let pattern = contains(&value);
+    let pattern = contains(&folded(&value));
     if tag.is_empty() || TAGS[..5].contains(&tag.as_str()) {
-        let mut statement=db.prepare("WITH matching AS MATERIALIZED (SELECT address_pk FROM email_addresses WHERE address LIKE ?1 ESCAPE '\\' UNION SELECT a.address_pk FROM address_search_names n JOIN email_addresses a ON a.address=n.address WHERE n.name LIKE ?1 ESCAPE '\\'), hits AS MATERIALIZED (SELECT a.address_pk,'from' AS role,m.message_pk,m.date_utc FROM matching a CROSS JOIN messages m INDEXED BY messages_sender_address_pk ON m.sender_address_pk=a.address_pk WHERE m.category IN ('Archive','Sent') UNION ALL SELECT a.address_pk,r.role,m.message_pk,m.date_utc FROM matching a CROSS JOIN recipients r INDEXED BY recipients_address_pk USING(address_pk) JOIN messages m USING(message_pk) WHERE m.category IN ('Archive','Sent')), counts AS (SELECT address_pk,role,count(DISTINCT message_pk) AS n,max(date_utc) AS seen FROM hits GROUP BY address_pk,role UNION ALL SELECT address_pk,'any',count(DISTINCT message_pk),max(date_utc) FROM hits GROUP BY address_pk UNION ALL SELECT NULL,role,count(DISTINCT message_pk),max(date_utc) FROM hits GROUP BY role UNION ALL SELECT NULL,'any',count(DISTINCT message_pk),max(date_utc) FROM hits), ranked AS (SELECT address_pk FROM counts WHERE address_pk IS NOT NULL AND role=?2 ORDER BY n DESC,seen DESC,address_pk LIMIT ?3) SELECT coalesce(a.address,''),c.role,c.n,c.seen FROM counts c LEFT JOIN email_addresses a USING(address_pk) WHERE c.n>0 AND (c.address_pk IS NULL OR c.address_pk IN(SELECT address_pk FROM ranked))")?;
-        let mut matches = BTreeMap::<String, Vec<Value>>::new();
+        let mut statement=db.prepare("WITH matching AS MATERIALIZED (SELECT address_pk FROM email_addresses WHERE lower(address) LIKE ?1 ESCAPE '\\' UNION SELECT a.address_pk FROM address_search_names n JOIN email_addresses a ON a.address=n.address WHERE lower(n.name) LIKE ?1 ESCAPE '\\'), hits AS MATERIALIZED (SELECT a.address_pk,'from' AS role,m.message_pk,m.date_utc FROM matching a CROSS JOIN messages m INDEXED BY messages_sender_address_pk ON m.sender_address_pk=a.address_pk WHERE m.category IN ('Archive','Sent') UNION ALL SELECT a.address_pk,r.role,m.message_pk,m.date_utc FROM matching a CROSS JOIN recipients r INDEXED BY recipients_address_pk USING(address_pk) JOIN messages m USING(message_pk) WHERE m.category IN ('Archive','Sent')), counts AS (SELECT address_pk,role,count(DISTINCT message_pk) AS n,max(date_utc) AS seen FROM hits GROUP BY address_pk,role UNION ALL SELECT address_pk,'any',count(DISTINCT message_pk),max(date_utc) FROM hits GROUP BY address_pk UNION ALL SELECT NULL,role,count(DISTINCT message_pk),max(date_utc) FROM hits GROUP BY role UNION ALL SELECT NULL,'any',count(DISTINCT message_pk),max(date_utc) FROM hits), ranked AS (SELECT address_pk FROM counts WHERE address_pk IS NOT NULL AND role=?2 ORDER BY n DESC,seen DESC,address_pk LIMIT ?3) SELECT coalesce(a.address,''),c.role,c.n,c.seen FROM counts c LEFT JOIN email_addresses a USING(address_pk) WHERE c.n>0 AND (c.address_pk IS NULL OR c.address_pk IN(SELECT address_pk FROM ranked))")?;
+        let mut matches = BTreeMap::<String, (Vec<Value>, String)>::new();
         for row in statement.query_map(
             rusqlite::params![pattern, if tag.is_empty() { "any" } else { &tag }, limit],
             |r| {
@@ -283,16 +304,19 @@ pub(crate) fn suggestions(db: &Connection, query: &str, limit: usize) -> Result<
                     r.get::<_, String>(0)?,
                     r.get::<_, String>(1)?,
                     r.get::<_, i64>(2)?,
+                    r.get::<_, String>(3)?,
                 ))
             },
         )? {
-            let (address, role, count) = row?;
-            matches
-                .entry(address)
-                .or_default()
-                .push(choice(&role, count));
+            let (address, role, count, seen) = row?;
+            let (choices, last_seen) = matches.entry(address).or_default();
+            choices.push(choice(&role, count));
+            if seen > *last_seen {
+                *last_seen = seen;
+            }
         }
-        for (address, mut choices) in matches {
+        let mut addresses = Vec::new();
+        for (address, (mut choices, seen)) in matches {
             choices.sort_by_key(|v| TAGS.iter().position(|tag| v["tag"] == *tag).unwrap_or(0));
             let roles: Vec<_> = choices.iter().filter(|v| v["tag"] != "any").collect();
             let selected = if !tag.is_empty() {
@@ -308,45 +332,65 @@ pub(crate) fn suggestions(db: &Connection, query: &str, limit: usize) -> Result<
                 } else {
                     address
                 };
-                items.push(json!({"tag":selected,"value":address,"label":address,"message_count":current["message_count"],"choices":choices}));
+                addresses.push((json!({"tag":selected,"value":address,"label":address,"message_count":current["message_count"],"choices":choices}),seen));
             }
         }
-        items.sort_by_key(|v| {
+        addresses.sort_by_key(|(v, seen)| {
             std::cmp::Reverse((
                 v["value"] == value,
                 v["message_count"].as_i64().unwrap_or(0),
+                seen.clone(),
+                v["value"].as_str().unwrap_or("").to_string(),
             ))
         });
+        items.extend(addresses.into_iter().take(limit + 1).map(|(item, _)| item));
     }
     if tag.is_empty() || tag == "subject" {
-        let count:i64=db.query_row("SELECT count(*) FROM messages WHERE category IN ('Archive','Sent') AND subject LIKE ? ESCAPE '\\'",[&pattern],|r|r.get(0))?;
+        let search = Query::parse(
+            &format!("subject:{}", quoted(&value)),
+            "date",
+            "descending",
+            false,
+            None,
+        )?;
+        let statement = search.count(None)?;
+        let count: i64 = db.query_row(
+            &statement.sql,
+            rusqlite::params_from_iter(statement.values),
+            |r| r.get(0),
+        )?;
         items.push(json!({"tag":"subject","value":value,"label":format!("Subject contains “{value}”"),"message_count":count,"choices":[choice("subject",count)]}));
-        let mut statement=db.prepare("SELECT subject,count(*) FROM messages WHERE category IN ('Archive','Sent') AND subject LIKE ? ESCAPE '\\' GROUP BY subject ORDER BY count(*) DESC,lower(subject) LIMIT ?")?;
-        for row in statement.query_map(rusqlite::params![pattern, limit], |r| {
+        let query = search.subjects(limit)?;
+        let mut statement = db.prepare(&query.sql)?;
+        for row in statement.query_map(rusqlite::params_from_iter(query.values), |r| {
             Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?))
         })? {
             let (subject, count) = row?;
             items.push(json!({"tag":"subject","value":subject,"label":subject,"message_count":count,"choices":[choice("subject",count)]}));
         }
     }
-    if (tag.is_empty() || TAGS[6..].contains(&tag.as_str())) && date_bounds(&value).is_ok() {
+    if (tag.is_empty() || TAGS[6..].contains(&tag.as_str())) && normalized_date(&value).is_ok() {
+        let normalized = normalized_date(&value)?;
         let mut choices = Vec::new();
         for tag in &TAGS[6..] {
-            let (clauses, values, _) =
-                crate::selectors::query_parts(&format!("{tag}:\"{value}\""))?;
+            let statement = Query::parse(
+                &format!("{tag}:{}", quoted(&normalized)),
+                "date",
+                "descending",
+                false,
+                None,
+            )?
+            .count(None)?;
             let count: i64 = db.query_row(
-                &format!(
-                    "SELECT count(*) FROM messages m WHERE {}",
-                    clauses.join(" AND ")
-                ),
-                rusqlite::params_from_iter(values),
+                &statement.sql,
+                rusqlite::params_from_iter(statement.values),
                 |r| r.get(0),
             )?;
             choices.push(choice(tag, count));
         }
         for option in &choices {
             if tag.is_empty() || option["tag"] == tag {
-                items.push(json!({"tag":option["tag"],"value":value,"label":value,"message_count":option["message_count"],"choices":choices}));
+                items.push(json!({"tag":option["tag"],"value":normalized,"label":normalized,"message_count":option["message_count"],"choices":choices}));
             }
         }
     }

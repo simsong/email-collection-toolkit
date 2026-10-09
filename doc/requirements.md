@@ -2522,19 +2522,35 @@ Native HTML address drags and person-merge drops must also reach the real servic
 and persist their distinct audit operations. Injected DOM drag events do not
 establish physical pointer or operating-system file-drag acceptance.
 
-Interactive Rust search must publish two bounded ordered catalog windows before
-running one comprehensive query over the remainder. Each window must be painted
-before continuing, even when empty. Results must remain sorted, without duplicates
-or omissions at tied sort values. A separate search connection must keep message
-selection, previews, and text display usable during the comprehensive query.
-Changing a query or sort, clearing the query, or closing must cancel obsolete
-work; stale results and failures must never alter the replacement search.
-The backend retains complete ordered message IDs and sends bounded display pages
-on scroll. Completion reports the total count separately from loaded rows and
-preserves selection and scroll position. No partial search may claim completeness.
-Small and empty searches must acknowledge both preview windows before completion.
-Sparse full-text terms must use indexed canonical-hash lookups rather than scan
-the catalog to enumerate matches. Autocomplete deadlines are optional incomplete
+Interactive Python and Rust search must select indexed matching candidates before
+sorting and aggregating display headers. Rust complete-ID selection, header pages,
+keyset batches, counts, subject suggestions and folder counts share one production
+SQL compiler and normalized selector plan. Attachment search intersects per-term
+unions of message/attachment hashes; recipient and folder predicates resolve
+indexed membership without correlated catalog traversal. Literal subject substring
+matching may scan its covering expression index. Appropriate filtering SEARCH
+paths and bounded SQLite VM work must be checked on the same language-neutral
+case matrix in Python acceptance tests and Rust unit tests, using unchanged
+production statements and bindings for pages, IDs and counts.
+
+Rust streams ordered matching IDs from one query on its separate read-only search
+connection. The first two full 512-result batches wait for frontend painting;
+small and empty searches complete without unrelated catalog windows or empty
+acknowledgements. Results must remain sorted without duplicates or omissions at
+tied keys. Message reads remain usable; changing query/sort, clearing or closing
+cancels obsolete work. Stale results/failures cannot alter the replacement search.
+Display pages contain at most 512 rows; completion reports the total separately
+from loaded rows and preserves selection/scroll. Partial failures remain incomplete.
+
+Common operations must agree on stripped/casefolded selector values, explicit
+empty quoted terms, strict calendar-date recognition and normalized suggestions,
+deduplicated text-first highlights, distinct recipient aggregation, processed
+attached-message badges and collapsed loose-message/Maildir mailbox trees.
+Header, authoritative person and institution-domain names participate in address
+matching without rewriting canonical messages or rebuilding full-text indexes.
+Production API comparisons must cover these contracts, role/attachment/folder
+filters, counts and offsets, while existing real pagination/cancellation tests
+retain broad-result and tied-key acceptance. Autocomplete deadlines are optional incomplete
 suggestions, never a failed search or fabricated count; stale suggestion errors
 must not affect a replacement query. Explicit Plain Text, HTML, or Raw Source
 selection persists within a reader window across message navigation, using the

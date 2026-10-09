@@ -17,6 +17,7 @@ pub mod macos;
 mod mime;
 pub mod opening;
 pub mod preferences;
+mod query;
 mod search;
 mod selectors;
 pub mod shell;
@@ -116,9 +117,13 @@ impl Archive {
             )?;
             names.push_str(" UNION SELECT a.address,p.canonical_name FROM identities.addresses a JOIN identities.person_addresses pa USING(address_id) JOIN identities.persons p USING(person_id) UNION SELECT a.address,n.name FROM identities.addresses a JOIN identities.person_addresses pa USING(address_id) JOIN identities.person_aliases n USING(person_id) UNION SELECT a.address,json_extract(e.value,'$.name') FROM identities.addresses a JOIN identities.evidence e USING(address_id) WHERE e.kind='header' UNION SELECT a.address,o.name FROM identities.addresses a JOIN identities.organization_domains d ON a.domain=d.domain OR a.domain LIKE '%.'||d.domain JOIN identities.organizations o USING(organization_id)");
             db.execute_batch("CREATE TEMP VIEW attached_origins AS SELECT DISTINCT child.catalog_message_pk AS child, parent.catalog_message_pk AS parent_message_pk,o.parent_message_id,o.part_path FROM identities.occurrences o JOIN identities.message_state child ON child.message_id=o.message_id LEFT JOIN identities.message_state parent ON parent.message_id=o.parent_message_id WHERE o.parent_message_id IS NOT NULL")?;
+            db.execute_batch("CREATE TEMP VIEW attached_search_messages AS SELECT s.catalog_message_pk AS message_pk FROM identities.message_state s JOIN identities.message_tags mt USING(message_id) JOIN identities.tags t USING(tagid) WHERE t.name='attachment'")?;
         }
         if !root.join("processing.sqlite3").exists() {
             db.execute_batch("CREATE TEMP VIEW attached_origins AS SELECT 0 AS child,0 AS parent_message_pk,'' AS parent_message_id,'[]' AS part_path WHERE 0")?;
+            db.execute_batch(
+                "CREATE TEMP VIEW attached_search_messages AS SELECT 0 AS message_pk WHERE 0",
+            )?;
         }
         db.execute_batch(&format!("CREATE TEMP VIEW address_search_names AS {names}"))?;
         db.execute_batch("PRAGMA query_only=ON")?;
@@ -136,38 +141,31 @@ impl Archive {
     }
 
     pub fn search(&self, text: &str) -> Result<Vec<Row>> {
-        ensure!(text.len() <= 4096, "Search is limited to 4096 bytes");
+        let query = crate::query::Query::parse(text, "date", "descending", false, None)?;
+        let statement = query.headers(Some(PAGE_SIZE), 0, None)?;
         let deadline = Instant::now() + Duration::from_secs(3);
         self.db
             .progress_handler(1000, Some(move || Instant::now() >= deadline));
-        let query = text
-            .split_whitespace()
-            .map(|s| format!("\"{}\"", s.replace('"', "\"\"")))
-            .collect::<Vec<_>>()
-            .join(" AND ");
-        let filter = if query.is_empty() {
-            ""
-        } else {
-            "AND m.sha256 IN (SELECT sha256 FROM search.message_fts WHERE message_fts MATCH ?1)"
-        };
-        let sql = format!("SELECT m.message_pk,m.subject,a.address,m.date_utc FROM messages m JOIN email_addresses a ON a.address_pk=m.sender_address_pk WHERE m.category IN ('Archive','Sent') {filter} ORDER BY m.date_utc DESC,m.message_pk DESC LIMIT {PAGE_SIZE}");
-        let mut statement = self.db.prepare(&sql)?;
-        let values = if query.is_empty() {
-            vec![]
-        } else {
-            vec![query]
-        };
-        let result = statement
-            .query_map(rusqlite::params_from_iter(values), |r| {
-                Ok(Row {
-                    id: r.get(0)?,
-                    subject: r.get(1)?,
-                    sender: r.get(2)?,
-                    date: r.get(3)?,
+        let result = (|| -> Result<Vec<Row>> {
+            Ok(self
+                .db
+                .prepare(&statement.sql)?
+                .query_map(
+                    rusqlite::params_from_iter(statement.values),
+                    crate::query::Header::read,
+                )?
+                .map(|row| {
+                    row.map(|r| Row {
+                        id: r.message_pk,
+                        subject: r.subject,
+                        sender: r.sender,
+                        date: r.date_utc,
+                    })
                 })
-            })?
-            .collect::<rusqlite::Result<Vec<_>>>()?;
-        Ok(result)
+                .collect::<rusqlite::Result<_>>()?)
+        })();
+        self.db.progress_handler(0, None::<fn() -> bool>);
+        result
     }
 
     pub(crate) fn raw_message(&self, id: i64) -> Result<Vec<u8>> {
@@ -356,7 +354,7 @@ mod tests {
         assert_eq!(archive.search("observatory Friday").unwrap()[0].id, 1);
         assert_eq!(archive.search("café").unwrap()[0].id, 2);
         assert!(archive.search("notpresent").unwrap().is_empty());
-        assert!(archive.search("\" OR *").unwrap().is_empty());
+        assert!(archive.search("\" OR *").is_err());
         let message = archive.message(1).unwrap();
         assert!(message.body.contains("\r\nFrom the hill"));
         assert!(message.body.contains(">From an older note"));

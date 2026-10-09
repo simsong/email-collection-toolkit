@@ -1016,7 +1016,7 @@ async function runIncrementalSearch(context) {
       const status = await window.pywebview.api.search_status(search.generation);
       if (request !== state.searchRequest || status.stale) return;
       Object.assign(search, {count: status.count, complete: status.complete, error: status.error || search.error});
-      // Paint both preview windows before releasing the comprehensive query.
+      // Paint the first two full matching batches before continuing the ID stream.
       // Once complete, fetch additional display pages only as the user scrolls.
       if (state.offset < Math.min(search.count, 1024)) await loadRustSearchPage(search, Math.min(512, 1024 - state.offset));
       if (request !== state.searchRequest) return;

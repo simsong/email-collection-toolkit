@@ -1,16 +1,92 @@
 <!-- Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved. -->
 
-# Python and Rust search parity audit
+# Python and Rust search parity report
 
-Audited local revision: `c85df4de68ad05f7667e17481501add94e0cdd18`, branch
-`work-rust-gui`. This report describes that candidate, including unpublished work;
-it is not a claim about the current GitHub PR head or a released installer.
+The a16 candidate implements the alignment plan below. The original audit is
+preserved as baseline evidence for revision `c85df4de68ad05f7667e17481501add94e0cdd18`.
+Its defect descriptions refer to that baseline, not the updated implementation.
+Local results do not establish current-head hosted CI, native rendering parity
+or a published installer.
 
-Rust should adopt Python's **filter-before-sort query strategy and search
-contract**, retaining Rust's separate cancellable worker and bounded display
-pages. The performance problem is avoidable SQL work, rather than evidence that
-Rust itself is slow. Runtime alignment and a permanent shared acceptance matrix
-are the next implementation work; they have not been delivered by this audit.
+## Reanalysis after alignment
+
+Rust now selects indexed matching candidates before sorting, through one complete
+SQL compiler (`query::Query`) shared by the native worker, direct search, header
+hydration, counts, folder counts, subject suggestions and comparison reader.
+Mandatory catalog-preview scans have been removed. The first two full **matching**
+batches still paint before streaming continues; sparse/empty queries finish
+without empty-window acknowledgements. The separate cancellable worker and
+bounded display pages remain.
+
+The original **181-operation** service/dispatcher audit was rerun with the
+optimized updated reader and fresh synthetic fixtures: **zero differences**,
+compared with 17 at baseline. Selectors, empty quoted terms, dates, highlights,
+normalized date suggestions, loose-message folder trees and processed-child tags
+now agree. Institution-domain matching was retained and added to Python rather
+than removed from Rust. Direct header comparisons also verify recipient
+aggregation, limits, offsets and count thresholds.
+
+`tests/fixtures/search-contract.json` now supplies the same 21 optimizer cases
+to both implementations. Python executes **252** production page/count statements;
+Rust unit tests execute **378** production header/ordered-ID/count statements.
+All required filtering SEARCH paths, FTS MATCH paths, covering subject scans,
+results and VM budgets pass on real-schema 20,001-message fixtures. Existing
+broad-result/tied-key/cancellation tests remain in place. `make test-search-parity`
+permanently checks real Python GUI APIs and compiled Rust IPC, including worker
+results and complete display records; the aggregate test gate includes it.
+
+Current local validation: `make test-rust-gui` passes format, Clippy and reader
+unit/integration gates; `make test-search-parity` passes **89** Python/parity cases;
+`make test-gui` passes **77** GUI-service/completion cases; `make test-rust-webview`
+passes **11** real-service browser regressions. Final Ruff, Pylint, ty and Pyright
+report zero diagnostics. Standalone child harnesses remain ignored in the parent
+Rust suite but run through their parent tests; native smoke tests are opt-in and
+were not rerun for this search task. Synthetic screenshots were regenerated and
+the homepage/Searching previews inspected without native app appearances.
+
+### Read-only performance check
+
+The optimized count-only probe returned all **510** matches for the user-reported
+query at **329 ms**, without either empty catalog preview. The prior optimized
+probe observed empty windows at 760/979 ms and completion at 1,308 ms. These are
+separate runs, so cache/startup conditions prevent claiming a controlled speedup.
+
+Four alternating Python/Rust pairs then used the actual Python GUI header service
+and optimized Rust worker/header IPC on the same quiescent archive. They returned
+the same 510 complete header records. Imports/builds and initial dispatcher setup
+were outside those per-query measurements. Subsequent warm Python complete-header
+calls took **9.25–10.12 ms**; Rust matching IDs took **5.28–6.70 ms**, and complete
+header delivery **11.52–13.05 ms**, including IPC/polling. The first Python call
+took 211.76 ms and is reported separately, without describing it as a controlled
+cold-cache run. Thus filtering behavior aligns and warm response times are close;
+this does not prove identical whole-window latency. Native WebKit rendering,
+controlled cold-cache performance and physical interaction remain unmeasured.
+Only counts/timings are retained in `.tmp/search-alignment/benchmark.json`; no
+private headers, subjects or message bodies are published.
+
+### Remaining differences and limits
+
+Rust deliberately keeps a separate cancellable ID stream, at most 1,024 initially
+loaded headers and 512-row scroll pages; Python materializes complete headers in
+its existing GUI API. Rust autocomplete can return explicitly incomplete after
+its 150-ms deadline; Python has no equivalent foreground deadline. Rust applies
+query-size/safety guards and excludes quarantined rows from original-folder trees;
+Python's original folder tree counts source observations across categories. Normal
+search results exclude quarantine in both. SQLite engines still differ (Python
+3.53.4, Rust 3.50.2). These policies are not hidden semantic mismatches in the
+shared tests. Unicode/escaping, arbitrary malformed/versioned tokens, completion
+ranking across every possible database distribution and concurrent external
+archive writers are not universally certified by finite fixtures.
+
+The search alignment is locally validated; full native GUI/package acceptance,
+current-head CI/Copilot review and public release remain separate gates. The
+background review monitor remains paused as requested.
+
+## Baseline audit
+
+Rust should adopt Python's filter-before-sort query strategy and search contract,
+retaining its separate cancellable worker and bounded display pages. The
+following sections record the evidence and plan before that implementation.
 
 ## Execution paths
 
