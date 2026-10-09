@@ -1,4 +1,4 @@
-// Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved.
+/* Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved. */
 // Present startup actions without blocking Finder/Dock document delivery.
 // Native IPC owns archive selection and initialization, not this page.
 // The real helper capability response enables New; Open always stays available.

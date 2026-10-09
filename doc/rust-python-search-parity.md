@@ -20,7 +20,9 @@ bounded display pages remain.
 
 The original **181-operation** service/dispatcher audit was rerun with the
 optimized updated reader and fresh synthetic fixtures: **zero differences**,
-compared with 17 at baseline. Selectors, empty quoted terms, dates, highlights,
+compared with 17 at baseline. The original 126-statement Rust diagnostic was
+also rerun on the same Python-created fixture: zero plan/index mismatches and
+zero work-budget failures, versus 102 and 68 respectively at baseline. Selectors, empty quoted terms, dates, highlights,
 normalized date suggestions, loose-message folder trees and processed-child tags
 now agree. Institution-domain matching was retained and added to Python rather
 than removed from Rust. Direct header comparisons also verify recipient
@@ -35,6 +37,10 @@ broad-result/tied-key/cancellation tests remain in place. `make test-search-pari
 permanently checks real Python GUI APIs and compiled Rust IPC, including worker
 results and complete display records; the aggregate test gate includes it.
 
+A real worker regression holds each paint acknowledgement longer than its test
+SQL budget. Disabling wait-time exclusion fails the intended assertion; restoring
+the exact source passes. UI painting waits therefore do not consume SQL time.
+
 Current local validation: `make test-rust-gui` passes format, Clippy and reader
 unit/integration gates; `make test-search-parity` passes **89** Python/parity cases;
 `make test-gui` passes **77** GUI-service/completion cases; `make test-rust-webview`
@@ -47,7 +53,7 @@ the homepage/Searching previews inspected without native app appearances.
 ### Read-only performance check
 
 The optimized count-only probe returned all **510** matches for the user-reported
-query at **329 ms**, without either empty catalog preview. The prior optimized
+query at **234 ms**, without either empty catalog preview. The prior optimized
 probe observed empty windows at 760/979 ms and completion at 1,308 ms. These are
 separate runs, so cache/startup conditions prevent claiming a controlled speedup.
 
@@ -55,9 +61,9 @@ Four alternating Python/Rust pairs then used the actual Python GUI header servic
 and optimized Rust worker/header IPC on the same quiescent archive. They returned
 the same 510 complete header records. Imports/builds and initial dispatcher setup
 were outside those per-query measurements. Subsequent warm Python complete-header
-calls took **9.25–10.12 ms**; Rust matching IDs took **5.28–6.70 ms**, and complete
-header delivery **11.52–13.05 ms**, including IPC/polling. The first Python call
-took 211.76 ms and is reported separately, without describing it as a controlled
+calls took **9.08–9.64 ms**; Rust matching IDs took **4.44–6.54 ms**, and complete
+header delivery **10.93–13.12 ms**, including IPC/polling. The first Python call
+took 161.90 ms and is reported separately, without describing it as a controlled
 cold-cache run. Thus filtering behavior aligns and warm response times are close;
 this does not prove identical whole-window latency. Native WebKit rendering,
 controlled cold-cache performance and physical interaction remain unmeasured.
