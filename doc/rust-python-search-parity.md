@@ -2,7 +2,7 @@
 
 # Python and Rust search parity report
 
-The a16 candidate implements the alignment plan below. The original audit is
+The search alignment implemented for a16 is retained in a17. The original audit is
 preserved as baseline evidence for revision `c85df4de68ad05f7667e17481501add94e0cdd18`.
 Its defect descriptions refer to that baseline, not the updated implementation.
 Local results do not establish current-head hosted CI, native rendering parity

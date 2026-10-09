@@ -2399,6 +2399,10 @@ No Requests-based fetching or public-suffix network update occurs at runtime.
 
 ### Rust desktop migration and retained reader prototype
 
+Desktop builds require Rust 1.99 or later. The checkout selects the tested
+1.99.0 compiler with rustfmt and Clippy without changing the global default;
+validation keeps compiler warnings fatal and preserves shutdown atomic ordering.
+
 The retained egui `mailsearch-rust` prototype must open existing version-1 catalog and
 search databases read-only, search indexed message words, select a result, and
 display headers and decoded text only after verifying canonical message SHA-256.

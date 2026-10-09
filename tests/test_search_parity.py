@@ -259,7 +259,7 @@ def test_completion_and_live_name_edits_match(tmp_path: Path) -> None:
 def test_attached_badges_are_selective_with_populated_processing(tmp_path: Path) -> None:
     """Child badges probe canonical hash indexes rather than every processor state."""
     archive = make_sparse_search_archive(tmp_path)
-    with closing(sqlite3.connect(archive / "archive.sqlite3")) as catalog:
+    with closing(sqlite3.connect((archive / "archive.sqlite3").as_uri() + "?mode=ro", uri=True)) as catalog:
         with closing(processing_connect(archive, create=True, production=True)) as processing, processing:
             processing.executemany("INSERT INTO messages VALUES(?,?,?,'')",
                                    ((digest, normalized, digest) for normalized, digest in

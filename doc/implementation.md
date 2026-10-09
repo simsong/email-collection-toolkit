@@ -3137,6 +3137,11 @@ pending work; deferred-but-unstarted jobs never become active merely on quit.
 
 ### Rust desktop migration and reader prototype
 
+`rust-toolchain.toml` selects Rust 1.99.0 with rustfmt and Clippy for this
+checkout; the desktop crate declares 1.99 as its minimum. CI can explicitly
+select its installed stable compiler through `RUSTUP_TOOLCHAIN`. ShutdownGate
+uses `try_update` with the existing AcqRel/Acquire ordering and update closure.
+
 `rust/mailsearch-gui` is a separate Cargo workspace member using eframe/egui,
 rusqlite with bundled SQLite, mailparse, and html2text. The native window owns
 only presentation state. One worker owns both read-only databases and consumes
@@ -3416,6 +3421,9 @@ acknowledgement waits; direct header/count APIs have
 15-second guards, removed before subsequent reads. No pre-result count is added.
 
 `tests/fixtures/search-contract.json` is the common optimizer case matrix.
+Its populated-processing fixture explicitly enables SQLite URI handling on the
+read-only catalog connection before attaching the read-only processing database;
+it does not rely on a Python build's default URI configuration.
 Python acceptance exercises 252 page/count statements and Rust unit tests exercise
 504 header/full-ID/bounded-ID/count statements, each explained and executed with original bindings
 on 20,001-message fixtures from the real schemas. Selective queries have 5,000-VM

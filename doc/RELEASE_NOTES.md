@@ -2,7 +2,12 @@
 
 # Release notes
 
-## 1.0.0a16 (candidate)
+## 1.0.0a17 (candidate)
+
+- Require Rust 1.99 and select 1.99.0 for local builds. Use the current atomic
+  update API without changing shutdown synchronization. Enable SQLite URI
+  handling explicitly in the populated-processing optimizer fixture so the
+  read-only attachment query is tested across Python SQLite builds.
 
 - Align Rust search with Python's indexed filter-before-sort strategy. Stream
   matching IDs without mandatory catalog-preview scans; share production SQL

@@ -1,0 +1,11 @@
+# Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved.
+# Select the Rust compiler used for this checkout's builds and checks.
+# Rustup reads this file when Cargo or Rust tools run within the project.
+# Pin the tested compiler so local warning gates reproduce its API diagnostics.
+# Include formatting and lint components required by the Makefile targets.
+# This project selection does not change the user's global Rust default.
+# Hosted workflows may explicitly select a newer stable compiler.
+[toolchain]
+channel = "1.99.0"
+profile = "minimal"
+components = ["rustfmt", "clippy"]

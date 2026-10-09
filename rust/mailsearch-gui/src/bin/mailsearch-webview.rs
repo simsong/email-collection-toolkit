@@ -259,7 +259,7 @@ impl ShutdownGate {
         }
         let initialization = matches!(request.method.as_str(), "status" | "engine_status");
         self.0
-            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |state| {
+            .try_update(Ordering::AcqRel, Ordering::Acquire, |state| {
                 (state & 1 != 0).then_some(state | if initialization { 2 } else { 0 })
             })
             .ok()

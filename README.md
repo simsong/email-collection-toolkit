@@ -62,7 +62,11 @@ verified MIME/HTML display, attachments and native reader actions. The local
 migration build uses a supervised Python archive-service helper for creation,
 imports, recovery, owner rules and identity edits; it never starts pywebview.
 The original Python GUI remains available until native migration acceptance.
-Rust 1.95+ is required to build the desktop. Reading/searching existing archives
+Rust 1.99+ is required to build the desktop. `rust-toolchain.toml` selects 1.99.0
+with rustfmt and Clippy for this checkout, without changing the global default;
+hosted CI also checks its explicitly selected stable compiler. `RUSTUP_TOOLCHAIN`
+overrides the checkout's compiler selection for an explicit alternate-toolchain run.
+Reading/searching existing archives
 needs no Python; archive-service operations require the prepared project Python
 environment. Archive writing remains unsupported on Windows.
 `ECT_RUST_ENGINE_PYTHON` optionally selects that environment's Python executable;

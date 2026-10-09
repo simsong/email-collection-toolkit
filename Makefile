@@ -40,6 +40,7 @@ runtime-license-bundle:
 
 TIKA_VERSION ?= 4.0.0
 # CARGO selects Cargo; RUST_TARGET_DIR keeps compiled artifacts in this checkout.
+# RUSTUP_TOOLCHAIN explicitly overrides the compiler selected by rust-toolchain.toml.
 CARGO ?= cargo
 RUST_EXE_SUFFIX := $(if $(filter Windows_NT,$(OS)),.exe,)
 RUST_TARGET_DIR ?= $(CURDIR)/target
