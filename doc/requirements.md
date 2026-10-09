@@ -2564,8 +2564,14 @@ all Unicode whitespace. Completion shares its quoting/escaping rules while
 retaining unfinished-quote fallback for typing.
 Production API comparisons must cover these contracts, role/attachment/folder
 filters, counts and offsets, while existing real pagination/cancellation tests
-retain broad-result and tied-key acceptance. Autocomplete deadlines are optional incomplete
-suggestions, never a failed search or fabricated count; stale suggestion errors
+retain broad-result and tied-key acceptance. Rust autocomplete runs on its own
+read-only worker, with replaceable pending work and generation cancellation.
+It must return Python-equivalent address/name role choices and exact counts on
+large archives, without a 150 ms cutoff discarding valid choices or blocking
+foreground searches and message display. Both background readers must retry
+opening on a later request after transient SQLite initialization contention.
+Their 120-second active SQL safety limit
+returns optional incomplete suggestions, never a failed search or fabricated count; stale suggestion errors
 must not affect a replacement query. Explicit Plain Text, HTML, or Raw Source
 selection persists within a reader window across message navigation, using the
 message default only when that representation is absent. Retained mode must

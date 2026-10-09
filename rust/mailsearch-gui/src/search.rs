@@ -55,7 +55,7 @@ impl Search {
         std::thread::Builder::new()
             .name("archive-search".into())
             .spawn(move || {
-                let mut bridge = Bridge::open(&path).map_err(|e| format!("{e:#}"));
+                let mut bridge: Option<Bridge> = None;
                 loop {
                     let job = {
                         let mut state = worker.state.lock().unwrap();
@@ -67,10 +67,14 @@ impl Search {
                         }
                         state.pending.take().unwrap()
                     };
-                    let result = match &mut bridge {
-                        Ok(bridge) => run(bridge, &worker, &job),
-                        Err(error) => Err(anyhow::anyhow!(error.clone())),
-                    };
+                    let result = (|| -> Result<()> {
+                        // Cache successful connections, not transient opening
+                        // errors; replacement searches must be able to retry.
+                        if bridge.is_none() {
+                            bridge = Some(Bridge::open(&path)?);
+                        }
+                        run(bridge.as_mut().unwrap(), &worker, &job)
+                    })();
                     let mut state = worker.state.lock().unwrap();
                     if state.generation == job.generation {
                         if let Err(error) = result {

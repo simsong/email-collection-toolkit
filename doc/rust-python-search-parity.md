@@ -57,7 +57,7 @@ use indexed joins; both languages test ordinary, targeted and broad institution
 queries with 3,000 unrelated processing addresses/domains and bounded VM work.
 
 Current local validation: `make test-rust-gui` passes format, Clippy and reader
-unit/integration gates; `make test-search-parity` passes **91** Python/parity cases;
+unit/integration gates; `make test-search-parity` passes **93** Python/parity cases;
 `make test-gui` passes **77** GUI-service/completion cases; `make test-rust-webview`
 passes **11** real-service browser regressions. Final Ruff, Pylint, ty and Pyright
 report zero diagnostics. Standalone child harnesses remain ignored in the parent
@@ -85,12 +85,47 @@ controlled cold-cache performance and physical interaction remain unmeasured.
 Only counts/timings are retained in `.tmp/search-alignment/benchmark.json`; no
 private headers, subjects or message bodies are published.
 
+### Follow-up: broad searches and autocomplete
+
+The user reported slow first results and absent autocomplete after testing the
+installed Rust Preview. Its bundle identifies itself as a14; it predates the
+a16 search alignment retained in a17. Read-only production-service probes of
+that executable showed a direct 2,000-header broad-word query taking 5.59 seconds
+in one run. Current a17 warm service calls took 0.35 seconds in Python and
+0.44 seconds for Rust's first 512 IDs plus hydrated headers. Startup/cache effects
+remain material: separate first runs took about eight seconds in either service;
+these observations do not establish controlled cold-cache parity.
+
+A headless comparison then exercised the actual shared frontend and optimized
+Rust dispatcher, alternating two runs per engine on the same archive. Python's
+real GUI search service ran off the rendering thread, matching its pywebview
+dispatch; its complementary query could not block the first paint. First visible
+rows appeared at about 0.79–0.80 seconds in both paths, with 2,000 initially loaded
+Python headers and 512 Rust headers. The transport/Playwright observation is
+coarse and uses warm caches; native WebKit performance still requires the user's
+installer trial. This supports delivering the aligned build rather than adding
+another search algorithm. Timings and counts only are retained locally in
+`.tmp/search-responsiveness/`; no private message data is published.
+
+Autocomplete had a separate reproducible defect in current a17: Python returned
+35 choices while Rust hit its 150 ms cutoff and returned none. Rust now computes
+the same exact address/name/subject/date choices on a dedicated cancellable
+read-only worker. The frontend polls it independently of search and message
+requests; typing, submitting, clearing or closing invalidates obsolete work.
+The same headless broad-archive trial displayed all 35 choices in about 0.80
+seconds after typing. Real dispatcher comparisons check the full completion
+matrix; browser tests type names/addresses and accept counted role choices.
+An exclusive SQLite lock verifies foreground message rendering/cancellation
+during completion contention and successful replacement after release.
+First-open contention regressions additionally check that both search and
+completion recover on a subsequent request after a temporary SQLite lock.
+
 ### Remaining differences and limits
 
 Rust deliberately keeps a separate cancellable ID stream, at most 1,024 initially
 loaded headers and 512-row scroll pages; Python materializes complete headers in
-its existing GUI API. Rust autocomplete can return explicitly incomplete after
-its 150-ms deadline; Python has no equivalent foreground deadline. Rust applies
+its existing GUI API. Rust autocomplete runs independently with a 120-second
+SQL safety limit; Python has no equivalent safety deadline. Rust applies
 query-size/safety guards and excludes quarantined rows from original-folder trees;
 Python's original folder tree counts source observations across categories. Normal
 search results exclude quarantine in both. SQLite engines still differ (Python

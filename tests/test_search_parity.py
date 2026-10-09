@@ -70,6 +70,13 @@ class Suggestions(SearchSuggestions):
     incomplete: bool = False
 
 
+class CompletionStatus(BaseModel):
+    complete: bool = False
+    stale: bool = False
+    result: Suggestions | None = None
+    error: str | None = None
+
+
 class Rpc:
     """Bounded real subprocess transport shared by these acceptance operations."""
     def __init__(self, binary: str, archive: Path) -> None:
@@ -240,6 +247,18 @@ def test_completion_and_live_name_edits_match(tmp_path: Path) -> None:
             actual = Suggestions.model_validate(rpc.call("suggestions", query))
             assert not actual.incomplete
             assert SearchSuggestions.model_validate(actual.model_dump(exclude={"incomplete"})) == search_suggestions(archive, query), query
+            # Native autocomplete uses an independent worker, with the same exact
+            # counts/choices rather than an empty 150 ms deadline response.
+            started = Generation.model_validate(rpc.call("suggestions_start", query))
+            deadline = time.monotonic() + 30
+            while True:
+                status = CompletionStatus.model_validate(rpc.call("suggestions_status", started.generation))
+                assert not status.error and not status.stale
+                if status.complete:
+                    assert status.result == actual
+                    break
+                assert time.monotonic() < deadline
+                time.sleep(.001)
     picker = IdentityPickerApi(archive, "name")
     people = PickerPage.model_validate(picker.query({"mailbox": "alpha"}))
     picker.update({"operation": "rename-person", "subject": people.groups[0].id, "name": "Authoritative Person"})
@@ -254,6 +273,41 @@ def test_completion_and_live_name_edits_match(tmp_path: Path) -> None:
             expected = search_page(archive, query, limit=0)
             actual = SearchPage.model_validate(rpc.call("search", query, 0, "date", "descending", False, [], 0))
             assert actual == expected
+
+
+@pytest.mark.parametrize("worker", ["suggestions", "search"])
+def test_background_reader_retries_initial_sqlite_contention(tmp_path: Path, worker: str) -> None:
+    """Parity: a transient first-open lock must not disable later queries."""
+    archive = completion_archive(tmp_path)
+    with reader(archive) as rpc:
+        rpc.call("status")  # Foreground is open; neither background reader is.
+        with closing(sqlite3.connect(archive / "search.sqlite3")) as locked:
+            locked.execute("BEGIN EXCLUSIVE")
+            generation = Generation.model_validate(rpc.call(worker + "_start", "subject:Simson"))
+            deadline = time.monotonic() + 5
+            while True:
+                status = CompletionStatus.model_validate(rpc.call(worker + "_status", generation.generation))
+                if status.complete:
+                    assert status.error and "locked" in status.error
+                    break
+                assert time.monotonic() < deadline
+                time.sleep(.001)
+            locked.rollback()
+        generation = Generation.model_validate(rpc.call(worker + "_start", "subject:Simson"))
+        deadline = time.monotonic() + 5
+        while True:
+            status = CompletionStatus.model_validate(rpc.call(worker + "_status", generation.generation))
+            assert not status.error and not status.stale
+            if status.complete:
+                if worker == "suggestions":
+                    assert status.result is not None and not status.result.incomplete
+                    assert SearchSuggestions.model_validate(status.result.model_dump()) == search_suggestions(archive, "subject:Simson")
+                else:
+                    page = DisplayPage.model_validate(rpc.call("search_page", generation.generation, 0, 512))
+                    assert page.results == search_page(archive, "subject:Simson", limit=512).results
+                break
+            assert time.monotonic() < deadline
+            time.sleep(.001)
 
 
 def test_attached_badges_are_selective_with_populated_processing(tmp_path: Path) -> None:

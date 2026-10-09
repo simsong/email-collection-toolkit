@@ -780,7 +780,20 @@ function scheduleSuggestions() {
 
 async function loadSuggestions(query, request) {
   try {
-    const suggestions = await window.pywebview.api.suggestions(query, SUGGESTION_LIMIT);
+    let suggestions;
+    if (window.pywebview.api.suggestions_start) {
+      const {generation} = await window.pywebview.api.suggestions_start(query, SUGGESTION_LIMIT);
+      while (request === state.suggestionRequest && elements.search.value.trim() === query) {
+        const status = await window.pywebview.api.suggestions_status(generation);
+        if (status.stale) return;
+        if (status.complete) {
+          if (status.error) throw new Error(status.error);
+          suggestions = status.result;
+          break;
+        }
+        await new Promise(resolve => window.setTimeout(resolve, 75));
+      }
+    } else suggestions = await window.pywebview.api.suggestions(query, SUGGESTION_LIMIT);
     if (!suggestions || request !== state.suggestionRequest || elements.search.value.trim() !== query) return;
     renderSuggestions(suggestions);
   } catch (error) {
@@ -852,6 +865,9 @@ function acceptSuggestion(index) {
 }
 
 function closeSuggestions() {
+  if (window.pywebview?.api?.suggestions_cancel) {
+    void window.pywebview.api.suggestions_cancel().catch(() => {});
+  }
   window.clearTimeout(state.suggestionTimer);
   state.suggestionRequest += 1;
   state.suggestionItems = [];

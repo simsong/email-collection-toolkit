@@ -3439,12 +3439,26 @@ comparisons unless `RUST_WEBVIEW_BINARY` is supplied by that Make target.
 Institution-domain names already supported by Rust are now included in Python's
 live address-name view. Neither reader modifies canonical archive content.
 
-Optional autocomplete has a 150-millisecond VM deadline on the foreground
-connection. SQLite interruption returns empty, explicitly incomplete suggestions;
-other errors remain errors. The handler is removed before subsequent reads, and
-the frontend rejects obsolete suggestion failures before displaying them.
+Autocomplete uses a separate read-only connection and one replaceable pending
+job. Search and completion retain successful reader opens; a failed initial
+open is retried on the next job rather than cached for the window lifetime.
+`suggestions_start/status/cancel` isolate the full Python-equivalent
+address/name/subject/date queries from foreground search pages and message reads.
+The shared frontend retains its 120 ms typing debounce and polls every 75 ms;
+generation changes interrupt stale SQL and reject obsolete choices/errors.
+The worker has a 120-second SQL safety limit, rather than the former 150 ms
+foreground cutoff that erased all choices on large collections. SQLite
+interruption returns empty, explicitly incomplete suggestions; other errors
+remain errors. The direct `suggestions` compatibility API uses the same queries
+and safety limit. Its progress handler is removed before subsequent reads.
 A real 50,000-row fixture checks ordered sparse results and SQLite VM work;
 another fixture forces an actual autocomplete interrupt and checks later reads.
+A real exclusive search-database lock checks that completion contention leaves
+cached message rendering and cancellation usable, then verifies replacement
+completion. Separate real RPC regressions lock before either worker's first
+request, observe the failure, unlock, and verify successful replacement queries.
+Browser acceptance types both names and addresses, shows exact role
+counts, and accepts a real choice into a search chip without submitting first.
 
 Python keeps its existing API path. `make rust-webview-probe ARCHIVE=... QUERY=...`
 measures matching batches and complete search, printing only counts and timings.

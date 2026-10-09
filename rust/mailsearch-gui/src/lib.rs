@@ -7,6 +7,7 @@
 // The native UI and headless smoke tests use this same request path.
 pub mod bridge;
 mod browse;
+mod completion;
 pub mod demo;
 pub mod desktop;
 pub mod documents;

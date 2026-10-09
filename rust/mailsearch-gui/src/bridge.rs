@@ -1,7 +1,7 @@
 // Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved.
 // Adapt the existing HTML interface to the Rust reader and archive service.
 // The external JSON protocol matches the existing frontend's method signatures.
-// A foreground worker owns message reads; a separate worker runs staged searches.
+// A foreground worker owns message reads; separate workers run search/completion.
 // Replies preserve request IDs so the frontend can discard stale search results.
 // Native actions are gated; mutations use a supervised, lease-protected service.
 // The same dispatcher runs in a native webview and in headless browser tests.
@@ -30,6 +30,7 @@ pub struct Reply {
 pub struct Bridge {
     pub(crate) archive: Archive,
     search: Option<crate::search::Search>,
+    completion: Option<crate::completion::Completion>,
     pub(crate) cancellation: Option<(std::sync::Arc<std::sync::atomic::AtomicU64>, u64)>,
     selected: Option<(i64, Vec<u8>)>,
     exports: Option<tempfile::TempDir>,
@@ -52,6 +53,7 @@ impl Bridge {
             engine_generation: 0,
             opening_notices: vec![],
             search: None,
+            completion: None,
             cancellation: None,
         })
     }
@@ -60,6 +62,7 @@ impl Bridge {
         // helper with a bounded fallback. Interrupted checkpoints need recovery;
         // retain the reader so canceled installation can restore the UI.
         self.search.take();
+        self.completion.take();
         self.engine.take();
         if let Some(drags) = &mut self.drags {
             drags.close()?;
@@ -106,6 +109,7 @@ impl Bridge {
             let generation = result["generation"].as_u64().unwrap_or(0);
             if generation != self.engine_generation {
                 self.search = None;
+                self.completion = None;
                 self.archive = Archive::open(&self.archive.root)?;
                 self.selected = None;
                 self.engine_generation = generation;
@@ -236,7 +240,35 @@ impl Bridge {
                     args.first().and_then(Value::as_bool).unwrap_or(false),
                 )
             }
-            "suggestions" => self.suggestions(args, Duration::from_millis(150)),
+            "suggestions" => self.suggestions(args, Duration::from_secs(120)),
+            "suggestions_start" => {
+                if self.completion.is_none() {
+                    self.completion = Some(crate::completion::Completion::new(
+                        self.archive.root.clone(),
+                    )?);
+                }
+                self.completion.as_ref().unwrap().start(
+                    text(args, 0, ""),
+                    usize::try_from(args.get(1).and_then(Value::as_u64).unwrap_or(20))?,
+                )
+            }
+            "suggestions_status" => {
+                let generation = args
+                    .first()
+                    .and_then(Value::as_u64)
+                    .context("Missing completion generation")?;
+                Ok(self
+                    .completion
+                    .as_ref()
+                    .context("No completion started")?
+                    .status(generation))
+            }
+            "suggestions_cancel" => {
+                if let Some(completion) = &self.completion {
+                    completion.cancel();
+                }
+                Ok(json!(true))
+            }
             "search" => self.search(args),
             "search_count" => self.search_count(args),
             "search_batch" => self.search_batch(args),
@@ -488,7 +520,7 @@ impl Bridge {
         Ok(json!(locations))
     }
 
-    fn suggestions(&self, args: &[Value], budget: Duration) -> Result<Value> {
+    pub(crate) fn suggestions(&self, args: &[Value], budget: Duration) -> Result<Value> {
         self.search_guard(budget);
         let query = text(args, 0, "");
         let result = crate::browse::suggestions(

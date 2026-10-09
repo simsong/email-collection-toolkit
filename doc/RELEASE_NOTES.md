@@ -2,6 +2,11 @@
 
 # Release notes
 
+- Restore Rust name/address autocomplete on large archives with independent,
+  cancellable completion queries instead of a 150 ms foreground cutoff. Show
+  Python-equivalent role choices and counts without blocking searches or reads.
+  Retry transient initial SQLite failures on replacement searches/completions.
+
 ## 1.0.0a17 (candidate)
 
 - Require Rust 1.99 and select 1.99.0 for local builds. Use the current atomic

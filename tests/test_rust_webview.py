@@ -263,6 +263,18 @@ def test_existing_interface_with_rust_backend(page: Page, tmp_path: Path) -> Non
         page.goto((ROOT / "gui/index.html").as_uri())
         expect(page.locator("#search")).to_be_enabled()
         expect(page.locator("#processing-open")).to_be_enabled(timeout=15000)
+        # Autocomplete parity: typing a name or address, without submitting,
+        # renders real role/count choices and accepts them as searchable chips.
+        page.locator("#search").fill("sender")
+        expect(page.locator("#search-suggestions")).to_be_visible()
+        expect(page.locator("#search-suggestions")).to_contain_text("sender@example.net")
+        expect(page.locator("#search-suggestions")).to_contain_text("1,600")
+        page.locator("#search").fill("sender@example.net")
+        expect(page.locator("#search-suggestions")).to_be_visible()
+        page.locator("#search-suggestions .suggestion-option").first.click()
+        expect(page.locator("#search-filters .search-chip")).to_have_count(1)
+        expect(page.locator("#result-status")).to_contain_text("1,600 messages")
+        page.locator("#search-filters .search-chip button").click()
         page.evaluate("""() => {
             window.batchEvidence = [];
             window.holdNextSearch = true;
