@@ -120,14 +120,8 @@ fn main() -> Result<()> {
             Ok(())
         }
         [] => native(startup_archive()?, None, None),
-        [flag, path] if flag == "--rpc" => {
-            let mut bridge = Bridge::open(&PathBuf::from(path))?;
-            for line in io::stdin().lock().lines() {
-                let request: Request = serde_json::from_str(&line?)?;
-                println!("{}", serde_json::to_string(&bridge.reply(request))?);
-                io::stdout().flush()?;
-            }
-            Ok(())
+        [flag, path] if matches!(flag.as_str(), "--rpc" | "--shutdown-reader-rpc") => {
+            reader_rpc(PathBuf::from(path), flag == "--shutdown-reader-rpc")
         }
         [flag, path]
             if matches!(
@@ -246,6 +240,70 @@ fn startup_archive() -> Result<Option<PathBuf>> {
     Ok(recent
         .first_openable_archive()
         .map(std::path::Path::to_owned))
+}
+
+// One atomic state ties rejected initialization to its shutdown attempt. Resume
+// cannot miss a concurrent rejection or carry a stale reload into the next Quit.
+#[derive(Default)]
+struct ShutdownGate(std::sync::atomic::AtomicU8);
+
+impl ShutdownGate {
+    fn begin(&self) {
+        self.0.store(1, std::sync::atomic::Ordering::Release);
+    }
+
+    fn reject(&self, request: &Request) -> Option<mailsearch_rust::bridge::Reply> {
+        use std::sync::atomic::Ordering;
+        if request.method == "quit" {
+            return None;
+        }
+        let initialization = matches!(request.method.as_str(), "status" | "engine_status");
+        self.0
+            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |state| {
+                (state & 1 != 0).then_some(state | if initialization { 2 } else { 0 })
+            })
+            .ok()
+            .map(|_| mailsearch_rust::bridge::Reply {
+                id: request.id,
+                result: None,
+                error: Some("Finishing archive work before closing…".into()),
+            })
+    }
+
+    fn resume(&self) -> bool {
+        self.0.swap(0, std::sync::atomic::Ordering::AcqRel) & 2 != 0
+    }
+}
+
+fn reader_rpc(path: PathBuf, shutdown_probe: bool) -> Result<()> {
+    let mut bridge = Some(Ok(Bridge::open(&path)?));
+    let closing = ShutdownGate::default();
+    for line in io::stdin().lock().lines() {
+        let request: Request = serde_json::from_str(&line?)?;
+        let reply = if shutdown_probe && request.method == "shutdown_begin" {
+            closing.begin();
+            mailsearch_rust::bridge::Reply {
+                id: request.id,
+                result: Some(serde_json::json!(true)),
+                error: None,
+            }
+        } else if shutdown_probe && request.method == "shutdown_cancel" {
+            let (ready, result) = quiesce_reader(&mut bridge);
+            result?;
+            mailsearch_rust::bridge::Reply {
+                id: request.id,
+                result: Some(serde_json::json!(closing.resume() && ready)),
+                error: None,
+            }
+        } else if let Some(reply) = closing.reject(&request) {
+            reply
+        } else {
+            bridge.as_mut().unwrap().as_mut().unwrap().reply(request)
+        };
+        println!("{}", serde_json::to_string(&reply)?);
+        io::stdout().flush()?;
+    }
+    Ok(())
 }
 
 fn opening_rpc(path: PathBuf, create: bool, retain: bool) -> Result<()> {
@@ -527,7 +585,7 @@ fn native(
     let proxy = events.create_proxy();
     let (sender, receiver) = mpsc::sync_channel::<Request>(64);
     let abort = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
-    let closing = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let closing = std::sync::Arc::new(ShutdownGate::default());
     let worker_abort = abort.clone();
     let capability_proxy = events.create_proxy();
     let probe_startup = move || {
@@ -692,14 +750,8 @@ fn native(
                 return;
             }
             if let Ok(message) = serde_json::from_str::<Request>(request.body()) {
-                if ipc_closing.load(std::sync::atomic::Ordering::Acquire)
-                    && message.method != "quit"
-                {
-                    let _ = ipc_proxy.send_event(NativeEvent::Reply(Reply {
-                        id: message.id,
-                        result: None,
-                        error: Some("Finishing archive work before closing…".into()),
-                    }));
+                if let Some(reply) = ipc_closing.reject(&message) {
+                    let _ = ipc_proxy.send_event(NativeEvent::Reply(reply));
                     return;
                 }
                 if is_welcome {
@@ -909,7 +961,7 @@ fn native(
                     cleanup_failed=false;
                     if let Some(shell) = &shell { shell.updater().begin_shutdown(); }
                     quit_epoch += 1;
-                    closing.store(true, std::sync::atomic::Ordering::Release);
+                    closing.begin();
                     let cleanup_proxy = reply_proxy.clone();
                     mailsearch_rust::drag::close(move |result| {
                         let _ = cleanup_proxy.send_event(NativeEvent::ExportCleanup(result));
@@ -1083,12 +1135,14 @@ fn native(
             worker_finished = false;
             quit_timed_out = false;
             exports_cleaned = false;
-            closing.store(false, std::sync::atomic::Ordering::Release);
+            let reload_reader = closing.resume();
             abort.store(false, std::sync::atomic::Ordering::Release);
             if let Some(updater) = updater { updater.shutdown_ready(false); }
             if !cleanup_failed { mailsearch_rust::drag::resume(); }
             let _ = view.evaluate_script("window.dispatchEvent(new Event('mailarchiver-exports-invalidated'))");
-            if !reader_ready {
+            if reader_ready && reload_reader {
+                let _ = view.load_url(if cfg!(windows) { "http://ect.localhost/index.html" } else { "ect://localhost/index.html" });
+            } else if !reader_ready {
                 welcome = true;
                 welcome_writable = false;
                 archive_path = None;

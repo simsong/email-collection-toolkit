@@ -3464,6 +3464,13 @@ reader (or startup when opening was interrupted).
 The worker acknowledgment reports whether it retained an open reader, including
 opening that completed during Quit; canceled installation cannot return to Welcome
 while leaving that reader hidden in the worker. The headless shutdown probe
+also shares an atomic IPC gate with the native host: rejected status/capability
+initialization marks that shutdown attempt for reader-page reload on cancellation.
+Reload clears the one-shot frontend initialization and rejected capability promise;
+ordinary canceled shutdown leaves an already initialized page intact. The
+`--shutdown-reader-rpc` fixture drives this gate and actual bridge/service cleanup
+through headless browser initialization, cancellation and usable service controls.
+The native updater probe
 exercises the actual Objective-C postpone/resume/error callbacks and Cocoa Quit
 against a real Python writer lease, including staging without postponement and
 local cleanup/reservation failures followed by guarded Quit; it

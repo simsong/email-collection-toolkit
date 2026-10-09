@@ -2646,6 +2646,9 @@ Only confirmed native cancellation clears that hazard. Cleanup errors belong to
 their attempt; a later Quit retries retained failed export paths before it can
 authorize installation. Shutdown acknowledgment must report the worker's retained
 reader even when opening completes during Quit.
+If shutdown rejects the reader's initial status/capability requests, canceled
+installation must reload that page after reopening IPC; an already initialized
+reader keeps its page and selection.
 An explicit Skip followed by nil cycle completion cancels staged installation;
 Dismiss followed by nil completion retains installation on Quit.
 Package updater inspection

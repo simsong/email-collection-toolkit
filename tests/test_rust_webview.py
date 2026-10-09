@@ -599,3 +599,72 @@ def test_opening_warning_survives_reader_handoff_and_drag_cache_is_revoked(page:
         process.wait(timeout=6)
         assert process.stderr is not None
         assert process.returncode == 0, process.stderr.read()
+
+
+def test_canceled_shutdown_reloads_blocked_reader_initialization(page: Page, tmp_path: Path) -> None:
+    """Update recovery: actual closing IPC rejection cannot poison restored reader/services."""
+    binary = environ.get("RUST_WEBVIEW_BINARY")
+    if not binary:
+        pytest.skip("run make test-rust-webview")
+    archive = make_gui_archive(tmp_path)
+    canonical = [(p, sha256(p.read_bytes()).hexdigest()) for p in (archive / "data/mbox").glob("*.mbox")]
+    server = ThreadingHTTPServer(("127.0.0.1", 0), partial(SimpleHTTPRequestHandler, directory=str(ROOT / "gui")))
+    serving = Thread(target=server.serve_forever, daemon=True)
+    serving.start()
+    process = subprocess.Popen([binary, "--shutdown-reader-rpc", str(archive)], stdin=subprocess.PIPE,
+                               stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    invoked: list[str] = []
+    try:
+        def transport(request: str) -> object:
+            invoked.append(WireRequest.model_validate_json(request).method)
+            assert process.stdin is not None and process.stdout is not None
+            process.stdin.write(request + "\n")
+            process.stdin.flush()
+            reply = process.stdout.readline()
+            assert reply, "Actual shutdown/reader dispatcher exited"
+            return json.loads(reply)
+
+        # A successfully opened real reader completes just as native shutdown
+        # blocks IPC. Both production initialization paths see real gate errors.
+        assert StartupReply.model_validate(transport(FilterRequest(method="shutdown_begin").model_dump_json())).result
+        page.expose_function("__rustTestTransport", transport)
+        page.add_init_script(path=ROOT / "rust/mailsearch-gui/bridge.js")
+        page.goto(f"http://127.0.0.1:{server.server_port}/index.html")
+        expect(page.locator("#error")).to_contain_text("Finishing archive work before closing")
+        expect(page.get_by_role("button", name="Owner emails…", exact=True)).to_be_disabled()
+        page.wait_for_function("initialized === true")
+        assert "status" in invoked and "engine_status" in invoked
+        restored = StartupReply.model_validate(transport(FilterRequest(method="shutdown_cancel").model_dump_json()))
+        assert restored.error is None and restored.result is True, "Native restoration must reload this page"
+        page.reload()
+        for label in ["Import…", "Owner emails…", "Import history", "Names and addresses", "Institutions"]:
+            expect(page.get_by_role("button", name=label, exact=True)).to_be_enabled(timeout=15000)
+        page.locator("#search").fill("subject:annual report")
+        page.locator("#search").press("Enter")
+        expect(page.locator("#result-status")).to_have_text("1 message")
+        page.locator("#result-list .result").first.click()
+        expect(page.locator("#body-view")).to_contain_text("The report is ready.")
+        page.get_by_role("button", name="Owner emails…", exact=True).click()
+        expect(page.frame_locator(".rust-workflow iframe").locator("#owner-include")).to_have_value("")
+        page.locator(".rust-workflow > button").click()
+        expect(page.locator("#error")).to_be_hidden()
+        # A later attempt with no rejected initialization preserves the current
+        # page/selection instead of reloading every restored reader.
+        assert StartupReply.model_validate(transport(FilterRequest(method="shutdown_begin").model_dump_json())).result
+        restored = StartupReply.model_validate(transport(FilterRequest(method="shutdown_cancel").model_dump_json()))
+        assert restored.error is None and restored.result is False
+        expect(page.locator("#message-subject")).to_have_text("annual plan")
+    finally:
+        assert process.stdin is not None
+        process.stdin.close()
+        try:
+            process.wait(timeout=6)
+        except subprocess.TimeoutExpired:
+            process.kill()
+            process.wait(timeout=6)
+        assert process.stderr is not None
+        assert process.returncode == 0, process.stderr.read()
+        server.shutdown()
+        server.server_close()
+        serving.join(timeout=2)
+    assert all(sha256(path.read_bytes()).hexdigest() == digest for path, digest in canonical)
