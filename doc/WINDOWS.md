@@ -8,13 +8,14 @@ WSL, Python, and the Dioxus/Tauri CLIs are not needed for this Rust reader.
 
 ## Prerequisites
 
-- Rust 1.95 or newer with an MSVC host toolchain: `aarch64-pc-windows-msvc`
+- Rust 1.99 or newer with an MSVC host toolchain: `aarch64-pc-windows-msvc`
   for native Windows ARM64 or `x86_64-pc-windows-msvc` for x64.
 - Visual Studio C++ build tools for that architecture and a Windows SDK.
 - Microsoft Edge WebView2 Runtime for the graphical application.
 - A checkout containing the Cargo aliases in `.cargo/config.toml`.
 
-Check the installed toolchain with `cargo --version` and `rustc -vV`.
+The checkout's `rust-toolchain.toml` selects 1.99.0 with rustfmt and Clippy.
+Check the selected toolchain with `cargo --version` and `rustc -vV`.
 If Cargo is not on PATH in the current PowerShell session, use:
 
 ```powershell

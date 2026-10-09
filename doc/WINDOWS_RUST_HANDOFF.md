@@ -4,6 +4,10 @@
 
 Prepared 2026-10-04 for the Codex instance working inside the Windows VM.
 
+Current builds require Rust 1.99+; `rust-toolchain.toml` selects 1.99.0 with
+rustfmt and Clippy. Dated validation checkpoints below retain their historical
+compiler versions and test results.
+
 ## Windows continuation checkpoint (2026-10-05)
 
 Integrated baseline: `5f7bab67f86d951080b15a78766c956e55f6d351` on
@@ -149,7 +153,7 @@ test harnesses. This is not a completed Python removal or a Rust import engine.
 
 | File | Responsibility and porting relevance |
 | --- | --- |
-| `rust/mailsearch-gui/Cargo.toml` | Dependencies and Rust 1.95 minimum. Wry 0.57 and Tao 0.37 support macOS and Windows; snapshot dependencies are feature-gated. |
+| `rust/mailsearch-gui/Cargo.toml` | Dependencies and Rust 1.99 minimum. Wry 0.57 and Tao 0.37 support macOS and Windows; snapshot dependencies are feature-gated. |
 | `rust/mailsearch-gui/src/bin/mailsearch-webview.rs` | CLI modes, native window/event loop, embedded asset protocol, navigation/IPC trust checks, bounded foreground worker channel, reply delivery, close/quit. |
 | `rust/mailsearch-gui/bridge.js` | Request IDs and promise resolution; exposes the compatibility name `window.pywebview.api` without running Python; disables unported controls. |
 | `rust/mailsearch-gui/src/bridge.rs` | Real frontend API dispatcher, asset allowlist, search grammar, parameterized SQL, selected-message representation, previews and regression tests. |
@@ -212,8 +216,8 @@ failed; inspect those boundaries before changing the archive engine.
 
 Use actual Windows, not WSL, for Windows acceptance. Record OS build, CPU
 architecture, `rustc -vV`, Cargo version, MSVC/SDK availability, WebView2 runtime
-version, shell, and exact Git revision. Rust **1.95 or newer** is required by
-this crate. No `rust-toolchain.toml` is committed in this baseline.
+version, shell, and exact Git revision. Rust **1.99 or newer** is required by
+the current crate; `rust-toolchain.toml` selects 1.99.0 for the checkout.
 
 Native Windows builds need the MSVC Rust target, the corresponding C/C++ build
 tools and Windows SDK, and the WebView2 runtime. Verify what is already installed

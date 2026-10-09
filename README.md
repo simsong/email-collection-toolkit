@@ -43,8 +43,8 @@ signature. The audited `Prepare historical signed appcast` workflow produced a
 separate signed copy, which was verified and published as the a10 release asset
 and Pages feed before the next tag. The failed `v1.0.0a11` run left a draft release;
 its tag is retired by explicit request while the draft remains as failure
-evidence. The published preview release is `v1.0.0a13`; the next candidate is
-`v1.0.0a14`, built from matching source on `main`.
+evidence. Read the current candidate version from `pyproject.toml`; prepare its
+matching release from `main` only after branch validation and merge.
 
 Release workflow variables: `GITHUB_REPOSITORY` names the repository used to
 retrieve the prior feed; `GH_TOKEN` authorizes release API reads and publication;

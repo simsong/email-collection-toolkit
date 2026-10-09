@@ -18,7 +18,7 @@ preservation constraints, and remaining work toward full macOS feature parity.
 
 ## Try it
 
-From the repository root, using Rust 1.95 or newer:
+From the repository root, using Rust 1.99 or newer (the checkout selects 1.99.0):
 
 ```sh
 make rust-gui ARCHIVE="/path/to/existing/archive"
