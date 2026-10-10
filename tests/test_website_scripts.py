@@ -428,7 +428,7 @@ def public_release(tag: str, *, windows: bool = True) -> PublishedRelease:
     version = tag.removeprefix("v")
     names = [f"Email-Collection-Toolkit-{version}-arm64.dmg", "appcast.xml"]
     if windows:
-        names.extend([f"ECT-{version}-windows-x64-arm64.msixbundle", f"ECT-{version}-windows-x64-arm64.zip"])
+        names.extend([f"ECT-{version}-windows-x64.msixbundle", f"ECT-{version}-windows-x64.zip"])
     return PublishedRelease(tag_name=tag, draft=False, prerelease=bool(re.search(r"[ab]\d+$", tag)),
                             assets=[Asset(name=name, size=123, state="uploaded",
                                           browser_download_url=f"https://github.com/simsong/email-collection-toolkit/releases/download/{tag}/{name}")
@@ -473,7 +473,7 @@ def test_site_data_uses_real_uploaded_assets_and_distinguishes_preview(tmp_path:
     assert data["current_version"] == "v2.0.0"
     assert data["preview"]["tag"] == "v2.1.0b1"
     assert data["stable"]["mac_url"].endswith("/Email-Collection-Toolkit-2.0.0-arm64.dmg")
-    assert data["preview"]["windows_url"].endswith("/ECT-2.1.0b1-windows-x64-arm64.msixbundle")
+    assert data["preview"]["windows_url"].endswith("/ECT-2.1.0b1-windows-x64.msixbundle")
     assert data["preview"]["windows_help_url"].endswith(".zip")
     before = output.read_bytes()
     failure = subprocess.run(command + ["--require-complete-tag", "v2.2.0a1"], capture_output=True, text=True, check=False)

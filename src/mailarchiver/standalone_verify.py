@@ -102,6 +102,11 @@ class PreservingMbox(mailbox.mbox):
 
     _file: BinaryIO  # Owned by mailbox.mbox; absent from its public type stub.
 
+    def get_bytes(self, key: str, from_: bool = False) -> bytes:
+        """Read the stored record without mailbox's platform newline conversion."""
+        with self.get_file(key, from_) as handle:
+            return handle.read()
+
     def _generate_toc(self) -> None:
         starts: list[int] = []
         stops: list[int] = []

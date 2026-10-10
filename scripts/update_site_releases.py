@@ -76,8 +76,8 @@ def installer_links(release: PublishedRelease) -> Links:
     if release.prerelease != (channel == "preview"):
         return Links()
     names = [f"Email-Collection-Toolkit-{version}-arm64.dmg",
-             f"ECT-{version}-windows-x64-arm64.msixbundle",
-             f"ECT-{version}-windows-x64-arm64.zip", "appcast.xml"]
+             f"ECT-{version}-windows-x64.msixbundle",
+             f"ECT-{version}-windows-x64.zip", "appcast.xml"]
     available: list[str] = []
     for name in names:
         matching = [asset for asset in release.assets if asset.name == name]

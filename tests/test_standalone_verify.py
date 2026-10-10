@@ -6,7 +6,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-import mailbox
 import os
 import signal
 import subprocess
@@ -28,6 +27,7 @@ from mailarchiver.catalog import address_pk, create_catalog
 from mailarchiver.layout import integrity_path, mbox_directory
 from mailarchiver.mbox import add_message
 from mailarchiver.standalone_verify import (
+    PreservingMbox,
     INSTALLED_NAME,
     IntegrityMessage,
     install_archive_verifier,
@@ -55,7 +55,7 @@ def make_integrity_archive(tmp_path: Path, raw: bytes | None = None) -> tuple[Pa
     )
     initialize_bag(tmp_path)
     path = mbox_directory(tmp_path) / "2024-Archive1.mbox"
-    box = mailbox.mbox(path)
+    box = PreservingMbox(path)
     try:
         location = add_message(box, path, raw)
     finally:
@@ -136,7 +136,7 @@ def test_standalone_verifier_checks_current_file_and_message_hashes(tmp_path: Pa
     assert [field[:3] for field in fields[2:]] == ["h2:", "h3:"]
     fields[-1] = "h3:" + "0" * 64
     lines[-1] = "\t".join(fields)
-    integrity.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    integrity.write_text("\n".join(lines) + "\n", encoding="utf-8", newline="\n")
     refresh_tag_manifest(tmp_path)
     bad_message = run_verifier(script, tmp_path)
     assert bad_message.returncode == 1
@@ -186,16 +186,17 @@ def test_integrity_serialization_is_deterministic(tmp_path: Path) -> None:
     assert integrity.read_bytes() == first
 
 
+def write_legacy_mbox(path: Path, raw: bytes) -> None:
+    """Construct LF mboxo fixtures independently of the canonical mboxrd writer."""
+    envelope = b"" if raw.startswith(b"From ") else b"From fixture Sat Jan 01 00:00:00 2000\n"
+    framed = envelope + raw.replace(b"\nFrom ", b"\n>From ")
+    path.write_bytes(framed + (b"" if framed.endswith(b"\n") else b"\n") + b"\n")
+
 def test_verifier_recovers_multiple_ambiguous_from_lines(tmp_path: Path) -> None:
     """Requirement: independent verification tests every bounded MBOX quote interpretation."""
     raw = b"Message-ID: <quoted@example>\n\nFrom one\n>From two\nFrom three\n"
     path = tmp_path / "quoted.mbox"
-    box = mailbox.mbox(path)
-    try:
-        box.add(raw)
-        box.flush()
-    finally:
-        box.close()
+    write_legacy_mbox(path, raw)
     sidecar = tmp_path / "quoted.mbox.integrity"
     digest = hashlib.sha256(raw).hexdigest()
     write_integrity_file(path, sidecar, (IntegrityMessage("quoted@example", digest, raw),), 1)
@@ -207,12 +208,7 @@ def test_verifier_recovers_message_without_source_final_newline(tmp_path: Path) 
     """Regression: independent verification recognizes one writer-added final LF."""
     raw = b"Message-ID: <no-final-newline@example>\n\nbody"
     path = tmp_path / "no-final-newline.mbox"
-    box = mailbox.mbox(path)
-    try:
-        box.add(raw)
-        box.flush()
-    finally:
-        box.close()
+    write_legacy_mbox(path, raw)
     sidecar = tmp_path / "no-final-newline.mbox.integrity"
     digest = hashlib.sha256(raw).hexdigest()
     write_integrity_file(
@@ -232,12 +228,7 @@ def test_verifier_recovers_original_leading_from_envelope(tmp_path: Path) -> Non
         b"Message-ID: <source-envelope@example>\n\nFrom body\n>From literal\n"
     )
     path = tmp_path / "source-envelope.mbox"
-    box = mailbox.mbox(path)
-    try:
-        box.add(raw)
-        box.flush()
-    finally:
-        box.close()
+    write_legacy_mbox(path, raw)
     sidecar = tmp_path / "source-envelope.mbox.integrity"
     digest = hashlib.sha256(raw).hexdigest()
     write_integrity_file(
@@ -266,7 +257,7 @@ def test_verifier_accepts_multiple_digest_algorithms_for_one_standard(tmp_path: 
     }
     lines.insert(4, json.dumps(h4, separators=(",", ":"), sort_keys=True))
     lines[-1] += f"\th4:{hashlib.sha512(semantic_bytes(raw)).hexdigest()}"
-    integrity.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    integrity.write_text("\n".join(lines) + "\n", encoding="utf-8", newline="\n")
     refresh_tag_manifest(tmp_path)
     script = install_archive_verifier(tmp_path)
 
@@ -280,12 +271,7 @@ def test_message_id_field_is_json_null_when_header_is_absent(tmp_path: Path) -> 
     raw = b"From: sender@example\nSubject: no identifier\n\nbody\n"
     initialize_bag(tmp_path)
     path = mbox_directory(tmp_path) / "2024-Archive1.mbox"
-    box = mailbox.mbox(path)
-    try:
-        box.add(raw)
-        box.flush()
-    finally:
-        box.close()
+    write_legacy_mbox(path, raw)
     sidecar = integrity_path(tmp_path, path.name)
     write_integrity_file(path, sidecar, (IntegrityMessage(None, hashlib.sha256(raw).hexdigest(), raw),), 1)
 
@@ -303,7 +289,7 @@ def test_verifier_rejects_noninteger_hash_version(tmp_path: Path, invalid_versio
     standard = json.loads(lines[1])
     standard[version_key] = invalid_version
     lines[1] = json.dumps(standard, separators=(",", ":"), sort_keys=True)
-    integrity.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    integrity.write_text("\n".join(lines) + "\n", encoding="utf-8", newline="\n")
 
     assert any("unsupported hash standard" in error for error in verify_mbox(path, integrity))
 
@@ -418,3 +404,23 @@ def test_installed_verifier_sigint_is_graceful(tmp_path: Path, quiet: bool, phas
     assert "Archive integrity verified" not in stdout
     if quiet:
         assert not stdout
+
+@pytest.mark.parametrize("from_", [False, True])
+def test_preserving_mbox_bytes_keep_mixed_original_newlines(tmp_path: Path, from_: bool) -> None:
+    """Preservation: get_bytes/get_file agree without host newline normalization."""
+    envelope = b"From sender@example.test Thu Apr 15 04:21:10 2004\n"
+    raw = b"From: sender@example.test\r\nSubject: mixed\n\r\nbody\r\n>From quoted\nlast\r\n"
+    path = tmp_path / "fixture.mbox"
+    path.write_bytes(envelope + raw + b"\n")
+    original = path.read_bytes()
+    box = PreservingMbox(path, create=False)
+    try:
+        key = next(box.iterkeys())
+        expected = envelope + raw if from_ else raw
+        assert box.get_bytes(key, from_) == expected
+        with box.get_file(key, from_) as handle:
+            assert handle.read() == expected
+        assert hashlib.sha256(box.get_bytes(key, from_)).digest() == hashlib.sha256(expected).digest()
+    finally:
+        box.close()
+    assert path.read_bytes() == original

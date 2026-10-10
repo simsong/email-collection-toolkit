@@ -89,6 +89,7 @@ def test_historical_notice_gate_matches_the_shipped_release(tmp_path: Path) -> N
         verify_mounted_notices(app, "v1.0.0a10")
 
 
+@pytest.mark.skipif(sys.platform != "darwin", reason="PyInstaller dylib diagnostics apply to the macOS package")
 def test_pyinstaller_loader_reports_its_native_cause(tmp_path: Path) -> None:
     """The packaging-only frozen ctypes hook must preserve dlopen's actual failure."""
     pytest.importorskip("PyInstaller")
@@ -129,6 +130,7 @@ def test_freshclam_uses_explicit_app_relative_configuration(tmp_path: Path) -> N
     assert result.returncode == 0, result.stderr
 
 
+@pytest.mark.skipif(sys.platform != "darwin", reason="Mounted DMG inventory requires macOS symlink semantics")
 def test_mounted_inventory_retains_av_files_and_logs_each_entry(
     tmp_path: Path, capsys: pytest.CaptureFixture[str],
 ) -> None:
@@ -387,6 +389,7 @@ def test_release_staging_authenticates_base_bundle_and_excludes_private_files(tm
     (windows / "sha256.json").write_bytes(TypeAdapter(list[FileHash]).dump_json(hashes, by_alias=True))
     destination = tmp_path / "release"
     bundle = stage(windows, destination)
+    assert bundle.name.endswith("-windows-x64.msixbundle")
     assert bundle.read_bytes() == (windows / "base.msixbundle").read_bytes()
     with zipfile.ZipFile(bundle.with_suffix(".zip")) as archive:
         assert set(archive.namelist()) == {bundle.name, "local-test.cer", "README.txt", "Install-Test-Certificate.ps1", "SHA256SUMS"}

@@ -54,7 +54,7 @@ def stage(windows: Path, destination: Path) -> Path:
         raise ValueError("Windows certificate differs from the persistent alpha identity")
     _, display = identity()
     destination.mkdir(parents=True, exist_ok=True)
-    bundle = destination / f"ECT-{display}-windows-x64-arm64.msixbundle"
+    bundle = destination / f"ECT-{display}-windows-x64.msixbundle"
     shutil.copyfile(windows / "base.msixbundle", bundle)
     shutil.copyfile(windows / "local-test.cer", destination / "local-test.cer")
     readme = (windows / "README.txt").read_text(encoding="utf-8").replace("base.msixbundle", bundle.name).replace("sha256.json", "SHA256SUMS")
@@ -89,7 +89,7 @@ def main() -> None:
     dmgs = list(DIST.glob("*.dmg"))
     if len(dmgs) != 1 or "_UNSIGNED" in dmgs[0].name:
         raise ValueError("Exactly one signed and notarized candidate DMG is required")
-    bundle = DIST / f"ECT-{display}-windows-x64-arm64.msixbundle"
+    bundle = DIST / f"ECT-{display}-windows-x64.msixbundle"
     if not bundle.is_file():
         raise ValueError("The tested Windows release bundle is missing")
     prefix = f"https://github.com/simsong/email-collection-toolkit/releases/download/{tag}"

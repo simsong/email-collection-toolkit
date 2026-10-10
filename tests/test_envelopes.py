@@ -3,7 +3,6 @@
 """Requirements: preserve source envelopes; synthesize delivery dates without changing h2."""
 
 import hashlib
-import mailbox
 import sqlite3
 from datetime import UTC, datetime
 from pathlib import Path
@@ -18,7 +17,7 @@ from mailarchiver.mbox_framing import MboxNormalization
 from mailarchiver.plugin_api import MailContainer, MailObject, SourceSpec
 from mailarchiver.plugin_loader import load_plugins
 from mailarchiver.sources import _unwrap_xxx_record, source_files, source_messages
-from mailarchiver.standalone_verify import verify_archive
+from mailarchiver.standalone_verify import PreservingMbox, verify_archive
 
 
 @pytest.mark.parametrize("outer_sender", [b"XXX", b"foo@bar", b"nobody", b"???@???"])
@@ -176,7 +175,7 @@ def test_synthetic_envelope_uses_latest_header_instant_and_keeps_bytes(tmp_path:
     envelope = b"From author@example.test Tue Jan  4 07:00:00 2000\n"
     assert synthetic_envelope(raw, sender="author@example.test") == envelope
     path = tmp_path / "output.mbox"
-    box = mailbox.mbox(path, create=True)
+    box = PreservingMbox(path, create=True)
     try:
         location = add_message(box, path, raw, sender="author@example.test")
     finally:
@@ -197,7 +196,7 @@ def test_source_envelope_in_raw_is_not_replaced(tmp_path: Path) -> None:
     """Babyl/EML leading envelopes remain part of the original hash interpretation."""
     raw = b"From legacy Sat Jan  1 00:00:00 2000\nFrom: author@example.test\n\nbody"
     path = tmp_path / "output.mbox"
-    box = mailbox.mbox(path, create=True)
+    box = PreservingMbox(path, create=True)
     try:
         location = add_message(box, path, raw)
     finally:

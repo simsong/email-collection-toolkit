@@ -12,7 +12,7 @@ from pathlib import Path
 import pytest
 
 from mailarchiver.clamav_definitions import ActiveDefinitions, DATABASE_NAMES, UPDATE_ENV, choose_definitions, read_definitions, selected_definitions, three_months_after
-from mailarchiver.clamav_update import publish_definitions, update_lock
+from mailarchiver.clamav_update import publish_definitions, publish_downloaded_definitions, update_lock
 from mailarchiver.scanner import ClamScannerStartupError
 from mailarchiver.owned_command import run_owned_command
 from mailarchiver.writer_lock import WriterLease
@@ -74,6 +74,29 @@ def test_invalid_update_preserves_active_manifest_and_existing_files(tmp_path: P
     assert active.read_bytes() == b'{"generation":"previous"}'
     assert staging.is_dir()
     assert not (root / "generations").exists()
+
+
+def test_publication_failure_retains_updater_diagnostics_after_staging_moves(tmp_path: Path) -> None:
+    """Requirement: failed activation retains its cause and downloaded-file evidence."""
+    baseline = selected_definitions()
+    root = tmp_path / "updates"
+    root.mkdir()
+    active = root / "active.json"
+    active.mkdir()  # Real filesystem failure after generation publication.
+    sentinel = active / "existing"
+    sentinel.write_bytes(b"preserve existing state")
+    staging = tmp_path / "staging"
+    staging.mkdir()
+    for item in baseline.files:
+        os.link(item.path, staging / item.path.name)
+    with update_lock(root), pytest.raises(RuntimeError, match="FreshClam: download complete") as failure:
+        publish_downloaded_definitions(staging, root, baseline, "download complete")
+    assert isinstance(failure.value.__cause__, OSError)
+    assert not isinstance(failure.value.__cause__, FileNotFoundError)
+    assert baseline.daily.path.name in str(failure.value)
+    assert not staging.exists()
+    assert len(list((root / "generations").iterdir())) == 1
+    assert sentinel.read_bytes() == b"preserve existing state"
 
 
 def test_update_lock_blocks_concurrent_writer_and_releases(tmp_path: Path) -> None:

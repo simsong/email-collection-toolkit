@@ -950,3 +950,6 @@ The Windows Python work is integrated into PR #153 while retaining the Mac resto
 The installed reader CI regression was a Windows fsync on a read-only file descriptor. Publication now syncs a writable handle, and the package's actual self-test uses the shared byte-preserving MBOX class. Source acceptance covers both script and isolated module entry points, processor discovery, search/completion, and byte hashes. Current-head signed installation still requires hosted CI evidence.
 
 Installed Windows acceptance invokes File/Quit through WinForms' MSAA menu provider. UI Automation can omit MenuStrip items even when they are present. The test still invokes the actual named action and requires the process to exit; it never substitutes a forced close for Quit.
+
+- Preserve CRLF/LF bytes through raw MBOX access on Windows; retain definition
+  activation errors after staging moves; label release installers as x64-only.

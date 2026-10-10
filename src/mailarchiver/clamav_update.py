@@ -100,6 +100,18 @@ def publish_definitions(staging: Path, root: Path, baseline: DefinitionSet | Non
     return UpdateResult(versions=definitions.versions, published=definitions.daily.published, directory=destination)
 
 
+def publish_downloaded_definitions(
+    staging: Path, root: Path, baseline: DefinitionSet | None, diagnostics: str,
+) -> UpdateResult:
+    """Retain updater evidence even when publication already moved staging."""
+    files = ", ".join(sorted(path.name for path in staging.iterdir()))
+    try:
+        return publish_definitions(staging, root, baseline)
+    except (OSError, ValueError, RuntimeError) as error:
+        raise RuntimeError(f"Downloaded definitions failed validation or publication: {error}; files: {files}; "
+                           f"FreshClam: {diagnostics[-4096:]}") from error
+
+
 def refresh_definitions() -> UpdateResult:
     root = update_root()
     with application_write_activity(), update_lock(root):
@@ -127,12 +139,7 @@ def refresh_definitions() -> UpdateResult:
                     shutil.copyfile(staging / "freshclam.dat", state)
             if result.returncode or "cool-down until" in (result.stdout + result.stderr):
                 raise RuntimeError(f"Definition update failed ({result.returncode}): {(result.stdout + result.stderr)[-4096:]}")
-            try:
-                return publish_definitions(staging, root, baseline)
-            except (OSError, ValueError, RuntimeError) as error:
-                files = ", ".join(sorted(path.name for path in staging.iterdir()))
-                raise RuntimeError(f"Downloaded definitions failed validation: {error}; files: {files}; "
-                                   f"FreshClam: {(result.stdout + result.stderr)[-4096:]}") from error
+            return publish_downloaded_definitions(staging, root, baseline, result.stdout + result.stderr)
 
 
 def seed_definitions(source: Path) -> UpdateResult:
