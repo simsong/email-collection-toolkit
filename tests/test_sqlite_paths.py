@@ -9,11 +9,15 @@
 from contextlib import closing
 from pathlib import Path, PureWindowsPath
 import sqlite3
+import subprocess
+import sys
 from urllib.parse import urlsplit, unquote
 
 import pytest
 
 from mailarchiver.reader_fixture import check_reader
+from mailarchiver.__main__ import IngestRequest, run_ingest
+from mailarchiver.owner_rules import OwnerRules
 from mailarchiver.sqlite_paths import sqlite_uri
 
 
@@ -54,3 +58,25 @@ def test_reserved_characters_and_read_only_attachments(tmp_path: Path) -> None:
 def test_reader_archive_under_uri_reserved_path(tmp_path: Path) -> None:
     # Full search, MIME rendering and byte-exact export use the escaped path.
     assert check_reader(tmp_path / "café #100% & reader").passed
+
+
+def test_processing_cli_under_uri_reserved_path(tmp_path: Path) -> None:
+    """Processing replay/status and identity queries must escape archive paths."""
+    source = tmp_path / "2024"
+    source.mkdir()
+    raw = b"From: sender@example.test\nSubject: path fixture\n\nOriginal message.\n"
+    message = source / "fixture.eml"
+    message.write_bytes(raw)
+    archive = tmp_path / "café #100% & cli.mailarchive"
+    run_ingest(IngestRequest(archive=archive, roots=[str(source)], scan_policy="not-scanned",
+                            owner_rules=OwnerRules(include=["sender@example.test"])))
+    stored = {path: path.read_bytes() for path in archive.rglob("*.mbox")}
+    assert stored
+    for command in (("process", "--phase", "content"), ("processing-status",), ("identities", "addresses")):
+        result = subprocess.run(
+            [sys.executable, "-m", "mailarchiver", "--archive", str(archive), *command],
+            capture_output=True, text=True, check=False, timeout=30,
+        )
+        assert result.returncode == 0, result.stderr
+    assert {path: path.read_bytes() for path in archive.rglob("*.mbox")} == stored
+    assert message.read_bytes() == raw

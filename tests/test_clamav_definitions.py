@@ -88,7 +88,10 @@ def test_publication_failure_retains_updater_diagnostics_after_staging_moves(tmp
     staging = tmp_path / "staging"
     staging.mkdir()
     for item in baseline.files:
-        os.link(item.path, staging / item.path.name)
+        if item.path.stat().st_dev == staging.stat().st_dev:
+            os.link(item.path, staging / item.path.name)
+        else:
+            shutil.copyfile(item.path, staging / item.path.name)
     with update_lock(root), pytest.raises(RuntimeError, match="FreshClam: download complete") as failure:
         publish_downloaded_definitions(staging, root, baseline, "download complete")
     assert isinstance(failure.value.__cause__, OSError)

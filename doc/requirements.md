@@ -2847,3 +2847,6 @@ Windows preservation and update publication: raw MBOX byte access must retain
 original CRLF/LF bytes independently of the host. Definition activation failures
 must retain the original error and FreshClam diagnostics after staging moves.
 Published Windows installer and help asset names identify the x64 payload only.
+
+Processing replay, processing-status and identity CLI reads must use escaped,
+host-independent SQLite URIs for reserved-character and UNC archive paths.

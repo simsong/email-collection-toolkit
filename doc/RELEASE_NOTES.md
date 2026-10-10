@@ -953,3 +953,6 @@ Installed Windows acceptance invokes File/Quit through WinForms' MSAA menu provi
 
 - Preserve CRLF/LF bytes through raw MBOX access on Windows; retain definition
   activation errors after staging moves; label release installers as x64-only.
+
+- Fix processing/status and identity CLI reads for reserved-character archive
+  paths; make Windows definition-publication tests work across disk volumes.

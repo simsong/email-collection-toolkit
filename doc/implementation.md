@@ -3811,3 +3811,6 @@ PreservingMbox.get_bytes reads its bounded get_file view without stdlib newline
 normalization. Downloaded-definition publication captures file names before the
 staging rename, preserving the original activation failure and updater output.
 Release staging, signing and website selection use windows-x64 asset names.
+
+The processing and identity CLI read paths use sqlite_paths.sqlite_uri, matching
+the desktop. Definition failure fixtures copy when staging crosses volumes.

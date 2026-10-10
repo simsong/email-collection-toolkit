@@ -105,6 +105,7 @@ from .sources import (
     local_hierarchy_path,
 )
 from .standalone_verify import semantic_bytes
+from .sqlite_paths import sqlite_uri
 from .writer_lock import ArchiveBusyError, WriterLease
 
 DEFAULT_REPORT_TOP = 10
@@ -1055,7 +1056,7 @@ def ingest(args: argparse.Namespace) -> None:
 def process_archive(args: argparse.Namespace) -> None:
     """Continue either processing phase with the archive's last ingest policy."""
     archive = Path(args.archive)
-    with sqlite3.connect(f"file:{archive / 'processing.sqlite3'}?mode=ro", uri=True) as database:
+    with sqlite3.connect(sqlite_uri(archive / "processing.sqlite3"), uri=True) as database:
         row = database.execute("SELECT value FROM processing_settings WHERE name='policy'").fetchone()
     if row is None:
         raise ValueError("archive has no saved processor policy; ingest a source first")
@@ -1069,7 +1070,7 @@ def process_archive(args: argparse.Namespace) -> None:
 
 def processing_status_report(args: argparse.Namespace) -> None:
     from .processing.store import report
-    with sqlite3.connect(f"file:{Path(args.archive) / 'processing.sqlite3'}?mode=ro", uri=True) as database:
+    with sqlite3.connect(sqlite_uri(Path(args.archive) / "processing.sqlite3"), uri=True) as database:
         kinds = tuple(row[0] for row in database.execute("SELECT DISTINCT kind FROM invocations ORDER BY kind"))
         print(report(database, kinds).model_dump_json())
 
@@ -1086,7 +1087,7 @@ def identity_command(args: argparse.Namespace) -> None:
     archive = Path(args.archive).resolve()
     if args.action in ("addresses", "organizations"):
         filters = IdentityFilter(name=args.name or "", mailbox=args.mailbox, domain=args.domain, start=args.start, end=args.end)
-        with sqlite3.connect(f"{archive.as_uri()}/processing.sqlite3?mode=ro", uri=True) as database:
+        with sqlite3.connect(sqlite_uri(archive / "processing.sqlite3"), uri=True) as database:
             rows = addresses(database, filters) if args.action == "addresses" else organizations(database, filters)
         print("[" + ",".join(row.model_dump_json() for row in rows) + "]")
         return
