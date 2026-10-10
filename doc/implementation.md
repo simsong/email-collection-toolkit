@@ -2,37 +2,44 @@
 
 # Mail archive normalizer implementation
 
-`cargo run-ect --archive PATH` builds and launches the native Rust GUI; the
-macOS `make rust-gui` target delegates to this alias. It replaces `cargo reader`.
-Batch import remains the Python `mailarchiver ingest` command. Local discovery
-recurses through directory roots, silently ignores empty files and configured
-metadata, and reports other unrecognized files as skipped inputs. Directory
-enumeration errors propagate. The Windows archive-writer guard remains in
-place; the Rust GUI cannot yet import a drive into a canonical archive.
+Python/pywebview is the default GUI and macOS/Windows package entry point.
+The Rust GUI migration is retired and preserved outside the supported workspace;
+its former GUI targets must fail explicitly. Independent Rust importer, verifier,
+PST and MIME tools remain supported. [The retrospective](../rust/README.md)
+records the last compiling snapshot and supersedes historical desktop migration
+requirements and implementation sections below.
 
-## Theory of operation: Rust desktop and Python ingest
+## Theory of operation: Python desktop and ingest
 
-Ingest currently remains in Python. The Rust GUI starts a private
-`mailarchiver.rust_engine` process and sends import requests over stdin/stdout.
-That helper calls the existing ingest engine (`run_ingest`) to preserve message
-bytes, write MBOX and manifests, update databases/indexes, and handle recovery.
-Rust manages the window, progress, cancellation, search, reading, and independent
-verification.
+The default application is Python/pywebview. Its application controller manages
+windows/documents, and its GUI services handle search, completion and reading.
+Import calls the existing Python ingest engine to preserve original message
+bytes, write MBOX and manifests, update databases/indexes and handle recovery.
+The installed package supplies Python and dependencies; no user-started service
+or external interpreter is required. Independent Rust executables provide import
+and verification tools where configured.
 
-The helper is bound to one archive and exchanges request-ID-based JSON lines
-through private pipes. Python writer leases serialize archive mutations; Rust
-supervises the helper's lifetime. It does not load the Python GUI. Development
-builds use the checkout's Python environment or `ECT_RUST_ENGINE_PYTHON`;
-the primary Rust DMG bundles a private frozen Python archive service.
-On macOS the Rust executable detects its bundle and starts adjacent
-`archive-service --rust-engine ARCHIVE`, ignoring development interpreter
-overrides and refusing a missing bundled service. This helper uses the same
-private protocol; it does not load the Python GUI.
-Protocol and cancellation details appear under
-[Rust desktop migration](#rust-desktop-migration-and-reader-prototype).
+### Historical Rust desktop boundary (retired)
+
+Ingest remained in Python during the migration. The Rust GUI started a private
+`mailarchiver.rust_engine` process and sent import requests over stdin/stdout.
+That helper called the existing ingest engine (`run_ingest`) to preserve message
+bytes, write MBOX and manifests, update databases/indexes and handle recovery.
+Rust managed the window, progress, cancellation, search, reading and independent
+verification. This architecture is preserved for study; it is no longer the
+default desktop or release package.
+
+The helper was bound to one archive and exchanged request-ID-based JSON lines
+through private pipes. Python writer leases serialized archive mutations; Rust
+supervised the helper lifetime. Development builds used the checkout's Python
+or `ECT_RUST_ENGINE_PYTHON`; macOS bundles used adjacent frozen
+`archive-service --rust-engine ARCHIVE`, ignoring development overrides.
+It did not load the Python GUI. Historical protocol details appear under
+[Rust desktop migration](#rust-desktop-migration-and-reader-prototype), superseded
+by the [retirement retrospective](../rust/README.md).
 
 [DEVOPS.md](DEVOPS.md) records the macOS-focused CI and coordinated Mac/Windows
-release design. Windows reader CI remains opt-in/release-only. Shared MSIX
+release design. Windows Python package CI remains opt-in/release-only. Shared MSIX
 packaging, dual-platform signed-feed publication and download selection are
 implemented; each release candidate must pass its actual hosted package gates.
 Pages reads public uploaded installer/Windows-trust/appcast metadata through
@@ -3679,3 +3686,34 @@ key and current validity, and removes temporary PFX material on success/failure.
 No fallback certificate is generated. This supersedes the ephemeral test-key
 policy; testers trust the public certificate once until expiration (2028-10-07)
 or deliberate rotation. Production trusted signing remains separate.
+
+
+## Python desktop restoration (October 10, 2026)
+
+`make gui`, `make dmg` and `make python-dmg` select the Python desktop.
+The MSIX manifest activates a frozen Python `ect.exe`; it packages GUI assets,
+SQL/YAML/plugin data and locked runtime dependencies, without the retired Rust
+GUI or its updater. The installed synthetic acceptance exercises the actual
+Python search, completion and message-reader APIs, preserves its fixture bytes,
+then tests native activation, upgrade and uninstall. Windows archive writing and
+Windows native auto-update parity remain unsupported; this change does not
+remove that restriction. Python's macOS Sparkle integration remains active.
+
+The shared `gui/` assets, Python archive engine and independent Rust tools are
+retained. The GUI crate is excluded from Cargo's supported workspace. Its tests
+and old platform recipes remain historical artifacts, not required active CI.
+Ordinary Python tests still exercise shared search/compiler/index behavior;
+GUI-only Python/Rust tests skip without a selected historical Rust binary.
+The new `make test-python-desktop-package` target checks real fixture reading,
+entry-point dispatch and supported build selection. Active CI and release
+workflows cannot require the archived GUI. No release/tag is implicit in this
+restoration. See `rust/README.md` for full architecture, experiments and lessons.
+
+Windows File → Quit explicitly terminates the Python application through its
+bounded existing quit path. Windows does not create a hidden About anchor;
+closing its final native window exits the application. An explicitly shown About window can close normally
+on Windows; macOS retains its application anchor and Dock reopening behavior.
+Installed MSIX acceptance exercises both ordinary last-window Close and native
+File/Quit on each installed base/upgrade package. The freezer must include
+processor source files beside their manifests; the packaged headless check validates
+actual registry discovery, not just index/search resources.

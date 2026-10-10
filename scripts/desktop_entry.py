@@ -3,7 +3,7 @@
 # Headless diagnostics and CLI commands run before any GUI imports.
 # The Rust preview uses this executable as its private archive-service helper.
 # Its explicit service flag preserves stdin/stdout for the JSON-line protocol.
-# Ordinary launches retain the Python GUI until desktop migration is accepted.
+# Ordinary launches use the supported Python GUI; the Rust migration is retired.
 
 """Frozen application entry point (also usable through make self-test).
 
@@ -17,6 +17,9 @@ import sys
 def main() -> int:
     """Keep headless diagnostics independent of Cocoa and user preferences."""
     multiprocessing.freeze_support()
+    if len(sys.argv) > 1 and sys.argv[1] == "--msix-test":
+        from mailarchiver.windows_self_test import main as windows_test_main
+        return windows_test_main()
     if len(sys.argv) > 1 and sys.argv[1] == "--rust-engine":
         sys.argv.pop(1)
         from mailarchiver.rust_engine import main as engine_main

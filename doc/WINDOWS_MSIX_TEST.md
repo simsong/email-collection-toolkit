@@ -1,5 +1,15 @@
 <!-- Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved. -->
 
+
+> **Python desktop restored October 10, 2026.** Packaging now freezes
+> `scripts/desktop_entry.py` as `ect.exe`, including Python and GUI resources.
+> Run `make msix-test ARGS="-Architecture x64"` (or the PowerShell build script
+> directly on Windows). Installed acceptance checks production Python search,
+> autocomplete and byte retrieval, then native launch, upgrade and uninstall.
+> Rust reader/helper/updater descriptions below record the former package and
+> are superseded by [the migration retrospective](../rust/README.md).
+> Windows ingest and native auto-updates remain unsupported.
+
 # Windows MSIX packaging and alpha delivery
 
 This isolated prototype starts at PR #153 commit `e1b4170`. It does not modify

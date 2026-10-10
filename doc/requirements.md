@@ -2,10 +2,12 @@
 
 # Mail archive normalizer requirements
 
-The native Rust GUI launch command is `cargo run-ect --archive PATH` on
-Windows and macOS; macOS Makefile launch targets delegate to that command.
-Batch import documentation must distinguish the Python writer from the Rust
-reader and identify the Windows writer restriction and discovery noise.
+Python/pywebview is the default GUI and macOS/Windows package entry point.
+The Rust GUI migration is retired and preserved outside the supported workspace;
+its former GUI targets must fail explicitly. Independent Rust importer, verifier,
+PST and MIME tools remain supported. [The retrospective](../rust/README.md)
+records the last compiling snapshot and supersedes historical desktop migration
+requirements and implementation sections below.
 
 The agreed release policy in [DEVOPS.md](DEVOPS.md) requires macOS-focused
 ordinary CI, explicit cross-platform test releases, concurrent Mac/Windows
@@ -974,18 +976,10 @@ An indexing failure is recorded as a metadata defect and does not reject mail;
 
 ## Desktop application documents and windows
 
-The compiled desktop experience will evaluate Dioxus Desktop and Tauri with the
-system webview (WKWebView on macOS, WebView2 on Windows). Rust also implements
-the MCT importer test programs and standalone PST extraction helper. Archive ingest
-orchestration, search, scanning, locking and preservation remain in Python.
-Windows with full ingest is the next platform priority; Linux/snap
-delivery is deferred. [DIOXUS.md](DIOXUS.md) defines the trial plan and migration,
-typed local worker boundary, packaging, and native acceptance requirements.
-The worker protocol and both candidate frontends remain unimplemented. End users must
-receive the compiled UI and bundled Python dependencies together.
-
-Plan comparable trial implementations in Dioxus and Tauri before choosing a
-framework. Either approach retains the Python archive engine.
+Python/pywebview remains the selected desktop architecture. The Dioxus/Tauri
+trial plan and Wry/egui migration are historical; the Rust GUI is retired.
+Independent Rust importer and verification tools remain in use. End users receive
+the Python GUI and dependencies together without installing a runtime.
 
 The current pywebview application uses HTML/CSS/JavaScript and its native Python
 bridge. The following asset-server rules describe that implementation and its
@@ -1951,14 +1945,9 @@ instructions.
 Application identity in the local Keychain search list, overridable with
 `SIGNING_IDENTITY`. An absent identity or `-` must fail before building.
 
-The local `make rust-dmg` preview uses the same resource, signing and mounted
-validation gates, with Rust as the application executable and the frozen Python
-archive service beside it. It must run off-checkout without an installed Python,
-ignore development interpreter overrides on macOS, and retain the existing
-Python app as a separate product. Preview builds do not install, register document
-associations, publish releases, notarize or claim updater/native interaction
-acceptance. Mounted synthetic ingest and Rust service/search/message checks
-must preserve source bytes and canonical manifests without opening GUI windows.
+The former `make rust-dmg` preview is retired. Its source and native acceptance
+history remain available for study in `rust/mailsearch-gui`; supported packaging
+must use the Python application and must not select an old Rust executable.
 `make list-signatures` must list valid local code-signing identities and their
 certificate hashes. `make notarize-dmg DMG=...` submits an already Developer ID
 signed DMG with protected App Store Connect API-key credentials, waits for
@@ -2755,3 +2744,34 @@ key and current validity, and removes temporary PFX material on success/failure.
 No fallback certificate is generated. This supersedes the ephemeral test-key
 policy; testers trust the public certificate once until expiration (2028-10-07)
 or deliberate rotation. Production trusted signing remains separate.
+
+
+## Python desktop restoration (October 10, 2026)
+
+`make gui`, `make dmg` and `make python-dmg` select the Python desktop.
+The MSIX manifest activates a frozen Python `ect.exe`; it packages GUI assets,
+SQL/YAML/plugin data and locked runtime dependencies, without the retired Rust
+GUI or its updater. The installed synthetic acceptance exercises the actual
+Python search, completion and message-reader APIs, preserves its fixture bytes,
+then tests native activation, upgrade and uninstall. Windows archive writing and
+Windows native auto-update parity remain unsupported; this change does not
+remove that restriction. Python's macOS Sparkle integration remains active.
+
+The shared `gui/` assets, Python archive engine and independent Rust tools are
+retained. The GUI crate is excluded from Cargo's supported workspace. Its tests
+and old platform recipes remain historical artifacts, not required active CI.
+Ordinary Python tests still exercise shared search/compiler/index behavior;
+GUI-only Python/Rust tests skip without a selected historical Rust binary.
+The new `make test-python-desktop-package` target checks real fixture reading,
+entry-point dispatch and supported build selection. Active CI and release
+workflows cannot require the archived GUI. No release/tag is implicit in this
+restoration. See `rust/README.md` for full architecture, experiments and lessons.
+
+Windows File → Quit explicitly terminates the Python application through its
+bounded existing quit path. Windows does not create a hidden About anchor;
+closing its final native window exits the application. An explicitly shown About window can close normally
+on Windows; macOS retains its application anchor and Dock reopening behavior.
+Installed MSIX acceptance exercises both ordinary last-window Close and native
+File/Quit on each installed base/upgrade package. The freezer must include
+processor source files beside their manifests; the packaged headless check validates
+actual registry discovery, not just index/search resources.

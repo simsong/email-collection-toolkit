@@ -450,7 +450,7 @@ def test_native_menus_route_through_the_application_controller(tmp_path: Path) -
     assert all(isinstance(item, MenuAction) for menu in menus for item in menu.items)
     assert [item.title for item in menus[0].items if isinstance(item, MenuAction)] == [
         "New", "Open…", "Import…", "Document Options…", "Close",
-    ]
+    ] + (["Quit"] if sys.platform == "win32" else [])
     assert [item.title for item in menus[1].items if isinstance(item, MenuAction)] == ["New Search Window", "Ingests"]
     for action in menus[1].items:
         assert isinstance(action, MenuAction)

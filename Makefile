@@ -152,9 +152,6 @@ check-static:
 
 check-tests:
 	$(MAKE) test
-	$(MAKE) test-search-parity
-	$(MAKE) test-rust-recovery
-	$(MAKE) test-rust-updates
 	$(MAKE) test-e2e
 	$(MAKE) website-check
 
@@ -242,11 +239,11 @@ sign-historical-appcast: sparkle-tools
 	PYTHONPATH="$(CURDIR)/src:$(CURDIR)" uv run --locked --group packaging python scripts/sign_historical_appcast.py --appcast "$(APPCAST)" --archive "$(DMG)" --output "$(OUTPUT)" --tag "$(RELEASE_TAG)" --signer "$(SPARKLE_DIR)/bin/sign_update"
 
 .PHONY: dmg dmg-signed notarize-dmg list-signatures check-release test-dmg preview-dmg self-test self-test-gui test-packaging
-dmg: rust-dmg
+dmg: python-dmg
 
 .PHONY: python-dmg
 python-dmg: ruff syntax-check sparkle-tools pst-importer mcti-scan pff-converter-bundle
-	uv run --group packaging python scripts/build_macos.py $(ARGS)
+	uv run --group packaging python scripts/build_macos.py $(if $(SIGNING_IDENTITY),--signing-identity "$(SIGNING_IDENTITY)") $(ARGS)
 
 # Rust is the primary desktop app; SIGNING_IDENTITY selects Developer ID
 # (default ad-hoc), RUST_TARGET_DIR selects its release binary build directory.
@@ -277,7 +274,7 @@ notarize-dmg:
 list-signatures:
 	/usr/bin/security find-identity -v -p codesigning
 
-check-release: ruff syntax-check $(if $(DMG),,rust-dmg)
+check-release: ruff syntax-check $(if $(DMG),,python-dmg)
 ifneq ($(strip $(DMG)),)
 	uv run --group packaging python scripts/build_macos.py --check-release --test-dmg "$(DMG)" $(ARGS)
 else
@@ -861,7 +858,7 @@ test-rust-engine:
 # MSIX_PACKAGE and MSIX_EVIDENCE name a test artifact and a new evidence directory.
 .PHONY: msix-test test-msix
 msix-test:
-	cargo msix-test
+	pwsh -NoProfile -File scripts/win/build_windows_msix.ps1 $(ARGS)
 
 test-msix:
 	uv run --locked python scripts/win/test_windows_msix.py "$(MSIX_PACKAGE)" "$(MSIX_EVIDENCE)"
@@ -877,3 +874,15 @@ rust-webview-release-probe:
 	@test -n "$(ARCHIVE)" || { echo 'usage: make rust-webview-release-probe ARCHIVE=/path QUERY=words'; exit 2; }
 	$(CARGO_RUN) build --locked --release -p mailsearch-rust --bin mailsearch-webview
 	"$(RUST_TARGET_DIR)/release/mailsearch-webview$(RUST_EXE_SUFFIX)" --probe "$(ARCHIVE)" "$(QUERY)"
+
+# The desktop experiment is retained for study, outside the supported workspace.
+# These historical targets fail explicitly rather than launching stale binaries.
+.PHONY: rust-gui-retired
+rust-gui-retired:
+	@echo 'Rust GUI retired: see rust/README.md. Use make gui or make dmg for Python.' >&2
+	@exit 2
+rust-dmg rust-gui-build test-rust-gui test-rust-startup test-rust-gui-native check-rust-gui-native-build test-rust-updater test-rust-updates rust-webview-release-probe: rust-gui-retired
+
+.PHONY: test-python-desktop-package
+test-python-desktop-package:
+	uv run --locked --group packaging pytest -q tests/test_python_desktop_package.py tests/test_packaging.py tests/test_macos_signing.py tests/test_website_scripts.py

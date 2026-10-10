@@ -1,7 +1,7 @@
 # Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved.
 # Test the same signed bundle on disposable x64 and ARM64 GitHub Windows VMs.
 # Trust only this run's public test certificate and install for the runner user.
-# Exercise installed Rust/Python binaries against a synthetic archive and native UI.
+# Exercise the frozen Python reader, native Close and Quit on synthetic mail.
 # Upgrade using identical payload bytes and verify archive preservation on uninstall.
 # Always remove the test package and newly added trust; never change existing trust.
 param([Parameter(Mandatory=$true)][string]$BundleDirectory,
@@ -17,6 +17,7 @@ $storePath = 'Cert:/LocalMachine/TrustedPeople/' + $cert.Thumbprint
 $addedTrust = $false
 $installed = $false
 $originalLocalAppData=$env:LOCALAPPDATA
+$originalAppData=$env:APPDATA
 if (Get-AppxPackage -Name ECT.LocalTest) { throw 'Existing ECT.LocalTest installation must be preserved; use a clean VM.' }
 # Activate the registered desktop application with its package identity.
 Add-Type -TypeDefinition @"
@@ -84,21 +85,45 @@ try {
         $guiFiles=@(Get-ChildItem $archive -Recurse -File)
         $guiBefore=@($guiFiles | Get-FileHash -Algorithm SHA256 | ForEach-Object { $_.Path + ':' + $_.Hash })
         $env:LOCALAPPDATA=Join-Path $evidence "$kind/profile"
-        $guiPid=[ECTActivation]::Launch($appId, ('--archive "'+$archive+'"'))
-        $process=Get-Process -Id $guiPid
-        try {
-            $deadline=[DateTime]::UtcNow.AddSeconds(45)
-            do {
-                Start-Sleep -Milliseconds 500
-                $process.Refresh()
-                if ($process.HasExited) { throw 'Installed GUI exited before opening a window' }
-            } until ($process.MainWindowHandle -ne 0 -or [DateTime]::UtcNow -gt $deadline)
-            if ($process.MainWindowHandle -eq 0) { throw 'Installed GUI did not open a native window' }
-            $process.MainWindowTitle | Set-Content (Join-Path $evidence "$kind-window.txt")
-            $null=$process.CloseMainWindow()
-            if (-not $process.WaitForExit(15000)) { throw 'Installed GUI did not quit' }
-        } finally { if (-not $process.HasExited) { $process.Kill(); $process.WaitForExit() } }
-        $guiAfter=@($guiFiles | Get-FileHash -Algorithm SHA256 | ForEach-Object { $_.Path + ':' + $_.Hash })
+        $env:APPDATA=$env:LOCALAPPDATA
+        foreach ($closeAction in @('close','quit')) {
+            $guiPid=[ECTActivation]::Launch($appId, ('--archive "'+$archive+'"'))
+            $process=Get-Process -Id $guiPid
+            try {
+                $deadline=[DateTime]::UtcNow.AddSeconds(45)
+                do {
+                    Start-Sleep -Milliseconds 500
+                    $process.Refresh()
+                    if ($process.HasExited) { throw 'Installed GUI exited before opening a window' }
+                } until ($process.MainWindowHandle -ne 0 -or [DateTime]::UtcNow -gt $deadline)
+                if ($process.MainWindowHandle -eq 0) { throw 'Installed GUI did not open a native window' }
+                $process.MainWindowTitle | Set-Content (Join-Path $evidence "$kind-$closeAction-window.txt")
+                if ($closeAction -eq 'close') {
+                    if (-not $process.CloseMainWindow()) { throw 'Installed GUI rejected ordinary Close' }
+                } else {
+                    # Invoke the actual File/Quit command through native accessibility.
+                    Add-Type -AssemblyName UIAutomationClient,UIAutomationTypes
+                    $window=[Windows.Automation.AutomationElement]::FromHandle($process.MainWindowHandle)
+                    $scope=[Windows.Automation.TreeScope]::Descendants
+                    $name=[Windows.Automation.AutomationElement]::NameProperty
+                    $file=$window.FindFirst($scope, [Windows.Automation.PropertyCondition]::new($name, 'File'))
+                    if (-not $file) { throw 'Installed Python GUI File menu is missing' }
+                    $expand=$file.GetCurrentPattern([Windows.Automation.ExpandCollapsePattern]::Pattern)
+                    $expand.Expand()
+                    $quit=$null
+                    $quitDeadline=[DateTime]::UtcNow.AddSeconds(5)
+                    do {
+                        $quit=$window.FindFirst($scope, [Windows.Automation.PropertyCondition]::new($name, 'Quit'))
+                        if (-not $quit) { Start-Sleep -Milliseconds 100 }
+                    } until ($quit -or [DateTime]::UtcNow -gt $quitDeadline)
+                    if (-not $quit) { throw 'Installed Python GUI Quit command is missing' }
+                    $invoke=$quit.GetCurrentPattern([Windows.Automation.InvokePattern]::Pattern)
+                    $invoke.Invoke()
+                }
+                if (-not $process.WaitForExit(15000)) { throw 'Installed GUI did not quit' }
+            } finally { if (-not $process.HasExited) { $process.Kill(); $process.WaitForExit() } }
+        }
+        $guiAfter=@(Get-ChildItem $archive -Recurse -File | Get-FileHash -Algorithm SHA256 | ForEach-Object { $_.Path + ':' + $_.Hash })
         if (Compare-Object $guiBefore $guiAfter) { throw 'Native launch changed archive bytes' }
     }
     $archiveFiles=@(Get-ChildItem $evidence -Recurse -File | Where-Object FullName -Match 'synthetic\.mailarchive[\\/]')
@@ -108,7 +133,7 @@ try {
     if (Get-AppxPackage -Name ECT.LocalTest) { throw 'Package remains installed' }
     $after=@($archiveFiles | Get-FileHash -Algorithm SHA256 | ForEach-Object { $_.Path + ':' + $_.Hash })
     if (Compare-Object $before $after) { throw 'Uninstall changed archive bytes' }
-    'Install, native launch, helper, search, upgrade and uninstall passed.' | Set-Content (Join-Path $evidence 'success.txt')
+    'Install, native launch, Python search/completion, upgrade and uninstall passed.' | Set-Content (Join-Path $evidence 'success.txt')
 } finally {
     try {
         if ($installed) { Get-AppxPackage -Name ECT.LocalTest | Remove-AppxPackage }
@@ -116,6 +141,7 @@ try {
         try { if ($addedTrust) { Remove-Item -LiteralPath $storePath } }
         finally {
             $env:LOCALAPPDATA=$originalLocalAppData
+            $env:APPDATA=$originalAppData
             $cert.Dispose()
             Stop-Transcript | Out-Null
         }

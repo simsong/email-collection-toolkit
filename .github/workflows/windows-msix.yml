@@ -35,12 +35,8 @@ jobs:
     steps:
       - uses: actions/checkout@v7.0.1
       - uses: astral-sh/setup-uv@v10.0.1
-      - name: Set up Rust
-        run: rustup toolchain install stable --profile minimal
       - name: Build and package once per architecture
-        env:
-          RUSTUP_TOOLCHAIN: stable
-        run: cargo msix-test -Architecture ${{ matrix.arch }} -CreateUpgradeTest
+        run: ./scripts/win/build_windows_msix.ps1 -Architecture ${{ matrix.arch }} -CreateUpgradeTest
       - uses: actions/upload-artifact@v7.0.1
         with:
           name: msix-payload-${{ matrix.arch }}

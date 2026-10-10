@@ -193,14 +193,14 @@ def test_release_waits_for_exact_dmg_before_checksumming() -> None:
     jobs = workflow[JOBS]
     assembly, macos = jobs[ASSEMBLE], jobs[MACOS]
     # Release identity must gate both expensive build paths, including reuse.
-    for job in (macos, jobs["rust-reader"]):
+    for job in (macos, jobs["windows-msix"]):
         assert job[NEEDS] == PREFLIGHT
         assert CONDITION not in job
     preflight = jobs[PREFLIGHT]
     assert macos[STEPS][0][WITH][REF] == "${{ needs.preflight.outputs.commit }}"
     assert preflight[STEPS][0][WITH][REF] == "${{ github.sha }}"
     assert preflight[STEPS][-1][RUN] == 'make release-tag-check GITHUB_REF_NAME="$RELEASE_TAG" ARGS=--require-annotated'
-    assert set(assembly[NEEDS]) == {MACOS, "rust-reader", "windows-msix"}
+    assert set(assembly[NEEDS]) == {MACOS, "windows-msix"}
     assert assembly[STEPS][0][WITH][REF] == "${{ needs.macos.outputs.commit }}"
     steps = assembly[STEPS]
     download = next(i for i, step in enumerate(steps) if "actions/download-artifact@" in step.get(USES, ""))

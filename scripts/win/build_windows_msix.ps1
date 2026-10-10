@@ -1,14 +1,13 @@
 # Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved.
-# Assemble the native hybrid Rust/Python alpha package using the Windows SDK.
-# The private CPython installation and locked runtime dependencies travel together.
-# Python's isolated path file excludes checkout paths and user-installed modules.
+# Assemble the Python desktop alpha package using the Windows SDK.
+# PyInstaller bundles CPython and locked runtime dependencies together.
+# The frozen entry point excludes checkout paths and user-installed modules.
 # Assembly never installs certificates or packages; separate CI validates those.
-# WebView2 remains external; the Rust entry point diagnoses a missing runtime.
+# WebView2 remains a platform prerequisite for the Python webview.
 # Native writer/scanner/converter parity is deliberately not claimed by packaging.
 param(
     [ValidateSet('arm64','x64')][string]$Architecture = 'arm64',
     [switch]$CreateUpgradeTest,
-    [string]$RustBinaryDirectory,
     [string]$OutputDirectory = 'dist/windows-msix-test',
     [string]$SdkDirectory
 )
@@ -17,14 +16,8 @@ $root = Split-Path (Split-Path $PSScriptRoot -Parent) -Parent
 Set-Location -LiteralPath $root
 . (Join-Path $PSScriptRoot 'sdk.ps1')
 if (-not $SdkDirectory) { $SdkDirectory = Get-WindowsSdkTools }
-if (-not $RustBinaryDirectory) {
-    & uv sync --locked --no-dev --python 3.12
-    if ($LASTEXITCODE) { throw 'Locked Python dependency setup failed' }
-    & uv run --locked --no-dev python scripts/rust_release_metadata.py --build-command cargo build --locked --release -p mailsearch-rust --bin mailsearch-webview --bin mailsearch-rust
-    if ($LASTEXITCODE) { throw 'Rust build failed' }
-    $target = if ($env:CARGO_TARGET_DIR) { $env:CARGO_TARGET_DIR } else { Join-Path $root 'target' }
-    $RustBinaryDirectory = Join-Path $target 'release'
-}
+& uv sync --locked --no-dev --group packaging --python 3.12
+if ($LASTEXITCODE) { throw 'Locked Python dependency setup failed' }
 $python = Join-Path $root '.venv/Scripts/python.exe'
 $machine = & $python -c 'import platform; print(platform.machine())'
 $expectedMachine = if ($Architecture -eq 'arm64') { 'ARM64' } else { 'AMD64' }
@@ -34,29 +27,15 @@ if ($LASTEXITCODE) { throw 'Release metadata failed' }
 if (-not [IO.Path]::IsPathRooted($OutputDirectory)) { $OutputDirectory = Join-Path $root $OutputDirectory }
 if (Test-Path -LiteralPath $OutputDirectory) { throw 'Use a new output directory; existing packages are preserved.' }
 $stage = Join-Path $OutputDirectory 'stage'
-$privatePython = Join-Path $stage 'python'
-New-Item -ItemType Directory -Path $privatePython -Force | Out-Null
-foreach ($name in @('python.exe','python3.dll','python312.dll','vcruntime140.dll','vcruntime140_1.dll','LICENSE.txt','Lib','DLLs')) {
-    Copy-Item -LiteralPath (Join-Path $metadata.home $name) -Destination $privatePython -Recurse
-}
-$site = Join-Path $privatePython 'Lib/site-packages'
-New-Item -ItemType Directory -Path $site -Force | Out-Null
-Get-ChildItem (Join-Path $root '.venv/Lib/site-packages') | Where-Object { $_.Name -notlike '*.pth' -and $_.Name -ne '__pycache__' } | ForEach-Object {
-    Copy-Item -LiteralPath $_.FullName -Destination $site -Recurse -Force
-}
-Copy-Item -LiteralPath (Join-Path $root 'src/mailarchiver') -Destination $site -Recurse
-[IO.File]::WriteAllText((Join-Path $privatePython 'python312._pth'), ".`nLib`nDLLs`nLib/site-packages`n", [Text.UTF8Encoding]::new($false))
-foreach ($name in @('mailsearch-webview.exe','mailsearch-rust.exe')) {
-    Copy-Item -LiteralPath (Join-Path $RustBinaryDirectory $name) -Destination $stage
-}
-& (Join-Path $PSScriptRoot 'prepare_winsparkle.ps1') -Architecture $Architecture -OutputDirectory $stage
+New-Item -ItemType Directory -Path $OutputDirectory -Force | Out-Null
+& $python -m PyInstaller --noconfirm --windowed --onedir --name ect --distpath (Join-Path $OutputDirectory 'frozen') --workpath (Join-Path $OutputDirectory 'work') --specpath $OutputDirectory --copy-metadata mailarchiver --collect-data mailarchiver --add-data "$root/src/mailarchiver/plugins;mailarchiver/plugins" --hidden-import mailarchiver.processing.builtin --collect-all webview --hidden-import webview.platforms.winforms --hidden-import webview.platforms.edgechromium --add-data "$root/gui;gui" --exclude-module pypff scripts/desktop_entry.py
+if ($LASTEXITCODE) { throw 'Python GUI freezing failed' }
+Move-Item -LiteralPath (Join-Path $OutputDirectory 'frozen/ect') -Destination $stage
 foreach ($name in @('LICENSE','COPYRIGHT','THIRD_PARTY_NOTICES.md')) {
     Copy-Item -LiteralPath (Join-Path $root $name) -Destination $stage
 }
 Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'test_windows_msix.py') -Destination $stage
 Copy-Item -LiteralPath (Join-Path $root 'licenses') -Destination $stage -Recurse
-& $python -c 'import sys; from pathlib import Path; from scripts.rust_bundle import copy_cargo_notices; copy_cargo_notices(Path(sys.argv[1]), Path.cwd())' (Join-Path $stage 'licenses/Rust')
-if ($LASTEXITCODE) { throw 'Rust dependency notices failed' }
 New-Item -ItemType Directory -Path (Join-Path $stage 'Assets') | Out-Null
 Copy-Item -LiteralPath (Join-Path $root 'gui/icons/rainbow-post-48.png') -Destination (Join-Path $stage 'Assets/Logo.png')
 Copy-Item -LiteralPath (Join-Path $root 'gui/icons/rainbow-post-192.png') -Destination (Join-Path $stage 'Assets/Tile.png')
@@ -67,7 +46,7 @@ $manifest = @"
  <Properties><DisplayName>Email Collector Toolkit (ECT)</DisplayName><PublisherDisplayName>ECT Local Test</PublisherDisplayName><Logo>Assets/Logo.png</Logo></Properties>
  <Dependencies><TargetDeviceFamily Name="Windows.Desktop" MinVersion="10.0.19041.0" MaxVersionTested="10.0.26100.0" /></Dependencies>
  <Resources><Resource Language="en-us" /></Resources>
- <Applications><Application Id="ECT" Executable="mailsearch-webview.exe" EntryPoint="Windows.FullTrustApplication"><uap:VisualElements DisplayName="Email Collector Toolkit (ECT)" Description="Hybrid Rust/Python test package" BackgroundColor="transparent" Square150x150Logo="Assets/Tile.png" Square44x44Logo="Assets/Logo.png" /></Application></Applications>
+ <Applications><Application Id="ECT" Executable="ect.exe" EntryPoint="Windows.FullTrustApplication"><uap:VisualElements DisplayName="Email Collector Toolkit (ECT)" Description="Python desktop test package" BackgroundColor="transparent" Square150x150Logo="Assets/Tile.png" Square44x44Logo="Assets/Logo.png" /></Application></Applications>
  <Capabilities><rescap:Capability Name="runFullTrust" /></Capabilities>
 </Package>
 "@

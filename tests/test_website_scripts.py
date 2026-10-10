@@ -71,7 +71,7 @@ def test_ci_runs_parallel_branch_jobs_without_building_a_dmg() -> None:
     triggers = configuration.get(WORKFLOW_ON, configuration.get(True))
     assert triggers == {"push": {"branches": ["**", "!main"]}}
     jobs = configuration[JOBS]
-    assert set(jobs) == {"static-rust", "python-browser", "rust-gui", "rust-reader", "release-candidate"}
+    assert set(jobs) == {"static-rust", "python-browser", "release-candidate"}
     assert jobs["release-candidate"]["if"] == "github.ref == 'refs/heads/work-rust-gui' && contains(github.event.head_commit.message, '[release-ci]')"
     assert jobs["release-candidate"]["uses"] == "./.github/workflows/release-candidate.yml"
     assert all(NEEDS not in job for job in jobs.values())
@@ -81,18 +81,6 @@ def test_ci_runs_parallel_branch_jobs_without_building_a_dmg() -> None:
     assert any("make check-tests" in run for run in test_runs)
     assert all("make check-tests" not in run for run in static_runs)
     assert all("make check-static" not in run for run in test_runs)
-    native = jobs["rust-gui"]
-    assert native["strategy"]["matrix"] == {"os": ["macos-latest"]}
-    assert native[RUNS_ON] == "${{ matrix.os }}"
-    native_runs = [step.get(RUN, "") for step in native[STEPS]]
-    assert native_runs.count("make test-rust-gui-native") == 1
-    assert all("rust-gui-build" not in run and "test-rust-gui " not in f"{run} "
-               and "check-static" not in run for run in native_runs)
-    upload = next(step for step in native[STEPS] if step.get("uses", "").startswith("actions/upload-artifact@"))
-    assert upload["if"] == "always()"
-    assert upload["with"]["path"] == ".tmp/rust-gui-native"
-    assert upload["with"]["include-hidden-files"] is True
-    assert upload["with"]["if-no-files-found"] == "error"
     makefile = (workflow.parents[2] / "Makefile").read_text(encoding="utf-8")
     assert "check:\n\t$(MAKE) check-static\n\t$(MAKE) check-tests" in makefile
     for definition in workflow.parent.glob("*.yml"):
@@ -105,31 +93,15 @@ def test_ci_runs_parallel_branch_jobs_without_building_a_dmg() -> None:
             assert job.get(RUNS_ON) == "macos-15" or "uses" in job, definition
 
 
-def test_cargo_reader_builds_gate_branch_and_tag_workflows() -> None:
-    """Windows delivery: both architectures must build/test and retain executable artifacts."""
-    workflows = Path(__file__).parents[1] / ".github/workflows"
-    ci = safe_load((workflows / "continuous-integration.yml").read_text(encoding="utf-8"))
-    opt_in = ci[JOBS]["rust-reader"]
-    assert opt_in["if"] == "contains(github.event.head_commit.message, '[windows-ci]')"
-    assert opt_in["uses"] == "./.github/workflows/rust-reader.yml"
-    assert opt_in["with"] == {"windows_only": True}
-    release = safe_load((workflows / "release.yml").read_text(encoding="utf-8"))
-    assert release[JOBS]["rust-reader"]["uses"] == "./.github/workflows/rust-reader.yml"
-    assert "rust-reader" in release[JOBS]["assemble"][NEEDS]
-    reader = safe_load((workflows / "rust-reader.yml").read_text(encoding="utf-8"))
-    job = reader[JOBS]["reader"]
-    assert job[RUNS_ON] == "${{ matrix.os }}"
-    assert job["strategy"]["matrix"]["os"] == (
-        "${{ fromJSON(inputs.windows_only && '[\"windows-latest\",\"windows-11-arm\"]'"
-        " || '[\"windows-latest\",\"windows-11-arm\",\"macos-latest\"]') }}"
-    )
-    runs = [step.get(RUN, "") for step in job[STEPS]]
-    assert runs.index("cargo reader-check") < runs.index("cargo reader-build --release")
-    windows_upload = next(step for step in job[STEPS]
-                          if step.get("if") == "runner.os == 'Windows'" and step.get("uses", "").startswith("actions/upload-artifact@"))
-    assert windows_upload["uses"].startswith("actions/upload-artifact@")
-    assert "target/release/mailsearch-webview.exe" in windows_upload["with"]["path"]
-    assert windows_upload["with"]["if-no-files-found"] == "error"
+def test_retired_reader_is_not_a_release_dependency() -> None:
+    """Retirement: active workflows cannot launch or require the archived GUI."""
+    root = Path(__file__).parents[1]
+    for name in ("continuous-integration.yml", "release.yml", "release-candidate.yml", "windows-msix.yml"):
+        text = (root / ".github/workflows" / name).read_text()
+        assert "mailsearch-rust" not in text
+        assert "rust-reader.yml" not in text
+        assert "test-rust-gui-native" not in text
+    assert (root / "rust/mailsearch-gui/ci/rust-reader.yml").is_file()
 
 
 def test_release_workflow_validates_built_distributions() -> None:
@@ -168,9 +140,8 @@ def test_release_workflow_validates_built_distributions() -> None:
     assert any(step.get("run") == "make test-sparkle-signing" for step in ci[JOBS]["python-browser"]["steps"])
     triggers = configuration.get(WORKFLOW_ON, configuration.get(True))
     assert triggers == {"push": {"tags": ["v*"]}}
-    assert set(configuration[JOBS]) == {"assemble", "macos", "rust-reader", "windows-msix", "preflight"}
+    assert set(configuration[JOBS]) == {"assemble", "macos", "windows-msix", "preflight"}
     assert configuration[JOBS]["macos"][NEEDS] == "preflight"
-    assert configuration[JOBS]["rust-reader"][NEEDS] == "preflight"
     assert "git merge-base --is-ancestor HEAD refs/remotes/origin/main" in text
     assert ('gh workflow run pages.yml --repo "$GITHUB_REPOSITORY" '
             '--ref main -f release_tag="$RELEASE_TAG"') in text

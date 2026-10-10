@@ -1,5 +1,11 @@
 <!-- Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved. -->
 
+
+> **Historical / retired October 10, 2026.** Python is the default desktop.
+> The Rust GUI is preserved outside supported builds; old commands and completion
+> plans below are archival. See [the retrospective](../rust/README.md) for current
+> status, measured limitations and the last compiling snapshot.
+
 # Windows Rust application handoff
 
 Prepared 2026-10-04 for the Codex instance working inside the Windows VM.

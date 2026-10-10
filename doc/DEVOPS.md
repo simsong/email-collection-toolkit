@@ -38,10 +38,10 @@ Do not run duplicate push/PR jobs or create a Windows build for every macOS
 iteration. Explicit test releases are an intentional packaging cost. Build each
 architecture once per run and pass those artifacts forward to packaging and
 release assembly rather than rebuilding them in the publisher.
-Ordinary branch CI assigns the Rust workspace suite to `static-rust`. The
-macOS native job runs `make test-rust-gui-native` directly; that target builds
-and checks native-feature code and exercises the actual window. It does not
-repeat `test-rust-gui` or a separate ordinary reader build.
+Ordinary branch CI checks the maintained Rust tools in `static-rust` and the
+Python/browser interface in `python-browser`. The retired Rust GUI is excluded
+from the workspace and has no active native CI or release dependency. Opted-in
+release candidate checks build the Python DMG and Python MSIX packages.
 
 ### Windows distribution and evidence
 
@@ -191,7 +191,7 @@ for the tag command, packaging steps, and secret boundaries.
 ## Local Windows MSIX prototype (2026-10-06)
 
 See [Windows MSIX test packaging](WINDOWS_MSIX_TEST.md) for automated build/sign/test commands,
-private Python helper discovery, external WebView2 detection, native Windows
+frozen Python reader validation, external WebView2 prerequisites, native Windows
 evidence and unresolved installation/import/scanner/converter requirements.
 This local prototype is not a released or fully validated Windows application.
 
@@ -208,8 +208,9 @@ until Linux-specific tooling is added.
 
 ## MSIX installation matrix (2026-10-07)
 
-MSIX replaces the older EXE installer plan; the a15 Rust WinSparkle adapter
-discovers the bundle through the authenticated shared feed. `windows-msix.yml`
+MSIX replaces the older EXE installer plan. The Python desktop is now its
+entry point; the a15 Rust WinSparkle adapter is archived and no longer ships.
+Windows automatic-update support remains unfinished. `windows-msix.yml`
 supports explicit dispatch, reusable release calls and explicit packaging-branch
 `[msix-ci]`/`[release-ci]` pushes; ordinary pushes do not run it. Two native build
 jobs produce x64 and ARM64 payloads once per workflow invocation.
@@ -222,7 +223,7 @@ test-signed bundle and public trust material; upgrade fixtures stay CI-only.
 The release caller waits for this gate after tag preflight. Windows 10 testing
 is not required. No GitHub Team or AWS provisioning is needed.
 
-Installed checks exercise private Python discovery, synthetic search/fixity,
+Installed checks exercise frozen Python search, autocomplete and byte retrieval,
 a native window, upgrade and uninstall, removing test packages and added trust
 in cleanup. WebView2 remains external and its absence fails this positive test.
 Its writable user-data directory is outside the immutable package. Hosted matrix

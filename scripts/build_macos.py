@@ -548,7 +548,7 @@ def build(signing_identity: str, *, gui: bool = False, log_contents: bool = Fals
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--rust-binary", type=Path, help="package the primary Rust GUI with the frozen private archive service")
+    parser.add_argument("--rust-binary", type=Path, help="unsupported historical Rust experiment; see rust/README.md")
     parser.add_argument("--test-dmg", type=Path, help="mount and retest an existing DMG")
     parser.add_argument("--test-mounted-dmg", type=Path, help="test an existing verified read-only DMG mount")
     parser.add_argument("--source-dmg", type=Path, help="source image for mounted test report names")

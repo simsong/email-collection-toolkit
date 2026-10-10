@@ -1511,7 +1511,7 @@ class PyWebViewApplication:
         window.events.shown += lambda *_args: self._refresh_menus()
 
         def closing(*_args: object) -> bool:
-            if self._quitting:
+            if self._quitting or sys.platform == "win32":
                 return True
             # Keep a hidden native window so closing the last visible window does
             # not end pywebview's event loop or remove File/New/Open and About.
@@ -2496,6 +2496,8 @@ def application_menu(application: PyWebViewApplication) -> list[Menu]:
             MenuAction("Close", application.close_active_window),
         )
     )
+    if sys.platform == "win32":
+        file_items.append(MenuAction("Quit", application.request_quit))
     return [
         Menu("File", file_items),
         Menu(
@@ -2671,7 +2673,9 @@ def main() -> int:
         for error in startup.errors:
             print(f"mailsearch-gui: {error}", file=sys.stderr)
             application.add_notice("error", error)
-        application.create_about_window(hidden=True)
+        # Windows exits with its last native window; only macOS has Dock reopening.
+        if sys.platform != "win32":
+            application.create_about_window(hidden=True)
         if prompt_for_archive:
             application.show_setup()
         for session in startup.windows:

@@ -4,6 +4,13 @@
 
 ## 1.0.0a18 (candidate)
 
+- Restore Python/pywebview as the default desktop and DMG/MSIX entry point.
+  Retire the Rust GUI from supported Cargo, CI and release builds without
+  deleting its source or test history. Document the architecture, experiments,
+  performance findings and lessons in `rust/README.md`. Independent Rust
+  verifier, importer/PST and MIME improvements remain supported. No new release
+  is published by this change.
+
 - Reduce unnecessary Rust MIME, JSON, IPC, folder traversal, search-binding and
   PST metadata copies. Recover selected MBOX records in their existing buffer;
   count attachment sizes and validate transfer encodings with bounded storage.

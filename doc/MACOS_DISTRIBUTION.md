@@ -11,11 +11,10 @@ Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved.
 
 ## Build and test
 
-`make dmg` builds the primary Rust/Wry application with its private frozen
-Python archive service. It retains the existing bundle identity and update feed,
-so an approved upgrade replaces the Python GUI. `make python-dmg` retains the
-legacy GUI build for development. [Dioxus and Tauri](DIOXUS.md) describe earlier
-framework comparisons.
+`make dmg` builds the primary Python/pywebview application. `make python-dmg`
+is an equivalent explicit target. The Rust GUI is retired; see the
+[retrospective](../rust/README.md). Bundle identity and the Python Sparkle updater
+are retained.
 
 On a logged-in Mac with this checkout's development environment and `uv`:
 
@@ -25,9 +24,8 @@ make dmg
 
 The target installs only project-local packaging dependencies, then uses
 PyInstaller to bundle the private Python runtime, Python extension libraries,
-SQL/YAML resources, plug-in manifests, and verifier source. Rust supplies the
-entry point and uses system WebKit. The bundle also contains Sparkle and the
-locked Cargo dependency notices. Users
+SQL/YAML resources, plug-in manifests, and verifier source. Python supplies the entry point and uses system WebKit through pywebview.
+The bundle also contains Sparkle and notices for bundled importer dependencies. Users
 need no Python, `uv`, Homebrew, or source checkout for the supported local-mail
 GUI. ClamAV is optional. Experimental PDF extraction/OCR, Tika/Java and the
 Apple Intelligence command are not included in this desktop workflow.
@@ -61,7 +59,7 @@ chrome so the footer stays visible. A build-only `dmgbuild` dependency saves thi
 mounted checks verify it. Use `make preview-dmg DMG=/absolute/path/to/image.dmg`
 for visual review in Finder; press Return in the terminal to eject afterward.
 The `.mailarchive` package type is declared in
-Info.plist; Rust's native event loop handles document-open events and retains
+Info.plist; Python's native application controller handles document-open events and retains
 the stop/checkpoint safeguards. File Open also accepts extensionless archive
 directories. Installation does not force replacement of another default handler.
 
