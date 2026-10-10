@@ -402,6 +402,13 @@ mod tests {
             assert_eq!(view["attachments"][0]["byte_length"], decoded.len());
             assert_eq!(view["preferred_part_id"], -1);
         }
+        // A prefix mismatch must not skip later transfer errors or fallback sizing.
+        let encoded = format!("{}!", STANDARD.encode(b"not legacy ".repeat(2000)));
+        let raw = format!("Content-Type: application/octet-stream; charset=utf-8\r\nContent-Transfer-Encoding: base64\r\n\r\n{encoded}");
+        assert_eq!(
+            describe(raw.as_bytes()).unwrap()["attachments"][0]["byte_length"],
+            raw.len()
+        );
         let body = format!(
             "{}<X-HTML>{}</x-html>{}",
             "\u{2003}".repeat(20000),

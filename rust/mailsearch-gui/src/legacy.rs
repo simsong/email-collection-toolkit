@@ -5,6 +5,7 @@
 // UTF-7 runs retain at most 80 symbols and stream through a UTF-16 decoder.
 // BOM sniffing and charset aliases match the mailparse charset dependency.
 // This probe describes MIME; rendering still uses the existing full text path.
+// A definitive prefix mismatch stops charset work while transfer counting continues.
 use base64::{engine::general_purpose::STANDARD_NO_PAD, Engine};
 use encoding_rs::{CoderResult, Decoder, Encoding};
 
@@ -19,6 +20,9 @@ struct Tags {
 impl Tags {
     fn write(&mut self, text: &str) {
         for c in text.chars() {
+            if self.invalid {
+                return;
+            }
             if self.prefix == 0 && c.is_whitespace() {
                 continue;
             }
@@ -57,7 +61,7 @@ fn decoded(decoder: &mut Decoder, mut bytes: &[u8], last: bool, tags: &mut Tags)
             std::str::from_utf8(&output[..written]).expect("charset decoder produces UTF-8"),
         );
         bytes = &bytes[read..];
-        if result == CoderResult::InputEmpty {
+        if tags.invalid || result == CoderResult::InputEmpty {
             break;
         }
     }
@@ -96,6 +100,9 @@ impl Utf7 {
     }
     fn write(&mut self, bytes: &[u8], tags: &mut Tags) {
         for &b in bytes {
+            if tags.invalid {
+                break;
+            }
             if self.decoder.is_some() {
                 if b.is_ascii_alphanumeric() || matches!(b, b'+' | b'/') {
                     if self.used == 80 {
@@ -140,6 +147,9 @@ enum Mode {
 }
 impl Mode {
     fn write(&mut self, bytes: &[u8], last: bool, tags: &mut Tags) {
+        if tags.invalid {
+            return;
+        }
         match self {
             Self::Encoded(decoder) => decoded(decoder, bytes, last, tags),
             Self::Utf7(decoder) => {
@@ -156,6 +166,9 @@ impl Mode {
             Self::Ascii => {
                 for chunk in bytes.chunks(1024) {
                     tags.write(&charset::decode_ascii(chunk));
+                    if tags.invalid {
+                        break;
+                    }
                 }
             }
         }

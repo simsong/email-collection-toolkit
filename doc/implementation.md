@@ -3172,10 +3172,13 @@ by mailparse, decodes displayable root text once, and compares legacy tags/URL p
 copying complete bodies. Non-display roots use bounded transfer/charset probing,
 including BOMs, UTF-7 and Unicode whitespace, without materializing attachments
 or multipart containers. The shared `mime-transfer` crate counts permissive
-attachment output and validates strict importer output through bounded slices;
+attachment output and validates strict importer output through bounded batches;
+quoted-printable feeds consumers at most once per 4 KiB of decoded output.
+Definite legacy-prefix mismatches stop charset work while transfer validation
+and byte counting continue, avoiding per-byte decoder overhead on attachments;
 only embedded RFC 822 validation retains decoded bytes. `make test-mime-transfer`
 compares strict/permissive bytes and failures with the original decoder libraries,
-including malformed streams and large payloads. Reader tests verify unchanged
+including malformed streams, large payloads and bounded consumer-call counts. Reader tests verify unchanged
 attachment sizes, UTF-8 display truncation, charset behavior and URL policy.
 Owned JSON fields/trees move into replies, native delivery serializes into its
 final JavaScript buffer, and helper requests serialize a borrowed envelope.

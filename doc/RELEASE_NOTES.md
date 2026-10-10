@@ -9,6 +9,8 @@
   count attachment sizes and validate transfer encodings with bounded storage.
   Preserve decoding/rejection semantics, hash-selected bytes and Python search
   behavior. Cache comparison-reader row labels and avoid native snapshot copies.
+- Batch quoted-printable decoder output and stop unnecessary charset probing
+  after a definite legacy-prefix mismatch, retaining full size/error validation.
 
 
 ## 1.0.0a17 (superseded candidate)

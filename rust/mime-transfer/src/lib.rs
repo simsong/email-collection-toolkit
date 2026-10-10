@@ -2,7 +2,7 @@
 // Decode transfer encodings without retaining throwaway attachment payloads.
 // A callback receives bounded decoded slices; a counter can discard them.
 // Strict mode matches importer validation; permissive mode matches mailparse.
-// Base64 uses fixed aligned chunks; quoted-printable borrows filtered line views.
+// Both codecs emit bounded batches; quoted-printable borrows filtered line views.
 // Only callers needing embedded-message bytes collect the decoded output.
 // Neither path rewrites canonical input or relaxes the importer's MIME policy.
 use base64::{engine::general_purpose::STANDARD, Engine};
@@ -79,6 +79,29 @@ fn base64(body: &[u8], strict: bool, emit: &mut impl FnMut(&[u8])) -> Result<(),
 }
 
 fn quoted_printable(
+    body: &[u8],
+    strict: bool,
+    emit: &mut impl FnMut(&[u8]),
+) -> Result<(), &'static str> {
+    let mut buffer = [0; 4096];
+    let mut used = 0;
+    quoted_printable_bytes(body, strict, &mut |bytes| {
+        for &byte in bytes {
+            buffer[used] = byte;
+            used += 1;
+            if used == buffer.len() {
+                emit(&buffer);
+                used = 0;
+            }
+        }
+    })?;
+    if used != 0 {
+        emit(&buffer[..used]);
+    }
+    Ok(())
+}
+
+fn quoted_printable_bytes(
     body: &[u8],
     strict: bool,
     emit: &mut impl FnMut(&[u8]),
@@ -273,5 +296,21 @@ mod tests {
             .unwrap(),
             0
         );
+        // requirements.md: bounded QP batches must avoid per-byte consumer calls.
+        let plain = b"ordinary = data\r\n".repeat(20000);
+        let encoded = quoted_printable::encode(&plain);
+        for strict in [false, true] {
+            let mut calls = 0;
+            let mut output = Vec::new();
+            let count = decode(&encoded, "quoted-printable", strict, |bytes| {
+                assert!(bytes.len() <= 4096);
+                calls += 1;
+                output.extend_from_slice(bytes);
+            })
+            .unwrap();
+            assert_eq!(output, plain);
+            assert_eq!(count, plain.len());
+            assert_eq!(calls, count.div_ceil(4096));
+        }
     }
 }

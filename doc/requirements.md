@@ -2402,6 +2402,9 @@ No Requests-based fetching or public-suffix network update occurs at runtime.
 Reader inspection must borrow unchanged MIME text and count decoded attachment
 sizes with bounded transfer-decoder storage. Strict importer validation keeps its
 existing rejection policy and retains decoded content only for embedded messages.
+Quoted-printable output must reach consumers in bounded batches rather than
+per-byte calls. Legacy-prefix mismatches stop charset work without skipping
+transfer validation or decoded-length counting.
 Owned MBOX recovery must compact the same hash-selected bytes in the existing
 record allocation. IPC replies move owned text/JSON trees; search statements reuse
 bound plan values. These allocation changes must preserve Python search parity,
