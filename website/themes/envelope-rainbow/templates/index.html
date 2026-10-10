@@ -15,15 +15,18 @@
       </div>
       <p class="cover-tagline"><span>Email</span> <span>has a history.</span> <span>Keep it</span></p>
     </div>
-    <div class="hero shell release-downloads" id="installer-downloads"
-         data-mac="{{ primary.mac_url }}" data-windows="{{ primary.windows_url }}"
-         data-version="{{ primary.tag }}">
+    <div class="hero shell release-downloads" id="installer-downloads">
       <p class="lede">Collect, preserve, search, and understand email across old computers, backup drives, and exported accounts — while keeping the archive local and verifiable.</p>
+      {% if not releases.stable.tag and releases.preview.tag %}<p><strong>Preview release:</strong> alpha/beta software for testing.</p>{% endif %}
       <div class="actions">
-        <a class="button primary" id="download-installer" href="{{ config.extra.releases }}/">Download the installers</a>
+        <a class="button primary" id="download-windows" href="{% if primary.windows_url %}{{ primary.windows_url }}{% else %}{{ config.extra.releases }}/{% endif %}">Download Windows installer</a>
+        <a class="button primary" id="download-macos" href="{% if primary.mac_url %}{{ primary.mac_url }}{% else %}{{ config.extra.releases }}/{% endif %}">Download macOS installer</a>
         <a class="button secondary" href="{{ config.extra.releases }}/">Show all installers</a>
       </div>
-      <p id="download-status" role="status"></p>
+      {% if not primary.windows_url %}<p>No published Windows installer is available for this release; the Windows button opens all releases.</p>{% endif %}
+      {% if not primary.mac_url %}<p>No published macOS installer is available for this release; the macOS button opens all releases.</p>{% endif %}
+      {% if primary.windows_help_url %}<p>Before installing on Windows, trust the release certificate.
+        <a href="{{ primary.windows_help_url }}">Windows certificate and installation instructions</a></p>{% endif %}
       <p>macOS installers require Apple Silicon; Windows installers require x64.
         Choose your update stream in the application's Preferences panel.</p>
       <p>Current release: <a href="{{ releases.current_url }}">{{ releases.current_version }}</a>{% if not releases.stable.tag and releases.preview.tag %} (preview){% endif %}</p>
@@ -37,7 +40,6 @@
         <p><a href="{{ config.extra.readme }}">Read the README</a></p>
       </details>
     </div>
-    <script src="{{ get_url(path='downloads.js') }}" defer></script>
   </section>
 
   <section class="capabilities shell" aria-label="Core capabilities">

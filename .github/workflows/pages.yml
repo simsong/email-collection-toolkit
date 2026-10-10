@@ -60,8 +60,9 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ inputs.release_tag }}
         run: |
+          set -euo pipefail
           gh api --paginate --slurp "repos/${GITHUB_REPOSITORY}/releases?per_page=100" \
-            --jq '[.[][] | select(.draft == false)]' > "$RUNNER_TEMP/published-releases.json"
+            | jq '[.[][] | select(.draft == false)]' > "$RUNNER_TEMP/published-releases.json"
           make website-release-data RELEASES_JSON="$RUNNER_TEMP/published-releases.json" \
             RELEASE_TAG="$RELEASE_TAG"
       - name: Include latest published Sparkle appcast

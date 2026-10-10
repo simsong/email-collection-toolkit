@@ -21,12 +21,20 @@ the Windows runtime's complete license evidence before MSIX assembly.
 
 # Release notes
 
-## 1.0.0a19 (candidate)
+## Website follow-up after 1.0.0a19
+
+- Replace browser detection with separate static Windows and macOS installer
+  buttons, retaining **Show all installers** and missing-asset notices. Expose
+  preview and Windows certificate-trust notices beside the buttons.
+
+- Repair website deployment by filtering paginated release JSON with standalone
+  `jq`, avoiding GitHub CLI's incompatible `--slurp`/`--jq` combination.
+
+## 1.0.0a19
 
 - Clarify the application Preferences update-stream choice as release-only or
   alpha/beta/development plus release, shared by Sparkle and WinSparkle. Keep
-  stream settings out of the website; its download buttons suggest macOS or
-  Windows and provide an adjacent **Show all installers** link.
+  stream settings out of the website.
 
 ## 1.0.0a18 (superseded candidate)
 

@@ -1,9 +1,9 @@
 # Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved.
 # Exercise the homepage download controls through a real browser and HTTP server.
 # Build Zola pages from public-shaped synthetic release and asset metadata.
-# Browser contexts supply desktop and mobile user agents without mocking APIs.
-# Check platform labels, direct URLs, missing assets, and responsive layout.
-# Unknown platforms, absent assets, and disabled JavaScript retain usable links.
+# Browser contexts exercise scripting enabled and disabled without mocking APIs.
+# Check both static buttons, direct URLs, missing assets, and responsive layout.
+# Absent assets retain usable release links with an explicit availability notice.
 # These checks download no installers and never publish a website or release.
 """Requirements: platform download buttons; update preferences belong in the app."""
 from __future__ import annotations
@@ -26,10 +26,6 @@ from scripts.update_site_releases import Asset, PublishedRelease, installer_link
 
 ROOT = Path(__file__).parents[1]
 DOWNLOADS = "https://github.com/simsong/email-collection-toolkit/releases/"
-WINDOWS = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/145.0.0.0 Safari/537.36"
-MAC = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 Version/26.0 Safari/605.1.15"
-IPAD = "Mozilla/5.0 (iPad; CPU OS 18_0 like Mac OS X) AppleWebKit/605.1.15 Mobile/15E148 Safari/604.1"
-LINUX = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/145.0.0.0 Safari/537.36"
 
 
 def release(tag: str, windows: bool = True) -> PublishedRelease:
@@ -43,7 +39,7 @@ def release(tag: str, windows: bool = True) -> PublishedRelease:
                                           browser_download_url=f"{DOWNLOADS}download/{tag}/{name}") for name in names])
 
 
-@pytest.fixture(params=["both", "preview-only", "newer-stable", "empty"], scope="module")
+@pytest.fixture(params=["both", "preview-only", "preview-both", "newer-stable", "empty"], scope="module")
 def download_site(request: pytest.FixtureRequest, tmp_path_factory: pytest.TempPathFactory) -> Iterator[tuple[str, list[PublishedRelease]]]:
     """Serve the actual rendered website; each publication state has a distinct origin."""
     if not shutil.which("zola"):
@@ -51,6 +47,7 @@ def download_site(request: pytest.FixtureRequest, tmp_path_factory: pytest.TempP
     publications = {
         "both": [release("v2.0.0"), release("v2.1.0b1")],
         "preview-only": [release("v2.0.0a1", windows=False)],
+        "preview-both": [release("v2.0.0a1")],
         "newer-stable": [release("v2.0.0"), release("v1.9.0b1")],
         "empty": [],
     }
@@ -75,57 +72,54 @@ def download_site(request: pytest.FixtureRequest, tmp_path_factory: pytest.TempP
             thread.join(timeout=5)
 
 
-@pytest.mark.parametrize(("agent", "platform", "label"), [
-    (WINDOWS, "windows", "Download Windows installer"), (MAC, "mac", "Download macOS installer"),
-    (IPAD, "", "Download the installers"), (LINUX, "", "Download the installers"),
-])
-def test_detected_platform(browser: Browser, download_site: tuple[str, list[PublishedRelease]],
-                                       agent: str, platform: str, label: str) -> None:
-    """Correct labels and published URLs remain usable without a website stream selector."""
+@pytest.mark.parametrize("scripting", [True, False])
+def test_static_downloads(browser: Browser, download_site: tuple[str, list[PublishedRelease]], scripting: bool) -> None:
+    """Both platform links work with or without scripts, using complete published releases."""
     url, publications = download_site
-    with browser.new_context(user_agent=agent) as context:
+    with browser.new_context(java_script_enabled=scripting) as context:
         page = context.new_page()
         page.goto(url)
-        button = page.get_by_role("link", name=label, exact=True)
-        expect(button).to_be_visible()
         expect(page.get_by_role("link", name="Show all installers", exact=True)).to_have_attribute("href", DOWNLOADS)
         expect(page.locator("select")).to_have_count(0)
         selected = next((item for item in publications if not item.prerelease), None)
         selected = selected or next(iter(publications), None)
         links = installer_links(selected) if selected else None
-        asset = (links.mac_url if platform == "mac" else links.windows_url) if links and platform else ""
-        expect(button).to_have_attribute("href", asset or DOWNLOADS)
-        if platform and not asset:
-            expect(page.locator("#download-status")).to_contain_text("No published installer")
-
-
-def test_download_links_without_javascript(browser: Browser, download_site: tuple[str, list[PublishedRelease]]) -> None:
-    """Disabling scripting leaves both generic buttons and all available platform links."""
-    url, publications = download_site
-    with browser.new_context(java_script_enabled=False) as context:
-        page = context.new_page()
-        page.goto(url)
-        for label in ("Download the installers", "Show all installers"):
-            expect(page.get_by_role("link", name=label, exact=True)).to_have_attribute("href", DOWNLOADS)
-        expect(page.locator("select")).to_have_count(0)
+        for label, asset, platform in (
+            ("Download Windows installer", links.windows_url if links else "", "Windows"),
+            ("Download macOS installer", links.mac_url if links else "", "macOS"),
+        ):
+            button = page.get_by_role("link", name=label, exact=True)
+            expect(button).to_be_visible()
+            expect(button).to_have_attribute("href", asset or DOWNLOADS)
+            if not asset:
+                expect(page.get_by_text(f"No published {platform} installer", exact=False)).to_be_visible()
+        if selected and selected.prerelease:
+            expect(page.get_by_text("Preview release:", exact=False)).to_be_visible()
+        else:
+            expect(page.get_by_text("Preview release:", exact=False)).to_have_count(0)
+        if links and links.windows_help_url:
+            expect(page.locator("#installer-downloads > p").get_by_role(
+                "link", name="Windows certificate and installation instructions", exact=True)).to_have_attribute(
+                    "href", links.windows_help_url)
+            expect(page.get_by_text("Before installing on Windows", exact=False)).to_be_visible()
         page.get_by_text("Platform links and installation instructions", exact=True).click()
         for publication in publications:
-            links = installer_links(publication)
-            expect(page.locator(f'a[href="{links.mac_url}"]')).to_be_visible()
-            if links.windows_url:
-                expect(page.locator(f'a[href="{links.windows_url}"]')).to_be_visible()
-                expect(page.locator(f'a[href="{links.windows_help_url}"]')).to_be_visible()
+            published = installer_links(publication)
+            expect(page.locator(f'details a[href="{published.mac_url}"]')).to_be_visible()
+            if published.windows_url:
+                expect(page.locator(f'details a[href="{published.windows_url}"]')).to_be_visible()
+                expect(page.locator(f'details a[href="{published.windows_help_url}"]')).to_be_visible()
 
 
 @pytest.mark.parametrize("width", [390, 1280])
 def test_download_controls_fit_the_viewport(browser: Browser, download_site: tuple[str, list[PublishedRelease]], width: int) -> None:
     """The rendered download buttons remain readable on mobile and desktop."""
     url, publications = download_site
-    with browser.new_context(user_agent=MAC, viewport={"width": width, "height": 960}) as context:
+    with browser.new_context(viewport={"width": width, "height": 960}) as context:
         page = context.new_page()
         page.goto(url)
         expect(page.get_by_role("link", name="Download macOS installer", exact=True)).to_be_visible()
-        for control in ("#download-installer", ".actions .secondary"):
+        for control in ("#download-windows", "#download-macos", ".actions .secondary"):
             bounds = page.locator(control).bounding_box()
             assert bounds is not None
             assert bounds["x"] >= 0 and bounds["x"] + bounds["width"] <= width

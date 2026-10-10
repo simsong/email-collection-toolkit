@@ -43,8 +43,10 @@ release design. Windows Python package CI remains opt-in/release-only. Shared MS
 packaging, dual-platform signed-feed publication and download selection are
 implemented; each release candidate must pass its actual hosted package gates.
 Pages reads public uploaded installer/Windows-trust/appcast metadata through
-`make website-release-data`, selects complete stable and preview releases
-separately, and refuses an incomplete requested publication tag. Static buttons
+`make website-release-data`. Pages collects all API pages with `gh api --paginate
+--slurp` and uses a separate `jq` filter to flatten pages and exclude drafts;
+GitHub CLI does not support combining `--slurp` with its `--jq` flag. It selects
+complete stable and preview releases separately, and refuses an incomplete requested publication tag. Static buttons
 link directly to installers; historical Mac-only releases never invent Windows
 assets. Feed authenticity remains a separate mandatory Pages gate.
 Windows website screenshots use the installed Microsoft Edge through Playwright;
@@ -1657,12 +1659,14 @@ Python application and its About/Dock identity use a stable project asset. The
 `envelope-rainbow` theme. GitHub Pages builds it from `main`; the workflow
 SHA-256 verifies the pinned Zola archive before extraction, resolves the newest
 published stable, alpha and beta assets into Zola data, then deploys a Pages artifact. The
-homepage enhances its generic download link with `downloads.js`. Published
-release metadata supplies exact URLs; stable installers are preferred, with
-preview installers offered before a stable release exists. Platform hints
-choose the macOS or Windows label. Mobile/unknown platforms and absent assets
-keep the generic releases URL. “Show all installers” stays beside the primary
-button, and explicit platform links remain accessible without JavaScript.
+homepage renders separate Windows and macOS download buttons as static links.
+Published release metadata supplies exact URLs; stable installers are preferred,
+with preview installers offered before a stable release exists. Both buttons
+remain visible on every platform, without JavaScript or browser detection.
+Absent assets use the generic releases URL with a static availability notice.
+“Show all installers” stays alongside both buttons. A preview-only primary
+release has a visible testing warning; Windows certificate instructions appear
+beside the buttons as well as in the additional-links disclosure.
 The website has no update-stream control or browser-local update preference.
 Both app Preferences panels use shared stream labels from `updates.py` and
 persist the existing `release`/`preview` channel through the document controller.
@@ -1670,7 +1674,7 @@ Sparkle's `allowedChannelsForUpdater_` reads that channel when checking;
 WinSparkle's gateway supplies it to the authenticated feed filter. Preview adds
 published alpha/beta/development builds while retaining stable updates.
 `make website-download-check` runs rendered Zola and real HTTP/browser checks
-for platform detection, missing assets, no-script fallback and responsive layout.
+for both static platform buttons, missing assets, scripting enabled/disabled and responsive layout.
 The home-page template uses a light rainbow design with capability and story cards
 and equal individual and archivist columns. The cover displays the text-free
 `images/cover-artwork.png` derived from the approved banner. CSS fits the
