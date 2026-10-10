@@ -13,6 +13,7 @@ from pathlib import Path
 from .api import ArchiveContext, ContentReference, PluginStatistics, ProcessingObject, RAW_MESSAGE, RunReport
 from ..catalog import PROCESSING_DATABASE as DATABASE
 from ..catalog import require_processing_schema
+from ..storage_sync import replace_file, sync_directory
 
 SCHEMA_RESOURCE = "V2__processing.sql"
 
@@ -41,7 +42,7 @@ def connect(archive: Path, *, create: bool = False, production: bool = False) ->
                 staging.close()
             if path.exists():
                 raise ValueError("initialization requires a fresh framework archive")
-            temporary.replace(path)
+            replace_file(temporary, path)
         finally:
             temporary.unlink(missing_ok=True)
     database = sqlite3.connect(path, check_same_thread=not production)
@@ -72,16 +73,13 @@ def snapshot(archive: Path, path: Path) -> ContentReference:
             target.flush()
             os.fsync(target.fileno())
         except BaseException:
+            target.close()
             temporary.unlink(missing_ok=True)
             raise
     reference = content_reference(temporary)
     final = destination / reference.sha256
-    temporary.replace(final)
-    descriptor = os.open(destination, os.O_RDONLY)
-    try:
-        os.fsync(descriptor)
-    finally:
-        os.close(descriptor)
+    replace_file(temporary, final)
+    sync_directory(destination)
     return ContentReference(path=final.resolve(), sha256=reference.sha256)
 
 

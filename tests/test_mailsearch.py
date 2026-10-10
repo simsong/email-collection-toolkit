@@ -5,11 +5,10 @@
 from __future__ import annotations
 
 import hashlib
-import mailbox
 import sqlite3
 import subprocess
 import sys
-from os import environ
+from os import environ, linesep
 from pathlib import Path
 
 import pytest
@@ -35,14 +34,15 @@ from mailarchiver.mailsearch import (
     search_header_page,
     search_headers,
 )
-from mailarchiver.mbox import add_message
+from mailarchiver.mbox import PreservingMbox, add_message
 from mailarchiver.search import index_message
 from mailarchiver.search_selectors import prepare_names
 
 
 def add_catalogued_message(archive: Path, message_pk: int, raw: bytes) -> None:
     path = mbox_directory(archive) / "2024-Archive1.mbox"
-    box = mailbox.mbox(path, create=True)
+    # Publish fixture bytes through the same newline-preserving archive writer.
+    box = PreservingMbox(path, create=True)
     try:
         location = add_message(box, path, raw)
     finally:
@@ -318,7 +318,8 @@ def test_mailsearch_limit_zero_and_number_print_original_message(tmp_path: Path)
         [sys.executable, "-m", "mailarchiver.mailsearch", "--archive", str(archive), "1"], capture_output=True, check=False
     )
     assert displayed.returncode == 0, displayed.stderr
-    assert displayed.stdout == render_message(raw, False, False).encode()
+    # Rendered CLI text uses host newlines; --mime below checks original bytes.
+    assert displayed.stdout == render_message(raw, False, False).replace("\n", linesep).encode()
 
 
 def test_mailsearch_listing_excludes_quarantine_categories(tmp_path: Path) -> None:

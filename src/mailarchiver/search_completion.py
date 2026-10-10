@@ -7,7 +7,10 @@ import shlex
 import sqlite3
 from pathlib import Path
 
+
 from pydantic import BaseModel, Field
+
+from .sqlite_paths import sqlite_uri
 
 from .search import SEARCH_CATEGORIES
 from .search_selectors import (
@@ -117,9 +120,9 @@ def search_suggestions(archive: Path, query: str, limit: int = 20) -> SearchSugg
     result = SearchSuggestions(query=query, prefix=prefix)
     if len(value) < 3:
         return result
-    database = sqlite3.connect(f"file:{archive / 'archive.sqlite3'}?mode=ro", uri=True)
+    database = sqlite3.connect(sqlite_uri(archive / 'archive.sqlite3'), uri=True)
     try:
-        database.execute("ATTACH DATABASE ? AS search", (f"file:{archive / 'search.sqlite3'}?mode=ro",))
+        database.execute("ATTACH DATABASE ? AS search", (sqlite_uri(archive / 'search.sqlite3'),))
         prepare_names(database, archive)
         spec = selector_for(tag) if tag else None
         if spec is None or spec.family == "address":

@@ -1,4 +1,9 @@
 # Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved.
+# Own selector recognition and bound predicates for CLI, GUI and completion.
+# Normalized text and worldwide calendar dates define the common reader contract.
+# Address, recipient, subject and date filters select candidates through indexes.
+# Live header, person and institution names come from read-only derived views.
+# Callers compose complete statements without changing canonical message bytes.
 """Shared selector recognition and indexed SQL for CLI, tiles and completion."""
 from __future__ import annotations
 
@@ -7,6 +12,8 @@ import sqlite3
 from collections.abc import Callable
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
+
+from .sqlite_paths import sqlite_uri
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict
@@ -130,11 +137,21 @@ def selector_for(tag: str) -> Selector | None:
     return next((spec for spec in SELECTORS if spec.tag == tag.lower()), None)
 
 
+ORGANIZATION_NAMES_SQL = """CREATE TEMP VIEW organization_address_names AS
+    WITH RECURSIVE suffixes(address,domain) AS MATERIALIZED (
+        SELECT address,domain FROM identities.addresses UNION ALL
+        SELECT address,substr(domain,instr(domain,'.')+1) FROM suffixes WHERE instr(domain,'.')>0)
+    SELECT a.address,o.name FROM identities.organization_domains d
+    CROSS JOIN identities.organizations o ON o.organization_id=d.organization_id
+    CROSS JOIN suffixes a ON a.domain=d.domain"""
+
+
 def prepare_names(database: sqlite3.Connection, archive: Path) -> None:
     """Read live identity edits and header names without rebuilding the content index."""
     sources = ["SELECT address, display_name AS name FROM search.address_suggestions"]
     if (archive / "processing.sqlite3").is_file():
-        database.execute("ATTACH DATABASE ? AS identities", (f"file:{archive / 'processing.sqlite3'}?mode=ro",))
+        database.execute("ATTACH DATABASE ? AS identities", (sqlite_uri(archive / 'processing.sqlite3'),))
+        database.execute(ORGANIZATION_NAMES_SQL)
         sources.extend((
             "SELECT a.address,p.canonical_name FROM identities.addresses a "
             "JOIN identities.person_addresses pa USING(address_id) JOIN identities.persons p USING(person_id)",
@@ -142,5 +159,6 @@ def prepare_names(database: sqlite3.Connection, archive: Path) -> None:
             "JOIN identities.person_addresses pa USING(address_id) JOIN identities.person_aliases n USING(person_id)",
             f"SELECT a.address,json_extract(e.value,'{EVIDENCE_NAME_PATH}') FROM identities.addresses a "
             "JOIN identities.evidence e USING(address_id) WHERE e.kind='header'",
+            "SELECT address,name FROM organization_address_names",
         ))
     database.execute("CREATE TEMP VIEW address_search_names AS " + " UNION ".join(sources))

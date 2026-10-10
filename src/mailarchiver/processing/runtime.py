@@ -112,7 +112,7 @@ def invoke(plugin: PluginSpec, item: ProcessingObject, installation_config: Path
 @contextmanager
 def invocation_deadline(item: ProcessingObject):
     """POSIX main-thread alarm supplements the portable cooperative deadline API."""
-    if threading.current_thread() is not threading.main_thread() or not hasattr(signal, "setitimer"):
+    if sys.platform == "win32" or threading.current_thread() is not threading.main_thread() or not hasattr(signal, "setitimer"):
         yield
         return
     previous = signal.getsignal(signal.SIGALRM)

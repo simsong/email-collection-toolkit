@@ -225,7 +225,7 @@ function installFrameFindShortcuts(frame) {
   const frameDocument = frame.contentDocument;
   if (!frameDocument) return false;
   frameDocument.addEventListener("keydown", event => {
-    if (!event.metaKey || event.altKey || !state.view) return;
+    if (!(event.metaKey || event.ctrlKey) || event.altKey || !state.view) return;
     if (event.key.toLowerCase() === "f") {
       event.preventDefault();
       void openMessageFind();
@@ -1338,7 +1338,7 @@ function navigateResults(event) {
 }
 
 function handleCommandShortcut(event) {
-  if (!event.metaKey || event.altKey) return;
+  if (!(event.metaKey || event.ctrlKey) || event.altKey) return;
   if (isTextInput(event.target) && event.target !== elements["message-find-query"]) return;
   if (event.key.toLowerCase() === "a" && !isTextInput(event.target)) {
     if (state.commandAContext === "results") {

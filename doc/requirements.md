@@ -2,6 +2,43 @@
 
 # Mail archive normalizer requirements
 
+Website screenshot validation uses purpose-made synthetic mail and a real
+browser: installed Edge on Windows, Playwright Chromium on other platforms.
+
+## Python webview comparison branch
+
+On `codex/python-webview`, macOS and Windows share the Python document controller,
+search, completion, verified message reader, and HTML interface. The first
+Windows deliverable is an x64 reader MSIX, including private Python and locked
+runtime dependencies; no Rust GUI or private Rust-to-Python worker is required.
+MSIX assembly must retain complete dependency licenses and reject unknown license
+evidence. Missing metadata labels require exact reviewed license-text evidence.
+WebView2 is external and missing/incompatible runtime startup must fail visibly,
+without falling back to Internet Explorer. Windows status publication must tolerate short-lived
+reader sharing conflicts with bounded retries, preserve the complete temporary
+file on failure, and retain a completed import status despite concurrent GUI polling.
+Windows Ctrl shortcuts complement
+macOS Command shortcuts. The complete GUI requires Windows archive creation,
+importing, processing and identity editing, plus bundled ClamAV and working
+definition updates. Reader packaging does not exclude these requirements.
+Windows archive selection must use the standard system Open dialog. Selecting
+any file or subdirectory inside a collection must open its enclosing archive,
+including legacy archive folders without the `.mailarchive` suffix. Invalid
+selections must report an error without modifying the selected file or archive.
+Windows mapped drives and UNC shares must open through standard Python SQLite.
+Validation, search and message reads must retain read-only database access and
+SQLite locking; URI-reserved characters in archive paths must remain literal.
+
+Reader operations must preserve every collection file, including databases.
+Explicit message/attachment exports and per-user saved searches are supported.
+The Python preview uses a separate package identity so it cannot upgrade or
+replace the Rust preview. Signing reuses the pinned test certificate; missing
+private-key access must fail, never generate an unrelated key. Versions derive
+from `pyproject.toml` using the shared release mapper. Native macOS, installed
+Windows activation, signing, and performance require their own evidence; a
+source test or unsigned payload is insufficient to claim those gates passed.
+
+
 ## Manual state and documentation status
 
 The archive has three operational databases: `archive.sqlite3` (catalog and
@@ -1846,6 +1883,17 @@ scanner portability remain implementation work, not shipped features.
 
 ### Application updates (issue #91)
 
+The Python Windows app uses WinSparkle with the shared release mapper, pinned
+Ed25519 key, and user update preferences. Authenticate complete appcast bytes
+before filtering to Windows x64 and package identity `ECT.PythonReader`; historical
+Rust packages must never be offered. Compatible enclosures carry
+`ect:packageIdentity` and `ect:architecture` in namespace
+`https://simsong.github.io/email-collection-toolkit/updates`. Native WinSparkle
+verifies the signed installer. Downloads and installation require user consent;
+installation must reserve the common cross-process archive-writer guard.
+Source launches allow manual discovery but must not run installers or automatic
+checks. User settings and updater state are separate from archived content.
+
 The frozen macOS app must use Sparkle's standard updater UI, with native
 Preferences… and Check for Updates… commands. Stable installations default to
 release-only; alpha/beta installations default to preview plus stable. Explicit
@@ -1946,6 +1994,15 @@ selected from another Python dependency. The mounted DMG self-test must fail
 when the native scanner or bundled `freshclam` updater cannot load. Both the
 definition updater and mounted updater test must pass an explicit temporary
 configuration, independent of any host ClamAV configuration.
+Windows scanner workers must load their private native dependencies before
+Python SSL imports, retain hard deadlines, and terminate with their owner.
+Definition initialization must work without a bundled baseline. Writable
+definitions and FreshClam state belong in the application's user data directory,
+never an archive. Publication requires real clean and EICAR verdicts; the bounded
+EICAR health sample may be scanned in memory to avoid host antivirus quarantine.
+CDN cooldown state must survive failures; a blocked refresh cannot replace the
+last validated generation. Explicit local seeding copies and validates definitions
+without modifying the source or clearing the downloader's cooldown state.
 Notarization failures must identify the failed stage and report Apple's
 validation issues without printing API-key material.
 
@@ -2135,7 +2192,7 @@ approval covers only the disclosed conflict and plan.
 
 Copilot review requests must use `gh` with the authorized `simsong` identity,
 not browser control. That exception is review-request-only; all other Codex
-GitHub writes retain `simsong-codex`. A successful command alone does not prove
+GitHub writes retain `simsong-agent`. A successful command alone does not prove
 that review was requested.
 
 Before pr-to-ready handoff, intended task changes and local-only commits in
@@ -2175,10 +2232,12 @@ import leaves the previous directory unchanged.
 
 ### Writer and desktop review boundary
 
-Current archive writing is supported on POSIX. Windows writing fails before
-creating an archive or lock metadata; the secure no-reparse-point implementation
-and native Windows subprocess validation are deferred to v1.1.0. The former
-untested msvcrt branch is removed; no Windows locking guarantee is claimed.
+Windows writing must preserve the same bytes and recovery semantics as POSIX.
+Native directory handles must reject reparse points and pin archive paths;
+single-link lock files and OS-owned shared/exclusive locks must protect writers
+and application installation. Windows MBOX input/output must not translate
+line endings according to the host OS. Scanner and native GUI acceptance remain
+required independently of storage tests.
 POSIX acquisition pins the archive/status directories and opens lock files
 relative to directory descriptors without following links. Lock files must be
 regular, single-link files. New targets are created under a parent-directory

@@ -34,6 +34,9 @@ def load_library(library: Path) -> c.CDLL:
 
 @lru_cache(maxsize=4)
 def engine_version(library: Path) -> str:
+    if os.name == "nt":
+        from .windows_scanner import probe_version
+        return probe_version(library)
     native = load_library(library)
     native.cl_retver.restype = c.c_char_p
     return native.cl_retver().decode("ascii")
@@ -92,6 +95,31 @@ class Engine:
         # All parsers; encrypted and over-limit inputs must not be reported clean.
         options = ScanOptions(CL_SCAN_GENERAL_HEURISTICS, 0xFFFFFFFF, CL_SCAN_HEURISTIC_INCOMPLETE, 0, 0)
         result = self.lib.cl_scanfile(os.fsencode(path), c.byref(name), None, self.engine, c.byref(options))
+        return self._verdict(result, name)
+
+    def scan_sample(self, sample: bytes) -> ScanEvidence:
+        """Scan a bounded validation sample without competing with host file scanners."""
+        if not sample or len(sample) > 65536:
+            raise ValueError("Validation samples must contain 1–65536 bytes")
+        self.lib.cl_fmap_open_memory.argtypes = [c.c_void_p, c.c_size_t]
+        self.lib.cl_fmap_open_memory.restype = c.c_void_p
+        self.lib.cl_fmap_close.argtypes = [c.c_void_p]
+        self.lib.cl_scanmap_callback.argtypes = [c.c_void_p, c.c_char_p, c.POINTER(c.c_char_p),
+            c.POINTER(c.c_ulong), c.c_void_p, c.POINTER(ScanOptions), c.c_void_p]
+        buffer = c.create_string_buffer(sample)
+        mapping = self.lib.cl_fmap_open_memory(buffer, len(sample))
+        if not mapping:
+            raise RuntimeError("ClamAV could not map the validation sample")
+        try:
+            name = c.c_char_p()
+            options = ScanOptions(CL_SCAN_GENERAL_HEURISTICS, 0xFFFFFFFF, CL_SCAN_HEURISTIC_INCOMPLETE, 0, 0)
+            result = self.lib.cl_scanmap_callback(mapping, b"validation-sample", c.byref(name),
+                                                  None, self.engine, c.byref(options), None)
+            return self._verdict(result, name)
+        finally:
+            self.lib.cl_fmap_close(mapping)
+
+    def _verdict(self, result: int, name: c.c_char_p) -> ScanEvidence:
         detail = name.value.decode("utf-8", "replace") if name.value else self.lib.cl_strerror(result).decode("utf-8", "replace")
         status: ScanStatus = "clean" if result == 0 else "infected" if result == 1 else "scanner-error"
         if result == 1 and detail.startswith(("Heuristics.Limits.Exceeded", "Heuristics.Encrypted")):

@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
 import tomllib
 from email.message import EmailMessage
 from pathlib import Path
@@ -82,7 +83,7 @@ def main() -> None:
         api = GuiApi(archive, work, preferences_file=work / "filter-sets.json")
         try:
             with sync_playwright() as playwright:
-                browser = playwright.chromium.launch()
+                browser = playwright.chromium.launch(channel="msedge" if sys.platform == "win32" else None)
                 try:
                     page = browser.new_page(viewport={WIDTH: 1440, HEIGHT: 960}, device_scale_factor=1)
                     bridge(page, api, SEARCH_METHODS)
@@ -153,7 +154,7 @@ def capture_site() -> None:
         route.fulfill(path=path)
 
     with sync_playwright() as playwright:
-        browser = playwright.chromium.launch()
+        browser = playwright.chromium.launch(channel="msedge" if sys.platform == "win32" else None)
         try:
             page = browser.new_page(viewport={WIDTH: 1440, HEIGHT: 1100})
             page.route("**/*", local_asset)

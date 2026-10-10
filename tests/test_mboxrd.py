@@ -6,14 +6,13 @@ See doc/MBOX_READING.md and doc/INTEGRITY_CONTROLS.md.
 """
 
 import hashlib
-import mailbox
 from contextlib import closing
 from pathlib import Path
 
 import pytest
 
 from e2e_tests.generate_corpus import generate
-from mailarchiver.mbox import add_message, read_verified_location
+from mailarchiver.mbox import PreservingMbox, add_message, read_verified_location
 from mailarchiver.mboxrd import quote, unquote
 from mailarchiver.pdf_mail import PdfMailExtraction, PrintedEmailRecord, write_pdf_mbox
 from mailarchiver.sources import source_files, source_messages
@@ -32,7 +31,7 @@ def test_publication_recovers_arbitrary_quote_depth(tmp_path: Path, newline: byt
         b">" * depth + b"From body\n" for depth in range(30)
     ) + b" From indented\n> From spaced\n\xff malformed MIME").replace(b"\n", newline) + ending
     path = tmp_path / "archive.mbox"
-    with closing(mailbox.mbox(path)) as box:
+    with closing(PreservingMbox(path)) as box:
         location = add_message(box, path, raw, envelope=ENVELOPE)
         expected = raw.replace(b">From malformed header", b">>From malformed header")
         for depth in range(29, -1, -1):
@@ -48,9 +47,10 @@ def test_mixed_legacy_and_mboxrd_recovery(tmp_path: Path) -> None:
     """Appending mboxrd must not reinterpret old mboxo records or require rewriting them."""
     raw = b"Subject: mixed\n\nFrom body\n>From literal\n>>From twice\n"
     path = tmp_path / "mixed.mbox"
-    with closing(mailbox.mbox(path)) as box:
-        legacy_key = box.add(ENVELOPE + raw)
-        box.flush()
+    # Fixed historical mboxo bytes, independent of the host's stdlib newline conversion.
+    path.write_bytes(ENVELOPE + raw.replace(b"\nFrom ", b"\n>From ") + b"\n")
+    with closing(PreservingMbox(path)) as box:
+        legacy_key = next(box.iterkeys())
         legacy_bytes = path.read_bytes()
         location = add_message(box, path, raw, envelope=ENVELOPE)
         assert path.read_bytes().startswith(legacy_bytes)

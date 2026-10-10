@@ -14,11 +14,15 @@ import zipfile
 from email import policy
 from email.message import Message
 from email.parser import BytesParser
-from pathlib import Path
+from pathlib import Path, PurePosixPath, PureWindowsPath
+from threading import Lock
+
 from urllib.parse import urlparse
 
 from bs4 import BeautifulSoup
 from pydantic import BaseModel, Field
+
+from .sqlite_paths import sqlite_uri
 
 from .search_completion import search_suggestions as search_suggestions
 from .gui_provenance import AttachedOrigin, attached_messages, attached_origins
@@ -38,6 +42,7 @@ from .message import decoded_message_header
 from .plugin_api import SourceContainerMetadata
 from .search import SEARCH_CATEGORIES, decoded_part, is_attachment
 
+_EXPORT_PUBLICATION_LOCK = Lock()
 PAGE_SIZE = 100
 IMMEDIATE_SEARCH_LIMIT = 2_000
 RAW_PART_ID = -1
@@ -233,7 +238,7 @@ def _highlight_terms(terms: SearchTerms) -> list[str]:
 
 def searchable_message_count(archive: Path) -> int:
     """Count deduplicated canonical messages visible to search."""
-    database = sqlite3.connect(f"file:{archive / 'archive.sqlite3'}?mode=ro", uri=True)
+    database = sqlite3.connect(sqlite_uri(archive / 'archive.sqlite3'), uri=True)
     try:
         row = database.execute(
             "SELECT count(*) FROM messages WHERE category IN (?, ?)", SEARCH_CATEGORIES
@@ -253,9 +258,9 @@ def message_previews(archive: Path, message_pks: list[int]) -> list[MessagePrevi
             seen.add(message_pk)
     if not unique_pks or len(unique_pks) > PAGE_SIZE:
         raise ValueError(f"request between 1 and {PAGE_SIZE} message previews")
-    database = sqlite3.connect(f"file:{archive / 'archive.sqlite3'}?mode=ro", uri=True)
+    database = sqlite3.connect(sqlite_uri(archive / 'archive.sqlite3'), uri=True)
     try:
-        database.execute("ATTACH DATABASE ? AS search", (f"file:{archive / 'search.sqlite3'}?mode=ro",))
+        database.execute("ATTACH DATABASE ? AS search", (sqlite_uri(archive / 'search.sqlite3'),))
         placeholders = ", ".join("?" for _ in unique_pks)
         rows = database.execute(
             "SELECT messages.message_pk, COALESCE(metadata.preview, '') FROM messages "
@@ -346,7 +351,7 @@ def describe_message(archive: Path, message_pk: int) -> MessageView:
 
 
 def message_catalog_date(archive: Path, message_pk: int) -> tuple[str, str]:
-    database = sqlite3.connect(f"file:{archive / 'archive.sqlite3'}?mode=ro", uri=True)
+    database = sqlite3.connect(sqlite_uri(archive / 'archive.sqlite3'), uri=True)
     try:
         row = database.execute("SELECT date_utc, date_source FROM messages WHERE message_pk = ?", (message_pk,)).fetchone()
         if row is None:
@@ -358,7 +363,7 @@ def message_catalog_date(archive: Path, message_pk: int) -> tuple[str, str]:
 
 def message_locations(archive: Path, message_pk: int) -> tuple[str | None, list[SourceLocation]]:
     """Return source discoveries and the canonical archive mailbox location."""
-    database = sqlite3.connect(f"file:{archive / 'archive.sqlite3'}?mode=ro", uri=True)
+    database = sqlite3.connect(sqlite_uri(archive / 'archive.sqlite3'), uri=True)
     try:
         archive_row = database.execute(
             "SELECT 'data/mbox/' || mbox_generations.filename, locations.byte_offset "
@@ -410,7 +415,7 @@ def location_display_path(path: str, offset: int | None) -> str:
 
 
 def _copy_path(volume_metadata: str, source_path: str, path_kind: str, source_plugin: str) -> str | None:
-    """Return a local source pathname suitable for the macOS pasteboard."""
+    """Preserve the source machine's path syntax when copying provenance as text."""
     if source_plugin != "file-folder" or path_kind == "provider":
         return None
     try:
@@ -420,10 +425,15 @@ def _copy_path(volume_metadata: str, source_path: str, path_kind: str, source_pl
     if not isinstance(metadata, dict):
         return None
     mount_path = metadata.get("current_mount_path")
-    if not isinstance(mount_path, str) or not Path(mount_path).is_absolute():
+    if not isinstance(mount_path, str):
         return None
-    source = Path(source_path)
-    return str(source if source.is_absolute() else Path(mount_path) / source)
+    if PureWindowsPath(mount_path).is_absolute():
+        source = PureWindowsPath(source_path)
+        return str(source if source.is_absolute() else PureWindowsPath(mount_path) / source)
+    if PurePosixPath(mount_path).is_absolute():
+        posix_source = PurePosixPath(source_path)
+        return str(posix_source if posix_source.is_absolute() else PurePosixPath(mount_path) / posix_source)
+    return None
 
 
 def _source_location(
@@ -533,7 +543,8 @@ def write_messages_zip(archive: Path, message_pks: list[int], destination: Path)
         with zipfile.ZipFile(temporary, "w", compression=zipfile.ZIP_DEFLATED) as output:
             for message_pk in unique:
                 output.writestr(export_filename(describe_message(archive, message_pk)), read_message_bytes(archive, message_pk))
-        temporary.replace(destination)
+        with _EXPORT_PUBLICATION_LOCK:
+            temporary.replace(destination)
     finally:
         temporary.unlink(missing_ok=True)
 
@@ -678,6 +689,7 @@ def _write_bytes(destination: Path, value: bytes) -> None:
             output.write(value)
             output.flush()
             os.fsync(output.fileno())
-        temporary.replace(destination)
+        with _EXPORT_PUBLICATION_LOCK:
+            temporary.replace(destination)
     finally:
         temporary.unlink(missing_ok=True)

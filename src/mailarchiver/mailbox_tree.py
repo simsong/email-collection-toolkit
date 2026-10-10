@@ -1,20 +1,31 @@
 # Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved.
+# Build folder selections from derived source observations, without changing mail.
+# Versioned tokens identify logical folders and optionally their source volume.
+# Saved filters share one per-user JSON format with the Rust desktop reader.
+# Mutations hold a stable companion-file OS lock before loading preferences.
+# Synced temporary-file replacement publishes complete snapshots to readers.
+# Closing the lock handle releases ownership after success, failure or a crash.
 
 """Build original-mailbox trees and persist per-user filter sets."""
 
 from __future__ import annotations
 
 import base64
+import importlib
 import json
 import os
 import sqlite3
 import sys
 import tempfile
+from collections.abc import Iterator
+from contextlib import contextmanager
 from itertools import groupby
 from pathlib import Path, PurePosixPath
 from typing import Literal
 
 from pydantic import BaseModel, Field, field_validator
+
+from .sqlite_paths import sqlite_uri
 
 FILTER_SET_VERSION = 1
 RESERVED_FILTER_NAMES = {"none", "save..."}
@@ -98,6 +109,22 @@ def preferences_path() -> Path:
     return root / "mailarchiver" / "filter-sets.json"
 
 
+@contextmanager
+def preferences_lock(path: Path) -> Iterator[None]:
+    """Serialize Python/Rust mutations using the same persistent companion file."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.with_suffix(".lock").open("a+b") as handle:
+        if os.name == "nt":
+            locking = importlib.import_module("msvcrt")
+            handle.seek(0)
+            locking.locking(handle.fileno(), locking.LK_LOCK, 1)
+        else:
+            locking = importlib.import_module("fcntl")
+            locking.flock(handle.fileno(), locking.LOCK_EX)
+        # The handle is never exposed or duplicated; close releases the OS lock.
+        yield
+
+
 class FilterSetStore:
     """Atomically maintain versioned search preferences outside the archive."""
 
@@ -113,34 +140,37 @@ class FilterSetStore:
         return preferences
 
     def save(self, filter_set: FilterSet) -> FilterSetPreferences:
-        preferences = self.read()
-        preferences.filter_sets = [item for item in preferences.filter_sets if item.name != filter_set.name]
-        preferences.filter_sets.append(filter_set)
-        preferences.filter_sets.sort(key=lambda item: item.name.casefold())
-        self._write(preferences)
-        return preferences
+        with preferences_lock(self.path):
+            preferences = self.read()
+            preferences.filter_sets = [item for item in preferences.filter_sets if item.name != filter_set.name]
+            preferences.filter_sets.append(filter_set)
+            preferences.filter_sets.sort(key=lambda item: item.name.casefold())
+            self._write(preferences)
+            return preferences
 
     def rename(self, old_name: str, new_name: str) -> FilterSetPreferences:
-        preferences = self.read()
-        replacement = FilterSet(name=new_name)
-        if any(item.name == replacement.name and item.name != old_name for item in preferences.filter_sets):
-            raise ValueError(f"filter set already exists: {replacement.name}")
-        target = next((item for item in preferences.filter_sets if item.name == old_name), None)
-        if target is None:
-            raise ValueError(f"no filter set named {old_name}")
-        target.name = replacement.name
-        preferences.filter_sets.sort(key=lambda item: item.name.casefold())
-        self._write(preferences)
-        return preferences
+        with preferences_lock(self.path):
+            preferences = self.read()
+            replacement = FilterSet(name=new_name)
+            if any(item.name == replacement.name and item.name != old_name for item in preferences.filter_sets):
+                raise ValueError(f"filter set already exists: {replacement.name}")
+            target = next((item for item in preferences.filter_sets if item.name == old_name), None)
+            if target is None:
+                raise ValueError(f"no filter set named {old_name}")
+            target.name = replacement.name
+            preferences.filter_sets.sort(key=lambda item: item.name.casefold())
+            self._write(preferences)
+            return preferences
 
     def delete(self, name: str) -> FilterSetPreferences:
-        preferences = self.read()
-        remaining = [item for item in preferences.filter_sets if item.name != name]
-        if len(remaining) == len(preferences.filter_sets):
-            raise ValueError(f"no filter set named {name}")
-        preferences.filter_sets = remaining
-        self._write(preferences)
-        return preferences
+        with preferences_lock(self.path):
+            preferences = self.read()
+            remaining = [item for item in preferences.filter_sets if item.name != name]
+            if len(remaining) == len(preferences.filter_sets):
+                raise ValueError(f"no filter set named {name}")
+            preferences.filter_sets = remaining
+            self._write(preferences)
+            return preferences
 
     def _write(self, preferences: FilterSetPreferences) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
@@ -161,7 +191,7 @@ class FilterSetStore:
 
 def mailbox_tree(archive: Path, show_volumes: bool = False) -> list[MailboxTreeNode]:
     """Return an eagerly counted tree derived from source observations."""
-    database = sqlite3.connect(f"file:{archive / 'archive.sqlite3'}?mode=ro", uri=True)
+    database = sqlite3.connect(sqlite_uri(archive / 'archive.sqlite3'), uri=True)
     try:
         rows = [
             SourceTreeFile(

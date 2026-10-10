@@ -26,13 +26,17 @@ class CommandResult(BaseModel):
 
 
 def _run(connection: Connection, command: list[str], timeout: float) -> None:
-    os.setsid()
+    if os.name == "nt":
+        from .windows_job import contain_current_process
+        contain_current_process()
+    else:
+        os.setsid()
     parent = multiprocessing.parent_process()
     assert parent is not None
 
     def watch_owner() -> None:
         wait([parent.sentinel])
-        os.killpg(os.getpid(), signal.SIGKILL)
+        _terminate_group()
 
     Thread(target=watch_owner, name="command-owner", daemon=True).start()
     try:
@@ -45,6 +49,13 @@ def _run(connection: Connection, command: list[str], timeout: float) -> None:
     finally:
         connection.close()
         # Also reap any utility descendants after errors or normal completion.
+        _terminate_group()
+
+
+def _terminate_group() -> None:
+    if os.name == "nt":
+        os._exit(0)  # Closing the supervisor's sole job handle reaps descendants.
+    else:
         os.killpg(os.getpid(), signal.SIGKILL)
 
 
@@ -71,7 +82,10 @@ def run_owned_command(command: list[str], *, timeout: float) -> CommandResult:
             worker.join(timeout=1)
             if worker.is_alive():
                 try:
-                    os.killpg(worker.pid, signal.SIGKILL)
+                    if os.name == "nt":
+                        worker.kill()
+                    else:
+                        os.killpg(worker.pid, signal.SIGKILL)
                 except ProcessLookupError:
                     worker.kill()
                 worker.join(timeout=1)

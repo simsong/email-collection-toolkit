@@ -7,6 +7,7 @@ import hashlib
 import os
 import signal
 import subprocess
+import sys
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from time import monotonic, sleep
@@ -22,6 +23,8 @@ from tests.test_quit import run_quit_probe
 
 def test_scanner_exits_with_owner_during_blocked_native_scan(tmp_path: Path) -> None:
     """Bounded GUI Quit must not orphan the native helper or its blocked scan threads."""
+    if sys.platform == "win32":
+        pytest.skip("POSIX FIFO blocking; Windows inherited-owner lifecycle is tested separately")
     try:
         assert run_quit_probe(tmp_path, "scanner") < 2
         pid = int((tmp_path / "scanner-pid").read_text())

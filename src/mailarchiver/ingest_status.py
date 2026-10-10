@@ -12,6 +12,8 @@ from uuid import uuid4
 
 from pydantic import BaseModel, Field, field_validator
 
+from .storage_sync import replace_file
+
 STATUS_FORMAT = "tag:simson.net,2026:mailarchiver/ingest-status"
 STATUS_VERSION = 1
 STATUS_DIRECTORY = "status"
@@ -153,7 +155,7 @@ class IngestStatusFile:
                 output.write("\n")
                 output.flush()
                 os.fsync(output.fileno())
-            temporary.replace(self.path)
+            replace_file(temporary, self.path)
         finally:
             temporary.unlink(missing_ok=True)
 

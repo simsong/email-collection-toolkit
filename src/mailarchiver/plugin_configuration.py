@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 import copy
-import fcntl
 import hashlib
+from importlib import import_module
 import json
 import os
 import tempfile
@@ -17,6 +17,7 @@ from yaml import YAMLError, safe_dump, safe_load
 
 from .application import application_preferences_path
 from .archive_config import config_path, load_archive_config
+from .storage_sync import replace_file, sync_directory
 
 ConfigValues = dict[str, JsonValue]
 ConfigScope = Literal["archive", "installation"]
@@ -129,18 +130,14 @@ def _atomic_write(path: Path, text: str) -> None:
             output.write(text)
             output.flush()
             os.fsync(output.fileno())
-        os.replace(temporary, path)
+        replace_file(Path(temporary), path)
         _sync_directory(path.parent)
     finally:
         Path(temporary).unlink(missing_ok=True)
 
 
 def _sync_directory(path: Path) -> None:
-    directory = os.open(path, os.O_RDONLY)
-    try:
-        os.fsync(directory)
-    finally:
-        os.close(directory)
+    sync_directory(path)
 
 
 def _prepare(archive: Path, transaction: ConfigTransaction) -> list[PreparedConfig]:
@@ -175,7 +172,12 @@ def _commit_config_transaction(archive: Path, transaction: ConfigTransaction) ->
         for path in sorted(paths):
             path.parent.mkdir(parents=True, exist_ok=True)
             lock = stack.enter_context(path.with_name(path.name + ".lock").open("a+b"))
-            fcntl.flock(lock.fileno(), fcntl.LOCK_EX)
+            if os.name == "nt":
+                from .windows_storage import lock as windows_lock
+                windows_lock(lock, blocking=True)
+            else:
+                fcntl = import_module("fcntl")
+                fcntl.flock(lock.fileno(), fcntl.LOCK_EX)
         prepared = _prepare(archive, transaction)
         archive.mkdir(parents=True, exist_ok=True)
         journal = archive / CONFIG_JOURNAL

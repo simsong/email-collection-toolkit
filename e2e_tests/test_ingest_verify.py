@@ -496,14 +496,20 @@ def test_native_smoke_report_keeps_the_primary_failure(tmp_path: Path) -> None:
 def terminate_process_group(process: subprocess.Popen[str]) -> tuple[str, str]:
     """Stop a timed-out smoke subprocess and collect its buffered output."""
     try:
-        os.killpg(process.pid, signal.SIGTERM)
+        if sys.platform == "win32":
+            process.terminate()
+        else:
+            os.killpg(process.pid, signal.SIGTERM)
     except ProcessLookupError:
         pass
     try:
         return process.communicate(timeout=5)
     except subprocess.TimeoutExpired:
         try:
-            os.killpg(process.pid, signal.SIGKILL)
+            if sys.platform == "win32":
+                process.kill()
+            else:
+                os.killpg(process.pid, signal.SIGKILL)
         except ProcessLookupError:
             pass
         return process.communicate()

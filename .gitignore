@@ -20,6 +20,9 @@ validation/samconfig.toml
 /ocr-text/
 *.p12
 *.cer
+*.pfx
+# This pinned public certificate is the existing historical test-signing identity.
+!scripts/win/test-signing.cer
 
 /var/pst/
 

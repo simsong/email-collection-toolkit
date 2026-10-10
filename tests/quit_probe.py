@@ -129,6 +129,8 @@ def main() -> None:
         if mode not in {"lock", "setup-lock"}:
             assert app.has_active_ingest(), "unknown state must still require confirmation"
     if mode == "startup":
+        if sys.platform == "win32":
+            raise RuntimeError("This startup probe requires POSIX FIFOs")
         document = controller.create_document(root / "startup-archive")
         assert document.path is not None
         session = controller.new_search_window(document)
@@ -167,6 +169,8 @@ def main() -> None:
             sleep(0.01)
         assert (root / "updater-pid").exists()
     if mode == "scanner":
+        if sys.platform == "win32":
+            raise RuntimeError("This blocked-scan probe requires POSIX FIFOs")
         from mailarchiver.scanner import ClamScanner  # pylint: disable=import-outside-toplevel
         scanner = ClamScanner(scan_temporary_directory=root)
         scanner.__enter__()

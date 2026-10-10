@@ -1,8 +1,16 @@
 /* Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved. */
 "use strict";
 
-window.addEventListener("pywebviewready", () => {
+window.addEventListener("pywebviewready", async () => {
   const api = window.pywebview.api;
+  const capabilities = await api.status();
+  if (capabilities.write_available === false) {
+    document.querySelector(".archive-tools").hidden = true;
+    for (const id of ["name-picker", "institution-picker", "processing-open"]) {
+      document.getElementById(id).hidden = true;
+    }
+    return;
+  }
   const dialog = document.getElementById("processing-dialog");
   const error = document.getElementById("processing-error");
   function showError(message) {

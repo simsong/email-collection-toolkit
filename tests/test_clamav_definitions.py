@@ -145,3 +145,18 @@ def test_selection_uses_newer_baseline_and_recovers_bad_manifest(tmp_path: Path)
     manifest.write_text(ActiveDefinitions(generation="../escape").model_dump_json())
     choice = choose_definitions(baseline, tmp_path)
     assert choice.definitions.source == "bundled" and "using baseline" in choice.warning
+
+
+def test_validated_user_generation_does_not_require_a_bundled_baseline(tmp_path: Path) -> None:
+    """First-run user storage becomes authoritative after native validation publishes it."""
+    with pytest.raises(ValueError, match="Update virus definitions"):
+        choose_definitions(None, tmp_path)
+    generation = tmp_path / "generations" / "candidate"
+    generation.parent.mkdir()
+    write_headers(generation)
+    manifest = tmp_path / "active.json"
+    manifest.write_text(ActiveDefinitions(generation="candidate").model_dump_json())
+    assert choose_definitions(None, tmp_path).definitions.directory == generation
+    manifest.write_text(ActiveDefinitions(generation="../escape").model_dump_json())
+    with pytest.raises(ValueError, match="Update virus definitions"):
+        choose_definitions(None, tmp_path)

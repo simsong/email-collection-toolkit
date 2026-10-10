@@ -23,7 +23,8 @@ from .layout import integrity_path, mbox_directory, mbox_path
 from .message import ParsedMessage, parse_date, raw_header_values
 from .mboxrd import quote, unquote
 from .search import delete_indexed_message
-from .standalone_verify import IntegrityMessage, write_integrity_file
+from .standalone_verify import IntegrityMessage, PreservingMbox as PreservingMbox, write_integrity_file
+from .storage_sync import replace_file, sync_directory
 
 
 class DiskFullError(RuntimeError):
@@ -61,7 +62,7 @@ def journal_publication(archive: Path, publication: PendingPublication) -> None:
         output.write(publication.model_dump_json())
         output.flush()
         os.fsync(output.fileno())
-    temporary.replace(target)
+    replace_file(temporary, target)
     _sync_directory(archive)
 
 
@@ -116,11 +117,7 @@ def recover_publication(archive: Path, catalog: sqlite3.Connection, search: sqli
 
 
 def _sync_directory(path: Path) -> None:
-    descriptor = os.open(path, os.O_RDONLY)
-    try:
-        os.fsync(descriptor)
-    finally:
-        os.close(descriptor)
+    sync_directory(path)
 
 
 def mailbox_name(parsed: ParsedMessage, category: str) -> str:
@@ -200,7 +197,7 @@ def add_message(
     try:
         key = box.add(framed)
         box.flush()
-        with path.open("rb") as persisted:
+        with path.open("r+b") as persisted:
             os.fsync(persisted.fileno())
         start, stop = message_offsets(box, key)
         return MboxLocation(byte_offset=start, byte_length=stop - start)

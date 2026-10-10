@@ -2,6 +2,83 @@
 
 # Mail archive normalizer implementation
 
+Windows website screenshots use the installed Microsoft Edge through Playwright;
+other platforms retain Playwright Chromium. All screenshots use synthetic mail.
+
+## Python webview comparison branch
+
+The experimental `codex/python-webview` branch starts from main and selectively
+reuses `work-rust-gui`'s deferred POSIX import, indexed attachment lookup,
+organization-name matching, saved-filter locking, and Windows MSIX tooling.
+`gui_app.py` remains the common host. `desktop_platform.py` adapts Windows
+clipboard, explicit file/URL opening, and WebView2 preflight. Windows starts with
+an archive-opening welcome window and reader menus; macOS retains its existing
+setup and menus. Ctrl and Command both invoke the reader's selection/find actions.
+Windows uses pywebview standard system Open file dialog. The common document
+controller resolves selected files/subdirectories to the nearest enclosing
+`.mailarchive` folder or folder containing an archive database, then performs
+normal database validation. A damaged nearer archive cannot fall through to an
+outer archive. Recent documents record the archive root, not the selected member.
+`sqlite_paths.sqlite_uri` preserves escaped filenames and places UNC servers in
+the URI path with an empty authority. This avoids the bundled SQLite rejection
+of network URI authorities after mapped-drive canonicalization. The GUI uses
+this helper for validation, search, completion, provenance and processing;
+readers use `mode=ro` and recovery/editing explicitly request `mode=rw`.
+`make check-archive-open ARCHIVE=...` validates member selections and reads one
+message through both display and canonical paths, without ingestion or recovery.
+New/Import, processing and identity controls now use the shared Python services.
+Windows leases use pinned non-reparse directory handles and LockFileEx; Windows
+publication flushes files and uses write-through renames with bounded retries for
+Windows sharing violations. Status writes use the same helper so GUI polling
+cannot permanently disable progress updates after a transient reader conflict.
+The stdlib MBOX subclass
+recognizes LF/CRLF separators independently of the host and writes framed bytes
+without stdlib newline translation. Temporary input files close before reopening.
+The initial Windows payload omitted ClamAV. Resource discovery now checks the
+private runtime, branch-local portable runtime and conventional Windows install.
+The updater supervisor uses a kill-on-close Windows job instead of POSIX groups.
+The MSIX builder now requires the native runtime and baseline definitions.
+Its runtime-license gate recognizes clr_loader's omitted metadata label only
+when the shipped full MIT text matches the reviewed SHA-256; unknown texts fail.
+Windows scanner startup uses an isolated interpreter that loads libclamav before
+application imports, avoiding Python's older same-named OpenSSL DLL. An inherited
+owner handle terminates the worker on parent exit; anonymous pipes retain typed
+requests and concurrent native scans. Version probing also runs in isolation.
+Small health-check samples use ClamAV's memory mapping API; normal archive input
+continues through file scans. Actual Windows clean/EICAR, concurrent verdicts,
+input preservation and startup-deadline checks pass through `make test-windows-scanner`.
+`make clamav-seed SEED_DIRECTORY=...` copies and validates a local baseline into
+`%LOCALAPPDATA%/Email Collection Toolkit/clamav/generations`. First-run refresh
+can bootstrap without bundled definitions. FreshClam diagnostics and CDN cooldown
+state survive failures; failed validation leaves the active generation unchanged.
+
+The MSIX contains x64 CPython and runtime-only locked dependencies, with an
+isolated `python312._pth`. Manifest activation runs `mailarchiver.desktop_entry`
+through private `pythonw.exe`; there is no Rust GUI executable. Shared GUI assets
+are inside the private runtime. `ECT.PythonReader` is distinct from `ECT.LocalTest`.
+The existing pinned certificate signer and bundle/install checks are adapted to
+x64. The Windows WinSparkle adapter shares update state/preferences and writer
+reservation with macOS Sparkle. A private tokenized loopback gateway validates
+complete feed signatures and selects only the Python x64 package identity.
+The SDK handles installer verification and confirmation; the app schedules daily
+checks in installed builds. Source launches permit manual checks only and refuse
+installer execution. Help contains Check for Updates and Update Settings.
+Actual SDK initialization and signed-feed filtering pass focused tests; an
+end-to-end signed Python package upgrade remains unvalidated. The published feed
+does not yet contain a Python Windows release. Native file drag remains unimplemented.
+Windows definition download remains blocked by a CDN cooldown during local
+acceptance; native scanning and validated local initialization pass. macOS
+acceptance remains unvalidated.
+macOS packaging remains the Python builder on main.
+
+`reader_fixture.py` constructs only a newly reserved synthetic fixture, without
+enabling the POSIX archive publisher on Windows. Make targets exercise shared
+search/render/export, byte preservation, native promise bridging, and relocated
+MSIX execution. [PYTHON_WEBVIEW.md](PYTHON_WEBVIEW.md) tracks actual validation
+and outstanding native/signing gates; earlier Rust packaging evidence is not
+evidence for this Python payload.
+
+
 ## Embedded antivirus migration status
 
 [PR #124](EMBEDDED_CLAMAV.md) uses libclamav directly from Python and Rust.
@@ -122,10 +199,12 @@ and CRLF without converting either representation, and retain lone CR content.
 CR characters in emailed program output can be terminal controls, so their
 presence alone does not identify a newline convention. The raw integrity hash
 continues to describe the stored message bytes; semantic-hash normalization is
-a separate derived calculation, not permission to rewrite mail. Windows archive
-writing remains unsupported. Before enabling it, both reading and writing must
-avoid platform newline translation, including the standard-library `mailbox`
-conversion path; passing bytes alone is not sufficient on Windows.
+a separate derived calculation, not permission to rewrite mail. `PreservingMbox`
+extends the standard-library container with platform-independent separator
+indexing and framed-byte publication. It is used by source ingestion, archive
+publication, index rebuilding and standalone verification on both platforms.
+This bypasses the standard-library Windows newline translation; passing bytes
+alone to an unmodified `mailbox.mbox` is insufficient.
 
 Use SHA-256 as the canonical hash.  A local OpenSSL 3.6.3 benchmark on this
 Apple Silicon host measured 2.74 GB/s for SHA-256 on 16 KiB blocks, versus
@@ -2749,7 +2828,7 @@ overlap. Potential conflicts require a concrete list and coordination plan plus
 explicit user approval; the ledger records the approved scope and subsequent
 checks before integration or publication. Separate worktrees do not waive this
 gate. Copilot review requests use `gh pr edit <number> --add-reviewer '@copilot'`
-as `simsong`, followed by restoration of `simsong-codex` for all other writes.
+as `simsong`, followed by restoration of `simsong-agent` for all other writes.
 Review-request timeline or reviewer evidence verifies the request; no browser
 control is used. Before handoff it inventories task checkouts, reconciles intended
 uncommitted changes and unpublished commits into the delivery branch, and records
