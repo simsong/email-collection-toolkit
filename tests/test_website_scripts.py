@@ -48,6 +48,7 @@ def test_pages_workflow_pins_and_checks_the_zola_archive() -> None:
     # PyYAML's YAML 1.1 resolver treats an unquoted "on" key as boolean True.
     triggers = configuration.get(WORKFLOW_ON, configuration.get(True))
     assert triggers["push"]["branches"] == ["main"]
+    assert triggers["push"]["paths-ignore"] == ["README.md", "doc/**"]
     assert "workflow_dispatch" in triggers
     assert triggers["workflow_dispatch"]["inputs"]["release_tag"]["required"] is False
     assert "workflow_call" not in triggers
@@ -56,7 +57,7 @@ def test_pages_workflow_pins_and_checks_the_zola_archive() -> None:
 
 
 def test_ci_runs_parallel_branch_jobs_without_building_a_dmg() -> None:
-    """Requirement: each non-main push runs independent static and test jobs without a DMG."""
+    """Requirement: CI reports on documentation-only pushes and skips its expensive jobs."""
     workflow = Path(__file__).parents[1] / ".github/workflows/continuous-integration.yml"
     text = workflow.read_text(encoding="utf-8")
 
@@ -66,10 +67,34 @@ def test_ci_runs_parallel_branch_jobs_without_building_a_dmg() -> None:
     assert "path: test-results" in text
     configuration = safe_load(text)
     triggers = configuration.get(WORKFLOW_ON, configuration.get(True))
-    assert triggers == {"push": {"branches": ["**", "!main"]}}
+    assert triggers == {
+        "push": {
+            "branches": ["**", "!main"],
+        }
+    }
     jobs = configuration[JOBS]
-    assert set(jobs) == {"static-rust", "python-browser"}
-    assert all(NEEDS not in job for job in jobs.values())
+    assert set(jobs) == {"ci-gate", "static-rust", "python-browser"}
+    gate = jobs["ci-gate"]
+    assert gate["outputs"]["run_checks"] == "${{ steps.check-changes.outputs.run_checks }}"
+    assert "if" not in gate
+    assert NEEDS not in gate
+    gate_steps = gate[STEPS]
+    assert gate_steps[0]["with"]["fetch-depth"] == 0
+    gate_script = next(step[RUN] for step in gate_steps if step.get("id") == "check-changes")
+    assert gate_steps[1]["env"] == {
+        "BASE_SHA": "${{ github.event.before }}",
+        "HEAD_SHA": "${{ github.sha }}",
+    }
+    assert '[[ "$BASE_SHA" =~ ^0+$ ]]' in gate_script
+    assert "git diff --quiet" in gate_script
+    assert ":(exclude)README.md" in gate_script
+    assert ":(exclude)doc/**" in gate_script
+    assert all(job[NEEDS] == "ci-gate" for job in jobs.values() if job is not gate)
+    assert all(
+        job["if"] == "${{ needs.ci-gate.outputs.run_checks == 'true' }}"
+        for job in jobs.values()
+        if job is not gate
+    )
     static_runs = [step.get(RUN, "") for step in jobs["static-rust"][STEPS]]
     test_runs = [step.get(RUN, "") for step in jobs["python-browser"][STEPS]]
     assert any("make check-static" in run for run in static_runs)
