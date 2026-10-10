@@ -416,14 +416,48 @@ def test_native_build_command_receives_mapped_identity_and_literal_arguments(mon
     from mailarchiver.release_versions import release_metadata
     from scripts.rust_release_metadata import BUILD, CHANNEL, FEED, PUBLIC_KEY, VERSION
     from mailarchiver.update_metadata import SPARKLE_FEED_URL, SPARKLE_PUBLIC_KEY
+    from scripts.macos_signing import RELEASE_SECRET_NAMES
 
     monkeypatch.setenv(BUILD, "incorrect inherited build")
+    for name in RELEASE_SECRET_NAMES:
+        monkeypatch.setenv(name, "synthetic-secret-must-not-reach-build")
     _, channel, build, display = release_metadata(tomllib.loads((ROOT / "pyproject.toml").read_text())["project"]["version"])
     names = (VERSION, BUILD, CHANNEL, FEED, PUBLIC_KEY)
     child = f"import os,sys; print(*(os.environ[name] for name in {names!r}), sep='\\n'); print(sys.argv[1:])"
+    child += f"; assert not any(name in os.environ for name in {RELEASE_SECRET_NAMES!r})"
     result = subprocess.run([sys.executable, ROOT / "scripts/rust_release_metadata.py", "--build-command",
                              sys.executable, "-c", child, "--child-option", "literal value"],
                             text=True, capture_output=True, check=True, timeout=15)
     assert result.stdout.splitlines() == [display, str(build), channel, SPARKLE_FEED_URL, SPARKLE_PUBLIC_KEY,
                                           "['--child-option', 'literal value']"]
     assert os.environ[BUILD] == "incorrect inherited build"
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows ClamAV preparation uses PowerShell")
+@pytest.mark.parametrize("changed", ["libclamav.dll", "dependency.dll", "extra.dll", "archive"])
+def test_cached_clamav_runtime_requires_verified_bytes(tmp_path: Path, changed: str) -> None:
+    """Cached runtime requirement: unchanged receipts cannot authorize modified bytes."""
+    import hashlib
+    import zipfile
+
+    script = tmp_path / "scripts/win/prepare_clamav.ps1"
+    script.parent.mkdir(parents=True)
+    cache = tmp_path / ".tmp/clamav-download/clamav-x64.zip"
+    cache.parent.mkdir(parents=True)
+    with zipfile.ZipFile(cache, "w") as archive:
+        for name in ("libclamav.dll", "dependency.dll", "freshclam.exe"):
+            archive.writestr("runtime/" + name, b"synthetic runtime bytes")
+    source = (ROOT / "scripts/win/prepare_clamav.ps1").read_text(encoding="utf-8")
+    checksum_line = next(line for line in source.splitlines() if line.startswith("$checksum = "))
+    source = source.replace(checksum_line, f"$checksum = '{hashlib.sha256(cache.read_bytes()).hexdigest()}'")
+    script.write_text(source, encoding="utf-8")
+    command = ["pwsh", "-NoProfile", "-File", str(script)]
+    subprocess.run(command, check=True, capture_output=True, timeout=30)
+    subprocess.run(command, check=True, capture_output=True, timeout=30)
+    target = cache if changed == "archive" else tmp_path / ".tmp/clamav-x64" / changed
+    target.write_bytes(b"tampered fixture")
+    result = subprocess.run(command, check=False, capture_output=True, text=True, timeout=30)
+    assert result.returncode != 0
+    assert any(message in result.stderr for message in (
+        "differs from verified archive", "Unexpected cached runtime file", "pinned upstream SHA-256"))
+    assert target.read_bytes() == b"tampered fixture"

@@ -2858,3 +2858,6 @@ the prior complete sidecar on permanent failure.
 
 WinSparkle shutdown requests must exit within the normal bounded Quit deadline
 while retaining the update writer reservation, including after a deferred Quit.
+
+Native build subprocesses must not inherit release signing secrets. Cached Windows
+ClamAV runtime files must match the checksum-verified upstream ZIP before reuse.

@@ -14,6 +14,10 @@ import tomllib
 
 from mailarchiver.release_versions import release_metadata
 from mailarchiver.update_metadata import SPARKLE_FEED_URL, SPARKLE_PUBLIC_KEY
+if __package__:
+    from scripts.macos_signing import release_safe_environment
+else:
+    from macos_signing import release_safe_environment
 
 VERSION = "ECT_RELEASE_VERSION"
 BUILD = "ECT_RELEASE_BUILD"
@@ -41,7 +45,7 @@ def main() -> None:
             command = command[1:]
         if not command:
             parser.error("A build command is required")
-        subprocess.run(command, env={**os.environ, **metadata}, check=True)
+        subprocess.run(command, env={**release_safe_environment(os.environ, ()), **metadata}, check=True)
     elif args.github_env:
         with Path(os.environ[GITHUB_ENV]).open("a", encoding="utf-8", newline="\n") as stream:
             for name, value in metadata.items():

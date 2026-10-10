@@ -962,3 +962,5 @@ Installed Windows acceptance invokes File/Quit through WinForms' MSAA menu provi
 
 - Fix WinSparkle installation shutdown after an accepted update or deferred Quit;
   avoid duplicate directory flushes and clarify the retired Rust import limit.
+
+- Filter signing secrets from native builds and verify cached ClamAV runtime bytes.

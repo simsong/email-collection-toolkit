@@ -12,21 +12,16 @@ $url = 'https://github.com/Cisco-Talos/clamav/releases/download/clamav-1.5.4/cla
 $cache = Join-Path $root '.tmp/clamav-download'
 $runtime = Join-Path $root '.tmp/clamav-x64'
 $receipt = Join-Path $runtime 'upstream-sha256.txt'
-if (Test-Path -LiteralPath $runtime) {
-    if ((Test-Path -LiteralPath $receipt) -and (Get-Content -LiteralPath $receipt -Raw).Trim() -eq $checksum) {
-        Write-Output "Portable ClamAV already prepared: $runtime"
-        exit 0
-    }
-    throw 'Existing ClamAV directory has no matching provenance; preserve it and inspect manually.'
-}
 New-Item -ItemType Directory -Path $cache -Force | Out-Null
 $zip = Join-Path $cache 'clamav-x64.zip'
 if (-not (Test-Path -LiteralPath $zip)) { Invoke-WebRequest -Uri $url -OutFile $zip }
 if ((Get-FileHash -LiteralPath $zip -Algorithm SHA256).Hash.ToLowerInvariant() -ne $checksum) {
     throw 'ClamAV archive does not match the pinned upstream SHA-256.'
 }
-$unpacked = Join-Path $cache ([guid]::NewGuid().ToString('N'))
-New-Item -ItemType Directory -Path $unpacked | Out-Null
+$reuse = Test-Path -LiteralPath $runtime
+$unpacked = if ($reuse) { $runtime } else { Join-Path $cache ([guid]::NewGuid().ToString('N')) }
+if (-not $reuse) { New-Item -ItemType Directory -Path $unpacked | Out-Null }
+$expected = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
 $archive = [IO.Compression.ZipFile]::OpenRead($zip)
 try {
     $libraries = @($archive.Entries | Where-Object { $_.Name -eq 'libclamav.dll' })
@@ -43,10 +38,31 @@ try {
         if (-not $destination.StartsWith($boundary, [StringComparison]::OrdinalIgnoreCase)) {
             throw 'Upstream ZIP member escapes the task runtime directory.'
         }
+        if (-not $expected.Add($destination)) { throw 'Duplicate runtime ZIP member.' }
+        if ($reuse) {
+            if (-not (Test-Path -LiteralPath $destination -PathType Leaf)) { throw "Missing cached runtime file: $relative" }
+            $stream = $entry.Open()
+            $hasher = [Security.Cryptography.SHA256]::Create()
+            try { $digest = [BitConverter]::ToString($hasher.ComputeHash($stream)).Replace('-', '') }
+            finally { $stream.Dispose(); $hasher.Dispose() }
+            if ((Get-FileHash -LiteralPath $destination -Algorithm SHA256).Hash -ne $digest) {
+                throw "Cached runtime differs from verified archive: $relative"
+            }
+            continue
+        }
         New-Item -ItemType Directory -Path ([IO.Path]::GetDirectoryName($destination)) -Force | Out-Null
         [IO.Compression.ZipFileExtensions]::ExtractToFile($entry, $destination)
     }
 } finally { $archive.Dispose() }
+if ($reuse) {
+    foreach ($file in Get-ChildItem -LiteralPath $runtime -File -Recurse -Force) {
+        if ($file.FullName -ne $receipt -and -not $expected.Contains($file.FullName)) {
+            throw "Unexpected cached runtime file: $($file.FullName)"
+        }
+    }
+    Write-Output "Verified cached portable ClamAV against upstream archive: $runtime"
+    exit 0
+}
 if (-not (Test-Path -LiteralPath (Join-Path $unpacked 'freshclam.exe'))) { throw 'Official archive lacks FreshClam.' }
 if (-not ([IO.Path]::GetFullPath($unpacked)).StartsWith(([IO.Path]::GetFullPath($cache).TrimEnd('\') + '\'), [StringComparison]::OrdinalIgnoreCase) -or
     [IO.Path]::GetFullPath($runtime) -ne [IO.Path]::GetFullPath((Join-Path $root '.tmp/clamav-x64'))) {

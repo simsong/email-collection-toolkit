@@ -3825,3 +3825,7 @@ WinSparkle uses an update-specific entry to the bounded Quit routine, which
 permits exit only while installation and its writer reservation remain active.
 Ordinary Sparkle Quit deferral stays unchanged. Shared replace_file already
 flushes POSIX directory metadata, so immediate duplicate flushes were removed.
+
+Native Rust metadata builds filter the shared release-secret names before adding
+public metadata. ClamAV reuse rehashes the ZIP and compares every retained file
+to its ZIP member, rejecting missing, changed, duplicate or additional files.
