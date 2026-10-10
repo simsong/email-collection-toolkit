@@ -8,6 +8,7 @@ param([Parameter(Mandatory=$true)][string]$BundleDirectory,
       [ValidateSet('x64')][string]$Architecture,
       [string]$EvidenceDirectory='dist/installed-evidence')
 $ErrorActionPreference='Stop'
+Add-Type -Path (Join-Path $PSScriptRoot 'NativeMenu.cs') -ReferencedAssemblies Accessibility
 $evidence = [IO.Path]::GetFullPath($EvidenceDirectory)
 New-Item -ItemType Directory -Path $evidence -ErrorAction Stop | Out-Null
 Start-Transcript -Path (Join-Path $evidence 'install.log') | Out-Null
@@ -101,24 +102,14 @@ try {
                 if ($closeAction -eq 'close') {
                     if (-not $process.CloseMainWindow()) { throw 'Installed GUI rejected ordinary Close' }
                 } else {
-                    # Invoke the actual File/Quit command through native accessibility.
-                    Add-Type -AssemblyName UIAutomationClient,UIAutomationTypes
-                    $window=[Windows.Automation.AutomationElement]::FromHandle($process.MainWindowHandle)
-                    $scope=[Windows.Automation.TreeScope]::Descendants
-                    $name=[Windows.Automation.AutomationElement]::NameProperty
-                    $file=$window.FindFirst($scope, [Windows.Automation.PropertyCondition]::new($name, 'File'))
-                    if (-not $file) { throw 'Installed Python GUI File menu is missing' }
-                    $expand=$file.GetCurrentPattern([Windows.Automation.ExpandCollapsePattern]::Pattern)
-                    $expand.Expand()
-                    $quit=$null
-                    $quitDeadline=[DateTime]::UtcNow.AddSeconds(5)
+                    # WinForms MenuStrip exposes MSAA even when UIA omits its items.
+                    $invoked=$false
+                    $quitDeadline=[DateTime]::UtcNow.AddSeconds(10)
                     do {
-                        $quit=$window.FindFirst($scope, [Windows.Automation.PropertyCondition]::new($name, 'Quit'))
-                        if (-not $quit) { Start-Sleep -Milliseconds 100 }
-                    } until ($quit -or [DateTime]::UtcNow -gt $quitDeadline)
-                    if (-not $quit) { throw 'Installed Python GUI Quit command is missing' }
-                    $invoke=$quit.GetCurrentPattern([Windows.Automation.InvokePattern]::Pattern)
-                    $invoke.Invoke()
+                        $invoked=[ECTNativeMenu]::InvokeQuit($process.MainWindowHandle)
+                        if (-not $invoked) { Start-Sleep -Milliseconds 100 }
+                    } until ($invoked -or [DateTime]::UtcNow -gt $quitDeadline)
+                    if (-not $invoked) { throw 'Installed Python GUI File/Quit command is missing' }
                 }
                 if (-not $process.WaitForExit(15000)) { throw 'Installed GUI did not quit' }
             } finally { if (-not $process.HasExited) { $process.Kill(); $process.WaitForExit() } }
