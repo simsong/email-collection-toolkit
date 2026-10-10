@@ -1,0 +1,5 @@
+From: sender@example.test
+Subject: Invalid UTF8
+Content-Type: text/plain; charset=utf-8
+
+ÿþ€

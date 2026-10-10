@@ -2837,6 +2837,21 @@ the worker legitimately stays on that path while advancing through messages.
 browser-acceptance, native-WKWebView, and optional XCUITest layers, including
 which layer owns macOS menu-bar verification.
 
+The four focused `tests/data/writer-preservation/2024/*.eml` samples retain the
+requested wire bytes, including CRLF, invalid UTF-8 and absent final newlines;
+Git text conversion is disabled for those files. The committed year component
+also lets the full corpus importer resolve their missing dates; public corpus
+expectations include the four messages and their fixture README. `test_portable_writer.py`
+checks repeated-source idempotence, separate hashes for the same Message-ID,
+path-year fallback and verified retrieval. The existing GUI-import acceptance
+in `e2e_tests/test_ingest_verify.py` imports the same files through the real
+application service, searches and renders each message through `GuiApi`,
+exports byte-identical EML, and runs the installed verifier under isolated
+Python. Run both with `make test-python-writer
+PYTEST_ARGS=e2e_tests/test_ingest_verify.py::test_gui_import_uses_typed_ingest_service_without_a_subprocess`.
+This focused storage test explicitly records unscanned mail; it does not claim
+ClamAV routing or native-window acceptance.
+
 Tests use small, hand-authored MBOX, Babyl, and EMLX fixtures covering mboxrd
 quoting, bounded terminal-preamble and MMDF-framed MBOX, silent empty/metadata
 files, MBOX-formatted files under Maildir paths, trimmed Received medians and

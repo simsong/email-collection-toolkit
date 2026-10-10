@@ -56,15 +56,17 @@ def test_atomic_publication_waits_for_readers_without_losing_files(tmp_path: Pat
 def test_create_import_preserves_original_bytes_and_source_idempotence(tmp_path: Path) -> None:
     source = tmp_path / "2024"  # Existing year-directory fallback for missing dates.
     source.mkdir()
-    messages = (
-        b"Message-ID: <duplicate@example.test>\r\nFrom: sender@example.test\r\nSubject: CRLF\r\n\r\nFrom original\r\n>From quoted\r\nunterminated",
-        b"Message-ID: <duplicate@example.test>\nFrom: sender@example.test\nSubject: Different content\n\nFrom body\n>From quoted\n",
-        b"From: sender@example.test\nSubject: Invalid UTF8\nContent-Type: text/plain; charset=utf-8\n\n\xff\xfe\x80\n",
-        b"From: sender@example.test\nSubject: Broken MIME\nContent-Type: multipart/mixed; boundary=absent\n\nRetained malformed mail",
-    )
+    # Requirements: exact raw bytes, duplicate IDs, best-effort MIME and path dates.
+    fixture_directory = Path(__file__).parent / "data/writer-preservation/2024"
+    messages = tuple((fixture_directory / name).read_bytes() for name in (
+        "duplicate-crlf.eml", "duplicate-lf.eml", "invalid-utf8.eml", "broken-mime.eml",
+    ))
     for index, raw in enumerate(messages):
         (source / f"{index}.eml").write_bytes(raw)
-    (source / "autosave.eml").write_bytes(b"From: sender@example.test\nX-Apple-Auto-Saved: 1\nSubject: Excluded draft\n\nDraft\n")
+    # Reuse the existing autosave sample instead of adding a fifth inline email.
+    (source / "autosave.emlx").write_bytes(
+        (fixture_directory.parent.parent / "emlx_maildir/2024/002-autosave.emlx").read_bytes()
+    )
     before = inventory(source)
     archive = tmp_path / "café collection.mailarchive"
     create_empty_archive(archive)
@@ -78,6 +80,13 @@ def test_create_import_preserves_original_bytes_and_source_idempotence(tmp_path:
             "SELECT m.message_pk,m.sha256,g.filename,l.byte_offset,l.byte_length "
             "FROM messages m JOIN locations l USING(message_pk) JOIN mbox_generations g USING(generation_pk)"
         ).fetchall()
+        metadata = database.execute(
+            "SELECT message_id_normalized,subject,date_source,date_utc,sha256 FROM messages"
+        ).fetchall()
+    assert sorted(row[1] for row in metadata) == ["Broken MIME", "CRLF", "Different content", "Invalid UTF8"]
+    assert sum(row[0] == "duplicate@example.test" for row in metadata) == 2
+    assert sum(row[0] == row[4] for row in metadata) == 2  # Absent IDs use the raw hash.
+    assert all(row[2] == "path-year" and row[3].startswith("2024-01-01") for row in metadata)
     assert len(rows) == len(messages)
     assert {row[1] for row in rows} == set(expected)
     for message_pk, digest, filename, offset, length in rows:

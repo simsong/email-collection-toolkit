@@ -15,6 +15,15 @@ dist/
 /target/
 .tmp
 data/
+# Publish only the focused synthetic preservation fixtures, not other local data.
+!/tests/data/
+/tests/data/*
+!/tests/data/writer-preservation/
+/tests/data/writer-preservation/*
+!/tests/data/writer-preservation/2024/
+/tests/data/writer-preservation/2024/*
+!/tests/data/writer-preservation/2024/*.eml
+!/tests/data/writer-preservation/README.md
 validation/samconfig.toml
 .aws-sam/
 /ocr-text/

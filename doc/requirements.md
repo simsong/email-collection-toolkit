@@ -144,6 +144,13 @@ directory, and a `data/mbox/` payload directory.
   there is no X-header exclusion from raw-message integrity. Document every
   digest's input, purpose and limits, and all added headers, in
   [INTEGRITY_CONTROLS.md](INTEGRITY_CONTROLS.md).
+* Preservation acceptance uses four committed byte fixtures under
+  `tests/data/writer-preservation/2024`: CRLF without a final newline, distinct LF
+  content sharing the same Message-ID, invalid declared UTF-8, and a missing
+  multipart boundary. The portable writer and production GUI import service
+  must retain all four, keep source files unchanged, export original bytes,
+  and pass independent archive verification. Missing dates use source-year
+  fallback; malformed MIME remains accessible as Raw Source.
 * Accept LF and CRLF input independently of the host operating system. Do not
   recode line endings in message headers, bodies, attachments, or existing
   delimiters during import, storage, or retrieval. Preserve lone CR characters:

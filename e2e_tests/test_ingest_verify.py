@@ -1,5 +1,10 @@
 # Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved.
 
+# Exercise CLI ingestion and the production desktop service with disposable mail.
+# Committed fixtures cover canonical bytes, search, rendering, and import lifecycle.
+# GUI bridge calls reach the real service without replacing it with a mock.
+# Independent installed verification checks the resulting BagIt/Mailbag archive.
+# Native acceptance is explicitly gated; headless checks do not claim native coverage.
 """Fresh-process ingest, verification, and native-search acceptance test."""
 
 from __future__ import annotations
@@ -35,7 +40,10 @@ from mailarchiver.gui_app import (
     NativeSmokeReport,
     PyWebViewApplication,
 )
+from mailarchiver.gui_service import MessageView, PartContent, SearchPage, write_message
+from mailarchiver.reader_fixture import inventory
 from mailarchiver.search import index_message
+from mailarchiver.standalone_verify import INSTALLED_NAME
 
 DATA = Path(__file__).parent / "data"
 PROCESSED_MESSAGE_COUNT = 210
@@ -326,18 +334,14 @@ def test_about_window_displays_version_disk_and_warnings(tmp_path: Path, page: P
 
 def test_gui_import_uses_typed_ingest_service_without_a_subprocess(tmp_path: Path) -> None:
     """Requirement: GUI Import publishes searchable mail through the shared typed service."""
-    source = tmp_path / "source"
+    source = tmp_path / "2024"
     source.mkdir()
-    (source / "message.eml").write_bytes(
-        b"Message-ID: <gui-import@example>\n"
-        b"From: owner@example.org\n"
-        b"To: reader@example.net\n"
-        b"Subject: GUI import\n"
-        b"Date: Wed, 03 Jan 2024 10:00:00 +0000\n\n"
-        b"Imported without a command-line subprocess.\n"
-    )
+    fixtures = Path(__file__).parents[1] / "tests/data/writer-preservation/2024"
+    for name in ("duplicate-crlf.eml", "duplicate-lf.eml", "invalid-utf8.eml", "broken-mime.eml"):
+        shutil.copyfile(fixtures / name, source / name)
+    before = inventory(source)
     owner_names = tmp_path / "owner-names.txt"
-    owner_names.write_text("owner@example.org\n", encoding="utf-8")
+    owner_names.write_text("sender@example.test\n", encoding="utf-8")
     controller = ApplicationController(ApplicationPreferencesStore(tmp_path / "preferences.json"))
     document = controller.create_document(tmp_path / "GUI.mailarchive")
     session = controller.new_search_window(document)
@@ -350,7 +354,8 @@ def test_gui_import_uses_typed_ingest_service_without_a_subprocess(tmp_path: Pat
         search_window=session,
     )
     try:
-        assert application.start_import(api, [source], owner_names)
+        # Storage acceptance is unscanned; real ClamAV routing has its own corpus.
+        assert application.start_import(api, [source], owner_names, scan_policy="not-scanned")
         deadline = time.monotonic() + 90
         while document.ingest_job is not None and time.monotonic() < deadline:
             time.sleep(0.05)
@@ -358,9 +363,39 @@ def test_gui_import_uses_typed_ingest_service_without_a_subprocess(tmp_path: Pat
         assert document.path is not None
         database = sqlite3.connect(document.path / "archive.sqlite3")
         try:
-            assert database.execute("SELECT COUNT(*) FROM messages").fetchone() == (1,)
+            assert database.execute("SELECT COUNT(*) FROM messages").fetchone() == (4,)
+            assert database.execute(
+                "SELECT COUNT(*) FROM messages WHERE message_id_normalized = ?",
+                ("duplicate@example.test",),
+            ).fetchone() == (2,)
         finally:
             database.close()
+        # Requirements: every fixture is searchable/readable and exports original bytes.
+        found = SearchPage.model_validate(api.search("from:sender@example.test"))
+        assert found.error is None and not found.has_more and len(found.results) == 4
+        for name, subject, body in (
+            ("duplicate-crlf.eml", "CRLF", "unterminated"),
+            ("duplicate-lf.eml", "Different content", "From body"),
+            ("invalid-utf8.eml", "Invalid UTF8", None),
+            ("broken-mime.eml", "Broken MIME", "Retained malformed mail"),
+        ):
+            result = SearchPage.model_validate(api.search(f'subject:"{subject}"'))
+            assert result.error is None and not result.has_more and len(result.results) == 1
+            view = MessageView.model_validate(api.message(result.results[0].message_pk))
+            assert view.subject == subject and view.date_source == "path-year"
+            part = PartContent.model_validate(api.part(view.message_pk, view.preferred_part_id))
+            assert part.content and part.kind == ("raw" if name == "broken-mime.eml" else "text")
+            if body is not None:
+                assert body in part.content
+            exported = tmp_path / f"exported-{name}"
+            write_message(document.path, view.message_pk, exported)
+            assert exported.read_bytes() == (fixtures / name).read_bytes()
+        verified = subprocess.run(
+            [sys.executable, "-I", str(document.path / INSTALLED_NAME), str(document.path)],
+            check=False, capture_output=True, text=True, timeout=30,
+        )
+        assert verified.returncode == 0, verified.stdout + verified.stderr
+        assert inventory(source) == before
         status = application.about_status()
         assert status.ingests[0].status is not None
         assert status.ingests[0].status.state == "completed"

@@ -187,6 +187,61 @@
           "sha256": "832e056ee7a7a0ee2ffd3ffca325948c3a92b0d252655c20c06c9b59275c4e4b"
         }
       ]
+    },
+    {
+      "path": "writer-preservation/2024/broken-mime.eml",
+      "sha256": "f91682d2e0486fa12f36a688cd8cc31e9c7167e67862bc12dc952ba9e910279a",
+      "observations": 1,
+      "excluded": 0,
+      "messages": [
+        {
+          "subject": "Broken MIME",
+          "sha256": "f91682d2e0486fa12f36a688cd8cc31e9c7167e67862bc12dc952ba9e910279a"
+        }
+      ]
+    },
+    {
+      "path": "writer-preservation/2024/duplicate-crlf.eml",
+      "sha256": "278458367da2ea5903baf3a69edfe63c13c180aec40a7a1115d2c28230f1f8d1",
+      "observations": 1,
+      "excluded": 0,
+      "messages": [
+        {
+          "subject": "CRLF",
+          "sha256": "278458367da2ea5903baf3a69edfe63c13c180aec40a7a1115d2c28230f1f8d1"
+        }
+      ]
+    },
+    {
+      "path": "writer-preservation/2024/duplicate-lf.eml",
+      "sha256": "ae7a5214d575546f032a2040f6ff126ae4331d433282d3f385d79fb819299b0e",
+      "observations": 1,
+      "excluded": 0,
+      "messages": [
+        {
+          "subject": "Different content",
+          "sha256": "ae7a5214d575546f032a2040f6ff126ae4331d433282d3f385d79fb819299b0e"
+        }
+      ]
+    },
+    {
+      "path": "writer-preservation/2024/invalid-utf8.eml",
+      "sha256": "5a83c7b99916a82e7788af94ff0f9a27a4597c955cce0a60d301ca263a7d0523",
+      "observations": 1,
+      "excluded": 0,
+      "messages": [
+        {
+          "subject": "Invalid UTF8",
+          "sha256": "5a83c7b99916a82e7788af94ff0f9a27a4597c955cce0a60d301ca263a7d0523"
+        }
+      ]
+    },
+    {
+      "path": "writer-preservation/README.md",
+      "sha256": "8c62a4fe522316d49eb722a367db494c787b23002b1595f463ee3a657013560f",
+      "observations": 0,
+      "excluded": 0,
+      "messages": []
     }
   ]
 }
