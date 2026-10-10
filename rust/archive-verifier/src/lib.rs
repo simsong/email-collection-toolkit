@@ -96,6 +96,17 @@ fn require_zero(connection: &Connection, sql: &str, description: &str) -> Result
     Ok(())
 }
 
+fn read_only_uri(path: &Path) -> Result<String> {
+    let mut uri =
+        url::Url::from_file_path(path).map_err(|()| anyhow::anyhow!("invalid search path"))?;
+    // SQLite rejects remote URI authorities; keep UNC servers in the path.
+    if let Some(host) = uri.host_str() {
+        return Ok(format!("file:////{host}{}?mode=ro", uri.path()));
+    }
+    uri.set_query(Some("mode=ro"));
+    Ok(uri.into())
+}
+
 pub fn verify_archive(root: &Path) -> Result<Report> {
     let root = root.canonicalize().context("archive directory")?;
     ensure!(
@@ -105,9 +116,7 @@ pub fn verify_archive(root: &Path) -> Result<Report> {
     let connection = open_catalog(&root)?;
     let search_path = contained_file(&root, &root.join("search.sqlite3"))?;
     require_quiescent_database(&search_path)?;
-    let mut search_uri = url::Url::from_file_path(search_path)
-        .map_err(|()| anyhow::anyhow!("invalid search path"))?;
-    search_uri.set_query(Some("mode=ro"));
+    let search_uri = read_only_uri(&search_path)?;
     connection.execute("ATTACH DATABASE ?1 AS search", [search_uri.as_str()])?;
     for schema in ["main", "search"] {
         let versions: Vec<i64> = connection
@@ -254,6 +263,42 @@ fn verify_search(connection: &Connection) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(windows)]
+    #[test]
+    fn unc_search_uri_keeps_server_in_path() -> Result<()> {
+        // UNC verification must use an empty SQLite URI authority and escape names.
+        for path in [
+            r"\\server\share\mail #%.mailarchive\search.sqlite3",
+            r"\\?\UNC\server\share\mail #%.mailarchive\search.sqlite3",
+        ] {
+            assert_eq!(
+                read_only_uri(Path::new(path))?,
+                "file:////server/share/mail%20%23%25.mailarchive/search.sqlite3?mode=ro"
+            );
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn search_uri_attaches_reserved_names_read_only() -> Result<()> {
+        // Verification must preserve database bytes and enforce read-only attachment.
+        let directory = tempfile::tempdir()?;
+        let path = directory.path().join("search #%.sqlite3");
+        Connection::open(&path)?
+            .execute_batch("CREATE TABLE fixture(value); INSERT INTO fixture VALUES (7);")?;
+        let before = file_sha256(&path)?;
+        let connection = Connection::open_in_memory()?;
+        connection.execute("ATTACH DATABASE ?1 AS search", [read_only_uri(&path)?])?;
+        assert_eq!(count(&connection, "SELECT value FROM search.fixture")?, 7);
+        assert!(connection
+            .execute("INSERT INTO search.fixture VALUES (8)", [])
+            .is_err());
+        drop(connection);
+        assert_eq!(file_sha256(&path)?, before);
+        assert_eq!(fs::read_dir(directory.path())?.count(), 1);
+        Ok(())
+    }
 
     #[test]
     fn wal_and_journals_are_rejected_without_archive_writes() -> Result<()> {

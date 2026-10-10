@@ -3829,3 +3829,7 @@ flushes POSIX directory metadata, so immediate duplicate flushes were removed.
 Native Rust metadata builds filter the shared release-secret names before adding
 public metadata. ClamAV reuse rehashes the ZIP and compares every retained file
 to its ZIP member, rejecting missing, changed, duplicate or additional files.
+
+Rust verifier SQLite attachments move UNC server names from URL authority into
+the path. make test-archive-verifier checks ordinary and extended UNC forms,
+reserved filename characters, enforced read-only access and unchanged bytes.

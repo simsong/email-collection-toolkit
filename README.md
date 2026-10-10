@@ -723,7 +723,8 @@ private Python helper discovery, external WebView2 detection, native Windows
 evidence and unresolved installation/import/scanner/converter requirements.
 This local prototype is not a released or fully validated Windows application.
 
-`CARGO_TARGET_DIR` optionally selects a reusable Cargo build cache.
+For direct Cargo commands, `CARGO_TARGET_DIR` selects a reusable build cache;
+for Make targets, use `RUST_TARGET_DIR` instead.
 `ECT_RUST_ENGINE_PYTHON` remains a development interpreter override; packaged
 builds otherwise discover their private Python beside the executable.
 

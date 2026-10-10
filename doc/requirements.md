@@ -2861,3 +2861,6 @@ while retaining the update writer reservation, including after a deferred Quit.
 
 Native build subprocesses must not inherit release signing secrets. Cached Windows
 ClamAV runtime files must match the checksum-verified upstream ZIP before reuse.
+
+The independent Rust verifier must attach search databases read-only for local
+and UNC archive paths, preserving reserved characters and original database bytes.

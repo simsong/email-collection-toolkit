@@ -964,3 +964,5 @@ Installed Windows acceptance invokes File/Quit through WinForms' MSAA menu provi
   avoid duplicate directory flushes and clarify the retired Rust import limit.
 
 - Filter signing secrets from native builds and verify cached ClamAV runtime bytes.
+
+- Correct read-only Rust verifier search database attachment for Windows UNC paths.

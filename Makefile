@@ -156,6 +156,12 @@ test-mime-transfer:
 test-rust:
 	$(CARGO_RUN) test --locked --workspace
 
+.PHONY: test-archive-verifier
+test-archive-verifier:
+	$(CARGO_RUN) fmt --check -p archive-verifier
+	$(CARGO_RUN) clippy --locked -p archive-verifier --lib -- -D warnings
+	$(CARGO_RUN) test --locked -p archive-verifier --lib
+
 export PST
 .PHONY: pst-input-check
 pst-input-check:
