@@ -233,7 +233,9 @@ def test_release_workflow_validates_built_distributions() -> None:
     validation_runs = [step.get("run", "") for step in pages_configuration[JOBS]["build"]["steps"]]
     validation_runs = [run for run in validation_runs if "make check-appcast" in run]
     assert len(validation_runs) == 1
-    assert all("ARGS=--require-signed-feed" in run for run in validation_runs)
+    assert all('ARGS="--require-signed-feed $platform_args"' in run for run in validation_runs)
+    assert 'endswith(".msixbundle")' in validation_runs[0]
+    assert 'platform_args="$platform_args --platform windows"' in validation_runs[0]
 
 
 def test_appcast_gate_rejects_missing_and_unsigned_release_items(tmp_path: Path) -> None:
@@ -248,6 +250,9 @@ def test_appcast_gate_rejects_missing_and_unsigned_release_items(tmp_path: Path)
                                            "v1.0.0a10/example.dmg",
                                        archive=SignedArchive(signature="signed", length=123)))
     check_appcast(appcast, "v1.0.0a10")
+    # A published Windows bundle requires a matching feed item, even if Mac is valid.
+    with pytest.raises(ValueError, match="exactly one signed item"):
+        check_appcast(appcast, "v1.0.0a10", expected_platforms=frozenset({"macos", "windows"}))
     appcast.write_text(appcast.read_text().replace('sparkle:edSignature="signed"', ''), encoding="utf-8")
     with pytest.raises(ValueError, match="unsigned"):
         check_appcast(appcast, "v1.0.0a10")

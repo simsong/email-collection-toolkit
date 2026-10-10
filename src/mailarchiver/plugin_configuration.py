@@ -193,7 +193,7 @@ def _commit_config_transaction(archive: Path, transaction: ConfigTransaction) ->
 def recover_config_transaction(archive: Path) -> None:
     journal = archive / CONFIG_JOURNAL
     if journal.exists():
-        _commit_config_transaction(archive, ConfigTransaction.model_validate_json(journal.read_text()))
+        _commit_config_transaction(archive, ConfigTransaction.model_validate_json(journal.read_bytes()))
 
 
 def apply_config_batch(archive: Path, namespaces: tuple[NamespaceWrites, ...],

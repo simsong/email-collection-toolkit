@@ -2864,3 +2864,7 @@ ClamAV runtime files must match the checksum-verified upstream ZIP before reuse.
 
 The independent Rust verifier must attach search databases read-only for local
 and UNC archive paths, preserving reserved characters and original database bytes.
+
+Plugin transaction recovery must decode UTF-8 journal bytes consistently on all
+platforms. Pages must require a Windows feed item when the selected published
+release includes a Windows bundle, while accepting historical Mac-only releases.

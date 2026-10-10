@@ -86,7 +86,13 @@ jobs:
             if [[ "$attempt" -eq 6 ]]; then exit 1; fi
             sleep "$attempt"
           done
-          make check-appcast APPCAST="$RUNNER_TEMP/latest-appcast.xml" RELEASE_TAG="$appcast_tag" ARGS=--require-signed-feed
+          platform_args="--platform macos"
+          windows_asset="$(gh release view "$appcast_tag" --repo "$GITHUB_REPOSITORY" \
+            --json assets --jq '.assets[] | select(.name | endswith(".msixbundle")) | .name')"
+          if [[ -n "$windows_asset" ]]; then
+            platform_args="$platform_args --platform windows"
+          fi
+          make check-appcast APPCAST="$RUNNER_TEMP/latest-appcast.xml" RELEASE_TAG="$appcast_tag" ARGS="--require-signed-feed $platform_args"
           cp "$RUNNER_TEMP/latest-appcast.xml" website/static/updates/mac/appcast.xml
       - name: Build Zola site
         run: zola --root website build --output-dir "$RUNNER_TEMP/mail-archiver-site"

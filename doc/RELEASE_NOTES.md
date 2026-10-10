@@ -966,3 +966,6 @@ Installed Windows acceptance invokes File/Quit through WinForms' MSAA menu provi
 - Filter signing secrets from native builds and verify cached ClamAV runtime bytes.
 
 - Correct read-only Rust verifier search database attachment for Windows UNC paths.
+
+- Preserve non-ASCII plugin settings during Windows recovery and validate published
+  Windows update-feed coverage during Pages deployment.

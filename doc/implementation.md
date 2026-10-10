@@ -3833,3 +3833,7 @@ to its ZIP member, rejecting missing, changed, duplicate or additional files.
 Rust verifier SQLite attachments move UNC server names from URL authority into
 the path. make test-archive-verifier checks ordinary and extended UNC forms,
 reserved filename characters, enforced read-only access and unchanged bytes.
+
+Plugin configuration recovery passes journal bytes directly to Pydantic JSON
+validation. Pages derives required appcast platforms from the selected release's
+assets before validating the signed feed; Windows bundles require Windows items.
