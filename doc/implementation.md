@@ -163,13 +163,16 @@ native loader's underlying error (PyInstaller's generic wrapper hides it).
 
 ## CI and release validation
 
-Existing static/Python runner jobs use macos-15; the Rust GUI matrix uses only
-macos-latest initially. Continuous integration runs `make check-static`
-and `make check-tests` in parallel jobs on each non-`main` repository branch
-push; local `make check` retains their order. CI has no PR/main duplicates.
-Forked PRs are not covered by that push trigger. An explicit `[release-ci]` head
-on `work-rust-gui` runs signed/notarized DMG and shared Windows package gates
-without publishing. Release publication requires a pushed, version-matching
+Ordinary runner jobs use macos-15. Continuous integration runs `make check-static`
+and `make check-tests` in parallel jobs on non-`main` branch pushes that change
+files outside `README.md` and `doc/RELEASE_NOTES.md`; local `make check` retains
+their order. Other documentation still runs validation. Pages also skips
+`main` pushes limited to those two files. CI has no PR/main duplicates.
+Forked PRs are not covered by that push trigger. An explicit `[release-ci]`
+head on any non-main branch runs signed/notarized DMG and Windows package gates
+independently of the changed-file filter, without publishing. Temporary PFX
+cleanup ownership is recorded before writing, so partial failed writes are
+removed as well as complete files. Release publication requires a version-matching
 annotated `v*` tag on `main` and invokes
 `make dmg`, which mounts the candidate and runs its headless installed-app
 self-test. Native GUI release checks remain an explicit local

@@ -2,15 +2,16 @@
 
 # Windows GUI: build and run
 
-The default Windows GUI is Python/pywebview using WebView2. Build native x64
-and ARM64 MSIX payloads with `scripts/win/build_windows_msix.ps1` (the equivalent
-Make entry point is `make msix-test ARGS="-Architecture x64"`). Each
-payload freezes the Python entry point and bundles its runtime, GUI assets and
+The default Windows GUI is Python/pywebview using WebView2. Build the x64-only
+MSIX payload with `make msix-test ARGS="-Architecture x64"`. It can run under
+Windows emulation on ARM64; there is no native ARM64 package. The
+payload bundles private CPython, the Python entry point, GUI assets and
 application dependencies. End users need WebView2, not a Python or Rust compiler.
 CI installs the shared test-signed bundle, exercises synthetic search/completion
 and byte retrieval, opens a native window, upgrades and uninstalls it. Certificate
-trust is explicit for alpha packages. Windows archive writing and native
-application update support remain separate unfinished work.
+trust is explicit for alpha packages. Archive writing uses the shared Python
+services. WinSparkle is integrated; an updater-driven signed package upgrade
+remains unvalidated, distinct from the package CI installation/upgrade checks.
 
 For source development use `uv sync --locked --all-groups`, then
 `uv run mailsearch-gui --archive PATH`. The Makefile `gui` target is equivalent.
@@ -64,7 +65,7 @@ Start with **x64 Windows CPython 3.12** on both kinds of machine. Windows 11 ARM
 can run x64 applications under emulation. This gives the VM and the initial x64
 customer build the same Python dependency architecture. An ARM64 `uv.exe` may
 manage x64 Python; the interpreter and its extension modules must agree on
-architecture. Native ARM64 packaging is a separate validation target.
+architecture. This project currently provides only the x64 package.
 [Microsoft emulation documentation](https://learn.microsoft.com/en-us/windows/arm/apps-on-arm-x86-emulation),
 [uv architecture guidance](https://docs.astral.sh/uv/concepts/python-versions/#transparent-x86_64-emulation-on-aarch64).
 

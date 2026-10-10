@@ -284,6 +284,8 @@ def test_startup_recovers_newest_recoverable_recent_archive(tmp_path: Path) -> N
 @pytest.mark.parametrize("outcome", ["complete", "abort"])
 def test_foreground_recovery_timer_long_wait_and_abort(page: Page, tmp_path: Path, outcome: Literal["complete", "abort"]) -> None:
     """Foreground requirement: real recovery outlasts 30s; Abort prevents opening."""
+    if sys.platform == "win32":
+        pytest.skip("POSIX process signals required")
     archive, _ = make_archive(tmp_path)
     mbox = next(archive.rglob("*.mbox"))
     mboxes = [(mbox, mbox.read_bytes())]
@@ -415,6 +417,8 @@ def test_abort_after_real_creation_before_acknowledgment_discards_only_staging(t
 @pytest.mark.skipif(os.name != "posix", reason="real SIGSTOP creation acknowledgment scheduling")
 def test_creation_commit_preserves_concurrent_destination_contents(tmp_path: Path) -> None:
     """Publication safety: another writer's destination files must never be replaced."""
+    if sys.platform == "win32":
+        pytest.skip("POSIX process signals required")
     archive = tmp_path / "concurrent.mailarchive"
     archive.mkdir()
     with opener(archive, tmp_path, create=True, before_create_reply=True) as (process, replies):

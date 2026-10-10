@@ -23,14 +23,14 @@ try {
         throw 'The signing secret does not match the pinned test certificate/private key.'
     }
     if ($cert.NotBefore.ToUniversalTime() -gt [DateTime]::UtcNow -or $cert.NotAfter.ToUniversalTime() -le [DateTime]::UtcNow) { throw 'The persistent test certificate is outside its validity period.' }
-    [IO.File]::WriteAllBytes($pfx, $bytes)
     $createdKey = $true
+    [IO.File]::WriteAllBytes($pfx, $bytes)
     [IO.File]::WriteAllBytes((Join-Path $directory 'local-test.cer'), $cert.Export([Security.Cryptography.X509Certificates.X509ContentType]::Cert))
     & (Join-Path (Get-WindowsSdkTools) 'signtool.exe') sign /fd SHA256 /f $pfx $Package
     if ($LASTEXITCODE) { throw 'Test package signing failed' }
     Get-FileHash -LiteralPath $Package -Algorithm SHA256
 } finally {
-    if ($createdKey) { Remove-Item -LiteralPath $pfx -Force }
+    if ($createdKey -and (Test-Path -LiteralPath $pfx)) { Remove-Item -LiteralPath $pfx -Force }
     if ($cert) { $cert.Dispose() }
     if ($expected) { $expected.Dispose() }
 }

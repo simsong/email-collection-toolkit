@@ -5,6 +5,9 @@ name: Build and deploy website
 on:
   push:
     branches: [main]
+    paths-ignore:
+      - README.md
+      - doc/RELEASE_NOTES.md
   workflow_dispatch:
     inputs:
       release_tag:

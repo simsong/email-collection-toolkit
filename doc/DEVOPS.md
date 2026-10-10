@@ -136,8 +136,8 @@ Windows packaging must be added rather than inferred from this baseline.
 
 | Workflow | Trigger | Gate and result |
 | --- | --- | --- |
-| [Continuous integration](../.github/workflows/continuous-integration.yml) | Every push to a non-`main` branch in this repository | Run `make check` (including all pytest suites), distribution checks, and website validation once per commit. No DMG build, signing, notarization, or release secrets. A PR becoming ready for review does not repeat pytest for an unchanged head. |
-| [Website](../.github/workflows/pages.yml) | Every push to `main`, including an accepted PR | Build and deploy the site, preserving the latest published Sparkle feed. No DMG build or release secrets. A merge updates Pages even when the PR changed no website file. |
+| [Continuous integration](../.github/workflows/continuous-integration.yml) | Push to a non-`main` repository branch | Ordinary checks skip changes limited to `README.md` and `doc/RELEASE_NOTES.md`. Other changes run static/tests, distribution and website validation. An explicit `[release-ci]` head independently runs DMG/MSIX/signature gates on any branch without publishing. |
+| [Website](../.github/workflows/pages.yml) | Push to `main` that changes files outside `README.md` and `doc/RELEASE_NOTES.md`, or manual `workflow_dispatch` | Build and deploy the site, preserving the latest published Sparkle feed. No DMG build or release secrets. Other documentation changes still deploy Pages. |
 | [Release](../.github/workflows/release.yml) | Push of an annotated `v...` tag at a version-matching commit already on `main` | Validate the tag before expensive work; build, sign, notarize, staple, and test the DMG once; publish the release with DMG and signed appcast; then build and deploy Pages as a dependent job using that exact appcast. A failed release job must not deploy Pages. |
 
 The `v*` trigger is only a coarse GitHub filter: `make release-tag-check`

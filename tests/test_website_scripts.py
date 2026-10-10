@@ -3,6 +3,7 @@
 """Verify project-website validation and workflow integrity controls."""
 
 import re
+import os
 from html.parser import HTMLParser
 import subprocess
 import sys
@@ -51,6 +52,7 @@ def test_pages_workflow_pins_and_checks_the_zola_archive() -> None:
     # PyYAML's YAML 1.1 resolver treats an unquoted "on" key as boolean True.
     triggers = configuration.get(WORKFLOW_ON, configuration.get(True))
     assert triggers["push"]["branches"] == ["main"]
+    assert triggers["push"]["paths-ignore"] == ["README.md", "doc/RELEASE_NOTES.md"]
     assert "workflow_dispatch" in triggers
     assert triggers["workflow_dispatch"]["inputs"]["release_tag"]["required"] is False
     assert "workflow_call" not in triggers
@@ -59,7 +61,7 @@ def test_pages_workflow_pins_and_checks_the_zola_archive() -> None:
 
 
 def test_ci_runs_parallel_branch_jobs_without_building_a_dmg() -> None:
-    """Requirement: each non-main push runs independent static and test jobs without a DMG."""
+    """Requirement: CI reports on documentation-only pushes and skips its expensive jobs."""
     workflow = Path(__file__).parents[1] / ".github/workflows/continuous-integration.yml"
     text = workflow.read_text(encoding="utf-8")
 
@@ -69,12 +71,39 @@ def test_ci_runs_parallel_branch_jobs_without_building_a_dmg() -> None:
     assert "path: test-results" in text
     configuration = safe_load(text)
     triggers = configuration.get(WORKFLOW_ON, configuration.get(True))
-    assert triggers == {"push": {"branches": ["**", "!main"]}}
+    assert triggers == {
+        "push": {
+            "branches": ["**", "!main"],
+        }
+    }
     jobs = configuration[JOBS]
-    assert set(jobs) == {"static-rust", "python-browser", "release-candidate"}
-    assert jobs["release-candidate"]["if"] == "github.ref == 'refs/heads/work-rust-gui' && contains(github.event.head_commit.message, '[release-ci]')"
+    assert set(jobs) == {"ci-gate", "static-rust", "python-browser", "release-candidate"}
+    # Release validation must work on any branch, including notes-only candidates.
+    assert jobs["release-candidate"]["if"] == "contains(github.event.head_commit.message, '[release-ci]')"
     assert jobs["release-candidate"]["uses"] == "./.github/workflows/release-candidate.yml"
-    assert all(NEEDS not in job for job in jobs.values())
+    assert NEEDS not in jobs["release-candidate"]
+    gate = jobs["ci-gate"]
+    assert gate["outputs"]["run_checks"] == "${{ steps.check-changes.outputs.run_checks }}"
+    assert "if" not in gate
+    assert NEEDS not in gate
+    gate_steps = gate[STEPS]
+    assert gate_steps[0]["with"]["fetch-depth"] == 0
+    gate_script = next(step[RUN] for step in gate_steps if step.get("id") == "check-changes")
+    assert gate_steps[1]["env"] == {
+        "BASE_SHA": "${{ github.event.before }}",
+        "HEAD_SHA": "${{ github.sha }}",
+    }
+    assert '[[ "$BASE_SHA" =~ ^0+$ ]]' in gate_script
+    assert "git diff --quiet" in gate_script
+    assert ":(exclude)README.md" in gate_script
+    assert ":(exclude)doc/RELEASE_NOTES.md" in gate_script
+    assert ":(exclude)doc/**" not in gate_script
+    ordinary_jobs = [jobs["static-rust"], jobs["python-browser"]]
+    assert all(job[NEEDS] == "ci-gate" for job in ordinary_jobs)
+    assert all(
+        job["if"] == "${{ needs.ci-gate.outputs.run_checks == 'true' }}"
+        for job in ordinary_jobs
+    )
     static_runs = [step.get(RUN, "") for step in jobs["static-rust"][STEPS]]
     test_runs = [step.get(RUN, "") for step in jobs["python-browser"][STEPS]]
     assert any("make check-static" in run for run in static_runs)
@@ -91,6 +120,46 @@ def test_ci_runs_parallel_branch_jobs_without_building_a_dmg() -> None:
             if definition == workflow and name == "rust-gui":
                 continue  # The explicit macos-latest matrix is checked above.
             assert job.get(RUNS_ON) == "macos-15" or "uses" in job, definition
+
+
+@pytest.mark.parametrize(("changed_file", "expected"), [
+    ("README.md", "false"),
+    ("doc/RELEASE_NOTES.md", "false"),
+    ("doc/USER_MANUAL.md", "true"),
+    ("doc/requirements.md", "true"),
+    ("src/example.py", "true"),
+])
+def test_ci_change_gate_runs_against_git_history(
+    tmp_path: Path, changed_file: str, expected: str,
+) -> None:
+    """Requirement: only README/release-note edits may skip ordinary CI."""
+    workflow = Path(__file__).parents[1] / ".github/workflows/continuous-integration.yml"
+    configuration = safe_load(workflow.read_text(encoding="utf-8"))
+    gate_steps = configuration[JOBS]["ci-gate"][STEPS]
+    script = next(step[RUN] for step in gate_steps if step.get("id") == "check-changes")
+
+    def git(*arguments: str) -> str:
+        return subprocess.run(
+            ["git", "-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid",
+             "-c", "commit.gpgsign=false", *arguments],
+            cwd=tmp_path, check=True, capture_output=True, text=True,
+        ).stdout.strip()
+
+    git("init")
+    git("commit", "--allow-empty", "-m", "base")
+    base = git("rev-parse", "HEAD")
+    changed = tmp_path / changed_file
+    changed.parent.mkdir(parents=True, exist_ok=True)
+    changed.write_text("fixture change\n", encoding="utf-8")
+    git("add", ".")
+    git("commit", "-m", "candidate")
+    output = tmp_path / "gate-output"
+    subprocess.run(
+        ["bash", "-c", script], cwd=tmp_path, check=True, capture_output=True, text=True,
+        env={**os.environ, "BASE_SHA": base, "HEAD_SHA": git("rev-parse", "HEAD"),
+             "GITHUB_OUTPUT": output.name},
+    )
+    assert output.read_text(encoding="utf-8").strip() == f"run_checks={expected}"
 
 
 def test_retired_reader_is_not_a_release_dependency() -> None:

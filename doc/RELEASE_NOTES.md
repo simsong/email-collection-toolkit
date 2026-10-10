@@ -23,6 +23,11 @@ the Windows runtime's complete license evidence before MSIX assembly.
 
 ## 1.0.0a18 (candidate)
 
+- Limit ordinary CI/Pages exclusions to README and release notes; validate other
+  documentation. Permit explicit release-candidate checks from any non-main
+  branch. Remove temporary signing keys even after a partial PFX write failure.
+  Correct Windows setup to describe the supported x64 Python package.
+
 - Restore Python/pywebview as the default desktop and DMG/MSIX entry point.
   Retire the Rust GUI from supported Cargo, CI and release builds without
   deleting its source or test history. Document the architecture, experiments,

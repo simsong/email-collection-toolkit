@@ -55,6 +55,8 @@ class Peer:
 @pytest.mark.skipif(os.name != "posix", reason="real FIFO coordinates the configuration read")
 def test_import_defaults_keep_the_revision_of_the_displayed_rules(tmp_path: Path) -> None:
     """Owner policy: a concurrent edit while reading source defaults must block import."""
+    if sys.platform == "win32":
+        pytest.skip("POSIX FIFO required")
     source = tmp_path / "source"
     source.mkdir()
     names = source / "owner-names.txt"
@@ -290,6 +292,8 @@ class Processor:
 @pytest.mark.skipif(os.name != "posix", reason="uses a real FIFO to hold startup before cancellation reset")
 def test_owner_eof_during_import_startup_is_latched(tmp_path: Path) -> None:
     """Owner loss during startup must not be reset or publish a new message."""
+    if sys.platform == "win32":
+        pytest.skip("POSIX FIFO required")
     archive = tmp_path / "startup.mailarchive"
     source = tmp_path / "source"
     source.mkdir()

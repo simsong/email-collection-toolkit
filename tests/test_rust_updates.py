@@ -88,6 +88,8 @@ def test_rust_installation_excludes_python_writers_and_cancellation_releases(tmp
 @pytest.mark.skipif(sys.platform != "darwin", reason="Cocoa shutdown policy")
 def test_native_deferred_install_waits_for_cleanup_and_recovers_from_failure(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Native update requirement: cleanup and external writers precede install; failure restores Quit."""
+    if sys.platform != "darwin":
+        pytest.skip("Cocoa shutdown policy requires macOS")
     configured = os.environ.get("RUST_WEBVIEW_BINARY")
     if not configured:
         pytest.skip("run make test-rust-updates")

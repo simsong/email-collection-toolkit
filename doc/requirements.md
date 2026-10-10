@@ -1447,15 +1447,16 @@ the command fails before reading or writing an archive.
 
 The Python GUI identifies itself as **Email Collection Toolkit** and uses the
 source-controlled rainbow-envelope icon in its native application identity.
-Current application development and all GitHub workflow jobs are macOS-only.
-Continuous integration runs on every non-`main` repository branch push, not
-again on its PR or merged `main` push; it does not build a DMG. Forked PRs
-currently need a separate CI policy. Release CI alone runs headless `make dmg`
-after a `v*` tag push; visible native release testing is an explicit local
-`make check-release` action. Website and release-assembly jobs also use macOS,
-including architecture-matched, checksum-verified Zola. All runner jobs in the
-continuous-integration workflow must use macOS; Windows and Linux validation
-are outside the current scope.
+Continuous integration runs on non-`main` repository branch pushes that change
+files outside `README.md` and `doc/RELEASE_NOTES.md`, not again on its PR or
+merged `main` push. Other documentation must still trigger validation. Pages
+also skips `main` pushes limited to those two files. An explicit `[release-ci]`
+head on any non-main branch must run DMG/MSIX/signature validation regardless
+of that filter, without publishing. Signing must remove temporary private-key
+material even if writing the PFX fails partway through. Forked PRs currently
+need a separate CI policy. Ordinary checks and website jobs use macOS with
+checksum-verified Zola; candidate validation additionally runs Windows x64.
+Release publication requires a version-matching `v*` tag on main.
 The required continuous-integration gate exercises the archive lifecycle and
 complete HTML interface in headless Chromium with disposable fixtures. Native
 Cocoa/WKWebView smoke testing is an explicit local macOS development check and
