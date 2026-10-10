@@ -7,9 +7,9 @@ description = "Changes to the Email Collection Toolkit website, separate from ap
 
 ## 2026-10-10
 
-- Add platform-aware installer labels and an adjacent **Show all installers**
-  button. Keep explicit platform links, unavailable-asset notices and no-script
-  fallback. Update-stream preferences belong in the application.
+- Display separate static **Download Windows installer** and **Download macOS
+  installer** buttons beside **Show all installers**, without platform detection
+  or JavaScript. Keep unavailable-asset notices and application update preferences.
 
 ## 2026-10-08
 

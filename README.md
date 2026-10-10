@@ -78,8 +78,9 @@ Pages within its `main` environment rule. After a transient Pages failure,
 rerun that workflow on `main`. Retire a failed unpublished tag only by explicit
 release decision; publish a corrected build under a new version and tag.
 
-The website suggests a macOS or Windows installer and offers **Show all
-installers** alongside it. Platform links remain available without scripting,
+The website displays separate **Download Windows installer** and **Download
+macOS installer** buttons, with **Show all installers** alongside them. All
+buttons work without scripting or browser detection,
 and the page states supported architectures. Update stream selection belongs
 in the app's Preferences panel: **Release only** or **Alpha / beta / development
 and release**. Both Sparkle and WinSparkle use that saved application preference.

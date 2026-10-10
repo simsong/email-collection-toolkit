@@ -13,14 +13,16 @@ The agreed release policy in [DEVOPS.md](DEVOPS.md) requires macOS-focused
 ordinary CI, explicit cross-platform test releases, concurrent Mac/Windows
 installer builds, coordinated publication through one signed appcast, and
 static direct-download buttons derived from complete published releases. Reject
-draft, absent, duplicate, incomplete-upload or wrong-URL installer metadata; keep
-preview downloads distinct and omit unavailable Windows downloads. The homepage
-has adjacent “Download macOS installer” or “Download Windows installer” and
-“Show all installers” buttons. Unknown platforms use “Download the installers”
-and the generic releases page; missing platform assets also use that page with
-an availability message. Generic and explicit platform links work without
-JavaScript. Browser hints do not establish hardware compatibility; the page
-states Apple Silicon macOS and x64 Windows requirements. The website has no
+draft, absent, duplicate, incomplete-upload or wrong-URL installer metadata.
+Preserve all paginated public releases before selecting a complete publication; keep
+preview downloads distinct. The homepage always displays separate “Download Windows
+installer” and “Download macOS installer” buttons beside “Show all installers”.
+Each platform button links directly to its available published installer; a
+missing asset falls back to the generic releases page with an availability
+notice. All three buttons work without JavaScript or platform detection. The
+page states Apple Silicon macOS and x64 Windows requirements, labels preview
+downloads visibly, and exposes Windows certificate-trust instructions beside
+the buttons before the additional-links disclosure. The website has no
 update-stream selector; that preference belongs in the application.
 These are release-workflow requirements, not evidence of Windows feature parity.
 Website screenshot validation uses purpose-made synthetic mail and a real

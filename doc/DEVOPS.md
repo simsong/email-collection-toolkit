@@ -107,19 +107,16 @@ its tag, rebuilding installers, or silently resetting the feed.
 ### Website downloads
 
 Generate installer metadata from public GitHub releases through
-`make website-release-data RELEASES_JSON=PATH`. JavaScript selects the primary
-button from browser platform hints:
+`make website-release-data RELEASES_JSON=PATH`. Always display three static links:
 
-- **Download macOS installer** or **Download Windows installer** links to the
-  matching uploaded asset.
-- **Download the installers** links to the generic releases page when the
-  platform cannot be identified.
-- **Show all installers** always links to the generic releases page beside it.
+- **Download Windows installer** links to the uploaded Windows bundle.
+- **Download macOS installer** links to the uploaded macOS DMG.
+- **Show all installers** links to the generic releases page beside them.
 
 Missing platform assets use the generic page with an availability notice.
-Explicit platform links and the generic fallback work without JavaScript.
-The page states Apple Silicon macOS and x64 Windows requirements; browser hints
-cannot prove hardware compatibility. Prefer complete stable releases, falling
+All buttons work without JavaScript or browser platform detection. Show a
+preview warning and Windows certificate-trust instructions beside these buttons.
+The page states Apple Silicon macOS and x64 Windows requirements. Prefer complete stable releases, falling
 back to clearly labeled previews before the first stable release. Nonempty,
 exactly named DMG/MSIX assets, the Windows trust ZIP and authenticated appcast
 are required for a complete release; a requested publication tag must be
