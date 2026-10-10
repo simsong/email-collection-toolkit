@@ -293,7 +293,7 @@ def test_zola_config_reports_read_failures(tmp_path: Path, failure: str) -> None
 
 
 def test_msix_same_bundle_is_installed_without_rebuilding() -> None:
-    """Windows release policy: explicit runs, shared artifact, two installs, no key upload."""
+    """Windows x64 policy: explicit runs, one reused artifact, no signing-key upload."""
     root = Path(__file__).parents[1]
     workflow = safe_load((root / ".github/workflows/windows-msix.yml").read_text(encoding="utf-8"))
     triggers = workflow.get("on", workflow.get(True))
@@ -303,8 +303,9 @@ def test_msix_same_bundle_is_installed_without_rebuilding() -> None:
     jobs = workflow[JOBS]
     assert jobs["bundle"][NEEDS] == "payload"
     assert jobs["install"][NEEDS] == "bundle"
-    assert jobs["install"]["strategy"]["matrix"]["include"] == [
-        {"os": "windows-latest", "arch": "x64"}, {"os": "windows-11-arm", "arch": "arm64"}]
+    expected_matrix = [{"os": "windows-latest", "arch": "x64"}]
+    assert jobs["payload"]["strategy"]["matrix"]["include"] == expected_matrix
+    assert jobs["install"]["strategy"]["matrix"]["include"] == expected_matrix
     install = jobs["install"][STEPS]
     downloads = [step for step in install if step.get("uses", "").startswith("actions/download-artifact@")]
     assert len(downloads) == 2
