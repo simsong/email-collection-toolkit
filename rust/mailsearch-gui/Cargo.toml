@@ -1,8 +1,9 @@
 # Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved.
-# Primary native desktop and independent archive reader.
+# Preserved retired Rust desktop experiment, excluded from the supported workspace.
+# The supported desktop uses the shared Python WebView implementation.
 # The library owns SQLite queries, verified MBOX reads, and display decoding.
 # Binaries connect that library to the existing web UI or an egui comparison.
-# Native ingest requests use the separately bundled private Python service.
+# Historical native ingest requests used a separately bundled Python service.
 # Synthetic fixtures and headless tests share the production read path.
 [package]
 name = "mailsearch-rust"
