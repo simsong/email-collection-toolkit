@@ -80,10 +80,11 @@ the remaining porting work.
 
 ## Batch import
 
-The Windows Rust GUI currently reads existing archives; it does not batch
-import. The Python importer explicitly refuses Windows archive writing, so
-there is no working Windows import command yet. Cargo's importer helper tools
-are not a replacement for the canonical archive writer.
+The retired Windows Rust GUI read existing archives and did not batch import.
+At that time the Python importer also refused Windows archive writing. The
+restored Python desktop now provides the shared Windows import path described
+in [Windows setup](../doc/WINDOWS.md). Cargo's historical helper commands were
+not a replacement for the canonical archive writer.
 
 For the currently implemented macOS batch workflow, see
 [Batch import from an external drive](../README.md#batch-import-from-an-external-drive).

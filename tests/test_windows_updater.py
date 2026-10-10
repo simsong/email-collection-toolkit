@@ -10,6 +10,8 @@ from __future__ import annotations
 import base64
 from importlib.metadata import version
 import os
+import subprocess
+import sys
 from pathlib import Path
 from urllib.error import HTTPError
 from urllib.request import urlopen
@@ -137,3 +139,38 @@ def test_native_sdk_initialization_and_source_install_fence() -> None:
     finally:
         backend.close()
     assert not backend.scheduler.is_alive() and not backend.gateway.thread.is_alive()
+
+@pytest.mark.skipif(os.name != "nt", reason="Actual WinSparkle shutdown callback")
+@pytest.mark.parametrize("already_quitting", [False, True])
+def test_native_update_shutdown_exits_with_reservation(tmp_path: Path, already_quitting: bool) -> None:
+    """Accepted Windows updates must exit even after an earlier deferred Quit."""
+    code = '''
+import os, sys, time
+from pathlib import Path
+from mailarchiver.application import ApplicationController, ApplicationPreferencesStore
+from mailarchiver.gui_app import PyWebViewApplication
+from mailarchiver.winsparkle import WinSparkleBackend
+root, library = Path(sys.argv[1]), Path(sys.argv[2])
+def exit_verified(status):
+    assert app._updating and app.updates.status.phase == 'installing'
+    try:
+        with app.writer_activity():
+            raise AssertionError('writer entered during installation')
+    except ValueError:
+        pass
+    (root / 'exited-with-reservation').write_text('verified', encoding='utf-8')
+    os._exit(status)
+app = PyWebViewApplication(ApplicationController(ApplicationPreferencesStore(root / 'preferences.json')), exit_process=exit_verified)
+app.updates.status.automatic_checks = False
+backend = WinSparkleBackend(app.updates, library, app.request_update_quit, installed=True)
+assert backend.ready_callback() == 1
+app._quitting = sys.argv[3] == 'True'
+backend.callbacks[0]()  # Registered native shutdown_request callback.
+time.sleep(15)
+raise AssertionError('native shutdown callback did not exit')
+'''
+    library = Path(__file__).parents[1] / ".tmp/winsparkle/WinSparkle.dll"
+    result = subprocess.run([sys.executable, "-c", code, str(tmp_path), str(library), str(already_quitting)],
+                            capture_output=True, text=True, timeout=10, check=False)
+    assert result.returncode == 0, result.stderr
+    assert (tmp_path / "exited-with-reservation").read_text(encoding="utf-8") == "verified"

@@ -63,7 +63,6 @@ def journal_publication(archive: Path, publication: PendingPublication) -> None:
         output.flush()
         os.fsync(output.fileno())
     replace_file(temporary, target)
-    _sync_directory(archive)
 
 
 def clear_publication_journal(archive: Path) -> None:

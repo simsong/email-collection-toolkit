@@ -2855,3 +2855,6 @@ Windows update settings must surface failed persistence and retain prior choices
 Candidate Windows appcasts must name the Python x64 package. Integrity sidecar
 publication must tolerate bounded transient Windows reader denial, preserving
 the prior complete sidecar on permanent failure.
+
+WinSparkle shutdown requests must exit within the normal bounded Quit deadline
+while retaining the update writer reservation, including after a deferred Quit.

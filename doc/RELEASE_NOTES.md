@@ -959,3 +959,6 @@ Installed Windows acceptance invokes File/Quit through WinForms' MSAA menu provi
 
 - Report failed Windows update-setting saves, validate candidate Windows package
   metadata, and retry transient Windows integrity-sidecar publication conflicts.
+
+- Fix WinSparkle installation shutdown after an accepted update or deferred Quit;
+  avoid duplicate directory flushes and clarify the retired Rust import limit.

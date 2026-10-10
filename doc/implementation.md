@@ -3820,3 +3820,8 @@ the asynchronous API returns failures to the existing status area. The release
 checker uses shared package constants to validate candidate Windows identity and
 architecture. Standalone integrity publication retries Windows sharing errors
 for at most two seconds without adding dependencies to the installed verifier.
+
+WinSparkle uses an update-specific entry to the bounded Quit routine, which
+permits exit only while installation and its writer reservation remain active.
+Ordinary Sparkle Quit deferral stays unchanged. Shared replace_file already
+flushes POSIX directory metadata, so immediate duplicate flushes were removed.

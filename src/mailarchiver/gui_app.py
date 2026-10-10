@@ -1486,7 +1486,7 @@ class PyWebViewApplication:
                 self.updates.status.channel = self.controller.initialize_updates(application_metadata().version)
             if sys.platform == "win32":
                 from .winsparkle import start_windows_updater
-                self._sparkle = start_windows_updater(self.updates, self.request_quit)
+                self._sparkle = start_windows_updater(self.updates, self.request_update_quit)
             else:
                 self._sparkle = start_installed_updater(self.updates)
         except (OSError, RuntimeError, ValueError) as error:
@@ -2288,9 +2288,17 @@ class PyWebViewApplication:
 
     def request_quit(self, *, confirm_ingest: bool = True) -> None:
         """Stop imports at message boundaries, allowing at most five seconds to exit."""
+        self._request_quit(confirm_ingest=confirm_ingest, update_install=False)
+
+    def request_update_quit(self) -> None:
+        """WinSparkle requires process exit while retaining the installation guard."""
+        if self.updates.status.phase == "installing" and self._updating:
+            self._request_quit(confirm_ingest=False, update_install=True)
+
+    def _request_quit(self, *, confirm_ingest: bool, update_install: bool) -> None:
         # Never wait for workers on Cocoa's event thread: they may still be
         # returning from a bridge callback that needs that same event loop.
-        if self._quitting:
+        if self._quitting and not update_install:
             return
         if not self.prepare_quit() and confirm_ingest and self.has_active_ingest():
             if sys.platform == "darwin":
@@ -2307,7 +2315,8 @@ class PyWebViewApplication:
         self._quitting = True
 
         def exit_if_allowed() -> None:
-            if not done.is_set() and self._quitting and self.updates.status.phase not in {"deferred", "installing"}:
+            allowed = (self.updates.status.phase == "installing" and self._updating) if update_install else self.updates.status.phase not in {"deferred", "installing"}
+            if not done.is_set() and self._quitting and allowed:
                 done.set()
                 self._exit_process(0)
 
@@ -2322,7 +2331,7 @@ class PyWebViewApplication:
             workers = tuple(self._import_threads)
             writers = tuple(self._writers)
             apis = tuple(self._apis.values())
-        if self.updates.status.phase in {"deferred", "installing"}:
+        if not update_install and self.updates.status.phase in {"deferred", "installing"}:
             # Sparkle owns termination/relaunch and may still cancel installation.
             return
         if not jobs and not writers and not apis and not any(worker.is_alive() for worker in workers):

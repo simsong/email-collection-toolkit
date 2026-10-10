@@ -86,7 +86,6 @@ def _write_atomic(path: Path, content: bytes) -> None:
             output.flush()
             os.fsync(output.fileno())
         replace_file(temporary, path)
-        _sync_directory(path.parent)
     except BaseException:
         temporary.unlink(missing_ok=True)
         raise
