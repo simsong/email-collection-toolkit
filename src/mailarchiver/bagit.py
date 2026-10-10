@@ -23,6 +23,7 @@ from pydantic import BaseModel
 from .layout import integrity_directory, mbox_directory
 from .mbox import IntegrityMessage, write_integrity_files
 from .standalone_verify import INSTALLED_NAME
+from .storage_sync import replace_file, sync_directory
 
 BAGIT_DECLARATION = "BagIt-Version: 1.0\nTag-File-Character-Encoding: UTF-8\n"
 BAG_INFO = "bag-info.txt"
@@ -74,11 +75,7 @@ class MailbagMessageMetadata(BaseModel):
 
 
 def _sync_directory(path: Path) -> None:
-    descriptor = os.open(path, os.O_RDONLY)
-    try:
-        os.fsync(descriptor)
-    finally:
-        os.close(descriptor)
+    sync_directory(path)
 
 
 def _write_atomic(path: Path, content: bytes) -> None:
@@ -88,7 +85,7 @@ def _write_atomic(path: Path, content: bytes) -> None:
             output.write(content)
             output.flush()
             os.fsync(output.fileno())
-        temporary.replace(path)
+        replace_file(temporary, path)
         _sync_directory(path.parent)
     except BaseException:
         temporary.unlink(missing_ok=True)
@@ -206,7 +203,7 @@ class MailbagCsvWriter:
         if self.rows != self.message_count:
             raise ValueError(f"expected {self.message_count} Mailbag rows, received {self.rows}")
         for temporary, destination in zip(self.temporary_paths, self.paths, strict=True):
-            temporary.replace(destination)
+            replace_file(temporary, destination)
         desired = {path.name for path in self.paths}
         for path in self.archive.glob("mailbag*.csv"):
             if path.name != MAILBAG_CSV and not MAILBAG_SPLIT_PATTERN.fullmatch(path.name):

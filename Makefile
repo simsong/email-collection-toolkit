@@ -1,6 +1,88 @@
 # Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved.
 
 .PHONY: benchmark-name-resolution check compare-apple-mail data-quality-audit data-quality-babyl-audit data-quality-summary extract-pdf-mail fixture-bagit fixture-e2e gui gui-smoke website-build-check website-check release-tag-check
+
+# Windows reader uses x64 CPython and the same GUI as macOS. MSIX_TEST_CERT_PFX_BASE64
+# supplies the pinned test key only to the explicit signer; never to the payload build.
+.PHONY: test-python-reader msix-test test-msix msix-bundle
+test-python-reader:
+	uv run --locked pytest -q tests/test_python_reader.py tests/test_sqlite_paths.py
+
+.PHONY: test-windows-package-entry
+test-windows-package-entry:
+	uv run --locked pytest -q tests/test_python_desktop_package.py
+
+.PHONY: test-python-reader-native
+.PHONY: test-python-writer
+.PHONY: test-updater-supervisor
+.PHONY: test-windows-scanner
+test-windows-scanner:
+	uv run --locked pytest -q tests/test_windows_scanner.py
+
+.PHONY: test-windows-updater
+test-windows-updater:
+	uv run --locked pytest -q tests/test_windows_updater.py
+
+.PHONY: check-windows-update-feed
+check-windows-update-feed:
+	uv run --locked python scripts/win/check_update_feed.py
+
+test-updater-supervisor:
+	uv run --locked pytest -q tests/test_clamav_definitions.py -k owned_updater
+
+.PHONY: test-definition-state
+test-definition-state:
+	uv run --locked pytest -q tests/test_clamav_definitions.py
+
+test-python-writer:
+	uv run --locked pytest -q tests/test_application.py tests/test_writer_lock.py tests/test_plugin_configuration.py tests/test_portable_writer.py $(PYTEST_ARGS)
+
+.PHONY: test-python-preservation
+test-python-preservation:
+	uv run --locked pytest -q tests/test_mboxrd.py tests/test_publication.py tests/test_sources.py tests/test_mbox_framing.py
+
+test-python-reader-native:
+	uv run --locked python scripts/test_python_reader_native.py $(ARGS)
+
+PYTHON_READER_SOURCES = src/mailarchiver/sqlite_paths.py src/mailarchiver/catalog.py \
+	src/mailarchiver/gui_service.py src/mailarchiver/gui_processing.py src/mailarchiver/mailsearch.py src/mailarchiver/search_completion.py \
+	scripts/check_archive_open.py tests/test_sqlite_paths.py tests/test_mailsearch.py tests/test_gui_service.py \
+	src/mailarchiver/application.py src/mailarchiver/desktop_entry.py src/mailarchiver/desktop_platform.py \
+	src/mailarchiver/reader_fixture.py src/mailarchiver/gui_app.py src/mailarchiver/gui_provenance.py \
+	src/mailarchiver/mailbox_tree.py src/mailarchiver/search_selectors.py src/mailarchiver/plugin_configuration.py \
+	src/mailarchiver/windows_storage.py src/mailarchiver/storage_sync.py src/mailarchiver/writer_lock.py src/mailarchiver/ingest_status.py \
+	src/mailarchiver/windows_job.py src/mailarchiver/owned_command.py src/mailarchiver/clamav_definitions.py \
+	src/mailarchiver/windows_scanner.py src/mailarchiver/scanner.py src/mailarchiver/libclamav.py src/mailarchiver/clamav_update.py tests/test_windows_scanner.py \
+	src/mailarchiver/winsparkle.py src/mailarchiver/windows_update_feed.py src/mailarchiver/windows_update_preferences.py tests/test_windows_updater.py \
+	scripts/win/check_update_feed.py scripts/website_screenshots.py scripts/check_runtime_licenses.py src/mailarchiver/processing/runtime.py \
+	e2e_tests/test_ingest_verify.py tests/quit_probe.py tests/test_scanner.py tests/test_standalone_verify.py tests/test_clamav_definitions.py \
+	src/mailarchiver/bagit.py src/mailarchiver/mbox.py src/mailarchiver/standalone_verify.py src/mailarchiver/sources.py \
+	src/mailarchiver/__main__.py src/mailarchiver/processing/store.py src/mailarchiver/processing/production.py tests/test_application.py \
+	tests/test_portable_writer.py tests/test_writer_lock.py \
+	src/mailarchiver/pdf_mail.py src/mailarchiver/validation.py scripts/data_quality/analyze_archive.py \
+	tests/test_mboxrd.py tests/test_publication.py tests/test_sources.py \
+	scripts/test_python_reader_native.py scripts/win/test_windows_msix.py tests/test_python_reader.py \
+	src/mailarchiver/windows_self_test.py scripts/update_appcast.py tests/test_python_desktop_package.py
+.PHONY: check-python-reader-static
+check-python-reader-static:
+	$(MAKE) ruff
+	PYTHONPATH="$(CURDIR)" uv run --locked pylint $(PYTHON_READER_SOURCES)
+	uv run --locked ty check $(PYTHON_READER_SOURCES) --error-on-warning
+	uv run --locked pyright $(PYTHON_READER_SOURCES) --warnings
+
+msix-test: ruff runtime-license-check
+	pwsh -NoProfile -File scripts/win/build_windows_msix.ps1 $(MSIX_ARGS)
+
+# Explicit dependency download only: no service installation or host PATH changes.
+.PHONY: prepare-windows-clamav
+prepare-windows-clamav:
+	pwsh -NoProfile -File scripts/win/prepare_clamav.ps1
+
+test-msix:
+	uv run --locked python scripts/win/test_windows_msix.py "$(MSIX_PACKAGE)" "$(MSIX_EVIDENCE)"
+
+msix-bundle:
+	pwsh -NoProfile -File scripts/win/bundle_test_msix.ps1 -InputDirectory "$(MSIX_PAYLOADS)" $(MSIX_ARGS)
 .PHONY: install-linux install-mac install-test-browser install-tika ocr-analyze ocr-experiment ocr-inventory ocr-profile ocr-run pylint run search summary-smoke test test-bagit test-data-quality
 .PHONY: test-application test-e2e test-encoding test-gui test-headers test-mailsearch test-native-gui test-native-html-find test-pdf-mail test-plugins test-progress test-provenance test-refresh-index test-tika test-website validation-aws-start validation-aws-start-all
 
@@ -405,7 +487,7 @@ test-native-application:
 .PHONY: check-archive-open
 check-archive-open:
 	@test -n "$(ARCHIVE)" || { echo 'usage: make check-archive-open ARCHIVE=/path/to/archive'; exit 2; }
-	uv run python -c 'import sys; from pathlib import Path; from mailarchiver.application import validate_archive; print(validate_archive(Path(sys.argv[1]))[0])' "$(ARCHIVE)"
+	uv run --locked python scripts/check_archive_open.py "$(ARCHIVE)"
 
 # RELEASES_JSON is public GitHub release/asset metadata, not credentials.
 # RELEASE_TAG optionally requires a complete published release before site deployment.
@@ -853,16 +935,6 @@ test-rust-updater:
 test-rust-engine:
 	uv run --locked pytest -q tests/test_rust_engine.py
 
-# Signing uses MSIX_TEST_CERT_PFX_BASE64 for the persistent private test PFX.
-# Windows-only local prototype; CARGO_TARGET_DIR selects the reusable Cargo cache.
-# MSIX_PACKAGE and MSIX_EVIDENCE name a test artifact and a new evidence directory.
-.PHONY: msix-test test-msix
-msix-test:
-	pwsh -NoProfile -File scripts/win/build_windows_msix.ps1 $(ARGS)
-
-test-msix:
-	uv run --locked python scripts/win/test_windows_msix.py "$(MSIX_PACKAGE)" "$(MSIX_EVIDENCE)"
-
 # RUST_WEBVIEW_BINARY selects the real dispatcher; tests never launch native windows.
 .PHONY: test-search-parity
 test-search-parity: rust-gui-build
@@ -886,3 +958,12 @@ rust-dmg rust-gui-build test-rust-gui test-rust-startup test-rust-gui-native che
 .PHONY: test-python-desktop-package
 test-python-desktop-package:
 	uv run --locked --group packaging pytest -q tests/test_python_desktop_package.py tests/test_packaging.py tests/test_macos_signing.py tests/test_website_scripts.py
+.PHONY: prepare-windows-updater
+prepare-windows-updater:
+	pwsh -NoProfile -File scripts/win/prepare_winsparkle.ps1 -Architecture x64 -OutputDirectory .tmp/winsparkle
+
+# SEED_DIRECTORY supplies a read-only local baseline; the app verifies its copy.
+.PHONY: clamav-seed
+clamav-seed:
+	@test -n "$(SEED_DIRECTORY)" || { echo 'Specify SEED_DIRECTORY containing existing ClamAV definitions'; exit 2; }
+	uv run --locked python -m mailarchiver.clamav_update --seed "$(SEED_DIRECTORY)"

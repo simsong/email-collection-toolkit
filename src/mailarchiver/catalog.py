@@ -8,6 +8,8 @@ import sqlite3
 from importlib import resources
 from pathlib import Path
 
+from .sqlite_paths import sqlite_uri
+
 SCHEMA_VERSION = 1
 SEARCH_SCHEMA_VERSION = 1
 ARCHIVE_SCHEMA = "V1__archive.sql"
@@ -216,7 +218,7 @@ def require_processing_schema(database: sqlite3.Connection) -> None:
 
 def validate_processing(path: Path) -> None:
     """Read the optional processing schema without creating or migrating it."""
-    database = sqlite3.connect(f"{path.as_uri()}?mode=ro", uri=True)
+    database = sqlite3.connect(sqlite_uri(path), uri=True)
     try:
         require_processing_schema(database)
     finally:
@@ -225,7 +227,7 @@ def validate_processing(path: Path) -> None:
 
 def validate_catalog(path: Path) -> None:
     """Validate the catalog schema and readable SQLite state without writing."""
-    database = sqlite3.connect(f"{path.resolve().as_uri()}?mode=ro", uri=True)
+    database = sqlite3.connect(sqlite_uri(path), uri=True)
     try:
         database.execute("PRAGMA query_only = ON")
         tables = _tables(database)
@@ -237,7 +239,7 @@ def validate_catalog(path: Path) -> None:
 
 def validate_search(path: Path) -> None:
     """Validate the disposable search schema and readable SQLite state without writing."""
-    database = sqlite3.connect(f"{path.resolve().as_uri()}?mode=ro", uri=True)
+    database = sqlite3.connect(sqlite_uri(path), uri=True)
     try:
         database.execute("PRAGMA query_only = ON")
         tables = _tables(database)

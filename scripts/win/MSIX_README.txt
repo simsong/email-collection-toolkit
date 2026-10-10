@@ -16,8 +16,8 @@ Email Collection Toolkit - Windows alpha installer
    powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\Install-Test-Certificate.ps1
 
 3. Double-click base.msixbundle and choose Install.
-   Windows selects the x64 or ARM64 application automatically.
-4. Launch Email Collector Toolkit (ECT) from the Start menu.
+   This package contains the x64 Python reader.
+4. Launch Email Collection Toolkit (Python Preview) from the Start menu.
 
 If double-click installation is unavailable, open an ordinary PowerShell
 window in the extracted folder and run:
@@ -32,11 +32,10 @@ https://developer.microsoft.com/microsoft-edge/webview2/#download
 For a disconnected machine, transfer the appropriate standalone installer
 from a connected computer and install it before running ECT.
 
-Windows importing is not yet enabled. Reading and search run in Rust;
-the isolated bundled Python service supplies archive metadata operations.
-Update discovery authenticates the shared feed; WinSparkle confirms downloads
-and verifies their Ed25519 signatures before opening the Windows installer.
-Read the published release's CI installation evidence for both architectures.
+Windows importing is not yet enabled. Reading and search use the same Python
+services and webview interface as macOS. This preview has a separate package
+identity and does not replace the Rust preview. Automatic Windows updates
+are not yet implemented; install later signed previews manually.
 
 Files: base.msixbundle is the only installer; local-test.cer is its public
 certificate; sha256.json contains checksums. No upgrade fixture is needed

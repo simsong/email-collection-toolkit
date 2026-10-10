@@ -28,6 +28,12 @@ def test_packaged_reader_uses_production_search_and_completion(tmp_path: Path) -
     dispatched = WindowsReport.model_validate_json((output / "report.json").read_text())
     assert dispatched.search_count == report.search_count
     assert dispatched.archive_sha256 == report.archive_sha256
+    isolated = tmp_path / "isolated"
+    subprocess.run([sys.executable, "-I", "-m", "mailarchiver.desktop_entry", "--msix-test", isolated],
+                   check=True, timeout=30)
+    activated = WindowsReport.model_validate_json((isolated / "report.json").read_text())
+    assert activated.installed_msix_tested and activated.processor_count == report.processor_count
+    assert activated.archive_sha256 == report.archive_sha256
 
 
 def test_supported_builds_select_python_and_keep_rust_tools() -> None:

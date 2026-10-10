@@ -25,6 +25,8 @@ from typing import Literal
 
 from pydantic import BaseModel, Field, field_validator
 
+from .sqlite_paths import sqlite_uri
+
 FILTER_SET_VERSION = 1
 RESERVED_FILTER_NAMES = {"none", "save..."}
 
@@ -189,7 +191,7 @@ class FilterSetStore:
 
 def mailbox_tree(archive: Path, show_volumes: bool = False) -> list[MailboxTreeNode]:
     """Return an eagerly counted tree derived from source observations."""
-    database = sqlite3.connect(f"file:{archive / 'archive.sqlite3'}?mode=ro", uri=True)
+    database = sqlite3.connect(sqlite_uri(archive / 'archive.sqlite3'), uri=True)
     try:
         rows = [
             SourceTreeFile(

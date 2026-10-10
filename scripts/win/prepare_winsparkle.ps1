@@ -7,7 +7,7 @@
 # CI and local ABI validation share this same staging operation.
 param(
     [Parameter(Mandatory = $true)]
-    [ValidateSet('ARM64', 'x64')]
+    [ValidateSet('x64')]
     [string]$Architecture,
     [Parameter(Mandatory = $true)]
     [string]$OutputDirectory

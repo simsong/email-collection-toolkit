@@ -1,5 +1,45 @@
 <!-- Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved. -->
 
+## Python webview comparison branch
+
+`codex/python-webview` keeps the shared Python GUI on macOS and adds an x64
+Windows reader using WebView2. `make gui` runs the shared application;
+`make test-python-reader` and `make test-python-reader-native` validate synthetic
+reading/export and the native bridge. Windows New/Import now uses the common
+Python engine with native locks and byte-preserving MBOX I/O. See
+[the comparison notes](doc/PYTHON_WEBVIEW.md) for validation and remaining gaps.
+
+`make prepare-windows-clamav` explicitly downloads the pinned official portable
+x64 runtime into `.tmp/clamav-x64`; it installs no service. `make clamav-update`
+fetches and validates definitions in application-specific user storage, outside
+archives. `make clamav-seed SEED_DIRECTORY=...` copies an existing baseline and
+validates it without modifying the source or clearing CDN cooldown state.
+`make freshclam` prepares `etc/clamdb` for packaging. Native runtime and baseline
+definitions are prerequisites for the MSIX builder, which requires and bundles
+the runtime and definitions. Existing `MAILARCHIVER_CLAMAV_LIBRARY`,
+`MAILARCHIVER_FRESHCLAM`, `MAILARCHIVER_CLAMAV_DATABASE`,
+`MAILARCHIVER_CLAMAV_CERTIFICATES`, and `MAILARCHIVER_CLAMAV_UPDATES` override
+the engine, updater, baseline databases, signing-certificate directory, and
+per-user definition-update location respectively.
+
+`make prepare-windows-updater` prepares the pinned WinSparkle DLL and licenses;
+the MSIX includes them. `make test-windows-scanner` and `make test-windows-updater`
+exercise the native runtime and update filtering. Help offers update checks and
+settings. Source launches support manual discovery only. The shared feed must
+publish a signed Python Windows enclosure with the package identity documented
+in the requirements before an installed Python upgrade can be offered.
+
+`make msix-test` builds the Windows payload; `make test-msix MSIX_PACKAGE=...
+MSIX_EVIDENCE=...` tests relocation. `make msix-bundle MSIX_PAYLOADS=...` signs the
+bundle using `MSIX_TEST_CERT_PFX_BASE64`, the private key matching the existing
+public test certificate. Never publish that variable's value. `UV_CACHE_DIR`,
+`UV_PYTHON_INSTALL_DIR`, and `UV_PYTHON_BIN_DIR` may place uv's cache, managed
+interpreters, and interpreter links inside a development checkout. The packaging
+script temporarily sets `UV_PROJECT_ENVIRONMENT` to its isolated runtime venv.
+The focused lint target sets `PYTHONPATH` to the checkout solely to resolve
+repository-local test helpers; the packaged interpreter remains isolated.
+
+
 # Email Collection Toolkit
 
 `mailarchiver` turns scattered email exports into a durable archive that you

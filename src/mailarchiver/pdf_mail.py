@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
-import mailbox
+from .standalone_verify import PreservingMbox
 import os
 import re
 import shutil
@@ -303,7 +303,7 @@ def write_pdf_mbox(extraction: PdfMailExtraction, output: Path) -> None:
     descriptor, temporary_name = tempfile.mkstemp(prefix=f".{destination.name}.", dir=destination.parent)
     os.close(descriptor)
     temporary = Path(temporary_name)
-    box = mailbox.mbox(temporary, factory=None, create=True)
+    box = PreservingMbox(temporary, factory=None, create=True)
     try:
         box.lock()
         for record in extraction.messages:

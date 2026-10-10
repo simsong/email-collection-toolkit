@@ -64,6 +64,7 @@ from .mbox import (
     MboxLocation,
     PendingPublication,
     PublicationRecovery,
+    PreservingMbox,
     add_message,
     clear_publication_journal,
     frame_message,
@@ -1625,7 +1626,7 @@ def _run_ingest(request: IngestRequest, writer_lease: WriterLease, outcome: Inge
                 )
             box = boxes.get(destination)
             if box is None:
-                box = mailbox.mbox(destination, create=True)
+                box = PreservingMbox(destination, create=True)
                 boxes[destination] = box
             journal_publication(archive, publication)
             location = add_message(
@@ -2223,7 +2224,7 @@ def _rebuild_search_index(
             )
             mailbox_progress.display(force=True)
             for path in mailboxes:
-                box = mailbox.mbox(path, factory=None, create=False)
+                box = PreservingMbox(path, factory=None, create=False)
                 try:
                     actual = len(box)
                 finally:

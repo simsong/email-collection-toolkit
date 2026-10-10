@@ -25,6 +25,11 @@ plan. They do not describe the current Python desktop package.
 The scanner now uses embedded libclamav; daemon-era instructions below are
 historical too.
 
+For the separate Python webview reader comparison branch, follow
+[PYTHON_WEBVIEW.md](PYTHON_WEBVIEW.md). That preview uses x64 Python/WebView2
+and the shared Mac reader with MSIX packaging; it does not require a Rust GUI.
+The older compiled-GUI plan below is historical context for that experiment.
+
 This guide prepares a clean Windows 11 system to develop and test Email
 Collection Toolkit's planned **compiled Rust desktop experience with a Python backend**,
 including the planned full ingest workflow. See [DIOXUS.md](DIOXUS.md). Use Windows

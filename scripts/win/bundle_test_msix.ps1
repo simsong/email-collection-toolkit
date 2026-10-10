@@ -15,21 +15,21 @@ New-Item -ItemType Directory -Path $work -ErrorAction Stop | Out-Null
 foreach ($kind in @('base','upgrade')) {
     $payload = Join-Path $work $kind
     New-Item -ItemType Directory -Path $payload | Out-Null
-    foreach ($arch in @('x64','arm64')) {
+    foreach ($arch in @('x64')) {
         $pattern = if ($kind -eq 'base') { "$arch/*.msix" } else { "$arch/upgrade/*.msix" }
         $files = @(Get-ChildItem (Join-Path $InputDirectory $pattern))
         if ($files.Count -ne 1) { throw "Expected one $kind package for $arch" }
         Copy-Item -LiteralPath $files[0].FullName -Destination (Join-Path $payload "$arch.msix")
     }
     $bundle = Join-Path $work "$kind.msixbundle"
-    $versions = foreach ($arch in @('x64','arm64')) {
+    $versions = foreach ($arch in @('x64')) {
         $zip = [IO.Compression.ZipFile]::OpenRead((Join-Path $payload "$arch.msix"))
         try {
             $reader = [IO.StreamReader]::new($zip.GetEntry('AppxManifest.xml').Open())
             try { ([xml]$reader.ReadToEnd()).Package.Identity.Version } finally { $reader.Dispose() }
         } finally { $zip.Dispose() }
     }
-    if ($versions[0] -ne $versions[1]) { throw 'Architecture package versions differ' }
+    $versions = @($versions)
     & (Join-Path $sdk 'makeappx.exe') bundle /bv $versions[0] /d $payload /p $bundle *> (Join-Path $work "$kind.log")
     if ($LASTEXITCODE) { throw 'Bundle creation failed' }
 }

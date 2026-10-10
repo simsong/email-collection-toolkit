@@ -7,13 +7,12 @@ from __future__ import annotations
 import base64
 import hashlib
 import json
-import mailbox
 import sqlite3
 import sys
 import time
 import zipfile
 from importlib.metadata import version
-from webview.menu import MenuAction
+from webview.menu import MenuAction, MenuSeparator
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
@@ -71,7 +70,7 @@ from mailarchiver.mailbox_tree import (
     MailboxTreeNode,
     mailbox_tree,
 )
-from mailarchiver.mbox import add_message
+from mailarchiver.mbox import PreservingMbox, add_message
 from mailarchiver.plugin_api import SourceContainerMetadata, SourceRelationship
 from mailarchiver.search import index_message
 from mailarchiver.standalone_verify import semantic_bytes
@@ -307,7 +306,8 @@ def make_gui_archive(
         catalog.close()
         search.close()
     path = mbox_directory(archive) / "2024-Archive1.mbox"
-    box = mailbox.mbox(path)
+    # Publish fixture bytes through the same newline-preserving archive writer.
+    box = PreservingMbox(path)
     try:
         locations = [add_message(box, path, raw) for raw, _, _, _ in records]
     finally:
@@ -446,11 +446,14 @@ def test_native_menus_route_through_the_application_controller(tmp_path: Path) -
 
     menus = application_menu(application)
 
-    assert [menu.title for menu in menus] == ["File", "Window"]
-    assert all(isinstance(item, MenuAction) for menu in menus for item in menu.items)
+    assert [menu.title for menu in menus] == (["File", "Window", "Help"] if sys.platform == "win32" else ["File", "Window"])
+    assert all(isinstance(item, (MenuAction, MenuSeparator)) for menu in menus for item in menu.items)
     assert [item.title for item in menus[0].items if isinstance(item, MenuAction)] == [
         "New", "Open…", "Import…", "Document Options…", "Close",
     ] + (["Quit"] if sys.platform == "win32" else [])
+    if sys.platform == "win32":
+        assert [item.title for item in menus[2].items if isinstance(item, MenuAction)] == [
+            "About", "Check for Updates…", "Update Settings…"]
     assert [item.title for item in menus[1].items if isinstance(item, MenuAction)] == ["New Search Window", "Ingests"]
     for action in menus[1].items:
         assert isinstance(action, MenuAction)
@@ -478,15 +481,16 @@ def test_gui_api_records_independent_search_window_state(tmp_path: Path) -> None
     assert session.selected_message == 1
 
 
-def test_gui_copy_source_path_reports_missing_macos_bridge(
+def test_gui_copy_source_path_reports_missing_native_bridge(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Requirement: copying a local source path reports unavailable macOS support."""
+    """Requirement: copying provenance reports a missing native clipboard bridge."""
     archive = make_gui_archive(tmp_path)
     api = GuiApi(archive)
     monkeypatch.setitem(sys.modules, "AppKit", None)
     try:
-        with pytest.raises(ValueError, match="requires macOS with PyObjC installed"):
+        expected = "requires an open reader window" if sys.platform == "win32" else "requires macOS with PyObjC installed"
+        with pytest.raises(ValueError, match=expected):
             api.copy_source_path(1, 0)
     finally:
         api.close()

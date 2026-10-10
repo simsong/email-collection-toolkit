@@ -28,6 +28,7 @@ from pydantic import BaseModel, Field, SecretStr
 from mailarchiver.release_versions import PREVIEW_CHANNEL, release_metadata
 from mailarchiver.update_metadata import MINIMUM_MACOS_VERSION
 from mailarchiver.update_metadata import SPARKLE_PUBLIC_KEY
+from mailarchiver.windows_update_feed import PACKAGE_IDENTITY, PACKAGE_NAMESPACE
 from scripts.macos_signing import NATIVE_TRUST_ENV_PREFIXES, release_safe_environment
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -150,9 +151,12 @@ def append_item(appcast: Path, release: AppcastRelease) -> None:
     if release.channel == PREVIEW_CHANNEL:
         xml.SubElement(item, SPARKLE_CHANNEL).text = PREVIEW_CHANNEL
     xml.SubElement(item, "pubDate").text = format_datetime(datetime.now(UTC), usegmt=True)
-    xml.SubElement(item, "enclosure", {"url": release.url, "length": str(release.archive.length),
+    enclosure = xml.SubElement(item, "enclosure", {"url": release.url, "length": str(release.archive.length),
                                          "type": OCTET_STREAM, SPARKLE_SIGNATURE: release.archive.signature,
                                          SPARKLE_OS: release.platform})
+    if release.platform == "windows":
+        enclosure.set(f"{{{PACKAGE_NAMESPACE}}}packageIdentity", PACKAGE_IDENTITY)
+        enclosure.set(f"{{{PACKAGE_NAMESPACE}}}architecture", "x64")
     channel.insert(0, item)
     xml.indent(document, space="  ")
     document.write(appcast, encoding="utf-8", xml_declaration=True)

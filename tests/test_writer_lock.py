@@ -209,11 +209,16 @@ def test_writer_lock_cannot_redirect_metadata(tmp_path: Path, target: str) -> No
 
 def test_parent_creation_lock_precedes_target_creation(tmp_path: Path) -> None:
     """Requirement: a contending creator cannot create its target before acquiring the guard."""
-    import fcntl
+    from importlib import import_module
 
     archive = tmp_path / "not-created"
     with (tmp_path / ".mailarchiver-create.lock").open("w+b") as guard:
-        fcntl.flock(guard.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        if os.name == "nt":
+            from mailarchiver.windows_storage import lock
+            lock(guard)
+        else:
+            fcntl = import_module("fcntl")
+            fcntl.flock(guard.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
         with pytest.raises(ArchiveBusyError, match="creator"):
             WriterLease.acquire(archive, str(archive), "create", "test", "test", create=True)
         assert not archive.exists()

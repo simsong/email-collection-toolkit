@@ -20,6 +20,7 @@ UPDATE_ENV = "MAILARCHIVER_CLAMAV_UPDATES"
 UPDATER_ENV = "MAILARCHIVER_FRESHCLAM"
 CERTIFICATES_ENV = "MAILARCHIVER_CLAMAV_CERTIFICATES"
 DEVELOPMENT_DATABASE = Path(__file__).resolve().parents[2] / "etc/clamdb"
+WINDOWS_DEVELOPMENT_RUNTIME = Path(__file__).resolve().parents[2] / ".tmp/clamav-x64"
 PREFIXES = (Path("/opt/homebrew"), Path("/usr/local"), Path("/usr/local/clamav"), Path("/usr"))
 
 
@@ -52,7 +53,17 @@ class ActiveDefinitions(BaseModel):
 
 def bundle_root() -> Path | None:
     """PyInstaller exposes Resources through its private bundle directory."""
+    if sys.platform == "win32":
+        root = Path(sys.executable).parent / "clamav"
+        return root if root.is_dir() else None
     return Path(getattr(sys, "_MEIPASS")) / "clamav" if getattr(sys, "frozen", False) else None
+
+
+def windows_runtime() -> Path:
+    """Prefer branch-local dependencies, then the conventional x64 installation."""
+    installed = Path(os.environ.get("ProgramW6432", os.environ.get("ProgramFiles", "C:/Program Files"))) / "ClamAV"
+    return next((path for path in (WINDOWS_DEVELOPMENT_RUNTIME, installed)
+                 if (path / "libclamav.dll").is_file()), WINDOWS_DEVELOPMENT_RUNTIME)
 
 
 def update_root() -> Path:
@@ -73,6 +84,8 @@ def library_path() -> Path:
     name = "libclamav.dylib" if sys.platform == "darwin" else "libclamav.dll" if sys.platform == "win32" else "libclamav.so"
     if root := bundle_root():
         return root / name
+    if sys.platform == "win32":
+        return windows_runtime() / name
     candidates = [prefix / "lib" / name for prefix in PREFIXES]
     candidates += list(Path("/usr/lib").glob(f"*-linux-gnu/{name}*"))
     return next((path for path in candidates if path.is_file()), candidates[0])
@@ -84,6 +97,8 @@ def updater_path() -> Path:
     name = "freshclam.exe" if sys.platform == "win32" else "freshclam"
     if root := bundle_root():
         return root / name
+    if sys.platform == "win32":
+        return windows_runtime() / name
     return next((prefix / "bin" / name for prefix in PREFIXES if (prefix / "bin" / name).is_file()), PREFIXES[0] / "bin" / name)
 
 
@@ -92,6 +107,9 @@ def certificates_path() -> Path | None:
         return Path(override)
     if root := bundle_root():
         return root / "certs"
+    if sys.platform == "win32":
+        certificates = library_path().parent / "certs"
+        return certificates if certificates.is_dir() else None
     candidates = [prefix / "etc/clamav/certs" for prefix in PREFIXES]
     return next((path for path in candidates if path.is_dir()), None)
 
@@ -125,9 +143,11 @@ class DefinitionSelection(BaseModel):
     warning: str = ""
 
 
-def choose_definitions(baseline: DefinitionSet, root: Path) -> DefinitionSelection:
+def choose_definitions(baseline: DefinitionSet | None, root: Path) -> DefinitionSelection:
     manifest = root / "active.json"
     if not manifest.is_file():
+        if baseline is None:
+            raise ValueError("Virus definitions are not installed. Choose Update virus definitions in About.")
         return DefinitionSelection(definitions=baseline)
     try:
         active = ActiveDefinitions.model_validate_json(manifest.read_bytes())
@@ -138,14 +158,23 @@ def choose_definitions(baseline: DefinitionSet, root: Path) -> DefinitionSelecti
             raise ValueError("Definition generation escapes update directory")
         updated = read_definitions(directory, "updated")
     except (OSError, ValueError, OverflowError) as error:
+        if baseline is None:
+            raise ValueError(f"Updated definitions unavailable: {error}. Choose Update virus definitions in About.") from error
         return DefinitionSelection(definitions=baseline, warning=f"Updated definitions unavailable; using baseline: {error}")
-    return DefinitionSelection(definitions=updated if updated.daily.version > baseline.daily.version else baseline)
+    return DefinitionSelection(definitions=updated if baseline is None or updated.daily.version > baseline.daily.version else baseline)
 
 
 def definition_selection() -> DefinitionSelection:
-    baseline = bundled_definitions()
-    # Explicit development/test database overrides must be deterministic.
-    return DefinitionSelection(definitions=baseline) if os.environ.get(DATABASE_ENV) else choose_definitions(baseline, update_root())
+    # Explicit development/test database overrides must remain deterministic.
+    if os.environ.get(DATABASE_ENV):
+        return DefinitionSelection(definitions=bundled_definitions())
+    try:
+        baseline = bundled_definitions()
+    except (OSError, ValueError, OverflowError):
+        # A source checkout can bootstrap exclusively into per-user application
+        # storage; missing bundled resources must not hide valid user updates.
+        baseline = None
+    return choose_definitions(baseline, update_root())
 
 
 def selected_definitions() -> DefinitionSet:

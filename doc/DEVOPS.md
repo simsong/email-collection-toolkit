@@ -239,3 +239,9 @@ key and current validity, and removes temporary PFX material on success/failure.
 No fallback certificate is generated. This supersedes the ephemeral test-key
 policy; testers trust the public certificate once until expiration (2028-10-07)
 or deliberate rotation. Production trusted signing remains separate.
+
+## Windows consolidation (October 10, 2026)
+
+The Windows Python work is integrated into PR #153 while retaining the Mac restoration and historical Rust GUI. The supported Windows package is x64-only private CPython with ClamAV and WinSparkle. This supersedes earlier frozen-Python/ARM64 and unsupported-import descriptions in the historical sections. The signed feed publisher labels Windows items with the Python package identity and x64 architecture so the updater can select compatible installations. The native install test retains both last-window Close and File/Quit checks.
+
+The installed reader CI regression was a Windows fsync on a read-only file descriptor. Publication now syncs a writable handle, and the package's actual self-test uses the shared byte-preserving MBOX class. Source acceptance covers both script and isolated module entry points, processor discovery, search/completion, and byte hashes. Current-head signed installation still requires hosted CI evidence.

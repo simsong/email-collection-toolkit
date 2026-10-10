@@ -17,7 +17,10 @@ from email.parser import BytesParser
 from enum import StrEnum
 from pathlib import Path
 
+
 from pydantic import BaseModel, Field
+
+from .sqlite_paths import sqlite_uri
 
 from .archive_path import add_archive_argument, require_archive
 from .layout import mbox_path
@@ -374,9 +377,9 @@ def search_header_page(
     catalog_path, search_path = archive / "archive.sqlite3", archive / "search.sqlite3"
     if not catalog_path.is_file() or not search_path.is_file():
         raise ValueError(f"{archive} must contain archive.sqlite3 and search.sqlite3")
-    database = sqlite3.connect(f"file:{catalog_path}?mode=ro", uri=True)
+    database = sqlite3.connect(sqlite_uri(catalog_path), uri=True)
     try:
-        database.execute("ATTACH DATABASE ? AS search", (f"file:{search_path}?mode=ro",))
+        database.execute("ATTACH DATABASE ? AS search", (sqlite_uri(search_path),))
         prepare_names(database, archive)
         terms = terms.model_copy(update={"address_names": True})
         fields = ("message_pk", "recipients", "sender", "subject", "date_utc", "attachment_count")
@@ -417,9 +420,9 @@ def search_result_count(
     catalog_path, search_path = archive / "archive.sqlite3", archive / "search.sqlite3"
     if not catalog_path.is_file() or not search_path.is_file():
         raise ValueError(f"{archive} must contain archive.sqlite3 and search.sqlite3")
-    database = sqlite3.connect(f"file:{catalog_path}?mode=ro", uri=True)
+    database = sqlite3.connect(sqlite_uri(catalog_path), uri=True)
     try:
-        database.execute("ATTACH DATABASE ? AS search", (f"file:{search_path}?mode=ro",))
+        database.execute("ATTACH DATABASE ? AS search", (sqlite_uri(search_path),))
         prepare_names(database, archive)
         terms = terms.model_copy(update={"address_names": True})
         statement = _count_statement(terms, search_attachments, mailbox_selections, maximum)
@@ -477,7 +480,7 @@ def render_message(raw: bytes, full_headers: bool, html: bool) -> str:
 
 def read_message_bytes(archive: Path, message_pk: int) -> bytes:
     """Return one canonical message after direct-location SHA-256 validation."""
-    database = sqlite3.connect(f"file:{archive / 'archive.sqlite3'}?mode=ro", uri=True)
+    database = sqlite3.connect(sqlite_uri(archive / 'archive.sqlite3'), uri=True)
     try:
         row = database.execute(
             "SELECT messages.sha256, mbox_generations.filename, locations.byte_offset, locations.byte_length "

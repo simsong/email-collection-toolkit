@@ -10,7 +10,6 @@ from __future__ import annotations
 
 from contextlib import closing
 import hashlib
-import mailbox
 from pathlib import Path
 import sys
 
@@ -21,7 +20,7 @@ from .catalog import address_pk, create_catalog, create_search
 from .gui_service import search_page
 from .layout import mbox_directory
 from .mailsearch import read_message_bytes
-from .mbox import add_message
+from .mbox import PreservingMbox, add_message
 from .search import index_message
 from .search_completion import search_suggestions
 from .plugin_loader import builtin_plugin_directory
@@ -53,7 +52,7 @@ def inventory(root: Path) -> list[FileDigest]:
     return result
 
 
-def exercise(output: Path) -> WindowsReport:
+def exercise(output: Path, *, installed: bool = False) -> WindowsReport:
     """Use real packaged schemas and reader APIs on a purpose-made archive."""
     output.mkdir(parents=True, exist_ok=False)
     archive = output / "synthetic.mailarchive"
@@ -62,7 +61,7 @@ def exercise(output: Path) -> WindowsReport:
            b"Date: Wed, 03 Jan 2024 10:00:00 +0000\nSubject: Observatory fixture\n"
            b"Message-ID: <msix-fixture@example.invalid>\n\nHello observatory.\n")
     path = mbox_directory(archive) / "2024-Archive1.mbox"
-    box = mailbox.mbox(path, create=True)
+    box = PreservingMbox(path, create=True)
     try:
         location = add_message(box, path, raw)
     finally:
@@ -95,7 +94,7 @@ def exercise(output: Path) -> WindowsReport:
     suggestions = search_suggestions(archive, "reader")
     assert suggestions.items, "Packaged Python autocomplete failed"
     assert inventory(archive) == before, "Reader modified archive files"
-    report = WindowsReport(installed_msix_tested=bool(getattr(sys, "frozen", False)),
+    report = WindowsReport(installed_msix_tested=installed or bool(getattr(sys, "frozen", False)),
                            search_count=len(page.results), completion_count=len(suggestions.items),
                            processor_count=len(processors), archive_sha256=before)
     (output / "report.json").write_text(report.model_dump_json(indent=2), encoding="utf-8")

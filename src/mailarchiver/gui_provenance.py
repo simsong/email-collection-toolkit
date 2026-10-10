@@ -7,7 +7,10 @@ import sqlite3
 from contextlib import closing
 from pathlib import Path
 
+
 from pydantic import BaseModel
+
+from .sqlite_paths import sqlite_uri
 
 from .processing.store import DATABASE
 
@@ -28,8 +31,8 @@ class AttachedOrigin(BaseModel):
 def attached_messages(archive: Path, message_pks: list[int]) -> set[int]:
     if not message_pks or not (archive / DATABASE).is_file():
         return set()
-    with closing(sqlite3.connect(f"{(archive / 'archive.sqlite3').resolve().as_uri()}?mode=ro", uri=True)) as database:
-        database.execute("ATTACH DATABASE ? AS identities", (f"{(archive / DATABASE).resolve().as_uri()}?mode=ro",))
+    with closing(sqlite3.connect(sqlite_uri(archive / "archive.sqlite3"), uri=True)) as database:
+        database.execute("ATTACH DATABASE ? AS identities", (sqlite_uri(archive / DATABASE),))
         result: set[int] = set()
         for offset in range(0, len(message_pks), 500):
             batch = message_pks[offset:offset + 500]
@@ -41,7 +44,7 @@ def attached_messages(archive: Path, message_pks: list[int]) -> set[int]:
 def attached_origins(archive: Path, message_pk: int) -> list[AttachedOrigin]:
     if not (archive / DATABASE).is_file():
         return []
-    with closing(sqlite3.connect(f"{(archive / DATABASE).resolve().as_uri()}?mode=ro", uri=True)) as database:
+    with closing(sqlite3.connect(sqlite_uri(archive / DATABASE), uri=True)) as database:
         return [AttachedOrigin(parent_message_pk=row[0], parent_message_id=row[1], part_path=json.loads(row[2]))
                 for row in database.execute("""SELECT DISTINCT parent.catalog_message_pk,o.parent_message_id,o.part_path
                 FROM occurrences o JOIN message_state child ON child.message_id=o.message_id

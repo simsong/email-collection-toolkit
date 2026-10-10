@@ -1,11 +1,11 @@
 # Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved.
-# Test the same signed bundle on disposable x64 and ARM64 GitHub Windows VMs.
+# Test the same signed bundle on disposable x64 GitHub Windows VMs.
 # Trust only this run's public test certificate and install for the runner user.
 # Exercise the frozen Python reader, native Close and Quit on synthetic mail.
 # Upgrade using identical payload bytes and verify archive preservation on uninstall.
 # Always remove the test package and newly added trust; never change existing trust.
 param([Parameter(Mandatory=$true)][string]$BundleDirectory,
-      [ValidateSet('x64','arm64')][string]$Architecture,
+      [ValidateSet('x64')][string]$Architecture,
       [string]$EvidenceDirectory='dist/installed-evidence')
 $ErrorActionPreference='Stop'
 $evidence = [IO.Path]::GetFullPath($EvidenceDirectory)
@@ -18,7 +18,7 @@ $addedTrust = $false
 $installed = $false
 $originalLocalAppData=$env:LOCALAPPDATA
 $originalAppData=$env:APPDATA
-if (Get-AppxPackage -Name ECT.LocalTest) { throw 'Existing ECT.LocalTest installation must be preserved; use a clean VM.' }
+if (Get-AppxPackage -Name ECT.PythonReader) { throw 'Existing ECT.PythonReader installation must be preserved; use a clean VM.' }
 # Activate the registered desktop application with its package identity.
 Add-Type -TypeDefinition @"
 using System;
@@ -61,14 +61,14 @@ try {
             $retainedHashes=@($priorFiles | Get-FileHash -Algorithm SHA256 | ForEach-Object { $_.Path + ':' + $_.Hash })
             if (Compare-Object $priorHashes $retainedHashes) { throw 'Upgrade changed existing archive bytes' }
         }
-        $package=Get-AppxPackage -Name ECT.LocalTest
+        $package=Get-AppxPackage -Name ECT.PythonReader
         if ($package.Architecture.ToString().ToLowerInvariant() -ne $Architecture) { throw 'Wrong installed architecture' }
         if ($kind -eq 'upgrade' -and [version]$package.Version -le $baseVersion) { throw 'Package did not upgrade' }
         $baseVersion=[version]$package.Version
         $location=$package.InstallLocation
         $appId=$package.PackageFamilyName + '!ECT'
         $startEntry=Get-StartApps | Where-Object AppID -EQ $appId
-        if ($startEntry.Name -ne 'Email Collector Toolkit (ECT)') { throw 'Expected Start menu application name is missing' }
+        if ($startEntry.Name -ne 'Email Collection Toolkit (Python Preview)') { throw 'Expected Start menu application name is missing' }
         $testOutput=Join-Path $evidence $kind
         $testPid=[ECTActivation]::Launch($appId, ('--msix-test "'+$testOutput+'"'))
         $testProcess=Get-Process -Id $testPid -ErrorAction SilentlyContinue
@@ -130,13 +130,13 @@ try {
     $before=@($archiveFiles | Get-FileHash -Algorithm SHA256 | ForEach-Object { $_.Path + ':' + $_.Hash })
     Remove-AppxPackage -Package $package.PackageFullName -ErrorAction Stop
     $installed=$false
-    if (Get-AppxPackage -Name ECT.LocalTest) { throw 'Package remains installed' }
+    if (Get-AppxPackage -Name ECT.PythonReader) { throw 'Package remains installed' }
     $after=@($archiveFiles | Get-FileHash -Algorithm SHA256 | ForEach-Object { $_.Path + ':' + $_.Hash })
     if (Compare-Object $before $after) { throw 'Uninstall changed archive bytes' }
     'Install, native launch, Python search/completion, upgrade and uninstall passed.' | Set-Content (Join-Path $evidence 'success.txt')
 } finally {
     try {
-        if ($installed) { Get-AppxPackage -Name ECT.LocalTest | Remove-AppxPackage }
+        if ($installed) { Get-AppxPackage -Name ECT.PythonReader | Remove-AppxPackage }
     } finally {
         try { if ($addedTrust) { Remove-Item -LiteralPath $storePath } }
         finally {

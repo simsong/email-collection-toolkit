@@ -13,6 +13,7 @@ import subprocess
 import sys
 import time
 from array import array
+from importlib import import_module
 
 import pytest
 from datetime import UTC, datetime
@@ -362,8 +363,11 @@ def test_verify_archive_defaults_to_observable_progress(tmp_path: Path, capsys: 
 @pytest.mark.parametrize("phase", ["manifest", "hashing"])
 def test_installed_verifier_sigint_is_graceful(tmp_path: Path, quiet: bool, phase: str) -> None:
     """Requirement: real Ctrl-C during archive I/O exits 130, including quiet mode."""
-    import fcntl
-    import termios
+    if sys.platform == "win32":
+        pytest.skip("POSIX FIFO and SIGINT synchronization")
+    # The test is POSIX-only; load those native APIs only on its supported host.
+    fcntl = import_module("fcntl")
+    termios = import_module("termios")
 
     initialize_bag(tmp_path)
     script = install_archive_verifier(tmp_path)

@@ -4,7 +4,7 @@
 # The persistent signing secret stays in assembly; only the public certificate ships.
 # Installation jobs consume the same artifact without checkout toolchains or rebuilds.
 # The alpha may ship with explicit certificate trust; the upgrade fixture never ships.
-name: Windows MSIX installation tests
+name: Python webview MSIX installation tests
 on:
   push:
     branches: [codex/windows-msix-ci]
@@ -27,16 +27,28 @@ jobs:
         include:
           - os: windows-latest
             arch: x64
-          - os: windows-11-arm
-            arch: arm64
     defaults:
       run:
         shell: pwsh
     steps:
       - uses: actions/checkout@v7.0.1
       - uses: astral-sh/setup-uv@v10.0.1
-      - name: Build and package once per architecture
-        run: ./scripts/win/build_windows_msix.ps1 -Architecture ${{ matrix.arch }} -CreateUpgradeTest
+      - name: Install Make and x64 Python dependencies
+        run: |
+          choco install make --yes --no-progress
+          uv sync --locked --python cpython-3.12-windows-x86_64-none
+      - name: Validate reader and build Python payload
+        run: |
+          $env:PATH = "C:/Program Files/Git/usr/bin;" + $env:PATH
+          make MAKE=make 'SHELL=C:/Program Files/Git/usr/bin/bash.exe' prepare-windows-clamav prepare-windows-updater freshclam test-windows-scanner test-windows-updater test-definition-state
+          if ($LASTEXITCODE) { throw 'Windows antivirus preparation or acceptance failed' }
+          make MAKE=make 'SHELL=C:/Program Files/Git/usr/bin/bash.exe' check-python-reader-static test-python-reader test-windows-package-entry test-python-writer test-python-reader-native
+          if ($LASTEXITCODE) { throw 'Reader checks failed' }
+          make 'SHELL=C:/Program Files/Git/usr/bin/bash.exe' msix-test 'MSIX_ARGS=-CreateUpgradeTest'
+          if ($LASTEXITCODE) { throw 'MSIX assembly failed' }
+          $package = (Get-ChildItem dist/windows-msix-test/*.msix).FullName
+          make 'SHELL=C:/Program Files/Git/usr/bin/bash.exe' test-msix "MSIX_PACKAGE=$package" 'MSIX_EVIDENCE=dist/relocated'
+          if ($LASTEXITCODE) { throw 'Relocated MSIX failed' }
       - uses: actions/upload-artifact@v7.0.1
         with:
           name: msix-payload-${{ matrix.arch }}
@@ -61,10 +73,6 @@ jobs:
         with:
           name: msix-payload-x64
           path: dist/payloads/x64
-      - uses: actions/download-artifact@v8.0.1
-        with:
-          name: msix-payload-arm64
-          path: dist/payloads/arm64
       - name: Assemble and test-sign shared bundles
         env:
           MSIX_TEST_CERT_PFX_BASE64: ${{ secrets.MSIX_TEST_CERT_PFX_BASE64 }}
@@ -98,8 +106,6 @@ jobs:
         include:
           - os: windows-latest
             arch: x64
-          - os: windows-11-arm
-            arch: arm64
     steps:
       - uses: actions/checkout@v7.0.1
       - uses: actions/download-artifact@v8.0.1

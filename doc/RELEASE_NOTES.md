@@ -1,5 +1,24 @@
 <!-- Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved. -->
 
+Python webview branch: use the standard Windows Open file dialog. Selecting a
+file inside an archive opens the enclosing collection, with normal validation
+and no changes to archived bytes. Fix mapped-drive/UNC SQLite URI handling
+throughout the reader, including search and message rendering. Remove the custom archive browser. Restore New/Import,
+processing and identity controls using native Windows locks, byte-preserving
+MBOX framing and portable temporary-file handling. Add Windows ClamAV discovery
+and bounded updater supervision; require runtime/definitions in new MSIX builds.
+Windows ClamAV now loads in an isolated worker, passes clean/EICAR checks and
+stores validated definitions in application-specific user storage. First-run
+initialization supports downloaded or explicitly copied baselines. A CDN cooldown
+still blocks local download acceptance; package validation remains pending.
+Integrate the pinned WinSparkle SDK, shared update preferences, complete-feed
+verification, Python package filtering and archive-write installation fences.
+Native initialization and signed-feed tests pass; a signed installed upgrade
+still needs acceptance. Preserve source-machine provenance paths when copying
+between platforms and serialize concurrent export replacements.
+Retain completed ingest status across transient Windows reader locks and verify
+the Windows runtime's complete license evidence before MSIX assembly.
+
 # Release notes
 
 ## 1.0.0a18 (candidate)
@@ -239,6 +258,12 @@
   preserving layout, sorting, previews, split panes and find-in-message. Rust
   handles words, phrases and address/subject filters; unported operations are
   clearly unavailable. Headless browser tests exercise the actual Rust backend.
+- Experimental `codex/python-webview` branch: reuse the macOS Python webview
+  reader on x64 Windows, with native clipboard/menu adapters and a separately
+  identified MSIX. Reuse indexed processing-name/tag reads and locked saved
+  filters from the Rust branch. Windows ingestion uses shared Python services; signing,
+  installed-package and macOS validation remain separate acceptance gates.
+
 - Use the shared `@simsong-agent` GitHub account for Codex and Claude Code,
   retain their separate commit identities and signing keys, and prohibit
   personal-account fallbacks for agent writes.
@@ -912,3 +937,9 @@ key and current validity, and removes temporary PFX material on success/failure.
 No fallback certificate is generated. This supersedes the ephemeral test-key
 policy; testers trust the public certificate once until expiration (2028-10-07)
 or deliberate rotation. Production trusted signing remains separate.
+
+## Windows consolidation (October 10, 2026)
+
+The Windows Python work is integrated into PR #153 while retaining the Mac restoration and historical Rust GUI. The supported Windows package is x64-only private CPython with ClamAV and WinSparkle. This supersedes earlier frozen-Python/ARM64 and unsupported-import descriptions in the historical sections. The signed feed publisher labels Windows items with the Python package identity and x64 architecture so the updater can select compatible installations. The native install test retains both last-window Close and File/Quit checks.
+
+The installed reader CI regression was a Windows fsync on a read-only file descriptor. Publication now syncs a writable handle, and the package's actual self-test uses the shared byte-preserving MBOX class. Source acceptance covers both script and isolated module entry points, processor discovery, search/completion, and byte hashes. Current-head signed installation still requires hosted CI evidence.

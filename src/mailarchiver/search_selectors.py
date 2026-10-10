@@ -12,6 +12,8 @@ import sqlite3
 from collections.abc import Callable
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
+
+from .sqlite_paths import sqlite_uri
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict
@@ -148,7 +150,7 @@ def prepare_names(database: sqlite3.Connection, archive: Path) -> None:
     """Read live identity edits and header names without rebuilding the content index."""
     sources = ["SELECT address, display_name AS name FROM search.address_suggestions"]
     if (archive / "processing.sqlite3").is_file():
-        database.execute("ATTACH DATABASE ? AS identities", (f"file:{archive / 'processing.sqlite3'}?mode=ro",))
+        database.execute("ATTACH DATABASE ? AS identities", (sqlite_uri(archive / 'processing.sqlite3'),))
         database.execute(ORGANIZATION_NAMES_SQL)
         sources.extend((
             "SELECT a.address,p.canonical_name FROM identities.addresses a "
