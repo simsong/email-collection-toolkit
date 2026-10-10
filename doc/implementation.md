@@ -3837,3 +3837,7 @@ reserved filename characters, enforced read-only access and unchanged bytes.
 Plugin configuration recovery passes journal bytes directly to Pydantic JSON
 validation. Pages derives required appcast platforms from the selected release's
 assets before validating the signed feed; Windows bundles require Windows items.
+
+Candidate and Windows release workflows reuse the production action commit pins.
+The welcome Open handler disables both document buttons and restores both on
+success, cancellation or failure; browser tests hold the native bridge boundary.

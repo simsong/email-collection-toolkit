@@ -2868,3 +2868,6 @@ and UNC archive paths, preserving reserved characters and original database byte
 Plugin transaction recovery must decode UTF-8 journal bytes consistently on all
 platforms. Pages must require a Windows feed item when the selected published
 release includes a Windows bundle, while accepting historical Mac-only releases.
+
+Signing runners must pin third-party setup actions to immutable commits. The
+welcome page must exclude both Open and Create while either native picker is pending.

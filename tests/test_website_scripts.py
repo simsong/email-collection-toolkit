@@ -31,6 +31,18 @@ RUN = "run"
 NEEDS = "needs"
 
 
+def test_signing_workflows_pin_setup_actions() -> None:
+    """Signing runners must not execute mutable third-party setup action tags."""
+    root = Path(__file__).parents[1] / ".github/workflows"
+    for name in ("release.yml", "release-candidate.yml", "windows-msix.yml"):
+        workflow = safe_load((root / name).read_text(encoding="utf-8"))
+        for job in workflow[JOBS].values():
+            for step in job.get(STEPS, []):
+                action = step.get("uses", "")
+                if action.startswith("astral-sh/setup-uv@"):
+                    assert re.fullmatch(r"astral-sh/setup-uv@[0-9a-f]{40}", action), (name, action)
+
+
 def test_missing_png_reports_a_clear_failure(tmp_path: Path) -> None:
     """Requirement: a missing required icon fails without a file-open traceback."""
     path = tmp_path / "rainbow-post-48.png"

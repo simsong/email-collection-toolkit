@@ -8,6 +8,10 @@
 test-python-reader:
 	uv run --locked pytest -q tests/test_python_reader.py tests/test_sqlite_paths.py
 
+.PHONY: test-reader-welcome
+test-reader-welcome:
+	uv run --locked pytest -q e2e_tests/test_reader_welcome.py
+
 .PHONY: test-windows-package-entry
 test-windows-package-entry:
 	uv run --locked pytest -q tests/test_python_desktop_package.py

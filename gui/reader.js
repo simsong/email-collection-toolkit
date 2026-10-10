@@ -22,9 +22,10 @@ newButton.addEventListener("click", async () => {
 });
 openButton.addEventListener("click", async () => {
   openButton.disabled = true;
+  newButton.disabled = true;
   try {
     const opened = await window.pywebview.api.open_archive_dialog();
     status.textContent = opened ? "" : "No archive opened. Choose a file inside a valid collection; details are in Help → About.";
   } catch (error) { status.textContent = String(error); }
-  finally { openButton.disabled = false; }
+  finally { openButton.disabled = false; newButton.disabled = false; }
 });

@@ -969,3 +969,5 @@ Installed Windows acceptance invokes File/Quit through WinForms' MSAA menu provi
 
 - Preserve non-ASCII plugin settings during Windows recovery and validate published
   Windows update-feed coverage during Pages deployment.
+
+- Pin signing-job setup actions and prevent concurrent welcome-page archive pickers.
