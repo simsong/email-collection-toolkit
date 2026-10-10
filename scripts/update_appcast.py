@@ -28,7 +28,7 @@ from pydantic import BaseModel, Field, SecretStr
 from mailarchiver.release_versions import PREVIEW_CHANNEL, release_metadata
 from mailarchiver.update_metadata import MINIMUM_MACOS_VERSION
 from mailarchiver.update_metadata import SPARKLE_PUBLIC_KEY
-from mailarchiver.windows_update_feed import PACKAGE_IDENTITY, PACKAGE_NAMESPACE
+from mailarchiver.update_metadata import PACKAGE_IDENTITY, PACKAGE_NAMESPACE
 from scripts.macos_signing import NATIVE_TRUST_ENV_PREFIXES, release_safe_environment
 
 ROOT = Path(__file__).resolve().parents[1]

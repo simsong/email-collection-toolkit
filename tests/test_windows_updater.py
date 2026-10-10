@@ -22,6 +22,9 @@ from mailarchiver.release_versions import release_metadata
 from mailarchiver.updates import UpdateService, UpdateStatus
 from mailarchiver.windows_update_feed import FeedGateway, PACKAGE_NAMESPACE, SPARKLE, filtered_feed
 from scripts.update_appcast import AppcastRelease, SignedArchive, append_item
+from scripts.check_appcast import check_appcast
+from mailarchiver.application import ApplicationController, ApplicationPreferencesStore
+from mailarchiver.windows_update_preferences import UpdatePreferencesApi
 
 
 def test_published_windows_item_reaches_the_authenticated_reader(tmp_path: Path) -> None:
@@ -40,6 +43,34 @@ def test_published_windows_item_reaches_the_authenticated_reader(tmp_path: Path)
     public = base64.b64encode(key.public_key().export_key(format="raw")).decode()
     selected = xml.fromstring(filtered_feed(signed, public, "preview")).findall("channel/item/enclosure")
     assert len(selected) == 1 and selected[0].get("url", "").endswith("fixture.msixbundle")
+    check_appcast(path, tag, expected_platforms=frozenset({"windows"}))
+    for field, invalid in (("packageIdentity", "ECT.LocalTest"), ("architecture", "arm64")):
+        tree = xml.fromstring(data)
+        enclosure = tree.find("channel/item/enclosure")
+        assert enclosure is not None
+        enclosure.set(f"{{{PACKAGE_NAMESPACE}}}{field}", invalid)
+        path.write_bytes(xml.tostring(tree))
+        with pytest.raises(ValueError, match="incompatible package"):
+            check_appcast(path, tag, expected_platforms=frozenset({"windows"}))
+
+
+def test_windows_settings_report_failed_save_and_restore_choices(tmp_path: Path) -> None:
+    """Settings must expose actual persistence failures and retain prior choices."""
+    path = tmp_path / "preferences.json"
+    controller = ApplicationController(ApplicationPreferencesStore(path))
+    before = controller.preferences
+    path.mkdir()
+    sentinel = path / "existing"
+    sentinel.write_bytes(b"preserve")
+    service = UpdateService(UpdateStatus(version=version("mailarchiver"), channel="release",
+                                        automatic_checks=False), lambda: False)
+    api = UpdatePreferencesApi(service,
+        lambda channel, automatic: controller.configure_updates(channel, automatic, strict=True))
+    with pytest.raises(OSError, match="Could not write application preferences"):
+        api.save("preview", True)
+    assert service.status.channel == "release" and not service.status.automatic_checks
+    assert controller.preferences == before
+    assert sentinel.read_bytes() == b"preserve"
 
 
 def signed_feed(identity: str = "ECT.PythonReader") -> tuple[bytes, str]:

@@ -26,10 +26,9 @@ from Cryptodome.Signature import eddsa
 
 from .release_versions import release_metadata
 from .updates import UpdateChannel
+from .update_metadata import PACKAGE_IDENTITY, PACKAGE_NAMESPACE
 
 SPARKLE = "http://www.andymatuschak.org/xml-namespaces/sparkle"
-PACKAGE_NAMESPACE = "https://simsong.github.io/email-collection-toolkit/updates"
-PACKAGE_IDENTITY = "ECT.PythonReader"
 MAX_FEED_BYTES = 16 * 1024 * 1024
 SIGNING_BLOCK = re.compile(rb"<!-- sparkle-signatures:\nedSignature: ([A-Za-z0-9+/]{86}==)\nlength: ([0-9]+)\n-->\n?\Z")
 

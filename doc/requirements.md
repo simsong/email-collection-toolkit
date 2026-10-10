@@ -2850,3 +2850,8 @@ Published Windows installer and help asset names identify the x64 payload only.
 
 Processing replay, processing-status and identity CLI reads must use escaped,
 host-independent SQLite URIs for reserved-character and UNC archive paths.
+
+Windows update settings must surface failed persistence and retain prior choices.
+Candidate Windows appcasts must name the Python x64 package. Integrity sidecar
+publication must tolerate bounded transient Windows reader denial, preserving
+the prior complete sidecar on permanent failure.

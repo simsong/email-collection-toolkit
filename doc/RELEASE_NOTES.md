@@ -956,3 +956,6 @@ Installed Windows acceptance invokes File/Quit through WinForms' MSAA menu provi
 
 - Fix processing/status and identity CLI reads for reserved-character archive
   paths; make Windows definition-publication tests work across disk volumes.
+
+- Report failed Windows update-setting saves, validate candidate Windows package
+  metadata, and retry transient Windows integrity-sidecar publication conflicts.

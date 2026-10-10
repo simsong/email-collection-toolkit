@@ -385,8 +385,12 @@ def write_integrity_file(
             native = ctypes.WinDLL("kernel32", use_last_error=True)
             native.MoveFileExW.argtypes = [ctypes.c_wchar_p, ctypes.c_wchar_p, ctypes.c_uint32]
             native.MoveFileExW.restype = ctypes.c_int
-            if not native.MoveFileExW(str(temporary), str(destination), 0x9):
-                raise ctypes.WinError(ctypes.get_last_error())
+            deadline = time.monotonic() + 2
+            while not native.MoveFileExW(str(temporary), str(destination), 0x9):
+                error = ctypes.get_last_error()
+                if error not in {5, 32, 33} or time.monotonic() >= deadline:
+                    raise ctypes.WinError(error)
+                time.sleep(0.01)
         else:
             temporary.replace(destination)
         _sync_directory(destination.parent)

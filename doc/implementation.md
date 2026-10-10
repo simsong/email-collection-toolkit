@@ -3814,3 +3814,9 @@ Release staging, signing and website selection use windows-x64 asset names.
 
 The processing and identity CLI read paths use sqlite_paths.sqlite_uri, matching
 the desktop. Definition failure fixtures copy when staging crosses volumes.
+
+Windows preference saves use strict controller persistence with state rollback;
+the asynchronous API returns failures to the existing status area. The release
+checker uses shared package constants to validate candidate Windows identity and
+architecture. Standalone integrity publication retries Windows sharing errors
+for at most two seconds without adding dependencies to the installed verifier.

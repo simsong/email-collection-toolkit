@@ -1496,7 +1496,8 @@ class PyWebViewApplication:
     def show_update_preferences(self) -> None:
         if sys.platform == "win32":
             from .windows_update_preferences import show_windows_update_preferences
-            show_windows_update_preferences(self.updates, self.controller.configure_updates)
+            show_windows_update_preferences(self.updates,
+                lambda channel, automatic: self.controller.configure_updates(channel, automatic, strict=True))
         else:
             show_preferences(self.updates, self.controller.configure_updates)
         if self.controller.preference_error:

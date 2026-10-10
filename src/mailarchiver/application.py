@@ -397,12 +397,16 @@ class ApplicationController:
     def preferences(self) -> ApplicationPreferences:
         return self._preferences.model_copy(deep=True)
 
-    def configure_updates(self, channel: UpdateChannel, automatic_checks: bool) -> None:
+    def configure_updates(self, channel: UpdateChannel, automatic_checks: bool, *, strict: bool = False) -> None:
         """Persist update choices outside archives without resetting document preferences."""
+        previous = self._preferences.model_copy(deep=True)
         self._preferences.update_channel = channel
         self._preferences.automatic_update_checks = automatic_checks
         self._preferences.version = APPLICATION_PREFERENCES_VERSION
         self._write_preferences()
+        if strict and self.preference_error:
+            self._preferences = previous
+            raise OSError(self.preference_error)
 
     def initialize_updates(self, installed_version: str) -> UpdateChannel:
         """Migrate an unset choice once, using the installed release's track."""

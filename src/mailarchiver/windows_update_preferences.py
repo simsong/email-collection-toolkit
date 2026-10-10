@@ -45,8 +45,13 @@ class UpdatePreferencesApi:
         if channel not in {"release", "preview"} or not isinstance(automatic, bool):
             raise ValueError("Invalid update preferences")
         selected: UpdateChannel = "preview" if channel == "preview" else "release"
+        previous = self._service.status.channel, self._service.status.automatic_checks
         self._service.configure(selected, automatic)
-        self._save(selected, self._service.status.automatic_checks)
+        try:
+            self._save(selected, self._service.status.automatic_checks)
+        except OSError:
+            self._service.configure(*previous)
+            raise
 
     def check(self) -> None:
         self._service.check()

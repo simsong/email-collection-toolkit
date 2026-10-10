@@ -11,6 +11,8 @@ import signal
 import subprocess
 import sys
 import time
+from concurrent.futures import ThreadPoolExecutor
+from threading import Event
 from array import array
 from importlib import import_module
 
@@ -424,3 +426,29 @@ def test_preserving_mbox_bytes_keep_mixed_original_newlines(tmp_path: Path, from
     finally:
         box.close()
     assert path.read_bytes() == original
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows DELETE-sharing semantics")
+@pytest.mark.parametrize("release_reader", [True, False])
+def test_integrity_publication_handles_windows_readers(tmp_path: Path, release_reader: bool) -> None:
+    """Integrity publication retries transient denial and preserves old bytes on failure."""
+    path, integrity, raw = make_integrity_archive(tmp_path)
+    original = integrity.read_bytes()
+    started = Event()
+    def publish() -> None:
+        started.set()
+        write_integrity_file(path, integrity,
+            (IntegrityMessage("verify@example", hashlib.sha256(raw).hexdigest(), raw),), 1)
+    with integrity.open("rb") as reader, ThreadPoolExecutor(max_workers=1) as executor:
+        future = executor.submit(publish)
+        assert started.wait(2)
+        if release_reader:
+            Event().wait(0.05)
+            assert not future.done()
+            reader.close()
+            future.result(timeout=4)
+        else:
+            with pytest.raises(PermissionError):
+                future.result(timeout=4)
+            assert reader.read() == original
+    assert integrity.read_bytes() == original
+    assert not integrity.with_name(f".{integrity.name}.tmp").exists()

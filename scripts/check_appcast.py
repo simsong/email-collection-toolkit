@@ -13,7 +13,7 @@ import xml.etree.ElementTree as xml
 from pathlib import Path
 from urllib.parse import unquote, urlsplit
 
-from mailarchiver.update_metadata import SPARKLE_PUBLIC_KEY
+from mailarchiver.update_metadata import SPARKLE_PUBLIC_KEY, PACKAGE_IDENTITY, PACKAGE_NAMESPACE
 
 SPARKLE_NAMESPACE = "http://www.andymatuschak.org/xml-namespaces/sparkle"
 SIGNATURE = f"{{{SPARKLE_NAMESPACE}}}edSignature"
@@ -91,6 +91,11 @@ def check_appcast(path: Path, tag: str = "", *, require_signed_feed: bool = Fals
             raise ValueError("Sparkle appcast contains duplicate release/platform items")
         seen.add(identity)
         if guid == tag:
+            if platform == "windows" and (
+                enclosure.get(f"{{{PACKAGE_NAMESPACE}}}packageIdentity") != PACKAGE_IDENTITY
+                or enclosure.get(f"{{{PACKAGE_NAMESPACE}}}architecture") != "x64"
+            ):
+                raise ValueError("Candidate Windows appcast item has an incompatible package identity or architecture")
             matches.add(platform)
     if tag and not expected_platforms.issubset(matches):
         raise ValueError(f"Sparkle appcast must contain exactly one signed item per required platform for {tag}")
