@@ -519,6 +519,7 @@ website-preview:
 website-download-check:
 	@command -v zola >/dev/null || { echo 'Zola is required for rendered download validation'; exit 2; }
 	uv run --locked pytest -q tests/test_website_scripts.py::test_static_platform_downloads_render_without_javascript
+	uv run --locked pytest -q --browser chromium e2e_tests/test_website_downloads.py
 
 website-build-check: website-check
 	zola --root website build --output-dir "$(CURDIR)/.tmp/website-check" --force

@@ -9,13 +9,15 @@ keeping ordinary development iterations independent of Windows. Bring Windows
 to the intended macOS feature fidelity when preparing a release, with limited
 local validation on the Windows ARM64 VM and focused release-time checks.
 
-**Implementation status:** ordinary CI remains macOS-focused, with explicit
-Windows reader and shared x64/ARM64 test-MSIX build/install/upgrade/uninstall gates.
-These test-installer gates are implemented; they are distinct from production
-publication. The a15 candidate adds shared-feed signing/publication and download
-selection, which still require its current-head release checks and live release
-verification. Windows archive writing/imports remain unsupported. Building or
-installing a reader package does not establish feature parity.
+**Implementation status:** Python/pywebview is the supported desktop. Explicit
+`[release-ci]` branch checks build the Apple Silicon DMG and x64 Python MSIX,
+validate installation and upgrades, and authenticate both payloads and the
+shared appcast before a tag may be pushed. Windows creation/importing and
+processing use shared Python services; hosted installed-package checks remain
+required for each candidate. ARM64 packaging and the Rust GUI are historical
+plans, superseded by the Windows consolidation below. Current source version
+and release identity derive from `pyproject.toml`; this document is not evidence
+that a candidate has passed CI or been published.
 
 ### When to spend runner time
 
@@ -45,17 +47,16 @@ release candidate checks build the Python DMG and Python MSIX packages.
 
 ### Windows distribution and evidence
 
-For explicit pre-merge Windows validation, include `[windows-ci]` in the pushed
-head commit message. The branch workflow calls the shared reader workflow for
-Windows x64/ARM64 only; its normal macOS job already validates that platform.
-Ordinary pushes omit this marker and skip Windows runners. The standalone
-manual reader workflow and release caller still build all three platforms.
+For explicit pre-merge packaging validation, include `[release-ci]` in the pushed
+head commit message. The branch workflow reuses the same macOS and Windows
+packaging jobs as the tagged release and verifies their combined signed feed.
+Ordinary pushes omit this marker and skip installer builds. The Windows workflow
+also supports explicit dispatch for its x64 package checks.
 
-The planned Windows download is one installer containing native x64 and ARM64
-application builds. It selects the matching executable and WinSparkle DLL for
-the machine. These remain separate native builds inside a common installer;
-the application is not a universal executable. Include license notices,
-WebView2 prerequisite detection/installation, shortcuts, and uninstall support.
+The supported Windows download is a test-signed x64 MSIX bundle with private
+CPython, ClamAV and WinSparkle. Its trust ZIP supplies the persistent public
+certificate and installation instructions. WebView2 remains an external
+prerequisite. ARM64 package construction is not part of the current workflow.
 
 Keep the macOS native GUI test. Windows release validation should cover install,
 launch, opening a synthetic archive, search, message display, unchanged archive
@@ -105,40 +106,43 @@ its tag, rebuilding installers, or silently resetting the feed.
 
 ### Website downloads
 
-Generate static platform buttons from public GitHub release metadata through
-`make website-release-data RELEASES_JSON=PATH`; JavaScript is not required:
+Generate installer metadata from public GitHub releases through
+`make website-release-data RELEASES_JSON=PATH`. JavaScript selects the primary
+button from browser platform hints:
 
-- **Download for Mac (.dmg)**
-- **Download for Windows (.msixbundle)** — includes native x64 and ARM64 builds
-- **View all downloads and release notes** — links to the GitHub release listing
+- **Download macOS installer** or **Download Windows installer** links to the
+  matching uploaded asset.
+- **Download the installers** links to the generic releases page when the
+  platform cannot be identified.
+- **Show all installers** always links to the generic releases page beside it.
 
-Display **Current release: VERSION** beside the primary buttons. Each primary
-button links directly to its installer asset, not an Actions artifact or a
-GitHub release-detail page. Generate version, URLs, and availability at site
-build time from a complete published release; validate that both assets exist.
-Uploaded nonempty, exactly named DMG/MSIX assets, the Windows trust ZIP and
-appcast are required for a complete release. Prefer complete releases over newer
-incomplete uploads; a requested publication tag must be complete or Pages fails.
-Before any complete Windows release, retain historical Mac-only download links.
-Keep preview downloads distinctly labeled and separate from the current stable
-release. If only previews exist, label them as previews. Before the first
-complete Windows release, do not render an active Windows download button for
-an absent asset. Browser platform detection may later emphasize a button but
-must not hide the other platform or be necessary for downloading.
+Missing platform assets use the generic page with an availability notice.
+Explicit platform links and the generic fallback work without JavaScript.
+The page states Apple Silicon macOS and x64 Windows requirements; browser hints
+cannot prove hardware compatibility. Prefer complete stable releases, falling
+back to clearly labeled previews before the first stable release. Nonempty,
+exactly named DMG/MSIX assets, the Windows trust ZIP and authenticated appcast
+are required for a complete release; a requested publication tag must be
+complete or Pages fails. Historical Mac-only releases retain their Mac links.
+
+The update-stream selector belongs in application Preferences, shared by
+Sparkle and WinSparkle: **Release only** or **Alpha / beta / development and
+release**. Development updates mean published previews. Preferences persist
+outside archives; there is no stream selector or saved update setting on the
+website.
 
 ## GitHub Actions
 
-### Existing macOS publication baseline
+### Current publication workflows
 
-The following describes the macOS workflow being extended. The agreed policy
-above governs the planned combined release; the manual test-release path and
-Windows packaging must be added rather than inferred from this baseline.
+The reusable candidate workflow validates both packages before the immutable
+tag. The tag workflow repeats identity and packaging gates for publication.
 
 | Workflow | Trigger | Gate and result |
 | --- | --- | --- |
 | [Continuous integration](../.github/workflows/continuous-integration.yml) | Push to a non-`main` repository branch | Ordinary checks skip changes limited to `README.md` and `doc/RELEASE_NOTES.md`. Other changes run static/tests, distribution and website validation. An explicit `[release-ci]` head independently runs DMG/MSIX/signature gates on any branch without publishing. |
 | [Website](../.github/workflows/pages.yml) | Push to `main` that changes files outside `README.md` and `doc/RELEASE_NOTES.md`, or manual `workflow_dispatch` | Build and deploy the site, preserving the latest published Sparkle feed. No DMG build or release secrets. Other documentation changes still deploy Pages. |
-| [Release](../.github/workflows/release.yml) | Push of an annotated `v...` tag at a version-matching commit already on `main` | Validate the tag before expensive work; build, sign, notarize, staple, and test the DMG once; publish the release with DMG and signed appcast; then build and deploy Pages as a dependent job using that exact appcast. A failed release job must not deploy Pages. |
+| [Release](../.github/workflows/release.yml) | Push of an annotated `v...` tag at a version-matching commit already on `main` | Validate the tag before expensive work; build, sign, notarize, staple, and test the DMG once; publish the release with DMG, MSIX, Windows trust material and signed appcast; then build and deploy Pages as a dependent job using that exact appcast. A failed release job must not deploy Pages. |
 
 The `v*` trigger is only a coarse GitHub filter: `make release-tag-check`
 enforces the canonical PEP 440 version and exact `v`-prefixed tag. A tag push,
@@ -206,7 +210,7 @@ existing macOS scripts remain at their historical paths until migrated together
 with their imports, tests and workflow callers. No Linux directory is needed
 until Linux-specific tooling is added.
 
-## MSIX installation matrix (2026-10-07)
+## Historical MSIX installation matrix (2026-10-07)
 
 MSIX replaces the older EXE installer plan. The Python desktop is now its
 entry point; the a15 Rust WinSparkle adapter is archived and no longer ships.

@@ -14,7 +14,14 @@ ordinary CI, explicit cross-platform test releases, concurrent Mac/Windows
 installer builds, coordinated publication through one signed appcast, and
 static direct-download buttons derived from complete published releases. Reject
 draft, absent, duplicate, incomplete-upload or wrong-URL installer metadata; keep
-preview buttons distinct and omit unavailable Windows downloads.
+preview downloads distinct and omit unavailable Windows downloads. The homepage
+has adjacent “Download macOS installer” or “Download Windows installer” and
+“Show all installers” buttons. Unknown platforms use “Download the installers”
+and the generic releases page; missing platform assets also use that page with
+an availability message. Generic and explicit platform links work without
+JavaScript. Browser hints do not establish hardware compatibility; the page
+states Apple Silicon macOS and x64 Windows requirements. The website has no
+update-stream selector; that preference belongs in the application.
 These are release-workflow requirements, not evidence of Windows feature parity.
 Website screenshot validation uses purpose-made synthetic mail and a real
 browser: installed Edge on Windows, Playwright Chromium on other platforms.
@@ -1948,6 +1955,13 @@ verifies the signed installer. Downloads and installation require user consent;
 installation must reserve the common cross-process archive-writer guard.
 Source launches allow manual discovery but must not run installers or automatic
 checks. User settings and updater state are separate from archived content.
+
+Both platform Preferences panels offer “Release only” and
+“Alpha / beta / development and release”, using shared labels and the saved
+`release`/`preview` application preference. Sparkle's allowed-channel delegate
+and WinSparkle's authenticated feed filter honor that selection. Development
+means published preview builds; it does not mean installing an arbitrary source
+checkout. This preference is independent of website downloads.
 
 The frozen macOS app must use Sparkle's standard updater UI, with native
 Preferences… and Check for Updates… commands. Stable installations default to

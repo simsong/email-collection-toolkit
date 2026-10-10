@@ -5,6 +5,12 @@ description = "Changes to the Email Collection Toolkit website, separate from ap
 <!-- Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved. -->
 
 
+## 2026-10-10
+
+- Add platform-aware installer labels and an adjacent **Show all installers**
+  button. Keep explicit platform links, unavailable-asset notices and no-script
+  fallback. Update-stream preferences belong in the application.
+
 ## 2026-10-08
 
 - Derive static Mac and Windows installer buttons from complete public releases,

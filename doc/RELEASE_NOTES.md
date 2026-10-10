@@ -21,7 +21,14 @@ the Windows runtime's complete license evidence before MSIX assembly.
 
 # Release notes
 
-## 1.0.0a18 (candidate)
+## 1.0.0a19 (candidate)
+
+- Clarify the application Preferences update-stream choice as release-only or
+  alpha/beta/development plus release, shared by Sparkle and WinSparkle. Keep
+  stream settings out of the website; its download buttons suggest macOS or
+  Windows and provide an adjacent **Show all installers** link.
+
+## 1.0.0a18 (superseded candidate)
 
 - Limit ordinary CI/Pages exclusions to README and release notes; validate other
   documentation. Permit explicit release-candidate checks from any non-main

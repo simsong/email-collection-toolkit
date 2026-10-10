@@ -78,6 +78,13 @@ Pages within its `main` environment rule. After a transient Pages failure,
 rerun that workflow on `main`. Retire a failed unpublished tag only by explicit
 release decision; publish a corrected build under a new version and tag.
 
+The website suggests a macOS or Windows installer and offers **Show all
+installers** alongside it. Platform links remain available without scripting,
+and the page states supported architectures. Update stream selection belongs
+in the app's Preferences panel: **Release only** or **Alpha / beta / development
+and release**. Both Sparkle and WinSparkle use that saved application preference.
+Run `make website-download-check` for rendered and headless browser acceptance.
+
 The original `v1.0.0a10` release signed its archive but omitted a complete XML
 signature. The audited `Prepare historical signed appcast` workflow produced a
 separate signed copy, which was verified and published as the a10 release asset
