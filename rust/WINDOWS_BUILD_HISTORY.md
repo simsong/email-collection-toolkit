@@ -4,9 +4,9 @@
 
 Retired; see [README](README.md).
 
-The current Windows GUI uses Rust, Wry/Tao, WebView2, and the shared web
-interface. Build and test it with **Cargo from PowerShell**. GNU Make, MSYS2,
-WSL, Python, and the Dioxus/Tauri CLIs are not needed for this Rust reader.
+The retired Windows GUI used Rust, Wry/Tao, WebView2, and the shared web
+interface. The commands below document its historical **Cargo from PowerShell**
+workflow. For the supported Python desktop, use [Windows setup](../doc/WINDOWS.md).
 
 ## Prerequisites
 

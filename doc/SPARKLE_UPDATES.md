@@ -5,15 +5,18 @@
 Issue #91 adds Sparkle to the frozen macOS application. The configured first
 target is Apple Silicon on macOS 15 or later. Older macOS and Intel builds need
 their own artifact validation; an Info.plist minimum alone does not prove support.
-Mapped Rust packages use Sparkle on macOS and WinSparkle on Windows.
-Source-checkout launches report updates unavailable and do not start automatic
-network checks. Windows archive writing remains disabled in this alpha.
+The supported Python/pywebview desktop uses Sparkle on macOS and WinSparkle
+on Windows. The Rust GUI and its updater adapters remain historical source.
+Source launches never run automatic checks or installers; the Windows adapter
+permits manual discovery. Windows archive creation/import uses the shared Python
+services, and definition databases live outside archives.
 
 ## User behavior
 
 The application menu contains Preferences… (Command-comma) and Check for
-Updates…. Rust Preferences exposes the track and automatic-check setting;
-About shows updater availability. Stable installations
+Updates…. On Windows, Help contains Check for Updates and Update Settings.
+The shared Python preferences retain the track and automatic-check setting.
+Stable installations
 initially use Release updates. Alpha/beta installations initially use Preview
 updates, which adds alpha/beta items to Sparkle's always-included stable track.
 An explicit choice survives subsequent upgrades, including preview-to-stable.
@@ -21,29 +24,24 @@ Daily checks are enabled initially. Download and installation require confirmati
 automatic-update offers are disabled. Sparkle supplies the standard release-note,
 download, error, and Install and Relaunch UI.
 
-Rust imports existing Python update choices when its own settings are absent,
-including the previous application directory and Windows roaming settings.
-The legacy Python preference store retains its version-1-to-2 migration.
+The Python preference store retains its version-1-to-2 migration.
 Update fields are retained when recent archives change. No archive configuration,
 OAuth credential, canonical message, manifest, or telemetry setting is changed.
 
 ## Native lifecycle
 
-`update_policy.rs` owns mapped identity, channel choices, daily timing and the
-shared installation fence. `updater_macos.rs` loads pinned Sparkle 2.10.0 and
-retains `SPUStandardUpdaterController` and its Objective-C delegate on the main
-Cocoa thread. It copies the deferred-install block and retries through a native
-timer. Objective-C continuation exceptions release the reservation.
-The retained legacy `sparkle.py` adapter serves the Python GUI.
+`updates.py` owns shared channel preferences and the installation reservation.
+`sparkle.py` provides the Python macOS native adapter, retaining the Sparkle
+controller and delegate and deferring installation while archive work is active.
 
-`updater.rs` loads pinned WinSparkle from beside the executable, supplies the
-mapped version/build and Ed25519 key, and installs shutdown/cancel/error callbacks.
-Rust owns daily scheduling so preference changes take effect immediately.
-The DLL stays loaded until process exit because SDK cleanup does not join every
-worker. `updater_gateway.rs` fetches the shared HTTPS feed with size/time bounds,
-authenticates its complete XML signature, and supplies only eligible Windows
-MSIX items to WinSparkle over a private loopback endpoint. Native WinSparkle
-verifies the installer signature and supplies confirmation/install UI.
+`winsparkle.py` loads the packaged WinSparkle DLL, supplies the mapped
+version/build and Ed25519 key, and installs shutdown/cancel/error callbacks.
+Python schedules daily checks for installed builds. Native callbacks remain
+retained because SDK cleanup does not join every worker. `windows_update_feed.py`
+fetches the shared HTTPS feed with size/time bounds, authenticates its complete
+XML signature, and supplies only eligible `ECT.PythonReader` x64 MSIX items over
+a private tokenized loopback endpoint. Native WinSparkle verifies the installer
+signature and supplies confirmation/install UI.
 
 Installation waits for all document jobs, worker tails, ClamAV definition
 replacement, and archive writer leases in other same-user CLI processes. Shared
@@ -168,11 +166,10 @@ can accept the next release.
 
 `make test-updates` exercises migration/defaults, retained settings, ordered
 versions, real writer exclusion, and checkpoint/definition deferral.
-`make test-rust-updates` checks the actual Python writer lease against a separate
-Rust process, including a real Cocoa continuation exception. Rust workspace
-tests authenticate and filter signed mixed-platform feeds through real loopback
-HTTP requests. `[release-ci]` branch CI builds/notarizes the DMG, installs the
-shared MSIX on both architectures, and signs/verifies both final installer bytes
+`make test-windows-updater` exercises the actual WinSparkle SDK and signed-feed
+filtering. Historical Rust updater tests remain separate from Python acceptance.
+`[release-ci]` branch CI builds/notarizes the DMG, installs the
+shared x64 MSIX, and signs/verifies both final installer bytes
 and the complete XML using the production key before a version tag is pushed.
 `make test-sparkle-signing` uses the actual pinned signer with a disposable key
 and proves archive/feed tampering rejection and public-key matching.
@@ -182,6 +179,10 @@ block ABI, and exactly-once continuation. Its unique defaults domain is removed
 afterward. `make sparkle-probe ARGS=--feed-check` additionally performs a real
 HTTPS preview check against the existing public feed and inspects Sparkle's
 standard update window. It does not download or install an update.
+
+The Windows package CI tests signed installation, Close/Quit, upgrade and
+uninstall. This does not prove a complete WinSparkle-driven update; the published
+feed does not yet contain a Python Windows release.
 
 Issue #91 remains subject to a signed/notarized older-to-newer application test
 using a controlled HTTPS feed. Cover release/preview eligibility, manual/daily

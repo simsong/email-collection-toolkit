@@ -32,10 +32,14 @@ https://developer.microsoft.com/microsoft-edge/webview2/#download
 For a disconnected machine, transfer the appropriate standalone installer
 from a connected computer and install it before running ECT.
 
-Windows importing is not yet enabled. Reading and search use the same Python
-services and webview interface as macOS. This preview has a separate package
-identity and does not replace the Rust preview. Automatic Windows updates
-are not yet implemented; install later signed previews manually.
+Archive creation, importing, reading and search use the shared Python services
+and webview interface. The package bundles ClamAV; virus definitions are stored
+under the user's Local AppData, outside .mailarchive folders. This preview has
+a separate package identity and does not replace the historical Rust preview.
+WinSparkle provides Check for Updates and Update Settings in the Help menu.
+A complete updater-driven Python package upgrade has not yet been validated,
+and the published feed has no Python Windows release; install signed previews
+manually until a compatible update is published.
 
 Files: base.msixbundle is the only installer; local-test.cer is its public
 certificate; sha256.json contains checksums. No upgrade fixture is needed
