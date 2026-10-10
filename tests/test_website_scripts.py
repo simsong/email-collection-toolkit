@@ -543,11 +543,13 @@ def test_static_platform_downloads_render_without_javascript(tmp_path: Path, tag
             assert links.windows_url in anchors.urls
             assert links.windows_help_url in anchors.urls
     assert "Current release:" in html
+    assert "Download the installers" in html
+    assert "Show all installers" in html
     if tags == ("v2.0.0a1",):
-        assert "Download for Windows" not in html
-        assert "Download for Mac (.dmg) — Preview" in html
+        assert "Windows (.msixbundle)" not in html
+        assert "v2.0.0a1 (preview)" in html
     elif len(tags) == 1:
-        assert "Download for Windows (.msixbundle) — Preview" in html
+        assert "Windows (.msixbundle)" in html
+        assert "v2.1.0b1 (preview)" in html
     else:
-        assert "Preview v2.1.0b1:" in html
-        assert "Download for Mac (.dmg) — Preview" not in html
+        assert "v2.1.0b1 (preview)" in html

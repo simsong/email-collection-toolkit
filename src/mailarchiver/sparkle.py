@@ -12,7 +12,8 @@ from typing import Any
 from types import new_class
 from collections.abc import Callable
 
-from .updates import UpdateChannel, UpdateService, allowed_channels
+from .updates import (PREVIEW_STREAM_LABEL, RELEASE_STREAM_LABEL, UPDATE_STREAM_HELP,
+                      UpdateChannel, UpdateService, allowed_channels)
 
 NO_UPDATE_ERROR = 1001
 ARGUMENTS = "arguments"
@@ -143,7 +144,7 @@ def show_preferences(service: UpdateService, save: Callable[[UpdateChannel, bool
     alert.setInformativeText_(f"You are running {status.version} (build {status.build or 'source checkout'}).")
     view = appkit.NSView.alloc().initWithFrame_(((0, 0), (470, 220)))
     channel = appkit.NSPopUpButton.alloc().initWithFrame_pullsDown_(((0, 172), (470, 28)), False)
-    channel.addItemsWithTitles_(["Release updates", "Preview updates — alpha, beta, and release"])
+    channel.addItemsWithTitles_([RELEASE_STREAM_LABEL, PREVIEW_STREAM_LABEL])
     channel.selectItemAtIndex_(int(status.channel == "preview"))
     view.addSubview_(channel)
     automatic = appkit.NSButton.checkboxWithTitle_target_action_("Check for updates automatically (daily)", None, None)
@@ -153,7 +154,7 @@ def show_preferences(service: UpdateService, save: Callable[[UpdateChannel, bool
     checked = status.last_checked.astimezone().strftime("%Y-%m-%d %H:%M %Z") if status.last_checked else "Not yet"
     text = appkit.NSTextField.wrappingLabelWithString_(
         "Downloading and installation always require confirmation.\n"
-        "Preview builds may contain unfinished features. Your choice is retained across upgrades.\n\n"
+        f"{UPDATE_STREAM_HELP}\n\n"
         f"Last checked: {checked}\n{status.detail}",
     )
     text.setFrame_(((0, 0), (470, 126)))

@@ -1656,8 +1656,22 @@ Python application and its About/Dock identity use a stable project asset. The
 `website/` directory is a Zola site using the local
 `envelope-rainbow` theme. GitHub Pages builds it from `main`; the workflow
 SHA-256 verifies the pinned Zola archive before extraction, resolves the newest
-exact stable and beta tags into Zola data, then deploys a Pages artifact. The
-home-page template uses a light rainbow design with capability and story cards
+published stable, alpha and beta assets into Zola data, then deploys a Pages artifact. The
+homepage enhances its generic download link with `downloads.js`. Published
+release metadata supplies exact URLs; stable installers are preferred, with
+preview installers offered before a stable release exists. Platform hints
+choose the macOS or Windows label. Mobile/unknown platforms and absent assets
+keep the generic releases URL. “Show all installers” stays beside the primary
+button, and explicit platform links remain accessible without JavaScript.
+The website has no update-stream control or browser-local update preference.
+Both app Preferences panels use shared stream labels from `updates.py` and
+persist the existing `release`/`preview` channel through the document controller.
+Sparkle's `allowedChannelsForUpdater_` reads that channel when checking;
+WinSparkle's gateway supplies it to the authenticated feed filter. Preview adds
+published alpha/beta/development builds while retaining stable updates.
+`make website-download-check` runs rendered Zola and real HTTP/browser checks
+for platform detection, missing assets, no-script fallback and responsive layout.
+The home-page template uses a light rainbow design with capability and story cards
 and equal individual and archivist columns. The cover displays the text-free
 `images/cover-artwork.png` derived from the approved banner. CSS fits the
 central artwork into the original wide banner proportions, excluding the

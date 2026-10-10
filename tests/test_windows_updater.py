@@ -18,15 +18,18 @@ from urllib.request import urlopen
 import xml.etree.ElementTree as xml
 
 from Cryptodome.Signature import eddsa
+from bs4 import BeautifulSoup
+from packaging.version import Version
 import pytest
 
 from mailarchiver.release_versions import release_metadata
-from mailarchiver.updates import UpdateService, UpdateStatus
+from mailarchiver.updates import (PREVIEW_STREAM_LABEL, RELEASE_STREAM_LABEL,
+                                UpdateService, UpdateStatus, allowed_channels)
 from mailarchiver.windows_update_feed import FeedGateway, PACKAGE_NAMESPACE, SPARKLE, filtered_feed
 from scripts.update_appcast import AppcastRelease, SignedArchive, append_item
 from scripts.check_appcast import check_appcast
 from mailarchiver.application import ApplicationController, ApplicationPreferencesStore
-from mailarchiver.windows_update_preferences import UpdatePreferencesApi
+from mailarchiver.windows_update_preferences import PAGE, UpdatePreferencesApi
 
 
 def test_published_windows_item_reaches_the_authenticated_reader(tmp_path: Path) -> None:
@@ -73,6 +76,45 @@ def test_windows_settings_report_failed_save_and_restore_choices(tmp_path: Path)
     assert service.status.channel == "release" and not service.status.automatic_checks
     assert controller.preferences == before
     assert sentinel.read_bytes() == b"preserve"
+
+
+def test_preferences_select_the_shared_sparkle_and_winsparkle_stream(tmp_path: Path) -> None:
+    """App-only stream choices persist and drive both native updater filtering policies."""
+    installed = version("mailarchiver")
+    stable = Version(installed).base_version
+    preview = installed if Version(installed).is_prerelease else stable + "a1"
+    feed = tmp_path / "appcast.xml"
+    feed.write_text("<rss><channel/></rss>", encoding="utf-8")
+    tags = []
+    for candidate in (stable, preview):
+        tag, channel, build, display = release_metadata(candidate)
+        tags.append(tag)
+        append_item(feed, AppcastRelease(tag=tag, channel=channel, sparkle_version=build,
+            display_version=display, platform="windows", hardware=None,
+            url=f"https://github.com/simsong/email-collection-toolkit/releases/download/{tag}/fixture.msixbundle",
+            archive=SignedArchive(signature=base64.b64encode(bytes(64)).decode(), length=100)))
+    key = eddsa.import_private_key(bytes(range(32)))
+    data = feed.read_bytes()
+    signature = base64.b64encode(eddsa.new(key, "rfc8032").sign(data))
+    signed = data + b"<!-- sparkle-signatures:\nedSignature: " + signature + f"\nlength: {len(data)}\n-->\n".encode()
+    public = base64.b64encode(key.public_key().export_key(format="raw")).decode()
+    options = BeautifulSoup(PAGE, "html.parser").select("#channel option")
+    assert [(option.get("value"), option.text) for option in options] == [
+        ("release", RELEASE_STREAM_LABEL), ("preview", PREVIEW_STREAM_LABEL)]
+    store = ApplicationPreferencesStore(tmp_path / "preferences.json")
+    controller = ApplicationController(store)
+    service = UpdateService(UpdateStatus(version=installed, channel="release"), lambda: False)
+    api = UpdatePreferencesApi(service,
+        lambda channel, automatic: controller.configure_updates(channel, automatic, strict=True))
+    for channel in ("preview", "release"):
+        api.save(channel, False)
+        reopened = ApplicationController(store)
+        assert reopened.initialize_updates(installed) == channel
+        assert not reopened.preferences.automatic_update_checks
+        assert service.status.channel == channel
+        assert allowed_channels(service.status.channel) == (frozenset({"preview"}) if channel == "preview" else frozenset())
+        items = xml.fromstring(filtered_feed(signed, public, service.status.channel)).findall("channel/item")
+        assert {item.findtext("guid") for item in items} == set(tags if channel == "preview" else tags[:1])
 
 
 def signed_feed(identity: str = "ECT.PythonReader") -> tuple[bytes, str]:

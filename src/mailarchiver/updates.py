@@ -12,6 +12,9 @@ from packaging.version import Version
 from pydantic import BaseModel
 
 UpdateChannel = Literal["release", "preview"]
+RELEASE_STREAM_LABEL = "Release only"
+PREVIEW_STREAM_LABEL = "Alpha / beta / development and release"
+UPDATE_STREAM_HELP = "Development updates are published preview builds. Your choice is retained across upgrades."
 
 
 def default_channel(version: str) -> UpdateChannel:
