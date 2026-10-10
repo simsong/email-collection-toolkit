@@ -1,0 +1,6 @@
+# Preserve intentional wire bytes in the focused writer fixtures.
+# CRLF and LF inputs must remain distinct on every checkout platform.
+# Invalid UTF-8 and missing terminal newlines are deliberate test inputs.
+# Tests read these files as bytes and compare canonical retrieval and export.
+# Other fixture formats retain their existing Git attributes.
+tests/data/writer-preservation/2024/*.eml -text

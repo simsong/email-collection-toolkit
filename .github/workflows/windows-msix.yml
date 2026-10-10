@@ -1,0 +1,132 @@
+# Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved.
+# Build each native payload once, then share one bundle between install-test VMs.
+# Explicit dispatch and reusable calls keep Windows packaging out of ordinary CI.
+# The persistent signing secret stays in assembly; only the public certificate ships.
+# Installation jobs consume the same artifact without checkout toolchains or rebuilds.
+# The alpha may ship with explicit certificate trust; the upgrade fixture never ships.
+name: Python webview MSIX installation tests
+on:
+  push:
+    branches: [codex/windows-msix-ci]
+  workflow_dispatch:
+  workflow_call:
+    secrets:
+      MSIX_TEST_CERT_PFX_BASE64:
+        required: true
+permissions:
+  contents: read
+jobs:
+  payload:
+    if: github.event_name != 'push' || github.ref_type == 'tag' || contains(github.event.head_commit.message, '[msix-ci]') || contains(github.event.head_commit.message, '[release-ci]')
+    name: Build payload (${{ matrix.arch }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            arch: x64
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+      - name: Install Make and x64 Python dependencies
+        run: |
+          choco install make --yes --no-progress
+          uv sync --locked --python cpython-3.12-windows-x86_64-none
+      - name: Validate reader and build Python payload
+        run: |
+          $env:PATH = "C:/Program Files/Git/usr/bin;" + $env:PATH
+          make MAKE=make 'SHELL=C:/Program Files/Git/usr/bin/bash.exe' prepare-windows-clamav prepare-windows-updater freshclam test-windows-scanner test-windows-updater test-definition-state
+          if ($LASTEXITCODE) { throw 'Windows antivirus preparation or acceptance failed' }
+          make MAKE=make 'SHELL=C:/Program Files/Git/usr/bin/bash.exe' check-python-reader-static test-python-reader test-windows-package-entry test-python-writer test-python-reader-native
+          if ($LASTEXITCODE) { throw 'Reader checks failed' }
+          make 'SHELL=C:/Program Files/Git/usr/bin/bash.exe' msix-test 'MSIX_ARGS=-CreateUpgradeTest'
+          if ($LASTEXITCODE) { throw 'MSIX assembly failed' }
+          $package = (Get-ChildItem dist/windows-msix-test/*.msix).FullName
+          make 'SHELL=C:/Program Files/Git/usr/bin/bash.exe' test-msix "MSIX_PACKAGE=$package" 'MSIX_EVIDENCE=dist/relocated'
+          if ($LASTEXITCODE) { throw 'Relocated MSIX failed' }
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: msix-payload-${{ matrix.arch }}
+          path: |
+            dist/windows-msix-test/*.msix
+            dist/windows-msix-test/upgrade/*.msix
+          if-no-files-found: error
+          retention-days: 7
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: always()
+        with:
+          name: msix-build-logs-${{ matrix.arch }}
+          path: dist/windows-msix-test/*.log
+          retention-days: 7
+  bundle:
+    needs: payload
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: msix-payload-x64
+          path: dist/payloads/x64
+      - name: Assemble and test-sign shared bundles
+        env:
+          MSIX_TEST_CERT_PFX_BASE64: ${{ secrets.MSIX_TEST_CERT_PFX_BASE64 }}
+        shell: pwsh
+        run: ./scripts/win/bundle_test_msix.ps1 -InputDirectory dist/payloads
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: windows-msix-install-test
+          path: |
+            dist/bundle/base.msixbundle
+            dist/bundle/*.cer
+            dist/bundle/sha256.json
+            dist/bundle/README.txt
+            dist/bundle/Install-Test-Certificate.ps1
+          if-no-files-found: error
+          retention-days: 7
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ci-only-msix-upgrade-fixture
+          path: dist/bundle/upgrade.msixbundle
+          if-no-files-found: error
+          retention-days: 7
+  install:
+    name: Install same bundle (${{ matrix.arch }})
+    needs: bundle
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            arch: x64
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: windows-msix-install-test
+          path: dist/bundle
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: ci-only-msix-upgrade-fixture
+          path: dist/bundle
+      - name: Install, launch, upgrade and uninstall
+        shell: powershell
+        run: ./scripts/win/test_installed_msix.ps1 -BundleDirectory dist/bundle -Architecture ${{ matrix.arch }}
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: always()
+        with:
+          name: msix-installed-evidence-${{ matrix.arch }}
+          path: |
+            dist/installed-evidence/install.log
+            dist/installed-evidence/*/report.json
+            dist/installed-evidence/*-window.txt
+            dist/installed-evidence/success.txt
+          if-no-files-found: error
+          retention-days: 7

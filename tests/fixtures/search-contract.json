@@ -1,0 +1,232 @@
+[
+  {
+    "query": "any:sender",
+    "attachments": false,
+    "selections": [],
+    "matches": 1,
+    "indexes": [
+      "messages_sender_address_pk",
+      "recipients_address_pk"
+    ],
+    "subject_scan": false
+  },
+  {
+    "query": "any:copy",
+    "attachments": false,
+    "selections": [],
+    "matches": 1,
+    "indexes": [
+      "messages_sender_address_pk",
+      "recipients_address_pk"
+    ],
+    "subject_scan": false
+  },
+  {
+    "query": "from:sender",
+    "attachments": false,
+    "selections": [],
+    "matches": 1,
+    "indexes": [
+      "messages_sender_address_pk"
+    ],
+    "subject_scan": false
+  },
+  {
+    "query": "from:missing",
+    "attachments": false,
+    "selections": [],
+    "matches": 0,
+    "indexes": [
+      "messages_sender_address_pk"
+    ],
+    "subject_scan": false
+  },
+  {
+    "query": "to:recipient",
+    "attachments": false,
+    "selections": [],
+    "matches": 1,
+    "indexes": [
+      "recipients_address_pk"
+    ],
+    "subject_scan": false
+  },
+  {
+    "query": "cc:copy",
+    "attachments": false,
+    "selections": [],
+    "matches": 1,
+    "indexes": [
+      "recipients_address_pk"
+    ],
+    "subject_scan": false
+  },
+  {
+    "query": "bcc:blind",
+    "attachments": false,
+    "selections": [],
+    "matches": 1,
+    "indexes": [
+      "recipients_address_pk"
+    ],
+    "subject_scan": false
+  },
+  {
+    "query": "date:2024-01-03",
+    "attachments": false,
+    "selections": [],
+    "matches": 1,
+    "indexes": [
+      "messages_date_message"
+    ],
+    "subject_scan": false
+  },
+  {
+    "query": "before:2025-01-01",
+    "attachments": false,
+    "selections": [],
+    "matches": 1,
+    "indexes": [
+      "messages_date_message"
+    ],
+    "subject_scan": false
+  },
+  {
+    "query": "after:2025-01-01",
+    "attachments": false,
+    "selections": [],
+    "matches": 0,
+    "indexes": [
+      "messages_date_message"
+    ],
+    "subject_scan": false
+  },
+  {
+    "query": "agenda",
+    "attachments": false,
+    "selections": [],
+    "matches": 1,
+    "indexes": [
+      "messages_sha256"
+    ],
+    "subject_scan": false
+  },
+  {
+    "query": "\"meeting agenda\"",
+    "attachments": false,
+    "selections": [],
+    "matches": 1,
+    "indexes": [
+      "messages_sha256"
+    ],
+    "subject_scan": false
+  },
+  {
+    "query": "meeting agenda",
+    "attachments": false,
+    "selections": [],
+    "matches": 1,
+    "indexes": [
+      "messages_sha256"
+    ],
+    "subject_scan": false
+  },
+  {
+    "query": "agenda",
+    "attachments": true,
+    "selections": [],
+    "matches": 1,
+    "indexes": [
+      "messages_sha256"
+    ],
+    "subject_scan": false
+  },
+  {
+    "query": "missing",
+    "attachments": true,
+    "selections": [],
+    "matches": 0,
+    "indexes": [
+      "messages_sha256"
+    ],
+    "subject_scan": false
+  },
+  {
+    "query": "from:sender to:recipient before:2025-01-01 agenda",
+    "attachments": false,
+    "selections": [],
+    "matches": 1,
+    "indexes": [
+      "messages_sha256",
+      "recipients_address_pk"
+    ],
+    "subject_scan": false
+  },
+  {
+    "query": "subject:planning",
+    "attachments": false,
+    "selections": [],
+    "matches": 1,
+    "indexes": [],
+    "subject_scan": true
+  },
+  {
+    "query": "subject:missing",
+    "attachments": false,
+    "selections": [],
+    "matches": 0,
+    "indexes": [],
+    "subject_scan": true
+  },
+  {
+    "query": "",
+    "attachments": false,
+    "selections": [
+      {
+        "version": 1,
+        "path": "mail",
+        "volume_identity": null
+      }
+    ],
+    "matches": 1,
+    "indexes": [
+      "source_files_hierarchy_volume",
+      "observations_source_file_offset"
+    ],
+    "subject_scan": false
+  },
+  {
+    "query": "",
+    "attachments": false,
+    "selections": [
+      {
+        "version": 1,
+        "path": "",
+        "volume_identity": "target"
+      }
+    ],
+    "matches": 1,
+    "indexes": [
+      "source_files_volume_hierarchy",
+      "observations_source_file_offset"
+    ],
+    "subject_scan": false
+  },
+  {
+    "query": "",
+    "attachments": false,
+    "selections": [
+      {
+        "version": 1,
+        "path": "mail",
+        "volume_identity": "target"
+      }
+    ],
+    "matches": 1,
+    "indexes": [
+      "source_files_volume_hierarchy",
+      "observations_source_file_offset"
+    ],
+    "subject_scan": false
+  }
+]

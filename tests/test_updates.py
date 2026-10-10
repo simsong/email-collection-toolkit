@@ -18,7 +18,7 @@ from mailarchiver.writer_lock import ArchiveBusyError, WriterLease
 def test_migration_retains_explicit_choice_across_upgrade(tmp_path: Path, installed: str, expected: str) -> None:
     """Version-1 preferences gain track defaults without losing Unicode recent paths."""
     store = ApplicationPreferencesStore(tmp_path / "preferences.json")
-    store.path.write_text('{"version":1,"last_archive":"/fixture/日本語","recent_archives":["/fixture/日本語"]}')
+    store.path.write_text('{"version":1,"last_archive":"/fixture/日本語","recent_archives":["/fixture/日本語"]}', encoding="utf-8")
     controller = ApplicationController(store)
     assert controller.initialize_updates(installed) == expected
     migrated = store.read()

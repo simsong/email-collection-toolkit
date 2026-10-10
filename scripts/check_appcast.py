@@ -13,11 +13,12 @@ import xml.etree.ElementTree as xml
 from pathlib import Path
 from urllib.parse import unquote, urlsplit
 
-from mailarchiver.update_metadata import SPARKLE_PUBLIC_KEY
+from mailarchiver.update_metadata import SPARKLE_PUBLIC_KEY, PACKAGE_IDENTITY, PACKAGE_NAMESPACE
 
 SPARKLE_NAMESPACE = "http://www.andymatuschak.org/xml-namespaces/sparkle"
 SIGNATURE = f"{{{SPARKLE_NAMESPACE}}}edSignature"
 VERSION = f"{{{SPARKLE_NAMESPACE}}}version"
+PLATFORM = f"{{{SPARKLE_NAMESPACE}}}os"
 RELEASE_PATH = "/simsong/email-collection-toolkit/releases/download/"
 MAX_FEED_BYTES = 16 * 1024 * 1024
 # Pinned Sparkle 2.10 signing.swift appends this block after the signed bytes.
@@ -41,8 +42,8 @@ def verify_feed(data: bytes, public_key: str) -> None:
         raise ValueError("Sparkle feed signature verification failed") from error
 
 
-def valid_release_url(url: str, tag: str) -> bool:
-    """Accept only a DMG asset under this repository's exact tagged release."""
+def valid_release_url(url: str, tag: str, platform: str = "macos") -> bool:
+    """Accept only this platform's installer in the exact repository/tag."""
     if not tag.startswith("v") or any(character in tag for character in "/\\%?#"):
         return False
     parsed = urlsplit(url)
@@ -51,12 +52,14 @@ def valid_release_url(url: str, tag: str) -> bool:
             or not parsed.path.startswith(prefix)):
         return False
     name = unquote(parsed.path[len(prefix):])
-    return bool(name and "/" not in name and "\\" not in name and name.endswith(".dmg"))
+    extension = {"macos": ".dmg", "windows": ".msixbundle"}.get(platform)
+    return bool(extension and name and "/" not in name and "\\" not in name and name.endswith(extension))
 
 
 def check_appcast(path: Path, tag: str = "", *, require_signed_feed: bool = False,
-                  public_key: str = SPARKLE_PUBLIC_KEY) -> None:
-    """Verify a bounded feed and exactly one item for the requested release."""
+                  public_key: str = SPARKLE_PUBLIC_KEY,
+                  expected_platforms: frozenset[str] = frozenset({"macos"})) -> None:
+    """Verify a bounded feed and one item per required release platform."""
     try:
         with path.open("rb") as handle:
             data = handle.read(MAX_FEED_BYTES + 1)
@@ -69,7 +72,8 @@ def check_appcast(path: Path, tag: str = "", *, require_signed_feed: bool = Fals
         raise ValueError(f"cannot read Sparkle appcast: {path}") from error
     if channel is None:
         raise ValueError("Sparkle appcast has no channel")
-    matches = 0
+    matches: set[str] = set()
+    seen: set[tuple[str, str]] = set()
     for item in channel.findall("item"):
         guid = item.findtext("guid")
         enclosure = item.find("enclosure")
@@ -79,12 +83,22 @@ def check_appcast(path: Path, tag: str = "", *, require_signed_feed: bool = Fals
             length = int(enclosure.get("length", ""))
         except ValueError as error:
             raise ValueError("Sparkle appcast contains an invalid archive length") from error
-        if length <= 0 or not valid_release_url(enclosure.get("url", ""), guid):
+        platform = enclosure.get(PLATFORM, "macos")
+        if length <= 0 or not valid_release_url(enclosure.get("url", ""), guid, platform):
             raise ValueError("Sparkle appcast contains an invalid archive enclosure")
+        identity = (guid, platform)
+        if identity in seen:
+            raise ValueError("Sparkle appcast contains duplicate release/platform items")
+        seen.add(identity)
         if guid == tag:
-            matches += 1
-    if tag and matches != 1:
-        raise ValueError(f"Sparkle appcast must contain exactly one signed item for {tag}")
+            if platform == "windows" and (
+                enclosure.get(f"{{{PACKAGE_NAMESPACE}}}packageIdentity") != PACKAGE_IDENTITY
+                or enclosure.get(f"{{{PACKAGE_NAMESPACE}}}architecture") != "x64"
+            ):
+                raise ValueError("Candidate Windows appcast item has an incompatible package identity or architecture")
+            matches.add(platform)
+    if tag and not expected_platforms.issubset(matches):
+        raise ValueError(f"Sparkle appcast must contain exactly one signed item per required platform for {tag}")
 
 
 def main() -> None:
@@ -92,9 +106,11 @@ def main() -> None:
     parser.add_argument("appcast", type=Path)
     parser.add_argument("--tag", default="")
     parser.add_argument("--require-signed-feed", action="store_true")
+    parser.add_argument("--platform", action="append", choices=("macos", "windows"))
     args = parser.parse_args()
     try:
-        check_appcast(args.appcast, args.tag, require_signed_feed=args.require_signed_feed)
+        check_appcast(args.appcast, args.tag, require_signed_feed=args.require_signed_feed,
+                      expected_platforms=frozenset(args.platform or ["macos"]))
     except ValueError as error:
         parser.error(str(error))
 

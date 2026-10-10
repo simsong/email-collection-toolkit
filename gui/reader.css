@@ -1,0 +1,12 @@
+/* Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved.
+ * Style the reader's small Windows welcome window with native system fonts.
+ * Content wraps as the window or display scale changes.
+ * Open and New use the shared document actions.
+ * Status and limitations stay selectable and readable.
+ * No archive contents or remote resources are loaded by this stylesheet. */
+body { font: 16px system-ui, sans-serif; background: #f6f8fb; color: #192c43; margin: 0; }
+main { margin: 32px auto; max-width: 540px; padding: 0 28px; }
+h1 { font-size: 26px; margin: 12px 0; }
+button { font: inherit; padding: 10px 20px; border: 1px solid #28508a; border-radius: 6px; background: #28508a; color: white; cursor: pointer; }
+button:disabled { opacity: .6; cursor: wait; }
+.detail, #status { font-size: 14px; line-height: 1.5; }

@@ -1,5 +1,10 @@
 # Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved.
 
+# Exercise CLI ingestion and the production desktop service with disposable mail.
+# Committed fixtures cover canonical bytes, search, rendering, and import lifecycle.
+# GUI bridge calls reach the real service without replacing it with a mock.
+# Independent installed verification checks the resulting BagIt/Mailbag archive.
+# Native acceptance is explicitly gated; headless checks do not claim native coverage.
 """Fresh-process ingest, verification, and native-search acceptance test."""
 
 from __future__ import annotations
@@ -35,11 +40,12 @@ from mailarchiver.gui_app import (
     NativeSmokeReport,
     PyWebViewApplication,
 )
-from mailarchiver.ingest_status import read_ingest_history
+from mailarchiver.gui_service import MessageView, PartContent, SearchPage, write_message
+from mailarchiver.reader_fixture import inventory
 from mailarchiver.search import index_message
+from mailarchiver.standalone_verify import INSTALLED_NAME
 
 DATA = Path(__file__).parent / "data"
-NORMAL_MESSAGE_COUNT = 207
 PROCESSED_MESSAGE_COUNT = 210
 GUI_API_METHODS = (
     "activate", "attachment", "choose_archive", "delete_filter_set", "mailbox_tree", "message",
@@ -134,79 +140,6 @@ def native_smoke_archive(tmp_path_factory: pytest.TempPathFactory) -> Path:
         catalog.close()
         search.close()
     return archive
-
-
-def test_fresh_ingest_builds_an_independently_verifiable_archive(built_archive: BuiltArchive) -> None:
-    """Prove discovery, dedupe, quarantine, indexing, fixity, and standalone verification."""
-    archive = built_archive.archive
-    assert "completed:" in built_archive.ingest_stderr
-    assert f"processed={PROCESSED_MESSAGE_COUNT}" in built_archive.ingest_stderr
-    assert "infected=1" in built_archive.ingest_stderr
-    assert "autosaved=1" in built_archive.ingest_stderr
-    assert "seen_skipped=1" in built_archive.ingest_stderr
-    assert "waiting for ClamAV startup:" in built_archive.ingest_stderr
-    assert not any(path.name.endswith("runtime-infected.emlx") for path in built_archive.source.rglob("*"))
-    assert (archive / "manifest-sha256.txt").is_file()
-    assert (archive / "tagmanifest-sha256.txt").is_file()
-    assert (archive / "mailbag.csv").is_file()
-    history = read_ingest_history(archive)
-    assert history.errors == []
-    assert len(history.statuses) == 1
-    ingest_status = history.statuses[0]
-    assert ingest_status.state == "completed"
-    assert ingest_status.processed_messages == PROCESSED_MESSAGE_COUNT
-    assert ingest_status.counts.infected == 1
-    assert ingest_status.counts.autosaves == 1
-    assert "status/" not in (archive / "tagmanifest-sha256.txt").read_text(encoding="utf-8")
-    assert "Mailarchiver-Message-Newline-Policy: preserve-source; add-final-LF-for-MBOX-framing\n" in (
-        archive / "bag-info.txt"
-    ).read_text(encoding="utf-8")
-
-    catalog = sqlite3.connect(f"file:{archive / 'archive.sqlite3'}?mode=ro", uri=True)
-    try:
-        assert catalog.execute("SELECT count(*) FROM messages").fetchone() == (NORMAL_MESSAGE_COUNT + 1,)
-        assert catalog.execute("SELECT count(*) FROM observations").fetchone() == (PROCESSED_MESSAGE_COUNT,)
-        assert catalog.execute("SELECT count(*) FROM source_files").fetchone() == (7,)
-        assert catalog.execute("SELECT count(*) FROM messages WHERE category = 'INFECTED'").fetchone() == (1,)
-        assert catalog.execute(
-            "SELECT count(*) FROM observations WHERE disposition = 'duplicate'"
-        ).fetchone() == (1,)
-        assert catalog.execute(
-            "SELECT count(*) FROM observations WHERE disposition = 'autosave-excluded'"
-        ).fetchone() == (1,)
-        assert catalog.execute(
-            "SELECT date_utc, date_source FROM messages WHERE message_id_normalized = 'rich-e2e@example'"
-        ).fetchone() == ("2024-02-02T00:00:00+00:00", "received-median")
-        infected_hash = catalog.execute(
-            "SELECT sha256 FROM messages WHERE message_id_normalized = 'infected-e2e@example'"
-        ).fetchone()
-        assert infected_hash == (hashlib.sha256(built_archive.infected_raw).hexdigest(),)
-        no_newline = (DATA / "source/Professional/Projects/no-final-newline.eml").read_bytes()
-        assert not no_newline.endswith(b"\n")
-        assert catalog.execute(
-            "SELECT sha256 FROM messages WHERE message_id_normalized = 'no-final-newline-e2e@example'"
-        ).fetchone() == (hashlib.sha256(no_newline).hexdigest(),)
-    finally:
-        catalog.close()
-
-    search = sqlite3.connect(f"file:{archive / 'search.sqlite3'}?mode=ro", uri=True)
-    try:
-        assert search.execute("SELECT count(*) FROM message_fts").fetchone() == (NORMAL_MESSAGE_COUNT,)
-        assert search.execute("SELECT count(*) FROM attachment_fts").fetchone() == (1,)
-        assert search.execute("SELECT count(*) FROM attachment_fts WHERE attachment_fts MATCH 'Appendixquartz'").fetchone() == (1,)
-    finally:
-        search.close()
-
-    verified = subprocess.run(
-        [sys.executable, "-I", str(archive / "verify_mail_archive.py"), str(archive)],
-        check=False,
-        capture_output=True,
-        text=True,
-    )
-    assert verified.returncode == 0, verified.stdout + verified.stderr
-    assert f"OK 2024-Archive1.mbox: {NORMAL_MESSAGE_COUNT} messages\n" in verified.stdout
-    assert "OK INFECTED1.mbox: 1 messages\n" in verified.stdout
-    assert verified.stdout.endswith("Archive integrity verified.\n")
 
 
 def test_search_ui_end_to_end_without_a_window(
@@ -401,18 +334,14 @@ def test_about_window_displays_version_disk_and_warnings(tmp_path: Path, page: P
 
 def test_gui_import_uses_typed_ingest_service_without_a_subprocess(tmp_path: Path) -> None:
     """Requirement: GUI Import publishes searchable mail through the shared typed service."""
-    source = tmp_path / "source"
+    source = tmp_path / "2024"
     source.mkdir()
-    (source / "message.eml").write_bytes(
-        b"Message-ID: <gui-import@example>\n"
-        b"From: owner@example.org\n"
-        b"To: reader@example.net\n"
-        b"Subject: GUI import\n"
-        b"Date: Wed, 03 Jan 2024 10:00:00 +0000\n\n"
-        b"Imported without a command-line subprocess.\n"
-    )
+    fixtures = Path(__file__).parents[1] / "tests/data/writer-preservation/2024"
+    for name in ("duplicate-crlf.eml", "duplicate-lf.eml", "invalid-utf8.eml", "broken-mime.eml"):
+        shutil.copyfile(fixtures / name, source / name)
+    before = inventory(source)
     owner_names = tmp_path / "owner-names.txt"
-    owner_names.write_text("owner@example.org\n", encoding="utf-8")
+    owner_names.write_text("sender@example.test\n", encoding="utf-8")
     controller = ApplicationController(ApplicationPreferencesStore(tmp_path / "preferences.json"))
     document = controller.create_document(tmp_path / "GUI.mailarchive")
     session = controller.new_search_window(document)
@@ -425,7 +354,8 @@ def test_gui_import_uses_typed_ingest_service_without_a_subprocess(tmp_path: Pat
         search_window=session,
     )
     try:
-        assert application.start_import(api, [source], owner_names)
+        # Storage acceptance is unscanned; real ClamAV routing has its own corpus.
+        assert application.start_import(api, [source], owner_names, scan_policy="not-scanned")
         deadline = time.monotonic() + 90
         while document.ingest_job is not None and time.monotonic() < deadline:
             time.sleep(0.05)
@@ -433,9 +363,39 @@ def test_gui_import_uses_typed_ingest_service_without_a_subprocess(tmp_path: Pat
         assert document.path is not None
         database = sqlite3.connect(document.path / "archive.sqlite3")
         try:
-            assert database.execute("SELECT COUNT(*) FROM messages").fetchone() == (1,)
+            assert database.execute("SELECT COUNT(*) FROM messages").fetchone() == (4,)
+            assert database.execute(
+                "SELECT COUNT(*) FROM messages WHERE message_id_normalized = ?",
+                ("duplicate@example.test",),
+            ).fetchone() == (2,)
         finally:
             database.close()
+        # Requirements: every fixture is searchable/readable and exports original bytes.
+        found = SearchPage.model_validate(api.search("from:sender@example.test"))
+        assert found.error is None and not found.has_more and len(found.results) == 4
+        for name, subject, body in (
+            ("duplicate-crlf.eml", "CRLF", "unterminated"),
+            ("duplicate-lf.eml", "Different content", "From body"),
+            ("invalid-utf8.eml", "Invalid UTF8", None),
+            ("broken-mime.eml", "Broken MIME", "Retained malformed mail"),
+        ):
+            result = SearchPage.model_validate(api.search(f'subject:"{subject}"'))
+            assert result.error is None and not result.has_more and len(result.results) == 1
+            view = MessageView.model_validate(api.message(result.results[0].message_pk))
+            assert view.subject == subject and view.date_source == "path-year"
+            part = PartContent.model_validate(api.part(view.message_pk, view.preferred_part_id))
+            assert part.content and part.kind == ("raw" if name == "broken-mime.eml" else "text")
+            if body is not None:
+                assert body in part.content
+            exported = tmp_path / f"exported-{name}"
+            write_message(document.path, view.message_pk, exported)
+            assert exported.read_bytes() == (fixtures / name).read_bytes()
+        verified = subprocess.run(
+            [sys.executable, "-I", str(document.path / INSTALLED_NAME), str(document.path)],
+            check=False, capture_output=True, text=True, timeout=30,
+        )
+        assert verified.returncode == 0, verified.stdout + verified.stderr
+        assert inventory(source) == before
         status = application.about_status()
         assert status.ingests[0].status is not None
         assert status.ingests[0].status.state == "completed"
@@ -496,14 +456,20 @@ def test_native_smoke_report_keeps_the_primary_failure(tmp_path: Path) -> None:
 def terminate_process_group(process: subprocess.Popen[str]) -> tuple[str, str]:
     """Stop a timed-out smoke subprocess and collect its buffered output."""
     try:
-        os.killpg(process.pid, signal.SIGTERM)
+        if sys.platform == "win32":
+            process.terminate()
+        else:
+            os.killpg(process.pid, signal.SIGTERM)
     except ProcessLookupError:
         pass
     try:
         return process.communicate(timeout=5)
     except subprocess.TimeoutExpired:
         try:
-            os.killpg(process.pid, signal.SIGKILL)
+            if sys.platform == "win32":
+                process.kill()
+            else:
+                os.killpg(process.pid, signal.SIGKILL)
         except ProcessLookupError:
             pass
         return process.communicate()

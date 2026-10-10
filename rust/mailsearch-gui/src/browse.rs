@@ -1,0 +1,475 @@
+// Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved.
+// Restore folder browsing and saved searches behind the shared frontend.
+// Folder identities come from original source observations, never archive paths.
+// Counts exclude quarantined messages and deduplicate repeated source sightings.
+// Search suggestions use catalog values with bound queries and finite deadlines.
+// Saved filter sets are typed, versioned per-user preferences outside archives.
+// UI callers receive the same data shapes as the existing Python interface.
+use crate::query::Query;
+use crate::selectors::{contains, folded, normalized_date, quoted, Selection};
+use anyhow::{ensure, Context, Result};
+use rusqlite::Connection;
+use serde::{Deserialize, Serialize};
+use serde_json::{json, Value};
+use std::{collections::BTreeMap, io::Write, path::Path};
+
+struct Source {
+    parts: Vec<String>,
+    kind: String,
+}
+pub(crate) fn tree(db: &Connection, volumes: bool) -> Result<Value> {
+    let mut groups = BTreeMap::<String, (String, Vec<Source>)>::new();
+    let mut statement = db.prepare("SELECT v.identity_json,v.metadata_json,s.hierarchy_path,s.source_kind FROM source_files s JOIN source_volumes v USING(source_volume_pk) WHERE EXISTS(SELECT 1 FROM observations o INDEXED BY observations_source_file_offset JOIN messages m USING(message_pk) WHERE o.source_file_pk=s.source_file_pk AND m.category IN ('Archive','Sent')) ORDER BY v.identity_json,s.source_path")?;
+    for row in statement.query_map([], |r| {
+        Ok((
+            r.get::<_, String>(0)?,
+            r.get::<_, String>(1)?,
+            r.get::<_, String>(2)?,
+            r.get::<_, String>(3)?,
+        ))
+    })? {
+        let (identity, metadata, path, kind) = row?;
+        let meta: Value = serde_json::from_str(&metadata).unwrap_or(Value::Null);
+        let label = meta["volume_label"]
+            .as_str()
+            .or(meta["current_mount_path"].as_str())
+            .unwrap_or("Unknown source volume")
+            .to_string();
+        groups
+            .entry(if volumes { identity } else { String::new() })
+            .or_insert_with(|| (label, Vec::new()))
+            .1
+            .push(Source {
+                parts: path
+                    .split('/')
+                    .filter(|s| !s.is_empty())
+                    .map(String::from)
+                    .collect(),
+                kind,
+            });
+    }
+    let mut result = Vec::new();
+    for (identity, (label, rows)) in groups {
+        let volume = volumes.then_some(identity);
+        let children = nodes(
+            db,
+            &rows.iter().collect::<Vec<_>>(),
+            &mut Vec::new(),
+            &volume,
+        )?;
+        if volumes {
+            let selection = Selection {
+                version: 1,
+                path: String::new(),
+                volume_identity: volume,
+            };
+            let token = selection.token()?;
+            let count = count(db, &token)?;
+            result.push(owned_json!({"selection":token,"logical_selection":Selection::token_for(1, &selection.path, None)?,"label":label,"kind":"volume","count":count,"children":children}));
+        } else {
+            result.extend(children);
+        }
+    }
+    Ok(Value::Array(result))
+}
+fn count(db: &Connection, token: &str) -> Result<i64> {
+    let query = Query::parse("", "date", "descending", false, Some(&json!([token])))?;
+    let statement = query.count(None)?;
+    Ok(db.query_row(
+        &statement.sql,
+        rusqlite::params_from_iter(statement.values),
+        |r| r.get(0),
+    )?)
+}
+fn nodes<'a>(
+    db: &Connection,
+    rows: &[&'a Source],
+    prefix: &mut Vec<&'a str>,
+    volume: &Option<String>,
+) -> Result<Vec<Value>> {
+    let depth = prefix.len();
+    let mut groups = BTreeMap::<&str, Vec<&Source>>::new();
+    for row in rows.iter().filter(|r| r.parts.len() > depth) {
+        groups.entry(&row.parts[depth]).or_default().push(row);
+    }
+    let mut result = Vec::new();
+    for (label, rows) in groups {
+        prefix.push(label);
+        let direct = rows.iter().any(|r| r.parts.len() == prefix.len());
+        let single = rows
+            .iter()
+            .all(|r| matches!(r.kind.as_str(), "message" | "emlx"));
+        let collapsed = single
+            && (rows.iter().all(|r| r.parts.len() == prefix.len() + 1)
+                || rows.iter().all(|r| {
+                    r.parts.len() == prefix.len() + 2
+                        && matches!(r.parts[prefix.len()].as_str(), "cur" | "new")
+                }));
+        let mailbox = direct || collapsed;
+        let children = if mailbox {
+            Vec::new()
+        } else {
+            nodes(db, &rows, prefix, volume)?
+        };
+        let path = prefix.join("/");
+        let token = Selection::token_for(1, &path, volume.as_deref())?;
+        let logical = Selection::token_for(1, &path, None)?;
+        let count = count(db, &token)?;
+        result.push(owned_json!({"selection":token,"logical_selection":logical,"label":label,"kind":if mailbox {"mailbox"} else {"folder"},"count":count,"children":children}));
+        prefix.pop();
+    }
+    Ok(result)
+}
+
+pub(crate) fn preferences_path() -> Result<std::path::PathBuf> {
+    use std::path::PathBuf;
+    #[cfg(target_os = "macos")]
+    let root = PathBuf::from(std::env::var_os("HOME").context("HOME unavailable")?)
+        .join("Library/Preferences");
+    #[cfg(target_os = "windows")]
+    let root = PathBuf::from(std::env::var_os("APPDATA").context("APPDATA unavailable")?);
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+    let root = std::env::var_os("XDG_CONFIG_HOME")
+        .map(PathBuf::from)
+        .unwrap_or(
+            PathBuf::from(std::env::var_os("HOME").context("HOME unavailable")?).join(".config"),
+        );
+    ensure!(root.is_absolute(), "Preference directory must be absolute");
+    Ok(root.join("mailarchiver/filter-sets.json"))
+}
+
+#[derive(Clone, Deserialize, Serialize)]
+struct Filter {
+    name: String,
+    show_volumes: bool,
+    selections: Vec<String>,
+}
+#[derive(Deserialize, Serialize)]
+struct Filters {
+    version: u8,
+    filter_sets: Vec<Filter>,
+}
+pub(crate) fn filters(path: &Path, method: &str, args: &[Value]) -> Result<Value> {
+    let _lock = if method == "saved_filter_sets" {
+        None
+    } else {
+        Some(crate::documents::preferences_lock(path)?)
+    };
+    let mut store: Filters = match std::fs::read(path) {
+        Ok(bytes) => serde_json::from_slice(&bytes).context("Invalid saved filters")?,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Filters {
+            version: 1,
+            filter_sets: Vec::new(),
+        },
+        Err(e) => return Err(e.into()),
+    };
+    ensure!(store.version == 1, "Unsupported saved filters version");
+    if method == "saved_filter_sets" {
+        return Ok(serde_json::to_value(store)?);
+    }
+    let name = args
+        .first()
+        .and_then(Value::as_str)
+        .context("Missing filter name")?
+        .trim();
+    ensure!(
+        !name.is_empty() && !["none", "save..."].contains(&name.to_lowercase().as_str()),
+        "Invalid filter name"
+    );
+    match method {
+        "save_filter_set" => {
+            let selections: Vec<String> =
+                Vec::<String>::deserialize(args.get(2).context("Missing selections")?)?;
+            for token in &selections {
+                Selection::decode(token)?;
+            }
+            store.filter_sets.retain(|v| v.name != name);
+            store.filter_sets.push(Filter {
+                name: name.into(),
+                show_volumes: args.get(1).and_then(Value::as_bool).unwrap_or(false),
+                selections,
+            });
+        }
+        "rename_filter_set" => {
+            let next = args
+                .get(1)
+                .and_then(Value::as_str)
+                .context("Missing new filter name")?
+                .trim();
+            ensure!(
+                !next.is_empty() && !["none", "save..."].contains(&next.to_lowercase().as_str()),
+                "Invalid filter name"
+            );
+            ensure!(
+                !store
+                    .filter_sets
+                    .iter()
+                    .any(|v| v.name == next && v.name != name),
+                "Filter name already exists"
+            );
+            store
+                .filter_sets
+                .iter_mut()
+                .find(|v| v.name == name)
+                .context("Unknown filter name")?
+                .name = next.into();
+        }
+        "delete_filter_set" => {
+            ensure!(
+                store.filter_sets.iter().any(|v| v.name == name),
+                "Unknown filter name"
+            );
+            store.filter_sets.retain(|v| v.name != name);
+        }
+        _ => anyhow::bail!("Unknown filter operation"),
+    }
+    store.filter_sets.sort_by_key(|v| v.name.to_lowercase());
+    let parent = path.parent().context("Missing preferences directory")?;
+    std::fs::create_dir_all(parent)?;
+    let mut output = tempfile::NamedTempFile::new_in(parent)?;
+    serde_json::to_writer_pretty(&mut output, &store)?;
+    output.flush()?;
+    output.as_file().sync_all()?;
+    output.persist(path)?;
+    Ok(serde_json::to_value(store)?)
+}
+
+const TAGS: [&str; 9] = [
+    "any", "from", "to", "cc", "bcc", "subject", "date", "before", "after",
+];
+fn completion_input(query: &str) -> (String, String, String) {
+    let mut spans = Vec::new();
+    let (mut start, mut quote, mut escape) = (None, None, false);
+    for (i, ch) in query.char_indices() {
+        if start.is_none() && !ch.is_whitespace() {
+            start = Some(i);
+        }
+        if escape {
+            escape = false;
+            continue;
+        }
+        if ch == '\\' && quote != Some('\'') {
+            escape = true;
+            continue;
+        }
+        if quote == Some(ch) {
+            quote = None;
+        } else if quote.is_none() && matches!(ch, '\'' | '"') {
+            quote = Some(ch);
+        }
+        if ch.is_whitespace() && quote.is_none() {
+            if let Some(begin) = start.take() {
+                spans.push((begin, i));
+            }
+        }
+    }
+    if let Some(begin) = start {
+        // Python's completion token spans exclude an unfinished trailing escape.
+        let end = query.len() - usize::from(escape);
+        if begin < end {
+            spans.push((begin, end));
+        }
+    }
+    let selectors = spans.iter().any(|(a, b)| {
+        query[*a..*b]
+            .split_once(':')
+            .is_some_and(|(tag, _)| TAGS.contains(&tag.to_ascii_lowercase().as_str()))
+    });
+    let (prefix, tag, value) = if selectors && !spans.is_empty() {
+        let (a, b) = spans.last().unwrap();
+        let last = &query[*a..*b];
+        let (tag, value) = last
+            .split_once(':')
+            .filter(|(tag, _)| TAGS.contains(&tag.to_ascii_lowercase().as_str()))
+            .unwrap_or(("", last));
+        (query[..*a].trim(), tag.to_ascii_lowercase(), value)
+    } else {
+        ("", String::new(), query.trim())
+    };
+    (
+        prefix.into(),
+        tag,
+        crate::selectors::tokens(value)
+            .map(|tokens| tokens.join(" "))
+            .unwrap_or_else(|_| value.trim_matches(['\'', '"']).into()),
+    )
+}
+fn choice(tag: &str, count: i64) -> Value {
+    json!({"tag":tag,"label":match tag {"any"=>"Any","from"=>"From","to"=>"To","cc"=>"Cc","bcc"=>"Bcc","subject"=>"Subject","date"=>"Date","before"=>"Before",_=>"After"},"message_count":count})
+}
+pub(crate) fn suggestions(db: &Connection, query: &str, limit: usize) -> Result<Value> {
+    ensure!(
+        (1..=50).contains(&limit),
+        "Suggestion limit must be between 1 and 50"
+    );
+    let (prefix, tag, value) = completion_input(query);
+    let mut items = Vec::new();
+    if value.chars().count() < 3 {
+        return Ok(owned_json!({"query":query,"prefix":prefix,"items":items}));
+    }
+    let pattern = contains(&folded(&value));
+    if tag.is_empty() || TAGS[..5].contains(&tag.as_str()) {
+        let mut statement=db.prepare("WITH matching AS MATERIALIZED (SELECT address_pk FROM email_addresses WHERE lower(address) LIKE ?1 ESCAPE '\\' UNION SELECT a.address_pk FROM address_search_names n JOIN email_addresses a ON a.address=n.address WHERE lower(n.name) LIKE ?1 ESCAPE '\\'), hits AS MATERIALIZED (SELECT a.address_pk,'from' AS role,m.message_pk,m.date_utc FROM matching a CROSS JOIN messages m INDEXED BY messages_sender_address_pk ON m.sender_address_pk=a.address_pk WHERE m.category IN ('Archive','Sent') UNION ALL SELECT a.address_pk,r.role,m.message_pk,m.date_utc FROM matching a CROSS JOIN recipients r INDEXED BY recipients_address_pk USING(address_pk) JOIN messages m USING(message_pk) WHERE m.category IN ('Archive','Sent')), counts AS (SELECT address_pk,role,count(DISTINCT message_pk) AS n,max(date_utc) AS seen FROM hits GROUP BY address_pk,role UNION ALL SELECT address_pk,'any',count(DISTINCT message_pk),max(date_utc) FROM hits GROUP BY address_pk UNION ALL SELECT NULL,role,count(DISTINCT message_pk),max(date_utc) FROM hits GROUP BY role UNION ALL SELECT NULL,'any',count(DISTINCT message_pk),max(date_utc) FROM hits), ranked AS (SELECT address_pk FROM counts WHERE address_pk IS NOT NULL AND role=?2 ORDER BY n DESC,seen DESC,address_pk LIMIT ?3) SELECT coalesce(a.address,''),c.role,c.n,c.seen FROM counts c LEFT JOIN email_addresses a USING(address_pk) WHERE c.n>0 AND (c.address_pk IS NULL OR c.address_pk IN(SELECT address_pk FROM ranked))")?;
+        let mut matches = BTreeMap::<String, (Vec<Value>, String)>::new();
+        for row in statement.query_map(
+            rusqlite::params![pattern, if tag.is_empty() { "any" } else { &tag }, limit],
+            |r| {
+                Ok((
+                    r.get::<_, String>(0)?,
+                    r.get::<_, String>(1)?,
+                    r.get::<_, i64>(2)?,
+                    r.get::<_, String>(3)?,
+                ))
+            },
+        )? {
+            let (address, role, count, seen) = row?;
+            let (choices, last_seen) = matches.entry(address).or_default();
+            choices.push(choice(&role, count));
+            if seen > *last_seen {
+                *last_seen = seen;
+            }
+        }
+        let mut addresses = Vec::new();
+        for (address, (mut choices, seen)) in matches {
+            choices.sort_by_key(|v| TAGS.iter().position(|tag| v["tag"] == *tag).unwrap_or(0));
+            let roles: Vec<_> = choices.iter().filter(|v| v["tag"] != "any").collect();
+            let selected = if !tag.is_empty() {
+                tag.as_str()
+            } else if roles.len() == 1 {
+                roles[0]["tag"].as_str().unwrap()
+            } else {
+                "any"
+            };
+            if let Some(current) = choices.iter().find(|v| v["tag"] == selected) {
+                let address = if address.is_empty() {
+                    value.clone()
+                } else {
+                    address
+                };
+                let selected = selected.to_string();
+                let count = current["message_count"].as_i64().unwrap_or(0);
+                let label = address.clone();
+                addresses.push((owned_json!({"tag":selected,"value":address,"label":label,"message_count":count,"choices":choices}),seen));
+            }
+        }
+        addresses.sort_by(|(a, seen_a), (b, seen_b)| {
+            (
+                b["value"] == value,
+                b["message_count"].as_i64().unwrap_or(0),
+                seen_b.as_str(),
+                b["value"].as_str().unwrap_or(""),
+            )
+                .cmp(&(
+                    a["value"] == value,
+                    a["message_count"].as_i64().unwrap_or(0),
+                    seen_a.as_str(),
+                    a["value"].as_str().unwrap_or(""),
+                ))
+        });
+        items.extend(addresses.into_iter().take(limit + 1).map(|(item, _)| item));
+    }
+    if tag.is_empty() || tag == "subject" {
+        let search = Query::subject_completion(&value)?;
+        let statement = search.count(None)?;
+        let count: i64 = db.query_row(
+            &statement.sql,
+            rusqlite::params_from_iter(statement.values),
+            |r| r.get(0),
+        )?;
+        items.push(owned_json!({"tag":"subject","value":value.as_str(),"label":format!("Subject contains “{value}”"),"message_count":count,"choices":vec![choice("subject",count)]}));
+        let query = search.subjects(limit)?;
+        let mut statement = db.prepare(&query.sql)?;
+        for row in statement.query_map(rusqlite::params_from_iter(query.values), |r| {
+            Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?))
+        })? {
+            let (subject, count) = row?;
+            let label = subject.clone();
+            items.push(owned_json!({"tag":"subject","value":subject,"label":label,"message_count":count,"choices":vec![choice("subject",count)]}));
+        }
+    }
+    if (tag.is_empty() || TAGS[6..].contains(&tag.as_str())) && normalized_date(&value).is_ok() {
+        let normalized = normalized_date(&value)?;
+        let mut choices = Vec::new();
+        for tag in &TAGS[6..] {
+            let query = Query::parse(
+                &format!("{tag}:{}", quoted(&normalized)),
+                "date",
+                "descending",
+                false,
+                None,
+            )?;
+            let statement = query.count(None)?;
+            let count: i64 = db.query_row(
+                &statement.sql,
+                rusqlite::params_from_iter(statement.values),
+                |r| r.get(0),
+            )?;
+            choices.push(choice(tag, count));
+        }
+        for option in &choices {
+            if tag.is_empty() || option["tag"] == tag {
+                // Each distinct date suggestion owns the shared choices in the wire shape.
+                items.push(json!({"tag":option["tag"],"value":normalized,"label":normalized,"message_count":option["message_count"],"choices":choices}));
+            }
+        }
+    }
+    Ok(owned_json!({"query":query,"prefix":prefix,"items":items}))
+}
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn completions_preserve_selectors_and_incomplete_quotes() {
+        assert_eq!(
+            completion_input("from:alice subject:\"annual rep"),
+            ("from:alice".into(), "subject".into(), "annual rep".into())
+        );
+        assert_eq!(
+            completion_input("January 5, 2020"),
+            ("".into(), "".into(), "January 5, 2020".into())
+        );
+        assert_eq!(
+            completion_input("annual report"),
+            ("".into(), "".into(), "annual report".into())
+        );
+    }
+    #[test]
+    fn saved_filters_round_trip_and_reject_malformed_tokens() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("filters.json");
+        let token = Selection {
+            version: 1,
+            path: "mail/inbox".into(),
+            volume_identity: None,
+        }
+        .token()
+        .unwrap();
+        filters(
+            &path,
+            "save_filter_set",
+            &[json!("Work"), json!(true), json!([token])],
+        )
+        .unwrap();
+        filters(
+            &path,
+            "rename_filter_set",
+            &[json!("Work"), json!("Archive")],
+        )
+        .unwrap();
+        let stored = filters(&path, "saved_filter_sets", &[]).unwrap();
+        assert_eq!(stored["filter_sets"][0]["name"], "Archive");
+        let before = std::fs::read(&path).unwrap();
+        assert!(filters(
+            &path,
+            "save_filter_set",
+            &[json!("Broken"), json!(false), json!(["bad"])]
+        )
+        .is_err());
+        assert_eq!(std::fs::read(&path).unwrap(), before);
+        filters(&path, "delete_filter_set", &[json!("Archive")]).unwrap();
+        assert_eq!(
+            filters(&path, "saved_filter_sets", &[]).unwrap()["filter_sets"],
+            json!([])
+        );
+    }
+}

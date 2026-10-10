@@ -1,4 +1,10 @@
 # Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved.
+# Capture shipped interfaces and locally built website pages without private mail.
+# Purpose-made archives supply the same production GUI service used by the app.
+# Headless Chromium renders application widgets and waits for their real content.
+# Website requests resolve only to the local Zola output; remote requests are blocked.
+# Generated PNGs support publication and visual inspection of candidate changes.
+# The homepage also captures its release buttons before scrolling to search.
 
 """Capture the shipped search and import interfaces with synthetic email only."""
 
@@ -6,6 +12,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
 import tomllib
 from email.message import EmailMessage
 from pathlib import Path
@@ -19,6 +26,7 @@ from mailarchiver.owner_rules import OwnerRules
 
 ROOT = Path(__file__).parents[1]
 OUTPUT = ROOT / "website/static/images"
+X = "x"
 WIDTH = "width"
 HEIGHT = "height"
 SEARCH_METHODS = (
@@ -82,7 +90,7 @@ def main() -> None:
         api = GuiApi(archive, work, preferences_file=work / "filter-sets.json")
         try:
             with sync_playwright() as playwright:
-                browser = playwright.chromium.launch()
+                browser = playwright.chromium.launch(channel="msedge" if sys.platform == "win32" else None)
                 try:
                     page = browser.new_page(viewport={WIDTH: 1440, HEIGHT: 960}, device_scale_factor=1)
                     bridge(page, api, SEARCH_METHODS)
@@ -153,12 +161,20 @@ def capture_site() -> None:
         route.fulfill(path=path)
 
     with sync_playwright() as playwright:
-        browser = playwright.chromium.launch()
+        browser = playwright.chromium.launch(channel="msedge" if sys.platform == "win32" else None)
         try:
             page = browser.new_page(viewport={WIDTH: 1440, HEIGHT: 1100})
             page.route("**/*", local_asset)
             for name, suffix in (("home", ""), ("searching", "searching/"), ("importing", "importing/")):
                 page.goto(base + suffix)
+                if name == "home":
+                    for width in (1440, 390):
+                        page.set_viewport_size({WIDTH: width, HEIGHT: 1100})
+                        for link in page.locator(".release-downloads .actions a").all():
+                            bounds = link.bounding_box()
+                            assert bounds and bounds[X] >= 0 and bounds[X] + bounds[WIDTH] <= width, "Download action overflows viewport"
+                        page.screenshot(path=str(previews / f"home-downloads-{width}.png"))
+                    page.set_viewport_size({WIDTH: 1440, HEIGHT: 1100})
                 filename = "importing-interface.png" if name == "importing" else "search-interface.png"
                 image = page.locator(f'img[src*="{filename}"]').first
                 image.scroll_into_view_if_needed()

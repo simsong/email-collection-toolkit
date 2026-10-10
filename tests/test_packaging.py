@@ -10,6 +10,7 @@ import plistlib
 import sqlite3
 import subprocess
 import sys
+from concurrent.futures import ThreadPoolExecutor
 from importlib import import_module
 from pathlib import Path
 
@@ -22,6 +23,35 @@ from mailarchiver.self_test import SelfTestReport
 from mailarchiver.standalone_verify import verify_archive
 
 ROOT = Path(__file__).resolve().parents[1]
+
+
+def test_frozen_entry_dispatches_private_rust_service(tmp_path: Path) -> None:
+    """Rust preview: service dispatch preserves JSON stdout without importing GUI."""
+    from mailarchiver.rust_engine import Reply, Request
+
+    request = Request(id=1, method="ping")
+    process = subprocess.Popen(
+        [sys.executable, str(ROOT / "scripts/desktop_entry.py"), "--rust-engine", str(tmp_path / "missing.mailarchive")],
+        stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        text=True, cwd=tmp_path,
+    )
+    assert process.stdin is not None and process.stdout is not None
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        response = pool.submit(process.stdout.readline)
+        try:
+            process.stdin.write(request.model_dump_json() + "\n")
+            process.stdin.flush()
+            reply = Reply.model_validate_json(response.result(timeout=10))
+        finally:
+            process.stdin.close()
+            try:
+                process.wait(timeout=6)
+            except subprocess.TimeoutExpired:
+                process.kill()
+                process.wait(timeout=2)
+    assert process.returncode == 0
+    assert reply.id == 1 and not reply.error
+    assert not (tmp_path / "missing.mailarchive").exists()
 
 
 def test_historical_notice_gate_matches_the_shipped_release(tmp_path: Path) -> None:
@@ -59,6 +89,7 @@ def test_historical_notice_gate_matches_the_shipped_release(tmp_path: Path) -> N
         verify_mounted_notices(app, "v1.0.0a10")
 
 
+@pytest.mark.skipif(sys.platform != "darwin", reason="PyInstaller dylib diagnostics apply to the macOS package")
 def test_pyinstaller_loader_reports_its_native_cause(tmp_path: Path) -> None:
     """The packaging-only frozen ctypes hook must preserve dlopen's actual failure."""
     pytest.importorskip("PyInstaller")
@@ -99,6 +130,7 @@ def test_freshclam_uses_explicit_app_relative_configuration(tmp_path: Path) -> N
     assert result.returncode == 0, result.stderr
 
 
+@pytest.mark.skipif(sys.platform != "darwin", reason="Mounted DMG inventory requires macOS symlink semantics")
 def test_mounted_inventory_retains_av_files_and_logs_each_entry(
     tmp_path: Path, capsys: pytest.CaptureFixture[str],
 ) -> None:
@@ -337,3 +369,95 @@ def test_gui_remembers_source_only_after_success(tmp_path: Path, succeeds: bool)
     assert import_directory(document.path) == (source.parent if succeeds else previous)
     assert document.generation == int(succeeds)
     assert not lease.acquired
+# Release requirement: private signing keys and synthetic upgrade fixtures must
+# not become alpha assets; retained installer bytes must match tested hashes.
+def test_release_staging_authenticates_base_bundle_and_excludes_private_files(tmp_path: Path) -> None:
+    import zipfile
+    from pydantic import TypeAdapter
+    from scripts.release_files import FileHash, ROOT as RELEASE_ROOT, digest, stage
+
+    windows = tmp_path / "windows"
+    windows.mkdir()
+    (windows / "base.msixbundle").write_bytes(b"synthetic signed bundle fixture")
+    (windows / "local-test.cer").write_bytes((RELEASE_ROOT / "scripts/win/test-signing.cer").read_bytes())
+    (windows / "README.txt").write_bytes((RELEASE_ROOT / "scripts/win/MSIX_README.txt").read_bytes())
+    (windows / "Install-Test-Certificate.ps1").write_bytes((RELEASE_ROOT / "scripts/win/Install-Test-Certificate.ps1").read_bytes())
+    (windows / "upgrade.msixbundle").write_bytes(b"CI-only future-version fixture")
+    (windows / "local-test.pfx").write_bytes(b"private-key sentinel")
+    hashes = [FileHash(Algorithm="SHA256", Hash=digest(windows / name).upper(), Path=f"C:\\build\\{name}")
+              for name in ("base.msixbundle", "local-test.cer")]
+    (windows / "sha256.json").write_bytes(TypeAdapter(list[FileHash]).dump_json(hashes, by_alias=True))
+    destination = tmp_path / "release"
+    bundle = stage(windows, destination)
+    assert bundle.name.endswith("-windows-x64.msixbundle")
+    assert bundle.read_bytes() == (windows / "base.msixbundle").read_bytes()
+    with zipfile.ZipFile(bundle.with_suffix(".zip")) as archive:
+        assert set(archive.namelist()) == {bundle.name, "local-test.cer", "README.txt", "Install-Test-Certificate.ps1", "SHA256SUMS"}
+        readme = archive.read("README.txt").decode()
+        assert bundle.name in readme and "SHA256SUMS" in readme and "sha256.json" not in readme
+        from hashlib import sha256
+        sums = archive.read("SHA256SUMS").decode().splitlines()
+        assert len(sums) == 3
+        for line in sums:
+            expected, name = line.split("  ", 1)
+            assert sha256(archive.read(name)).hexdigest() == expected
+    assert not (destination / "upgrade.msixbundle").exists()
+    assert not (destination / "local-test.pfx").exists()
+    assert f"{digest(bundle)}  {bundle.name}" in (destination / "SHA256SUMS").read_text()
+    (windows / "base.msixbundle").write_bytes(b"tampered downloaded bundle")
+    with pytest.raises(ValueError, match="hash mismatch"):
+        stage(windows, destination)
+    assert bundle.read_bytes() == b"synthetic signed bundle fixture"
+
+
+def test_native_build_command_receives_mapped_identity_and_literal_arguments(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Build requirement: both native packages use the mapper, not inherited metadata."""
+    import tomllib
+    from mailarchiver.release_versions import release_metadata
+    from scripts.rust_release_metadata import BUILD, CHANNEL, FEED, PUBLIC_KEY, VERSION
+    from mailarchiver.update_metadata import SPARKLE_FEED_URL, SPARKLE_PUBLIC_KEY
+    from scripts.macos_signing import RELEASE_SECRET_NAMES
+
+    monkeypatch.setenv(BUILD, "incorrect inherited build")
+    for name in RELEASE_SECRET_NAMES:
+        monkeypatch.setenv(name, "synthetic-secret-must-not-reach-build")
+    _, channel, build, display = release_metadata(tomllib.loads((ROOT / "pyproject.toml").read_text())["project"]["version"])
+    names = (VERSION, BUILD, CHANNEL, FEED, PUBLIC_KEY)
+    child = f"import os,sys; print(*(os.environ[name] for name in {names!r}), sep='\\n'); print(sys.argv[1:])"
+    child += f"; assert not any(name in os.environ for name in {RELEASE_SECRET_NAMES!r})"
+    result = subprocess.run([sys.executable, ROOT / "scripts/rust_release_metadata.py", "--build-command",
+                             sys.executable, "-c", child, "--child-option", "literal value"],
+                            text=True, capture_output=True, check=True, timeout=15)
+    assert result.stdout.splitlines() == [display, str(build), channel, SPARKLE_FEED_URL, SPARKLE_PUBLIC_KEY,
+                                          "['--child-option', 'literal value']"]
+    assert os.environ[BUILD] == "incorrect inherited build"
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows ClamAV preparation uses PowerShell")
+@pytest.mark.parametrize("changed", ["libclamav.dll", "dependency.dll", "extra.dll", "archive"])
+def test_cached_clamav_runtime_requires_verified_bytes(tmp_path: Path, changed: str) -> None:
+    """Cached runtime requirement: unchanged receipts cannot authorize modified bytes."""
+    import hashlib
+    import zipfile
+
+    script = tmp_path / "scripts/win/prepare_clamav.ps1"
+    script.parent.mkdir(parents=True)
+    cache = tmp_path / ".tmp/clamav-download/clamav-x64.zip"
+    cache.parent.mkdir(parents=True)
+    with zipfile.ZipFile(cache, "w") as archive:
+        for name in ("libclamav.dll", "dependency.dll", "freshclam.exe"):
+            archive.writestr("runtime/" + name, b"synthetic runtime bytes")
+    source = (ROOT / "scripts/win/prepare_clamav.ps1").read_text(encoding="utf-8")
+    checksum_line = next(line for line in source.splitlines() if line.startswith("$checksum = "))
+    source = source.replace(checksum_line, f"$checksum = '{hashlib.sha256(cache.read_bytes()).hexdigest()}'")
+    script.write_text(source, encoding="utf-8")
+    command = ["pwsh", "-NoProfile", "-File", str(script)]
+    subprocess.run(command, check=True, capture_output=True, timeout=30)
+    subprocess.run(command, check=True, capture_output=True, timeout=30)
+    target = cache if changed == "archive" else tmp_path / ".tmp/clamav-x64" / changed
+    target.write_bytes(b"tampered fixture")
+    result = subprocess.run(command, check=False, capture_output=True, text=True, timeout=30)
+    assert result.returncode != 0
+    assert any(message in result.stderr for message in (
+        "differs from verified archive", "Unexpected cached runtime file", "pinned upstream SHA-256"))
+    assert target.read_bytes() == b"tampered fixture"

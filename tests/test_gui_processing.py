@@ -12,6 +12,7 @@ import pytest
 
 from mailarchiver.__main__ import IngestRequest, run_ingest
 from mailarchiver.application import ApplicationController, ApplicationPreferencesStore
+from mailarchiver.document_options import DocumentOptions
 from mailarchiver.gui_app import GuiApi, IdentityPickerApi, PyWebViewApplication
 from mailarchiver.gui_processing import PickerPage, registered_processors, resume_request, unfinished_work
 from mailarchiver.gui_service import describe_message, search_page
@@ -83,7 +84,11 @@ def test_gui_resumes_cli_content_and_displays_attached_provenance(tmp_path: Path
 def test_picker_edits_filters_unique_counts_and_replay(tmp_path: Path) -> None:
     """Real saved decisions survive processing, filters count observations, and writers exclude edits."""
     archive = build_deferred_archive(tmp_path)
+    with WriterLease.acquire(archive, str(archive), "fixture owner edit", "resume-owners", "test") as lease:
+        DocumentOptions(archive).save(OwnerRules(include=["later@example.test"]), lease)
+    config = (archive / "config.yaml").read_bytes()
     run_ingest(resume_request(archive, False, True), terminal=False)
+    assert (archive / "config.yaml").read_bytes() == config
     picker = IdentityPickerApi(archive, "name")
     page = PickerPage.model_validate(picker.query({"domain": "example.ac.uk"}))
     sender = next(group for group in page.groups if group.label == "Sender")
@@ -106,6 +111,7 @@ def test_picker_edits_filters_unique_counts_and_replay(tmp_path: Path) -> None:
     organization = next(group for group in institutions.groups if group.label == "example.ac.uk")
     assert len(organization.addresses) == 3 and organization.messages == 2
     run_ingest(resume_request(archive, False, True).model_copy(update={"reprocess": True}), terminal=False)
+    assert (archive / "config.yaml").read_bytes() == config
     reopened = PickerPage.model_validate(IdentityPickerApi(archive, "name").query({"name": "Canonical"}))
     assert len(reopened.groups[0].addresses) == 2
     address = signature.addresses[0].address_id

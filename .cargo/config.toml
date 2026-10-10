@@ -1,0 +1,17 @@
+# Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved.
+# Provide the same Rust build and validation commands on every host platform.
+# Aliases select the existing workspace packages and reader executables.
+# The small xtask runner orders format, Clippy and tests without a POSIX shell.
+# Cargo retains ownership of dependency resolution and incremental builds.
+# The macOS Makefile delegates to these same commands.
+[alias]
+msix-test = "run --locked -p xtask -- msix-test"
+reader-build = "build --locked -p mailsearch-rust"
+run-ect = "run --locked -p mailsearch-rust --bin mailsearch-webview --"
+reader-demo = "run --locked -p mailsearch-rust --bin mailsearch-rust -- --create-demo"
+reader-smoke = "run --locked -p mailsearch-rust --bin mailsearch-rust -- --smoke"
+reader-probe = "run --locked -p mailsearch-rust --bin mailsearch-webview -- --probe"
+reader-check = "run --locked -p xtask -- check reader"
+reader-native-check = "test --locked -p mailsearch-rust --features native-smoke --test native_smoke --test native_windows -- --ignored --nocapture"
+reader-updater-check = "test --locked -p mailsearch-rust --lib winsparkle_sdk_accepts_only_valid_public_keys -- --ignored"
+workspace-check = "run --locked -p xtask -- check workspace"

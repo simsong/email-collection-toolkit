@@ -5,15 +5,14 @@
 from __future__ import annotations
 
 import hashlib
-import mailbox
 import sqlite3
 import subprocess
 import sys
-from os import environ
+from os import environ, linesep
 from pathlib import Path
 
 import pytest
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, TypeAdapter
 
 from mailarchiver.mailbox_tree import MailboxSelection
 
@@ -35,14 +34,15 @@ from mailarchiver.mailsearch import (
     search_header_page,
     search_headers,
 )
-from mailarchiver.mbox import add_message
+from mailarchiver.mbox import PreservingMbox, add_message
 from mailarchiver.search import index_message
 from mailarchiver.search_selectors import prepare_names
 
 
 def add_catalogued_message(archive: Path, message_pk: int, raw: bytes) -> None:
     path = mbox_directory(archive) / "2024-Archive1.mbox"
-    box = mailbox.mbox(path, create=True)
+    # Publish fixture bytes through the same newline-preserving archive writer.
+    box = PreservingMbox(path, create=True)
     try:
         location = add_message(box, path, raw)
     finally:
@@ -65,13 +65,13 @@ def add_catalogued_message(archive: Path, message_pk: int, raw: bytes) -> None:
         catalog.close()
 
 
-def make_archive(tmp_path: Path) -> tuple[Path, bytes]:
+def make_archive(tmp_path: Path, body: bytes = b"Meeting agenda.\n") -> tuple[Path, bytes]:
     archive = tmp_path / "archive"
     initialize_bag(archive)
     raw = (
         b"Message-ID: <one@example>\nFrom: sender@example.net\nTo: recipient@example.net\nCc: copy@example.net\nX-Trace: one\n"
-        b"Subject: planning meeting\nDate: Wed, 03 Jan 2024 10:00:00 +0000\n\nMeeting agenda.\n"
-    )
+        b"Subject: planning meeting\nDate: Wed, 03 Jan 2024 10:00:00 +0000\n\n"
+    ) + body
     catalog = create_catalog(archive / "archive.sqlite3")
     search = create_search(archive / "search.sqlite3")
     try:
@@ -318,7 +318,8 @@ def test_mailsearch_limit_zero_and_number_print_original_message(tmp_path: Path)
         [sys.executable, "-m", "mailarchiver.mailsearch", "--archive", str(archive), "1"], capture_output=True, check=False
     )
     assert displayed.returncode == 0, displayed.stderr
-    assert displayed.stdout == render_message(raw, False, False).encode()
+    # Rendered CLI text uses host newlines; --mime below checks original bytes.
+    assert displayed.stdout == render_message(raw, False, False).replace("\n", linesep).encode()
 
 
 def test_mailsearch_listing_excludes_quarantine_categories(tmp_path: Path) -> None:
@@ -495,10 +496,9 @@ def test_mail_archive_dir_defaults_and_archive_option_overrides(tmp_path: Path) 
     assert override.returncode == 0, override.stderr
 
 
-@pytest.fixture(scope="module")
-def sparse_search_archive(tmp_path_factory: pytest.TempPathFactory) -> Path:
+def make_sparse_search_archive(tmp_path: Path) -> Path:
     """One older match among 20,000 unrelated messages, recipients and source files."""
-    archive, _ = make_archive(tmp_path_factory.mktemp("search-plans"))
+    archive, _ = make_archive(tmp_path)
     catalog = create_catalog(archive / "archive.sqlite3")
     try:
         sender = address_pk(catalog, "unrelated@example.net")
@@ -532,6 +532,11 @@ def sparse_search_archive(tmp_path_factory: pytest.TempPathFactory) -> Path:
     return archive
 
 
+@pytest.fixture(scope="module")
+def sparse_search_archive(tmp_path_factory: pytest.TempPathFactory) -> Path:
+    return make_sparse_search_archive(tmp_path_factory.mktemp("search-plans"))
+
+
 class SearchPlanCase(BaseModel):
     """Expected access paths and results, independent of SQLite's full plan text."""
 
@@ -543,32 +548,9 @@ class SearchPlanCase(BaseModel):
     subject_scan: bool = False
 
 
-@pytest.mark.parametrize("case", [
-    SearchPlanCase(query="any:sender", indexes=("messages_sender_address_pk", "recipients_address_pk")),
-    SearchPlanCase(query="any:copy", indexes=("messages_sender_address_pk", "recipients_address_pk")),
-    SearchPlanCase(query="from:sender", indexes=("messages_sender_address_pk",)),
-    SearchPlanCase(query="from:missing", matches=0, indexes=("messages_sender_address_pk",)),
-    *(SearchPlanCase(query=f"{role}:{value}", indexes=("recipients_address_pk",))
-      for role, value in (("to", "recipient"), ("cc", "copy"), ("bcc", "blind"))),
-    SearchPlanCase(query="date:2024-01-03", indexes=("messages_date_message",)),
-    SearchPlanCase(query="before:2025-01-01", indexes=("messages_date_message",)),
-    SearchPlanCase(query="after:2025-01-01", matches=0, indexes=("messages_date_message",)),
-    SearchPlanCase(query="agenda", indexes=("messages_sha256",)),
-    SearchPlanCase(query='"meeting agenda"', indexes=("messages_sha256",)),
-    SearchPlanCase(query="meeting agenda", indexes=("messages_sha256",)),
-    SearchPlanCase(query="agenda", attachments=True, indexes=("messages_sha256",)),
-    SearchPlanCase(query="missing", attachments=True, matches=0, indexes=("messages_sha256",)),
-    SearchPlanCase(query="from:sender to:recipient before:2025-01-01 agenda",
-                   indexes=("messages_sha256", "recipients_address_pk")),
-    SearchPlanCase(query="subject:planning", indexes=(), subject_scan=True),
-    SearchPlanCase(query="subject:missing", matches=0, indexes=(), subject_scan=True),
-    SearchPlanCase(selections=[MailboxSelection(path="mail")],
-                   indexes=("source_files_hierarchy_volume", "observations_source_file_offset")),
-    SearchPlanCase(selections=[MailboxSelection(volume_identity="target")],
-                   indexes=("source_files_volume_hierarchy", "observations_source_file_offset")),
-    SearchPlanCase(selections=[MailboxSelection(path="mail", volume_identity="target")],
-                   indexes=("source_files_volume_hierarchy", "observations_source_file_offset")),
-], ids=lambda case: case.query + ("+attachments" if case.attachments else "") or str(case.selections))
+@pytest.mark.parametrize("case", TypeAdapter(list[SearchPlanCase]).validate_json(
+    (Path(__file__).parent / "fixtures/search-contract.json").read_text(encoding="utf-8")
+), ids=lambda case: case.query + ("+attachments" if case.attachments else "") or str(case.selections))
 @pytest.mark.parametrize("sort_by", list(SortField))
 def test_search_primitives_use_filter_indexes(sparse_search_archive: Path, case: SearchPlanCase, sort_by: SortField) -> None:
     """Requirement: pages/counts filter through indexes before sorting, across all primitives.

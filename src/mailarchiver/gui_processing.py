@@ -6,10 +6,13 @@ import sqlite3
 from collections.abc import Iterator
 from contextlib import closing, contextmanager
 from pathlib import Path
+
 from typing import Literal
 from uuid import uuid4
 
 from pydantic import BaseModel, Field
+
+from .sqlite_paths import sqlite_uri
 
 from .__main__ import IngestRequest
 from .ingest_status import read_ingest_history
@@ -37,7 +40,7 @@ class ProcessingWork(BaseModel):
 
 @contextmanager
 def connection(archive: Path) -> Iterator[sqlite3.Connection]:
-    with closing(sqlite3.connect(f"{(archive / DATABASE).resolve().as_uri()}?mode=ro", uri=True)) as database:
+    with closing(sqlite3.connect(sqlite_uri(archive / DATABASE), uri=True)) as database:
         yield database
 
 
@@ -80,6 +83,7 @@ def resume_request(archive: Path, ingest: bool, content: bool) -> IngestRequest:
     else:
         raise ValueError("No saved import policy. Use File → Import to continue the source import.")
     return request.model_copy(update={"archive": archive, "roots": unfinished_work(archive).source_roots if ingest else [],
+                                      "save_owner_defaults": False,
                                       "continue_ingest": ingest, "continue_content": content,
                                       "max_content_jobs": None, "reprocess": False})
 
@@ -150,6 +154,6 @@ def picker_page(archive: Path, kind: Literal["name", "institution"], filters: Id
 
 def save_identity(archive: Path, decision: ManualDecision) -> None:
     with WriterLease.acquire(archive, str(archive.resolve()), "GUI identity edit", uuid4().hex, "2"):
-        with closing(sqlite3.connect(f"{(archive / DATABASE).resolve().as_uri()}?mode=rw", uri=True)) as database:
+        with closing(sqlite3.connect(sqlite_uri(archive / DATABASE, mode="rw"), uri=True)) as database:
             database.execute("PRAGMA foreign_keys=ON")
             edit(database, decision)

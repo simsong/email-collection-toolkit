@@ -1,6 +1,92 @@
 # Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved.
 
 .PHONY: benchmark-name-resolution check compare-apple-mail data-quality-audit data-quality-babyl-audit data-quality-summary extract-pdf-mail fixture-bagit fixture-e2e gui gui-smoke website-build-check website-check release-tag-check
+
+# Windows reader uses x64 CPython and the same GUI as macOS. MSIX_TEST_CERT_PFX_BASE64
+# supplies the pinned test key only to the explicit signer; never to the payload build.
+.PHONY: test-python-reader msix-test test-msix msix-bundle
+test-python-reader:
+	uv run --locked pytest -q tests/test_python_reader.py tests/test_sqlite_paths.py
+
+.PHONY: test-reader-welcome
+test-reader-welcome:
+	uv run --locked pytest -q e2e_tests/test_reader_welcome.py
+
+.PHONY: test-windows-package-entry
+test-windows-package-entry:
+	uv run --locked pytest -q tests/test_python_desktop_package.py
+
+.PHONY: test-python-reader-native
+.PHONY: test-python-writer
+.PHONY: test-updater-supervisor
+.PHONY: test-windows-scanner
+test-windows-scanner:
+	uv run --locked pytest -q tests/test_windows_scanner.py
+
+.PHONY: test-windows-updater
+test-windows-updater:
+	uv run --locked pytest -q tests/test_windows_updater.py
+
+.PHONY: check-windows-update-feed
+check-windows-update-feed:
+	uv run --locked python scripts/win/check_update_feed.py
+
+test-updater-supervisor:
+	uv run --locked pytest -q tests/test_clamav_definitions.py -k owned_updater
+
+.PHONY: test-definition-state
+test-definition-state:
+	uv run --locked pytest -q tests/test_clamav_definitions.py
+
+test-python-writer:
+	uv run --locked pytest -q tests/test_application.py tests/test_writer_lock.py tests/test_plugin_configuration.py tests/test_portable_writer.py $(PYTEST_ARGS)
+
+.PHONY: test-python-preservation
+test-python-preservation:
+	uv run --locked pytest -q tests/test_mboxrd.py tests/test_publication.py tests/test_sources.py tests/test_mbox_framing.py
+
+test-python-reader-native:
+	uv run --locked python scripts/test_python_reader_native.py $(ARGS)
+
+PYTHON_READER_SOURCES = src/mailarchiver/sqlite_paths.py src/mailarchiver/catalog.py \
+	src/mailarchiver/gui_service.py src/mailarchiver/gui_processing.py src/mailarchiver/mailsearch.py src/mailarchiver/search_completion.py \
+	scripts/check_archive_open.py tests/test_sqlite_paths.py tests/test_mailsearch.py tests/test_gui_service.py \
+	src/mailarchiver/application.py src/mailarchiver/desktop_entry.py src/mailarchiver/desktop_platform.py \
+	src/mailarchiver/reader_fixture.py src/mailarchiver/gui_app.py src/mailarchiver/gui_provenance.py \
+	src/mailarchiver/mailbox_tree.py src/mailarchiver/search_selectors.py src/mailarchiver/plugin_configuration.py \
+	src/mailarchiver/windows_storage.py src/mailarchiver/storage_sync.py src/mailarchiver/writer_lock.py src/mailarchiver/ingest_status.py \
+	src/mailarchiver/windows_job.py src/mailarchiver/owned_command.py src/mailarchiver/clamav_definitions.py \
+	src/mailarchiver/windows_scanner.py src/mailarchiver/scanner.py src/mailarchiver/libclamav.py src/mailarchiver/clamav_update.py tests/test_windows_scanner.py \
+	src/mailarchiver/winsparkle.py src/mailarchiver/windows_update_feed.py src/mailarchiver/windows_update_preferences.py tests/test_windows_updater.py \
+	scripts/win/check_update_feed.py scripts/website_screenshots.py scripts/check_runtime_licenses.py src/mailarchiver/processing/runtime.py \
+	e2e_tests/test_ingest_verify.py tests/quit_probe.py tests/test_scanner.py tests/test_standalone_verify.py tests/test_clamav_definitions.py \
+	src/mailarchiver/bagit.py src/mailarchiver/mbox.py src/mailarchiver/standalone_verify.py src/mailarchiver/sources.py \
+	src/mailarchiver/__main__.py src/mailarchiver/processing/store.py src/mailarchiver/processing/production.py tests/test_application.py \
+	tests/test_portable_writer.py tests/test_writer_lock.py \
+	src/mailarchiver/pdf_mail.py src/mailarchiver/validation.py scripts/data_quality/analyze_archive.py \
+	tests/test_mboxrd.py tests/test_publication.py tests/test_sources.py \
+	scripts/test_python_reader_native.py scripts/win/test_windows_msix.py tests/test_python_reader.py \
+	src/mailarchiver/windows_self_test.py scripts/update_appcast.py tests/test_python_desktop_package.py
+.PHONY: check-python-reader-static
+check-python-reader-static:
+	$(MAKE) ruff
+	PYTHONPATH="$(CURDIR)" uv run --locked pylint $(PYTHON_READER_SOURCES)
+	uv run --locked ty check $(PYTHON_READER_SOURCES) --error-on-warning
+	uv run --locked pyright $(PYTHON_READER_SOURCES) --warnings
+
+msix-test: ruff runtime-license-check
+	pwsh -NoProfile -File scripts/win/build_windows_msix.ps1 $(MSIX_ARGS)
+
+# Explicit dependency download only: no service installation or host PATH changes.
+.PHONY: prepare-windows-clamav
+prepare-windows-clamav:
+	pwsh -NoProfile -File scripts/win/prepare_clamav.ps1
+
+test-msix:
+	uv run --locked python scripts/win/test_windows_msix.py "$(MSIX_PACKAGE)" "$(MSIX_EVIDENCE)"
+
+msix-bundle:
+	pwsh -NoProfile -File scripts/win/bundle_test_msix.ps1 -InputDirectory "$(MSIX_PAYLOADS)" $(MSIX_ARGS)
 .PHONY: install-linux install-mac install-test-browser install-tika ocr-analyze ocr-experiment ocr-inventory ocr-profile ocr-run pylint run search summary-smoke test test-bagit test-data-quality
 .PHONY: test-application test-e2e test-encoding test-gui test-headers test-mailsearch test-native-gui test-native-html-find test-pdf-mail test-plugins test-progress test-provenance test-refresh-index test-tika test-website validation-aws-start validation-aws-start-all
 
@@ -39,16 +125,20 @@ runtime-license-bundle:
 	uv run python scripts/check_runtime_licenses.py --output "$(LICENSE_OUTPUT)"
 
 TIKA_VERSION ?= 4.0.0
+# CARGO selects Cargo; RUST_TARGET_DIR keeps compiled artifacts in this checkout.
+# RUSTUP_TOOLCHAIN explicitly overrides the compiler selected by rust-toolchain.toml.
 CARGO ?= cargo
 RUST_EXE_SUFFIX := $(if $(filter Windows_NT,$(OS)),.exe,)
 RUST_TARGET_DIR ?= $(CURDIR)/target
-CARGO_RUN = $(CARGO) --config 'build.target-dir="$(RUST_TARGET_DIR)"'
+# Export Cargo's native override so nested Cargo checks use the same output tree.
+export CARGO_TARGET_DIR := $(RUST_TARGET_DIR)
+CARGO_RUN = $(CARGO)
 
-.PHONY: test-pst pst-import pst-smoke rust-programs mdti-validator mcti-generator pst-importer mcti-scan pst-downloader pst-download pst-download-plan test-pst-downloader rust-toolchain rust-lock rust-fmt rust-check test-rust rust-smoke
+.PHONY: test-pst pst-import pst-smoke rust-programs mdti-validator mcti-generator pst-importer mcti-scan pst-downloader pst-download pst-download-plan test-pst-downloader rust-toolchain rust-lock rust-fmt rust-check test-rust test-mime-transfer rust-smoke
 rust-programs:
 	$(CARGO_RUN) build --locked --release --workspace --bins
 
-mdti-validator mcti-generator pst-importer pst-downloader mcti-scan:
+mdti-validator mcti-generator pst-importer pst-downloader mcti-scan archive-verifier:
 	$(CARGO_RUN) build --locked --release --bin $@
 
 rust-toolchain:
@@ -62,12 +152,19 @@ rust-fmt:
 	$(CARGO_RUN) fmt --all
 
 rust-check:
-	$(CARGO_RUN) fmt --all -- --check
-	$(CARGO_RUN) clippy --locked --workspace --all-targets -- -D warnings
-	$(MAKE) test-rust
+	$(CARGO_RUN) workspace-check
+
+test-mime-transfer:
+	$(CARGO_RUN) test --locked -p mime-transfer
 
 test-rust:
 	$(CARGO_RUN) test --locked --workspace
+
+.PHONY: test-archive-verifier
+test-archive-verifier:
+	$(CARGO_RUN) fmt --check -p archive-verifier
+	$(CARGO_RUN) clippy --locked -p archive-verifier --lib -- -D warnings
+	$(CARGO_RUN) test --locked -p archive-verifier --lib
 
 export PST
 .PHONY: pst-input-check
@@ -200,7 +297,19 @@ sparkle-keys: sparkle-tools
 update-appcast: sparkle-tools
 	@test -n "$(ARCHIVE)" -a -n "$(RELEASE_TAG)" -a -n "$(RELEASE_URL)" || { echo 'usage: make update-appcast ARCHIVE=/path/to/image.dmg RELEASE_TAG=v1.0.0 RELEASE_URL=https://example.invalid/image.dmg'; exit 2; }
 	@test -x "$(SPARKLE_DIR)/bin/sign_update" || { echo 'run make sparkle-tools before update-appcast'; exit 2; }
-	PYTHONPATH="$(CURDIR)/src:$(CURDIR)" uv run --locked --group packaging python scripts/update_appcast.py --appcast "$(or $(APPCAST),website/static/updates/mac/appcast.xml)" --archive "$(ARCHIVE)" --tag "$(RELEASE_TAG)" --url "$(RELEASE_URL)" --signer "$(SPARKLE_DIR)/bin/sign_update"
+	PYTHONPATH="$(CURDIR)/src:$(CURDIR)" uv run --locked --group packaging python scripts/update_appcast.py --appcast "$(or $(APPCAST),website/static/updates/mac/appcast.xml)" --archive "$(ARCHIVE)" --tag "$(RELEASE_TAG)" --url "$(RELEASE_URL)" --signer "$(SPARKLE_DIR)/bin/sign_update" $(if $(WINDOWS_ARCHIVE),--windows-archive "$(WINDOWS_ARCHIVE)" --windows-url "$(WINDOWS_RELEASE_URL)")
+
+# WINDOWS_ARCHIVE/WINDOWS_RELEASE_URL identify the tested MSIX enclosure.
+# APPCAST selects the feed copy; candidate identity comes from pyproject.toml.
+.PHONY: release-files release-candidate-base release-candidate-feed release-package-check
+release-files:
+	uv run --locked python scripts/release_files.py stage
+release-candidate-base:
+	uv run --locked python scripts/release_files.py base --appcast "$(APPCAST)"
+release-candidate-feed:
+	uv run --locked --group packaging python scripts/release_files.py sign --appcast "$(APPCAST)"
+release-package-check: dmg
+	@set -eu; set -- dist/*.dmg; test "$$#" -eq 1; case "$$1" in *_UNSIGNED.dmg) exit 1;; esac; $(MAKE) notarize-dmg DMG="$$1"; $(MAKE) test-dmg DMG="$$1"
 
 .PHONY: release-appcast-base
 # RELEASE_TAG is the candidate tag; APPCAST is the output copy of the prior feed.
@@ -222,8 +331,23 @@ sign-historical-appcast: sparkle-tools
 	PYTHONPATH="$(CURDIR)/src:$(CURDIR)" uv run --locked --group packaging python scripts/sign_historical_appcast.py --appcast "$(APPCAST)" --archive "$(DMG)" --output "$(OUTPUT)" --tag "$(RELEASE_TAG)" --signer "$(SPARKLE_DIR)/bin/sign_update"
 
 .PHONY: dmg dmg-signed notarize-dmg list-signatures check-release test-dmg preview-dmg self-test self-test-gui test-packaging
-dmg: ruff syntax-check sparkle-tools pst-importer mcti-scan pff-converter-bundle
-	uv run --group packaging python scripts/build_macos.py $(ARGS)
+dmg: python-dmg
+
+.PHONY: python-dmg
+python-dmg: ruff syntax-check sparkle-tools pst-importer mcti-scan pff-converter-bundle
+	uv run --group packaging python scripts/build_macos.py $(if $(SIGNING_IDENTITY),--signing-identity "$(SIGNING_IDENTITY)") $(ARGS)
+
+# Rust is the primary desktop app; SIGNING_IDENTITY selects Developer ID
+# (default ad-hoc), RUST_TARGET_DIR selects its release binary build directory.
+# Mounted acceptance is headless; interaction testing belongs to the user.
+.PHONY: rust-dmg
+rust-dmg: ruff syntax-check sparkle-tools pst-importer mcti-scan pff-converter-bundle
+	uv run --locked python scripts/rust_release_metadata.py --build-command $(CARGO_RUN) build --locked --release -p mailsearch-rust --bin mailsearch-webview
+	uv run --locked --group packaging python scripts/build_macos.py --rust-binary "$(RUST_TARGET_DIR)/release/mailsearch-webview" $(if $(SIGNING_IDENTITY),--signing-identity "$(SIGNING_IDENTITY)") $(ARGS)
+
+.PHONY: test-rust-dmg
+test-rust-dmg: ruff
+	uv run --locked --group packaging pytest -q tests/test_packaging.py -k frozen_entry_dispatches_private_rust_service
 
 # APPLE_CERTIFICATE_P12_BASE64 and APPLE_CERTIFICATE_PASSWORD import the
 # Developer ID identity on hosted release runners; local builds use Keychain.
@@ -242,8 +366,12 @@ notarize-dmg:
 list-signatures:
 	/usr/bin/security find-identity -v -p codesigning
 
-check-release: ruff syntax-check $(if $(DMG),,sparkle-tools pst-importer mcti-scan pff-converter-bundle)
-	uv run --group packaging python scripts/build_macos.py --check-release $(if $(DMG),--test-dmg "$(DMG)") $(ARGS)
+check-release: ruff syntax-check $(if $(DMG),,python-dmg)
+ifneq ($(strip $(DMG)),)
+	uv run --group packaging python scripts/build_macos.py --check-release --test-dmg "$(DMG)" $(ARGS)
+else
+	@set -eu; set -- dist/*.dmg; test "$$#" -eq 1; uv run --group packaging python scripts/build_macos.py --check-release --test-dmg "$$1" $(ARGS)
+endif
 
 test-dmg:
 	@test -n "$(DMG)" || { echo 'usage: make test-dmg DMG=/path/to/Email-Collection-Toolkit.dmg'; exit 2; }
@@ -285,6 +413,11 @@ test-signing: ruff
 .PHONY: test-sparkle-signing
 test-sparkle-signing: sparkle-tools ruff
 	uv run --locked --group packaging pytest -q tests/test_sparkle_signing.py
+
+.PHONY: test-rust-updates
+test-rust-updates: ruff
+	$(CARGO_RUN) build --locked -p mailsearch-rust --bin mailsearch-webview
+	RUST_WEBVIEW_BINARY="$(RUST_TARGET_DIR)/debug/mailsearch-webview$(RUST_EXE_SUFFIX)" uv run --locked pytest -q tests/test_rust_updates.py
 
 .PHONY: sparkle-probe test-updates
 sparkle-probe: sparkle-tools ruff
@@ -364,7 +497,14 @@ test-native-application:
 .PHONY: check-archive-open
 check-archive-open:
 	@test -n "$(ARCHIVE)" || { echo 'usage: make check-archive-open ARCHIVE=/path/to/archive'; exit 2; }
-	uv run python -c 'import sys; from pathlib import Path; from mailarchiver.application import validate_archive; print(validate_archive(Path(sys.argv[1]))[0])' "$(ARCHIVE)"
+	uv run --locked python scripts/check_archive_open.py "$(ARCHIVE)"
+
+# RELEASES_JSON is public GitHub release/asset metadata, not credentials.
+# RELEASE_TAG optionally requires a complete published release before site deployment.
+.PHONY: website-release-data
+website-release-data:
+	@test -n "$(RELEASES_JSON)" || { echo 'usage: make website-release-data RELEASES_JSON=/path/to/public-releases.json'; exit 2; }
+	uv run --locked python scripts/update_site_releases.py --output website/data/releases.toml --releases-json "$(RELEASES_JSON)" $(if $(RELEASE_TAG),--require-complete-tag "$(RELEASE_TAG)")
 
 website-check:
 	uv run python scripts/check_website.py
@@ -373,6 +513,12 @@ website-check:
 WEBSITE_PREVIEW_PORT ?= 1111
 website-preview:
 	zola --root website serve --interface 127.0.0.1 --port $(WEBSITE_PREVIEW_PORT) --output-dir "$(CURDIR)/.tmp/website-preview" --force
+
+# Run rendered release-metadata cases after CI provisions Zola.
+.PHONY: website-download-check
+website-download-check:
+	@command -v zola >/dev/null || { echo 'Zola is required for rendered download validation'; exit 2; }
+	uv run --locked pytest -q tests/test_website_scripts.py::test_static_platform_downloads_render_without_javascript
 
 website-build-check: website-check
 	zola --root website build --output-dir "$(CURDIR)/.tmp/website-check" --force
@@ -393,12 +539,22 @@ test-workflow-gates:
 test: pst-importer mcti-scan pff-converter test-pff-converter
 	uv run pytest -q
 
-.PHONY: test-corpus-import update-corpus-expectations
+.PHONY: archive-verifier verify-database test-import-e2e test-corpus-import update-corpus-expectations
+# ARCHIVE selects the quiescent archive; verification never repairs it.
+verify-database: archive-verifier
+	@test -n "$(ARCHIVE)" || { echo 'usage: make verify-database ARCHIVE=/path/to/archive'; exit 2; }
+	"$(RUST_TARGET_DIR)/release/archive-verifier$(RUST_EXE_SUFFIX)" "$(ARCHIVE)"
+
+# uv supplies the application Python executable; all test assertions run in Rust.
+# MAILARCHIVER_CLAMAV_* retain their existing scanner meanings (README.md).
+test-import-e2e:
+	uv run --locked $(CARGO_RUN) test --locked -p archive-verifier --test imports -- --ignored --skip update_corpus_expectations
+
 test-corpus-import:
-	uv run pytest -q tests/test_corpus_import.py
+	uv run --locked $(CARGO_RUN) test --locked -p archive-verifier --test imports complete_corpus_import -- --ignored --exact
 
 update-corpus-expectations:
-	uv run pytest -q -s tests/test_corpus_import.py --update-corpus-expectations
+	uv run --locked $(CARGO_RUN) test --locked -p archive-verifier --test imports update_corpus_expectations -- --ignored --exact --nocapture
 
 test-application:
 	uv run pytest -q tests/test_application.py tests/test_writer_lock.py tests/test_loopback.py
@@ -415,6 +571,7 @@ test-apple-mail-compare:
 	uv run pytest -q tests/test_apple_mail_compare.py
 
 test-e2e:
+	$(MAKE) test-import-e2e
 	uv run pytest -q --browser chromium --tracing=retain-on-failure e2e_tests
 
 test-encoding:
@@ -694,3 +851,129 @@ pff-converter-bundle: pff-converter
 
 test-pff-converter: pff-converter
 	uv run --locked --project converters/pff pytest -q converters/pff/tests
+
+# Rust GUI experiment: ARCHIVE is an existing archive directory; QUERY is literal search text.
+# RUST_GUI_DEMO selects a new synthetic fixture directory; no real mail is imported.
+# ECT_RUST_WEBVIEW_DIAGNOSTICS enables native navigation/IPC URL diagnostics.
+# ECT_RUST_PREFERENCES_TEST_ROOT/EDIT coordinate isolated child-process fixtures only.
+# ECT_RUST_ENGINE_PYTHON selects the prepared Python archive-service interpreter;
+# default: this checkout .venv/bin/python (Windows .venv/Scripts/python.exe).
+RUST_GUI_DEMO ?= $(CURDIR)/.tmp/rust-gui-demo
+.PHONY: rust-gui-build rust-gui rust-gui-demo rust-gui-smoke test-rust-gui
+rust-gui-build:
+	$(CARGO_RUN) reader-build
+
+rust-gui: rust-gui-build
+	$(CARGO_RUN) run-ect $(if $(ARCHIVE),--archive "$(ARCHIVE)")
+
+rust-gui-demo: rust-gui-build
+	$(CARGO_RUN) reader-demo "$(RUST_GUI_DEMO)"
+
+rust-gui-smoke: rust-gui-build
+	@test -n "$(ARCHIVE)" || { echo 'usage: make rust-gui-smoke ARCHIVE=/path/to/archive QUERY=words'; exit 2; }
+	$(CARGO_RUN) reader-smoke "$(ARCHIVE)" "$(QUERY)"
+
+# ECT_RUST_RECENT_TEST_ROOT/NAME are internal child-process fixture paths set by Rust tests.
+test-rust-gui:
+	$(CARGO_RUN) reader-check
+
+.PHONY: test-rust-gui-interop
+
+# RUST_GUI_BINARY tells the Python interoperability test which freshly built executable to use.
+test-rust-gui-interop: rust-gui-build
+	RUST_GUI_BINARY="$(RUST_TARGET_DIR)/debug/mailsearch-rust$(RUST_EXE_SUFFIX)" uv run --locked pytest -q tests/test_rust_gui.py
+
+# The original native-widget prototype remains available for comparison.
+.PHONY: rust-gui-egui
+rust-gui-egui: rust-gui-build
+	$(CARGO_RUN) run --locked -p mailsearch-rust --bin mailsearch-rust -- $(if $(ARCHIVE),--archive "$(ARCHIVE)")
+
+# RUST_WEBVIEW_BINARY selects the built Rust dispatcher for real headless browser tests.
+.PHONY: test-rust-webview
+test-rust-webview: rust-gui-build
+	RUST_WEBVIEW_BINARY="$(RUST_TARGET_DIR)/debug/mailsearch-webview$(RUST_EXE_SUFFIX)" uv run --locked pytest -q tests/test_rust_webview.py --browser chromium
+
+# Check startup button-to-IPC wiring without native windows or simulated archive replies.
+.PHONY: test-rust-startup
+test-rust-startup:
+	uv run --locked pytest -q tests/test_rust_webview.py -k startup_buttons --browser chromium
+
+# Real hot-journal recovery, foreground timer, >30-second wait and owner Abort.
+# Also exercises worker-owned startup initialization with an OS-stopped real helper.
+# RUST_WEBVIEW_BINARY selects the same native opening worker's diagnostic pipe.
+.PHONY: test-rust-recovery
+test-rust-recovery: rust-gui-build
+	RUST_WEBVIEW_BINARY="$(RUST_TARGET_DIR)/debug/mailsearch-webview$(RUST_EXE_SUFFIX)" uv run --locked pytest -q tests/test_rust_recovery.py --browser chromium
+
+# Read-only timing probe: prints counts/timings only, never message contents.
+.PHONY: rust-webview-probe
+rust-webview-probe: rust-gui-build
+	@test -n "$(ARCHIVE)" || { echo 'usage: make rust-webview-probe ARCHIVE=/path QUERY=words'; exit 2; }
+	$(CARGO_RUN) reader-probe "$(ARCHIVE)" "$(QUERY)"
+
+# RUST_GUI_ARTIFACT_DIR retains the synthetic .mailarchive, native PNG, hashes and logs.
+# Requires a logged-in macOS GUI session; uses explicitly unscanned synthetic EML only.
+# Exercises real owner/identity edits and processor-rerun persistence on that fixture.
+RUST_GUI_ARTIFACT_DIR ?= $(CURDIR)/.tmp/rust-gui-native
+.PHONY: test-rust-gui-native
+# Windows CI's Cargo native target also checks Ctrl-comma through the menu hook.
+test-rust-gui-native:
+	@test "$$(uname -s)" = Darwin || { echo 'native Rust GUI smoke currently requires macOS'; exit 2; }
+	$(CARGO_RUN) fmt -p mailsearch-rust -- --check
+	$(CARGO_RUN) clippy --locked -p mailsearch-rust --features native-smoke --all-targets -- -D warnings
+	RUST_GUI_ARTIFACT_DIR="$(RUST_GUI_ARTIFACT_DIR)" $(CARGO_RUN) reader-native-check
+
+# Compile native acceptance without claiming an unlocked desktop runtime check.
+.PHONY: check-rust-gui-native-build
+check-rust-gui-native-build:
+	$(CARGO_RUN) fmt -p mailsearch-rust -- --check
+	$(CARGO_RUN) clippy --locked -p mailsearch-rust --features native-smoke --all-targets -- -D warnings
+	$(CARGO_RUN) test --locked -p mailsearch-rust --features native-smoke --test native_smoke --test native_windows --no-run
+
+# ECT_WINSPARKLE_TEST_DLL points to the staged checksum-verified native SDK DLL.
+# APPDATA locates legacy Python update preferences on Windows; LOCALAPPDATA
+# continues to store Rust reader preferences separately from archives.
+# ECT_RELEASE_VERSION/BUILD/CHANNEL come from the shared release mapper.
+# ECT_UPDATE_FEED_URL/PUBLIC_KEY and ECT_RELEASE_* are common public build inputs.
+# ECT_RUST_NATIVE_CLOSE_SMOKE is used only by feature-gated lifecycle tests.
+.PHONY: test-rust-updater
+test-rust-updater:
+	$(CARGO_RUN) reader-updater-check
+
+# The transitional Rust engine test uses only synthetic archives and no GUI windows.
+.PHONY: test-rust-engine
+test-rust-engine:
+	uv run --locked pytest -q tests/test_rust_engine.py
+
+# RUST_WEBVIEW_BINARY selects the real dispatcher; tests never launch native windows.
+.PHONY: test-search-parity
+test-search-parity: rust-gui-build
+	RUST_WEBVIEW_BINARY="$(RUST_TARGET_DIR)/debug/mailsearch-webview$(RUST_EXE_SUFFIX)" uv run --locked pytest -q tests/test_mailsearch.py tests/test_search_parity.py
+
+# ARCHIVE/QUERY use the same read-only diagnostic contract as rust-webview-probe.
+.PHONY: rust-webview-release-probe
+rust-webview-release-probe:
+	@test -n "$(ARCHIVE)" || { echo 'usage: make rust-webview-release-probe ARCHIVE=/path QUERY=words'; exit 2; }
+	$(CARGO_RUN) build --locked --release -p mailsearch-rust --bin mailsearch-webview
+	"$(RUST_TARGET_DIR)/release/mailsearch-webview$(RUST_EXE_SUFFIX)" --probe "$(ARCHIVE)" "$(QUERY)"
+
+# The desktop experiment is retained for study, outside the supported workspace.
+# These historical targets fail explicitly rather than launching stale binaries.
+.PHONY: rust-gui-retired
+rust-gui-retired:
+	@echo 'Rust GUI retired: see rust/README.md. Use make gui or make dmg for Python.' >&2
+	@exit 2
+rust-dmg rust-gui-build test-rust-gui test-rust-startup test-rust-gui-native check-rust-gui-native-build test-rust-updater test-rust-updates rust-webview-release-probe: rust-gui-retired
+
+.PHONY: test-python-desktop-package
+test-python-desktop-package:
+	uv run --locked --group packaging pytest -q tests/test_python_desktop_package.py tests/test_packaging.py tests/test_macos_signing.py tests/test_website_scripts.py
+.PHONY: prepare-windows-updater
+prepare-windows-updater:
+	pwsh -NoProfile -File scripts/win/prepare_winsparkle.ps1 -Architecture x64 -OutputDirectory .tmp/winsparkle
+
+# SEED_DIRECTORY supplies a read-only local baseline; the app verifies its copy.
+.PHONY: clamav-seed
+clamav-seed:
+	@test -n "$(SEED_DIRECTORY)" || { echo 'Specify SEED_DIRECTORY containing existing ClamAV definitions'; exit 2; }
+	uv run --locked python -m mailarchiver.clamav_update --seed "$(SEED_DIRECTORY)"

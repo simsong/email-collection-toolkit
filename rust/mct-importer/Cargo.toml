@@ -8,6 +8,7 @@ publish = false
 license = "GPL-2.0-only"
 
 [dependencies]
+mime-transfer = { path = "../mime-transfer" }
 outlook-pst = "=1.2.0"
 url = "2.5.7"
 anyhow = "1.0.100"

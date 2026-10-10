@@ -1,0 +1,18 @@
+/* Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved. */
+/* Present the existing archive editors inside the Rust-owned desktop window.
+ * Trusted application frames keep their established controls and typography.
+ * The modal separates explicit mutations from ordinary message browsing.
+ * Error and cancellation controls remain reachable at small window sizes.
+ * MIME frames remain separately sandboxed by the shared message renderer.
+ */
+.rust-workflow { width:min(1100px,90vw); max-height:90vh; border:1px solid #aaa; border-radius:8px; padding:20px; }
+.rust-workflow::backdrop { background:rgba(0,0,0,.25); }
+.rust-workflow > h2 { display:inline-block; margin-top:0; }
+.rust-workflow > button { float:right; }
+.rust-workflow iframe { display:block; width:100%; height:70vh; border:0; }
+.rust-workflow label { display:block; margin:12px 0; }
+.rust-workflow textarea { display:block; width:95%; font:inherit; }
+.rust-workflow [role=alert] { color:#b00020; }
+
+.archive-tools { overflow-x:auto; white-space:nowrap; }
+.archive-tools > button { flex-shrink:0; }

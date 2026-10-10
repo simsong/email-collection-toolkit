@@ -57,6 +57,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import ctypes
 import hashlib
 import io
 import json
@@ -69,7 +70,7 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path, PurePosixPath
-from typing import TypeVar
+from typing import Any, BinaryIO, TypeVar
 
 BUFFER_SIZE = 1024 * 1024
 FORMAT_ID = "tag:simson.net,2026:mailarchiver/integrity"
@@ -94,6 +95,50 @@ MAX_AMBIGUOUS_FROM_LINES = 12
 FIELD_NAME_PATTERN = re.compile(rb"[!-9;-~]+")
 ALGORITHMS = {"sha256": 64, "sha512": 128}
 T = TypeVar("T")
+
+
+class PreservingMbox(mailbox.mbox):
+    """Use stdlib containers with host-independent framing and original bytes."""
+
+    _file: BinaryIO  # Owned by mailbox.mbox; absent from its public type stub.
+
+    def get_bytes(self, key: str, from_: bool = False) -> bytes:
+        """Read the stored record without mailbox's platform newline conversion."""
+        with self.get_file(key, from_) as handle:
+            return handle.read()
+
+    def _generate_toc(self) -> None:
+        starts: list[int] = []
+        stops: list[int] = []
+        blank_size = 0
+        self._file.seek(0)
+        while True:
+            position = self._file.tell()
+            line = self._file.readline()
+            if line.startswith(b"From "):
+                if len(stops) < len(starts):
+                    stops.append(position - blank_size)
+                starts.append(position)
+            elif not line:
+                if len(stops) < len(starts):
+                    stops.append(position - blank_size)
+                break
+            blank_size = len(line) if line in (b"\n", b"\r\n") else 0
+        self._toc = dict(enumerate(zip(starts, stops)))
+        self._next_key = len(self._toc)
+        self._file_length = self._file.tell()
+
+    def _install_message(self, message: Any) -> tuple[int, int]:
+        if not isinstance(message, bytes) or not message.startswith(b"From "):
+            raise TypeError("Canonical MBOX publication requires framed raw bytes")
+        start = self._file.tell()
+        self._file.write(message)
+        if not message.endswith(b"\n"):
+            self._file.write(b"\n")
+        return start, self._file.tell()
+
+    def _post_message_hook(self, f: BinaryIO) -> None:
+        f.write(b"\n")
 
 
 class _Progress:
@@ -336,7 +381,18 @@ def write_integrity_file(
                 raise ValueError(f"MBOX changed while writing integrity file: {mbox_path}")
             output.flush()
             os.fsync(output.fileno())
-        temporary.replace(destination)
+        if os.name == "nt":
+            native = ctypes.WinDLL("kernel32", use_last_error=True)
+            native.MoveFileExW.argtypes = [ctypes.c_wchar_p, ctypes.c_wchar_p, ctypes.c_uint32]
+            native.MoveFileExW.restype = ctypes.c_int
+            deadline = time.monotonic() + 2
+            while not native.MoveFileExW(str(temporary), str(destination), 0x9):
+                error = ctypes.get_last_error()
+                if error not in {5, 32, 33} or time.monotonic() >= deadline:
+                    raise ctypes.WinError(error)
+                time.sleep(0.01)
+        else:
+            temporary.replace(destination)
         _sync_directory(destination.parent)
     except BaseException:
         temporary.unlink(missing_ok=True)
@@ -345,6 +401,8 @@ def write_integrity_file(
 
 
 def _sync_directory(path: Path) -> None:
+    if os.name == "nt":
+        return  # The publication above uses a write-through native rename.
     descriptor = os.open(path, os.O_RDONLY)
     try:
         os.fsync(descriptor)
@@ -515,7 +573,7 @@ def verify_mbox(path: Path, integrity: Path, progress: _Progress | None = None) 
             raw_standards = [item for item in message_standards if item.standard == "raw"]
             if not raw_standards:
                 raise ValueError("no raw-message standard declared")
-            box = mailbox.mbox(path, factory=None, create=False)
+            box = PreservingMbox(path, factory=None, create=False)
             rows = 0
             try:
                 progress.announce(path, "Checking messages")
@@ -807,7 +865,7 @@ def verify_archive(archive: Path, quiet: bool = False) -> list[str]:
     expected_mailboxes: dict[str, int] = {}
     for path in mailboxes:
         progress.announce(path, "Counting messages for Mailbag CSV")
-        box = mailbox.mbox(path, factory=None, create=False)
+        box = PreservingMbox(path, factory=None, create=False)
         try:
             expected_mailboxes[path.name] = len(box)
         finally:

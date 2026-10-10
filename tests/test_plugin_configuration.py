@@ -158,14 +158,14 @@ def test_rank_conflict_cannot_publish_an_earlier_plugin_or_scope(tmp_path: Path)
 def test_interrupted_rank_configuration_recovers_before_plugin_reads(tmp_path: Path) -> None:
     """Real persisted journal models interruption between the two file replacements."""
     archive = tmp_path / "archive"
-    installation = tmp_path / "install.yaml"
-    installation.write_text("plugins: {unrelated: {keep: true}}\n")
+    installation = tmp_path / "José-東京.yaml"
+    installation.write_text("plugins: {unrelated: {keep: true}}\n", encoding="utf-8")
     archive_write = ConfigWrite(scope="archive", values={"limit": 3}, expected_hash=value_hash({}))
-    install_write = ConfigWrite(scope="installation", values={"inherited": True}, expected_hash=value_hash({}))
+    install_write = ConfigWrite(scope="installation", values={"inherited": "café 東京"}, expected_hash=value_hash({}))
     transaction = ConfigTransaction(installation=installation, namespaces=(
         NamespaceWrites(name="one", writes=(archive_write, install_write)),))
     save_archive_config(archive, ArchiveConfig(plugins={"one": archive_write.values}))
-    (archive / CONFIG_JOURNAL).write_text(transaction.model_dump_json())
-    assert read_plugin_configuration(archive, "one", installation).get_my_config() == {"limit": 3, "inherited": True}
+    (archive / CONFIG_JOURNAL).write_text(transaction.model_dump_json(), encoding="utf-8")
+    assert read_plugin_configuration(archive, "one", installation).get_my_config() == {"limit": 3, "inherited": "café 東京"}
     assert not (archive / CONFIG_JOURNAL).exists()
     assert load_installation_config(installation).plugins["unrelated"] == {"keep": True}

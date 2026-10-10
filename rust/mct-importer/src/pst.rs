@@ -284,6 +284,7 @@ fn exchange_directory(pst: &PstStore) -> ExchangeDirectory {
                                     .get(id)
                                     .filter(|v| !matches!(v, PropertyValue::Null)),
                             )
+                            .map(|value| value.map(Cow::into_owned))
                         },
                         |id| match message.properties().get(id) {
                             Some(PropertyValue::Binary(value)) => Some(value.buffer()),
@@ -300,8 +301,14 @@ fn exchange_directory(pst: &PstStore) -> ExchangeDirectory {
                     (REPRESENTING_EMAIL, REPRESENTING_SMTP),
                 ] {
                     directory.remember(
-                        text(message.properties().get(dn)).ok().flatten(),
-                        text(message.properties().get(smtp)).ok().flatten(),
+                        text(message.properties().get(dn))
+                            .ok()
+                            .flatten()
+                            .map(Cow::into_owned),
+                        text(message.properties().get(smtp))
+                            .ok()
+                            .flatten()
+                            .map(Cow::into_owned),
                         item,
                         smtp,
                     );
@@ -324,7 +331,7 @@ fn exchange_directory(pst: &PstStore) -> ExchangeDirectory {
                                     context.columns()[index].prop_type(),
                                 )
                                 .ok()?;
-                            text(Some(&value)).ok().flatten()
+                            text(Some(&value)).ok().flatten().map(Cow::into_owned)
                         };
                         directory.remember(
                             read(RECIPIENT_EMAIL),
@@ -836,17 +843,16 @@ impl Write for LimitedWriter<'_> {
     }
 }
 
-fn text(value: Option<&PropertyValue>) -> Result<Option<String>> {
+fn text(value: Option<&PropertyValue>) -> Result<Option<Cow<'_, str>>> {
     Ok(match value {
         None => None,
-        Some(PropertyValue::Unicode(v)) => {
-            Some(String::from_utf16(v.buffer()).context("invalid UTF-16 MAPI string")?)
-        }
-        Some(PropertyValue::String8(v)) => Some(
+        Some(PropertyValue::Unicode(v)) => Some(Cow::Owned(
+            String::from_utf16(v.buffer()).context("invalid UTF-16 MAPI string")?,
+        )),
+        Some(PropertyValue::String8(v)) => Some(Cow::Borrowed(
             std::str::from_utf8(v.buffer())
-                .context("non-UTF-8 MAPI String8 metadata is not yet supported")?
-                .to_owned(),
-        ),
+                .context("non-UTF-8 MAPI String8 metadata is not yet supported")?,
+        )),
         // Optional MAPI string fields can have a non-text value in an otherwise
         // readable item. Leave that field absent and retain the source PST.
         _ => None,
@@ -1063,7 +1069,7 @@ fn render(
                 .map(|v| v.split_whitespace().collect::<Vec<_>>().join(" "))
         })
         .transpose()?
-        .map(|v| Ok(Some(v)))
+        .map(|v| Ok(Some(Cow::Owned(v))))
         .unwrap_or_else(|| {
             text(props.get(SENDER_SMTP)).and_then(|v| match v {
                 Some(v) => Ok(Some(v)),
@@ -1078,16 +1084,25 @@ fn render(
             .flatten()
             .filter(|name| !name.chars().any(char::is_control));
         if let Some(name) = name {
-            format!(
-                "\"{}\" <{}>",
-                name.replace('\\', "\\\\").replace('"', "\\\""),
-                mapping.smtp
-            )
+            let mut display = String::with_capacity(name.len() + mapping.smtp.len() + 5);
+            display.push('"');
+            for c in name.chars() {
+                if matches!(c, '\\' | '"') {
+                    display.push('\\');
+                }
+                display.push(c);
+            }
+            display.push_str("\" <");
+            display.push_str(&mapping.smtp);
+            display.push('>');
+            Cow::Owned(display)
         } else {
-            mapping.smtp.clone()
+            Cow::Borrowed(mapping.smtp.as_str())
         }
     } else {
-        resolve_address_header("From", &from, directory, out)?.unwrap_or(from)
+        resolve_address_header("From", &from, directory, out)?
+            .map(Cow::Owned)
+            .unwrap_or(from)
     };
     ensure!(
         !from.chars().any(char::is_control) && from.len() < 990,
@@ -1097,12 +1112,14 @@ fn render(
     if crate::exchange_from_valid(&from) {
         writeln!(out, "{}: EX\r", crate::PST_SENDER_ADDRESS_TYPE)?;
     }
-    if let Some(subject) = text(props.get(SUBJECT))?.or_else(|| headers.get_first_value("Subject"))
+    if let Some(subject) =
+        text(props.get(SUBJECT))?.or_else(|| headers.get_first_value("Subject").map(Cow::Owned))
     {
         subject_header(&subject, out)?;
     }
     let original_id = headers
         .get_first_value("Message-ID")
+        .map(Cow::Owned)
         .or(text(props.get(MESSAGE_ID))?)
         .map(|id| id.split_whitespace().collect::<Vec<_>>().join(" "));
     if let Some(id) = original_id
@@ -1172,11 +1189,8 @@ fn render(
         "MIME-Version: 1.0\r\nContent-Type: multipart/mixed; boundary=\"{boundary}\"\r\n\r\n"
     )?;
     let alternatives = props.get(BODY).is_some() && props.get(HTML).is_some();
-    let body_boundary = if alternatives {
-        format!("=_mct_alternative_{item:08x}")
-    } else {
-        boundary.clone()
-    };
+    let alternative_boundary = alternatives.then(|| format!("=_mct_alternative_{item:08x}"));
+    let body_boundary = alternative_boundary.as_deref().unwrap_or(&boundary);
     if alternatives {
         write!(out, "--{boundary}\r\nContent-Type: multipart/alternative; boundary=\"{body_boundary}\"\r\n\r\n")?;
     }
@@ -1191,7 +1205,7 @@ fn render(
             };
             base64_part(
                 out,
-                &body_boundary,
+                body_boundary,
                 &format!("{media}; charset={charset}"),
                 None,
                 None,
@@ -1393,9 +1407,12 @@ fn write_recipients(
         {
             continue;
         }
-        let native = text(read(RECIPIENT_EMAIL)?.as_ref())?;
-        let smtp = text(read(RECIPIENT_SMTP)?.as_ref())?;
-        let address_type = text(read(0x3002)?.as_ref())?;
+        let native_property = read(RECIPIENT_EMAIL)?;
+        let native = text(native_property.as_ref())?;
+        let smtp_property = read(RECIPIENT_SMTP)?;
+        let smtp = text(smtp_property.as_ref())?;
+        let address_type_property = read(0x3002)?;
+        let address_type = text(address_type_property.as_ref())?;
         let (address, mapping) = recipient_address(
             address_type.as_deref(),
             native.as_deref(),

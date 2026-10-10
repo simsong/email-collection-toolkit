@@ -3,7 +3,7 @@
 """Verify read-only source discovery, EMLX/MBOX streaming, and append fingerprints."""
 
 import json
-import mailbox
+import os
 from pathlib import Path
 
 import pytest
@@ -71,7 +71,7 @@ def test_local_source_silently_ignores_empty_files_and_known_metadata(tmp_path: 
         (tmp_path / name).write_bytes(b"metadata")
     keywords = tmp_path / "courierimapkeywords"
     keywords.mkdir()
-    (keywords / ":list.txt").write_bytes(b"NotJunk\nmessage:0\n")
+    (keywords / ("list.txt" if os.name == "nt" else ":list.txt")).write_bytes(b"NotJunk\nmessage:0\n")
     plugin = load_plugins().source("file-folder").implementation
 
     discovered = list(plugin.discover(SourceSpec(locator=str(tmp_path))))
@@ -201,14 +201,10 @@ def test_maildir_content_parser_wins_without_changing_logical_folder(tmp_path: P
     root = tmp_path / "2003" / "mbox.2003.ID-Policy"
     for name in ("cur", "new", "tmp"):
         (root / name).mkdir(parents=True, exist_ok=True)
-    path = root / "cur" / "1071235664.M505205P94798:2,S.txt"
+    filename = "1071235664.M505205P94798" + ("!" if os.name == "nt" else ":") + "2,S.txt"
+    path = root / "cur" / filename
     raw = b"From: sender@example.net\nDate: Thu, 1 Feb 2024 12:00:00 +0000\n\nbody\n"
-    box = mailbox.mbox(path)
-    try:
-        box.add(raw)
-        box.flush()
-    finally:
-        box.close()
+    path.write_bytes(b"From sender@example.net Thu Feb 1 12:00:00 2024\n" + raw + b"\n")
     plugin = load_plugins().source("file-folder").implementation
 
     containers = [
@@ -222,7 +218,7 @@ def test_maildir_content_parser_wins_without_changing_logical_folder(tmp_path: P
     assert container.parser_kind == "mbox"
     assert container.source.hierarchy == tuple(Path(source.source_path).parts[:-2])
     assert local_hierarchy_path(source).endswith("/2003/mbox.2003.ID-Policy")
-    assert container.source.native_id.endswith("/mbox.2003.ID-Policy/cur/1071235664.M505205P94798:2,S.txt")
+    assert container.source.native_id.endswith(f"/mbox.2003.ID-Policy/cur/{filename}")
     assert [message.raw for message in plugin.messages(container, None)] == [raw]
 
 
@@ -264,12 +260,7 @@ def test_classic_apple_mail_package_reads_mbox_stream(tmp_path: Path) -> None:
     path = tmp_path / "On My Mac.mbox" / "mbox"
     path.parent.mkdir()
     raw = b"Message-ID: <classic@example>\nDate: Thu, 1 Feb 2024 12:00:00 +0000\n\nbody\n"
-    box = mailbox.mbox(path)
-    try:
-        box.add(raw)
-        box.flush()
-    finally:
-        box.close()
+    path.write_bytes(b"From sender@example.net Thu Feb 1 12:00:00 2024\n" + raw + b"\n")
 
     discovered = list(source_files(tmp_path))
 
@@ -280,7 +271,7 @@ def test_classic_apple_mail_package_reads_mbox_stream(tmp_path: Path) -> None:
 
 def test_mbox_signature_precedes_maildir_location(tmp_path: Path) -> None:
     """Requirement: packaged MBOX recognition takes precedence over a Maildir path."""
-    path = tmp_path / "maildir" / "cur" / "message:2,S.txt"
+    path = tmp_path / "maildir" / "cur" / ("message!2,S.txt" if os.name == "nt" else "message:2,S.txt")
     path.parent.mkdir(parents=True)
     raw = (
         b"Message-ID: <maildir-mbox@example>\n"
@@ -288,12 +279,7 @@ def test_mbox_signature_precedes_maildir_location(tmp_path: Path) -> None:
         b"Date: Thu, 1 Feb 2024 12:00:00 +0000\n\n"
         b"body\nordinary second line\n"
     )
-    box = mailbox.mbox(path)
-    try:
-        box.add(raw)
-        box.flush()
-    finally:
-        box.close()
+    path.write_bytes(b"From sender@example.net Thu Feb 1 12:00:00 2024\n" + raw + b"\n")
 
     plugin = load_plugins().source("file-folder").implementation
     discovered = list(plugin.discover(SourceSpec(locator=str(path))))

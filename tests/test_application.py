@@ -82,7 +82,9 @@ def test_gui_stop_checkpoints_partial_import_and_reimport_has_no_duplicates(tmp_
     finally:
         stop.set()
         worker.join(timeout=30)
-    assert not worker.is_alive() and count > 0
+    if errors and not isinstance(errors[0], IngestInterrupted):
+        raise errors[0]
+    assert not worker.is_alive() and count > 0, errors
     assert len(errors) == 1 and isinstance(errors[0], IngestInterrupted)
     assert read_ingest_history(archive).statuses[0].state == "interrupted"
     assert not verify_archive(archive)

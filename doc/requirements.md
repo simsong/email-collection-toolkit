@@ -2,6 +2,57 @@
 
 # Mail archive normalizer requirements
 
+Python/pywebview is the default GUI and macOS/Windows package entry point.
+The Rust GUI migration is retired and preserved outside the supported workspace;
+its former GUI targets must fail explicitly. Independent Rust importer, verifier,
+PST and MIME tools remain supported. [The retrospective](../rust/README.md)
+records the last compiling snapshot and supersedes historical desktop migration
+requirements and implementation sections below.
+
+The agreed release policy in [DEVOPS.md](DEVOPS.md) requires macOS-focused
+ordinary CI, explicit cross-platform test releases, concurrent Mac/Windows
+installer builds, coordinated publication through one signed appcast, and
+static direct-download buttons derived from complete published releases. Reject
+draft, absent, duplicate, incomplete-upload or wrong-URL installer metadata; keep
+preview buttons distinct and omit unavailable Windows downloads.
+These are release-workflow requirements, not evidence of Windows feature parity.
+Website screenshot validation uses purpose-made synthetic mail and a real
+browser: installed Edge on Windows, Playwright Chromium on other platforms.
+
+## Shared Python Windows desktop
+
+macOS and Windows share the Python document controller,
+search, completion, verified message reader, and HTML interface. The first
+Windows deliverable is an x64 reader MSIX, including private Python and locked
+runtime dependencies; no Rust GUI or private Rust-to-Python worker is required.
+MSIX assembly must retain complete dependency licenses and reject unknown license
+evidence. Missing metadata labels require exact reviewed license-text evidence.
+WebView2 is external and missing/incompatible runtime startup must fail visibly,
+without falling back to Internet Explorer. Windows status publication must tolerate short-lived
+reader sharing conflicts with bounded retries, preserve the complete temporary
+file on failure, and retain a completed import status despite concurrent GUI polling.
+Windows Ctrl shortcuts complement
+macOS Command shortcuts. The complete GUI requires Windows archive creation,
+importing, processing and identity editing, plus bundled ClamAV and working
+definition updates. Reader packaging does not exclude these requirements.
+Windows archive selection must use the standard system Open dialog. Selecting
+any file or subdirectory inside a collection must open its enclosing archive,
+including legacy archive folders without the `.mailarchive` suffix. Invalid
+selections must report an error without modifying the selected file or archive.
+Windows mapped drives and UNC shares must open through standard Python SQLite.
+Validation, search and message reads must retain read-only database access and
+SQLite locking; URI-reserved characters in archive paths must remain literal.
+
+Reader operations must preserve every collection file, including databases.
+Explicit message/attachment exports and per-user saved searches are supported.
+The Python preview uses a separate package identity so it cannot upgrade or
+replace the Rust preview. Signing reuses the pinned test certificate; missing
+private-key access must fail, never generate an unrelated key. Versions derive
+from `pyproject.toml` using the shared release mapper. Native macOS, installed
+Windows activation, signing, and performance require their own evidence; a
+source test or unsigned payload is insufficient to claim those gates passed.
+
+
 ## Manual state and documentation status
 
 The archive has three operational databases: `archive.sqlite3` (catalog and
@@ -93,6 +144,13 @@ directory, and a `data/mbox/` payload directory.
   there is no X-header exclusion from raw-message integrity. Document every
   digest's input, purpose and limits, and all added headers, in
   [INTEGRITY_CONTROLS.md](INTEGRITY_CONTROLS.md).
+* Preservation acceptance uses four committed byte fixtures under
+  `tests/data/writer-preservation/2024`: CRLF without a final newline, distinct LF
+  content sharing the same Message-ID, invalid declared UTF-8, and a missing
+  multipart boundary. The portable writer and production GUI import service
+  must retain all four, keep source files unchanged, export original bytes,
+  and pass independent archive verification. Missing dates use source-year
+  fallback; malformed MIME remains accessible as Raw Source.
 * Accept LF and CRLF input independently of the host operating system. Do not
   recode line endings in message headers, bodies, attachments, or existing
   delimiters during import, storage, or retrieval. Preserve lone CR characters:
@@ -329,17 +387,17 @@ Processing database initialization must publish a complete schema atomically;
 a version marker alone is insufficient for validation. Message-boundary replay
 must not repeat archive-wide recovery or aggregate-report scans for every message.
 
-The default pytest suite must import the entire local `tests/data/` directory
-through the CLI into a disposable archive, with a ten-minute subprocess
-deadline. A reviewed expectation file lists source fingerprints and every
+The required Rust import gate in `make check` must import the entire local
+`tests/data/` directory through the CLI into a disposable archive, with a
+ten-minute subprocess deadline. A reviewed expectation file lists source fingerprints and every
 retained email's subject and raw SHA-256, plus observation/exclusion counts.
 Failures report both unexpected and missing messages. Verification must read
 canonical bytes, run the installed validator, confirm source immutability, and
 repeat ingest to establish idempotence. Updating expectations requires the
-explicit `--update-corpus-expectations` pytest option. Tracked fixture expectations
-are public; ignored local mailbox expectations remain in an ignored local
-overlay. Unknown local files fail comparison until explicitly reviewed.
-This test uses the real on-demand ClamAV path, as the GUI does. Its subject/hash
+explicit `make update-corpus-expectations` Rust maintenance target. Tracked
+fixture expectations are public; ignored local mailbox expectations remain in
+an ignored local overlay. Unknown local files fail comparison until explicitly reviewed.
+This test uses the real configured ClamAV engine, as the GUI does. Its subject/hash
 expectations include quarantined mail and do not depend on signature-dependent
 mailbox destinations. Dedicated EICAR tests also verify infected routing.
 
@@ -575,6 +633,40 @@ recorded in THIRD_PARTY_NOTICES.md.
   from the disposable search index, ordinary search listings, reports, and
   correspondent statistics. Its canonical MBOX content remains available for
   an explicit future quarantine-review workflow.
+
+## Independent Rust import verification
+
+`make verify-database ARCHIVE=...` shall read existing catalog/search databases
+without SQL writes and independently verify every catalogued MBOX location.
+For a quiescent, checkpointed schema-v1 archive, require SQLite integrity and
+foreign-key consistency; complete message/location coverage; whole-MBOX byte
+counts and SHA-256; nonoverlapping, gap-free records; and raw message SHA-256
+recovery using mboxrd, bounded legacy mboxo, adopted envelopes and final-newline
+candidates. Reject pending publications, unfinished runs, unsafe mailbox paths,
+unregistered MBOX files, inconsistent publication observations, missing/extra
+search digests, quarantine leakage, and broken FTS/attachment metadata mappings.
+Reject WAL headers and database journals/sidecars before SQLite opens them,
+without creating shared-memory files. Stream mailbox and message bytes with
+bounded buffers, including arbitrarily long adopted envelope lines, while staying
+within each catalogued record. Mixed legacy interpretations must share a streamed
+pass instead of rereading the record for every quote mask; retain the twelve-line
+ambiguity bound and bounded candidate hash memory. Fail rather than repair.
+
+This first Rust verifier does not recompute semantic hashes, parsed metadata,
+extracted search text, or processing/manual-decision data; it does not establish
+source completeness. The separate installed Python verifier continues to check
+BagIt/Mailbag and semantic fixity. Stop all writers before either verifier runs;
+a read transaction does not synchronize independent databases and MBOX files.
+
+Rust owns the complete-corpus and synthetic import/database end-to-end assertions.
+Tests invoke the real Python importer and installed portable verifier as child
+programs, use the real embedded scanner, compare reviewed source/hash expectations,
+check source preservation and repeat-import idempotence, and reject deliberate
+catalog/MBOX/search corruption. A subprocess deadline must terminate test-owned
+children. Golden updates remain an explicit, reviewed maintenance action with
+private expectations in ignored output. Browser/native test migration is deferred.
+`make test-import-e2e` is required by `make test-e2e` and therefore `make check`;
+plain Cargo tests report these external-prerequisite tests as ignored.
 
 ## Primary metadata database
 
@@ -927,18 +1019,10 @@ An indexing failure is recorded as a metadata defect and does not reject mail;
 
 ## Desktop application documents and windows
 
-The compiled desktop experience will evaluate Dioxus Desktop and Tauri with the
-system webview (WKWebView on macOS, WebView2 on Windows). Rust also implements
-the MCT importer test programs and standalone PST extraction helper. Archive ingest
-orchestration, search, scanning, locking and preservation remain in Python.
-Windows with full ingest is the next platform priority; Linux/snap
-delivery is deferred. [DIOXUS.md](DIOXUS.md) defines the trial plan and migration,
-typed local worker boundary, packaging, and native acceptance requirements.
-The worker protocol and both candidate frontends remain unimplemented. End users must
-receive the compiled UI and bundled Python dependencies together.
-
-Plan comparable trial implementations in Dioxus and Tauri before choosing a
-framework. Either approach retains the Python archive engine.
+Python/pywebview remains the selected desktop architecture. The Dioxus/Tauri
+trial plan and Wry/egui migration are historical; the Rust GUI is retired.
+Independent Rust importer and verification tools remain in use. End users receive
+the Python GUI and dependencies together without installing a runtime.
 
 The current pywebview application uses HTML/CSS/JavaScript and its native Python
 bridge. The following asset-server rules describe that implementation and its
@@ -1116,6 +1200,9 @@ including senders from prior imports and applying exclusions. Detected addresses
 are derived evidence, never expanded into YAML or reused as implicit owner rules.
 Existing Sent/Archive classifications remain unchanged by rule edits or
 reindexing; correcting historical misclassification requires a fresh rebuild.
+CLI processing, Continue Processing and explicit reprocessing replay their saved
+ingest policy without overwriting later owner defaults in `config.yaml`.
+Only an explicitly requested import saves its owner rules as document defaults.
 
 Only a saved document holding the matching cross-process writer lease may
 start ingest. The process-local document registry prevents duplicate UI jobs
@@ -1367,18 +1454,16 @@ the command fails before reading or writing an archive.
 
 The Python GUI identifies itself as **Email Collection Toolkit** and uses the
 source-controlled rainbow-envelope icon in its native application identity.
-Current application development and all GitHub workflow jobs are macOS-only.
 Continuous integration runs on non-`main` repository branch pushes that change
-files outside `README.md` and `doc/`, not again on its PR or merged `main` push;
-it does not build a DMG. Forked PRs currently need a separate CI policy.
-The Pages workflow also skips `main` pushes that change only those documentation
-paths.
-Release CI alone runs headless `make dmg` after a `v*` tag push; visible native
-release testing is an explicit local `make check-release` action. Website and
-release-assembly jobs also use macOS,
-including architecture-matched, checksum-verified Zola. All runner jobs in the
-continuous-integration workflow must use macOS; Windows and Linux validation
-are outside the current scope.
+files outside `README.md` and `doc/RELEASE_NOTES.md`, not again on its PR or
+merged `main` push. Other documentation must still trigger validation. Pages
+also skips `main` pushes limited to those two files. An explicit `[release-ci]`
+head on any non-main branch must run DMG/MSIX/signature validation regardless
+of that filter, without publishing. Signing must remove temporary private-key
+material even if writing the PFX fails partway through. Forked PRs currently
+need a separate CI policy. Ordinary checks and website jobs use macOS with
+checksum-verified Zola; candidate validation additionally runs Windows x64.
+Release publication requires a version-matching `v*` tag on main.
 The required continuous-integration gate exercises the archive lifecycle and
 complete HTML interface in headless Chromium with disposable fixtures. Native
 Cocoa/WKWebView smoke testing is an explicit local macOS development check and
@@ -1441,7 +1526,11 @@ regeneration closes its browser on success and failure.
 Release assembly verifies the annotated tag's type, package version, and
 ancestry on `main` before installing project dependencies, building artifacts,
 or executing their entry points. Tag/version validation must not install the
-project itself. Pages deploys on every `main` push and after a tagged release
+project itself. A shared identity preflight must succeed before either the
+macOS packaging job or the cross-platform Rust reader matrix starts.
+Preflight must check out the triggering commit, rejecting a tag that has moved
+instead of validating a different revision from the Rust build.
+Pages deploys on every `main` push and after a tagged release
 publishes, using the release run's signed appcast rather than a release-list
 query for that new asset; the two deployment paths are serialized.
 
@@ -1849,6 +1938,17 @@ scanner portability remain implementation work, not shipped features.
 
 ### Application updates (issue #91)
 
+The Python Windows app uses WinSparkle with the shared release mapper, pinned
+Ed25519 key, and user update preferences. Authenticate complete appcast bytes
+before filtering to Windows x64 and package identity `ECT.PythonReader`; historical
+Rust packages must never be offered. Compatible enclosures carry
+`ect:packageIdentity` and `ect:architecture` in namespace
+`https://simsong.github.io/email-collection-toolkit/updates`. Native WinSparkle
+verifies the signed installer. Downloads and installation require user consent;
+installation must reserve the common cross-process archive-writer guard.
+Source launches allow manual discovery but must not run installers or automatic
+checks. User settings and updater state are separate from archived content.
+
 The frozen macOS app must use Sparkle's standard updater UI, with native
 Preferences… and Check for Updates… commands. Stable installations default to
 release-only; alpha/beta installations default to preview plus stable. Explicit
@@ -1861,7 +1961,7 @@ atomically exclude new writers before relaunch. Resource shutdown must retain
 the installation guard until process exit once relaunch has begun; ordinary
 shutdown releases reservations. Failure, including a raised
 native continuation error, must restore writer access and cancel any Quit waiting
-for that update, allowing new work and a later Quit. Source launches and other platforms must
+for that update, allowing new work and a later Quit. Source launches without mapped updater metadata and unsupported platforms must
 report updates unavailable without starting checks.
 
 The app and publisher share numeric version mapping. Runtime Cocoa metadata
@@ -1899,6 +1999,10 @@ instructions.
 `make dmg-signed` must invoke the same build with the first valid Developer ID
 Application identity in the local Keychain search list, overridable with
 `SIGNING_IDENTITY`. An absent identity or `-` must fail before building.
+
+The former `make rust-dmg` preview is retired. Its source and native acceptance
+history remain available for study in `rust/mailsearch-gui`; supported packaging
+must use the Python application and must not select an old Rust executable.
 `make list-signatures` must list valid local code-signing identities and their
 certificate hashes. `make notarize-dmg DMG=...` submits an already Developer ID
 signed DMG with protected App Store Connect API-key credentials, waits for
@@ -1949,6 +2053,15 @@ selected from another Python dependency. The mounted DMG self-test must fail
 when the native scanner or bundled `freshclam` updater cannot load. Both the
 definition updater and mounted updater test must pass an explicit temporary
 configuration, independent of any host ClamAV configuration.
+Windows scanner workers must load their private native dependencies before
+Python SSL imports, retain hard deadlines, and terminate with their owner.
+Definition initialization must work without a bundled baseline. Writable
+definitions and FreshClam state belong in the application's user data directory,
+never an archive. Publication requires real clean and EICAR verdicts; the bounded
+EICAR health sample may be scanned in memory to avoid host antivirus quarantine.
+CDN cooldown state must survive failures; a blocked refresh cannot replace the
+last validated generation. Explicit local seeding copies and validates definitions
+without modifying the source or clearing the downloader's cooldown state.
 Notarization failures must identify the failed stage and report Apple's
 validation issues without printing API-key material.
 
@@ -1962,8 +2075,9 @@ The release parser rejects noncanonical or unsupported versions; only stable
 `preview` channel; stable items use its default channel. The published release
 contains a signed `appcast.xml` asset; the tag workflow dispatches Pages from
 `main` with the exact release tag after publication. Pages verifies and serves that
-asset at the website's fixed HTTPS URL. Only a notarized DMG with a Sparkle Ed25519
-archive signature may enter the feed.
+asset at the website's fixed HTTPS URL. Only a notarized DMG or the tested signed Windows MSIX bundle, each with a
+verified Sparkle Ed25519 enclosure signature, may enter the feed. Authenticate
+the complete mixed XML and preserve historical installer signatures.
 The website's release links use published release tags, recognize the same
 canonical alpha/beta spelling, and never advertise a draft or failed tag.
 The homepage's primary Download action links to the GitHub releases listing.
@@ -2046,6 +2160,9 @@ background workers that block process exit to stop within a five-second grace
 period after GUI shutdown. A remaining worker must produce a failed report,
 thread stacks, and a nonzero exit rather than a successful report followed by
 an interpreter-shutdown hang. The parent must still require successful process exit.
+Worker-gate regression tests must run in fresh processes so unrelated test-suite
+executors cannot contaminate the desktop shutdown result; they must retain real
+finishing/blocked-worker assertions and bounded child exit.
 The bundled-library audit must distinguish `LC_ID_DYLIB` metadata from actual
 load commands; a binary's own install name is not an imported dependency.
 Unresolved imported libraries must still fail validation.
@@ -2138,7 +2255,7 @@ approval covers only the disclosed conflict and plan.
 
 Copilot review requests must use `gh` with the authorized `simsong` identity,
 not browser control. That exception is review-request-only; all other Codex
-GitHub writes retain `simsong-codex`. A successful command alone does not prove
+GitHub writes retain `simsong-agent`. A successful command alone does not prove
 that review was requested.
 
 Before pr-to-ready handoff, intended task changes and local-only commits in
@@ -2178,10 +2295,12 @@ import leaves the previous directory unchanged.
 
 ### Writer and desktop review boundary
 
-Current archive writing is supported on POSIX. Windows writing fails before
-creating an archive or lock metadata; the secure no-reparse-point implementation
-and native Windows subprocess validation are deferred to v1.1.0. The former
-untested msvcrt branch is removed; no Windows locking guarantee is claimed.
+Windows writing must preserve the same bytes and recovery semantics as POSIX.
+Native directory handles must reject reparse points and pin archive paths;
+single-link lock files and OS-owned shared/exclusive locks must protect writers
+and application installation. Windows MBOX input/output must not translate
+line endings according to the host OS. Scanner and native GUI acceptance remain
+required independently of storage tests.
 POSIX acquisition pins the archive/status directories and opens lock files
 relative to directory descriptors without following links. Lock files must be
 regular, single-link files. New targets are created under a parent-directory
@@ -2332,3 +2451,430 @@ Organization-domain evidence uses the bundled ICANN Public Suffix List offline,
 including longest-match, wildcard and exception rules, with IDNA normalization.
 Private suffix entries remain excluded, matching the prior tldextract policy.
 No Requests-based fetching or public-suffix network update occurs at runtime.
+
+### Rust desktop migration and retained reader prototype
+
+Reader inspection must borrow unchanged MIME text and count decoded attachment
+sizes with bounded transfer-decoder storage. Strict importer validation keeps its
+existing rejection policy and retains decoded content only for embedded messages.
+Quoted-printable output must reach consumers in bounded batches rather than
+per-byte calls. Legacy-prefix mismatches stop charset work without skipping
+transfer validation or decoded-length counting.
+Owned MBOX recovery must compact the same hash-selected bytes in the existing
+record allocation. IPC replies move owned text/JSON trees; search statements reuse
+bound plan values. These allocation changes must preserve Python search parity,
+charset/legacy HTML behavior, URL restrictions, and canonical byte verification.
+
+Desktop builds require Rust 1.99 or later. The checkout selects the tested
+1.99.0 compiler with rustfmt and Clippy without changing the global default;
+validation keeps compiler warnings fatal and preserves shutdown atomic ordering.
+
+The retained egui `mailsearch-rust` prototype must open existing version-1 catalog and
+search databases read-only, search indexed message words, select a result, and
+display headers and decoded text only after verifying canonical message SHA-256.
+It must not require Python, import mail, repair journals, or alter archives.
+File/database work belongs to background workers; UI callbacks must not acquire
+archive locks or wait for worker completion on close. Validation must include real
+headless widget interactions and a fixture produced by the Python archive writer.
+
+This experiment returns at most the newest 100 matching messages, treats words
+as literal FTS terms joined by AND, and caps search execution at three seconds.
+It displays at most 256 KiB per text field from records no larger than 16 MiB.
+HTML is converted to text without fetching resources or executing scripts.
+Unsupported/corrupt records and recovery-required databases produce visible
+errors. WAL-mode databases must be refused without creating sidecar files.
+Attachment viewing, advanced search selectors, pagination, import,
+packaging, and full legacy mboxo ambiguity recovery remain outside its scope.
+
+The Rust shell must reuse the shipped `gui/index.html`, `app.js`, and `style.css`
+so layout, result selection, split panes, highlighting, previews, and
+find-in-message retain their existing behavior. Rust must handle words, quoted
+phrases, subject/address selectors, ordering and bounded result batches behind
+that interface. Preview windows have a 15-second deadline; the comprehensive
+query has a 120-second safety limit and must report incomplete results on
+failure. Deadlines must be cleared after each request.
+The Wry desktop shell targets macOS and Windows. Search includes date selectors,
+header/manual identity and institution names, autocomplete, attachment text,
+original folders and version-1 saved filter sets shared with Python.
+Saved-filter save, rename and delete must serialize across Rust and Python
+processes using a persistent companion-file OS lock held before loading through
+synced atomic replacement. Waiting writers must reload the latest snapshot;
+neither successful concurrent mutations nor intervening updates may be lost.
+Read-only listing may use the atomically published snapshot without a lock.
+Rust preference dialogs must submit the snapshot originally displayed. Saving
+must hold a stable OS lock while reloading and merging only changed fields, so
+another window's unrelated font/update edits survive. Conflicting text-size edits
+must fail without replacing the file. Native callbacks must report lock contention
+promptly instead of waiting; reopening Preferences reads the latest disk settings.
+GUI message recovery must use the verifier's bounded per-line legacy quoting
+choices, including adopted envelopes and terminal-newline variants. Display only
+the exact original bytes selected by the recorded SHA-256; reject corruption
+and mixed ambiguity beyond the twelve-line bound without rewriting an archive.
+Rich MIME viewing includes sanitized HTML, CID raster images, per-message remote-content
+consent, raw source, attachment previews, parent-message provenance and computed-date
+notices. Native actions include safe file exports, attachment open confirmation,
+clipboard, links, print and additional reader/message windows.
+The macOS Rust reader must prepare EML/ZIP drags itself, without the Python
+helper. Verify every record's SHA-256 before publishing its export token; refuse
+empty selections, more than 1000 selected IDs, and any corrupt/missing record.
+Deduplicate IDs and write one bounded record at a time to private files outside
+the archive. Cocoa must replace registered tokens with file-URL-only writers,
+preserve the drag frame and keep ordinary unregistered drags unchanged.
+Closing must revoke tokens, cancel preparation and remove private drag files
+without waiting on the archive worker. Shutdown must await cleanup completion,
+including when the worker watchdog fires; cleanup errors must produce a diagnostic
+and failed exit status. Handle modern WebKit's placeholder and later legacy
+pasteboard restoration without altering an unrelated drag. Other platforms hide
+and reject file dragging.
+Native regression must exercise the real first-drag/second-drag controls and
+actual Cocoa writers; physical Finder copying remains a separate acceptance gate.
+
+During migration, a private, archive-bound Python helper may provide creation,
+owner-rule editing, identity decisions, imports, processing resume/history and
+virus-definition updates. It must not load the Python GUI. Mutations use existing
+writer leases and preserve source bytes. Pipe closure requests message-boundary
+cancellation; both Rust close and helper owner-loss handling have five-second
+bounds independent of UI callbacks. Import and definition work run outside the
+request loop. Rust reads stay read-only; explicitly opening an archive may use
+lease-protected recovery of hot journals. No automatic source ingest is allowed.
+Rust archive opening must probe read-only and distinguish SQLite rollback-required
+errors from invalid or busy databases. Recovery is a foreground opening job: show
+"Recovery in progress…", monotonic elapsed time and Abort while keeping the
+native event loop responsive. No fixed elapsed-time deadline may terminate repair.
+Only successful recovery followed by validation permits opening the reader.
+Abort explicitly closes the helper pipe, bounds shutdown, and leaves the archive
+unopened; a later Open probes again. Failure shows the diagnostic and Close,
+without offering access to the failed archive. Never manually delete journals.
+Engine availability must be separate from archive-write capability. Windows
+startup, menus, import, processing and owner/identity editors must not offer
+unsupported writes, including About-dialog virus-definition refresh; history/status
+and Rust readers remain usable. Import job errors describe ingest failures. Failure to remember the source directory after
+successful ingest must surface as a separate warning and retain completed status.
+With no usable recent archive, startup must check actual helper availability and
+write capability before offering Create; an unavailable helper offers Open only.
+Restoring startup after a failed update during opening must repeat that handshake.
+macOS File → Open must select `.mailarchive` directory packages as documents,
+as well as ordinary archive directories. Explicit Finder/Dock document opens
+must retain the package root, validate/recover it before reader access, and
+focus the current archive or open an independent reader for another archive.
+Startup without an archive must keep its native event loop available for these
+events. Packaged previews must declare archive document support and use their
+bundled application name/icon. Programmatic panel/metadata checks support these
+requirements; physical selection, Dock drops and displayed identity require
+human acceptance.
+The startup page must expose its Open/New/status/Quit native IPC methods without
+initializing archive-only toolbar or shell controls. Every enabled button must
+send its corresponding request; JavaScript failures must be visible to the user.
+Owner-loss acceptance must synchronize unfinished processing rather than race
+the speed of a synthetic import, and verify bounded exit, recovery and source fixity.
+Owner EOF must remain latched across import startup; resetting a previous user
+Stop must never clear owner-loss cancellation. Startup held before that reset
+must reject the job, release its lease and publish no new canonical message.
+
+Headless acceptance uses the real frontend and service boundary, synthetic
+archives, writer-conflict checks, cancellation/resume and byte inventories.
+Ordinary branch CI must run the Rust workspace suite once, in `static-rust`.
+The separate macOS native job must exercise the native-feature build and real
+window without repeating the ordinary reader test suite or a separate build.
+`make test-rust-recovery` exercises real crashed-writer journals, writer exclusion,
+foreground elapsed time, waits beyond 30 seconds, Abort and successful later Open.
+Native drag-out, file associations, packaged delivery, Windows writer support and
+full native acceptance remain gates before Python-GUI deprecation; compilation
+or headless success must not mark those gates complete.
+Native preference acceptance must use isolated user settings and the real dialog
+Save/Reopen controls, verify applied and persisted values, and preserve source
+and archive inventories. Compilation alone does not satisfy this gate.
+Native owner/identity acceptance must use actual sandboxed editor controls for
+owner Save/Reopen and identity Rename/Move/Separate/Reopen. Manual decisions must
+survive a real processor rerun and a fresh app process. Only explicit fixture
+settings/derived-state writes are permitted; canonical mail and sources stay fixed.
+Native HTML address drags and person-merge drops must also reach the real service
+and persist their distinct audit operations. Injected DOM drag events do not
+establish physical pointer or operating-system file-drag acceptance.
+
+Interactive Python and Rust search must select indexed matching candidates before
+sorting and aggregating display headers. Rust complete-ID selection, header pages,
+keyset batches, counts, subject suggestions and folder counts share one production
+SQL compiler and normalized selector plan. Attachment search intersects per-term
+unions of message/attachment hashes; recipient and folder predicates resolve
+indexed membership without correlated catalog traversal. Literal subject substring
+matching may scan its covering expression index. Appropriate filtering SEARCH
+paths and bounded SQLite VM work must be checked on the same language-neutral
+case matrix in Python acceptance tests and Rust unit tests, using unchanged
+production statements and bindings for pages, IDs and counts.
+
+Rust selects ordered matching IDs on its separate read-only search connection.
+Up to two bounded matching queries finish and release their read transactions
+before waiting for frontend painting; an indexed query streams the remainder.
+The first two nonfinal 512-result batches wait for frontend painting;
+small and empty searches complete without unrelated catalog windows or empty
+acknowledgements. Results must remain sorted without duplicates or omissions at
+tied keys. Message reads remain usable; changing query/sort, clearing or closing
+cancels obsolete work. Stale results/failures cannot alter the replacement search.
+Display pages contain at most 512 rows; completion reports the total separately
+from loaded rows and preserves selection/scroll. Partial failures remain incomplete.
+
+Common operations must agree on stripped/casefolded selector values, explicit
+empty quoted terms, strict calendar-date recognition and normalized suggestions,
+deduplicated text-first highlights, distinct recipient aggregation, processed
+attached-message badges and collapsed loose-message/Maildir mailbox trees.
+Badge lookup must probe displayed catalog IDs and canonical processor hash keys,
+using existing indexes without scanning all processing states or migrating an archive.
+Subject completion counts the literal fragment displayed, including quoted spaces.
+Header, authoritative person and institution-domain names participate in address
+matching without rewriting canonical messages or rebuilding full-text indexes.
+Institution matching must avoid an addresses-by-domains Cartesian scan; real
+populated identity fixtures must check indexed suffix matching and VM budgets.
+Search tokenization uses Python shlex whitespace (space, tab, CR and LF), not
+all Unicode whitespace. Completion shares its quoting/escaping rules while
+retaining unfinished-quote fallback for typing.
+Production API comparisons must cover these contracts, role/attachment/folder
+filters, counts and offsets, while existing real pagination/cancellation tests
+retain broad-result and tied-key acceptance. Rust autocomplete runs on its own
+read-only worker, with replaceable pending work and generation cancellation.
+It must return Python-equivalent address/name role choices and exact counts on
+large archives, without a 150 ms cutoff discarding valid choices or blocking
+foreground searches and message display. Both background readers must retry
+opening on a later request after transient SQLite initialization contention.
+Their 120-second active SQL safety limit
+returns optional incomplete suggestions, never a failed search or fabricated count; stale suggestion errors
+must not affect a replacement query. Explicit Plain Text, HTML, or Raw Source
+selection persists within a reader window across message navigation, using the
+message default only when that representation is absent. Retained mode must
+honor the backend preferred body when its type matches, preserving substantive
+HTML rather than selecting an earlier short alternative. HTML must render in
+native sandboxed frames without acquiring scripts, remote-content consent, or
+native IPC privileges.
+Native recent-menu actions must retain the displayed path despite another window
+reordering the saved list. Recent-list updates from separate processes must
+serialize the complete load/update/replace sequence and retain concurrent opens.
+Startup archive creation and helper cleanup must run on the archive worker,
+leaving Quit/Close and document events responsive; Abort keeps that reader closed.
+New prepares and validates an archive in an owned sibling staging directory,
+reaps its helper before cleanup, and publishes by atomic rename. Abort before
+publication leaves the selected destination absent or empty and permits retry;
+an Abort after publication leaves the complete archive available through Open.
+Never remove files from an existing destination to roll back creation.
+Failure to save recent-document preferences reports a notice without discarding
+a successfully validated reader; retain and display that warning after navigation
+to the ready reader page.
+Startup must choose the first usable archive in recent order, skipping missing
+or invalid entries; only an entirely unusable list may fall back to prompting.
+A rollback-required recent archive remains eligible ahead of older valid entries
+and must enter foreground recovery. Read-only selection must never repair it;
+recovery failure or Abort leaves that selected archive unopened rather than
+silently switching to another recent archive.
+Native workflow menus must reflect helper capability,
+including disabled writes/history when the helper is unavailable. Synthetic demo
+creation must create missing parents and refuse an existing destination.
+Headless tests must exercise both preview stages, full completion, sparse matches,
+all sort orders, cancellation, paging, message reads, and unchanged archive bytes.
+
+Windows continuation must preserve the working Rust reader behavior and shared
+frontend, validate real WebView2 navigation/IPC and native interactions, and
+retain read-only archive fixity. Reader parity is an intermediate milestone;
+full Windows application parity includes imports, processing, attachments,
+output operations, and packaged execution. Track evidence and remaining gaps
+using [WINDOWS_RUST_HANDOFF.md](WINDOWS_RUST_HANDOFF.md).
+
+The Rust GUI CI matrix must initially contain only `macos-latest` and build/test
+native-feature code; the separate static job owns the ordinary reader suite.
+Native acceptance must create a synthetic `.mailarchive`
+through the real ingest CLI, verify it, boot the actual Wry/WKWebView shell,
+submit a simple search, select the expected result, and verify its body before
+capturing a PNG of the native webview. Missing results, startup/callback timeouts,
+premature close, snapshot failures, or source/archive mutations must fail the
+test. Upload the synthetic archive and evidence even on failure. Keep automation
+behind an explicit build feature; a Chromium/RPC screenshot is not native proof.
+The native main-document boundary must admit only `ect://localhost/index.html`
+on macOS and WebView2's `http://ect.localhost/index.html` on Windows. Only embedded identity/options/history pages may navigate as trusted editor
+frames, with a constrained parent-provided API. They must not invoke native IPC
+directly. Other origins, asset paths, query strings and fragments must not gain
+backend access. MIME frames remain script-disabled and cannot receive editor APIs. Validate the actual callback URLs in the native runtime.
+Editor dialogs must have accessible names. Their frames use opaque-origin
+sandboxing and a private message port; the parent validates requests against each
+panel's method allowlist. Native editor content policies must permit only each
+page's named bundled scripts and stylesheet at its platform's local origin;
+opaque WKWebView origins must not rely on `self`. Remote content and eval stay
+blocked. Real native tests must load owner rules, identities and history through
+their service port while proving that parent API access remains denied.
+Import defaults and their archive-policy revision must
+come from one configuration snapshot, including legacy source defaults, so a
+concurrent rule change is rejected at confirmation. Date selectors allow commas
+only after the day in month-name dates; malformed numeric dates are errors.
+The shared reader must accept Ctrl shortcuts for find, find-next, selection and
+MIME-part navigation on Windows while preserving Command shortcuts on macOS.
+The macOS native Edit menu must provide responder-chain Undo/Redo, Cut, Copy,
+Paste and Select All, including in sandboxed workflow fields. Native Open,
+Preferences and Quit accelerators must work while an editor has keyboard focus;
+Quit must retain supervised helper shutdown.
+Windows must route native accelerators through its Win32 message loop, consuming
+handled messages and retaining valid menu/window handles throughout dispatch.
+The Windows native test must queue a real Preferences key message, observe its
+translation and menu event, and save/reload the resulting dialog's preference.
+Direct JavaScript dialog calls do not establish that routing requirement.
+
+Explicit pre-merge Windows CI is opt-in via `[windows-ci]` in the pushed head
+commit message; ordinary pushes must skip both Windows runners. Reuse the
+reader workflow without duplicating the normal macOS native job.
+
+Windows distribution uses MSIX with separately installed WebView2. Missing
+runtime detection must provide native installation guidance without downloading
+or installing WebView2. Share Rust updater metadata, channel preferences and
+installation policy across Sparkle and WinSparkle; native adapters retain their
+own confirmation/installation mechanisms. The Windows adapter must authenticate
+complete XML before selecting Windows items and preserve their installer
+signatures. Windows App Installer performs the confirmed MSIX installation.
+Installer CI builds x64/ARM64 payloads once, assembles one signed bundle, and
+installs the same artifact on Windows Server x64 and Windows 11 ARM64. Run only
+on explicit dispatch, `[release-ci]` candidate checks or release calls. Test private Python discovery, native
+launch, synthetic search/fixity, upgrade and uninstall. Test signing keys must
+never enter uploaded artifacts. Windows 10 testing is not a release gate. The alpha may use the persistent
+test certificate with explicit trust instructions; private keys and synthetic
+upgrade fixtures must never be published. Native Rust becomes the primary Mac
+GUI while retaining the bundled Python ingest service and existing update identity.
+Confirmed macOS update installation must request foreground shutdown, reject new
+archive work, await the actual helper checkpoint/owner cleanup and temporary
+export cleanup, then reserve the application writer fence before handing control
+to Sparkle. A watchdog expiration is not a cleanup acknowledgment. Cocoa Quit
+(including Sparkle's native terminate request) must use the same coordination.
+Staged updates that install on ordinary Quit require the same cleanup and fence,
+including resumed sessions without a relaunch callback. Only termination with no
+staged installer may retain the ordinary close watchdog.
+An installation failure/cancellation releases the reservation and restores the reader
+or startup page. Local cleanup or fence failures retain the external staged-installer
+hazard: subsequent Quit must still complete cleanup and reserve the writer fence.
+Only confirmed native cancellation clears that hazard. Cleanup errors belong to
+their attempt; a later Quit retries retained failed export paths before it can
+authorize installation. Shutdown acknowledgment must report the worker's retained
+reader even when opening completes during Quit.
+If shutdown rejects the reader's initial status/capability requests, canceled
+installation must reload that page after reopening IPC; an already initialized
+reader keeps its page and selection.
+Cancellation must restart a discarded incremental search, retain the selected
+message, and allow further result pages without manual query resubmission.
+An explicit Skip followed by nil cycle completion cancels staged installation;
+Dismiss followed by nil completion retains installation on Quit.
+Package updater inspection
+must initialize the actual framework without network checks, windows or changes
+to the app's persistent Sparkle preferences.
+
+Ordinary Rust search exposes only Archive/Sent categories, including blank,
+structured, preview and comprehensive queries; quarantined rows must never
+appear in ordinary results even if indexed. Hash-verified malformed MIME must
+remain displayable: prefer a valid alternative over a damaged preferred part,
+retain usable inline siblings, and use bounded replacement-decoded fallback
+text when decoding fails. Display recovery must not rewrite archive bytes.
+
+Windows native smoke must retain a real WebView2 PNG and unchanged archive
+inventory/hash evidence. Use synthetic fixtures only and isolate preferences;
+Windows writer restrictions must not be bypassed to manufacture acceptance.
+Rust attachment opening must render an accessible confirmation dialog rather
+than rely on webview JavaScript confirm support. Cancel/Escape must leave the
+attachment unopened; only explicit Open may launch its exported temporary copy.
+
+## Local Windows MSIX prototype (2026-10-06)
+
+See [Windows MSIX test packaging](WINDOWS_MSIX_TEST.md) for automated build/sign/test commands,
+private Python helper discovery, external WebView2 detection, native Windows
+evidence and unresolved installation/import/scanner/converter requirements.
+This local prototype is not a released or fully validated Windows application.
+
+The downloadable `windows-msix-install-test` artifact contains exactly one installer,
+`base.msixbundle`, plus its public test certificate and checksum inventory. The
+higher-version bundle is isolated in `ci-only-msix-upgrade-fixture`; installation
+CI downloads both artifacts into the same directory to retain upgrade coverage.
+Users downloading the installer do not need the upgrade fixture.
+
+The installer artifact includes README.txt with certificate installation into
+Local Machine/Trusted People using elevated PowerShell (Current User trust is
+insufficient), installation and launch steps, and external WebView2 guidance.
+
+The test installer ZIP includes `Install-Test-Certificate.ps1`: right-click Run
+with PowerShell requests elevation, installs the adjacent public certificate in
+Local Machine/Trusted People, verifies its presence, and displays the outcome.
+The README documents this path and a command fallback without changing the
+machine execution policy. The helper does not install the application.
+
+Windows installation registers the display name **Email Collector Toolkit (ECT)**.
+The installation matrix verifies that Start menu entry and activates its app ID
+using IApplicationActivationManager. The activated Rust executable runs the
+bundled Python self-test in package context, then CI activates the native reader
+on the synthetic archive before testing upgrade and uninstall. Taskbar pinning
+is a user choice, not an installation requirement.
+
+Windows test signing now requires the persistent `MSIX_TEST_CERT_PFX_BASE64`
+Actions secret, passed only to bundle signing (including reusable release calls).
+The signer checks it against `scripts/win/test-signing.cer`, requires a private
+key and current validity, and removes temporary PFX material on success/failure.
+No fallback certificate is generated. This supersedes the ephemeral test-key
+policy; testers trust the public certificate once until expiration (2028-10-07)
+or deliberate rotation. Production trusted signing remains separate.
+
+
+## Python desktop restoration (October 10, 2026)
+
+`make gui`, `make dmg` and `make python-dmg` select the Python desktop.
+The MSIX manifest activates isolated private x64 CPython; it packages GUI assets,
+SQL/YAML/plugin data and locked runtime dependencies, without the retired Rust
+GUI or its updater. The installed synthetic acceptance exercises the actual
+Python search, completion and message-reader APIs, preserves its fixture bytes,
+then tests native activation, upgrade and uninstall. Windows archive writing and
+Windows native auto-update parity remain unsupported; this change does not
+remove that restriction. Python's macOS Sparkle integration remains active.
+
+The shared `gui/` assets, Python archive engine and independent Rust tools are
+retained. The GUI crate is excluded from Cargo's supported workspace. Its tests
+and old platform recipes remain historical artifacts, not required active CI.
+Ordinary Python tests still exercise shared search/compiler/index behavior;
+GUI-only Python/Rust tests skip without a selected historical Rust binary.
+The new `make test-python-desktop-package` target checks real fixture reading,
+entry-point dispatch and supported build selection. Active CI and release
+workflows cannot require the archived GUI. No release/tag is implicit in this
+restoration. See `rust/README.md` for full architecture, experiments and lessons.
+
+Windows File → Quit explicitly terminates the Python application through its
+bounded existing quit path. Windows does not create a hidden About anchor;
+closing its final native window exits the application. An explicitly shown About window can close normally
+on Windows; macOS retains its application anchor and Dock reopening behavior.
+Installed MSIX acceptance exercises both ordinary last-window Close and native
+File/Quit on each installed base/upgrade package. The freezer must include
+processor source files beside their manifests; the packaged headless check validates
+actual registry discovery, not just index/search resources.
+
+## Windows consolidation (October 10, 2026)
+
+The Windows Python work is integrated into PR #153 while retaining the Mac restoration and historical Rust GUI. The supported Windows package is x64-only private CPython with ClamAV and WinSparkle. This supersedes earlier frozen-Python/ARM64 and unsupported-import descriptions in the historical sections. The signed feed publisher labels Windows items with the Python package identity and x64 architecture so the updater can select compatible installations. The native install test retains both last-window Close and File/Quit checks.
+
+The installed reader CI regression was a Windows fsync on a read-only file descriptor. Publication now syncs a writable handle, and the package's actual self-test uses the shared byte-preserving MBOX class. Source acceptance covers both script and isolated module entry points, processor discovery, search/completion, and byte hashes. Current-head signed installation still requires hosted CI evidence.
+
+Installed Windows acceptance invokes File/Quit through WinForms' MSAA menu provider. UI Automation can omit MenuStrip items even when they are present. The test still invokes the actual named action and requires the process to exit; it never substitutes a forced close for Quit.
+
+Windows preservation and update publication: raw MBOX byte access must retain
+original CRLF/LF bytes independently of the host. Definition activation failures
+must retain the original error and FreshClam diagnostics after staging moves.
+Published Windows installer and help asset names identify the x64 payload only.
+
+Processing replay, processing-status and identity CLI reads must use escaped,
+host-independent SQLite URIs for reserved-character and UNC archive paths.
+
+Windows update settings must surface failed persistence and retain prior choices.
+Candidate Windows appcasts must name the Python x64 package. Integrity sidecar
+publication must tolerate bounded transient Windows reader denial, preserving
+the prior complete sidecar on permanent failure.
+
+WinSparkle shutdown requests must exit within the normal bounded Quit deadline
+while retaining the update writer reservation, including after a deferred Quit.
+
+Native build subprocesses must not inherit release signing secrets. Cached Windows
+ClamAV runtime files must match the checksum-verified upstream ZIP before reuse.
+
+The independent Rust verifier must attach search databases read-only for local
+and UNC archive paths, preserving reserved characters and original database bytes.
+
+Plugin transaction recovery must decode UTF-8 journal bytes consistently on all
+platforms. Pages must require a Windows feed item when the selected published
+release includes a Windows bundle, while accepting historical Mac-only releases.
+
+Signing runners must pin third-party setup actions to immutable commits. The
+welcome page must exclude both Open and Create while either native picker is pending.

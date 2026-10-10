@@ -64,19 +64,23 @@ class DocumentOptions:
         self.used_path = archive / "status" / OWNER_RULES_USED
 
     def defaults(self, roots: list[Path] | None = None) -> OwnerRules:
-        saved = load_archive_config(self.archive).owner
-        if saved is not None:
-            return saved
-        # Legacy files seed the editor only until the archive has saved YAML rules.
-        return OwnerRules(include=read_owner_names(self.archive / OWNER_NAMES_FILENAME) + source_owner_names(roots or []))
+        return self._snapshot(roots)[0]
 
-    def state(self) -> OwnerRulesState:
-        rules = self.defaults()
+    def _snapshot(self, roots: list[Path] | None = None) -> tuple[OwnerRules, str]:
+        saved = load_archive_config(self.archive).owner
+        base = saved if saved is not None else OwnerRules(include=read_owner_names(self.archive / OWNER_NAMES_FILENAME))
+        revision = hashlib.sha256(base.model_dump_json().encode()).hexdigest()
+        # Legacy files seed the editor only until the archive has saved YAML rules.
+        rules = base if saved is not None else OwnerRules(include=base.include + source_owner_names(roots or []))
+        return rules, revision
+
+    def state(self, roots: list[Path] | None = None) -> OwnerRulesState:
+        rules, revision = self._snapshot(roots)
         known = self.used_path.exists()
         previous = OwnerRules.model_validate(safe_load(self.used_path.read_text(encoding="utf-8"))) if known else None
         return OwnerRulesState(
             include=rules.include, exclude=rules.exclude,
-            revision=hashlib.sha256(rules.model_dump_json().encode()).hexdigest(),
+            revision=revision,
             changed_since_import=known and rules != previous, import_rules_known=known,
         )
 

@@ -1,6 +1,35 @@
 <!-- Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved. -->
 
-# Windows development setup
+# Windows GUI: build and run
+
+The default Windows GUI is Python/pywebview using WebView2. Build the x64-only
+MSIX payload with `make msix-test ARGS="-Architecture x64"`. It can run under
+Windows emulation on ARM64; there is no native ARM64 package. The
+payload bundles private CPython, the Python entry point, GUI assets and
+application dependencies. End users need WebView2, not a Python or Rust compiler.
+CI installs the shared test-signed bundle, exercises synthetic search/completion
+and byte retrieval, opens a native window, upgrades and uninstalls it. Certificate
+trust is explicit for alpha packages. Archive writing uses the shared Python
+services. WinSparkle is integrated; an updater-driven signed package upgrade
+remains unvalidated, distinct from the package CI installation/upgrade checks.
+
+For source development use `uv sync --locked --all-groups`, then
+`uv run mailsearch-gui --archive PATH`. The Makefile `gui` target is equivalent.
+Rust is needed for independent importer/verifier tools, not for the desktop shell.
+The retired Rust desktop source is preserved; [its retrospective](../rust/README.md)
+and [old Windows commands](../rust/WINDOWS_BUILD_HISTORY.md) are historical only.
+
+## Historical full-application setup notes
+
+The remaining sections describe the earlier Python-backend and Dioxus/Tauri
+plan. They do not describe the current Python desktop package.
+The scanner now uses embedded libclamav; daemon-era instructions below are
+historical too.
+
+For the separate Python webview reader comparison branch, follow
+[PYTHON_WEBVIEW.md](PYTHON_WEBVIEW.md). That preview uses x64 Python/WebView2
+and the shared Mac reader with MSIX packaging; it does not require a Rust GUI.
+The older compiled-GUI plan below is historical context for that experiment.
 
 This guide prepares a clean Windows 11 system to develop and test Email
 Collection Toolkit's planned **compiled Rust desktop experience with a Python backend**,
@@ -36,7 +65,7 @@ Start with **x64 Windows CPython 3.12** on both kinds of machine. Windows 11 ARM
 can run x64 applications under emulation. This gives the VM and the initial x64
 customer build the same Python dependency architecture. An ARM64 `uv.exe` may
 manage x64 Python; the interpreter and its extension modules must agree on
-architecture. Native ARM64 packaging is a separate validation target.
+architecture. This project currently provides only the x64 package.
 [Microsoft emulation documentation](https://learn.microsoft.com/en-us/windows/arm/apps-on-arm-x86-emulation),
 [uv architecture guidance](https://docs.astral.sh/uv/concepts/python-versions/#transparent-x86_64-emulation-on-aarch64).
 
@@ -372,3 +401,10 @@ After setup, take a second VM snapshot named `Windows development tools`.
 Record OS version/architecture, Python path, uv version, source commit, commands,
 failures, and skipped tests with each validation run. Keep the initial clean
 snapshot available for installer testing.
+
+## Local Windows MSIX prototype (2026-10-06)
+
+See [Windows MSIX test packaging](WINDOWS_MSIX_TEST.md) for automated build/sign/test commands,
+private Python helper discovery, external WebView2 detection, native Windows
+evidence and unresolved installation/import/scanner/converter requirements.
+This local prototype is not a released or fully validated Windows application.

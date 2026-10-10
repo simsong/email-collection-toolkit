@@ -24,6 +24,9 @@ nav a, .site-footer a { text-decoration: none; } nav a:hover, nav a:focus, .site
 .hero { display: flex; align-items: center; justify-content: space-between; gap: 32px; padding-block: 28px 36px; }
 .hero .lede { max-width: 650px; margin: 0; font-size: 1.05rem; }
 .hero .actions { flex-shrink: 0; margin: 0; }
+.hero.release-downloads { display: block; }
+.hero.release-downloads .actions { margin-top: 20px; max-width: 100%; }
+.hero.release-downloads .button { white-space: normal; }
 .eyebrow { margin: 0 0 12px; color: #356bb3; font-size: .75rem; font-weight: 850; letter-spacing: .14em; text-transform: uppercase; }
 h1, h2, h3, p { margin-top: 0; } h1 { max-width: 700px; margin-bottom: 18px; color: #102a59; font-size: clamp(3.2rem, 7.4vw, 6.7rem); line-height: .92; letter-spacing: -.065em; } h2 { color: #102a59; line-height: 1.08; letter-spacing: -.035em; }
 .lede { max-width: 620px; color: #385779; font-size: 1.22rem; }

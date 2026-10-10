@@ -10,8 +10,9 @@ import os
 import socket
 import stat
 import tempfile
+from importlib import import_module
 from collections.abc import Iterator
-from contextlib import contextmanager
+from contextlib import ExitStack, contextmanager
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import BinaryIO, ClassVar, Self
@@ -50,6 +51,7 @@ class WriterLease(BaseModel):
     _handle: BinaryIO | None = PrivateAttr(default=None)
     _tracked: bool = PrivateAttr(default=False)
     _application_guard: BinaryIO | None = PrivateAttr(default=None)
+    _directory_pins: ExitStack | None = PrivateAttr(default=None)
     _process_lock: ClassVar[RLock] = RLock()
     _active_count: ClassVar[int] = 0
     _update_reserved: ClassVar[bool] = False
@@ -129,27 +131,17 @@ class WriterLease(BaseModel):
         cls, archive: Path, archive_identity: str, operation: str, operation_id: str,
         application_version: str, *, create: bool,
     ) -> WriterLease:
-        if os.name == "nt":
-            raise OSError("Windows archive writing is not supported; planned for v1.1.0")
         lock_path = archive / LOCK_RELATIVE_PATH
-        with _archive_directory(archive, create) as archive_fd:
-            try:
-                os.mkdir("status", mode=0o700, dir_fd=archive_fd)
-            except FileExistsError:
-                pass
-            status_fd = os.open("status", os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=archive_fd)
-            try:
-                descriptor = _open_regular("archive-write.lock", status_fd)
-            finally:
-                os.close(status_fd)
-        handle = os.fdopen(descriptor, "r+b", buffering=0)
+        handle, pins = _open_archive_lock(archive, create)
         try:
-            if not stat.S_ISREG(os.fstat(descriptor).st_mode):
+            if not stat.S_ISREG(os.fstat(handle.fileno()).st_mode):
                 raise ValueError(f"archive writer lock is not a regular file: {lock_path}")
             _acquire_nonblocking(handle)
         except BaseException as error:
             holder = _read_holder(handle)
             handle.close()
+            if pins is not None:
+                pins.close()
             if _is_contention(error):
                 detail = f": {holder}" if holder else ""
                 raise ArchiveBusyError(f"archive is busy with another writer{detail}") from error
@@ -172,9 +164,12 @@ class WriterLease(BaseModel):
         except BaseException:
             _release(handle)
             handle.close()
+            if pins is not None:
+                pins.close()
             raise
         lease = cls(archive_identity=archive_identity, lock_path=lock_path, metadata=metadata)
         lease._handle = handle
+        lease._directory_pins = pins
         return lease
 
     def release(self) -> None:
@@ -185,6 +180,7 @@ class WriterLease(BaseModel):
                 return
             tracked, self._tracked = self._tracked, False
             guard, self._application_guard = self._application_guard, None
+            pins, self._directory_pins = self._directory_pins, None
         try:
             _release(handle)
         finally:
@@ -193,6 +189,8 @@ class WriterLease(BaseModel):
             finally:
                 if guard is not None:
                     guard.close()
+                if pins is not None:
+                    pins.close()
                 self.acquired = False
                 if tracked:
                     with self._process_lock:
@@ -218,6 +216,42 @@ def _read_holder(handle: BinaryIO) -> str:
         return ""
 
 
+def _open_archive_lock(archive: Path, create: bool) -> tuple[BinaryIO, ExitStack | None]:
+    if os.name == "nt":
+        from .windows_storage import lock, open_lock, pin_directories
+        pins = ExitStack()
+        try:
+            if create:
+                archive.parent.mkdir(parents=True, exist_ok=True)
+            pins.enter_context(pin_directories(archive.parent))
+            if create:
+                with open_lock(archive.parent / ".mailarchiver-create.lock") as guard:
+                    try:
+                        lock(guard)
+                    except BlockingIOError as error:
+                        raise ArchiveBusyError("another archive creator is active in this directory") from error
+                    archive.mkdir(exist_ok=True)
+            pins.enter_context(pin_directories(archive))
+            status = archive / "status"
+            status.mkdir(exist_ok=True)
+            pins.enter_context(pin_directories(status))
+            return open_lock(archive / LOCK_RELATIVE_PATH), pins
+        except BaseException:
+            pins.close()
+            raise
+    with _archive_directory(archive, create) as archive_fd:
+        try:
+            os.mkdir("status", mode=0o700, dir_fd=archive_fd)
+        except FileExistsError:
+            pass
+        status_fd = os.open("status", os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=archive_fd)
+        try:
+            descriptor = _open_regular("archive-write.lock", status_fd)
+        finally:
+            os.close(status_fd)
+    return os.fdopen(descriptor, "r+b", buffering=0), None
+
+
 def _is_contention(error: BaseException) -> bool:
     return isinstance(error, (BlockingIOError, PermissionError)) or (
         isinstance(error, OSError) and error.errno in {errno.EACCES, errno.EAGAIN}
@@ -225,6 +259,8 @@ def _is_contention(error: BaseException) -> bool:
 
 
 def _open_regular(name: str, directory: int) -> int:
+    if os.name == "nt":
+        raise RuntimeError("Use the Windows handle adapter")
     descriptor = os.open(name, os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW | os.O_NONBLOCK, 0o600, dir_fd=directory)
     metadata = os.fstat(descriptor)
     if not stat.S_ISREG(metadata.st_mode) or metadata.st_nlink != 1:
@@ -236,6 +272,8 @@ def _open_regular(name: str, directory: int) -> int:
 @contextmanager
 def _archive_directory(archive: Path, create: bool) -> Iterator[int]:
     """Serialize target creation under a parent lock, then pin the archive directory."""
+    if os.name == "nt":
+        raise RuntimeError("Use the Windows directory handle adapter")
     parent_fd = None
     guard = None
     try:
@@ -275,7 +313,18 @@ def application_write_activity() -> Iterator[None]:
 def _application_guard(*, shared: bool) -> BinaryIO:
     """Shared writer/exclusive installer guard outside archives; OS death releases it."""
     if os.name == "nt":
-        raise OSError("Windows archive writing is not supported; planned for v1.1.0")
+        from .windows_storage import open_lock
+        directory = Path(tempfile.gettempdir()) / "mailarchiver-writers"
+        directory.mkdir(exist_ok=True)
+        handle = open_lock(directory / "application-write.lock")
+        try:
+            _acquire_nonblocking(handle, shared=shared)
+        except BaseException as error:
+            handle.close()
+            if _is_contention(error):
+                raise ArchiveBusyError("application writer or update installation is active") from error
+            raise
+        return handle
     directory = Path(tempfile.gettempdir()) / f"mailarchiver-writers-{os.getuid()}"
     directory.mkdir(mode=0o700, exist_ok=True)
     descriptor = os.open(directory, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
@@ -297,12 +346,18 @@ def _application_guard(*, shared: bool) -> BinaryIO:
 
 
 def _acquire_nonblocking(handle: BinaryIO, *, shared: bool = False) -> None:
-    import fcntl  # pylint: disable=import-outside-toplevel
-
+    if os.name == "nt":
+        from .windows_storage import lock
+        lock(handle, shared=shared)
+        return
+    fcntl = import_module("fcntl")
     fcntl.flock(handle.fileno(), (fcntl.LOCK_SH if shared else fcntl.LOCK_EX) | fcntl.LOCK_NB)
 
 
 def _release(handle: BinaryIO) -> None:
-    import fcntl  # pylint: disable=import-outside-toplevel
-
+    if os.name == "nt":
+        from .windows_storage import unlock
+        unlock(handle)
+        return
+    fcntl = import_module("fcntl")
     fcntl.flock(handle.fileno(), fcntl.LOCK_UN)

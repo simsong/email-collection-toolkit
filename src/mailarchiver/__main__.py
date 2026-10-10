@@ -64,6 +64,7 @@ from .mbox import (
     MboxLocation,
     PendingPublication,
     PublicationRecovery,
+    PreservingMbox,
     add_message,
     clear_publication_journal,
     frame_message,
@@ -104,6 +105,7 @@ from .sources import (
     local_hierarchy_path,
 )
 from .standalone_verify import semantic_bytes
+from .sqlite_paths import sqlite_uri
 from .writer_lock import ArchiveBusyError, WriterLease
 
 DEFAULT_REPORT_TOP = 10
@@ -148,6 +150,7 @@ class IngestRequest(BaseModel):
     archive: Path
     owner_names_file: Path | None = None
     owner_rules: OwnerRules | None = None
+    save_owner_defaults: bool = True
     roots: list[str] = Field(default_factory=list)
     earliest_year: int = Field(default=1900, ge=1)
     workers: int = Field(default_factory=lambda: min(os.cpu_count() or 1, 8), ge=1)
@@ -1053,12 +1056,12 @@ def ingest(args: argparse.Namespace) -> None:
 def process_archive(args: argparse.Namespace) -> None:
     """Continue either processing phase with the archive's last ingest policy."""
     archive = Path(args.archive)
-    with sqlite3.connect(f"file:{archive / 'processing.sqlite3'}?mode=ro", uri=True) as database:
+    with sqlite3.connect(sqlite_uri(archive / "processing.sqlite3"), uri=True) as database:
         row = database.execute("SELECT value FROM processing_settings WHERE name='policy'").fetchone()
     if row is None:
         raise ValueError("archive has no saved processor policy; ingest a source first")
     policy = ProcessingPolicy.model_validate_json(row[0])
-    run_ingest(IngestRequest(archive=archive, owner_rules=policy.owners,
+    run_ingest(IngestRequest(archive=archive, owner_rules=policy.owners, save_owner_defaults=False,
         earliest_year=policy.earliest_year, index_attachments=policy.index_attachments,
         scan_policy=policy.scan_policy, continue_ingest=args.phase in ("ingest", "all"),
         continue_content=args.phase in ("content", "all"), max_content_jobs=args.max_jobs,
@@ -1067,7 +1070,7 @@ def process_archive(args: argparse.Namespace) -> None:
 
 def processing_status_report(args: argparse.Namespace) -> None:
     from .processing.store import report
-    with sqlite3.connect(f"file:{Path(args.archive) / 'processing.sqlite3'}?mode=ro", uri=True) as database:
+    with sqlite3.connect(sqlite_uri(Path(args.archive) / "processing.sqlite3"), uri=True) as database:
         kinds = tuple(row[0] for row in database.execute("SELECT DISTINCT kind FROM invocations ORDER BY kind"))
         print(report(database, kinds).model_dump_json())
 
@@ -1084,7 +1087,7 @@ def identity_command(args: argparse.Namespace) -> None:
     archive = Path(args.archive).resolve()
     if args.action in ("addresses", "organizations"):
         filters = IdentityFilter(name=args.name or "", mailbox=args.mailbox, domain=args.domain, start=args.start, end=args.end)
-        with sqlite3.connect(f"{archive.as_uri()}/processing.sqlite3?mode=ro", uri=True) as database:
+        with sqlite3.connect(sqlite_uri(archive / "processing.sqlite3"), uri=True) as database:
             rows = addresses(database, filters) if args.action == "addresses" else organizations(database, filters)
         print("[" + ",".join(row.model_dump_json() for row in rows) + "]")
         return
@@ -1202,7 +1205,8 @@ def _run_ingest(request: IngestRequest, writer_lease: WriterLease, outcome: Inge
         outcome.published = True
         checkpoint_archive()
         print(f"recovered: pending message publication {recovery.value}", file=sys.stderr)
-    options.save(owners, writer_lease)
+    if request.save_owner_defaults:
+        options.save(owners, writer_lease)
     options.record_import(owners, writer_lease)
     started_at = datetime.now(UTC)
     run_pk = catalog.execute(
@@ -1623,7 +1627,7 @@ def _run_ingest(request: IngestRequest, writer_lease: WriterLease, outcome: Inge
                 )
             box = boxes.get(destination)
             if box is None:
-                box = mailbox.mbox(destination, create=True)
+                box = PreservingMbox(destination, create=True)
                 boxes[destination] = box
             journal_publication(archive, publication)
             location = add_message(
@@ -2221,7 +2225,7 @@ def _rebuild_search_index(
             )
             mailbox_progress.display(force=True)
             for path in mailboxes:
-                box = mailbox.mbox(path, factory=None, create=False)
+                box = PreservingMbox(path, factory=None, create=False)
                 try:
                     actual = len(box)
                 finally:

@@ -9,6 +9,7 @@ import gzip
 import hashlib
 import json
 import mailbox
+from .standalone_verify import PreservingMbox
 import os
 import re
 import shutil
@@ -445,7 +446,7 @@ def write_babyl_messages(source: Path, prepared: Path, start: int) -> int:
 def write_mbox_messages(source: Path, prepared: Path, start: int) -> int:
     """Convert one envelope-wrapped source file into derived RFC 5322 files."""
 
-    box = mailbox.mbox(source, factory=None, create=False)
+    box = PreservingMbox(source, factory=None, create=False)
     count = start
     try:
         for key in box.iterkeys():

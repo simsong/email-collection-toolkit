@@ -11,7 +11,7 @@ import csv
 import hashlib
 import json
 import logging
-import mailbox
+from mailarchiver.standalone_verify import PreservingMbox
 import random
 import sqlite3
 from collections import Counter
@@ -249,7 +249,7 @@ def source_boundary_sender(items: list[SourceObservation]) -> str:
 def write_mbox(path: Path, messages: list[bytes]) -> None:
     if path.exists():
         raise FileExistsError(f"refusing to replace {path}")
-    box = mailbox.mbox(path, create=True)
+    box = PreservingMbox(path, create=True)
     try:
         box.lock()
         for raw in messages:

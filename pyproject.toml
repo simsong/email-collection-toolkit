@@ -2,7 +2,7 @@
 
 [project]
 name = "mailarchiver"
-version = "1.0.0a14"
+version = "1.0.0a18"
 description = "Personal MBOX archive normalizer"
 requires-python = ">=3.12"
 license = "GPL-2.0-only"
@@ -21,6 +21,7 @@ dependencies = [
     "ftfy>=6.3.0",
     "packaging>=26.3",
     "py7zr>=1.0.0",
+    "pycryptodomex>=3.23.0",
     "pydantic>=2.13.4",
     "pywebview>=6.2",
     "pyyaml>=6.0.2",

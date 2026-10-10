@@ -12,7 +12,7 @@ from pathlib import Path
 import pytest
 
 from mailarchiver.clamav_definitions import ActiveDefinitions, DATABASE_NAMES, UPDATE_ENV, choose_definitions, read_definitions, selected_definitions, three_months_after
-from mailarchiver.clamav_update import publish_definitions, update_lock
+from mailarchiver.clamav_update import publish_definitions, publish_downloaded_definitions, update_lock
 from mailarchiver.scanner import ClamScannerStartupError
 from mailarchiver.owned_command import run_owned_command
 from mailarchiver.writer_lock import WriterLease
@@ -74,6 +74,32 @@ def test_invalid_update_preserves_active_manifest_and_existing_files(tmp_path: P
     assert active.read_bytes() == b'{"generation":"previous"}'
     assert staging.is_dir()
     assert not (root / "generations").exists()
+
+
+def test_publication_failure_retains_updater_diagnostics_after_staging_moves(tmp_path: Path) -> None:
+    """Requirement: failed activation retains its cause and downloaded-file evidence."""
+    baseline = selected_definitions()
+    root = tmp_path / "updates"
+    root.mkdir()
+    active = root / "active.json"
+    active.mkdir()  # Real filesystem failure after generation publication.
+    sentinel = active / "existing"
+    sentinel.write_bytes(b"preserve existing state")
+    staging = tmp_path / "staging"
+    staging.mkdir()
+    for item in baseline.files:
+        if item.path.stat().st_dev == staging.stat().st_dev:
+            os.link(item.path, staging / item.path.name)
+        else:
+            shutil.copyfile(item.path, staging / item.path.name)
+    with update_lock(root), pytest.raises(RuntimeError, match="FreshClam: download complete") as failure:
+        publish_downloaded_definitions(staging, root, baseline, "download complete")
+    assert isinstance(failure.value.__cause__, OSError)
+    assert not isinstance(failure.value.__cause__, FileNotFoundError)
+    assert baseline.daily.path.name in str(failure.value)
+    assert not staging.exists()
+    assert len(list((root / "generations").iterdir())) == 1
+    assert sentinel.read_bytes() == b"preserve existing state"
 
 
 def test_update_lock_blocks_concurrent_writer_and_releases(tmp_path: Path) -> None:
@@ -145,3 +171,18 @@ def test_selection_uses_newer_baseline_and_recovers_bad_manifest(tmp_path: Path)
     manifest.write_text(ActiveDefinitions(generation="../escape").model_dump_json())
     choice = choose_definitions(baseline, tmp_path)
     assert choice.definitions.source == "bundled" and "using baseline" in choice.warning
+
+
+def test_validated_user_generation_does_not_require_a_bundled_baseline(tmp_path: Path) -> None:
+    """First-run user storage becomes authoritative after native validation publishes it."""
+    with pytest.raises(ValueError, match="Update virus definitions"):
+        choose_definitions(None, tmp_path)
+    generation = tmp_path / "generations" / "candidate"
+    generation.parent.mkdir()
+    write_headers(generation)
+    manifest = tmp_path / "active.json"
+    manifest.write_text(ActiveDefinitions(generation="candidate").model_dump_json())
+    assert choose_definitions(None, tmp_path).definitions.directory == generation
+    manifest.write_text(ActiveDefinitions(generation="../escape").model_dump_json())
+    with pytest.raises(ValueError, match="Update virus definitions"):
+        choose_definitions(None, tmp_path)

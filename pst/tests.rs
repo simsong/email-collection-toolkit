@@ -351,9 +351,9 @@ fn incomplete_publication_is_preserved_and_retried() {
     atomic_json(
         &receipt_folder.join("receipt.json"),
         &Receipt {
-            url: second_url.clone(),
+            url: second_url.clone().into(),
             final_url: second_url,
-            sha256: sha256_hex(&second),
+            sha256: sha256_hex(&second).into(),
             size: second.len() as u64,
         },
     )

@@ -18,6 +18,9 @@ from mailarchiver.processing.builtin import QUARANTINE_UNKNOWN_DATE
 from e2e_tests.eicar_fixture import EICAR_PIECES
 from mailarchiver.archive_config import ArchiveConfig, load_archive_config, save_archive_config
 from mailarchiver.plugin_configuration import ConfigValues
+from mailarchiver.document_options import DocumentOptions
+from mailarchiver.owner_rules import OwnerRules
+from mailarchiver.writer_lock import WriterLease
 from tests.test_end_to_end import mailbox_message_bytes
 
 
@@ -47,6 +50,29 @@ def ingest(tmp_path: Path, raw: bytes, *arguments: str) -> tuple[Path, Path]:
 HEADER = (b"From: Sender <sender@lab.example.ac.uk>\r\nTo: owner@example.test\r\n"
           b"Date: Tue, 02 Jan 2024 10:00:00 +0000\r\nMessage-ID: <parent@example.test>\r\n"
           b"Subject: Parent\r\nMIME-Version: 1.0\r\n")
+
+
+def test_cli_reprocess_preserves_new_owner_defaults_and_old_processing_policy(tmp_path: Path) -> None:
+    """Replays use recorded ingest rules without replacing later document settings."""
+    raw = HEADER + b"Content-Type: text/plain\r\n\r\nOriginal body\r\n"
+    archive, source = ingest(tmp_path, raw, "--defer-content")
+    edited = OwnerRules(include=["sender@lab.example.ac.uk"], exclude=["other@example.test"])
+    with WriterLease.acquire(archive, str(archive), "fixture settings edit", "owner-defaults", "test") as lease:
+        DocumentOptions(archive).save(edited, lease)
+    config = (archive / "config.yaml").read_bytes()
+    with sqlite3.connect(archive / "processing.sqlite3") as database:
+        policy = database.execute("SELECT value FROM processing_settings WHERE name='policy'").fetchone()[0]
+    for arguments in [("process",), ("process", "--reprocess")]:
+        cli(archive, *arguments)
+        assert (archive / "config.yaml").read_bytes() == config
+        assert DocumentOptions(archive).defaults() == edited
+        with sqlite3.connect(archive / "processing.sqlite3") as database:
+            assert database.execute("SELECT value FROM processing_settings WHERE name='policy'").fetchone()[0] == policy
+        with sqlite3.connect(archive / "archive.sqlite3") as database:
+            assert database.execute("SELECT category FROM messages").fetchall() == [("Archive",)]
+    assert source.read_bytes() == raw
+    assert mailbox_message_bytes(mbox_directory(archive) / "2024-Archive1.mbox") == [raw]
+    assert not verify_archive(archive)
 
 
 def test_cli_deferred_content_resume_and_manual_evidence(tmp_path: Path) -> None:

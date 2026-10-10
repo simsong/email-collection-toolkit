@@ -1,0 +1,5 @@
+From: sender@example.test
+Subject: Broken MIME
+Content-Type: multipart/mixed; boundary=absent
+
+Retained malformed mail

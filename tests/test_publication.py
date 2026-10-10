@@ -3,7 +3,7 @@
 """Verify journal recovery retains committed mail and rolls back orphaned appends."""
 
 import hashlib
-import mailbox
+from mailarchiver.standalone_verify import PreservingMbox
 from pathlib import Path
 
 from mailarchiver.bagit import initialize_bag
@@ -25,7 +25,7 @@ def test_recovery_truncates_orphaned_mbox_append_and_search_row(tmp_path: Path) 
     archive = tmp_path / "archive"
     initialize_bag(archive)
     path = mbox_directory(archive) / "2024-Archive1.mbox"
-    box = mailbox.mbox(path, create=True)
+    box = PreservingMbox(path, create=True)
     try:
         original = b"Message-ID: <original@example>\n\noriginal\n"
         orphan = b"Message-ID: <orphan@example>\n\norphan\n"
@@ -58,7 +58,7 @@ def test_recovery_truncates_orphaned_mbox_append_and_search_row(tmp_path: Path) 
     finally:
         catalog.close()
         search.close()
-    recovered = mailbox.mbox(path, factory=None, create=False)
+    recovered = PreservingMbox(path, factory=None, create=False)
     try:
         assert [recovered.get_bytes(key, from_=False) for key in recovered.iterkeys()] == [original]
     finally:
@@ -71,7 +71,7 @@ def test_recovery_keeps_catalogued_mbox_append(tmp_path: Path) -> None:
     path = mbox_directory(archive) / "2024-Archive1.mbox"
     raw = b"Message-ID: <committed@example>\n\ncommitted\n"
     digest = hashlib.sha256(raw).hexdigest()
-    box = mailbox.mbox(path, create=True)
+    box = PreservingMbox(path, create=True)
     try:
         location = add_message(box, path, raw)
     finally:
@@ -110,7 +110,7 @@ def test_recovery_keeps_catalogued_mbox_append(tmp_path: Path) -> None:
     finally:
         catalog.close()
         search.close()
-    recovered = mailbox.mbox(path, factory=None, create=False)
+    recovered = PreservingMbox(path, factory=None, create=False)
     try:
         assert [recovered.get_bytes(key, from_=False) for key in recovered.iterkeys()] == [raw]
     finally:
@@ -121,7 +121,7 @@ def test_ambiguous_from_recovery_yields_each_interpretation_once(tmp_path: Path)
     """Requirement: hash recovery streams every bounded From-quote interpretation once."""
     path = tmp_path / "ambiguous.mbox"
     raw = b"Message-ID: <ambiguous@example>\n\nFrom one\nFrom two\nFrom three\n"
-    box = mailbox.mbox(path, create=True)
+    box = PreservingMbox(path, create=True)
     try:
         location = add_message(box, path, raw)
     finally:
@@ -138,7 +138,7 @@ def test_location_recovery_removes_one_writer_added_final_newline(tmp_path: Path
     """Regression: MBOX framing may add a final LF absent from the source message."""
     path = tmp_path / "no-final-newline.mbox"
     raw = b"Message-ID: <no-final-newline@example>\n\nbody"
-    box = mailbox.mbox(path, create=True)
+    box = PreservingMbox(path, create=True)
     try:
         location = add_message(box, path, raw)
     finally:
@@ -158,7 +158,7 @@ def test_location_recovery_includes_original_leading_from_envelope(tmp_path: Pat
         b"Message-ID: <source-envelope@example>\n\nFrom body\n>From literal\n"
     )
     digest = hashlib.sha256(raw).hexdigest()
-    box = mailbox.mbox(path, create=True)
+    box = PreservingMbox(path, create=True)
     try:
         location = add_message(box, path, raw)
     finally:

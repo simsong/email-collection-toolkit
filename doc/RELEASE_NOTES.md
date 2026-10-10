@@ -1,8 +1,273 @@
 <!-- Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved. -->
 
+Python webview branch: use the standard Windows Open file dialog. Selecting a
+file inside an archive opens the enclosing collection, with normal validation
+and no changes to archived bytes. Fix mapped-drive/UNC SQLite URI handling
+throughout the reader, including search and message rendering. Remove the custom archive browser. Restore New/Import,
+processing and identity controls using native Windows locks, byte-preserving
+MBOX framing and portable temporary-file handling. Add Windows ClamAV discovery
+and bounded updater supervision; require runtime/definitions in new MSIX builds.
+Windows ClamAV now loads in an isolated worker, passes clean/EICAR checks and
+stores validated definitions in application-specific user storage. First-run
+initialization supports downloaded or explicitly copied baselines. A CDN cooldown
+still blocks local download acceptance; package validation remains pending.
+Integrate the pinned WinSparkle SDK, shared update preferences, complete-feed
+verification, Python package filtering and archive-write installation fences.
+Native initialization and signed-feed tests pass; a signed installed upgrade
+still needs acceptance. Preserve source-machine provenance paths when copying
+between platforms and serialize concurrent export replacements.
+Retain completed ingest status across transient Windows reader locks and verify
+the Windows runtime's complete license evidence before MSIX assembly.
+
 # Release notes
 
+## 1.0.0a18 (candidate)
+
+- Limit ordinary CI/Pages exclusions to README and release notes; validate other
+  documentation. Permit explicit release-candidate checks from any non-main
+  branch. Remove temporary signing keys even after a partial PFX write failure.
+  Correct Windows setup to describe the supported x64 Python package.
+
+- Restore Python/pywebview as the default desktop and DMG/MSIX entry point.
+  Retire the Rust GUI from supported Cargo, CI and release builds without
+  deleting its source or test history. Document the architecture, experiments,
+  performance findings and lessons in `rust/README.md`. Independent Rust
+  verifier, importer/PST and MIME improvements remain supported. No new release
+  is published by this change.
+
+- Reduce unnecessary Rust MIME, JSON, IPC, folder traversal, search-binding and
+  PST metadata copies. Recover selected MBOX records in their existing buffer;
+  count attachment sizes and validate transfer encodings with bounded storage.
+  Preserve decoding/rejection semantics, hash-selected bytes and Python search
+  behavior. Cache comparison-reader row labels and avoid native snapshot copies.
+- Batch quoted-printable decoder output and stop unnecessary charset probing
+  after a definite legacy-prefix mismatch, retaining full size/error validation.
+
+
+## 1.0.0a17 (superseded candidate)
+
+- Restore Rust name/address autocomplete on large archives with independent,
+  cancellable completion queries instead of a 150 ms foreground cutoff. Show
+  Python-equivalent role choices and counts without blocking searches or reads.
+  Retry transient initial SQLite failures on replacement searches/completions.
+
+
+- Require Rust 1.99 and select 1.99.0 for local builds. Use the current atomic
+  update API without changing shutdown synchronization. Enable SQLite URI
+  handling explicitly in the populated-processing optimizer fixture so the
+  read-only attachment query is tested across Python SQLite builds.
+
+- Align Rust search with Python's indexed filter-before-sort strategy. Stream
+  matching IDs without mandatory catalog-preview scans; share production SQL
+  for pages, counts and suggestions. Match query/date/highlight normalization,
+  recipient aggregation, folder-tree collapsing and attached-message badges.
+  Include institution-domain name matching in both readers and enforce the
+  same optimizer matrix plus real cross-language service comparisons. Finalize
+  bounded search statements before paint waits so concurrent writers can commit;
+  use selective canonical-hash child-badge lookups in both readers, and retain
+  literal spaces in subject completion counts. Share shlex quoting/escaping with
+  completion and avoid addresses-by-domains Cartesian scans for institution names.
+
+- Reload reader initialization blocked by canceled update shutdown, restoring
+  service controls while preserving already initialized reader pages. Restart
+  discarded searches so result pagination and selected messages remain usable.
+- Display startup preference warnings after the reader opens, invalidate drag
+  exports after canceled updates, and publish static platform download buttons
+  only for uploaded installer assets, with preview labels and Windows trust help.
+- Keep valid readers open when recent preferences cannot be saved. Stage New
+  creation before atomic publication so Abort can discard only its own attempt
+  and retry without a partial destination.
+- Make Rust the primary macOS app while retaining the private Python ingest
+  service, existing application identity, document ownership and update feed.
+- Share Rust update preferences and signing metadata across native Sparkle and
+  WinSparkle. Preserve existing update choices, authenticate full feeds and
+  installer signatures, and defer macOS installation until helper/export cleanup
+  and Python writer exclusion finish, including staged installation on Quit. Restore the reader after native install
+  failure, including opening completed during Quit. Distinguish Skip cancellation
+  from Dismiss installation-on-Quit; retain staged installation guards after
+  local cleanup or reservation failures. Retry failed private-export deletions
+  on a later Quit without retaining the previous attempt's error. Keep mounted updater checks out of saved
+  Sparkle preferences.
+- Refresh the private helper's capabilities when a failed update restores startup
+  after interrupted opening, so New can become available again.
+- Consolidate Windows packaging into a tested x64/ARM64 MSIX bundle. Alpha
+  installation requires trusting its persistent test certificate; Windows ingest
+  remains disabled. Never distribute synthetic upgrade fixtures or private keys.
+- Validate actual signed/notarized DMG, both Windows installs and complete mixed
+  appcast in explicit branch CI before the immutable release tag. Physical
+  interaction testing remains separately recorded human acceptance.
+
 ## Unreleased
+
+- Run startup Rust archive initialization on its supervised worker so helper
+  waits cannot block native Quit/document events. Exempt release tag calls from
+  the MSIX branch opt-in condition so macOS release assembly remains runnable.
+
+- Keep optional Rust autocomplete timeouts out of search errors and complete
+  sparse full-text searches through indexed hash lookups. Render sandboxed HTML
+  in native WebKit and retain explicitly selected Plain Text/HTML/Raw Source
+  across message navigation. Add real SQLite, native MIME and browser regressions.
+
+- Wire Rust startup Open/New/Quit buttons into the native IPC adapter and skip
+  archive-only toolbar/shell initialization before an archive opens. Add a real
+  frontend regression for startup requests and JavaScript errors.
+
+- Make Rust macOS Open select `.mailarchive` packages as documents; handle native
+  Dock/Finder document events, retain a responsive startup selection page, and
+  explicitly load the preview bundle's application icon/name. Mounted checks
+  inspect actual panel configuration and identity without showing windows;
+  physical gestures remain human acceptance.
+
+- Add a separately named macOS Rust Preview DMG with a bundled private Python
+  archive service. Headless mounted checks exercise frozen ingest, Rust helper
+  discovery, search/reading and byte preservation without checkout dependencies.
+  Interaction testing remains human acceptance; no installation or release occurs.
+
+- Prepare hash-verified Rust EML/ZIP drag exports and wait for their cleanup on
+  shutdown. Exercise identity drop persistence through the real native handlers;
+  physical cross-app transfer remains a user acceptance check.
+
+- Remove duplicate ordinary Rust reader checks from the macOS native CI job;
+  the static Rust job retains workspace formatting, Clippy and ordinary tests.
+
+- Show an accessible Rust attachment Open confirmation; Cancel leaves the
+  attachment unopened instead of silently relying on unsupported WKWebView confirm.
+
+- Latch Rust helper owner-pipe loss across import startup; a prior Stop can be
+  reset for a new job, but owner loss cannot be cleared or publish another message.
+
+- Require Windows native smoke to open Preferences through the real Win32
+  accelerator hook, then save and reload the preference across application runs.
+
+- Preserve edited owner defaults when CLI or GUI processing replays an earlier
+  ingest policy; existing message classifications keep their recorded rules.
+
+- Automate native owner/identity Save, Rename, Move, Separate and Reopen trials;
+  verify persisted decisions after real processor reruns and a fresh app launch.
+
+- Preserve recoverable recent archives during Rust startup selection; hot SQLite
+  journals enter foreground recovery instead of silently opening an older archive.
+
+- Route Windows native menu accelerators through Tao's Win32 message loop;
+  shortcut labels alone do not enable their actions.
+
+- Add the missing macOS native Edit menu and native Open/Preferences/Quit
+  shortcuts, including when keyboard focus is inside a sandboxed workflow editor.
+
+- Fix empty Rust workflow editors on WKWebView by allowing only each sandboxed
+  page's bundled scripts/styles. Native tests load real owner rules, identities
+  and history while verifying that parent API access remains denied.
+
+- Extend macOS native acceptance to real Preferences Save/Reopen with isolated
+  settings, both with and without the Python helper, preserving archive bytes.
+
+- Merge only edited Rust preference fields under a stable process lock. Preserve
+  other windows' independent changes, reject conflicting font-size edits, and
+  refresh preferences from disk when reopening the dialog.
+
+- Make Rust database recovery a responsive foreground opening job with elapsed
+  time and Abort, without a 30-second repair cutoff. Revalidate before opening;
+  aborted or failed recovery leaves the archive unopened and preserves journals
+  for SQLite. Open and Open Recent use the same visible recovery path.
+
+- Share bounded hash-selected MBOX byte recovery between the Rust GUI and
+  independent verifier so mixed legacy quoting remains readable and verified.
+
+- Open the first usable recent archive, skipping missing or invalid newer entries.
+
+- Serialize shared saved-filter mutations across Rust and Python processes;
+  retain concurrent save, rename and delete updates without writing archives.
+
+- Serialize recent-archive updates across Rust window processes to retain
+  concurrent opens while preserving atomic settings replacement.
+
+- Offer startup archive creation only after a real writable-helper handshake;
+  synchronize owner-loss/recovery acceptance at a held processing boundary.
+
+- Verify mixed legacy MBOX quoting with shared streamed hash candidates instead
+  of thousands of full-record rereads; retain existing ambiguity/framing checks.
+
+- Stream long adopted MBOX envelopes during independent verification and hide
+  definition refresh when the archive helper cannot perform writes.
+
+- Preserve both preview stages for small/empty searches, bind recent-menu actions
+  to displayed paths, gate native menus on helper capabilities, and create
+  missing demo-directory parents without replacing existing archives.
+
+- Validate annotated release tags, version and `main` ancestry in a shared
+  preflight pinned to the triggering commit before starting macOS packaging
+  or cross-platform Rust builds; reject tags moved after the event.
+
+- Gate unsupported Windows archive writes before entry into import or editing,
+  preserving read-only status/history. Report post-import source-directory
+  preference failures separately from successful canonical import outcomes.
+
+- Isolate Rust workflow editors behind sandboxed message ports, label their
+  dialogs for assistive technology, reject concurrent owner-policy overwrites
+  during import setup, and reject malformed comma-bearing numeric dates.
+
+- Add independent Rust catalog/MBOX/search verification with `make verify-database`.
+  Move complete-corpus and synthetic import/database end-to-end assertions to
+  Rust, including corruption rejection and explicit golden maintenance. The
+  existing Python importer, portable BagIt verifier and browser tests remain.
+
+- Extend the Rust desktop migration with date/name/institution search, autocomplete,
+  attachment-text and original-folder filters, compatible saved filters, rich MIME
+  display, CID images, exports, print, clipboard, native file selection and extra
+  reader windows. Source bytes remain hash-verified and preserved.
+- Connect owner rules, identity edits, imports, progress/history, cancellation,
+  resume and recovery through a supervised Python archive-service helper without
+  loading the Python GUI. This is a local migration build: native acceptance,
+  drag-out, file associations, Windows writing and packaged delivery remain pending.
+
+- Allow explicit Windows x64/ARM64 branch validation with a `[windows-ci]`
+  head commit marker, without adding Windows costs to ordinary Mac iterations.
+
+- Exclude quarantined categories from all ordinary Rust search paths, and
+  recover displayable MIME alternatives/siblings when an inline part is damaged.
+- Add native About/Preferences menus and dialogs, atomic per-user preferences,
+  and optional WinSparkle client support. Shared-feed publication and installers
+  remain pending; ordinary branch CI remains macOS-only.
+
+- Add a macos-latest Rust GUI CI matrix job that builds a synthetic archive
+  through the CLI, boots the native webview, searches/displays a message, checks
+  archive fixity, and uploads a native screenshot with reproducible evidence.
+- Document the agreed DevOps policy: macOS-focused development CI, explicit
+  parallel Mac/Windows test and release builds, one coordinated signed appcast,
+  and static direct-download buttons. Workflow and packaging implementation
+  remain pending.
+
+- Rename the Cargo GUI launch command to `cargo run-ect` and update its macOS
+  Makefile wrapper. Document batch import from external-drive roots, current
+  skipped-file noise, and the Windows archive-writing limitation.
+
+- Add Windows Wry/Tao shell support and a native synthetic smoke with exact
+  WebView2 main-document checks and opt-in boundary diagnostics. The shared
+  reader accepts Ctrl shortcuts alongside Command. Native reader parity,
+  imports and Windows packaging remain incomplete.
+
+- Publish the Rust prototype with a detailed Windows continuation handoff,
+  including WebView2 integration boundaries, preservation requirements, test
+  commands, and remaining work toward full macOS application parity.
+
+- Show two quick Rust search windows before a comprehensive background query.
+  Cancel obsolete SQL on replacement, keep message reads independent, and retain
+  the full ordered result IDs in Rust with display pages fetched on scrolling.
+  Completion preserves selection and reports total matches separately from
+  loaded rows; partial failures remain explicit.
+- Add an experimental Rust-only, read-only archive reader with indexed word
+  search, message selection, SHA-256 verification, and plain-text MIME display.
+  Makefile build/demo targets and headless interaction/interoperability tests
+  support local trials; the existing packaged application is unchanged.
+- Host the existing search interface in a Rust-owned macOS Wry/Tao shell,
+  preserving layout, sorting, previews, split panes and find-in-message. Rust
+  handles words, phrases and address/subject filters; unported operations are
+  clearly unavailable. Headless browser tests exercise the actual Rust backend.
+- Experimental `codex/python-webview` branch: reuse the macOS Python webview
+  reader on x64 Windows, with native clipboard/menu adapters and a separately
+  identified MSIX. Reuse indexed processing-name/tag reads and locked saved
+  filters from the Rust branch. Windows ingestion uses shared Python services; signing,
+  installed-package and macOS validation remain separate acceptance gates.
 
 - Use the shared `@simsong-agent` GitHub account for Codex and Claude Code,
   retain their separate commit identities and signing keys, and prohibit
@@ -624,3 +889,85 @@ Recovered work from historical development checkouts:
 Contacts/geography GUI, live IMAP sources, and Refresh/Rebuild are documented
 plans, not newly implemented features. No source mailbox or real archive is
 changed by reconciliation or its fixture tests.
+
+## Local Windows MSIX prototype (2026-10-06)
+
+See [Windows MSIX test packaging](WINDOWS_MSIX_TEST.md) for automated build/sign/test commands,
+private Python helper discovery, external WebView2 detection, native Windows
+evidence and unresolved installation/import/scanner/converter requirements.
+This local prototype is not a released or fully validated Windows application.
+
+## MSIX installation matrix (2026-10-07)
+
+The MSIX decision supersedes the older shared WinSparkle feed/EXE plan.
+`windows-msix.yml` supports explicit dispatch and reusable release calls; ordinary
+pushes do not run it. Two native build jobs produce x64 and ARM64 payloads once.
+One assembly job creates a signed common bundle and a higher-version upgrade
+fixture with identical application bytes. Both installation VMs download that
+same artifact: Windows Server x64 (`windows-latest`) and Windows 11 ARM64
+(`windows-11-arm`). Installation jobs do not rebuild. Private signing keys remain
+outside uploaded artifacts. Test packages are never published as release assets.
+The release caller waits for this gate after tag preflight. Windows 10 testing
+is not required. No GitHub Team or AWS provisioning is needed.
+
+Installed checks exercise private Python discovery, synthetic search/fixity,
+a native window, upgrade and uninstall, removing test packages and added trust
+in cleanup. WebView2 remains external and its absence fails this positive test.
+Its writable user-data directory is outside the immutable package. Hosted
+execution is pending; earlier local prototype results do not validate this head.
+Start-menu activation, missing-runtime UI, Windows imports/scanner/converters,
+and physical interaction remain separate acceptance gaps.
+
+Windows test installer downloads now contain one MSIX bundle and a README
+explaining machine-level test certificate trust, installation, and WebView2.
+The synthetic upgrade bundle is a separate CI-only artifact.
+
+The test installer ZIP includes `Install-Test-Certificate.ps1`: right-click Run
+with PowerShell requests elevation, installs the adjacent public certificate in
+Local Machine/Trusted People, verifies its presence, and displays the outcome.
+The README documents this path and a command fallback without changing the
+machine execution policy. The helper does not install the application.
+
+Windows installation registers the display name **Email Collector Toolkit (ECT)**.
+The installation matrix verifies that Start menu entry and activates its app ID
+using IApplicationActivationManager. The activated Rust executable runs the
+bundled Python self-test in package context, then CI activates the native reader
+on the synthetic archive before testing upgrade and uninstall. Taskbar pinning
+is a user choice, not an installation requirement.
+
+Windows test signing now requires the persistent `MSIX_TEST_CERT_PFX_BASE64`
+Actions secret, passed only to bundle signing (including reusable release calls).
+The signer checks it against `scripts/win/test-signing.cer`, requires a private
+key and current validity, and removes temporary PFX material on success/failure.
+No fallback certificate is generated. This supersedes the ephemeral test-key
+policy; testers trust the public certificate once until expiration (2028-10-07)
+or deliberate rotation. Production trusted signing remains separate.
+
+## Windows consolidation (October 10, 2026)
+
+The Windows Python work is integrated into PR #153 while retaining the Mac restoration and historical Rust GUI. The supported Windows package is x64-only private CPython with ClamAV and WinSparkle. This supersedes earlier frozen-Python/ARM64 and unsupported-import descriptions in the historical sections. The signed feed publisher labels Windows items with the Python package identity and x64 architecture so the updater can select compatible installations. The native install test retains both last-window Close and File/Quit checks.
+
+The installed reader CI regression was a Windows fsync on a read-only file descriptor. Publication now syncs a writable handle, and the package's actual self-test uses the shared byte-preserving MBOX class. Source acceptance covers both script and isolated module entry points, processor discovery, search/completion, and byte hashes. Current-head signed installation still requires hosted CI evidence.
+
+Installed Windows acceptance invokes File/Quit through WinForms' MSAA menu provider. UI Automation can omit MenuStrip items even when they are present. The test still invokes the actual named action and requires the process to exit; it never substitutes a forced close for Quit.
+
+- Preserve CRLF/LF bytes through raw MBOX access on Windows; retain definition
+  activation errors after staging moves; label release installers as x64-only.
+
+- Fix processing/status and identity CLI reads for reserved-character archive
+  paths; make Windows definition-publication tests work across disk volumes.
+
+- Report failed Windows update-setting saves, validate candidate Windows package
+  metadata, and retry transient Windows integrity-sidecar publication conflicts.
+
+- Fix WinSparkle installation shutdown after an accepted update or deferred Quit;
+  avoid duplicate directory flushes and clarify the retired Rust import limit.
+
+- Filter signing secrets from native builds and verify cached ClamAV runtime bytes.
+
+- Correct read-only Rust verifier search database attachment for Windows UNC paths.
+
+- Preserve non-ASCII plugin settings during Windows recovery and validate published
+  Windows update-feed coverage during Pages deployment.
+
+- Pin signing-job setup actions and prevent concurrent welcome-page archive pickers.

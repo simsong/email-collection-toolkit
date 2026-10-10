@@ -10,18 +10,19 @@ from collections.abc import Callable
 from concurrent.futures import Future, ThreadPoolExecutor
 from contextlib import AbstractContextManager
 from datetime import UTC, datetime
-from multiprocessing.connection import Connection, wait
+from multiprocessing.connection import wait
 from multiprocessing.process import BaseProcess
 from pathlib import Path
 from threading import RLock, Thread, current_thread
 from typing import Self
 from uuid import uuid4
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from .clamav_definitions import DefinitionSet, definition_selection, library_path, selected_definitions, three_months_after
 from .libclamav import Engine, engine_version
 from .scan_evidence import ScanEvidence, ScanFailure
+from .windows_scanner import ScannerConnection, ScannerProcess
 
 CLAMAV_DOWNLOAD_URL = "https://github.com/simsong/mail-archiver/releases"
 UNSCANNED_WARNING = "Antivirus unavailable. Importing without scanning may retain infected messages and attachments."
@@ -67,7 +68,8 @@ class ClamScannerStartupError(RuntimeError):
 
 class ScanRequest(BaseModel):
     request_id: str
-    path: Path
+    path: Path | None = None
+    sample: bytes | None = Field(default=None, min_length=1, max_length=65536)
 
 
 class ScanResponse(BaseModel):
@@ -81,7 +83,7 @@ def exit_with_parent(sentinel: int) -> None:
     os._exit(0)
 
 
-def engine_worker(connection: Connection, library: Path, definitions: DefinitionSet, workers: int, temporary_directory: Path) -> None:
+def engine_worker(connection: ScannerConnection, library: Path, definitions: DefinitionSet, workers: int, temporary_directory: Path) -> None:
     """Share one immutable engine among native scan threads; ctypes releases the GIL."""
     parent = multiprocessing.parent_process()
     if parent is not None:
@@ -94,7 +96,12 @@ def engine_worker(connection: Connection, library: Path, definitions: Definition
         def scan(request: ScanRequest) -> None:
             assert engine is not None
             try:
-                evidence = engine.scan(request.path)
+                if request.sample is not None:
+                    evidence = engine.scan_sample(request.sample)
+                elif request.path is not None:
+                    evidence = engine.scan(request.path)
+                else:
+                    raise ValueError("Scanner request has no input")
             except Exception as error:
                 evidence = ScanEvidence(status="scanner-error", detail=f"{type(error).__name__}: {error}",
                                         engine_version=engine.version, signature_version=definitions.versions)
@@ -149,8 +156,8 @@ class ClamScanner(AbstractContextManager["ClamScanner"]):
         if self.workers < 1:
             raise ValueError("Scanner workers must be positive")
         self.session = uuid4().hex
-        self.process: BaseProcess | None = None
-        self.connection: Connection | None = None
+        self.process: BaseProcess | ScannerProcess | None = None
+        self.connection: ScannerConnection | None = None
         self.lock = RLock()
         self.pending: dict[str, Future[ScanEvidence]] = {}
         self.reader: Thread | None = None
@@ -163,9 +170,13 @@ class ClamScanner(AbstractContextManager["ClamScanner"]):
             self.runtime = tempfile.TemporaryDirectory(prefix="libclamav-", dir=self.scan_temporary_directory)
             context = multiprocessing.get_context("spawn")
             self.connection, child = context.Pipe()
-            self.process = context.Process(target=engine_worker, args=(child, self.library or library_path(), definitions, self.workers, Path(self.runtime.name)), daemon=True)
             try:
-                self.process.start()
+                if os.name == "nt":
+                    self.process = ScannerProcess(child, self.library or library_path())
+                    self.connection.send((definitions, self.workers, Path(self.runtime.name)))
+                else:
+                    self.process = context.Process(target=engine_worker, args=(child, self.library or library_path(), definitions, self.workers, Path(self.runtime.name)), daemon=True)
+                    self.process.start()
             finally:
                 child.close()
             self.evidence = self._receive(time.monotonic() + self.startup_timeout_seconds, startup=True)
@@ -216,8 +227,14 @@ class ClamScanner(AbstractContextManager["ClamScanner"]):
                 future.set_exception(RuntimeError(f"ClamAV worker ended: {error}"))
 
     def scan(self, path: Path, timeout: float | None = None) -> ScanEvidence:
+        return self._scan_request(ScanRequest(request_id=uuid4().hex, path=path), timeout)
+
+    def scan_sample(self, sample: bytes) -> ScanEvidence:
+        """Only small health-check samples use memory; archive messages remain streamed."""
+        return self._scan_request(ScanRequest(request_id=uuid4().hex, sample=sample), None)
+
+    def _scan_request(self, request: ScanRequest, timeout: float | None) -> ScanEvidence:
         deadline = time.monotonic() + min(timeout if timeout is not None else self.scan_timeout_seconds, self.scan_timeout_seconds)
-        request = ScanRequest(request_id=uuid4().hex, path=path)
         future: Future[ScanEvidence] = Future()
         try:
             with self.lock:

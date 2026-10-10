@@ -11,7 +11,6 @@ import logging
 import os
 import shutil
 import signal
-import subprocess
 import sys
 import tempfile
 import time
@@ -33,10 +32,12 @@ from pydantic import BaseModel, Field
 from webview.menu import Menu, MenuAction, MenuSeparator
 
 from .file_drag import FILE_DRAGS, install_file_drag
+from .desktop_platform import copy_windows_text, open_export, open_external_url, refresh_windows_menu, startup_error, windows_webview
 from .identity import APPLICATION_NAME
 from .updates import UpdateService, UpdateStatus, default_channel
 from .release_versions import release_metadata
 from .sparkle import SparkleBackend, show_preferences, start_installed_updater
+from .winsparkle import WinSparkleBackend
 from .__main__ import IngestInterrupted, IngestOutcome, IngestRequest, run_ingest
 from .application import (
     ApplicationController,
@@ -143,6 +144,7 @@ class GuiStatus(BaseModel):
     generation: int = 0
     opened_in_new_window: bool = False
     file_drag_supported: bool = sys.platform == "darwin"
+    write_available: bool = True
     configuration: GuiConfiguration
     notices: list[ApplicationNotice] = Field(default_factory=list)
 
@@ -992,6 +994,9 @@ class GuiApi:
             raise ValueError("unknown source location") from error
         if path is None:
             raise ValueError("source location has no local filesystem path")
+        if sys.platform == "win32":
+            copy_windows_text(self.window, path)
+            return path
         if sys.platform != "darwin":
             raise ValueError("copying source paths requires macOS with PyObjC installed")
         try:
@@ -1013,6 +1018,9 @@ class GuiApi:
 
     def copy_visible_text(self, text: str) -> str:
         """Copy the user-visible message text to the macOS pasteboard."""
+        if sys.platform == "win32":
+            copy_windows_text(self.window, text)
+            return text
         if sys.platform != "darwin":
             raise ValueError("copying visible text requires macOS with PyObjC installed")
         try:
@@ -1028,6 +1036,9 @@ class GuiApi:
     def copy_link(self, destination: str) -> str:
         """Copy an approved message link as both text and a macOS URL."""
         destination = external_link_destination(destination)
+        if sys.platform == "win32":
+            copy_windows_text(self.window, destination)
+            return destination
         if sys.platform != "darwin":
             raise ValueError("copying links requires macOS with PyObjC installed")
         try:
@@ -1045,6 +1056,9 @@ class GuiApi:
         """Open an approved message link only after an explicit viewer action."""
         destination = external_link_destination(destination)
         if self.e2e_directory is not None:
+            return destination
+        if sys.platform == "win32":
+            open_external_url(destination)
             return destination
         if sys.platform != "darwin":
             raise ValueError("opening links requires macOS with PyObjC installed")
@@ -1142,7 +1156,7 @@ class GuiApi:
             if self._drag_closed or self._export_stop.is_set():
                 raise ValueError("message viewer is closed")
             write_attachment(self._archive(), message_pk, part_id, destination)
-            subprocess.Popen(["/usr/bin/open", str(destination)], close_fds=True)
+            open_export(destination)
         return OpenResult(filename=descriptor.filename, opened=True).model_dump()
 
     def open_message_window(self, message_pk: int, highlight_terms: list[str] | None = None) -> bool:
@@ -1342,6 +1356,10 @@ class SetupApi:
 
 def cleanup_stale_exports() -> None:
     """Remove only this user's private export directories whose owner PID is gone."""
+    if sys.platform == "win32":
+        # POSIX ownership and kill(pid, 0) are not a safe Windows liveness test.
+        # Current-session exports still use TemporaryDirectory cleanup on close.
+        return
     for directory in Path(tempfile.gettempdir()).glob("mailarchive-gui-*"):
         fields = directory.name.split("-", 3)
         if len(fields) != 4 or not fields[2].isdecimal() or int(fields[2]) <= 0:
@@ -1380,6 +1398,7 @@ class PyWebViewApplication:
         self._native_child_ids: dict[str, str] = {}
         self._about_api = AboutApi(self)
         self._about_window: Any = None
+        self._reader_window: Any = None
         self._setup_api: SetupApi | None = None
         self._setup_visible = False
         self._about_visible = False
@@ -1394,7 +1413,7 @@ class PyWebViewApplication:
         self._updates_started = False
         self._updating = False
         self._definition_updates = 0
-        self._sparkle: SparkleBackend | None = None
+        self._sparkle: SparkleBackend | WinSparkleBackend | None = None
         installed_version = application_metadata().version
         self.updates = UpdateService(
             UpdateStatus(version=installed_version, channel=controller.preferences.update_channel or default_channel(installed_version),
@@ -1465,13 +1484,22 @@ class PyWebViewApplication:
         try:
             if sys.platform == "darwin" and getattr(sys, "frozen", False):
                 self.updates.status.channel = self.controller.initialize_updates(application_metadata().version)
-            self._sparkle = start_installed_updater(self.updates)
+            if sys.platform == "win32":
+                from .winsparkle import start_windows_updater
+                self._sparkle = start_windows_updater(self.updates, self.request_update_quit)
+            else:
+                self._sparkle = start_installed_updater(self.updates)
         except (OSError, RuntimeError, ValueError) as error:
             self.updates.fail(str(error))
             self.add_notice("warning", f"Updates unavailable: {error}")
 
     def show_update_preferences(self) -> None:
-        show_preferences(self.updates, self.controller.configure_updates)
+        if sys.platform == "win32":
+            from .windows_update_preferences import show_windows_update_preferences
+            show_windows_update_preferences(self.updates,
+                lambda channel, automatic: self.controller.configure_updates(channel, automatic, strict=True))
+        else:
+            show_preferences(self.updates, self.controller.configure_updates)
         if self.controller.preference_error:
             self.add_notice("warning", self.controller.preference_error)
 
@@ -1511,7 +1539,7 @@ class PyWebViewApplication:
         window.events.shown += lambda *_args: self._refresh_menus()
 
         def closing(*_args: object) -> bool:
-            if self._quitting:
+            if self._quitting or sys.platform == "win32":
                 return True
             # Keep a hidden native window so closing the last visible window does
             # not end pywebview's event loop or remove File/New/Open and About.
@@ -1677,10 +1705,16 @@ class PyWebViewApplication:
         except (OSError, ValueError) as error:
             self.add_notice("error", f"Could not create archive: {error}")
             return None
-        return self.create_search_window(self.controller.new_search_window(document))
+        api = self.create_search_window(self.controller.new_search_window(document))
+        if self._reader_window is not None:
+            self._reader_window.hide()
+        return api
 
     def show_setup(self) -> None:
         """Show all three setup steps together, retaining a single setup window."""
+        if sys.platform == "win32":
+            self.show_reader_start()
+            return
         with self._lock:
             if self._setup_api is not None:
                 self._setup_visible = True
@@ -1709,6 +1743,32 @@ class PyWebViewApplication:
             window.events.closing += lambda *_args: not api._lock.locked()
             window.events.closed += closed
         self._refresh_menus()
+
+    def show_reader_start(self) -> None:
+        """Offer archive opening without advertising unsupported Windows writes."""
+        if self._reader_window is not None:
+            self._reader_window.show()
+            return
+        window = webview.create_window(
+            APPLICATION_NAME, self.asset_url("reader.html"),
+            js_api=WindowBridge(self, ("open_archive_dialog", "new_document", "request_quit")),
+            width=700, height=430, min_size=(500, 330), menu=self.menu(),
+        )
+        if window is None:
+            raise RuntimeError("Could not open reader welcome window")
+        self._reader_window = window
+
+        def closing(*_args: object) -> bool:
+            if self._quitting:
+                return True
+            if self._search_apis():
+                window.hide()
+            else:
+                self.request_quit()
+            return False
+
+        window.events.closing += closing
+        window.events.shown += lambda *_args: self._refresh_menus()
 
     def new_search_window(self) -> bool:
         document = self.active_document()
@@ -1954,7 +2014,10 @@ class PyWebViewApplication:
         directory = api.document.display_path.parent if api and api.document and api.document.display_path else Path.home()
         selected = (
             macos_import_picker(directory, "Open Mail Archive", "Select a .mailarchive package or an existing archive directory.", "Open", folders=True)
-            if sys.platform == "darwin" else anchor.create_file_dialog(webview.FileDialog.FOLDER, directory=str(directory))
+            if sys.platform == "darwin" else anchor.create_file_dialog(
+                webview.FileDialog.OPEN if sys.platform == "win32" else webview.FileDialog.FOLDER,
+                directory=str(directory), allow_multiple=False,
+            )
         )
         if not selected:
             return False
@@ -1974,7 +2037,10 @@ class PyWebViewApplication:
             if recent
             else self.controller.open_document(path)
         )
-        return self.create_search_window(self.controller.new_search_window(document))
+        api = self.create_search_window(self.controller.new_search_window(document))
+        if self._reader_window is not None:
+            self._reader_window.hide()
+        return api
 
     def open_recent_document(self, path: Path) -> bool:
         try:
@@ -2150,6 +2216,8 @@ class PyWebViewApplication:
         except ValueError:
             pass
         self._refresh_menus()
+        if sys.platform == "win32" and not self._quitting and not self._search_apis():
+            self.request_quit()
 
     def focus_window(self, uid: str) -> bool:
         windows = [api.window for api in self._search_apis()]
@@ -2220,9 +2288,17 @@ class PyWebViewApplication:
 
     def request_quit(self, *, confirm_ingest: bool = True) -> None:
         """Stop imports at message boundaries, allowing at most five seconds to exit."""
+        self._request_quit(confirm_ingest=confirm_ingest, update_install=False)
+
+    def request_update_quit(self) -> None:
+        """WinSparkle requires process exit while retaining the installation guard."""
+        if self.updates.status.phase == "installing" and self._updating:
+            self._request_quit(confirm_ingest=False, update_install=True)
+
+    def _request_quit(self, *, confirm_ingest: bool, update_install: bool) -> None:
         # Never wait for workers on Cocoa's event thread: they may still be
         # returning from a bridge callback that needs that same event loop.
-        if self._quitting:
+        if self._quitting and not update_install:
             return
         if not self.prepare_quit() and confirm_ingest and self.has_active_ingest():
             if sys.platform == "darwin":
@@ -2239,7 +2315,8 @@ class PyWebViewApplication:
         self._quitting = True
 
         def exit_if_allowed() -> None:
-            if not done.is_set() and self._quitting and self.updates.status.phase not in {"deferred", "installing"}:
+            allowed = (self.updates.status.phase == "installing" and self._updating) if update_install else self.updates.status.phase not in {"deferred", "installing"}
+            if not done.is_set() and self._quitting and allowed:
                 done.set()
                 self._exit_process(0)
 
@@ -2254,7 +2331,7 @@ class PyWebViewApplication:
             workers = tuple(self._import_threads)
             writers = tuple(self._writers)
             apis = tuple(self._apis.values())
-        if self.updates.status.phase in {"deferred", "installing"}:
+        if not update_install and self.updates.status.phase in {"deferred", "installing"}:
             # Sparkle owns termination/relaunch and may still cancel installation.
             return
         if not jobs and not writers and not apis and not any(worker.is_alive() for worker in workers):
@@ -2341,12 +2418,17 @@ class PyWebViewApplication:
         windows = [api.window for api in self._search_apis()]
         windows.extend(api.window for api in self._ingest_apis.values())
         windows.append(self._about_window)
+        windows.append(self._reader_window)
         if self._setup_api is not None:
             windows.append(self._setup_api.window)
         for window in windows:
             if window is not None:
                 window.menu = menu
         self._refresh_macos_menu()
+        if sys.platform == "win32":
+            for window in windows:
+                if window is not None and window.native is not None:
+                    refresh_windows_menu(window, menu, self.active_document() is not None)
 
     def _refresh_macos_menu(self) -> None:
         """Refresh pywebview's process menu and its dynamic Close enabled state."""
@@ -2489,6 +2571,19 @@ def application_menu(application: PyWebViewApplication) -> list[Menu]:
     ]
     if recent:
         file_items.append(Menu("Open Recent", recent))
+    if sys.platform == "win32":
+        return [
+            Menu("File", [*file_items, MenuAction("Import…", application.import_active_document),
+                          MenuAction("Document Options…", application.open_document_options),
+                          MenuAction("Close", application.close_active_window),
+                          MenuSeparator(), MenuAction("Quit", application.request_quit)]),
+            Menu("Window", [MenuAction("New Search Window", application.new_search_window),
+                            MenuAction("Ingests", application.open_active_ingest_window),
+                            *application.window_menu_items()]),
+            Menu("Help", [MenuAction("About", application.create_about_window),
+                          MenuAction("Check for Updates…", application.updates.check),
+                          MenuAction("Update Settings…", application.show_update_preferences)]),
+        ]
     file_items.extend(
         (
             MenuAction("Import…", application.import_active_document),
@@ -2617,6 +2712,12 @@ def main() -> int:
         from .self_test import main as test_main  # pylint: disable=import-outside-toplevel
         return test_main()
     args = build_parser().parse_args()
+    if sys.platform == "win32":
+        try:
+            windows_webview()
+        except (ImportError, OSError, RuntimeError, webview.WebViewException) as error:
+            startup_error(f"The reader could not start.\n\n{error}")
+            return 1
     if args.smoke_test != (args.smoke_report is not None):
         raise SystemExit("--smoke-test and --smoke-report must be used together")
     if args.smoke_html_find and not args.smoke_test:
@@ -2671,7 +2772,9 @@ def main() -> int:
         for error in startup.errors:
             print(f"mailsearch-gui: {error}", file=sys.stderr)
             application.add_notice("error", error)
-        application.create_about_window(hidden=True)
+        # Windows exits with its last native window; only macOS has Dock reopening.
+        if sys.platform != "win32":
+            application.create_about_window(hidden=True)
         if prompt_for_archive:
             application.show_setup()
         for session in startup.windows:
@@ -2691,7 +2794,10 @@ def main() -> int:
             application.request_quit(confirm_ingest=False)
         signal.signal(signal.SIGINT, interrupt_gui)
     try:
+        if application is not None and sys.platform == "win32":
+            application.start_updates()
         webview.start(
+            gui="edgechromium" if sys.platform == "win32" else None,
             http_server=False,
             private_mode=True,
             menu=application.menu() if application is not None else [],

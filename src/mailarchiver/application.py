@@ -12,11 +12,14 @@ import tempfile
 from hashlib import sha256
 from importlib.metadata import version
 from pathlib import Path
+
 from threading import Event, RLock
 from typing import Literal
 from uuid import uuid4
 
 from pydantic import BaseModel, ConfigDict, Field
+
+from .sqlite_paths import sqlite_uri
 
 from .identity import application_data_directory
 
@@ -163,6 +166,24 @@ def application_preferences_path() -> Path:
     return root / application / "preferences.json"
 
 
+def archive_from_selection(path: Path) -> Path:
+    """Resolve a selected archive member to its nearest enclosing archive root."""
+    selected = Path(os.path.abspath(path.expanduser()))
+    if not selected.exists():
+        return selected
+    directory = selected if selected.is_dir() else selected.parent
+    for candidate in (directory, *directory.parents):
+        # Stop at a damaged archive too: validation must report that archive's
+        # problem instead of accidentally opening a different enclosing one.
+        if candidate.suffix.casefold() == ".mailarchive" or any(
+            (candidate / name).is_file() for name in ("archive.sqlite3", "search.sqlite3")
+        ):
+            return candidate
+    if selected.is_file():
+        raise InvalidArchiveError(f"selected file is not inside a mail archive: {selected}")
+    return selected
+
+
 def validate_archive(path: Path, *, recover: bool = False) -> tuple[Path, Path, str]:
     """Validate read-only; GUI Open may request lease-protected hot-journal recovery."""
     display = Path(os.path.abspath(path.expanduser()))
@@ -197,7 +218,7 @@ def validate_archive(path: Path, *, recover: bool = False) -> tuple[Path, Path, 
                             info = candidate.lstat()
                             if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1:
                                 raise InvalidArchiveError(f"unsafe SQLite recovery path: {candidate.name}")
-                    database = sqlite3.connect(f"{(canonical / name).as_uri()}?mode=rw", uri=True)
+                    database = sqlite3.connect(sqlite_uri(canonical / name, mode="rw"), uri=True)
                     try:
                         database.execute("SELECT count(*) FROM sqlite_schema").fetchone()
                     finally:
@@ -376,12 +397,16 @@ class ApplicationController:
     def preferences(self) -> ApplicationPreferences:
         return self._preferences.model_copy(deep=True)
 
-    def configure_updates(self, channel: UpdateChannel, automatic_checks: bool) -> None:
+    def configure_updates(self, channel: UpdateChannel, automatic_checks: bool, *, strict: bool = False) -> None:
         """Persist update choices outside archives without resetting document preferences."""
+        previous = self._preferences.model_copy(deep=True)
         self._preferences.update_channel = channel
         self._preferences.automatic_update_checks = automatic_checks
         self._preferences.version = APPLICATION_PREFERENCES_VERSION
         self._write_preferences()
+        if strict and self.preference_error:
+            self._preferences = previous
+            raise OSError(self.preference_error)
 
     def initialize_updates(self, installed_version: str) -> UpdateChannel:
         """Migrate an unset choice once, using the installed release's track."""
@@ -422,7 +447,7 @@ class ApplicationController:
         return candidate
 
     def open_document(self, path: Path) -> ArchiveDocument:
-        candidate = ArchiveDocument.open(path)
+        candidate = ArchiveDocument.open(archive_from_selection(path))
         with self._lock:
             document = self._documents_by_identity.get(candidate.descriptor.identity)
             if document is None:

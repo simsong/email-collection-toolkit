@@ -1,8 +1,16 @@
 /* Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved. */
 "use strict";
 
-window.addEventListener("pywebviewready", () => {
+window.addEventListener("pywebviewready", async () => {
   const api = window.pywebview.api;
+  const capabilities = await api.status();
+  if (capabilities.write_available === false) {
+    document.querySelector(".archive-tools").hidden = true;
+    for (const id of ["name-picker", "institution-picker", "processing-open"]) {
+      document.getElementById(id).hidden = true;
+    }
+    return;
+  }
   const dialog = document.getElementById("processing-dialog");
   const error = document.getElementById("processing-error");
   function showError(message) {
@@ -13,6 +21,7 @@ window.addEventListener("pywebviewready", () => {
     if (!api.processing_work) return;
     try {
       const work = await api.processing_work();
+      if (work.available === false) return;
       if (work.active || (!always && !(work.ingest || work.content || work.source_roots.length))) return;
       document.getElementById("processing-detail").textContent =
         `${work.ingest} ingest jobs, ${work.content} message/content jobs, ${work.failed || 0} failed jobs; ${work.source_roots.length} unfinished source imports. Saved import settings will be used.`;
@@ -40,5 +49,5 @@ window.addEventListener("pywebviewready", () => {
     try { await api.open_picker(kind); }
     catch (failure) { showError(failure.message || String(failure)); }
   });
-  if (!new URLSearchParams(location.search).has("message")) void showWork();
+  if (!new URLSearchParams(window.__rustWindowParameters || location.search).has("message")) void showWork();
 });

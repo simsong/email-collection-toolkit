@@ -16,6 +16,7 @@ the exact runtime environment used to build that application.
 | libpff-python 20231205 | Independent `converters/pff` executable only | LGPL-3.0-or-later; Joachim Metz. The GPLv3 converter loads this extension; the GPLv2 application does not. Complete upstream texts are in `converters/pff/libpff-LGPL.txt` because the wheel omits them. Source: https://github.com/libyal/libpff and https://pypi.org/project/libpff-python/20231205/. |
 | Public Suffix List snapshot | `src/mailarchiver/public_suffix_list.dat` | MPL-2.0; unchanged 2025-04-07 snapshot formerly supplied by tldextract 5.3.2. Upstream notices remain in the file; full license in `licenses/publicsuffix-MPL-2.0.txt`. Source: https://publicsuffix.org/list/public_suffix_list.dat. |
 | proxy_tools 0.1.0 | Runtime dependency | BSD; Copyright (c) 2013 Armin Ronacher and Copyright (c) 2014 Jonathan Tushman. Its wheel metadata incorrectly says MIT and omits the upstream license file, so the reviewed upstream text is retained in `licenses/proxy_tools-BSD.txt`. |
+| clr_loader 0.3.1 | Windows pythonnet runtime dependency | MIT; Copyright (c) 2019-2026 Benedikt Reinartz. The wheel includes the complete MIT text but omits its metadata license label. The audit accepts only that exact reviewed text by SHA-256; the runtime retains the wheel's license file. |
 
 The Tabulator directory is vendored and must remain byte-for-byte identical to
 the reviewed upstream files. Minified files are never rewritten to add project

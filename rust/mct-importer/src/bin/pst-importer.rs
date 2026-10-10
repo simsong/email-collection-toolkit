@@ -3,11 +3,11 @@
 //! MCT Importer API 1.0 PST executable; see doc/PST_IMPORTER.md.
 use std::{io, path::Path, process::ExitCode};
 
-fn number(value: Option<std::ffi::OsString>, flag: &str) -> Result<u64, String> {
+fn number(value: Option<&std::ffi::OsString>, flag: &str) -> Result<u64, String> {
     value
         .ok_or_else(|| format!("{flag} requires a non-negative integer"))?
-        .into_string()
-        .map_err(|_| format!("{flag} requires a non-negative integer"))?
+        .to_str()
+        .ok_or_else(|| format!("{flag} requires a non-negative integer"))?
         .parse()
         .map_err(|_| format!("{flag} requires a non-negative integer"))
 }
@@ -37,17 +37,13 @@ fn main() -> ExitCode {
     let mut only_invalid = false;
     let mut offset = 0;
     let mut limit = None;
-    while let Some(flag) = args
-        .first()
-        .and_then(|value| value.to_str())
-        .map(str::to_owned)
-    {
-        match flag.as_str() {
+    while let Some(flag) = args.first().and_then(|value| value.to_str()) {
+        match flag {
             "--only-invalid" => {
                 only_invalid = true;
                 args.remove(0);
             }
-            "--offset" => match number(args.get(1).cloned(), &flag) {
+            "--offset" => match number(args.get(1), flag) {
                 Ok(value) => {
                     offset = value;
                     args.drain(..2);
@@ -57,7 +53,7 @@ fn main() -> ExitCode {
                     return ExitCode::from(2);
                 }
             },
-            "--limit" => match number(args.get(1).cloned(), &flag) {
+            "--limit" => match number(args.get(1), flag) {
                 Ok(value) => {
                     limit = Some(value);
                     args.drain(..2);

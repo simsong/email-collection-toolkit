@@ -4,10 +4,9 @@
 
 from __future__ import annotations
 
-from mailarchiver.mbox import message_offsets
+from mailarchiver.mbox import PreservingMbox, message_offsets
 
 import hashlib
-import mailbox
 import os
 import re
 import stat as stat_module
@@ -303,7 +302,7 @@ class MboxFileParser(FileParser):
     def messages(self, source: SourceFile, start_offset: int = 0) -> Iterator[SourceMessage]:
         with source.path.open("rb") as mailbox_file:
             mmdf_framed = mailbox_file.readline().rstrip(b"\r\n") == MMDF_DELIMITER
-        box = mailbox.mbox(source.path, factory=None, create=False)
+        box = PreservingMbox(source.path, factory=None, create=False)
         try:
             for key in box.iterkeys():
                 start, end = message_offsets(box, key)

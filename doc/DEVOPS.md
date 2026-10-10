@@ -2,14 +2,142 @@
 
 # DevOps
 
+## Agreed development and release policy
+
+Primary development takes place on macOS. Minimize GitHub Actions spending by
+keeping ordinary development iterations independent of Windows. Bring Windows
+to the intended macOS feature fidelity when preparing a release, with limited
+local validation on the Windows ARM64 VM and focused release-time checks.
+
+**Implementation status:** ordinary CI remains macOS-focused, with explicit
+Windows reader and shared x64/ARM64 test-MSIX build/install/upgrade/uninstall gates.
+These test-installer gates are implemented; they are distinct from production
+publication. The a15 candidate adds shared-feed signing/publication and download
+selection, which still require its current-head release checks and live release
+verification. Windows archive writing/imports remain unsupported. Building or
+installing a reader package does not establish feature parity.
+
+### When to spend runner time
+
+| Event | Required work | Publication |
+| --- | --- | --- |
+| Ordinary development push | Existing macOS checks, once per commit; Cargo for Rust builds/tests and macOS Makefile wrappers. No automatic Windows build or installer. | None. |
+| Explicit test-release run | Build the macOS DMG and Windows installer concurrently from the same selected commit, using the production packaging workflow and focused installed-app checks. | Retain downloadable CI artifacts; no public appcast or current-download changes. |
+| Tagged alpha, beta, or stable release | Validate the annotated tag and canonical project version first; build, sign, and validate both installers concurrently from that exact commit. | Publish only after both platforms and all release gates succeed. Alpha/beta publication uses the preview channel. |
+| Ordinary website deployment | Build the site using the last complete published release and verified appcast. | Update Pages without rebuilding installers. |
+
+Add a manual test-release entry point that reuses the same packaging jobs as
+tagged releases. A manual test run is not itself permission to publish an
+update. Published test releases use the normal immutable alpha/beta tag path;
+stable clients must not receive previews unless explicitly opted in. Derive
+versions, channels, tags, and updater build numbers from `pyproject.toml`
+through the shared release-version mapper, including installer-specific version
+fields. Never hard-code a candidate version or move a published tag.
+
+Do not run duplicate push/PR jobs or create a Windows build for every macOS
+iteration. Explicit test releases are an intentional packaging cost. Build each
+architecture once per run and pass those artifacts forward to packaging and
+release assembly rather than rebuilding them in the publisher.
+Ordinary branch CI checks the maintained Rust tools in `static-rust` and the
+Python/browser interface in `python-browser`. The retired Rust GUI is excluded
+from the workspace and has no active native CI or release dependency. Opted-in
+release candidate checks build the Python DMG and Python MSIX packages.
+
+### Windows distribution and evidence
+
+For explicit pre-merge Windows validation, include `[windows-ci]` in the pushed
+head commit message. The branch workflow calls the shared reader workflow for
+Windows x64/ARM64 only; its normal macOS job already validates that platform.
+Ordinary pushes omit this marker and skip Windows runners. The standalone
+manual reader workflow and release caller still build all three platforms.
+
+The planned Windows download is one installer containing native x64 and ARM64
+application builds. It selects the matching executable and WinSparkle DLL for
+the machine. These remain separate native builds inside a common installer;
+the application is not a universal executable. Include license notices,
+WebView2 prerequisite detection/installation, shortcuts, and uninstall support.
+
+Keep the macOS native GUI test. Windows release validation should cover install,
+launch, opening a synthetic archive, search, message display, unchanged archive
+bytes, upgrade, and uninstall. Exercise the packaged application, not only a
+Cargo executable. Record the architecture and distinguish hosted checks from
+the limited ARM64 VM checks; do not claim x64 execution from an ARM64 build.
+Imports and other newly ported features need their own acceptance evidence.
+Report untested behavior and remaining parity gaps explicitly.
+
+Windows executable/installer code signing and WinSparkle payload signing are
+distinct steps. Preserve the macOS signing, notarization, and installed-DMG
+gates. Keep release credentials out of ordinary branch CI and use the same
+packaging logic in test runs, reporting any unavailable signing validation.
+
+### One release and one appcast
+
+Retain one shared appcast URL for Sparkle and WinSparkle, including the existing
+`/updates/mac/appcast.xml` path for installed-client compatibility. Announce a
+version only when both platform installers are complete; do not let two jobs
+independently append or publish competing feeds.
+
+Use separate macOS and Windows items, with their own minimum OS versions,
+payload lengths, URLs, and signatures. Enclosures use `sparkle:os="macos"` and
+`sparkle:os="windows"` for the combined Windows installer. If architecture-specific
+installers are introduced later, use `windows-x64` and `windows-arm64` instead.
+Extend publisher/checker assumptions that currently allow only DMGs and one
+item per tag. Verify prior signed history before classifying historical macOS
+entries, then sign and verify the complete updated XML before publication.
+Test platform and preview-channel selection in both clients.
+
+Release orchestration is:
+
+1. Validate the release identity, then build and validate both installers in
+   parallel from the same commit.
+2. Assemble both installers, checksums, and required release assets. Verify
+   prior feed history, sign the final payloads, and generate and verify the
+   complete shared appcast before creating the complete draft release.
+3. Publish the complete GitHub release only after all required gates succeed.
+4. Deploy Pages using that exact release's verified appcast and download metadata.
+
+If either platform fails before publication, keep the previous public release,
+appcast, and current-download links intact. Serialize publication to prevent
+concurrent runs from losing feed history. GitHub Releases and Pages are not an
+atomic transaction: if Pages deployment fails after release publication, retain
+the failure and retry deployment of the exact published release without moving
+its tag, rebuilding installers, or silently resetting the feed.
+
+### Website downloads
+
+Generate static platform buttons from public GitHub release metadata through
+`make website-release-data RELEASES_JSON=PATH`; JavaScript is not required:
+
+- **Download for Mac (.dmg)**
+- **Download for Windows (.msixbundle)** — includes native x64 and ARM64 builds
+- **View all downloads and release notes** — links to the GitHub release listing
+
+Display **Current release: VERSION** beside the primary buttons. Each primary
+button links directly to its installer asset, not an Actions artifact or a
+GitHub release-detail page. Generate version, URLs, and availability at site
+build time from a complete published release; validate that both assets exist.
+Uploaded nonempty, exactly named DMG/MSIX assets, the Windows trust ZIP and
+appcast are required for a complete release. Prefer complete releases over newer
+incomplete uploads; a requested publication tag must be complete or Pages fails.
+Before any complete Windows release, retain historical Mac-only download links.
+Keep preview downloads distinctly labeled and separate from the current stable
+release. If only previews exist, label them as previews. Before the first
+complete Windows release, do not render an active Windows download button for
+an absent asset. Browser platform detection may later emphasize a button but
+must not hide the other platform or be necessary for downloading.
+
 ## GitHub Actions
 
-### Workflow gates
+### Existing macOS publication baseline
+
+The following describes the macOS workflow being extended. The agreed policy
+above governs the planned combined release; the manual test-release path and
+Windows packaging must be added rather than inferred from this baseline.
 
 | Workflow | Trigger | Gate and result |
 | --- | --- | --- |
-| [Continuous integration](../.github/workflows/continuous-integration.yml) | Push to a non-`main` branch in this repository that changes files outside `README.md` and `doc/` | Run `make check` (including all pytest suites), distribution checks, and website validation once per commit. No DMG build, signing, notarization, or release secrets. A PR becoming ready for review does not repeat pytest for an unchanged head. |
-| [Website](../.github/workflows/pages.yml) | Push to `main` that changes files outside `README.md` and `doc/`, or manual `workflow_dispatch` | Build and deploy the site, preserving the latest published Sparkle feed. No DMG build or release secrets. Documentation-only pushes do not deploy Pages. |
+| [Continuous integration](../.github/workflows/continuous-integration.yml) | Push to a non-`main` repository branch | Ordinary checks skip changes limited to `README.md` and `doc/RELEASE_NOTES.md`. Other changes run static/tests, distribution and website validation. An explicit `[release-ci]` head independently runs DMG/MSIX/signature gates on any branch without publishing. |
+| [Website](../.github/workflows/pages.yml) | Push to `main` that changes files outside `README.md` and `doc/RELEASE_NOTES.md`, or manual `workflow_dispatch` | Build and deploy the site, preserving the latest published Sparkle feed. No DMG build or release secrets. Other documentation changes still deploy Pages. |
 | [Release](../.github/workflows/release.yml) | Push of an annotated `v...` tag at a version-matching commit already on `main` | Validate the tag before expensive work; build, sign, notarize, staple, and test the DMG once; publish the release with DMG and signed appcast; then build and deploy Pages as a dependent job using that exact appcast. A failed release job must not deploy Pages. |
 
 The `v*` trigger is only a coarse GitHub filter: `make release-tag-check`
@@ -59,3 +187,61 @@ published GitHub Release cannot be rolled back transactionally with Pages.
 
 See [macOS distribution](MACOS_DISTRIBUTION.md#publish-a-tagged-macos-release)
 for the tag command, packaging steps, and secret boundaries.
+
+## Local Windows MSIX prototype (2026-10-06)
+
+See [Windows MSIX test packaging](WINDOWS_MSIX_TEST.md) for automated build/sign/test commands,
+frozen Python reader validation, external WebView2 prerequisites, native Windows
+evidence and unresolved installation/import/scanner/converter requirements.
+This local prototype is not a released or fully validated Windows application.
+
+## Platform script layout
+
+Keep Windows-only tooling in `scripts/win/`, macOS-only tooling in
+`scripts/mac/`, and Linux-only tooling in `scripts/linux/`. Shared scripts remain
+in `scripts/`; classify by the operating system required to execute the script,
+not by its language or the artifacts it examines. Cargo aliases and Makefile
+targets provide the normal entry points. Windows scripts have been relocated;
+existing macOS scripts remain at their historical paths until migrated together
+with their imports, tests and workflow callers. No Linux directory is needed
+until Linux-specific tooling is added.
+
+## MSIX installation matrix (2026-10-07)
+
+MSIX replaces the older EXE installer plan. The Python desktop is now its
+entry point; the a15 Rust WinSparkle adapter is archived and no longer ships.
+Windows automatic-update support remains unfinished. `windows-msix.yml`
+supports explicit dispatch, reusable release calls and explicit packaging-branch
+`[msix-ci]`/`[release-ci]` pushes; ordinary pushes do not run it. Two native build
+jobs produce x64 and ARM64 payloads once per workflow invocation.
+One assembly job creates a signed common bundle and a higher-version upgrade
+fixture with identical application bytes. Both installation VMs download that
+same artifact: Windows Server x64 (`windows-latest`) and Windows 11 ARM64
+(`windows-11-arm`). Installation jobs do not rebuild. Private signing keys remain
+outside uploaded artifacts. The authorized alpha may publish the validated base
+test-signed bundle and public trust material; upgrade fixtures stay CI-only.
+The release caller waits for this gate after tag preflight. Windows 10 testing
+is not required. No GitHub Team or AWS provisioning is needed.
+
+Installed checks exercise frozen Python search, autocomplete and byte retrieval,
+a native window, upgrade and uninstall, removing test packages and added trust
+in cleanup. WebView2 remains external and its absence fails this positive test.
+Its writable user-data directory is outside the immutable package. Hosted matrix
+execution is implemented, including Start-menu activation and missing-runtime
+guidance. Results must match the candidate head; earlier package results do not
+clear revised signing or updater code. Windows imports/scanner/converters and
+physical interaction remain separate acceptance gaps.
+
+Windows test signing now requires the persistent `MSIX_TEST_CERT_PFX_BASE64`
+Actions secret, passed only to bundle signing (including reusable release calls).
+The signer checks it against `scripts/win/test-signing.cer`, requires a private
+key and current validity, and removes temporary PFX material on success/failure.
+No fallback certificate is generated. This supersedes the ephemeral test-key
+policy; testers trust the public certificate once until expiration (2028-10-07)
+or deliberate rotation. Production trusted signing remains separate.
+
+## Windows consolidation (October 10, 2026)
+
+The Windows Python work is integrated into PR #153 while retaining the Mac restoration and historical Rust GUI. The supported Windows package is x64-only private CPython with ClamAV and WinSparkle. This supersedes earlier frozen-Python/ARM64 and unsupported-import descriptions in the historical sections. The signed feed publisher labels Windows items with the Python package identity and x64 architecture so the updater can select compatible installations. The native install test retains both last-window Close and File/Quit checks.
+
+The installed reader CI regression was a Windows fsync on a read-only file descriptor. Publication now syncs a writable handle, and the package's actual self-test uses the shared byte-preserving MBOX class. Source acceptance covers both script and isolated module entry points, processor discovery, search/completion, and byte hashes. Current-head signed installation still requires hosted CI evidence.

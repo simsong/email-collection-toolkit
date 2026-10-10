@@ -107,9 +107,10 @@ class ProductionPipeline:
         return item
 
     def ingest(self, source: MailObject, metadata: SourceMetadata) -> IngestedMessage:
-        with tempfile.NamedTemporaryFile(dir=self.archive, prefix=".processing-input-") as temporary:
+        with tempfile.NamedTemporaryFile(dir=self.archive, prefix=".processing-input-", delete_on_close=False) as temporary:
             temporary.write(source.raw)
             temporary.flush()
+            temporary.close()
             reference = snapshot(self.archive, Path(temporary.name))
         existing = self.catalog.execute("SELECT message_pk FROM messages WHERE sha256=?", (reference.sha256,)).fetchone()
         with self.database:

@@ -1,0 +1,19 @@
+<!-- Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved. -->
+<!-- Welcome to the Windows desktop with shared New and Open actions.
+     Opening uses the standard system file picker and shared document controller.
+     Only application-owned assets and the narrow Python bridge are used.
+     Creation and import retain the common destination and source confirmation.
+     A pending picker disables repeated activation until it returns. -->
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-eval'; style-src 'self'">
+<title>Email Collection Toolkit</title><link rel="stylesheet" href="reader.css">
+</head><body><main>
+<img src="icons/rainbow-post-192.png" alt="" width="72" height="72">
+<h1>Email Collection Toolkit</h1>
+<p>Search and read your email collection.</p>
+<button id="open" disabled>Open an archive…</button>
+<button id="new" disabled>Create a new archive…</button>
+<p id="status" role="status">Connecting to the reader…</p>
+<p class="detail">To open a collection, browse into its .mailarchive folder and select any file inside it (for example, archive.sqlite3). Or create a new collection and choose mail to import.</p>
+</main><script src="reader.js"></script></body></html>

@@ -1,5 +1,45 @@
 <!-- Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved. -->
 
+## Python webview comparison branch
+
+`codex/python-webview` keeps the shared Python GUI on macOS and adds an x64
+Windows reader using WebView2. `make gui` runs the shared application;
+`make test-python-reader` and `make test-python-reader-native` validate synthetic
+reading/export and the native bridge. Windows New/Import now uses the common
+Python engine with native locks and byte-preserving MBOX I/O. See
+[the comparison notes](doc/PYTHON_WEBVIEW.md) for validation and remaining gaps.
+
+`make prepare-windows-clamav` explicitly downloads the pinned official portable
+x64 runtime into `.tmp/clamav-x64`; it installs no service. `make clamav-update`
+fetches and validates definitions in application-specific user storage, outside
+archives. `make clamav-seed SEED_DIRECTORY=...` copies an existing baseline and
+validates it without modifying the source or clearing CDN cooldown state.
+`make freshclam` prepares `etc/clamdb` for packaging. Native runtime and baseline
+definitions are prerequisites for the MSIX builder, which requires and bundles
+the runtime and definitions. Existing `MAILARCHIVER_CLAMAV_LIBRARY`,
+`MAILARCHIVER_FRESHCLAM`, `MAILARCHIVER_CLAMAV_DATABASE`,
+`MAILARCHIVER_CLAMAV_CERTIFICATES`, and `MAILARCHIVER_CLAMAV_UPDATES` override
+the engine, updater, baseline databases, signing-certificate directory, and
+per-user definition-update location respectively.
+
+`make prepare-windows-updater` prepares the pinned WinSparkle DLL and licenses;
+the MSIX includes them. `make test-windows-scanner` and `make test-windows-updater`
+exercise the native runtime and update filtering. Help offers update checks and
+settings. Source launches support manual discovery only. The shared feed must
+publish a signed Python Windows enclosure with the package identity documented
+in the requirements before an installed Python upgrade can be offered.
+
+`make msix-test` builds the Windows payload; `make test-msix MSIX_PACKAGE=...
+MSIX_EVIDENCE=...` tests relocation. `make msix-bundle MSIX_PAYLOADS=...` signs the
+bundle using `MSIX_TEST_CERT_PFX_BASE64`, the private key matching the existing
+public test certificate. Never publish that variable's value. `UV_CACHE_DIR`,
+`UV_PYTHON_INSTALL_DIR`, and `UV_PYTHON_BIN_DIR` may place uv's cache, managed
+interpreters, and interpreter links inside a development checkout. The packaging
+script temporarily sets `UV_PROJECT_ENVIRONMENT` to its isolated runtime venv.
+The focused lint target sets `PYTHONPATH` to the checkout solely to resolve
+repository-local test helpers; the packaged interpreter remains isolated.
+
+
 # Email Collection Toolkit
 
 `mailarchiver` turns scattered email exports into a durable archive that you
@@ -43,8 +83,8 @@ signature. The audited `Prepare historical signed appcast` workflow produced a
 separate signed copy, which was verified and published as the a10 release asset
 and Pages feed before the next tag. The failed `v1.0.0a11` run left a draft release;
 its tag is retired by explicit request while the draft remains as failure
-evidence. The published preview release is `v1.0.0a13`; the next candidate is
-`v1.0.0a14`, built from matching source on `main`.
+evidence. Read the current candidate version from `pyproject.toml`; prepare its
+matching release from `main` only after branch validation and merge.
 
 Release workflow variables: `GITHUB_REPOSITORY` names the repository used to
 retrieve the prior feed; `GH_TOKEN` authorizes release API reads and publication;
@@ -54,20 +94,21 @@ the copied feed output. `RUNNER_TEMP` is the hosted runner's temporary area.
 No variable should contain secret material except the protected signing and
 notarization variables named above.
 
-## Windows development
+## Desktop implementation
 
-The compiled desktop UI candidates are **Dioxus Desktop and Tauri**, using Rust
-and the system webview, while ingest, search, and archive preservation remain in Python.
-Windows with full ingest is the next platform priority. This migration is
-planned; the current application remains pywebview. See
-[the desktop architecture decision](doc/DIOXUS.md).
+Python/pywebview is the default desktop on macOS and Windows. `make gui` launches
+it; `make dmg` (also `make python-dmg`) builds the macOS Python application.
+Windows MSIX builds freeze that same Python entry point with its runtime and
+WebView2 integration. Windows archive writing remains unsupported; packaging a
+reader is not evidence of ingest/scanner parity.
 
-Plan comparable trial implementations in Dioxus and Tauri before choosing a
-framework. Either approach retains the Python archive engine.
-
-See [Windows setup](doc/WINDOWS.md) for clean-install VM directions and the
-remaining work required for full Windows ingest. This is a development setup
-guide, not a supported Windows application release.
+The Rust GUI migration is retired. Its source remains in
+[`rust/mailsearch-gui`](rust/mailsearch-gui) outside the supported Cargo workspace.
+The historical GUI Make targets stop with a retirement message. See the detailed
+[migration retrospective](rust/README.md) for what was tried, measured limitations,
+lessons and the last compiling snapshot. Independent Rust importer, verifier,
+PST and MIME tools remain supported. `RUSTUP_TOOLCHAIN` can explicitly override
+the checkout's compiler; `rust-toolchain.toml` selects Rust 1.99 for these tools.
 
 ## Rust importer development
 
@@ -206,6 +247,33 @@ set that variable after checking its release notes and checksum:
 ```console
 make install-mac TIKA_VERSION=X.Y.Z
 ```
+
+## Batch import from an external drive
+
+Batch import uses the Python archive engine on macOS. The retired Rust GUI connected
+to that engine through its Import control; the CLI remains available for batch work. Windows archive writing is explicitly unsupported in
+this checkout. From a prepared macOS development checkout, with current ClamAV
+definitions and an owner-names file (one owner name or address per line):
+
+```sh
+export MAIL_ARCHIVE_DIR="$HOME/EmailArchive"
+make run ARGS='ingest --owner-names-file owner-names.txt --clamav "/Volumes/BackupDrive"'
+```
+
+Choose the destination deliberately and keep it outside the source tree. The
+command creates or adds to that archive and recursively discovers supported
+mail below the source root without modifying the source. Multiple source roots
+can be supplied at the end of the same command. PST/OST formats need their
+[importer prerequisites](doc/PST_IMPORTER.md). Reruns use source-idempotence and
+message-deduplication checks.
+
+A whole external-drive root is accepted, but this is **not yet a quiet drive
+harvester**: empty files and known metadata are silently ignored; other
+unrecognized files produce `skipped input` notices. Unreadable directories can
+stop discovery. There is currently no CLI quiet-discovery switch. Keep genuine
+read, parse, and antivirus errors visible; do not discard stderr to hide the
+ordinary skipped-file notices. This command imports recognized mailbox data,
+not arbitrary documents or mail hidden inside every possible container format.
 
 ## Ingest local mail
 
@@ -354,6 +422,31 @@ From this checkout, the equivalent command is:
 ```console
 make verify ARCHIVE=/path/to/mail-archive
 ```
+
+For an independent Rust check of imported catalog records and search membership:
+
+```console
+make verify-database ARCHIVE=/path/to/mail-archive
+make test-import-e2e
+```
+
+`ARCHIVE` selects an existing, idle archive. The Rust verifier checks every MBOX
+location/raw SHA-256, mailbox coverage and hashes, database relationships and
+search digest/FTS mappings without repairing data. It supplements the portable
+verifier: semantic hashes, parsed fields, extracted index text, processing/manual
+state and source completeness are not yet checked in Rust. Stop all writers first;
+WAL databases and journal/sidecar files are rejected without creating new files.
+`CARGO` selects Cargo and `RUST_TARGET_DIR` its build-output directory (defaults:
+`cargo` and checkout `target/`). `uv run` supplies Python only for the application
+under test and its portable verifier; import/database test logic runs in Rust.
+Rust tests internally set `ECT_RUST_RECENT_TEST_ROOT` and
+`ECT_RUST_RECENT_TEST_NAME` for an isolated recent-list fixture and child archive name.
+Existing `MAILARCHIVER_CLAMAV_LIBRARY`, `MAILARCHIVER_CLAMAV_DATABASE`,
+`MAILARCHIVER_CLAMAV_UPDATES`, `MAILARCHIVER_FRESHCLAM` and
+`MAILARCHIVER_CLAMAV_CERTIFICATES` select the native engine, bundled definitions,
+per-user definition updates, updater executable and signature certificates.
+The tests require the configured real scanner and Poppler for the PDF corpus.
+Failures retain local artifacts in `.tmp/rust-import-tests/`.
 
 `bag-info.txt` explicitly records that MBOX framing adds a final LF when a
 source message lacks one. The original source-byte SHA-256 disambiguates stored and recovered newline
@@ -559,11 +652,12 @@ The full test architecture and its explicit browser/Cocoa coverage boundary are
 documented in [`doc/END_TO_END_TESTING.md`](doc/END_TO_END_TESTING.md).
 
 The ordinary suite uses static MBOX and `.emlx` fixtures. Antivirus tests build
-the EICAR signature from fragments only inside a pytest temporary directory,
-ingest it with the real on-demand ClamAV daemon, and immediately delete the
+the EICAR signature from fragments only inside a disposable test directory,
+ingest it with the real embedded ClamAV engine, and immediately delete the
 generated source; no complete virus-test signature is tracked in Git. The
 separate end-to-end suite copies its tracked, virus-free source corpus, ingests
-110 discoveries, verifies deduplication, autosave exclusion, quarantine,
+210 observations with Rust-owned lifecycle assertions, and verifies deduplication,
+autosave exclusion, quarantine,
 newline preservation, attachment indexing, BagIt fixity, and the installed
 standalone verifier. Headless Chromium drives the shipped HTML and JavaScript
 through the real Python service bridge, including empty-query suppression, complete searches,
@@ -621,3 +715,45 @@ license bundle produced by `make runtime-license-bundle LICENSE_OUTPUT=PATH`.
 
 Development PST/OST imports require `make pst-importer mcti-scan pff-converter`.
 The DMG bundles these executables; the host never loads libpff.
+
+## Local Windows MSIX prototype (2026-10-06)
+
+See [Windows MSIX test packaging](doc/WINDOWS_MSIX_TEST.md) for automated build/sign/test commands,
+private Python helper discovery, external WebView2 detection, native Windows
+evidence and unresolved installation/import/scanner/converter requirements.
+This local prototype is not a released or fully validated Windows application.
+
+For direct Cargo commands, `CARGO_TARGET_DIR` selects a reusable build cache;
+for Make targets, use `RUST_TARGET_DIR` instead.
+`ECT_RUST_ENGINE_PYTHON` remains a development interpreter override; packaged
+builds otherwise discover their private Python beside the executable.
+
+Windows test signing uses the GitHub Actions secret/environment variable
+`MSIX_TEST_CERT_PFX_BASE64`, containing the base64-encoded persistent test PFX.
+Only the signing step receives it. Local signing requires the same variable;
+missing or mismatched keys fail rather than creating a new certificate. The
+public identity is `scripts/win/test-signing.cer`; private keys never belong in
+Git or artifacts. Testers trust it once, until expiration or deliberate rotation.
+
+## Python desktop delivery
+
+`make dmg` packages the Python GUI, bundled runtime, native dependencies, schemas,
+plugins and importer tools. It retains the existing application identity, Sparkle
+feed and document ownership. `SIGNING_IDENTITY` selects a local Developer ID
+identity. `make test-dmg DMG=...` repeats mounted synthetic/headless validation;
+physical interaction is separate acceptance. Building does not install or publish.
+
+Windows MSIX contains a frozen Python `ect.exe` built separately on x64 and ARM64.
+Installed CI exercises production search, autocomplete, exact message retrieval,
+native window launch, upgrade and uninstall on the same signed bundle. The alpha
+uses the persistent test certificate with explicit trust instructions. Windows
+updates are not supplied by the archived Rust WinSparkle adapter; native updater
+parity remains separate work. macOS retains Python's existing Sparkle integration.
+
+`[release-ci]` opts the current branch into signed/notarized DMG and Windows
+installation checks and signatures for both installers and complete XML.
+`make test-python-desktop-package` checks the Python entry point and package gates.
+`WINDOWS_ARCHIVE` and `WINDOWS_RELEASE_URL` select MSIX signing inputs;
+`make release-candidate-base APPCAST=...` authenticates published history and
+`make release-candidate-feed APPCAST=...` signs/verifies a candidate. No release
+or tag is created by restoring Python defaults.

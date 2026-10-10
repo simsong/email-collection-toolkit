@@ -7,7 +7,7 @@ on:
     branches: [main]
     paths-ignore:
       - README.md
-      - doc/**
+      - doc/RELEASE_NOTES.md
   workflow_dispatch:
     inputs:
       release_tag:
@@ -60,11 +60,10 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ inputs.release_tag }}
         run: |
-          {
-            gh api --paginate "repos/${GITHUB_REPOSITORY}/releases?per_page=100" \
-              --jq '.[] | select(.draft == false) | .tag_name'
-            if [[ -n "$RELEASE_TAG" ]]; then printf '%s\n' "$RELEASE_TAG"; fi
-          } | python3 scripts/update_site_releases.py --output website/data/releases.toml
+          gh api --paginate --slurp "repos/${GITHUB_REPOSITORY}/releases?per_page=100" \
+            --jq '[.[][] | select(.draft == false)]' > "$RUNNER_TEMP/published-releases.json"
+          make website-release-data RELEASES_JSON="$RUNNER_TEMP/published-releases.json" \
+            RELEASE_TAG="$RELEASE_TAG"
       - name: Include latest published Sparkle appcast
         env:
           GH_TOKEN: ${{ github.token }}
@@ -87,7 +86,13 @@ jobs:
             if [[ "$attempt" -eq 6 ]]; then exit 1; fi
             sleep "$attempt"
           done
-          make check-appcast APPCAST="$RUNNER_TEMP/latest-appcast.xml" RELEASE_TAG="$appcast_tag" ARGS=--require-signed-feed
+          platform_args="--platform macos"
+          windows_asset="$(gh release view "$appcast_tag" --repo "$GITHUB_REPOSITORY" \
+            --json assets --jq '.assets[] | select(.name | endswith(".msixbundle")) | .name')"
+          if [[ -n "$windows_asset" ]]; then
+            platform_args="$platform_args --platform windows"
+          fi
+          make check-appcast APPCAST="$RUNNER_TEMP/latest-appcast.xml" RELEASE_TAG="$appcast_tag" ARGS="--require-signed-feed $platform_args"
           cp "$RUNNER_TEMP/latest-appcast.xml" website/static/updates/mac/appcast.xml
       - name: Build Zola site
         run: zola --root website build --output-dir "$RUNNER_TEMP/mail-archiver-site"

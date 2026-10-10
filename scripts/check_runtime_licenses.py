@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import platform
 import shutil
@@ -28,6 +29,8 @@ LICENSE_BASENAMES = ("copying", "copyright", "license", "notice")
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 NOTICE_FILES = ("COPYRIGHT", "LICENSE", "THIRD_PARTY_NOTICES.md", "licenses/publicsuffix-MPL-2.0.txt")
 PROXY_TOOLS_LICENSE = REPOSITORY_ROOT / "licenses/proxy_tools-BSD.txt"
+# The locked clr_loader wheel includes MIT text but omits its machine-readable label.
+CLR_LOADER_MIT_SHA256 = "dd6bdca10cdc3b24c6b0b6cef5fd611b7feb6917f127833283ddcdb310d3b453"
 
 
 class LicenseRecord(BaseModel):
@@ -68,6 +71,11 @@ def license_label(item: Distribution) -> str:
     if classifiers:
         return "; ".join(classifiers)
     value = item.metadata.get(METADATA_LICENSE, "").strip()
+    if not value and canonicalize_name(item.metadata[METADATA_NAME]) == "clr-loader":
+        for filename in license_files(item):
+            with Path(str(item.locate_file(filename))).open("rb") as handle:
+                if hashlib.file_digest(handle, "sha256").hexdigest() == CLR_LOADER_MIT_SHA256:
+                    return "MIT (verified complete license text; wheel omits metadata label)"
     return value.splitlines()[0].strip() if value else "UNKNOWN"
 
 

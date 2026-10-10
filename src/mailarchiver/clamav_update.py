@@ -73,14 +73,15 @@ def validate_definitions(definitions: DefinitionSet) -> None:
     with ClamScanner(definitions=definitions) as scanner:
         if scanner.infected(b"From: offline@example.test\nSubject: clean\n\nA clean validation message.\n"):
             raise ValueError("Clean definition-validation fixture was detected as infected")
-        if not scanner.infected(EICAR):
+        verdict = scanner.scan_sample(EICAR)
+        if verdict.status != "infected":
             raise ValueError("Updated definitions did not detect EICAR")
 
 
-def publish_definitions(staging: Path, root: Path, baseline: DefinitionSet) -> UpdateResult:
+def publish_definitions(staging: Path, root: Path, baseline: DefinitionSet | None) -> UpdateResult:
     """Caller holds update_lock. A failed validation cannot replace active.json."""
     definitions = read_definitions(staging, "updated")
-    if definitions.daily.version < baseline.daily.version:
+    if baseline is not None and definitions.daily.version < baseline.daily.version:
         raise ValueError("Refusing to replace definitions with an older daily database")
     validate_definitions(definitions)
     generation = uuid4().hex
@@ -99,15 +100,30 @@ def publish_definitions(staging: Path, root: Path, baseline: DefinitionSet) -> U
     return UpdateResult(versions=definitions.versions, published=definitions.daily.published, directory=destination)
 
 
+def publish_downloaded_definitions(
+    staging: Path, root: Path, baseline: DefinitionSet | None, diagnostics: str,
+) -> UpdateResult:
+    """Retain updater evidence even when publication already moved staging."""
+    files = ", ".join(sorted(path.name for path in staging.iterdir()))
+    try:
+        return publish_definitions(staging, root, baseline)
+    except (OSError, ValueError, RuntimeError) as error:
+        raise RuntimeError(f"Downloaded definitions failed validation or publication: {error}; files: {files}; "
+                           f"FreshClam: {diagnostics[-4096:]}") from error
+
+
 def refresh_definitions() -> UpdateResult:
     root = update_root()
     with application_write_activity(), update_lock(root):
-        baseline = selected_definitions()
+        try:
+            baseline = selected_definitions()
+        except (OSError, ValueError, OverflowError):
+            baseline = None
         with tempfile.TemporaryDirectory(prefix=".update-", dir=root) as temporary:
             workspace = Path(temporary)
             staging = workspace / "definitions"
             staging.mkdir()
-            for path in baseline.directory.iterdir():
+            for path in baseline.directory.iterdir() if baseline is not None else ():
                 if path.is_file() and (path.suffix in (".cvd", ".cld", ".sign") or path.name == "freshclam.dat"):
                     shutil.copyfile(path, staging / path.name)
             state = root / "freshclam.dat"
@@ -121,8 +137,26 @@ def refresh_definitions() -> UpdateResult:
             finally:
                 if (staging / "freshclam.dat").is_file():
                     shutil.copyfile(staging / "freshclam.dat", state)
-            if result.returncode:
+            if result.returncode or "cool-down until" in (result.stdout + result.stderr):
                 raise RuntimeError(f"Definition update failed ({result.returncode}): {(result.stdout + result.stderr)[-4096:]}")
+            return publish_downloaded_definitions(staging, root, baseline, result.stdout + result.stderr)
+
+
+def seed_definitions(source: Path) -> UpdateResult:
+    """Copy and verify a local baseline without changing its source or CDN state."""
+    root = update_root()
+    definitions = read_definitions(source, "development")
+    with application_write_activity(), update_lock(root):
+        try:
+            baseline = selected_definitions()
+        except (OSError, ValueError, OverflowError):
+            baseline = None
+        with tempfile.TemporaryDirectory(prefix=".seed-", dir=root) as temporary:
+            staging = Path(temporary) / "definitions"
+            staging.mkdir()
+            for path in source.iterdir():
+                if path.is_file() and (path in tuple(item.path for item in definitions.files) or path.suffix == ".sign"):
+                    shutil.copyfile(path, staging / path.name)
             return publish_definitions(staging, root, baseline)
 
 
@@ -157,9 +191,13 @@ def _refresh_development() -> UpdateResult:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--seed", type=Path, help="verify and copy an existing local definition set into application storage")
     parser.add_argument("--development", action="store_true", help="update etc/clamdb for development and DMG builds")
     args = parser.parse_args()
-    print((refresh_development() if args.development else refresh_definitions()).model_dump_json(indent=2))
+    if args.seed is not None and args.development:
+        parser.error("--seed and --development are mutually exclusive")
+    result = seed_definitions(args.seed) if args.seed is not None else refresh_development() if args.development else refresh_definitions()
+    print(result.model_dump_json(indent=2))
 
 
 if __name__ == "__main__":

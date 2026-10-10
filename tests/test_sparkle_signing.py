@@ -18,6 +18,7 @@ import sys
 import tarfile
 import tomllib
 import xml.etree.ElementTree as xml
+from typing import Literal
 
 import pytest
 
@@ -470,3 +471,43 @@ def test_release_key_must_match_embedded_public_key(monkeypatch: pytest.MonkeyPa
         monkeypatch.setenv(SPARKLE_PRIVATE_KEY_SECRET, base64.b64encode(bytes(expanded_size)).decode("ascii"))
         with pytest.raises(ValueError, match="reviewed migration"):
             signing_key()
+
+
+def test_mixed_feed_authenticates_both_installers_and_complete_xml(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Shared update requirement: one signed feed carries distinct platform items."""
+    from Cryptodome.Signature import eddsa
+
+    signer = Path(__file__).parents[1] / ".tools/sparkle/2.10.0/bin/sign_update"
+    assert signer.exists(), "Run make test-sparkle-signing to provision the verified tools"
+    seed = bytes(range(32))
+    monkeypatch.setenv(SPARKLE_PRIVATE_KEY_SECRET, base64.b64encode(seed).decode("ascii"))
+    public = base64.b64encode(eddsa.import_private_key(seed).public_key().export_key(format="raw")).decode("ascii")
+    version = tomllib.loads((Path(__file__).parents[1] / "pyproject.toml").read_text())["project"]["version"]
+    tag, channel, build, display = release_metadata(version)
+    appcast = tmp_path / "mixed.xml"
+    appcast.write_text('<rss><channel><title>Fixture</title></channel></rss>\n', encoding="utf-8")
+    prefix = f"https://github.com/simsong/email-collection-toolkit/releases/download/{tag}"
+    releases = []
+    cases: tuple[tuple[Literal["macos", "windows"], str], ...] = (("macos", "dmg"), ("windows", "msixbundle"))
+    for platform, extension in cases:
+        archive = tmp_path / f"fixture.{extension}"
+        archive.write_bytes(f"synthetic {platform} installer bytes".encode())
+        signed = signed_archive(archive, signer, signing_key())
+        release = AppcastRelease(tag=tag, channel=channel, sparkle_version=build, display_version=display,
+                                url=f"{prefix}/{archive.name}", archive=signed, platform=platform,
+                                hardware="arm64" if platform == "macos" else None)
+        releases.append(release)
+        append_item(appcast, release)
+        archive.write_bytes(b"tampered installer")
+        with pytest.raises(RuntimeError, match="signature verification failed"):
+            verify_signed_archive(archive, signer, signing_key(), signed.signature)
+    with pytest.raises(ValueError, match="already contains"):
+        append_item(appcast, releases[0])
+    sign_feed(appcast, signer, signing_key())
+    check_appcast(appcast, tag, require_signed_feed=True, public_key=public,
+                  expected_platforms=frozenset({"macos", "windows"}))
+    assert {enclosure.get("{http://www.andymatuschak.org/xml-namespaces/sparkle}os")
+            for enclosure in xml.parse(appcast).findall("channel/item/enclosure")} == {"macos", "windows"}
+    appcast.write_bytes(appcast.read_bytes().replace(b"fixture.msixbundle", b"changed.msixbundle"))
+    with pytest.raises(ValueError, match="signature verification failed"):
+        check_appcast(appcast, tag, require_signed_feed=True, public_key=public)

@@ -29,13 +29,16 @@ const state = {
   selected: null,
   selectionRequest: null,
   searchRequest: 0,
+  rustSearch: null,
   partRequest: 0,
+  preferredBodyType: null,
   remoteContentAuthorizedMessage: null,
   remoteContentAuthorizedPart: null,
   view: null,
   fileDragSupported: false,
   dragExports: new Map(),
   dragPreparing: new Set(),
+  dragEpoch: 0,
   previewUrl: null,
   ingestStatusText: "",
   linkDestination: "",
@@ -90,7 +93,7 @@ window.setTimeout(() => {
 async function initialize() {
   if (initialized) return;
   initialized = true;
-  const parameters = new URLSearchParams(window.location.search);
+  const parameters = new URLSearchParams(window.__rustWindowParameters || window.location.search);
   if (parameters.get("native-smoke") === "1") {
     await runNativeSmoke();
     return;
@@ -225,7 +228,7 @@ function installFrameFindShortcuts(frame) {
   const frameDocument = frame.contentDocument;
   if (!frameDocument) return false;
   frameDocument.addEventListener("keydown", event => {
-    if (!event.metaKey || event.altKey || !state.view) return;
+    if (!(event.metaKey || event.ctrlKey) || event.altKey || !state.view) return;
     if (event.key.toLowerCase() === "f") {
       event.preventDefault();
       void openMessageFind();
@@ -429,8 +432,7 @@ function resetArchiveView() {
   clearMessageFindUpdate();
   state.remoteContentAuthorizedMessage = null;
   state.remoteContentAuthorizedPart = null;
-  state.dragExports.clear();
-  state.dragPreparing.clear();
+  invalidateDragExports();
   clearResultViewport();
   showSingleMessageSelection();
   renderSearchFilters();
@@ -777,9 +779,26 @@ function scheduleSuggestions() {
 }
 
 async function loadSuggestions(query, request) {
-  const suggestions = await call(() => window.pywebview.api.suggestions(query, SUGGESTION_LIMIT));
-  if (!suggestions || request !== state.suggestionRequest || elements.search.value.trim() !== query) return;
-  renderSuggestions(suggestions);
+  try {
+    let suggestions;
+    if (window.pywebview.api.suggestions_start) {
+      const {generation} = await window.pywebview.api.suggestions_start(query, SUGGESTION_LIMIT);
+      while (request === state.suggestionRequest && elements.search.value.trim() === query) {
+        const status = await window.pywebview.api.suggestions_status(generation);
+        if (status.stale) return;
+        if (status.complete) {
+          if (status.error) throw new Error(status.error);
+          suggestions = status.result;
+          break;
+        }
+        await new Promise(resolve => window.setTimeout(resolve, 75));
+      }
+    } else suggestions = await window.pywebview.api.suggestions(query, SUGGESTION_LIMIT);
+    if (!suggestions || request !== state.suggestionRequest || elements.search.value.trim() !== query) return;
+    renderSuggestions(suggestions);
+  } catch (error) {
+    if (request === state.suggestionRequest && elements.search.value.trim() === query) showError(error);
+  }
 }
 
 function renderSuggestions(suggestions) {
@@ -846,6 +865,9 @@ function acceptSuggestion(index) {
 }
 
 function closeSuggestions() {
+  if (window.pywebview?.api?.suggestions_cancel) {
+    void window.pywebview.api.suggestions_cancel().catch(() => {});
+  }
   window.clearTimeout(state.suggestionTimer);
   state.suggestionRequest += 1;
   state.suggestionItems = [];
@@ -896,12 +918,40 @@ function renderSearchFilters() {
   elements["search-filters"]?.replaceChildren(...chips);
 }
 
+async function resumeReaderSearch() {
+  if (!state.rustSearch) return;
+  const selected = [...state.resultSelection];
+  const displayed = state.offset;
+  const holder = elements["result-list"].querySelector(".tabulator-tableholder");
+  const scrollTop = holder?.scrollTop || 0;
+  const request = ++state.searchRequest;
+  state.rustSearch = null;
+  // Rebuild only results: keep the message view, part choice and find state.
+  await runCompleteSearch({query: state.query, sortBy: state.sortBy,
+    sortDirection: state.sortDirection, searchAttachments: state.searchAttachments,
+    mailboxSelections: state.showTree ? [...state.mailboxSelections] : [], request});
+  while (request === state.searchRequest && state.rustSearch &&
+    state.offset < Math.min(displayed, state.rustSearch.count)) {
+    const before = state.offset;
+    await loadRustSearchPage(state.rustSearch);
+    if (state.offset === before) break;
+  }
+  if (request !== state.searchRequest) return;
+  state.resultTable.selectRow(selected);
+  if (holder) holder.scrollTop = scrollTop;
+}
+window.addEventListener("mailarchiver-reader-resumed", () => {
+  void resumeReaderSearch().catch(error => showError(error.message));
+});
+
 async function runSearch() {
   const query = effectiveQuery();
   const sortBy = elements["sort-by"].value;
   const sortDirection = state.sortDirection;
   const searchAttachments = elements["search-attachments"].checked;
   const request = ++state.searchRequest;
+  state.rustSearch = null;
+  if (window.pywebview.api.search_cancel) void window.pywebview.api.search_cancel().catch(() => {});
   clearCurrentMessageFind();
   clearLinkDestination();
   state.partRequest += 1;
@@ -935,6 +985,10 @@ async function runCompleteSearch(context) {
   const {query, sortBy, sortDirection, searchAttachments, mailboxSelections, request} = context;
   Object.assign(state, {query, sortBy, sortDirection, searchAttachments, offset: 0});
   clearResultViewport();
+  if (window.pywebview.api.search_start) {
+    await runIncrementalSearch(context);
+    return;
+  }
   const first = await call(() => window.pywebview.api.search(
     query, 0, sortBy, sortDirection, searchAttachments, mailboxSelections, RESULT_INITIAL_LIMIT,
   ));
@@ -962,6 +1016,72 @@ async function runCompleteSearch(context) {
   appendResults(remainder.results, request);
   state.offset += remainder.results.length;
   updateResultStatus();
+}
+
+async function runIncrementalSearch(context) {
+  const {query, sortBy, sortDirection, searchAttachments, mailboxSelections, request} = context;
+  try {
+    const started = await window.pywebview.api.search_start(query, sortBy, sortDirection, searchAttachments, mailboxSelections);
+    if (request !== state.searchRequest) return;
+    state.highlightTerms = started.highlight_terms;
+    const search = {request, generation: started.generation, count: 0, complete: false, loading: false, error: null};
+    state.rustSearch = search;
+    elements["result-status"].classList.add("background-search");
+    let acknowledged = 0;
+    while (request === state.searchRequest) {
+      const status = await window.pywebview.api.search_status(search.generation);
+      if (request !== state.searchRequest || status.stale) return;
+      Object.assign(search, {count: status.count, complete: status.complete, error: status.error || search.error});
+      // Paint the first two full matching batches before continuing the ID stream.
+      // Once complete, fetch additional display pages only as the user scrolls.
+      if (state.offset < Math.min(search.count, 1024)) await loadRustSearchPage(search, Math.min(512, 1024 - state.offset));
+      if (request !== state.searchRequest) return;
+      updateRustSearchStatus(search);
+      if (search.error || status.complete) { if (status.complete && !search.error) showResultTable(); return; }
+      if (status.window > acknowledged && state.offset >= search.count) {
+        await new Promise(resolve => window.requestAnimationFrame(() => window.setTimeout(resolve, 0)));
+        if (request !== state.searchRequest) return;
+        acknowledged = status.window;
+        await window.pywebview.api.search_advance(search.generation, acknowledged);
+      }
+      await new Promise(resolve => window.setTimeout(resolve, 75));
+    }
+  } catch (error) {
+    if (request !== state.searchRequest) return;
+    elements["result-status"].classList.remove("background-search");
+    elements["result-status"].textContent = `${state.offset.toLocaleString()} messages shown; search incomplete: ${error.message}`;
+  }
+}
+
+async function loadRustSearchPage(search, limit = 512) {
+  if (search !== state.rustSearch || search.loading || state.offset >= search.count) return;
+  search.loading = true;
+  try {
+    const page = await window.pywebview.api.search_page(search.generation, state.offset, limit);
+    if (search !== state.rustSearch || page.stale) return;
+    if (!page.results.length) return;
+    state.results.push(...page.results);
+    showResultTable();
+    await state.resultTable.addData(page.results, false);
+    if (search !== state.rustSearch) return;
+    state.offset = state.results.length;
+    updateRustSearchStatus(search);
+  } catch (error) {
+    if (search === state.rustSearch) {
+      search.error = `Unable to load results: ${error.message}`;
+      updateRustSearchStatus(search);
+    }
+  } finally { search.loading = false; }
+}
+
+function updateRustSearchStatus(search) {
+  if (search !== state.rustSearch) return;
+  const shown = state.offset.toLocaleString();
+  elements["result-status"].classList.toggle("background-search", !search.complete && !search.error);
+  elements["result-status"].textContent = search.error
+    ? `${shown} messages shown; search incomplete: ${search.error}`
+    : !search.complete ? `Searching in background… ${shown} messages shown`
+    : `${search.count.toLocaleString()} message${search.count === 1 ? "" : "s"}${search.count > state.offset ? ` · ${shown} shown; scroll for more` : ""}`;
 }
 
 function renderSearchHelp() {
@@ -1023,6 +1143,13 @@ function initializeResultTable() {
       resizable: false,
       widthGrow: 1,
     }],
+  });
+  state.resultTable.on("scrollVertical", () => {
+    const search = state.rustSearch;
+    const holder = elements["result-list"].querySelector(".tabulator-tableholder");
+    if (search && holder && holder.scrollTop + holder.clientHeight >= holder.scrollHeight - 600) {
+      void loadRustSearchPage(search);
+    }
   });
   state.resultTable.on("rowClick", selectResultRow);
   state.resultTable.on("rowDblClick", openResultWindow);
@@ -1277,10 +1404,13 @@ async function selectMessage(messagePk) {
   updateMessageFileWell();
   renderMessageHeaders(view);
   elements["part-select"].replaceChildren(...view.body_parts.map(partOption));
-  elements["part-select"].value = String(view.preferred_part_id);
+  const defaultPart = view.body_parts.find(part => part.part_id === view.preferred_part_id);
+  const partId = defaultPart?.content_type === state.preferredBodyType ? view.preferred_part_id
+    : (view.body_parts.find(part => part.content_type === state.preferredBodyType)?.part_id ?? view.preferred_part_id);
+  elements["part-select"].value = String(partId);
   renderAttachments(view.attachments);
   renderLocations(view);
-  const displayed = await showPart(view.preferred_part_id, false);
+  const displayed = await showPart(partId, false);
   if (state.selectionRequest !== messagePk || state.selected !== messagePk || !displayed) return;
   if (state.messageFindQuery) await moveMessageFind(1);
 }
@@ -1338,7 +1468,7 @@ function navigateResults(event) {
 }
 
 function handleCommandShortcut(event) {
-  if (!event.metaKey || event.altKey) return;
+  if (!(event.metaKey || event.ctrlKey) || event.altKey) return;
   if (isTextInput(event.target) && event.target !== elements["message-find-query"]) return;
   if (event.key.toLowerCase() === "a" && !isTextInput(event.target)) {
     if (state.commandAContext === "results") {
@@ -1728,6 +1858,8 @@ async function showPart(partId, allowRemote) {
 
 async function selectMessagePart(partId, allowRemote) {
   if (state.selected === null || state.selectionRequest !== state.selected) return;
+  const chosenPart = state.view?.body_parts.find(part => part.part_id === partId);
+  if (chosenPart && !allowRemote) state.preferredBodyType = chosenPart.content_type;
   if (allowRemote && state.selected !== null) {
     state.remoteContentAuthorizedMessage = state.selected;
     state.remoteContentAuthorizedPart = partId;
@@ -1956,6 +2088,14 @@ function showSingleMessageSelection() {
   elements["message-well"].classList.remove("multi-selection");
 }
 
+function invalidateDragExports() {
+  state.dragEpoch += 1;
+  state.dragExports.clear();
+  state.dragPreparing.clear();
+  if (elements["message-file-well"]) updateMessageFileWell();
+}
+window.addEventListener("mailarchiver-exports-invalidated", invalidateDragExports);
+
 function dragExportKey(messagePks) {
   return [...new Set(messagePks)].sort((left, right) => left - right).join(",");
 }
@@ -1995,8 +2135,10 @@ async function prepareDrag(messagePks) {
   if (!messagePks.length) return;
   const key = dragExportKey(messagePks);
   if (state.dragExports.has(key) || state.dragPreparing.has(key)) return;
+  const epoch = state.dragEpoch;
   state.dragPreparing.add(key);
   const info = await call(() => window.pywebview.api.prepare_drag(messagePks));
+  if (epoch !== state.dragEpoch) return;
   state.dragPreparing.delete(key);
   if (info) {
     state.dragExports.set(key, info);
