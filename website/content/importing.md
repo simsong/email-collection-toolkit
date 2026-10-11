@@ -6,8 +6,10 @@ description = "Configure local and IMAP sources, then choose a fast refresh or c
 
 
 Email Collection Toolkit imports supported local email files and folders into
-an archive without changing the sources. Google Takeout MBOX, Maildir, EML,
-Babyl, and complete Apple Mail `.emlx` files can be used today.
+an archive without changing the sources. MBOX (including Google Takeout),
+Maildir, EML, Babyl, and complete Apple Mail `.emlx` files can be used today.
+The macOS application also reads Outlook PST and OST files, with
+[best-effort extraction](https://github.com/simsong/email-collection-toolkit/blob/main/doc/PST_IMPORTER.md).
 
 ## Import with the application
 

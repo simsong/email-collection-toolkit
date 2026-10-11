@@ -1,45 +1,5 @@
 <!-- Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved. -->
 
-## Python webview comparison branch
-
-`codex/python-webview` keeps the shared Python GUI on macOS and adds an x64
-Windows reader using WebView2. `make gui` runs the shared application;
-`make test-python-reader` and `make test-python-reader-native` validate synthetic
-reading/export and the native bridge. Windows New/Import now uses the common
-Python engine with native locks and byte-preserving MBOX I/O. See
-[the comparison notes](doc/PYTHON_WEBVIEW.md) for validation and remaining gaps.
-
-`make prepare-windows-clamav` explicitly downloads the pinned official portable
-x64 runtime into `.tmp/clamav-x64`; it installs no service. `make clamav-update`
-fetches and validates definitions in application-specific user storage, outside
-archives. `make clamav-seed SEED_DIRECTORY=...` copies an existing baseline and
-validates it without modifying the source or clearing CDN cooldown state.
-`make freshclam` prepares `etc/clamdb` for packaging. Native runtime and baseline
-definitions are prerequisites for the MSIX builder, which requires and bundles
-the runtime and definitions. Existing `MAILARCHIVER_CLAMAV_LIBRARY`,
-`MAILARCHIVER_FRESHCLAM`, `MAILARCHIVER_CLAMAV_DATABASE`,
-`MAILARCHIVER_CLAMAV_CERTIFICATES`, and `MAILARCHIVER_CLAMAV_UPDATES` override
-the engine, updater, baseline databases, signing-certificate directory, and
-per-user definition-update location respectively.
-
-`make prepare-windows-updater` prepares the pinned WinSparkle DLL and licenses;
-the MSIX includes them. `make test-windows-scanner` and `make test-windows-updater`
-exercise the native runtime and update filtering. Help offers update checks and
-settings. Source launches support manual discovery only. The shared feed must
-publish a signed Python Windows enclosure with the package identity documented
-in the requirements before an installed Python upgrade can be offered.
-
-`make msix-test` builds the Windows payload; `make test-msix MSIX_PACKAGE=...
-MSIX_EVIDENCE=...` tests relocation. `make msix-bundle MSIX_PAYLOADS=...` signs the
-bundle using `MSIX_TEST_CERT_PFX_BASE64`, the private key matching the existing
-public test certificate. Never publish that variable's value. `UV_CACHE_DIR`,
-`UV_PYTHON_INSTALL_DIR`, and `UV_PYTHON_BIN_DIR` may place uv's cache, managed
-interpreters, and interpreter links inside a development checkout. The packaging
-script temporarily sets `UV_PROJECT_ENVIRONMENT` to its isolated runtime venv.
-The focused lint target sets `PYTHONPATH` to the checkout solely to resolve
-repository-local test helpers; the packaged interpreter remains isolated.
-
-
 # Email Collection Toolkit
 
 `mailarchiver` turns scattered email exports into a durable archive that you
@@ -54,7 +14,8 @@ _NOTE --- THIS PROGRAM IS UNDER ACTIVE DEVELOPMENT. DO NOT USE OPERATIONALLY UNT
 ## macOS application
 
 For the macOS drag-to-Applications build, run `make dmg`. Python and GUI
-dependencies are bundled; ClamAV is optional. The target mounts its DMG and
+dependencies, the ClamAV engine and baseline definitions are bundled; the build
+fails if ClamAV is not installed. The target mounts its DMG and
 runs headless self-tests before publishing the local artifact. Visible native
 validation is an explicit local `make check-release` operation.
 See [macOS distribution](doc/MACOS_DISTRIBUTION.md) for installation, test commands,
@@ -107,8 +68,10 @@ notarization variables named above.
 Python/pywebview is the default desktop on macOS and Windows. `make gui` launches
 it; `make dmg` (also `make python-dmg`) builds the macOS Python application.
 Windows MSIX builds freeze that same Python entry point with its runtime and
-WebView2 integration. Windows archive writing remains unsupported; packaging a
-reader is not evidence of ingest/scanner parity.
+WebView2 integration, for x64 only. The Windows desktop opens, creates and
+imports into archives through the shared Python engine; it is an alpha (published
+builds so far are test-signed; release workflows now require Microsoft public
+signing), and PST/OST converters are not yet packaged for Windows.
 
 The Rust GUI migration is retired. Its source remains in
 [`rust/mailsearch-gui`](rust/mailsearch-gui) outside the supported Cargo workspace.
@@ -124,9 +87,9 @@ Rust importer development uses `make rust-programs` to build `mdti-validator`
 `mcti-generator`, and [`pst-importer`](doc/PST_IMPORTER.md). See [MCT Importer API 1.0](doc/MCT_IMPORTER_API.md) for
 the contract, individual targets and validation pipeline. Rust/Cargo are
 required to build these tools. The standalone PST helper uses Microsoft's Rust crate;
-the CLI archive host runs it through the common processing pipelines. Native
-installer bundling remains planned. Packaged PST users will
-need the compiled helper, not a compiler.
+the CLI archive host runs it through the common processing pipelines. The macOS
+DMG bundles `pst-importer`, `mcti-scan` and the `pff-converter`, so packaged
+users need no compiler; the Windows MSIX does not yet include them.
 
 PST test inventories and the Rust corpus downloader live in [`pst/`](pst/README.md);
 use `make pst-download-plan` to inspect the plan and `make pst-download` to fetch
@@ -209,15 +172,19 @@ locations.
 
 ## Install
 
-Install [uv](https://docs.astral.sh/uv/) and ClamAV, configure the ClamAV
-daemon and signatures, then prepare this project:
+Install [uv](https://docs.astral.sh/uv/) and a ClamAV installation that
+provides `libclamav` (for example, Homebrew `clamav` on macOS), then prepare
+this project and its local virus definitions:
 
 ```console
 cd email-collection-toolkit
 uv sync
+make freshclam
 ```
 
-Run the project command with `uv run mailarchiver`.
+`make freshclam` seeds and updates `etc/clamdb` from the installed database.
+No ClamAV daemon is configured or started; see
+[embedded antivirus](doc/EMBEDDED_CLAMAV.md). Run the project command with `uv run mailarchiver`.
 
 Set the archive directory once for the shell session:
 
@@ -258,10 +225,10 @@ make install-mac TIKA_VERSION=X.Y.Z
 
 ## Batch import from an external drive
 
-Batch import uses the Python archive engine on macOS. The retired Rust GUI connected
-to that engine through its Import control; the CLI remains available for batch work. Windows archive writing is explicitly unsupported in
-this checkout. From a prepared macOS development checkout, with current ClamAV
-definitions and an owner-names file (one owner name or address per line):
+Batch import uses the Python archive engine, the same one behind the desktop
+**Import** command. The CLI remains available for batch work. From a prepared
+macOS development checkout, with current ClamAV definitions and an owner-names
+file (one owner name or address per line):
 
 ```sh
 export MAIL_ARCHIVE_DIR="$HOME/EmailArchive"
@@ -287,9 +254,9 @@ not arbitrary documents or mail hidden inside every possible container format.
 
 The following command recursively reads MBOX, Emacs RMAIL Babyl, EML, Maildir,
 and `.emlx` files below
-`SOURCE`.  It never changes those source files.  It starts `clamd` temporarily
-for the ingest run if no daemon is already listening on the configured local
-socket.
+`SOURCE`.  It never changes those source files.  With `--clamav` it scans
+new messages with the embedded ClamAV engine in a temporary worker process
+owned by the run; no daemon is started.
 
 Maildir message files are grouped at the Maildir root. Apple Mail `.emlx`
 cache files are grouped by their containing `.mbox` package hierarchy rather
@@ -301,28 +268,25 @@ Every CLI ingest requires either `--clamav` or `--no-scan`. The latter is an
 explicit antivirus opt-out and records each new message as not scanned; it
 does not certify mail as clean. A scanner failure never selects it automatically.
 
-Choose `--clamav` to scan each new
-message through the locally configured `clamd` socket before the message is
-written to a normal MBOX. Before starting any mailfile workers, the main
-ingest thread verifies that ClamAV is ready. If no healthy daemon is listening,
-mailarchiver starts one foreground daemon for this ingest only, reusing its
-loaded signatures, and stops it afterward. Each daemon started by mailarchiver
-uses a verified private per-run log and no PID file, so stale configured log or
-PID paths cannot prevent startup. An advisory lock serializes mailarchiver-owned
-daemons that share one configured socket. If a healthy external daemon already
-owns that socket, mailarchiver uses it and leaves it running.
-`MAILARCHIVER_CLAMD`, `MAILARCHIVER_CLAMDSCAN`,
-`MAILARCHIVER_CLAMD_CONFIG`, and `MAILARCHIVER_CLAMD_SOCKET` override the
-macOS Homebrew defaults for another local environment, including CI.
+Choose `--clamav` to scan each new message with `libclamav` before the
+message is written to a normal MBOX. Before starting any mailfile workers, the
+main ingest thread starts a run-owned scanner worker process that loads the
+engine and definitions, and stops it when the run ends. A stuck or crashed
+native scan can be terminated without taking down the ingest process.
+`MAILARCHIVER_CLAMAV_LIBRARY`, `MAILARCHIVER_CLAMAV_DATABASE`,
+`MAILARCHIVER_CLAMAV_CERTIFICATES`, `MAILARCHIVER_FRESHCLAM` and
+`MAILARCHIVER_CLAMAV_UPDATES` override the engine, baseline definitions,
+signature certificates, updater and per-user update location. The older
+`MAILARCHIVER_CLAMD*` variables are no longer read.
 
 This option does **not** enable on-access scanning, a login service, or a
-scheduled scan.  It requires a configured ClamAV signature database; scanner
+scheduled scan.  It requires usable ClamAV definitions; scanner
 startup or scan errors stop the current ingest rather than silently treating
 mail as clean.  A positive detection is retained in `INFECTED1.mbox`.
 
 To create a new archive from a directory and then search it, run from the
-repository root after installing the development dependencies and configuring
-ClamAV. Replace the paths with your source directory and a new archive location;
+repository root after installing the development dependencies and ClamAV
+definitions. Replace the paths with your source directory and a new archive location;
 `owner-names.txt` lists the owner's names or addresses, one per line.
 
 ```sh
@@ -582,10 +546,9 @@ SHA-256; it does not alter canonical message bytes.
 
 ### Graphical search desktop architecture
 
-The current graphical search tool uses pywebview with WKWebView on macOS.
-The compiled replacement candidates are Dioxus Desktop and Tauri, retaining Python
-archive services and system-webview rendering; see [DIOXUS.md](doc/DIOXUS.md).
-The current controller supports multiple archive documents and multiple
+The graphical search tool uses pywebview with WKWebView on macOS and WebView2
+on Windows. The compiled-UI replacement (Rust/Wry) was retired; see
+[the retrospective](rust/README.md). The current controller supports multiple archive documents and multiple
 independent search windows on one archive. Packaged GUI assets come from an
 application-owned, nonce-authenticated server bound to an ephemeral
 `127.0.0.1` port; it exposes no HTTP service API, and JavaScript calls Python
@@ -630,22 +593,22 @@ by default and can be shown explicitly. Named filter sets are stored atomically
 in the operating system's per-user preferences location, outside the archive.
 See [`doc/USER_MANUAL.md`](doc/USER_MANUAL.md#filter-by-original-mailbox).
 
-pywebview also supports Windows and Linux, but this application is not yet
-portable: attachment opening currently calls the macOS `open` command, Finder
-drag-out is macOS-specific, and only the Cocoa/WKWebView bridge has been tested.
-The Python writer and scanner also require Windows portability work. Full
-Windows support will be validated with the chosen UI framework and packaged
-Python backend; existing browser tests do not establish native Windows support.
+Windows uses the same application with a reader welcome window, Windows
+clipboard and file/URL opening, native locks and the Windows ClamAV runtime.
+Native file drag-out remains macOS-only. Linux is not a packaged target. See
+[the Windows Python desktop notes](doc/PYTHON_WEBVIEW.md).
 
 ## Versioning and Updating
 
 The [DevOps guide](doc/DEVOPS.md#github-actions) records the CI, Pages, and
 tagged-release GitHub Actions gates.
 
-One canonical PEP 440 version is used everywhere users see a version: package
-metadata and the About window currently say `1.0.0a10`. The annotated Git tag
-adds only `v`: `v1.0.0a10`. Alpha and beta releases use Sparkle's `preview`
-channel; stable releases use the default channel. The release parser accepts
+One canonical PEP 440 version, set in `pyproject.toml`, is used everywhere
+users see a version: package metadata and the About window show it, and the
+annotated Git tag adds only `v` (for example `1.0.0a19` and `v1.0.0a19`).
+Alpha and beta releases are published on Sparkle's `preview` channel; stable
+releases use the default channel. Installations choose which they receive
+under **Release only** or **Alpha / beta / development and release**. The release parser accepts
 only canonical `MAJOR.MINOR.PATCH`, `MAJOR.MINOR.PATCHaN`, or
 `MAJOR.MINOR.PATCHbN` versions and rejects all other forms. Sparkle uses a
 separate increasing internal build number solely to order updates.
@@ -724,17 +687,55 @@ license bundle produced by `make runtime-license-bundle LICENSE_OUTPUT=PATH`.
 Development PST/OST imports require `make pst-importer mcti-scan pff-converter`.
 The DMG bundles these executables; the host never loads libpff.
 
-## Local Windows MSIX prototype (2026-10-06)
+## Windows development
+
+Windows runs the same Python/pywebview application as macOS, using WebView2.
+`make gui` runs it from a checkout; `make test-python-reader` and
+`make test-python-reader-native` validate synthetic reading/export and the
+native bridge. Windows New/Import uses the common Python engine with native
+locks and byte-preserving MBOX I/O. See [the Windows Python desktop
+notes](doc/PYTHON_WEBVIEW.md) for validation and remaining gaps.
+
+`make prepare-windows-clamav` explicitly downloads the pinned official portable
+x64 runtime into `.tmp/clamav-x64`; it installs no service. `make clamav-update`
+fetches and validates definitions in application-specific user storage, outside
+archives. `make clamav-seed SEED_DIRECTORY=...` copies an existing baseline and
+validates it without modifying the source or clearing CDN cooldown state.
+`make freshclam` prepares `etc/clamdb` for packaging. Native runtime and baseline
+definitions are prerequisites for the MSIX builder, which requires and bundles
+the runtime and definitions. Existing `MAILARCHIVER_CLAMAV_LIBRARY`,
+`MAILARCHIVER_FRESHCLAM`, `MAILARCHIVER_CLAMAV_DATABASE`,
+`MAILARCHIVER_CLAMAV_CERTIFICATES`, and `MAILARCHIVER_CLAMAV_UPDATES` override
+the engine, updater, baseline databases, signing-certificate directory, and
+per-user definition-update location respectively.
+
+`make prepare-windows-updater` prepares the pinned WinSparkle DLL and licenses;
+the MSIX includes them. `make test-windows-scanner` and `make test-windows-updater`
+exercise the native runtime and update filtering. Help offers update checks and
+settings. Source launches support manual discovery only. The shared feed must
+publish a signed Python Windows enclosure with the package identity documented
+in the requirements before an installed Python upgrade can be offered.
+
+`make msix-test` builds the Windows payload; `make test-msix MSIX_PACKAGE=...
+MSIX_EVIDENCE=...` tests relocation. `make msix-bundle MSIX_PAYLOADS=...` signs the
+bundle using `MSIX_TEST_CERT_PFX_BASE64`, the private key matching the existing
+public test certificate. Never publish that variable's value. `UV_CACHE_DIR`,
+`UV_PYTHON_INSTALL_DIR`, and `UV_PYTHON_BIN_DIR` may place uv's cache, managed
+interpreters, and interpreter links inside a development checkout. The packaging
+script temporarily sets `UV_PROJECT_ENVIRONMENT` to its isolated runtime venv.
+The focused lint target sets `PYTHONPATH` to the checkout solely to resolve
+repository-local test helpers; the packaged interpreter remains isolated.
+
+## Windows MSIX packaging
 
 See [Windows MSIX test packaging](doc/WINDOWS_MSIX_TEST.md) for automated build/sign/test commands,
-private Python helper discovery, external WebView2 detection, native Windows
-evidence and unresolved installation/import/scanner/converter requirements.
-This local prototype is not a released or fully validated Windows application.
+external WebView2 detection and native Windows evidence. Windows packages are
+x64 alpha builds, not a fully validated Windows release.
 
 For direct Cargo commands, `CARGO_TARGET_DIR` selects a reusable build cache;
 for Make targets, use `RUST_TARGET_DIR` instead.
-`ECT_RUST_ENGINE_PYTHON` remains a development interpreter override; packaged
-builds otherwise discover their private Python beside the executable.
+`ECT_RUST_ENGINE_PYTHON` was the retired Rust GUI's helper-interpreter override;
+only historical Rust GUI tests still set it.
 
 Windows test signing uses the GitHub Actions secret/environment variable
 `MSIX_TEST_CERT_PFX_BASE64`, containing the base64-encoded persistent test PFX.
@@ -762,12 +763,14 @@ feed and document ownership. `SIGNING_IDENTITY` selects a local Developer ID
 identity. `make test-dmg DMG=...` repeats mounted synthetic/headless validation;
 physical interaction is separate acceptance. Building does not install or publish.
 
-Windows MSIX contains a frozen Python `ect.exe` built separately on x64 and ARM64.
+Windows MSIX contains private x64 CPython that runs `mailarchiver.desktop_entry`
+through `pythonw.exe`; ARM64 is not a package target.
 Installed CI exercises production search, autocomplete, exact message retrieval,
 native window launch, upgrade and uninstall on the same signed bundle. The alpha
 uses the persistent test certificate with explicit trust instructions. Windows
-updates are not supplied by the archived Rust WinSparkle adapter; native updater
-parity remains separate work. macOS retains Python's existing Sparkle integration.
+updates use the Python WinSparkle adapter (`winsparkle.py`), sharing update
+preferences with macOS Sparkle; an end-to-end signed Windows upgrade has not yet
+been validated.
 
 `[release-ci]` opts the current branch into signed/notarized DMG and Windows
 installation checks and signatures for both installers and complete XML.

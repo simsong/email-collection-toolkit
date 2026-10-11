@@ -2,13 +2,11 @@
 
 # Email Collection Toolkit User Manual
 
-This manual describes the current application. The planned compiled desktop
-experience will evaluate [Dioxus and Tauri](DIOXUS.md) with the existing Python
-archive engine; Windows delivery must include full ingest. This decision does
-not introduce an available Windows release or change the current macOS installer.
-
-Plan comparable trial implementations in Dioxus and Tauri before choosing a
-framework. Either approach retains the Python archive engine.
+This manual describes the current Python/pywebview application on macOS.
+Windows uses the same application in an x64 MSIX alpha; its menus
+use Ctrl where this manual says Command, and native file drag-out, PST/OST
+readers and some macOS dialogs are not available there. The compiled Rust
+desktop experiment was retired; see [its retrospective](../rust/README.md).
 
 This manual explains how an archivist creates and searches a mail archive.
 Email Collection Toolkit reads source mail without changing it. It stores deduplicated
@@ -24,8 +22,9 @@ indexes are derived data.
 
 On macOS, open the supplied DMG and drag **Email Collection Toolkit.app** to its
 **Applications** shortcut. Eject the disk and open the installed app.
-Python is included. Development builds are ad-hoc signed, not notarized;
-see [installation and signing notes](MACOS_DISTRIBUTION.md).
+Python and the ClamAV engine are included. Published releases are Developer ID
+signed and notarized; local development builds are ad-hoc signed unless a
+signing identity is selected. See [installation and signing notes](MACOS_DISTRIBUTION.md).
 
 Email Collection Toolkit currently reads:
 
@@ -42,8 +41,8 @@ old record has no original-header block, its visible headers are used instead.
 RMAIL labels and redundant visible headers remain only in the source Babyl
 container and are not email content.
 
-This checkout also imports PST using the Rust helper and OST through the external
-libpff converter; see [PST_IMPORTER.md](PST_IMPORTER.md) for build requirements, qualified
+Email Collection Toolkit also imports PST using the Rust helper and OST through the external
+libpff converter; the macOS application bundles both. See [PST_IMPORTER.md](PST_IMPORTER.md) for build requirements, qualified
 formats, and reconstruction/cache limits. Direct Gmail, Microsoft 365, and live
 IMAP connections remain planned. Complete local Apple Mail
 cache records from those providers can be imported now.
@@ -55,9 +54,12 @@ modes yet.
 
 Ask the person who installed Email Collection Toolkit to confirm that:
 
-1. `uv` and ClamAV are installed;
-2. ClamAV has a current signature database; and
+1. `uv` and a ClamAV installation providing `libclamav` are installed;
+2. `make freshclam` has prepared current virus definitions; and
 3. this checkout has been prepared with `uv sync`.
+
+The installed macOS application needs none of these: it bundles Python, the
+ClamAV engine and baseline definitions.
 
 Choose two locations:
 
@@ -407,12 +409,13 @@ ignored, removed from recents, and reported in the About window. **File → New*
 asks for a new or empty `.mailarchive` destination before initializing and
 opening it. On macOS, **File → Import…** opens one picker for local files and
 directories, sets up owner names, shows the destination and sources for final
-confirmation, and starts import. When ClamAV is missing or unconfigured, the
-import screen displays an antivirus warning. **Install ClamAV…** opens its
-official download page; it does not install software automatically. You may
-instead explicitly choose **Import Without Scanning**, or Cancel. The unscanned
-warning is retained in import history. Installing ClamAV later does not scan
-previously imported messages automatically.
+confirmation, and starts import. When the embedded ClamAV engine or its
+definitions are missing or unusable, the import screen displays an antivirus
+warning. **Install ClamAV…** opens the Email Collection Toolkit releases page so
+you can download a build with a working engine; it does not install software
+automatically. You may instead explicitly choose **Import Without Scanning**, or
+Cancel. The unscanned warning is retained in import history. Repairing antivirus
+later does not scan previously imported messages automatically.
 The **Import Directory…** button in the Ingests window starts the same workflow
 for that window's archive, opening the same source picker directly.
 In the picker, select files or directories and click **Import**. You can also
@@ -930,7 +933,7 @@ replace:
 * the planned per-archive `archive.yaml` source registry;
 * archive `config.yaml`, which stores owner include/exclude rules and navigation;
 * `MAIL_ARCHIVE_DIR` or `--archive`, which selects an archive;
-* the installed ClamAV configuration; or
+* the ClamAV definitions, which live in per-user application data; or
 * saved original-mailbox filter sets, which remain per-user preferences.
 
 Changing the highlight color affects only derived display rendering. It does

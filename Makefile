@@ -348,9 +348,8 @@ dmg: python-dmg
 python-dmg: ruff syntax-check sparkle-tools pst-importer mcti-scan pff-converter-bundle
 	uv run --group packaging python scripts/build_macos.py $(if $(SIGNING_IDENTITY),--signing-identity "$(SIGNING_IDENTITY)") $(ARGS)
 
-# Rust is the primary desktop app; SIGNING_IDENTITY selects Developer ID
-# (default ad-hoc), RUST_TARGET_DIR selects its release binary build directory.
-# Mounted acceptance is headless; interaction testing belongs to the user.
+# Retired Rust GUI packaging, kept for reference. The rust-gui-retired
+# prerequisite added below fails before this recipe runs; use make dmg.
 .PHONY: rust-dmg
 rust-dmg: ruff syntax-check sparkle-tools pst-importer mcti-scan pff-converter-bundle
 	uv run --locked python scripts/rust_release_metadata.py --build-command $(CARGO_RUN) build --locked --release -p mailsearch-rust --bin mailsearch-webview

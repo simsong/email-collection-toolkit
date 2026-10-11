@@ -53,18 +53,13 @@ resolved timestamps in UTC and preserve original message headers. Existing
 date-recovery rules and mailbox filing are unchanged; no archive rebuild is
 needed for the new search boundaries.
 
-## Planned compiled desktop experience
+## Desktop platforms
 
-The compiled desktop UI will evaluate Dioxus Desktop and Tauri with the system webview.
-Ingest, search, and canonical archive preservation remain in Python. Windows
-with full ingest is the next platform priority; Linux/snap delivery is deferred.
-The current application remains Python/pywebview, and this decision is not a
-Windows release announcement. See the
-[architecture decision](https://github.com/simsong/email-collection-toolkit/blob/main/doc/DIOXUS.md)
-for migration and validation requirements.
-
-Plan comparable trial implementations in Dioxus and Tauri before choosing a
-framework. Either approach retains the Python archive engine.
+The desktop application is Python/pywebview on both macOS and Windows. Ingest,
+search, and canonical archive preservation are in Python. A compiled Rust
+desktop was tried and retired in October 2026; see the
+[retrospective](https://github.com/simsong/email-collection-toolkit/blob/main/rust/README.md).
+Windows builds are x64 alpha packages; Linux/snap delivery is deferred.
 
 ## Apple Mail as a temporary provider adapter
 

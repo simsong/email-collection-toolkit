@@ -31,9 +31,9 @@ browser: installed Edge on Windows, Playwright Chromium on other platforms.
 ## Shared Python Windows desktop
 
 macOS and Windows share the Python document controller,
-search, completion, verified message reader, and HTML interface. The first
-Windows deliverable is an x64 reader MSIX, including private Python and locked
-runtime dependencies; no Rust GUI or private Rust-to-Python worker is required.
+search, completion, verified message reader, and HTML interface. The Windows
+deliverable is an x64 MSIX, including private Python and locked runtime
+dependencies; no Rust GUI or private Rust-to-Python worker is required.
 MSIX assembly must retain complete dependency licenses and reject unknown license
 evidence. Missing metadata labels require exact reviewed license-text evidence.
 WebView2 is external and missing/incompatible runtime startup must fail visibly,
@@ -784,8 +784,8 @@ channel across all visible member addresses.
 Scanner invocations persist typed clean/infected/not-scanned/unscannable/scanner-error
 results with diagnostics and engine/signature versions (NULL if unavailable).
 Errors and reported encryption/size-limit heuristics block filing and retain
-raw input for retry. Version queries are cached per daemon configuration;
-which unscannable conditions are reported depends on the daemon configuration.
+raw input for retry. Engine and definition versions are read once per scanner
+session; which unscannable conditions are reported depends on libclamav's scan options.
 Failed invocations may publish scan evidence only, never content or filing.
 
 
@@ -1555,7 +1555,8 @@ library unless another dependency is explicitly approved.
 ## Per-archive sources and import modes
 
 This source registry and Refresh/Rebuild workflow are planned. The current
-`archive.yaml` stores document preferences, not this registry.
+per-archive file is `config.yaml` (owner rules, `mbox_max_bytes`, plugin
+settings and the last import directory); it holds no source registry.
 
 Each archive has a versioned top-level `archive.yaml` operational configuration
 containing an ordered `sources` list. Every source has a stable, unique `id`
@@ -1934,14 +1935,13 @@ packaging, runtime provenance, signing, confinement and installed-fixture gates.
 No platform is supported merely because its package builds; validate full ingest,
 scanning, locking, cancellation and recovery in the installed application.
 
-[WINDOWS.md](WINDOWS.md) documents native Windows setup with x64 CPython managed
-by uv, MSYS2 build utilities, Rust/MSVC/Dioxus tooling, WebView2, and existing
-Makefile checks. It covers ARM64 and x64 uv installation separately from the
-application Python target. Setup must distinguish installed tools from validated
-application support. Windows delivery
+[WINDOWS.md](WINDOWS.md) documents building and running the x64 Python/WebView2
+desktop and MSIX; its Rust/MSVC/Dioxus setup sections are historical. Setup must
+distinguish installed tools from validated application support. Windows delivery
 requires full ingest, preservation, recovery, and native desktop validation;
-WSL/Linux results do not establish Windows compatibility. Windows writer and
-scanner portability remain implementation work, not shipped features.
+WSL/Linux results do not establish Windows compatibility. The Windows writer and
+embedded scanner are implemented (see [Shared Python Windows desktop](#shared-python-windows-desktop));
+PST/OST converters are not yet packaged for Windows.
 
 ## macOS desktop delivery
 
@@ -2351,13 +2351,8 @@ rejects boolean, floating-point, and string alternatives without coercion.
 
 ## Current acquisition boundaries
 
-No release Desktop OAuth client is bundled yet. The shared-client end-user
-flow remains deferred until a maintainer supplies and validates that public
-configuration in release artifacts. Current authorization requires a developer
-client override. Installing that override validates and writes the same bytes.
-Known consumer domains need no DNS lookup; transient DNS and token-refresh
-transport failures are disclosed as errors rather than negative detection or
-fresh consent. Credentials are stored only after the profile matches.
+The application contains no OAuth client or account authorization; see
+[Remote account authorization](#remote-account-authorization).
 
 Directory import reports and skips `.partial.emlx` records while retaining
 complete supported records. Direct selection of a partial record is rejected,
@@ -2469,6 +2464,10 @@ Private suffix entries remain excluded, matching the prior tldextract policy.
 No Requests-based fetching or public-suffix network update occurs at runtime.
 
 ### Rust desktop migration and retained reader prototype
+
+> Historical: the Rust GUI was retired on 2026-10-10. Requirements below that
+> concern the Rust desktop are superseded; those for the retained Rust importer,
+> verifier and MIME tools still apply. See [the retrospective](../rust/README.md).
 
 Reader inspection must borrow unchanged MIME text and count decoded attachment
 sizes with bounded transfer-decoder storage. Strict importer validation keeps its
@@ -2789,12 +2788,11 @@ Rust attachment opening must render an accessible confirmation dialog rather
 than rely on webview JavaScript confirm support. Cancel/Escape must leave the
 attachment unopened; only explicit Open may launch its exported temporary copy.
 
-## Local Windows MSIX prototype (2026-10-06)
+## Local Windows MSIX prototype (2026-10-06, historical)
 
-See [Windows MSIX test packaging](WINDOWS_MSIX_TEST.md) for automated build/sign/test commands,
-private Python helper discovery, external WebView2 detection, native Windows
-evidence and unresolved installation/import/scanner/converter requirements.
-This local prototype is not a released or fully validated Windows application.
+See [Windows MSIX test packaging](WINDOWS_MSIX_TEST.md) for automated build/sign/test commands
+and external WebView2 detection. The current package requirements are under
+[Windows consolidation](#windows-consolidation-october-10-2026).
 
 The downloadable `windows-msix-install-test` artifact contains exactly one installer,
 `base.msixbundle`, plus its public test certificate and checksum inventory. The
@@ -2812,10 +2810,10 @@ Local Machine/Trusted People, verifies its presence, and displays the outcome.
 The README documents this path and a command fallback without changing the
 machine execution policy. The helper does not install the application.
 
-Windows installation registers the display name **Email Collector Toolkit (ECT)**.
+Windows installation registers the display name **Email Collection Toolkit (Python Preview)**.
 The installation matrix verifies that Start menu entry and activates its app ID
-using IApplicationActivationManager. The activated Rust executable runs the
-bundled Python self-test in package context, then CI activates the native reader
+using IApplicationActivationManager. The activated Python entry point runs its
+bundled self-test in package context, then CI activates the native reader
 on the synthetic archive before testing upgrade and uninstall. Taskbar pinning
 is a user choice, not an installation requirement.
 
@@ -2850,9 +2848,10 @@ The MSIX manifest activates isolated private x64 CPython; it packages GUI assets
 SQL/YAML/plugin data and locked runtime dependencies, without the retired Rust
 GUI or its updater. The installed synthetic acceptance exercises the actual
 Python search, completion and message-reader APIs, preserves its fixture bytes,
-then tests native activation, upgrade and uninstall. Windows archive writing and
-Windows native auto-update parity remain unsupported; this change does not
-remove that restriction. Python's macOS Sparkle integration remains active.
+then tests native activation, upgrade and uninstall. Python's macOS Sparkle
+integration remains active. (At this step Windows archive writing and native
+auto-update were still disabled; the Windows consolidation below enabled
+New/Import and WinSparkle.)
 
 The shared `gui/` assets, Python archive engine and independent Rust tools are
 retained. The GUI crate is excluded from Cargo's supported workspace. Its tests

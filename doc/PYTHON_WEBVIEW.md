@@ -1,10 +1,12 @@
 <!-- Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved. -->
 
-# Python webview comparison
+# Python webview desktop on Windows
 
-This branch starts from main `251b77a` and selectively reuses reader and MSIX
-work from `work-rust-gui` at `2bbedc3`. It is a separate experiment, not a merge
-or replacement of PR #153. Existing linked worktrees and their edits are preserved.
+This work began as a comparison branch from main `251b77a`, selectively reusing
+reader and MSIX work from `work-rust-gui` at `2bbedc3`. It was integrated into
+PR #153 and is now the supported Windows desktop; the Rust GUI was retired. The
+validation log below is chronological, so earlier entries (for example, the
+"intentionally disabled Windows writer") are superseded by later ones.
 
 ## Scope
 
@@ -70,10 +72,11 @@ mapper, not constants in packaging. The persistent public certificate and
 `MSIX_TEST_CERT_PFX_BASE64` signing contract are reused without generating a key.
 The installer README and certificate helper are preserved with x64 instructions.
 
-`.github/workflows/python-reader.yml` prepares x64 payload/relocation checks,
-pinned-key signing, registered Start-menu activation, upgrade/uninstall, and a
-separate macOS native-reader check. Dispatch/reusable calls or an explicit
-`[msix-ci]`/`[release-ci]` branch commit opt into Windows packaging. No workflow,
+`.github/workflows/windows-msix.yml` prepares x64 payload/relocation checks,
+pinned-key signing, registered Start-menu activation and upgrade/uninstall.
+Manual dispatch, a `[release-ci]` branch commit (through
+`release-candidate.yml`) or a tagged release (through `release.yml`) runs it;
+ordinary CI does not. No workflow,
 release, certificate installation or package installation has been performed
 by this local implementation task.
 

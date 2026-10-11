@@ -13,8 +13,9 @@ search, export, and collection work.
 
 ## Build and run
 
-Rust/Cargo are required to build the helper. Packaged users will need the native
-executable, not Rust or Outlook. The locked dependency uses no JVM or C PST library.
+Rust/Cargo are required to build the helper. The macOS DMG bundles the native
+executable, so its users need neither Rust nor Outlook; the Windows MSIX does
+not yet include it. The locked dependency uses no JVM or C PST library.
 
 ```sh
 make rust-programs        # all three tools

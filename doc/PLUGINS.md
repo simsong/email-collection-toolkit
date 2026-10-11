@@ -467,8 +467,8 @@ channel across all visible member addresses.
 Scanner invocations persist typed clean/infected/not-scanned/unscannable/scanner-error
 results with diagnostics and engine/signature versions (NULL if unavailable).
 Errors and reported encryption/size-limit heuristics block filing and retain
-raw input for retry. Version queries are cached per daemon configuration;
-which unscannable conditions are reported depends on the daemon configuration.
+raw input for retry. Engine and definition versions are read once per scanner
+session; which unscannable conditions are reported depends on libclamav's scan options.
 Failed invocations may publish scan evidence only, never content or filing.
 
 

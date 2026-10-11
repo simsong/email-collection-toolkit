@@ -1,5 +1,10 @@
 <!-- Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved. -->
 
+> **Historical / retired October 10, 2026.** Python is the default desktop.
+> The Rust GUI is preserved outside supported builds; old commands and completion
+> plans below are archival. See [the retrospective](../rust/README.md) for current
+> status, measured limitations and the last compiling snapshot.
+
 # Python and Rust search parity report
 
 The search alignment implemented for a16 is retained in a17. The original audit is

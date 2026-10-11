@@ -673,8 +673,8 @@ The detailed distinction and reader limits are in
 
 Packages will bundle selected OS/architecture-specific executables and native
 dependencies. This avoids a mandatory JVM when only the Rust adapter ships.
-The current macOS builder includes no PST importer. Windows installer and
-Linux Snap builders remain unimplemented, as do full native ingest prerequisites.
+The macOS builder bundles `pst-importer`, `mcti-scan` and the `pff-converter`.
+The Windows MSIX does not yet include them, and no Linux Snap builder exists.
 
 The Cargo workspace now contains `rust/mct-importer`: the Rust library,
 `pst-importer`, `mdti-validator` and `mcti-generator` implement/test
@@ -794,8 +794,8 @@ relations, and viewer page navigation remain the next integration layer.
 The first implementation supports recursive local MBOX, Emacs RMAIL Babyl,
 `.eml`, Maildir, and `.emlx` ingest, owner-rule Sent classification, exact
 `(Message-ID, SHA-256)` deduplication, autosave and source-metadata exclusion,
-`Date:`/`Received:`/source/previous-message/path-year date resolution, a
-temporary on-demand `clamd`,
+`Date:`/`Received:`/source/previous-message/path-year date resolution,
+embedded libclamav scanning in a run-owned worker process,
 `data/mbox/INFECTED1.mbox`, SQLite catalog/FTS files, native BagIt/Mailbag
 metadata, versioned `integrity/*.mbox.integrity` tags,
 per-run observation review, and year/correspondent reports.  The top-level
@@ -804,9 +804,8 @@ per-run observation review, and year/correspondent reports.  The top-level
 or more source roots as positional arguments and `--owner-names-file` selects
 a legacy include-rule list; otherwise archive `config.yaml` supplies owner rules. Ingest requires `--clamav` or explicit `--no-scan`.
 With `--clamav`, it starts
-a foreground daemon only when no healthy configured socket is available, then
-removes the daemon's stale socket on exit; it never enables persistent or
-on-access scanning. Workers enqueue typed phase/path/offset updates; the main
+a temporary scanner worker that loads libclamav and the selected definitions,
+and stops it when the run ends; it never enables persistent or on-access scanning. Workers enqueue typed phase/path/offset updates; the main
 thread drains them and redraws the stderr scoreboard every 250 milliseconds.
 The same main-thread snapshot is atomically published to a unique
 `status/ingest-*.json` operational tag file. It is updated in place for that
@@ -1094,8 +1093,8 @@ channel across all visible member addresses.
 Scanner invocations persist typed clean/infected/not-scanned/unscannable/scanner-error
 results with diagnostics and engine/signature versions (NULL if unavailable).
 Errors and reported encryption/size-limit heuristics block filing and retain
-raw input for retry. Version queries are cached per daemon configuration;
-which unscannable conditions are reported depends on the daemon configuration.
+raw input for retry. Engine and definition versions are read once per scanner
+session; which unscannable conditions are reported depends on libclamav's scan options.
 Failed invocations may publish scan evidence only, never content or filing.
 
 
@@ -2263,34 +2262,29 @@ presence separately from readiness, which remains an ingest preflight check.
 the PyInstaller ctypes loader regression, missing-scanner failure, explicit opt-out,
 durable evidence, source immutability, and isolated headless diagnostics.
 
-## Compiled desktop UI trials
+## Compiled desktop UI trials (retired)
 
-[DIOXUS.md](DIOXUS.md) records the planned UI trials: Dioxus Desktop and Tauri
-using the system webview, with ingest/search/preservation still in Python.
-The Rust frontend and transitional typed local Python worker are implemented in the desktop migration described below; packaged delivery remains pending.
-Current `PyWebViewApplication`, `WindowBridge`, HTML/JavaScript, and PyInstaller
-sections describe the existing application. They remain the migration baseline,
-not evidence of Dioxus support. Windows full ingest takes priority over Linux
-packaging and still requires backend locking and scanner portability fixes.
-
-Plan comparable trial implementations in Dioxus and Tauri before choosing a
-framework. Either approach retains the Python archive engine.
+[DIOXUS.md](DIOXUS.md) recorded planned Dioxus Desktop and Tauri trials; the
+Rust/Wry desktop migration that followed was retired on 2026-10-10 (see
+[the retrospective](../rust/README.md)). `PyWebViewApplication`, `WindowBridge`,
+HTML/JavaScript and PyInstaller sections describe the current application on
+macOS and Windows.
 
 ## Windows development setup
 
-[WINDOWS.md](WINDOWS.md) describes an unexecuted clean-Windows setup procedure,
-including automatic and explicit manual ARM64/x64 uv installation:
-MSYS2 supplies Git/Make/shell utilities while uv selects native Windows x64
-CPython 3.12, including under Windows ARM emulation. Rust/MSVC and Dioxus tooling
-prepare for the Dioxus trial. The guide reuses existing Makefile
-targets and identifies required Windows work. The scanner's unconditional
-`fcntl` import can prevent GUI startup, the writer rejects Windows, and native
-GUI integration and executable/installer targets remain incomplete. This
-documentation adds no Windows runtime or packaging support.
+[WINDOWS.md](WINDOWS.md) describes building and running the x64 Python/WebView2
+desktop and MSIX. Its later clean-VM, Rust/MSVC and Dioxus sections are
+historical. Windows now uses native writer locks and the embedded scanner; see
+[Shared Python Windows desktop](#shared-python-windows-desktop).
 
 ## macOS packaging
 
-`make rust-dmg` adds a local preview path to the existing builder. PyInstaller
+`make dmg` builds the Python application described in
+[MACOS_DISTRIBUTION.md](MACOS_DISTRIBUTION.md). The following Rust preview
+paragraphs are historical: `make rust-dmg` now stops with the retirement
+message.
+
+`make rust-dmg` added a local preview path to the existing builder. PyInstaller
 collects the archive service/runtime and resources; `rust_bundle.py` preserves
 that layout, makes the release Rust binary the bundle entry point and renames
 the Python executable `archive-service`. Preview identity/name are separate;
@@ -2516,8 +2510,9 @@ MAILARCHIVER_CLAMAV_LIBRARY and MAILARCHIVER_CLAMAV_DATABASE select explicit
 development resources. MAILARCHIVER_CLAMAV_CERTIFICATES selects signature trust
 material, MAILARCHIVER_FRESHCLAM the updater, and MAILARCHIVER_CLAMAV_UPDATES a
 private update root. Frozen resource resolution uses the bundle rather than
-Homebrew. Bundle assembly and CI provisioning still require migration; see
-EMBEDDED_CLAMAV.md. Legacy MAILARCHIVER_CLAMD settings are ignored.
+Homebrew. The DMG and MSIX builders bundle the engine and definitions, and
+release CI runs `make freshclam` first; see EMBEDDED_CLAMAV.md. Legacy
+MAILARCHIVER_CLAMD settings are ignored.
 
 
 Current MIME traversal uses the standard-library parser without explicit size,
@@ -2882,7 +2877,7 @@ file is deleted immediately after ingest; the repository contains only a safe
 message template. Tests assert message identities and bytes, not only record
 counts. Small synthetic rollover fixtures and recorded scanner-failure routing tests
 cover those paths; EICAR checks actual scanner version evidence. The separately runnable `make test-e2e` target starts a fresh
-CLI ingest with the real configured on-demand `clamd`, includes a source message
+CLI ingest with the real embedded ClamAV engine, includes a source message
 without a final newline, requires checkpoint publication, and invokes the
 installed standard-library-only verifier under isolated Python.
 
@@ -3003,8 +2998,8 @@ passed during development; these do not establish signed application replacement
 production acceptance, with macOS 15/arm64 as the configured initial target.
 
 Scanner deadline and helper-execution regressions use real POSIX subprocesses
-and explicitly skip Windows before importing the `fcntl`-based scanner. They do not establish Windows
-scanner support. Pages release-trigger checks parse YAML rather than relying on
+and skip the FIFO-blocking case on Windows; `make test-windows-scanner` covers
+the Windows inherited-owner lifecycle separately. Pages release-trigger checks parse YAML rather than relying on
 indentation, accepting PyYAML's YAML 1.1 interpretation of an unquoted `on` key.
 
 Release preflight checks out the event's `github.sha`, verifies the tag still
@@ -3067,11 +3062,9 @@ import leaves the previous directory unchanged.
 
 ### Writer and desktop review boundary
 
-Current archive writing is supported on POSIX. Windows writing fails before
-creating an archive or lock metadata; the secure no-reparse-point implementation
-and native Windows subprocess validation are deferred to v1.1.0. The former
-untested msvcrt branch is removed; no Windows locking guarantee is claimed.
-POSIX acquisition pins the archive/status directories and opens lock files
+Archive writing is supported on POSIX and Windows. Windows leases use pinned
+non-reparse directory handles and `LockFileEx` (see
+[Shared Python Windows desktop](#shared-python-windows-desktop)). POSIX acquisition pins the archive/status directories and opens lock files
 relative to directory descriptors without following links. Lock files must be
 regular, single-link files. New targets are created under a parent-directory
 creation lock before acquiring the archive lease; creation diagnostics may leave
@@ -3105,13 +3098,8 @@ rejects boolean, floating-point, and string alternatives without coercion.
 
 ## Current acquisition boundaries
 
-No release Desktop OAuth client is bundled yet. The shared-client end-user
-flow remains deferred until a maintainer supplies and validates that public
-configuration in release artifacts. Current authorization requires a developer
-client override. Installing that override validates and writes the same bytes.
-Known consumer domains need no DNS lookup; transient DNS and token-refresh
-transport failures are disclosed as errors rather than negative detection or
-fresh consent. Credentials are stored only after the profile matches.
+The Google authorization prototype, its developer client override and its
+dependencies have been removed; the application contains no OAuth client.
 
 Directory import reports and skips `.partial.emlx` records while retaining
 complete supported records. Direct selection of a partial record is rejected.
@@ -3257,6 +3245,9 @@ Headless regressions cancel a real cooperative processor and verify retained
 pending work; deferred-but-unstarted jobs never become active merely on quit.
 
 ### Rust desktop migration and reader prototype
+
+> Historical: the Rust GUI was retired on 2026-10-10. This section records the
+> former implementation; see [the retrospective](../rust/README.md).
 
 `rust-toolchain.toml` selects Rust 1.99.0 with rustfmt and Clippy for this
 checkout; the desktop crate declares 1.99 as its minimum. CI can explicitly
@@ -3731,14 +3722,13 @@ hashes and retains logs, the synthetic `.mailarchive`, PNG and success evidence
 under `RUST_GUI_ARTIFACT_DIR`. CI uploads these even on failure. Automation and
 snapshot dependencies are isolated behind the `native-smoke` Cargo feature.
 
-## Local Windows MSIX prototype (2026-10-06)
+## Local Windows MSIX prototype (2026-10-06, historical)
 
-See [Windows MSIX test packaging](WINDOWS_MSIX_TEST.md) for automated build/sign/test commands,
-private Python helper discovery, external WebView2 detection, native Windows
-evidence and unresolved installation/import/scanner/converter requirements.
-This local prototype is not a released or fully validated Windows application.
+See [Windows MSIX test packaging](WINDOWS_MSIX_TEST.md) for automated build/sign/test commands
+and external WebView2 detection. The current package is described under
+[Windows consolidation](#windows-consolidation-october-10-2026).
 
-## MSIX installation matrix (2026-10-07)
+## MSIX installation matrix (2026-10-07, historical)
 
 MSIX replaces the older EXE installer plan; WinSparkle discovers the signed
 bundle through the authenticated shared feed. `windows-msix.yml` supports
@@ -3778,10 +3768,10 @@ Local Machine/Trusted People, verifies its presence, and displays the outcome.
 The README documents this path and a command fallback without changing the
 machine execution policy. The helper does not install the application.
 
-Windows installation registers the display name **Email Collector Toolkit (ECT)**.
+Windows installation registers the display name **Email Collection Toolkit (Python Preview)**.
 The installation matrix verifies that Start menu entry and activates its app ID
-using IApplicationActivationManager. The activated Rust executable runs the
-bundled Python self-test in package context, then CI activates the native reader
+using IApplicationActivationManager. The activated Python entry point runs its
+bundled self-test in package context, then CI activates the native reader
 on the synthetic archive before testing upgrade and uninstall. Taskbar pinning
 is a user choice, not an installation requirement.
 
@@ -3809,9 +3799,10 @@ The MSIX manifest activates isolated private x64 CPython; it packages GUI assets
 SQL/YAML/plugin data and locked runtime dependencies, without the retired Rust
 GUI or its updater. The installed synthetic acceptance exercises the actual
 Python search, completion and message-reader APIs, preserves its fixture bytes,
-then tests native activation, upgrade and uninstall. Windows archive writing and
-Windows native auto-update parity remain unsupported; this change does not
-remove that restriction. Python's macOS Sparkle integration remains active.
+then tests native activation, upgrade and uninstall. Python's macOS Sparkle
+integration remains active. (At this step Windows archive writing and native
+auto-update were still disabled; the Windows consolidation below enabled
+New/Import and WinSparkle.)
 
 The shared `gui/` assets, Python archive engine and independent Rust tools are
 retained. The GUI crate is excluded from Cargo's supported workspace. Its tests

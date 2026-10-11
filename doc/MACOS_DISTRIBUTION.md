@@ -27,7 +27,8 @@ PyInstaller to bundle the private Python runtime, Python extension libraries,
 SQL/YAML resources, plug-in manifests, and verifier source. Python supplies the entry point and uses system WebKit through pywebview.
 The bundle also contains Sparkle and notices for bundled importer dependencies. Users
 need no Python, `uv`, Homebrew, or source checkout for the supported local-mail
-GUI. ClamAV is optional. Experimental PDF extraction/OCR, Tika/Java and the
+GUI. The ClamAV engine, FreshClam and baseline definitions are bundled, and
+the builder fails without them. Experimental PDF extraction/OCR, Tika/Java and the
 Apple Intelligence command are not included in this desktop workflow.
 
 The [ingest executables](PST_IMPORTER.md#platform-packaging-and-qualification)
@@ -111,11 +112,11 @@ archive CLI with `--cli`, without a separately installed Python:
 "/Applications/Email Collection Toolkit.app/Contents/MacOS/Email Collection Toolkit" --cli --help
 ```
 
-## Optional antivirus
+## Bundled antivirus
 
-The [embedded antivirus migration planned for PR #124](EMBEDDED_CLAMAV.md)
-will replace this setup with a bundled library and offline definitions, with
-updates under Application Support and refreshed app releases at least quarterly.
+The application scans with [embedded libclamav](EMBEDDED_CLAMAV.md) and offline
+definitions, with updates under Application Support and refreshed app releases
+at least quarterly. Users may still explicitly import without scanning.
 The DMG bundles libclamav, FreshClam, and the definitions in `etc/clamdb/`.
 Install ClamAV for development, then run `make freshclam`: it seeds the ignored
 project directory from an installed database (normally
@@ -152,7 +153,7 @@ make dmg-signed
 listed by macOS. It fails before building if none is available. To select a
 different identity, use `make dmg-signed SIGNING_IDENTITY=HASH`, using the
 certificate hash from `list-signatures`. The target signs both the application
-and DMG; notarization remains separate.
+and DMG; notarize separately with `make notarize-dmg DMG=...`.
 
 On an isolated GitHub-hosted runner, `make dmg` and `make check-release` import a Developer ID Application
 identity when both
