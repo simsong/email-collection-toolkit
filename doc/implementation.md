@@ -3872,5 +3872,17 @@ validation. Pages derives required appcast platforms from the selected release's
 assets before validating the signed feed; Windows bundles require Windows items.
 
 Candidate and Windows release workflows reuse the production action commit pins.
+Microsoft public signing is selected explicitly by both release callers. The bundle
+job uses Azure login OIDC and the pinned Artifact Signing action behind the
+`windows-signing` environment. Payload assembly escapes the configured publisher
+into its manifest. `verify_public_msix.ps1` requires SignTool public-policy success
+with timestamp warnings treated as failures, then checks bundle publisher/name and
+records the base hash. Public installed acceptance imports no local certificate.
+`release_files.py` requires typed public-signing evidence and a matching inventory,
+then emits a ZIP without test trust material. These cross-platform hash tests do
+not establish certificate trust; hosted Windows acceptance does. Azure identity,
+profile, federation, GitHub protection and client/profile/publisher variables remain
+unprovisioned; the four existing Azure account variables are saved in GitHub. See
+[Windows public signing](WINDOWS_PUBLIC_SIGNING.md) for their required configuration.
 The welcome Open handler disables both document buttons and restores both on
 success, cancellation or failure; browser tests hold the native bridge boundary.

@@ -743,6 +743,17 @@ missing or mismatched keys fail rather than creating a new certificate. The
 public identity is `scripts/win/test-signing.cer`; private keys never belong in
 Git or artifacts. Testers trust it once, until expiration or deliberate rotation.
 
+Release and candidate workflows require Microsoft public signing. See
+[Windows public signing](doc/WINDOWS_PUBLIC_SIGNING.md) for provisioning and checks.
+Repository variables `AZURE_CLIENT_ID`, `AZURE_TENANT_ID`, `AZURE_SUBSCRIPTION_ID`,
+`AZURE_SIGNING_ENDPOINT`, `AZURE_SIGNING_ACCOUNT`, and `AZURE_SIGNING_PROFILE`
+select the OIDC identity and signing service. `MSIX_PUBLISHER` is the exact approved
+certificate subject, used in the manifest and verification. `PUBLIC_SIGNING` is
+the workflow's boolean mode selector. Missing production configuration fails;
+release bundles never fall back to the test key. `make test-release-files`
+validates staging; `make verify-public-msix MSIX_PUBLISHER=...` verifies Windows
+trust, timestamps and publisher on Windows after signing.
+
 ## Python desktop delivery
 
 `make dmg` packages the Python GUI, bundled runtime, native dependencies, schemas,

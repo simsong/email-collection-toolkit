@@ -400,7 +400,7 @@ def test_msix_same_bundle_is_installed_without_rebuilding() -> None:
     upload = next(step for step in jobs["bundle"][STEPS] if step.get("uses", "").startswith("actions/upload-artifact@"))
     assert upload["with"]["name"] == downloads[0]["with"]["name"]
     assert set(upload["with"]["path"].splitlines()) == {
-        "dist/bundle/base.msixbundle", "dist/bundle/*.cer", "dist/bundle/sha256.json",
+        "dist/bundle/base.msixbundle", "dist/bundle/*.cer", "dist/bundle/sha256.json", "dist/bundle/signing-verification.json",
         "dist/bundle/README.txt", "dist/bundle/Install-Test-Certificate.ps1"}
     fixture = jobs["bundle"][STEPS][-1]["with"]
     assert fixture["name"] == downloads[1]["with"]["name"] == "ci-only-msix-upgrade-fixture"
@@ -410,10 +410,29 @@ def test_msix_same_bundle_is_installed_without_rebuilding() -> None:
     assert release[JOBS]["windows-msix"][NEEDS] == "preflight"
     assert "windows-msix" in release[JOBS]["assemble"][NEEDS]
     secret = "MSIX_TEST_CERT_PFX_BASE64"
-    assert triggers["workflow_call"]["secrets"][secret]["required"] is True
+    assert triggers["workflow_call"]["secrets"][secret]["required"] is False
     signer = next(step for step in jobs["bundle"][STEPS] if "bundle_test_msix.ps1" in step.get(RUN, ""))
     assert signer["env"][secret] == "${{ secrets.MSIX_TEST_CERT_PFX_BASE64 }}"
-    assert release[JOBS]["windows-msix"]["secrets"][secret] == signer["env"][secret]
+    assert signer["if"] == "${{ !inputs.public_signing }}"
+    assert release[JOBS]["windows-msix"]["with"]["public_signing"] is True
+    assert "secrets" not in release[JOBS]["windows-msix"]
+    candidate = safe_load((root / ".github/workflows/release-candidate.yml").read_text())
+    ci = safe_load((root / ".github/workflows/continuous-integration.yml").read_text())
+    assert candidate[JOBS]["windows"]["with"]["public_signing"] is True
+    for caller in (release[JOBS]["windows-msix"], candidate[JOBS]["windows"], ci[JOBS]["release-candidate"]):
+        assert caller["permissions"]["id-token"] == "write"
+    assert jobs["bundle"]["permissions"]["id-token"] == "write"
+    assert "windows-signing" in jobs["bundle"]["environment"]
+    assert "permissions" not in jobs["payload"] and "permissions" not in jobs["install"]
+    public_signer = next(step for step in jobs["bundle"][STEPS] if "azure/artifact-signing-action@" in step.get("uses", ""))
+    assert public_signer["if"] == "inputs.public_signing"
+    assert public_signer["with"]["file-digest"] == "SHA256"
+    assert public_signer["with"]["timestamp-rfc3161"] == "http://timestamp.acs.microsoft.com"
+    assert public_signer["with"]["timestamp-digest"] == "SHA256"
+    public_verify = next(step for step in jobs["bundle"][STEPS] if "verify_public_msix.ps1" in step.get(RUN, ""))
+    assert public_verify["if"] == "inputs.public_signing"
+    installer = next(step for step in install if "test_installed_msix.ps1" in step.get(RUN, ""))
+    assert "-PublicSigning:" in installer[RUN]
 
 
 @pytest.mark.parametrize("event,reference,message,expected", [

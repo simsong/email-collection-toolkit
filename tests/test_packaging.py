@@ -374,35 +374,39 @@ def test_gui_remembers_source_only_after_success(tmp_path: Path, succeeds: bool)
 def test_release_staging_authenticates_base_bundle_and_excludes_private_files(tmp_path: Path) -> None:
     import zipfile
     from pydantic import TypeAdapter
-    from scripts.release_files import FileHash, ROOT as RELEASE_ROOT, digest, stage
+    from scripts.release_files import FileHash, ROOT as RELEASE_ROOT, SigningVerification, digest, stage
 
     windows = tmp_path / "windows"
     windows.mkdir()
     (windows / "base.msixbundle").write_bytes(b"synthetic signed bundle fixture")
     (windows / "local-test.cer").write_bytes((RELEASE_ROOT / "scripts/win/test-signing.cer").read_bytes())
-    (windows / "README.txt").write_bytes((RELEASE_ROOT / "scripts/win/MSIX_README.txt").read_bytes())
+    evidence = SigningVerification(signing_mode="public-trust", publisher="CN=Approved Fixture",
+                                   base_sha256=digest(windows / "base.msixbundle"), timestamp_required=True)
+    (windows / "signing-verification.json").write_text(evidence.model_dump_json(), encoding="utf-8")
+    (windows / "README.txt").write_bytes((RELEASE_ROOT / "scripts/win/MSIX_PUBLIC_README.txt").read_bytes())
     (windows / "Install-Test-Certificate.ps1").write_bytes((RELEASE_ROOT / "scripts/win/Install-Test-Certificate.ps1").read_bytes())
     (windows / "upgrade.msixbundle").write_bytes(b"CI-only future-version fixture")
     (windows / "local-test.pfx").write_bytes(b"private-key sentinel")
     hashes = [FileHash(Algorithm="SHA256", Hash=digest(windows / name).upper(), Path=f"C:\\build\\{name}")
-              for name in ("base.msixbundle", "local-test.cer")]
+              for name in ("base.msixbundle", "signing-verification.json")]
     (windows / "sha256.json").write_bytes(TypeAdapter(list[FileHash]).dump_json(hashes, by_alias=True))
     destination = tmp_path / "release"
     bundle = stage(windows, destination)
     assert bundle.name.endswith("-windows-x64.msixbundle")
     assert bundle.read_bytes() == (windows / "base.msixbundle").read_bytes()
     with zipfile.ZipFile(bundle.with_suffix(".zip")) as archive:
-        assert set(archive.namelist()) == {bundle.name, "local-test.cer", "README.txt", "Install-Test-Certificate.ps1", "SHA256SUMS"}
+        assert set(archive.namelist()) == {bundle.name, "signing-verification.json", "README.txt", "SHA256SUMS"}
         readme = archive.read("README.txt").decode()
         assert bundle.name in readme and "SHA256SUMS" in readme and "sha256.json" not in readme
         from hashlib import sha256
         sums = archive.read("SHA256SUMS").decode().splitlines()
-        assert len(sums) == 3
+        assert len(sums) == 2
         for line in sums:
             expected, name = line.split("  ", 1)
             assert sha256(archive.read(name)).hexdigest() == expected
     assert not (destination / "upgrade.msixbundle").exists()
     assert not (destination / "local-test.pfx").exists()
+    assert not (destination / "local-test.cer").exists()
     assert f"{digest(bundle)}  {bundle.name}" in (destination / "SHA256SUMS").read_text()
     (windows / "base.msixbundle").write_bytes(b"tampered downloaded bundle")
     with pytest.raises(ValueError, match="hash mismatch"):

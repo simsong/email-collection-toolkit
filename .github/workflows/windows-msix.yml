@@ -1,18 +1,27 @@
 # Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved.
 # Build each native payload once, then share one bundle between install-test VMs.
 # Explicit dispatch and reusable calls keep Windows packaging out of ordinary CI.
-# The persistent signing secret stays in assembly; only the public certificate ships.
+# Test keys stay in assembly; production uses protected-environment Azure OIDC.
 # Installation jobs consume the same artifact without checkout toolchains or rebuilds.
-# The alpha may ship with explicit certificate trust; the upgrade fixture never ships.
+# Public releases require timestamped trust; the upgrade fixture never ships.
 name: Python webview MSIX installation tests
 on:
   push:
     branches: [codex/windows-msix-ci]
   workflow_dispatch:
+    inputs:
+      public_signing:
+        description: Use Microsoft public-trust signing
+        type: boolean
+        default: false
   workflow_call:
+    inputs:
+      public_signing:
+        type: boolean
+        default: false
     secrets:
       MSIX_TEST_CERT_PFX_BASE64:
-        required: true
+        required: false
 permissions:
   contents: read
 jobs:
@@ -38,13 +47,21 @@ jobs:
           choco install make --yes --no-progress
           uv sync --locked --python cpython-3.12-windows-x86_64-none
       - name: Validate reader and build Python payload
+        env:
+          PUBLIC_SIGNING: ${{ inputs.public_signing }}
+          MSIX_PUBLISHER: ${{ vars.MSIX_PUBLISHER }}
         run: |
           $env:PATH = "C:/Program Files/Git/usr/bin;" + $env:PATH
           make MAKE=make 'SHELL=C:/Program Files/Git/usr/bin/bash.exe' prepare-windows-clamav prepare-windows-updater freshclam test-windows-scanner test-windows-updater test-definition-state
           if ($LASTEXITCODE) { throw 'Windows antivirus preparation or acceptance failed' }
           make MAKE=make 'SHELL=C:/Program Files/Git/usr/bin/bash.exe' check-python-reader-static test-python-reader test-windows-package-entry test-python-writer test-python-reader-native
           if ($LASTEXITCODE) { throw 'Reader checks failed' }
-          make 'SHELL=C:/Program Files/Git/usr/bin/bash.exe' msix-test 'MSIX_ARGS=-CreateUpgradeTest'
+          $arguments = '-CreateUpgradeTest'
+          if ($env:PUBLIC_SIGNING -eq 'true') {
+            if ([string]::IsNullOrWhiteSpace($env:MSIX_PUBLISHER) -or $env:MSIX_PUBLISHER -eq 'CN=ECT Local Test') { throw 'Configure the approved MSIX_PUBLISHER repository variable.' }
+            $arguments += ' -Publisher "' + $env:MSIX_PUBLISHER + '" -PublisherDisplayName "Simson L. Garfinkel"'
+          }
+          make 'SHELL=C:/Program Files/Git/usr/bin/bash.exe' msix-test "MSIX_ARGS=$arguments"
           if ($LASTEXITCODE) { throw 'MSIX assembly failed' }
           $package = (Get-ChildItem dist/windows-msix-test/*.msix).FullName
           make 'SHELL=C:/Program Files/Git/usr/bin/bash.exe' test-msix "MSIX_PACKAGE=$package" 'MSIX_EVIDENCE=dist/relocated'
@@ -65,6 +82,10 @@ jobs:
           retention-days: 7
   bundle:
     needs: payload
+    environment: ${{ inputs.public_signing && 'windows-signing' || 'windows-test-signing' }}
+    permissions:
+      contents: read
+      id-token: write
     runs-on: windows-latest
     timeout-minutes: 15
     steps:
@@ -74,16 +95,73 @@ jobs:
           name: msix-payload-x64
           path: dist/payloads/x64
       - name: Assemble and test-sign shared bundles
+        if: ${{ !inputs.public_signing }}
         env:
           MSIX_TEST_CERT_PFX_BASE64: ${{ secrets.MSIX_TEST_CERT_PFX_BASE64 }}
         shell: pwsh
         run: ./scripts/win/bundle_test_msix.ps1 -InputDirectory dist/payloads
+      - name: Check Microsoft signing configuration
+        if: inputs.public_signing
+        shell: pwsh
+        env:
+          AZURE_CLIENT_ID: ${{ vars.AZURE_CLIENT_ID }}
+          AZURE_TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
+          AZURE_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+          AZURE_SIGNING_ENDPOINT: ${{ vars.AZURE_SIGNING_ENDPOINT }}
+          AZURE_SIGNING_ACCOUNT: ${{ vars.AZURE_SIGNING_ACCOUNT }}
+          AZURE_SIGNING_PROFILE: ${{ vars.AZURE_SIGNING_PROFILE }}
+          MSIX_PUBLISHER: ${{ vars.MSIX_PUBLISHER }}
+        run: |
+          foreach ($name in @('AZURE_CLIENT_ID','AZURE_TENANT_ID','AZURE_SUBSCRIPTION_ID','AZURE_SIGNING_ENDPOINT','AZURE_SIGNING_ACCOUNT','AZURE_SIGNING_PROFILE','MSIX_PUBLISHER')) {
+            if ([string]::IsNullOrWhiteSpace([Environment]::GetEnvironmentVariable($name))) { throw "Missing signing configuration: $name" }
+          }
+      - name: Assemble unsigned public bundles
+        if: inputs.public_signing
+        shell: pwsh
+        run: ./scripts/win/bundle_test_msix.ps1 -InputDirectory dist/payloads -PublicSigning
+      - name: Authenticate to Azure with GitHub OIDC
+        if: inputs.public_signing
+        uses: azure/login@a641126d1b8aa4d1fa005f4f92df94a3a4c4c906 # v3
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+      - name: Sign and timestamp both public bundles
+        if: inputs.public_signing
+        uses: azure/artifact-signing-action@c7ab2a863ab5f9a846ddb8265964877ef296ee82 # v2
+        with:
+          endpoint: ${{ vars.AZURE_SIGNING_ENDPOINT }}
+          signing-account-name: ${{ vars.AZURE_SIGNING_ACCOUNT }}
+          certificate-profile-name: ${{ vars.AZURE_SIGNING_PROFILE }}
+          files-folder: ${{ github.workspace }}/dist/bundle
+          files-folder-filter: msixbundle
+          file-digest: SHA256
+          timestamp-rfc3161: http://timestamp.acs.microsoft.com
+          timestamp-digest: SHA256
+          cache-dependencies: false
+          exclude-environment-credential: true
+          exclude-workload-identity-credential: true
+          exclude-managed-identity-credential: true
+          exclude-shared-token-cache-credential: true
+          exclude-visual-studio-credential: true
+          exclude-visual-studio-code-credential: true
+          exclude-azure-cli-credential: false
+          exclude-azure-powershell-credential: true
+          exclude-azure-developer-cli-credential: true
+          exclude-interactive-browser-credential: true
+      - name: Verify public signatures, timestamps and publisher
+        if: inputs.public_signing
+        shell: pwsh
+        env:
+          MSIX_PUBLISHER: ${{ vars.MSIX_PUBLISHER }}
+        run: ./scripts/win/verify_public_msix.ps1 -Publisher $env:MSIX_PUBLISHER
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: windows-msix-install-test
           path: |
             dist/bundle/base.msixbundle
             dist/bundle/*.cer
+            dist/bundle/signing-verification.json
             dist/bundle/sha256.json
             dist/bundle/README.txt
             dist/bundle/Install-Test-Certificate.ps1
@@ -118,7 +196,10 @@ jobs:
           path: dist/bundle
       - name: Install, launch, upgrade and uninstall
         shell: powershell
-        run: ./scripts/win/test_installed_msix.ps1 -BundleDirectory dist/bundle -Architecture ${{ matrix.arch }}
+        env:
+          PUBLIC_SIGNING: ${{ inputs.public_signing }}
+        run: |
+          ./scripts/win/test_installed_msix.ps1 -BundleDirectory dist/bundle -Architecture ${{ matrix.arch }} -PublicSigning:($env:PUBLIC_SIGNING -eq 'true')
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: always()
         with:

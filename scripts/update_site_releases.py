@@ -87,7 +87,7 @@ def installer_links(release: PublishedRelease) -> Links:
     mac, windows, help_url, feed = available
     if not feed or not mac:
         return Links()
-    # A test-signed alpha must include the trust instructions alongside its bundle.
+    # Every Windows release includes instructions; historical test builds also include trust material.
     if not help_url:
         windows = ""
     return Links(tag=tag, mac_url=mac, windows_url=windows, windows_help_url=help_url if windows else "")
@@ -122,7 +122,7 @@ def main() -> int:
         releases = TypeAdapter(list[PublishedRelease]).validate_json(args.releases_json.read_bytes())
         if args.require_complete_tag and not any(installer_links(release).complete
                                                 and release.tag_name == args.require_complete_tag for release in releases):
-            parser.error("Requested release is not public with complete uploaded installers, trust package and appcast")
+            parser.error("Requested release is not public with complete uploaded installers, installation package and appcast")
         stable, preview = select_links(releases, False), select_links(releases, True)
     else:
         if args.require_complete_tag:
