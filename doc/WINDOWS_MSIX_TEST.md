@@ -1,5 +1,10 @@
 <!-- Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved. -->
 
+For future release and candidate builds, [Microsoft public signing](WINDOWS_PUBLIC_SIGNING.md)
+supersedes the test-certificate publication path described below. Development test
+dispatch still uses the pinned test key. Public builds require the approved publisher,
+OIDC and timestamp verification; their ZIPs contain no certificate-import helper.
+
 
 > **Python desktop restored October 10, 2026.** Packaging now freezes
 > `scripts/desktop_entry.py` as `ect.exe`, including Python and GUI resources.

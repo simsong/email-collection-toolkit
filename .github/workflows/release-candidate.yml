@@ -11,7 +11,12 @@ permissions:
   contents: read
 jobs:
   windows:
+    permissions:
+      contents: read
+      id-token: write
     uses: ./.github/workflows/windows-msix.yml
+    with:
+      public_signing: true
     secrets: inherit
   macos:
     runs-on: macos-15
@@ -73,7 +78,7 @@ jobs:
           name: windows-msix-install-test
           path: dist/windows
       - name: Stage only tested release files
-        run: make release-files sparkle-tools
+        run: make test-release-files release-files sparkle-tools
       - name: Authenticate previous published feed
         env:
           GH_TOKEN: ${{ github.token }}

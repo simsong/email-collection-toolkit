@@ -2827,6 +2827,21 @@ No fallback certificate is generated. This supersedes the ephemeral test-key
 policy; testers trust the public certificate once until expiration (2028-10-07)
 or deliberate rotation. Production trusted signing remains separate.
 
+### Microsoft public MSIX signing (October 11, 2026)
+
+Release and release-candidate calls require Microsoft Artifact Signing public
+trust, SHA-256 signatures and RFC 3161 timestamps. Missing configuration must
+fail, without test-certificate fallback. The manifest publisher must match the
+approved certificate subject. GitHub authenticates through repository/environment
+restricted OIDC, with signing permission limited to the selected certificate profile.
+The signing job must pass the protected environment gate. Public acceptance must
+verify Windows trust and install/upgrade without importing a certificate. Release
+staging checks the exact verified bundle hashes, excludes upgrade fixtures, and
+ships no test certificate or trust helper. New publisher identity requires a
+one-time reinstall from earlier test builds; preserve archives. Published tags and
+assets remain immutable. `tests/test_release_files.py` covers staging rejection and
+archive contents; hosted Windows signing/installation remains required.
+
 
 ## Python desktop restoration (October 10, 2026)
 

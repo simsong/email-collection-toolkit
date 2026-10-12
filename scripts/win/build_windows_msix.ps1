@@ -13,9 +13,16 @@ param(
     [string]$WinSparkleDirectory = '.tmp/winsparkle',
     [string]$DefinitionsDirectory = 'etc/clamdb',
     [string]$OutputDirectory = 'dist/windows-msix-test',
+    [string]$Publisher = 'CN=ECT Local Test',
+    [string]$PublisherDisplayName = 'ECT Local Test',
     [string]$SdkDirectory
 )
 $ErrorActionPreference = 'Stop'
+if ([string]::IsNullOrWhiteSpace($Publisher) -or [string]::IsNullOrWhiteSpace($PublisherDisplayName)) {
+    throw 'A package publisher and display name are required.'
+}
+$publisherXml = [Security.SecurityElement]::Escape($Publisher)
+$publisherNameXml = [Security.SecurityElement]::Escape($PublisherDisplayName)
 $root = Split-Path (Split-Path $PSScriptRoot -Parent) -Parent
 Set-Location -LiteralPath $root
 if (-not (Test-Path -LiteralPath (Join-Path $WinSparkleDirectory 'WinSparkle.dll') -PathType Leaf)) {
@@ -80,8 +87,8 @@ Copy-Item -LiteralPath (Join-Path $root 'gui/icons/rainbow-post-192.png') -Desti
 $manifest = @"
 <?xml version="1.0" encoding="utf-8"?>
 <Package xmlns="http://schemas.microsoft.com/appx/manifest/foundation/windows10" xmlns:uap="http://schemas.microsoft.com/appx/manifest/uap/windows10" xmlns:uap10="http://schemas.microsoft.com/appx/manifest/uap/windows10/10" xmlns:rescap="http://schemas.microsoft.com/appx/manifest/foundation/windows10/restrictedcapabilities" IgnorableNamespaces="uap uap10 rescap">
- <Identity Name="ECT.PythonReader" Publisher="CN=ECT Local Test" Version="$($metadata.version)" ProcessorArchitecture="$Architecture" />
- <Properties><DisplayName>Email Collection Toolkit (Python Preview)</DisplayName><PublisherDisplayName>ECT Local Test</PublisherDisplayName><Logo>Assets/Logo.png</Logo></Properties>
+ <Identity Name="ECT.PythonReader" Publisher="$publisherXml" Version="$($metadata.version)" ProcessorArchitecture="$Architecture" />
+ <Properties><DisplayName>Email Collection Toolkit (Python Preview)</DisplayName><PublisherDisplayName>$publisherNameXml</PublisherDisplayName><Logo>Assets/Logo.png</Logo></Properties>
  <Dependencies><TargetDeviceFamily Name="Windows.Desktop" MinVersion="10.0.19041.0" MaxVersionTested="10.0.26100.0" /></Dependencies>
  <Resources><Resource Language="en-us" /></Resources>
  <Applications><Application Id="ECT" Executable="python\pythonw.exe" uap10:Parameters="-I -m mailarchiver.desktop_entry" EntryPoint="Windows.FullTrustApplication"><uap:VisualElements DisplayName="Email Collection Toolkit (Python Preview)" Description="Python webview reader preview" BackgroundColor="transparent" Square150x150Logo="Assets/Tile.png" Square44x44Logo="Assets/Logo.png" /></Application></Applications>

@@ -33,5 +33,5 @@ disposable directory when restarting or rebuilding the preview. This does not pu
 the site.
 
 The homepage shows a preview warning when its primary downloads use a preview
-release, and Windows certificate-trust instructions beside the installer buttons
+release, and Windows installation instructions beside the installer buttons
 before users expand the additional platform links.

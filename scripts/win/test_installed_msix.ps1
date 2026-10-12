@@ -1,11 +1,12 @@
 # Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved.
 # Test the same signed bundle on disposable x64 GitHub Windows VMs.
-# Trust only this run's public test certificate and install for the runner user.
+# Public signing uses Windows trust; test mode imports only the pinned test cert.
 # Exercise the frozen Python reader, native Close and Quit on synthetic mail.
 # Upgrade using identical payload bytes and verify archive preservation on uninstall.
 # Always remove the test package and newly added trust; never change existing trust.
 param([Parameter(Mandatory=$true)][string]$BundleDirectory,
       [ValidateSet('x64')][string]$Architecture,
+      [switch]$PublicSigning,
       [string]$EvidenceDirectory='dist/installed-evidence')
 $ErrorActionPreference='Stop'
 Add-Type -Path (Join-Path $PSScriptRoot 'NativeMenu.cs') -ReferencedAssemblies Accessibility
@@ -13,8 +14,12 @@ $evidence = [IO.Path]::GetFullPath($EvidenceDirectory)
 New-Item -ItemType Directory -Path $evidence -ErrorAction Stop | Out-Null
 Start-Transcript -Path (Join-Path $evidence 'install.log') | Out-Null
 $certPath = Join-Path $BundleDirectory 'local-test.cer'
-$cert = [Security.Cryptography.X509Certificates.X509Certificate2]::new((Resolve-Path $certPath).Path)
-$storePath = 'Cert:/LocalMachine/TrustedPeople/' + $cert.Thumbprint
+$cert = $null
+$storePath = $null
+if (-not $PublicSigning) {
+    $cert = [Security.Cryptography.X509Certificates.X509Certificate2]::new((Resolve-Path $certPath).Path)
+    $storePath = 'Cert:/LocalMachine/TrustedPeople/' + $cert.Thumbprint
+}
 $addedTrust = $false
 $installed = $false
 $originalLocalAppData=$env:LOCALAPPDATA
@@ -43,7 +48,7 @@ public static class ECTActivation {
 }
 "@
 try {
-    if (-not (Test-Path $storePath)) {
+    if (-not $PublicSigning -and -not (Test-Path $storePath)) {
         Import-Certificate -FilePath $certPath -CertStoreLocation Cert:/LocalMachine/TrustedPeople | Out-Null
         $addedTrust=$true
     }
@@ -53,7 +58,9 @@ try {
         $priorFiles=@(Get-ChildItem $evidence -Recurse -File | Where-Object FullName -Match 'synthetic\.mailarchive[\\/]')
         $priorHashes=@($priorFiles | Get-FileHash -Algorithm SHA256 | ForEach-Object { $_.Path + ':' + $_.Hash })
         $bundle = Join-Path $BundleDirectory "$kind.msixbundle"
-        & (Join-Path $sdk 'signtool.exe') verify /pa $bundle
+        $verifyArgs = @('verify', '/pa', '/all', '/v')
+        if ($PublicSigning) { $verifyArgs += '/tw' }
+        & (Join-Path $sdk 'signtool.exe') @verifyArgs $bundle
         if ($LASTEXITCODE) { throw 'Bundle signature verification failed' }
         Get-FileHash -LiteralPath $bundle -Algorithm SHA256 | Format-List
         Add-AppxPackage -Path $bundle -ErrorAction Stop
@@ -133,7 +140,7 @@ try {
         finally {
             $env:LOCALAPPDATA=$originalLocalAppData
             $env:APPDATA=$originalAppData
-            $cert.Dispose()
+            if ($cert) { $cert.Dispose() }
             Stop-Transcript | Out-Null
         }
     }

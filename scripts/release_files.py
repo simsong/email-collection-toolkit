@@ -1,8 +1,8 @@
 # Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved.
 # Stage the tested installers using the common release-version mapper.
 # Authenticate downloaded Windows files against their streaming SHA-256 hashes.
-# Require the persistent public alpha certificate and exclude upgrade fixtures.
-# Package explicit certificate-trust instructions with the shared MSIX bundle.
+# Require Windows public-trust verification evidence and exclude upgrade fixtures.
+# Package the Microsoft-signed bundle without local certificate-trust helpers.
 # Candidate CI and publication reuse the same assets and signing operations.
 # No version, release tag or private signing material is stored in this script.
 import argparse
@@ -12,6 +12,7 @@ import shutil
 import subprocess
 import tomllib
 import zipfile
+from typing import Literal
 
 from pydantic import BaseModel, Field, TypeAdapter
 from mailarchiver.release_versions import release_metadata
@@ -27,6 +28,14 @@ class FileHash(BaseModel):
     path: str = Field(alias="Path")
 
 
+class SigningVerification(BaseModel):
+    """Windows CI evidence; staging verifies hashes, not Windows certificate trust."""
+    signing_mode: Literal["public-trust"]
+    publisher: str = Field(min_length=1)
+    base_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    timestamp_required: Literal[True]
+
+
 def identity() -> tuple[str, str]:
     """Derive candidate identity from the canonical project version."""
     version = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))["project"]["version"]
@@ -40,33 +49,32 @@ def digest(path: Path) -> str:
 
 
 def stage(windows: Path, destination: Path) -> Path:
-    """Copy only authenticated base payload and public trust material."""
+    """Copy the exact base payload verified by the Windows public signing gate."""
     hashes = TypeAdapter(list[FileHash]).validate_json((windows / "sha256.json").read_bytes())
-    expected = {"base.msixbundle", "local-test.cer"}
+    expected = {"base.msixbundle", "signing-verification.json"}
     if len(hashes) != len(expected):
-        raise ValueError("Windows artifact must authenticate base bundle and certificate")
+        raise ValueError("Windows artifact must authenticate base bundle and public signing evidence")
     for item in hashes:
         name = item.path.replace("\\", "/").rsplit("/", 1)[-1]
         if name not in expected or item.algorithm != "SHA256" or digest(windows / name) != item.digest.lower():
             raise ValueError("Windows release artifact hash mismatch")
         expected.remove(name)
-    if digest(windows / "local-test.cer") != digest(ROOT / "scripts/win/test-signing.cer"):
-        raise ValueError("Windows certificate differs from the persistent alpha identity")
+    verification = SigningVerification.model_validate_json((windows / "signing-verification.json").read_bytes())
+    if verification.publisher.strip() == "CN=ECT Local Test" or verification.base_sha256 != digest(windows / "base.msixbundle"):
+        raise ValueError("Windows public signing evidence differs from the release bundle")
     _, display = identity()
     destination.mkdir(parents=True, exist_ok=True)
     bundle = destination / f"ECT-{display}-windows-x64.msixbundle"
     shutil.copyfile(windows / "base.msixbundle", bundle)
-    shutil.copyfile(windows / "local-test.cer", destination / "local-test.cer")
     readme = (windows / "README.txt").read_text(encoding="utf-8").replace("base.msixbundle", bundle.name).replace("sha256.json", "SHA256SUMS")
     with zipfile.ZipFile(bundle.with_suffix(".zip"), "w", compression=zipfile.ZIP_DEFLATED) as archive:
         archive.write(bundle, bundle.name)
-        archive.write(windows / "local-test.cer", "local-test.cer")
-        archive.write(windows / "Install-Test-Certificate.ps1", "Install-Test-Certificate.ps1")
+        archive.write(windows / "signing-verification.json", "signing-verification.json")
         archive.writestr("README.txt", readme)
-        members = [bundle, windows / "local-test.cer", windows / "Install-Test-Certificate.ps1"]
+        members = [bundle, windows / "signing-verification.json"]
         archive.writestr("SHA256SUMS", "".join(f"{digest(path)}  {path.name}\n" for path in members))
     files = sorted(path for path in destination.iterdir()
-                   if path.name.endswith((".dmg", ".msixbundle", ".zip", ".tar.gz", ".cer")))
+                   if path.name.endswith((".dmg", ".msixbundle", ".zip", ".tar.gz")))
     (destination / "SHA256SUMS").write_text("".join(f"{digest(path)}  {path.name}\n" for path in files), encoding="utf-8")
     return bundle
 

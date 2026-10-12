@@ -87,6 +87,17 @@ test-msix:
 
 msix-bundle:
 	pwsh -NoProfile -File scripts/win/bundle_test_msix.ps1 -InputDirectory "$(MSIX_PAYLOADS)" $(MSIX_ARGS)
+
+# MSIX_PUBLISHER is the exact approved certificate subject; no private key is used.
+.PHONY: verify-public-msix test-release-files
+verify-public-msix:
+	pwsh -NoProfile -File scripts/win/verify_public_msix.ps1 -Publisher "$(MSIX_PUBLISHER)"
+
+test-release-files: ruff
+	PYTHONPATH="$(CURDIR)/src:$(CURDIR)" uv run --locked pylint scripts/release_files.py tests/test_release_files.py
+	uv run --locked ty check scripts/release_files.py tests/test_release_files.py --error-on-warning
+	uv run --locked pyright scripts/release_files.py tests/test_release_files.py --warnings
+	uv run --locked pytest -q tests/test_release_files.py
 .PHONY: install-linux install-mac install-test-browser install-tika ocr-analyze ocr-experiment ocr-inventory ocr-profile ocr-run pylint run search summary-smoke test test-bagit test-data-quality
 .PHONY: test-application test-e2e test-encoding test-gui test-headers test-mailsearch test-native-gui test-native-html-find test-pdf-mail test-plugins test-progress test-provenance test-refresh-index test-tika test-website validation-aws-start validation-aws-start-all
 

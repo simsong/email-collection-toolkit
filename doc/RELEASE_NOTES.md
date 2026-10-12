@@ -21,6 +21,14 @@ the Windows runtime's complete license evidence before MSIX assembly.
 
 # Release notes
 
+## Windows public signing preparation
+
+- Require Microsoft Artifact Signing and GitHub OIDC for future MSIX release and
+  candidate builds. Verify public trust, timestamps and the approved publisher;
+  omit local test certificates from release ZIPs. Earlier test installations need
+  a one-time reinstall because the publisher changes. Azure identity verification,
+  restricted federation, GitHub configuration and hosted acceptance remain pending.
+
 ## Website follow-up after 1.0.0a19
 
 - Replace browser detection with separate static Windows and macOS installer
