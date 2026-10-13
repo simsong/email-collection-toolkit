@@ -1442,6 +1442,24 @@ are written explicitly as UTF-8 and atomically replaced in the platform
 application-data directory; their randomly generated temporary filename has no
 user-derived component. They are treated as optional, discardable state.
 
+`application_menu` adds the shared Help destinations using the system browser
+adapter, with Windows' existing About/update actions retained. `show_license`
+reuses a selectable local window containing escaped, complete GPL text, without
+a JavaScript bridge. Both desktop packagers copy the root `LICENSE` into their
+GUI resources; source runs use the root file. `make test-gui` verifies callback
+dispatch and offline license content. The Zola `/manual/` index links to the four
+guides; Features uses `/features/` with a `/use-cases/` redirect. The shared header
+links User Manual and omits Advanced. `make test-website` exercises actual Zola
+output and `make test-website-navigation` checks responsive header layout.
+The homepage uses the shared product name and current Features routes, including
+its audience anchors. Its resource card links to the manual index; curation
+resources are labeled reports and organizations. Built-site tests validate all
+same-site links and their HTML fragment targets. The detailed repository
+reference remains linked separately from the website manual index.
+`make website-download-check` runs the built manual/link acceptance alongside
+installer rendering after CI provisions Zola, so the earlier missing-tool skip
+cannot leave those navigation checks unexecuted.
+
 `PyWebViewApplication` adapts that model to native pywebview windows without
 putting platform imports in the controller. Its File menu asks for a new or
 empty destination and initializes it before creating a blank window, opens an

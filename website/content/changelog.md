@@ -5,6 +5,16 @@ description = "Changes to the Email Collection Toolkit website, separate from ap
 <!-- Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved. -->
 
 
+## 2026-10-12
+
+- Add a User Manual index for Importing, Searching, Features, and Advanced.
+  Replace Documentation with User Manual in the header and remove its Advanced link.
+- Give Features the `/features/` address, retaining `/use-cases/` as a redirect.
+- Use Email Collection Toolkit throughout the site, link homepage guides to the
+  User Manual, and point workflow links directly to Features. Align community and
+  support labels with the Help menu, clarify backup requirements, and replace the
+  retired desktop migration plan with current Python desktop documentation.
+
 ## 2026-10-10
 
 - Display separate static **Download Windows installer** and **Download macOS

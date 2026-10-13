@@ -28,6 +28,25 @@ These are release-workflow requirements, not evidence of Windows feature parity.
 Website screenshot validation uses purpose-made synthetic mail and a real
 browser: installed Edge on Windows, Playwright Chromium on other platforms.
 
+## Desktop Help and user manual
+
+macOS and Windows provide a Help menu with Community Forum, Contact Support,
+User Manual, Source Code, and License. Web actions open the project's Discussions,
+Issues, `/manual/` website page, and repository in the system browser. License
+displays the complete embedded project GPL text offline in a selectable window.
+Existing About and update actions remain available in their platform menus.
+The website navigation labels its documentation entry User Manual and links to
+`/manual/`; Advanced remains available through the manual, rather than the header.
+The manual indexes Importing, Searching, Features (`/features/`), and Advanced.
+The former `/use-cases/` route redirects to Features for existing links.
+Website headings use Email Collection Toolkit consistently, and internal links
+use current routes with valid section anchors. The homepage exposes the User
+Manual; Curation remains an archival overview. Community Forum and Contact
+Support use the same destinations as Help. Website and reference documentation
+describe the supported Python desktop and preserve manual identity/tag data.
+Hosted CI runs built manual/link acceptance after installing Zola; a test skipped
+before that prerequisite is available does not satisfy website validation.
+
 ## Shared Python Windows desktop
 
 macOS and Windows share the Python document controller,

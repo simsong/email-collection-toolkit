@@ -127,7 +127,7 @@ query and selection. You can also search from a terminal:
 make search ARGS='--archive "/path/to/collection" subject:"annual report" after:2024-01-01'
 ```
 
-See the [user manual](https://github.com/simsong/email-collection-toolkit/blob/main/doc/USER_MANUAL.md)
+See the [detailed reference manual](https://github.com/simsong/email-collection-toolkit/blob/main/doc/USER_MANUAL.md)
 for command-line options, search-index rebuilding, keyboard controls, and the
 full message-viewing workflow. Semantic search and live provider ingestion are
 planned work, not features of the current search interface.

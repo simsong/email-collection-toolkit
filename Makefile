@@ -525,11 +525,11 @@ WEBSITE_PREVIEW_PORT ?= 1111
 website-preview:
 	zola --root website serve --interface 127.0.0.1 --port $(WEBSITE_PREVIEW_PORT) --output-dir "$(CURDIR)/.tmp/website-preview" --force
 
-# Run rendered release-metadata cases after CI provisions Zola.
+# Run rendered manual links and release-metadata cases after CI provisions Zola.
 .PHONY: website-download-check
 website-download-check:
 	@command -v zola >/dev/null || { echo 'Zola is required for rendered download validation'; exit 2; }
-	uv run --locked pytest -q tests/test_website_scripts.py::test_static_platform_downloads_render_without_javascript
+	uv run --locked pytest -q tests/test_website_scripts.py::test_manual_index_links_to_built_guides tests/test_website_scripts.py::test_static_platform_downloads_render_without_javascript
 	uv run --locked pytest -q --browser chromium e2e_tests/test_website_downloads.py
 
 website-build-check: website-check

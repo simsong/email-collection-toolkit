@@ -30,6 +30,7 @@ from mailarchiver.gui_app import (
     application_menu,
     application_metadata,
     external_link_destination,
+    license_html,
 )
 from mailarchiver.gui_service import (
     LEGACY_X_HTML_PART_ID,
@@ -446,18 +447,63 @@ def test_native_menus_route_through_the_application_controller(tmp_path: Path) -
 
     menus = application_menu(application)
 
-    assert [menu.title for menu in menus] == (["File", "Window", "Help"] if sys.platform == "win32" else ["File", "Window"])
+    assert [menu.title for menu in menus] == ["File", "Window", "Help"]
     assert all(isinstance(item, (MenuAction, MenuSeparator)) for menu in menus for item in menu.items)
     assert [item.title for item in menus[0].items if isinstance(item, MenuAction)] == [
         "New", "Open…", "Import…", "Document Options…", "Close",
     ] + (["Quit"] if sys.platform == "win32" else [])
     if sys.platform == "win32":
         assert [item.title for item in menus[2].items if isinstance(item, MenuAction)] == [
+            "Community Forum", "Contact Support", "User Manual", "Source Code", "License",
             "About", "Check for Updates…", "Update Settings…"]
     assert [item.title for item in menus[1].items if isinstance(item, MenuAction)] == ["New Search Window", "Ingests"]
     for action in menus[1].items:
         assert isinstance(action, MenuAction)
         assert not action.function()
+
+
+@pytest.mark.parametrize("platform", ["darwin", "win32"])
+def test_help_actions_open_the_requested_destinations(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, platform: str,
+) -> None:
+    """Requirement: every Help action dispatches its own destination on both desktops."""
+    application = PyWebViewApplication(ApplicationController(
+        ApplicationPreferencesStore(tmp_path / "preferences.json")))
+    opened: list[str] = []
+    # Replace only the OS boundaries to avoid launching browsers/native windows in unit tests.
+    monkeypatch.setattr("mailarchiver.gui_app.open_external_url", opened.append)
+    monkeypatch.setattr(application, "show_license", lambda: opened.append("embedded-license"))
+    monkeypatch.setattr(sys, "platform", platform)
+    actions = application_menu(application)[2].items[:5]
+    assert [action.title for action in actions if isinstance(action, MenuAction)] == [
+        "Community Forum", "Contact Support", "User Manual", "Source Code", "License",
+    ]
+    for action in actions:
+        assert isinstance(action, MenuAction)
+        action.function()
+    assert opened == [
+        "https://github.com/simsong/email-collection-toolkit/discussions",
+        "https://github.com/simsong/email-collection-toolkit/issues",
+        "https://simsong.github.io/email-collection-toolkit/manual/",
+        "https://github.com/simsong/email-collection-toolkit",
+        "embedded-license",
+    ]
+
+
+def test_license_view_preserves_the_complete_local_text(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Requirement: License works offline from source and packaged GUI resources."""
+    from bs4 import BeautifulSoup  # pylint: disable=import-outside-toplevel
+
+    original = (Path(__file__).parents[1] / "LICENSE").read_text(encoding="utf-8")
+    pre = BeautifulSoup(license_html(), "html.parser").pre
+    assert pre is not None and pre.get_text() == original
+    assets = tmp_path / "gui"
+    assets.mkdir()
+    (assets / "LICENSE").write_text(original, encoding="utf-8")
+    monkeypatch.setattr("mailarchiver.gui_app.GUI_DIRECTORY", assets)
+    page = BeautifulSoup(license_html(), "html.parser")
+    assert page.pre is not None and page.pre.get_text() == original
+    assert not page.find_all(["script", "link", "iframe"])
 
 
 def test_gui_api_records_independent_search_window_state(tmp_path: Path) -> None:

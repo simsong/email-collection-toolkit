@@ -21,6 +21,18 @@ the Windows runtime's complete license evidence before MSIX assembly.
 
 # Release notes
 
+## Desktop Help and user manual
+
+- Add Help links for the community forum, support issues, user manual and source
+  code on both desktops, plus an offline viewer for the embedded project license.
+- Add a website manual index, replace Documentation with User Manual in navigation,
+  and move Advanced access into the manual. Publish Features at `/features/` while
+  retaining a redirect from `/use-cases/`.
+- Align website product names, manual and support labels, current Features links,
+  desktop architecture guidance, and backup instructions across the public pages.
+- Run built manual/link acceptance after CI installs Zola, alongside installer
+  rendering checks.
+
 ## Windows public signing preparation
 
 - Require Microsoft Artifact Signing and GitHub OIDC for future MSIX release and

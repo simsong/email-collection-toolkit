@@ -1,5 +1,7 @@
 +++
-title = "Use cases"
+title = "Features"
+path = "features"
+aliases = ["use-cases"]
 description = "Examples of personal and institutional email archive workflows."
 +++
 <!-- Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved. -->
@@ -52,7 +54,7 @@ uses one of these formats.
 
 Direct access to Gmail and Microsoft 365 accounts is planned but is not yet
 available. Local PST/OST support exists in the development checkout, with the
-format and helper requirements documented in the user manual. Mailbag import, automatic transfer to ePADD,
+format and helper requirements documented in [Importing](@/importing.md). Mailbag import, automatic transfer to ePADD,
 redaction, and more detailed finding-aid output are also planned.
 
 ## File and source handling
@@ -66,5 +68,6 @@ Email Collection Toolkit uses the same process for personal and institutional co
 - the archive uses MBOX, BagIt 1.0, Mailbag 1.0, and SHA-256.
 
 Email Collection Toolkit is not an email client or a hosted service. See the
-[README](https://github.com/simsong/email-collection-toolkit/blob/main/README.md) for
-installation and operating instructions.
+[User Manual](@/manual.md) for operating guides and the
+[README](https://github.com/simsong/email-collection-toolkit/blob/main/README.md)
+for installation instructions.
