@@ -109,5 +109,5 @@ canonical mail.
 Import/Rebuild is not `refresh-index`. The latter reads messages already in the
 archive and replaces only the disposable search index.
 
-See the [user manual](https://github.com/simsong/email-collection-toolkit/blob/main/doc/USER_MANUAL.md)
+See the [detailed reference manual](https://github.com/simsong/email-collection-toolkit/blob/main/doc/USER_MANUAL.md)
 for the currently available explicit-path commands.

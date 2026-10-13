@@ -9,7 +9,9 @@ Email Collection Toolkit is local software for preserving and searching email co
 Each archive uses BagIt 1.0 and Mailbag 1.0 as its native storage format, with
 original messages in MBOX files and SHA-256 integrity information. These are
 the files the application works with, not a separate export. SQLite catalogs
-and search indexes are derived data; source mail is never modified.
+and search indexes support the archive; source mail is never modified. Search
+indexes can be rebuilt, but manual identity and tag decisions must be preserved.
+Back up the entire archive, including its databases and configuration.
 
 ## Simson Garfinkel
 
@@ -22,8 +24,9 @@ about his work on [his personal website](https://simson.net/), or visit
 
 ## Project and website updates
 
-- [Email Collection Toolkit on GitHub](https://github.com/simsong/email-collection-toolkit): source code,
+- [Source Code](https://github.com/simsong/email-collection-toolkit): project code,
   issues, and contributions.
+- [User Manual](@/manual.md): importing, searching, features, and advanced guidance.
 - [Website changelog](@/changelog.md): changes to this website and its explanations.
 - [Software release notes](https://github.com/simsong/email-collection-toolkit/blob/main/doc/RELEASE_NOTES.md):
   application changes, separate from website updates.

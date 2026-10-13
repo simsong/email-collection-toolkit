@@ -2,13 +2,12 @@
 
 # Email Collection Toolkit User Manual
 
-This manual describes the current application. The planned compiled desktop
-experience will evaluate [Dioxus and Tauri](DIOXUS.md) with the existing Python
-archive engine; Windows delivery must include full ingest. This decision does
-not introduce an available Windows release or change the current macOS installer.
-
-Plan comparable trial implementations in Dioxus and Tauri before choosing a
-framework. Either approach retains the Python archive engine.
+This reference manual describes the Python/pywebview desktop and command-line
+tools. The earlier Rust GUI experiment is retired; independent Rust tools
+remain supported. See the [desktop retrospective](../rust/README.md) for the
+architecture history. The [website User Manual](https://simsong.github.io/email-collection-toolkit/manual/)
+indexes the operating guides; the website homepage lists available installers
+and their platform requirements.
 
 This manual explains how an archivist creates and searches a mail archive.
 Email Collection Toolkit reads source mail without changing it. It stores deduplicated
@@ -19,8 +18,9 @@ Each archive directory uses BagIt 1.0 and Mailbag 1.0 as its native storage
 format. Messages live in MBOX files under `data/mbox/`, alongside archive
 metadata and SHA-256 integrity information elsewhere in the archive directory.
 This is the archive the application uses, not a separate export; no conversion
-step is needed to obtain a BagIt/Mailbag archive. SQLite catalogs and search
-indexes are derived data.
+step is needed to obtain a BagIt/Mailbag archive. Search indexes can be rebuilt;
+manual identity and tag decisions in `processing.sqlite3` cannot. Back up the
+entire archive, including its databases and configuration.
 
 On macOS, open the supplied DMG and drag **Email Collection Toolkit.app** to its
 **Applications** shortcut. Eject the disk and open the installed app.

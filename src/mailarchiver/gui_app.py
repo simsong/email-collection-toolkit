@@ -6,6 +6,7 @@ from __future__ import annotations
 
 
 import argparse
+from html import escape
 import json
 import logging
 import os
@@ -97,6 +98,25 @@ EXTERNAL_LINK_SCHEMES = frozenset({"http", "https", "mailto"})
 INTERNET_CHECK_URL = "https://www.example.com/"
 INTERNET_CHECK_INTERVAL_SECONDS = 30.0
 QUIT_TIMEOUT_SECONDS = 5.0
+HELP_LINKS = (
+    ("Community Forum", "https://github.com/simsong/email-collection-toolkit/discussions"),
+    ("Contact Support", "https://github.com/simsong/email-collection-toolkit/issues"),
+    ("User Manual", "https://simsong.github.io/email-collection-toolkit/manual/"),
+    ("Source Code", "https://github.com/simsong/email-collection-toolkit"),
+)
+
+
+def license_html() -> str:
+    """Display the packaged project license, falling back to the source checkout."""
+    path = GUI_DIRECTORY / "LICENSE"
+    if not path.is_file():
+        path = GUI_DIRECTORY.parent / "LICENSE"
+    text = escape(path.read_text(encoding="utf-8"))
+    return ('<!doctype html><html lang="en"><meta charset="utf-8">'
+            '<meta name="viewport" content="width=device-width, initial-scale=1">'
+            '<title>License</title><body style="margin:24px">'
+            '<h1>License</h1><pre style="white-space:pre-wrap;overflow-wrap:anywhere">'
+            f'{text}</pre></body></html>')
 
 
 def owner_rules_text(include: str, exclude: str) -> OwnerRules:
@@ -1398,6 +1418,7 @@ class PyWebViewApplication:
         self._native_child_ids: dict[str, str] = {}
         self._about_api = AboutApi(self)
         self._about_window: Any = None
+        self._license_window: Any = None
         self._reader_window: Any = None
         self._setup_api: SetupApi | None = None
         self._setup_visible = False
@@ -1510,6 +1531,30 @@ class PyWebViewApplication:
             return self.asset_server.url(asset, parameters)
         suffix = f"?{urlencode(parameters)}" if parameters else ""
         return f"{GUI_DIRECTORY / asset}{suffix}"
+
+    def show_license(self) -> None:
+        """Open a selectable offline license; reuse it until its window closes."""
+        with self._lock:
+            if self._license_window is not None:
+                self._license_window.restore()
+                self._license_window.show()
+                return
+            window = webview.create_window(
+                f"License — {APPLICATION_NAME}", html=license_html(),
+                width=760, height=640, min_size=(400, 300),
+                text_select=True, menu=self.menu(),
+            )
+            if window is None:
+                raise RuntimeError("pywebview failed to create a license window")
+            self._license_window = window
+
+            def closed(*_args: object) -> None:
+                with self._lock:
+                    self._license_window = None
+                self._refresh_menus()
+
+            window.events.closed += closed
+        self._refresh_menus()
 
     def create_about_window(self, *, hidden: bool = False) -> None:
         """Retain the application anchor; show health on an explicit About request."""
@@ -2224,6 +2269,7 @@ class PyWebViewApplication:
         windows.extend(api.window for api in self._ingest_apis.values())
         windows.extend(api.window for api in self._options_apis.values())
         windows.append(self._about_window)
+        windows.append(self._license_window)
         if self._setup_api is not None:
             windows.append(self._setup_api.window)
         window = next((candidate for candidate in windows if candidate is not None and candidate.uid == uid), None)
@@ -2242,6 +2288,8 @@ class PyWebViewApplication:
             items.append(MenuAction("Get started", self.show_setup))
         if self._about_window is not None and self._about_visible:
             items.append(MenuAction(f"About {APPLICATION_NAME}", lambda: self.focus_window(self._about_window.uid)))
+        if self._license_window is not None:
+            items.append(MenuAction("License", lambda: self.focus_window(self._license_window.uid)))
         for index, api in enumerate(self._search_apis(), 1):
             if api.window is None:
                 continue
@@ -2419,6 +2467,7 @@ class PyWebViewApplication:
         windows.extend(api.window for api in self._ingest_apis.values())
         windows.append(self._about_window)
         windows.append(self._reader_window)
+        windows.append(self._license_window)
         if self._setup_api is not None:
             windows.append(self._setup_api.window)
         for window in windows:
@@ -2511,7 +2560,7 @@ class PyWebViewApplication:
                     child = active.uid in self._native_child_ids
                 setup = self._setup_api
                 busy = setup is not None and setup._lock.locked()
-                enabled = child or (setup is not None and active is setup.window) or (
+                enabled = child or active is self._license_window or (setup is not None and active is setup.window) or (
                     search_id is not None and self.controller.can_close_window(search_id)
                 )
                 close_item.setEnabled_(enabled and not busy)
@@ -2571,6 +2620,11 @@ def application_menu(application: PyWebViewApplication) -> list[Menu]:
     ]
     if recent:
         file_items.append(Menu("Open Recent", recent))
+    help_items: list[Menu | MenuAction | MenuSeparator] = [
+        MenuAction(title, lambda destination=url: open_external_url(destination))
+        for title, url in HELP_LINKS
+    ]
+    help_items.append(MenuAction("License", application.show_license))
     if sys.platform == "win32":
         return [
             Menu("File", [*file_items, MenuAction("Import…", application.import_active_document),
@@ -2580,7 +2634,7 @@ def application_menu(application: PyWebViewApplication) -> list[Menu]:
             Menu("Window", [MenuAction("New Search Window", application.new_search_window),
                             MenuAction("Ingests", application.open_active_ingest_window),
                             *application.window_menu_items()]),
-            Menu("Help", [MenuAction("About", application.create_about_window),
+            Menu("Help", [*help_items, MenuSeparator(), MenuAction("About", application.create_about_window),
                           MenuAction("Check for Updates…", application.updates.check),
                           MenuAction("Update Settings…", application.show_update_preferences)]),
         ]
@@ -2598,6 +2652,7 @@ def application_menu(application: PyWebViewApplication) -> list[Menu]:
             [MenuAction("New Search Window", application.new_search_window),
              MenuAction("Ingests", application.open_active_ingest_window), *application.window_menu_items()],
         ),
+        Menu("Help", help_items),
     ]
 
 
