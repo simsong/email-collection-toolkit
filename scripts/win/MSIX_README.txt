@@ -16,7 +16,7 @@ Email Collection Toolkit - Windows alpha installer
    powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\Install-Test-Certificate.ps1
 
 3. Double-click base.msixbundle and choose Install.
-   This package contains the x64 Python reader.
+   This package contains the x64 Python application.
 4. Launch Email Collection Toolkit (Python Preview) from the Start menu.
 
 If double-click installation is unavailable, open an ordinary PowerShell

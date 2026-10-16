@@ -1,25 +1,14 @@
 <!-- Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved. -->
 
-Python webview branch: use the standard Windows Open file dialog. Selecting a
-file inside an archive opens the enclosing collection, with normal validation
-and no changes to archived bytes. Fix mapped-drive/UNC SQLite URI handling
-throughout the reader, including search and message rendering. Remove the custom archive browser. Restore New/Import,
-processing and identity controls using native Windows locks, byte-preserving
-MBOX framing and portable temporary-file handling. Add Windows ClamAV discovery
-and bounded updater supervision; require runtime/definitions in new MSIX builds.
-Windows ClamAV now loads in an isolated worker, passes clean/EICAR checks and
-stores validated definitions in application-specific user storage. First-run
-initialization supports downloaded or explicitly copied baselines. A CDN cooldown
-still blocks local download acceptance; package validation remains pending.
-Integrate the pinned WinSparkle SDK, shared update preferences, complete-feed
-verification, Python package filtering and archive-write installation fences.
-Native initialization and signed-feed tests pass; a signed installed upgrade
-still needs acceptance. Preserve source-machine provenance paths when copying
-between platforms and serialize concurrent export replacements.
-Retain completed ingest status across transient Windows reader locks and verify
-the Windows runtime's complete license evidence before MSIX assembly.
-
 # Release notes
+
+## Documentation after 1.0.0a19
+
+- Reconcile documentation with the current source: ClamAV scanning uses the
+  embedded libclamav engine (no daemon); the Windows x64 desktop creates and
+  imports archives; the macOS DMG bundles ClamAV and the PST/OST helpers; the
+  compiled Dioxus/Tauri/Rust desktop plans are retired; no Google OAuth code
+  remains; release CI notarizes the DMG. Historical sections are labeled.
 
 ## Windows public signing preparation
 
@@ -120,7 +109,11 @@ the Windows runtime's complete license evidence before MSIX assembly.
   appcast in explicit branch CI before the immutable release tag. Physical
   interaction testing remains separately recorded human acceptance.
 
-## Unreleased
+## Earlier development (released by 1.0.0a19)
+
+These entries accumulated under "Unreleased" before per-version headings were
+used; all of them were included by the `v1.0.0a19` tag. Rust GUI items describe
+the migration retired on October 10, 2026.
 
 - Run startup Rust archive initialization on its supervised worker so helper
   waits cannot block native Quit/document events. Exempt release tag calls from
@@ -965,6 +958,27 @@ key and current validity, and removes temporary PFX material on success/failure.
 No fallback certificate is generated. This supersedes the ephemeral test-key
 policy; testers trust the public certificate once until expiration (2028-10-07)
 or deliberate rotation. Production trusted signing remains separate.
+
+## Windows Python desktop branch (released by 1.0.0a19)
+
+Use the standard Windows Open file dialog. Selecting a
+file inside an archive opens the enclosing collection, with normal validation
+and no changes to archived bytes. Fix mapped-drive/UNC SQLite URI handling
+throughout the reader, including search and message rendering. Remove the custom archive browser. Restore New/Import,
+processing and identity controls using native Windows locks, byte-preserving
+MBOX framing and portable temporary-file handling. Add Windows ClamAV discovery
+and bounded updater supervision; require runtime/definitions in new MSIX builds.
+Windows ClamAV now loads in an isolated worker, passes clean/EICAR checks and
+stores validated definitions in application-specific user storage. First-run
+initialization supports downloaded or explicitly copied baselines. A CDN cooldown
+still blocks local download acceptance; package validation remains pending.
+Integrate the pinned WinSparkle SDK, shared update preferences, complete-feed
+verification, Python package filtering and archive-write installation fences.
+Native initialization and signed-feed tests pass; a signed installed upgrade
+still needs acceptance. Preserve source-machine provenance paths when copying
+between platforms and serialize concurrent export replacements.
+Retain completed ingest status across transient Windows reader locks and verify
+the Windows runtime's complete license evidence before MSIX assembly.
 
 ## Windows consolidation (October 10, 2026)
 

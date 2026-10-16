@@ -47,12 +47,12 @@ Mailbag package directly.
 ## Available and planned source support
 
 Current releases read local MBOX, EML, Maildir, Emacs RMAIL Babyl, and complete
-Apple Mail `.emlx` messages. A Gmail or Microsoft 365 export can be read if it
-uses one of these formats.
+Apple Mail `.emlx` messages. The macOS application also reads Outlook PST and
+OST files, with best-effort extraction documented in the user manual. A Gmail or
+Microsoft 365 export can be read if it uses one of these formats.
 
 Direct access to Gmail and Microsoft 365 accounts is planned but is not yet
-available. Local PST/OST support exists in the development checkout, with the
-format and helper requirements documented in the user manual. Mailbag import, automatic transfer to ePADD,
+available. Mailbag import, automatic transfer to ePADD,
 redaction, and more detailed finding-aid output are also planned.
 
 ## File and source handling

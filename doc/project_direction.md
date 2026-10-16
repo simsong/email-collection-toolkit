@@ -499,9 +499,10 @@ track release assignments and current issue status.
   installer (#75), with Windows writer locking (#70). Shared prerequisites are
   antivirus integration (#71), packaging/native CI (#72), and document
   registration (#76); those cross-platform issues remain shared dependencies.
-  Merged [PR #105](https://github.com/simsong/email-collection-toolkit/pull/105) documents
-  Dioxus Desktop and Tauri trials before selecting a compiled UI, retaining the
-  Python archive engine. The framework decision remains pending.
+  Merged [PR #105](https://github.com/simsong/email-collection-toolkit/pull/105) planned
+  Dioxus Desktop and Tauri trials for a compiled UI. That migration was retired
+  on 2026-10-10: Windows uses the same Python/pywebview desktop as macOS, and
+  x64 alphas already ship (see [the retrospective](../rust/README.md)).
 
 Milestone scope is planned work, not evidence of shipped support. v1.1.0 has no
 assigned release date; native Windows and clean-VM validation must establish

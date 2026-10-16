@@ -6,14 +6,19 @@ dispatch still uses the pinned test key. Public builds require the approved publ
 OIDC and timestamp verification; their ZIPs contain no certificate-import helper.
 
 
-> **Python desktop restored October 10, 2026.** Packaging now freezes
-> `scripts/desktop_entry.py` as `ect.exe`, including Python and GUI resources.
+> **Python desktop restored October 10, 2026.** The x64 MSIX contains private
+> CPython; its manifest runs `python\pythonw.exe -I -m mailarchiver.desktop_entry`
+> with the shared GUI resources (there is no separate `ect.exe`).
 > Run `make msix-test ARGS="-Architecture x64"` (or the PowerShell build script
 > directly on Windows). Installed acceptance checks production Python search,
 > autocomplete and byte retrieval, then native launch, upgrade and uninstall.
-> Rust reader/helper/updater descriptions below record the former package and
-> are superseded by [the migration retrospective](../rust/README.md).
-> Windows ingest and native auto-updates remain unsupported.
+> The package bundles the Windows ClamAV runtime and WinSparkle; New/Import use
+> the shared Python engine. PST/OST converters are not packaged, and an
+> updater-driven signed upgrade remains unvalidated.
+> The prototype notes below, including Rust reader/helper/updater descriptions,
+> ARM64 commands and "writing unsupported" statements, record the former package
+> and are superseded by [the migration retrospective](../rust/README.md) and
+> [PYTHON_WEBVIEW.md](PYTHON_WEBVIEW.md).
 
 # Windows MSIX packaging and alpha delivery
 
@@ -123,10 +128,10 @@ Local Machine/Trusted People, verifies its presence, and displays the outcome.
 The README documents this path and a command fallback without changing the
 machine execution policy. The helper does not install the application.
 
-Windows installation registers the display name **Email Collector Toolkit (ECT)**.
+Windows installation registers the display name **Email Collection Toolkit (Python Preview)**.
 The installation matrix verifies that Start menu entry and activates its app ID
-using IApplicationActivationManager. The activated Rust executable runs the
-bundled Python self-test in package context, then CI activates the native reader
+using IApplicationActivationManager. The activated Python entry point runs its
+bundled self-test in package context, then CI activates the native reader
 on the synthetic archive before testing upgrade and uninstall. Taskbar pinning
 is a user choice, not an installation requirement.
 

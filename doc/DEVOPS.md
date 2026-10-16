@@ -53,9 +53,11 @@ packaging jobs as the tagged release and verifies their combined signed feed.
 Ordinary pushes omit this marker and skip installer builds. The Windows workflow
 also supports explicit dispatch for its x64 package checks.
 
-The supported Windows download is a test-signed x64 MSIX bundle with private
-CPython, ClamAV and WinSparkle. Its trust ZIP supplies the persistent public
-certificate and installation instructions. WebView2 remains an external
+The supported Windows download is an x64 MSIX bundle with private CPython,
+ClamAV and WinSparkle. Builds published so far are test-signed, and their trust
+ZIP supplies the persistent public certificate and installation instructions.
+Release and candidate workflows now require
+[Microsoft public signing](WINDOWS_PUBLIC_SIGNING.md) instead. WebView2 remains an external
 prerequisite. ARM64 package construction is not part of the current workflow.
 
 Keep the macOS native GUI test. Windows release validation should cover install,
@@ -189,12 +191,13 @@ published GitHub Release cannot be rolled back transactionally with Pages.
 See [macOS distribution](MACOS_DISTRIBUTION.md#publish-a-tagged-macos-release)
 for the tag command, packaging steps, and secret boundaries.
 
-## Local Windows MSIX prototype (2026-10-06)
+## Windows MSIX packaging
 
 See [Windows MSIX test packaging](WINDOWS_MSIX_TEST.md) for automated build/sign/test commands,
-frozen Python reader validation, external WebView2 prerequisites, native Windows
-evidence and unresolved installation/import/scanner/converter requirements.
-This local prototype is not a released or fully validated Windows application.
+external WebView2 prerequisites and native Windows evidence. The current package
+is described under [Windows consolidation](#windows-consolidation-october-10-2026);
+it is an x64 alpha, not a fully validated Windows release. Release and candidate
+builds require [Microsoft public signing](WINDOWS_PUBLIC_SIGNING.md).
 
 ## Platform script layout
 

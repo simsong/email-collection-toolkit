@@ -5,8 +5,9 @@
 ## Scope and current implementation
 
 This guide covers distributing Email Collection Toolkit from GitHub Releases
-using a **Developer ID Application** certificate. The build and release workflow
-support optional signing; secrets must still be supplied by a repository admin.
+using a **Developer ID Application** certificate. Local builds may be unsigned;
+tagged releases and `[release-ci]` candidates must be signed and notarized.
+Secrets must be supplied by a repository admin.
 
 - `make dmg` uses an explicit `--signing-identity` if supplied. Otherwise, it
   imports the `.p12` when both signing secrets described below are present on
@@ -24,8 +25,10 @@ support optional signing; secrets must still be supplied by a repository admin.
   if the tag has moved to another commit. Both jobs require a version-matching
   annotated tag; unsigned tags are accepted without release-signing public keys.
   The release tag must contain this builder/workflow.
-- Automatic notarization and stapling remain **unimplemented**. A signed DMG
-  alone is not evidence of Gatekeeper acceptance.
+- `make notarize-dmg DMG=...` submits the signed DMG with `notarytool`,
+  staples the ticket and requires Gatekeeper acceptance. `release.yml` and
+  `release-candidate.yml` run it with the `APPLE_NOTARY_*` secrets. A signed
+  DMG alone is not evidence of Gatekeeper acceptance.
 
 See [macOS packaging](MACOS_DISTRIBUTION.md) for features, architecture limits,
 and Makefile targets. A successful unit test is not proof of Apple acceptance;
@@ -278,10 +281,9 @@ do not import your real signing key or establish Apple notarization acceptance.
 
 ### Separate notarization after signing
 
-Use section 4 to obtain notarization authentication. This step is manual; the
-workflow does not read any notarization secrets. Work on the exact signed DMG
-from the build. The following native Apple commands are an operator procedure,
-not an additional automated release target:
+Use section 4 to obtain notarization authentication. Release CI notarizes
+automatically through `make notarize-dmg`; the following native Apple commands
+are the equivalent manual operator procedure for a locally signed DMG:
 
 ```sh
 DMG="$PWD/dist/Email-Collection-Toolkit-VERSION-ARCH.dmg"

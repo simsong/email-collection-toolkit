@@ -5,6 +5,12 @@ description = "Changes to the Email Collection Toolkit website, separate from ap
 <!-- Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved. -->
 
 
+## 2026-10-11
+
+- Reconcile pages with the current source: the desktop is Python/pywebview on
+  macOS and Windows (the compiled Dioxus/Tauri plan is retired), the macOS
+  application reads PST/OST, and no Google authorization code remains.
+
 ## 2026-10-10
 
 - Display separate static **Download Windows installer** and **Download macOS
