@@ -1795,6 +1795,21 @@ typed search service. Ordinary terms search `message_fts` by default; when the
 box is selected they search the union of `message_fts` and `attachment_fts`.
 Metadata selectors are unchanged.
 
+`GuiStatus.archive_status_messages` supplies ordered plain-text archive notices.
+The search page renders one paragraph per message with `textContent` in a bottom
+footer, beside the existing ingest-history/link-destination line. A flex-column
+layout gives the workspace the remaining height; the footer grows for multiple
+messages and scrolls when needed. It is hidden without a ready archive, in
+standalone message windows, and when printing. The initial notice reads
+**Currently only .txt email attachments are indexed**; extraction still accepts
+the existing opt-in MIME text attachments. This adds no indexing or reindexing.
+Tika integration remains planned: a separate licensing-isolated process will
+be launched by an **index-attachments** action, then supply indexed/remaining
+document counts, elapsed time, and estimated completion time to the banner.
+No launch action or progress values are exposed before that process exists.
+Website command examples live under **Advanced → Command Line**, with links
+from Searching, Importing, Plugins, and Reports.
+
 Each typed GUI search page also returns its deduplicated ordinary free-text and
 textual-selector values; date selectors remain filters only. JavaScript marks
 literal case-insensitive matches when it renders header, plain-text, or
@@ -2063,6 +2078,29 @@ reports; grouping those complete results may still require temporary B-trees.
 Leading-wildcard `to:`, `from:`, and `subject:` substring predicates cannot use
 a selective ordinary B-tree, but their bounded traversal and relational joins
 remain indexed.
+
+Natural search shares `search_text.search_fold`: Unicode case folding expands
+sharp s to `ss`, then NFD decomposition removes combining accents. New body
+and attachment FTS writes normalize only search content; previews and canonical
+mail retain their original text. The existing V1 index needs no rebuild.
+For legacy content, connection-local `fts5vocab` tables supply exceptional
+spellings whose normalization differs from their native token. Query compilation
+expands those words into FTS phrases; more than 64 phrase combinations use
+ANDed word alternatives followed by a normalized token-adjacency check.
+Indexed vocabulary lookups assemble native fragment phrases for legacy words
+split by combining accents. Ordinary queries do not scan isolated one-letter
+prefixes; exceptionally ambiguous fragmentations retain a bounded-expression
+prefix fallback. Native matches whose content contains combining marks and all extra
+candidates pass the normalized token-adjacency check, including Latin words.
+This also rejects legacy fragments that become interior parts of a normalized word.
+A bounded process cache follows the index's path, inode, size and nanosecond
+timestamps, sampled across attachment/read-lock acquisition. WAL indexes bypass
+that cache. This keeps vocabulary changes and atomic replacements visible.
+POSIX quote intent survives parsing for symbol-containing text; `search_literal`
+checks the normalized literal and its own word boundaries in each matching FTS table before counts, sorts
+or limits. Symbols-only quotes scan indexed text. Selectors and suggestions use
+the same registered normalization function. CLI `--query` preserves search-box
+quotation through shell parsing. Case sensitivity and stemming are not options.
 
 `search.sqlite3` has its own packaged, versioned `sql/V1__search.sql` schema and
 does not use cross-database foreign keys. `create_search()` rejects unversioned

@@ -540,6 +540,13 @@ filter. Selecting a subject completion creates a removable **Subject** filter.
 
 Useful search forms include:
 
+Search ignores case and accents and treats `ß`/`ẞ` as `ss`, without stemming
+or a case-sensitivity setting. Existing indexes need no rebuild. Symbols inside
+quotes are significant: `"CACM-"` requires the hyphen and `"Ham+Sandwhich"`
+requires the plus. Outside quotes, punctuation separates words as before.
+Word boundaries still apply; these searches do not find arbitrary substrings
+inside larger words. Quoted symbols with no words scan the indexed text.
+
 | Search | Meaning |
 |---|---|
 | `budget` | indexed headers and message text contain budget |
@@ -582,16 +589,12 @@ selector, search-box filter, or original-mailbox selection to define an
 archival search. The result pane shows this complete search-language table and
 examples when the program starts and whenever the search is empty.
 
-Select **Search attachments** to include indexed text attachments. This works
-only after an attachment index has been built:
-
-```console
-make run ARGS='--archive "/path/to/mail-archive" refresh-index --index-attachments'
-```
-
-PDF and Microsoft Office attachment extraction is not implemented yet.
-
 ## Viewing messages
+
+The bottom of each search window displays archive status messages, one per
+line. It currently says **Currently only .txt email attachments are indexed**.
+The separate ingest-history line remains clickable. The attachment-indexing
+action and document progress display are planned for the separate Tika indexer.
 
 Select a search result to view it beside the result list, or double-click the
 result to open it in an independent window. That window has its own scrollbar,
@@ -706,6 +709,9 @@ or travel with it unless the preferences are copied separately.
 ## Search from the command line
 
 Use command-line search for scripts, remote sessions, or plain-text output:
+
+Use `uv run mailsearch --query '"Ham+Sandwhich"'` to pass the graphical search
+syntax, including its literal quotes, through the shell.
 
 ```console
 make search ARGS='--archive "/path/to/mail-archive" to:alice@example.org budget'

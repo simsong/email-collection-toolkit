@@ -609,11 +609,19 @@ test-data-quality:
 test-mailsearch:
 	uv run pytest -q tests/test_mailsearch.py
 
+.PHONY: test-natural-search
+test-natural-search:
+	uv run --locked pytest -q tests/test_search_text.py tests/test_mailsearch.py tests/test_search.py tests/test_search_completion.py tests/test_gui_service.py
+
 test-name-resolution:
 	uv run pytest -q tests/test_name_resolution_benchmark.py tests/test_name_matcher_research.py
 
 test-gui:
 	uv run pytest -q tests/test_gui_service.py tests/test_search_completion.py
+
+.PHONY: test-archive-status
+test-archive-status:
+	uv run --locked pytest -q --browser chromium e2e_tests/test_archive_status.py
 
 test-provenance:
 	uv run pytest -q tests/test_catalog.py tests/test_sources.py

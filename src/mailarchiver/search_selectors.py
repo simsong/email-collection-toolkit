@@ -14,6 +14,7 @@ from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 
 from .sqlite_paths import sqlite_uri
+from .search_text import register_search_functions, search_fold
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict
@@ -33,7 +34,7 @@ def contains(value: str) -> str:
 
 
 def recognize_text(value: str) -> str | None:
-    return value.strip().casefold() or None
+    return search_fold(value.strip()) or None
 
 
 def recognize_date(value: str) -> str | None:
@@ -67,12 +68,12 @@ def worldwide_bounds(value: str) -> tuple[str, str]:
 
 
 def matching_addresses(value: str, names: bool = False) -> SearchStatement:
-    sql = "SELECT address_pk FROM email_addresses WHERE lower(address) LIKE ? ESCAPE '\\'"
-    parameters: list[str | int] = [contains(value)]
+    sql = "SELECT address_pk FROM email_addresses WHERE search_fold(address) LIKE ? ESCAPE '\\'"
+    parameters: list[str | int] = [contains(search_fold(value))]
     if names:
         sql += (" UNION SELECT a.address_pk FROM address_search_names n "
-                "JOIN email_addresses a ON a.address=n.address WHERE lower(n.name) LIKE ? ESCAPE '\\'")
-        parameters.append(contains(value))
+                "JOIN email_addresses a ON a.address=n.address WHERE search_fold(n.name) LIKE ? ESCAPE '\\'")
+        parameters.append(contains(search_fold(value)))
     return SearchStatement(sql=sql, parameters=parameters)
 
 
@@ -98,7 +99,7 @@ def address_sql(tag: str, value: str, names: bool) -> SearchStatement:
 def subject_sql(_tag: str, value: str, _names: bool) -> SearchStatement:
     return SearchStatement(sql=("m.message_pk IN (SELECT subject_match.message_pk "
         "FROM messages subject_match INDEXED BY messages_subject_message "
-        "WHERE lower(subject_match.subject) LIKE ? ESCAPE '\\')"), parameters=[contains(value)])
+        "WHERE search_fold(subject_match.subject) LIKE ? ESCAPE '\\')"), parameters=[contains(search_fold(value))])
 
 
 def date_sql(tag: str, value: str, _names: bool) -> SearchStatement:
@@ -148,6 +149,7 @@ ORGANIZATION_NAMES_SQL = """CREATE TEMP VIEW organization_address_names AS
 
 def prepare_names(database: sqlite3.Connection, archive: Path) -> None:
     """Read live identity edits and header names without rebuilding the content index."""
+    register_search_functions(database)
     sources = ["SELECT address, display_name AS name FROM search.address_suggestions"]
     if (archive / "processing.sqlite3").is_file():
         database.execute("ATTACH DATABASE ? AS identities", (sqlite_uri(archive / 'processing.sqlite3'),))

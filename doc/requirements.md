@@ -944,6 +944,21 @@ through an explicit user action. See
 
 ## Search database
 
+Search ignores case and combining accents and treats `ß`/`ẞ` as `ss`, without
+stemming or a case-sensitivity option. The same normalization applies to query
+text, indexed derivatives, subject/address/name selectors and suggestions.
+Existing word indexes remain usable without reindexing: query compilation must
+include native vocabulary spellings that normalize to the requested words.
+Canonical bytes, hashes, displayed headers and previews remain unchanged.
+Inside quotes, punctuation and symbols are significant, including prefixes,
+suffixes and separators: `"CACM-"` requires the hyphen and `"Ham+Sandwhich"`
+requires the plus. Candidate words retain native word/phrase boundaries;
+quoted symbols are checked in normalized candidate text before counting,
+ordering and pagination. Unquoted separators retain ordinary word-search
+behavior. Quoted text consisting only of symbols uses a literal scan.
+Attachment-inclusive searches apply each term's word and literal predicates
+within the same body/header or attachment text, then intersect the terms.
+
 `search.sqlite3` is a separate, disposable SQLite FTS5 database.  It indexes
 normal Sent and Archive message SHA-256, normalized headers, `text/plain` body text when present,
 otherwise rendered `text/html`, otherwise safe single-part message text.  It
@@ -1382,7 +1397,24 @@ message's text, excluding viewer headers, attachments, and provenance. HTML
 keeps its native document selection behavior. A copy control copies the visible
 body text; for HTML it also copies the displayed message subject and headers.
 
-The bottom of the main GUI contains a clickable ingest-status line. During a
+The bottom of each search window contains an archive-status banner. It accepts
+multiple messages, displayed on separate lines, and reserves layout space so
+messages cannot cover search results or the viewer. Hide it without an open
+archive and in standalone message windows and printouts. The current message
+is **Currently only .txt email attachments are indexed**. Preserve the separate
+clickable ingest-history line and hovered-link destination behavior.
+
+Planned attachment indexing uses Apache Tika in a separate process to preserve
+the application's licensing boundary. Once available, an **index-attachments**
+action in this banner launches that process. Its live status must show indexed
+and remaining document counts, elapsed time, and estimated completion time.
+Do not present that action or fabricated progress until the indexer exists.
+The current banner does not change attachment extraction or rebuild an index.
+
+The website centralizes terminal commands under **Advanced → Command Line**;
+other documentation pages link there instead of repeating CLI instructions.
+
+The bottom of the main GUI also contains a clickable ingest-status line. During a
 run it shows live completion, message count, active/configured workers, and ETA;
 otherwise it summarizes the latest run. Clicking it opens a separate native
 Ingests window with its own close box. The **Window → Ingests** menu opens the
