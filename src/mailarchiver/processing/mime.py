@@ -1,4 +1,13 @@
 # Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved.
+
+# Purpose: Extract bounded MIME parts and preserve attached-message bytes.
+# How it works:
+# Stream decoded payloads to owned temporary parts while enforcing expansion, depth and item
+# budgets.
+# Fundamental dependents:
+# - processing.builtin: MIME dispatch and attached-message promotion require these exact part
+#   boundaries.
+
 """Stream MIME payloads into temporary parts, retaining exact attached-message bytes."""
 from __future__ import annotations
 

@@ -1,10 +1,13 @@
 # Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved.
-# Host the pinned WinSparkle SDK through its public cdecl interface.
-# Authenticate and filter the shared appcast before native update discovery.
-# Retain native callbacks for process lifetime, including after SDK cleanup.
-# Installation reserves the same cross-process writer fence as macOS Sparkle.
-# The application schedules checks; downloads and installation require native UI consent.
-# Source launches support manual checks only and never enable a background service.
+
+# Purpose: Adapt the shared update service to native Windows WinSparkle.
+# How it works:
+# Retain SDK callbacks, use an authenticated feed gateway and reserve archive writes before
+# installation.
+# Fundamental dependents:
+# - gui_app: Windows update actions depend on this native adapter.
+# - updates: Windows installation uses its backend implementation of shared policy.
+
 """Windows update adapter for the shared Python application."""
 from __future__ import annotations
 

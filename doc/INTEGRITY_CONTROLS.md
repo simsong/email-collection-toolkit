@@ -643,9 +643,7 @@ The standalone validator takes the bag directory as its only optional
 argument. With no argument, an installed copy validates its containing
 directory:
 
-```console
-python3 verify_mail_archive.py /path/to/archive
-```
+See the [CLI reference](CLI_REFERENCE.md#verification) for invocation.
 
 It is strictly read-only. It validates:
 

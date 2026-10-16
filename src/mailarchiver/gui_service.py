@@ -1,5 +1,13 @@
 # Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved.
 
+# Purpose: Provide typed archive search, verified MIME views and explicit exports.
+# How it works:
+# Read indexed/catalog state, verify message bytes and derive sanitized display/export
+# responses.
+# Fundamental dependents:
+# - gui_app: desktop bridges rely on these reader and export semantics.
+# - reader_fixture: package acceptance uses this production reader boundary.
+
 """Provide typed, read-only search, MIME rendering, and safe export services."""
 
 from __future__ import annotations

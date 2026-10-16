@@ -2,9 +2,16 @@
 
 # Printed-email PDF and OCR strategy
 
+**Planned design.** Current partial capabilities and limitations are identified below.
+
 Printed or scanned email is source evidence even when no original RFC 5322
 bytes survive. OCR output is a derived representation: it must never replace
 the source PDF or be described as byte-preserved email.
+
+The current standalone extractor uses Poppler text and writes a new derived
+`.mboxrd` for review; it does not ingest PDFs or perform general OCR.
+[CLI_REFERENCE.md](../CLI_REFERENCE.md#printed-email-pdf-extraction) owns invocation.
+The remaining steps are planned unless explicitly identified as implemented.
 
 ## Preservation model
 
@@ -16,7 +23,9 @@ the source PDF or be described as byte-preserved email.
 3. Do not publish OCR-derived text into canonical MBOX. Printed messages need a
    distinct document-derived record type because their original RFC 5322 bytes
    do not exist. Adding original PDFs to the bag would require an explicit
-   archive-format decision, such as a new `data/documents/` payload.
+   archive extension. The current proposed layout is `data/pdf/` for sources
+   and `data/pdf-mbox/` for interpretations, as specified in
+   [requirements.md](ARCHIVE_EXTENSIONS.md#standalone-printed-email-pdfs).
 
 ## Page classification and OCR
 

@@ -1,5 +1,13 @@
 # Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved.
 
+# Purpose: Build rebuildable message/body/attachment indexes and previews.
+# How it works:
+# Derive text from original MIME, prepare typed index records and publish consistent FTS
+# metadata.
+# Fundamental dependents:
+# - processing.production: content processors rely on this index representation.
+# - gui_service: previews and body selection must agree with indexed message content.
+
 """Build disposable FTS5 body, preview, and optional text-attachment indexes."""
 
 from __future__ import annotations

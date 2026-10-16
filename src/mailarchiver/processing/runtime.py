@@ -1,4 +1,13 @@
 # Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved.
+
+# Purpose: Dispatch processor jobs with durable rank barriers and cooperative deadlines.
+# How it works:
+# Load trusted factories, validate results and publish successful rank outcomes/checkpoints
+# transactionally.
+# Fundamental dependents:
+# - processing.production: archive pipelines rely on this dispatcher.
+# - processing.__main__: the standalone harness exercises the same retry/cancellation rules.
+
 """In-process rank-barrier dispatcher with durable checkpoints and deadlines."""
 from __future__ import annotations
 

@@ -1,5 +1,13 @@
 # Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved.
 
+# Purpose: Recover useful derived text while preserving source message bytes.
+# How it works:
+# Try declared/detected encodings and bounded repair candidates, retaining decoding defects as
+# evidence.
+# Fundamental dependents:
+# - message: header/date metadata needs robust text recovery.
+# - search: body and attachment indexes depend on derived readable text.
+
 """Recover readable derived text without changing source message bytes."""
 
 from __future__ import annotations

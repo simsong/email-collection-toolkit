@@ -1,10 +1,13 @@
 # Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved.
-# Build a purpose-made collection for reader and relocated-package acceptance.
-# This uses low-level catalog and byte-preserving MBOX writers only for fixtures.
-# It never enables Windows production ingestion or touches an existing directory.
-# Raw bytes include Unicode, CRLF, From quoting and a final unterminated line.
-# Reader checks compare every fixture file before and after shared service calls.
-# Packaging can run these checks without a development checkout or pytest.
+
+# Purpose: Build synthetic archives for portable reader/package acceptance.
+# How it works:
+# Reserve a new fixture, exercise real reader services and compare before/after file
+# inventories.
+# Fundamental dependents:
+# - scripts.test_python_reader_native: native reader acceptance uses this collection contract.
+# - scripts.win.test_windows_msix: relocated-package checks need the same verified fixture.
+
 """Synthetic, portable reader acceptance collection and checks."""
 from __future__ import annotations
 

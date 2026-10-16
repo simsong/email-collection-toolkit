@@ -1,5 +1,12 @@
 # Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved.
 
+# Purpose: Define public application names and per-user data locations.
+# How it works:
+# Centralize current and legacy identity conventions used to find settings outside archives.
+# Fundamental dependents:
+# - application: document preferences need stable application identity.
+# - clamav_definitions: antivirus updates use the same per-user identity boundary.
+
 """Public application identity and read-only discovery of existing settings."""
 
 from pathlib import Path

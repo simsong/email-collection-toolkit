@@ -1,5 +1,13 @@
 # Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved.
 
+# Purpose: Discover supported local mail containers and stream their message bytes.
+# How it works:
+# Use format/hierarchy parsers and source integrity controls while keeping input stores read-
+# only.
+# Fundamental dependents:
+# - __main__: local ingest requires these source containers and raw messages.
+# - apple_mail_compare: cache reconciliation reuses complete EMLX acquisition rules.
+
 """Discover and stream MBOX, Babyl, EMLX, EML, and Maildir messages read-only."""
 
 from __future__ import annotations

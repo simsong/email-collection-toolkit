@@ -25,6 +25,13 @@ separate export. Record website changes in `content/changelog.md`, linked from
 `content/about.md`; application release notes remain separate. About also
 provides the author biography and links to the author and project on GitHub.
 
+Use **Email Collection Toolkit** consistently. **User Manual** links to `/manual/`,
+which indexes Importing, Searching, Features, and Advanced; the longer repository
+manual is labeled **detailed reference manual**. Features uses `/features/`;
+`/use-cases/` is retained only as a compatibility redirect. Keep Curation available
+as an archival overview, rather than presenting it as the manual. Community links
+use **Community Forum** for Discussions and **Contact Support** for Issues.
+
 Zola `0.23.4` is pinned in the workflow. To preview locally, install that
 version and run `make website-preview`. The temporary preview is served only on
 `127.0.0.1:1111`; override the port with `WEBSITE_PREVIEW_PORT=...`. Stop it with

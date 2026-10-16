@@ -1,9 +1,12 @@
 # Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved.
-# Start the packaged Python webview reader without a Rust host or helper protocol.
-# MSIX invokes this module with its isolated private CPython interpreter.
-# Package checks generate only new synthetic collections and durable reports.
-# Normal startup shares the exact GUI entry point used by the macOS application.
-# Windows activation arguments are preserved for archive and native smoke checks.
+
+# Purpose: Activate the isolated Python desktop in Windows packages.
+# How it works:
+# Dispatch installed self-tests or normal startup through the shared Python GUI entry point.
+# Fundamental dependents:
+# - windows_self_test: installed activation must reach its package acceptance mode.
+# - gui_app: Windows package launches route into its normal desktop lifecycle.
+
 """Isolated Python desktop activation for the Windows package."""
 from __future__ import annotations
 

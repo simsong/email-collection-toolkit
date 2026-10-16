@@ -1,5 +1,13 @@
 # Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved.
 
+# Purpose: Normalize narrowly recognized double-processed MBOX envelopes.
+# How it works:
+# Choose the retained envelope and record reversible X-From/source-hash evidence without general
+# MIME rewriting.
+# Fundamental dependents:
+# - sources: local MBOX extraction relies on this normalization rule.
+# - processing.contracts: durable provenance carries the resulting reconstruction evidence.
+
 """Normalize explicitly double-processed MBOX framing, retaining source evidence."""
 
 import hashlib

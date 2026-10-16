@@ -1,4 +1,13 @@
 # Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved.
+
+# Purpose: Supervise bounded antivirus scans without a resident service.
+# How it works:
+# Run native engines in owned workers, enforce deadlines and return typed scan evidence to
+# message processing.
+# Fundamental dependents:
+# - processing.builtin: antivirus admission depends on these actual verdicts.
+# - clamav_update: definition generations require real clean/infected validation scans.
+
 """Direct libclamav scanning in a bounded, run-owned worker; no resident daemon."""
 from __future__ import annotations
 

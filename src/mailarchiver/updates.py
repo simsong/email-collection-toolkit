@@ -1,5 +1,13 @@
 # Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved.
 
+# Purpose: Coordinate shared update preferences, eligibility and installation exclusion.
+# How it works:
+# Track channel/check state and fence installers against active archive writes independently of
+# native UI.
+# Fundamental dependents:
+# - sparkle: macOS native callbacks follow this shared policy.
+# - winsparkle: Windows updates must honor the same preferences and write reservation.
+
 """Application update policy, separate from archive state and native UI."""
 
 from __future__ import annotations

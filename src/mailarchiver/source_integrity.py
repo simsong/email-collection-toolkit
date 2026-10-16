@@ -1,5 +1,13 @@
 # Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved.
 
+# Purpose: Decide when local source containers can be read, skipped or resumed.
+# How it works:
+# Compare complete/prefix hashes and message boundaries while emitting typed checkpoint
+# evidence.
+# Fundamental dependents:
+# - sources: local containers expose these integrity controls.
+# - __main__: safe reruns rely on these decisions before parsing and publication.
+
 """Source-specific integrity planning independent of ingest orchestration."""
 
 from __future__ import annotations

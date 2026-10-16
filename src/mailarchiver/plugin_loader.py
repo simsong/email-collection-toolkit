@@ -1,5 +1,13 @@
 # Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved.
 
+# Purpose: Discover trusted source/file adapters from validated manifests.
+# How it works:
+# Freeze compatible registries after checking paths, factory entry points and declared
+# implementations.
+# Fundamental dependents:
+# - __main__: ingest preflight needs deterministic provider/parser registries.
+# - sources: local traversal delegates parsing through the validated file registry.
+
 """Discover trusted ingest plug-ins from validated directory manifests."""
 
 from __future__ import annotations

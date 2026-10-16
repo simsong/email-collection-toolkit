@@ -1,5 +1,13 @@
 # Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved.
 
+# Purpose: Compile read-only archive queries and display verified numbered messages.
+# How it works:
+# Combine selectors and FTS candidates with indexed predicates, stable ordering and hash-checked
+# retrieval.
+# Fundamental dependents:
+# - gui_service: desktop search uses the same query and ordering semantics.
+# - search_completion: suggested selectors must agree with this search language.
+
 """Search catalog and FTS data read-only, then retrieve hash-verified MBOX bytes."""
 
 from __future__ import annotations

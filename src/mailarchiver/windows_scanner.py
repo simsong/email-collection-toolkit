@@ -1,10 +1,12 @@
 # Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved.
-# Bootstrap the native scanner before Python imports its own OpenSSL libraries.
-# Windows resolves already loaded DLL basenames before private dependency paths.
-# A separate interpreter therefore loads ClamAV before importing application code.
-# Inherited anonymous pipes retain the existing typed scanner protocol.
-# An inherited owner handle makes abrupt GUI exit terminate the worker as well.
-# This module also provides a bounded version probe without loading DLLs in the GUI.
+
+# Purpose: Bootstrap ClamAV in an isolated Windows interpreter.
+# How it works:
+# Load native dependencies before conflicting application DLLs, then exchange scan requests over
+# owned pipes.
+# Fundamental dependents:
+# - scanner: Windows scan workers require this loader and process boundary.
+
 """Private Windows scanner process and early native loader."""
 from __future__ import annotations
 

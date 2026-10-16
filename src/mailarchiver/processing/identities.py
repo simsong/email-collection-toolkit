@@ -1,4 +1,13 @@
 # Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved.
+
+# Purpose: Query identity evidence and persist explicit manual identity decisions.
+# How it works:
+# Provide picker projections and leased database edits with durable names, merges and dated
+# affiliations.
+# Fundamental dependents:
+# - gui_processing: desktop identity pickers depend on these query/edit semantics.
+# - __main__: identity CLI operations must commit the same manual decisions.
+
 """Shared identity picker queries and immediate, durable manual decisions."""
 from __future__ import annotations
 

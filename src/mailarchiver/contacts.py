@@ -1,5 +1,12 @@
 # Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved.
 
+# Purpose: Project read-only address-level Contacts from catalog evidence.
+# How it works:
+# Resolve exact owners and query direct correspondents, dates and counts under the contact
+# policy.
+# Fundamental dependents:
+# - __main__: the human-contacts command uses this projection and output contract.
+
 """Read-only address-level Contact queries over an archive catalog."""
 
 from __future__ import annotations

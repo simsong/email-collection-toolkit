@@ -1,11 +1,15 @@
 <!-- Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved. -->
 
-# Source-code audit
+# 2026-08-25-Source-Code-Audit
 
-> Historical research/planning snapshot. Current development and application CI
-> are macOS-only. For implemented behavior use `requirements.md`,
-> `implementation.md`, and the current feature-specific guides; older
-> backend/platform priorities and inventories below may be superseded.
+**Historical record.** Archived October 16, 2026. Statements, counts and findings
+describe the recorded revisions, not current support. Use the
+[documentation guide](../README.md) for current behavior.
+
+## Source-code audit
+
+> Historical research/planning snapshot. Its platform and feature inventories
+> describe the recorded date. Use [the documentation index](../README.md) for current guides.
 
 
 Date: 2026-08-25
@@ -71,7 +75,7 @@ atomicity, tests, and module-level documentation.
 5. **Native UI/helper coverage at this revision.** JavaScript-to-Python bridge
    smoke testing was manual/macOS-only beyond the existing service tests, and
    the Swift Foundation Models helper required eligible Apple hardware for an
-   end-to-end run. See the [current repository audit](developer/ANALYSIS.md) for
+   end-to-end run. See the [current repository audit](2026-09-03-repository-audit.md) for
    later hosted-smoke status.
 
 The remaining items are architectural features rather than safe local cleanup;

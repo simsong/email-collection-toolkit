@@ -1,4 +1,13 @@
 # Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved.
+
+# Purpose: Host durable ingest, message and content pipelines for real archives.
+# How it works:
+# Translate typed processor results into catalog/index publication while retaining provenance
+# and replay state.
+# Fundamental dependents:
+# - __main__: normal ingest and content resumption delegate to this host.
+# - gui_processing: desktop continuation depends on its persisted policy and queues.
+
 """Production CLI host for the durable ingest, message and content processor trees."""
 from __future__ import annotations
 
@@ -239,7 +248,7 @@ class ProductionPipeline:
                 raise ValueError("child message has no source provenance")
             metadata = item.source_metadata.model_copy(update={
                 "cursor": item.source_metadata.cursor + "#mime=" + ".".join(map(str, child.part_path)),
-                "envelope_hex": None, "normalization": None,
+                "envelope_hex": None, "normalization": None, "provider_metadata_json": None,
                 "prior_date": datetime.fromisoformat(ParsedMessage.model_validate_json(row[1]).date_utc) if row and row[1] else item.source_metadata.prior_date})
             child_item = self._admit(child.content_ref, metadata, pipeline="message", parent=item.message_id,
                 part_path=child.part_path, scan=item.scan_provenance, depth=item.content_metadata.depth + 1)

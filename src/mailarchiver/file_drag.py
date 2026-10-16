@@ -1,5 +1,12 @@
 # Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved.
 
+# Purpose: Bridge explicit message exports to native macOS file dragging.
+# How it works:
+# Validate export tokens and supply Cocoa file URLs/pasteboard writers for prepared derivative
+# files.
+# Fundamental dependents:
+# - gui_app: message drag-out depends on this native export handoff.
+
 """Promote explicit export tokens to native file drags at the Cocoa boundary."""
 
 from importlib import import_module

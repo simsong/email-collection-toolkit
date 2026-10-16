@@ -1,4 +1,13 @@
 # Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved.
+
+# Purpose: Isolate OST extraction behind the independent libpff converter.
+# How it works:
+# Supervise bounded converter output/receipts and expose recovered records through the file-
+# parser contract.
+# Fundamental dependents:
+# - sources: local discovery delegates recognized OST content to this adapter.
+# - __main__: ingestion depends on its partial-result and source-provenance guarantees.
+
 """Run the independent libpff converter; never import its native reader in the host."""
 from __future__ import annotations
 

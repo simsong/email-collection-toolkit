@@ -1,10 +1,13 @@
 # Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved.
-# Construct SQLite filenames for local, mapped-drive and UNC archive paths.
-# Keep a network server inside the URI path instead of the URI authority.
-# Python's bundled SQLite rejects non-local URI authorities by default.
-# Preserve percent escaping for spaces, Unicode, hashes and query delimiters.
-# Read-only callers retain mode=ro; recovery may explicitly request mode=rw.
-# Do not disable SQLite locking or change detection for network collections.
+
+# Purpose: Construct portable SQLite URI filenames without weakening access modes.
+# How it works:
+# Escape literal path characters and retain UNC servers in the path rather than the URI
+# authority.
+# Fundamental dependents:
+# - application: archive validation must open the intended local/network database.
+# - mailsearch: read-only queries require the same exact path and locking semantics.
+
 """Portable SQLite URI filenames for the shared Python application."""
 from pathlib import Path, PurePath, PureWindowsPath
 from typing import Literal

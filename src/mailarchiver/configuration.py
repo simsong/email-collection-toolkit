@@ -1,5 +1,12 @@
 # Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved.
 
+# Purpose: Load strictly validated packaged display policy.
+# How it works:
+# Cache typed YAML settings so GUI rendering receives validated values rather than arbitrary
+# configuration.
+# Fundamental dependents:
+# - gui_app: desktop initialization depends on validated display policy.
+
 """Load validated packaged application configuration."""
 
 from __future__ import annotations

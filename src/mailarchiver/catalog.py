@@ -1,5 +1,13 @@
 # Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved.
 
+# Purpose: Create and validate the supported catalog and disposable search schemas.
+# How it works:
+# Load packaged SQL and check versions, tables, columns and indexes before callers use
+# databases.
+# Fundamental dependents:
+# - __main__: canonical publication relies on validated catalog structure.
+# - application: opening a document must reject incompatible or damaged schemas.
+
 """Load the packaged SQLite catalog and disposable search schemas."""
 
 from __future__ import annotations

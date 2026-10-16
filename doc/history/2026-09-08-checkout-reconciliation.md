@@ -1,6 +1,12 @@
 <!-- Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved. -->
 
-# Historical checkout reconciliation — 2026-09-08
+# 2026-09-08-Checkout-Reconciliation
+
+**Historical record.** Archived October 16, 2026. Statements, counts and findings
+describe the recorded revisions, not current support. Use the
+[documentation guide](../README.md) for current behavior.
+
+## Historical checkout reconciliation — 2026-09-08
 
 ## Consolidation into PR #124 — 2026-09-18
 

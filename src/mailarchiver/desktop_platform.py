@@ -1,9 +1,11 @@
 # Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved.
-# Adapt the shared Python reader to native Windows desktop services.
-# Clipboard writes occur on the window's STA thread through its existing host.
-# External files are explicit user exports, never original source messages.
-# Require WebView2 before creating windows; never fall back to Internet Explorer.
-# Keep platform imports lazy so the same reader continues to run on macOS.
+
+# Purpose: Supply native Windows services for the shared desktop host.
+# How it works:
+# Check WebView2 and adapt clipboard, menu refresh, file opening and external links to Windows.
+# Fundamental dependents:
+# - gui_app: shared desktop actions require these platform-specific boundaries.
+
 """Small native adapters for the Python webview desktop."""
 
 from __future__ import annotations

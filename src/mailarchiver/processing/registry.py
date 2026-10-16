@@ -1,4 +1,13 @@
 # Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved.
+
+# Purpose: Validate trusted processor manifests and graph structure before execution.
+# How it works:
+# Resolve ranked subscriptions and fingerprint manifests/local code without importing processor
+# factories.
+# Fundamental dependents:
+# - processing.runtime: dispatch needs valid dependency ordering and subscribers.
+# - processing.production: replay generations must reflect the selected registry fingerprint.
+
 """Validate trusted manifests and graph structure without executing plugin code."""
 from __future__ import annotations
 

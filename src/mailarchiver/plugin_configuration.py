@@ -1,4 +1,13 @@
 # Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved.
+
+# Purpose: Provide isolated, versioned configuration namespaces for trusted plugins.
+# How it works:
+# Merge archive/installation layers and publish successful scoped writes through conflict checks
+# and recovery journals.
+# Fundamental dependents:
+# - processing.runtime: rank completion depends on transactional configuration publication.
+# - archive_config: plugin settings must coexist with other archive operational state.
+
 """Plugin-owned configuration namespaces, merged snapshots and atomic scoped writes."""
 from __future__ import annotations
 

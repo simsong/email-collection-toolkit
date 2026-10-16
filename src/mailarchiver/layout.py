@@ -1,5 +1,12 @@
 # Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved.
 
+# Purpose: Define canonical Mailbag payload and integrity-tag paths.
+# How it works:
+# Construct archive-relative MBOX and integrity locations from shared directory conventions.
+# Fundamental dependents:
+# - mbox: publication/retrieval must use the canonical payload location.
+# - bagit: manifests and integrity tags must describe that same layout.
+
 """Centralize canonical Mailbag payload and integrity-tag path construction."""
 
 from __future__ import annotations

@@ -1,5 +1,11 @@
 # Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved.
 
+# Purpose: Provide the optional local Apple Foundation Models summary command.
+# How it works:
+# Read stdin and compile/cache the Swift helper before invoking the local model runtime.
+# Fundamental dependents:
+# - No archive module fundamentally depends on this standalone summary entry point.
+
 """Compile and invoke the Apple Foundation Models helper for local text summaries."""
 
 from __future__ import annotations

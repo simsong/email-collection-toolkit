@@ -348,9 +348,8 @@ dmg: python-dmg
 python-dmg: ruff syntax-check sparkle-tools pst-importer mcti-scan pff-converter-bundle
 	uv run --group packaging python scripts/build_macos.py $(if $(SIGNING_IDENTITY),--signing-identity "$(SIGNING_IDENTITY)") $(ARGS)
 
-# Rust is the primary desktop app; SIGNING_IDENTITY selects Developer ID
-# (default ad-hoc), RUST_TARGET_DIR selects its release binary build directory.
-# Mounted acceptance is headless; interaction testing belongs to the user.
+# Retired Rust GUI packaging, kept for reference. The rust-gui-retired
+# prerequisite added below fails before this recipe runs; use make dmg.
 .PHONY: rust-dmg
 rust-dmg: ruff syntax-check sparkle-tools pst-importer mcti-scan pff-converter-bundle
 	uv run --locked python scripts/rust_release_metadata.py --build-command $(CARGO_RUN) build --locked --release -p mailsearch-rust --bin mailsearch-webview
@@ -525,11 +524,11 @@ WEBSITE_PREVIEW_PORT ?= 1111
 website-preview:
 	zola --root website serve --interface 127.0.0.1 --port $(WEBSITE_PREVIEW_PORT) --output-dir "$(CURDIR)/.tmp/website-preview" --force
 
-# Run rendered release-metadata cases after CI provisions Zola.
+# Run rendered manual links and release-metadata cases after CI provisions Zola.
 .PHONY: website-download-check
 website-download-check:
 	@command -v zola >/dev/null || { echo 'Zola is required for rendered download validation'; exit 2; }
-	uv run --locked pytest -q tests/test_website_scripts.py::test_static_platform_downloads_render_without_javascript
+	uv run --locked pytest -q tests/test_website_scripts.py::test_manual_index_links_to_built_guides tests/test_website_scripts.py::test_static_platform_downloads_render_without_javascript
 	uv run --locked pytest -q --browser chromium e2e_tests/test_website_downloads.py
 
 website-build-check: website-check
@@ -608,6 +607,14 @@ test-data-quality:
 
 test-mailsearch:
 	uv run pytest -q tests/test_mailsearch.py
+
+# IMAP_ARGS supplies standalone CLI arguments; no password environment variable is supported.
+.PHONY: imap test-imap
+imap:
+	uv run --locked mailarchiver-imap $(IMAP_ARGS)
+
+test-imap:
+	uv run --locked pytest -q tests/test_imap.py
 
 test-name-resolution:
 	uv run pytest -q tests/test_name_resolution_benchmark.py tests/test_name_matcher_research.py

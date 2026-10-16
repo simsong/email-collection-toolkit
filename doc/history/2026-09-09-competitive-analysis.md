@@ -1,8 +1,16 @@
 <!-- Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved. -->
 
-# Competitive analysis: email archiving, preservation, search, and analysis
+# 2026-09-09-Competitive-Analysis
 
-Research date: 2026-09-09
+**Historical record.** Archived October 16, 2026. Statements, counts and findings
+describe the recorded revisions, not current support. Use the
+[documentation guide](../README.md) for current behavior.
+
+## Competitive analysis: email archiving, preservation, search, and analysis
+
+Research date: 2026-09-09. External product capabilities, prices and licenses
+are historical observations; recheck primary sources before making a current
+adoption decision. This report is research, not the project feature inventory.
 
 This report compares the requirements of a serious email-collection system with
 active open-source and commercial products, abandoned or dormant projects, and
@@ -17,8 +25,8 @@ files inside a native BagIt 1.0 / Mailbag 1.0 package. Source observations,
 message and file hashes, ingest history, and provenance are retained; SQLite
 catalogs, FTS5 search indexes, future embedding indexes, and reports are
 rebuildable derivatives. A user should be able to copy the preservation package
-away, verify it without the application, discard every database, and build new
-analysis software later.
+away and verify canonical messages without the application. Search indexes
+are disposable; manual decisions and operational history still need database backups.
 
 ## Section 1 - Tasks for a mail archiving and search solution
 

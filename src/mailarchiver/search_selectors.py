@@ -1,9 +1,13 @@
 # Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved.
-# Own selector recognition and bound predicates for CLI, GUI and completion.
-# Normalized text and worldwide calendar dates define the common reader contract.
-# Address, recipient, subject and date filters select candidates through indexes.
-# Live header, person and institution names come from read-only derived views.
-# Callers compose complete statements without changing canonical message bytes.
+
+# Purpose: Own the shared selector language and indexed predicate construction.
+# How it works:
+# Recognize values, resolve names and worldwide dates, and produce parameter-bound SQL
+# constraints.
+# Fundamental dependents:
+# - mailsearch: compiled searches depend on this interpretation of selectors.
+# - search_completion: suggestions must recognize and normalize the same selector types.
+
 """Shared selector recognition and indexed SQL for CLI, tiles and completion."""
 from __future__ import annotations
 

@@ -1,9 +1,13 @@
 # Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved.
-# Present update preferences using the application's existing webview toolkit.
-# Store channel and automatic-check choices through the shared controller.
-# Expose only update status and explicitly chosen update operations to the page.
-# Native WinSparkle dialogs retain download and installation confirmation.
-# The page contains no remote content and displays diagnostics as plain text.
+
+# Purpose: Present Windows controls for the shared update policy.
+# How it works:
+# Expose a restricted webview bridge that persists explicit channel/check choices through the
+# controller.
+# Fundamental dependents:
+# - gui_app: Windows update settings actions depend on this preferences window.
+# - winsparkle: installed discovery follows the settings edited through this bridge.
+
 """Windows update settings for the common Python update service."""
 from __future__ import annotations
 

@@ -1,25 +1,56 @@
 <!-- Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved. -->
 
-Python webview branch: use the standard Windows Open file dialog. Selecting a
-file inside an archive opens the enclosing collection, with normal validation
-and no changes to archived bytes. Fix mapped-drive/UNC SQLite URI handling
-throughout the reader, including search and message rendering. Remove the custom archive browser. Restore New/Import,
-processing and identity controls using native Windows locks, byte-preserving
-MBOX framing and portable temporary-file handling. Add Windows ClamAV discovery
-and bounded updater supervision; require runtime/definitions in new MSIX builds.
-Windows ClamAV now loads in an isolated worker, passes clean/EICAR checks and
-stores validated definitions in application-specific user storage. First-run
-initialization supports downloaded or explicitly copied baselines. A CDN cooldown
-still blocks local download acceptance; package validation remains pending.
-Integrate the pinned WinSparkle SDK, shared update preferences, complete-feed
-verification, Python package filtering and archive-write installation fences.
-Native initialization and signed-feed tests pass; a signed installed upgrade
-still needs acceptance. Preserve source-machine provenance paths when copying
-between platforms and serialize concurrent export replacements.
-Retain completed ingest status across transient Windows reader locks and verify
-the Windows runtime's complete license evidence before MSIX assembly.
-
 # Release notes
+
+Entries describe their recorded revisions. For current behavior use the
+[user manual](USER_MANUAL.md) and [CLI reference](CLI_REFERENCE.md). Retired
+Rust delivery plans and historical package checks are not current acceptance.
+
+## Documentation consolidation
+
+- Split requirements and implementation into paired subsystem guides, retaining
+  short entry-point overviews. Separate future designs under `doc/plans/` and
+  dated audits/scope records under `doc/history/`; migrate incoming links.
+
+- Centralize command syntax in `CLI_REFERENCE.md` and add the documentation index.
+- Consolidate retired Rust GUI architecture, migration, Windows trials and search
+  evidence in `RUST_GUI_EXPERIMENTS.md`; remove superseded setup recipes.
+- Reduce repeated provider, Windows packaging, date and workflow descriptions.
+  Separate implemented behavior, future requirements and dated historical evidence.
+- Integrate documentation corrections and Help/manual work locally with IMAP;
+  branch publication and acceptance remain separate.
+
+## Standalone IMAP CLI
+
+Add `mailarchiver-imap` for single-run, read-only synchronization on macOS and
+Windows, including new archive creation, interactive native-keyring setup, eight
+workers by default, five-minute status and graceful Ctrl-C recovery. Generic IMAP
+excludes spam-named mailboxes; Gmail downloads only All Mail and retains Gmail IDs
+and labels. Per-message checkpoints and separate new/duplicate hourly totals share
+the archive transaction. Complete MIME bytes and attachments use the existing
+ingest pipeline and its current extraction limits. Graphs, scheduling, desktop
+configuration and background agents remain future work. Native Windows/keyring
+and live Gmail acceptance are not established by the local fixture tests.
+
+## Desktop Help and user manual
+
+- Add Help links for the community forum, support issues, user manual and source
+  code on both desktops, plus an offline viewer for the embedded project license.
+- Add a website manual index, replace Documentation with User Manual in navigation,
+  and move Advanced access into the manual. Publish Features at `/features/` while
+  retaining a redirect from `/use-cases/`.
+- Align website product names, manual and support labels, current Features links,
+  desktop architecture guidance, and backup instructions across the public pages.
+- Run built manual/link acceptance after CI installs Zola, alongside installer
+  rendering checks.
+
+## Documentation after 1.0.0a19
+
+- Reconcile documentation with the current source: ClamAV scanning uses the
+  embedded libclamav engine (no daemon); the Windows x64 desktop creates and
+  imports archives; the macOS DMG bundles ClamAV and the PST/OST helpers; the
+  compiled Dioxus/Tauri/Rust desktop plans are retired; no Google OAuth code
+  remains; release CI notarizes the DMG. Historical sections are labeled.
 
 ## Windows public signing preparation
 
@@ -120,7 +151,11 @@ the Windows runtime's complete license evidence before MSIX assembly.
   appcast in explicit branch CI before the immutable release tag. Physical
   interaction testing remains separately recorded human acceptance.
 
-## Unreleased
+## Earlier development (released by 1.0.0a19)
+
+These entries accumulated under "Unreleased" before per-version headings were
+used; all of them were included by the `v1.0.0a19` tag. Rust GUI items describe
+the migration retired on October 10, 2026.
 
 - Run startup Rust archive initialization on its supervised worker so helper
   waits cannot block native Quit/document events. Exempt release tag calls from
@@ -913,84 +948,14 @@ Contacts/geography GUI, live IMAP sources, and Refresh/Rebuild are documented
 plans, not newly implemented features. No source mailbox or real archive is
 changed by reconciliation or its fixture tests.
 
-## Local Windows MSIX prototype (2026-10-06)
+## Historical Windows delivery work (October 2026)
 
-See [Windows MSIX test packaging](WINDOWS_MSIX_TEST.md) for automated build/sign/test commands,
-private Python helper discovery, external WebView2 detection, native Windows
-evidence and unresolved installation/import/scanner/converter requirements.
-This local prototype is not a released or fully validated Windows application.
-
-## MSIX installation matrix (2026-10-07)
-
-The MSIX decision supersedes the older shared WinSparkle feed/EXE plan.
-`windows-msix.yml` supports explicit dispatch and reusable release calls; ordinary
-pushes do not run it. Two native build jobs produce x64 and ARM64 payloads once.
-One assembly job creates a signed common bundle and a higher-version upgrade
-fixture with identical application bytes. Both installation VMs download that
-same artifact: Windows Server x64 (`windows-latest`) and Windows 11 ARM64
-(`windows-11-arm`). Installation jobs do not rebuild. Private signing keys remain
-outside uploaded artifacts. Test packages are never published as release assets.
-The release caller waits for this gate after tag preflight. Windows 10 testing
-is not required. No GitHub Team or AWS provisioning is needed.
-
-Installed checks exercise private Python discovery, synthetic search/fixity,
-a native window, upgrade and uninstall, removing test packages and added trust
-in cleanup. WebView2 remains external and its absence fails this positive test.
-Its writable user-data directory is outside the immutable package. Hosted
-execution is pending; earlier local prototype results do not validate this head.
-Start-menu activation, missing-runtime UI, Windows imports/scanner/converters,
-and physical interaction remain separate acceptance gaps.
-
-Windows test installer downloads now contain one MSIX bundle and a README
-explaining machine-level test certificate trust, installation, and WebView2.
-The synthetic upgrade bundle is a separate CI-only artifact.
-
-The test installer ZIP includes `Install-Test-Certificate.ps1`: right-click Run
-with PowerShell requests elevation, installs the adjacent public certificate in
-Local Machine/Trusted People, verifies its presence, and displays the outcome.
-The README documents this path and a command fallback without changing the
-machine execution policy. The helper does not install the application.
-
-Windows installation registers the display name **Email Collector Toolkit (ECT)**.
-The installation matrix verifies that Start menu entry and activates its app ID
-using IApplicationActivationManager. The activated Rust executable runs the
-bundled Python self-test in package context, then CI activates the native reader
-on the synthetic archive before testing upgrade and uninstall. Taskbar pinning
-is a user choice, not an installation requirement.
-
-Windows test signing now requires the persistent `MSIX_TEST_CERT_PFX_BASE64`
-Actions secret, passed only to bundle signing (including reusable release calls).
-The signer checks it against `scripts/win/test-signing.cer`, requires a private
-key and current validity, and removes temporary PFX material on success/failure.
-No fallback certificate is generated. This supersedes the ephemeral test-key
-policy; testers trust the public certificate once until expiration (2028-10-07)
-or deliberate rotation. Production trusted signing remains separate.
-
-## Windows consolidation (October 10, 2026)
-
-The Windows Python work is integrated into PR #153 while retaining the Mac restoration and historical Rust GUI. The supported Windows package is x64-only private CPython with ClamAV and WinSparkle. This supersedes earlier frozen-Python/ARM64 and unsupported-import descriptions in the historical sections. The signed feed publisher labels Windows items with the Python package identity and x64 architecture so the updater can select compatible installations. The native install test retains both last-window Close and File/Quit checks.
-
-The installed reader CI regression was a Windows fsync on a read-only file descriptor. Publication now syncs a writable handle, and the package's actual self-test uses the shared byte-preserving MBOX class. Source acceptance covers both script and isolated module entry points, processor discovery, search/completion, and byte hashes. Current-head signed installation still requires hosted CI evidence.
-
-Installed Windows acceptance invokes File/Quit through WinForms' MSAA menu provider. UI Automation can omit MenuStrip items even when they are present. The test still invokes the actual named action and requires the process to exit; it never substitutes a forced close for Quit.
-
-- Preserve CRLF/LF bytes through raw MBOX access on Windows; retain definition
-  activation errors after staging moves; label release installers as x64-only.
-
-- Fix processing/status and identity CLI reads for reserved-character archive
-  paths; make Windows definition-publication tests work across disk volumes.
-
-- Report failed Windows update-setting saves, validate candidate Windows package
-  metadata, and retry transient Windows integrity-sidecar publication conflicts.
-
-- Fix WinSparkle installation shutdown after an accepted update or deferred Quit;
-  avoid duplicate directory flushes and clarify the retired Rust import limit.
-
-- Filter signing secrets from native builds and verify cached ClamAV runtime bytes.
-
-- Correct read-only Rust verifier search database attachment for Windows UNC paths.
-
-- Preserve non-ASCII plugin settings during Windows recovery and validate published
-  Windows update-feed coverage during Pages deployment.
-
-- Pin signing-job setup actions and prevent concurrent welcome-page archive pickers.
+The initial Rust reader/MSIX prototype expanded into shared x64/ARM64 installed
+acceptance, then the October 10 restoration selected the Python desktop. Python
+consolidation added x64 private CPython, ClamAV, WinSparkle, standard Open,
+Windows writer/publication fixes and native Close/Quit acceptance.
+The earlier ARM64 package, Rust updater and frozen-executable recipes are
+superseded. [RUST_GUI_EXPERIMENTS.md](RUST_GUI_EXPERIMENTS.md) retains the
+historical revision/run evidence; [WINDOWS_MSIX_TEST.md](WINDOWS_MSIX_TEST.md)
+owns the current package and acceptance contract. Public signing preparation is
+recorded above; neither these notes nor local tests establish hosted trust.

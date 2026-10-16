@@ -1,6 +1,18 @@
 <!-- Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved. -->
 
-# v1.0.0 alpha scope review
+# 2026-09-21-Alpha-Scope
+
+**Historical record.** Archived October 16, 2026. Statements, counts and findings
+describe the recorded revisions, not current support. Use the
+[documentation guide](../README.md) for current behavior.
+
+## v1.0.0 alpha scope review
+
+> Historical scope review. This records earlier release decisions, not today's
+> feature inventory. Current behavior is in [USER_MANUAL.md](../USER_MANUAL.md),
+> commands in [CLI_REFERENCE.md](../CLI_REFERENCE.md), and later changes in
+> [RELEASE_NOTES.md](../RELEASE_NOTES.md).
+
 
 ## Current release roadmap — 2026-09-21
 
@@ -20,30 +32,25 @@ This section supersedes the historical review below.
   message timelines.
 * **v2.0** adds social-media ingest.
 
-Sparkle is a macOS framework. The v1.1 updater must provide the equivalent
-Windows behavior with a Windows-native implementation and separate release
-feed. Gmail API, Microsoft Graph, additional legacy-mail formats, and other
+Sparkle is a macOS framework. Windows uses WinSparkle, reading the same signed
+appcast filtered to Windows x64 items; Windows alphas are already published as
+x64 MSIX packages alongside the macOS alphas, and release builds now require
+Microsoft public signing. v1.1 completes Windows parity. Gmail API, Microsoft Graph, additional legacy-mail formats, and other
 source-specific expansion are post-v1.1 work unless they become necessary to
 meet the v1.0 IMAP acceptance criteria.
 
-> Historical research/planning snapshot. Current development and application CI
-> are macOS-only. For implemented behavior use `requirements.md`,
-> `implementation.md`, and the current feature-specific guides; older
-> backend/platform priorities and inventories below may be superseded.
+> Historical research/planning snapshot. Its platform and feature inventories
+> describe the recorded date. Use [the documentation index](../README.md) for current guides.
 
 
 Review date: 2026-09-07. This is release planning, not implementation or release
 certification. No version tag or release binary has been published by this task.
 
-Architecture update, 2026-09-10: [Dioxus Desktop and Tauri](DIOXUS.md) are candidates for
-the compiled UI, retaining the Python archive engine. Windows full ingest is
-the next platform priority; Linux/snap delivery is deferred. This supersedes
-the earlier pywebview Windows direction, without claiming migration completion
-or changing the historical release inventory below. Linked issue titles are
+Architecture update, 2026-09-10 (superseded): [Dioxus Desktop and Tauri](../RUST_GUI_EXPERIMENTS.md)
+were then candidates for a compiled UI. That migration was retired on
+2026-10-10; Python/pywebview is the desktop on macOS and Windows (see
+[the retrospective](../RUST_GUI_EXPERIMENTS.md)). Linked issue titles below are
 historical labels; this documentation update does not edit those issues.
-
-Plan comparable trial implementations in Dioxus and Tauri before choosing a
-framework. Either approach retains the Python archive engine.
 
 ## Evidence and coverage
 
@@ -166,7 +173,7 @@ overlapping issues need scoped acceptance criteria; no issue is closed here.
 | [#41 GUI: distinguish message-file and attachment double-click behavior](https://github.com/simsong/email-collection-toolkit/issues/41) | v1.0.0 supporting; reconcile existing work | Confirm acceptance against final release; open issue status alone does not establish implementation. |
 | [#42 GUI: drag single messages as named mid-####.eml files](https://github.com/simsong/email-collection-toolkit/issues/42) | v1.0.0 supporting; reconcile existing work | Confirm acceptance against final release; open issue status alone does not establish implementation. |
 | [#43 GUI: select visible messages and export a ZIP](https://github.com/simsong/email-collection-toolkit/issues/43) | v1.0.0 supporting; reconcile existing work | Confirm acceptance against final release; open issue status alone does not establish implementation. |
-| [#49 Decide the future of the UI](https://github.com/simsong/email-collection-toolkit/issues/49) | v1.0.0 supporting; reconcile existing work | Preserve #78 document model; trial Dioxus and Tauri before choosing the compiled UI; retain Python ingest. Migration remains outside the existing alpha implementation. |
+| [#49 Decide the future of the UI](https://github.com/simsong/email-collection-toolkit/issues/49) | v1.0.0 supporting; reconcile existing work | Preserve #78 document model; trial Dioxus and Tauri before choosing the compiled UI; retain Python ingest. Migration remains outside the existing alpha implementation. *Superseded 2026-10-10: compiled UI retired; Python/pywebview is the desktop.* |
 | [#50 IMAP Source](https://github.com/simsong/email-collection-toolkit/issues/50) | v1.0.0 core | Reserved stub; add latest saved-source Refresh/Rebuild decisions. |
 | [#51 Adopt rainbow-post icon and create the initial GitHub Pages site.](https://github.com/simsong/email-collection-toolkit/issues/51) | v1.0.0 supporting; reconcile existing work | Existing icon/site; verify alpha links and current feature claims. |
 | [#62 Store ClamAV-positive messages as encrypted per-message EML files in a quarantine ZIP](https://github.com/simsong/email-collection-toolkit/issues/62) | Proposed later / scope decision | Decide encrypted quarantine ZIP vs current infected MBOX. |
@@ -176,7 +183,7 @@ overlapping issues need scoped acceptance criteria; no issue is closed here.
 | [#70 Enforce one archive writer across GUI windows, CLI processes, and application instances](https://github.com/simsong/email-collection-toolkit/issues/70) | v1.0.0 supporting; reconcile existing work | Verify every new archive writer, including redaction. |
 | [#71 Add pluggable antivirus providers for external ClamAV and Windows AMSI](https://github.com/simsong/email-collection-toolkit/issues/71) | v1.0.0 supporting; reconcile existing work | Mac ClamAV now; Windows AMSI/provider work later. |
 | [#72 Add shared PyInstaller resource packaging and desktop release infrastructure](https://github.com/simsong/email-collection-toolkit/issues/72) | v1.1.0 | The macOS packaging path exists; the remaining cross-platform acceptance criteria require a clean Windows bundle and native Windows CI. |
-| [#73 Make the pywebview GUI fully functional on Windows](https://github.com/simsong/email-collection-toolkit/issues/73) | v1.1.0 Windows | Historical title; choose the compiled UI after Dioxus/Tauri trials and retain applicable full-ingest/native acceptance criteria. |
+| [#73 Make the pywebview GUI fully functional on Windows](https://github.com/simsong/email-collection-toolkit/issues/73) | v1.1.0 Windows | Historical title; choose the compiled UI after Dioxus/Tauri trials and retain applicable full-ingest/native acceptance criteria. *Superseded 2026-10-10: the pywebview GUI is again the Windows direction.* |
 | [#74 Build, sign, notarize, and publish a self-contained macOS app and DMG](https://github.com/simsong/email-collection-toolkit/issues/74) | v1.0.0 core | Local DMG exists; public signed/notarized release unverified. |
 | [#75 Build and Authenticode-sign a self-contained Windows installer](https://github.com/simsong/email-collection-toolkit/issues/75) | v1.1.0 Windows | Outside the initial alpha scope; see issue for detailed acceptance criteria. |
 | [#76 Define and register the cross-platform Email Collection Toolkit document type](https://github.com/simsong/email-collection-toolkit/issues/76) | v1.0.0 supporting; reconcile existing work | Mac package registration now; Windows association later. |

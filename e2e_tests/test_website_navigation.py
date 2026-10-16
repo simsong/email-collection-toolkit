@@ -30,7 +30,10 @@ def test_navigation_remains_visible_and_within_viewport(page: Page, width: int) 
         assert bounds[WIDTH] == pytest.approx(width - 30, abs=0.5)
     for _ in range(2):
         links = page.locator("nav a")
-        expect(links).to_have_count(9)
+        expect(links).to_have_count(8)
+        expect(page.get_by_role("link", name="User Manual", exact=True)).to_have_attribute(
+            "href", "{{ get_url(path='manual/') }}")
+        expect(page.get_by_role("link", name="Advanced", exact=True)).to_have_count(0)
         for link in links.all():
             expect(link).to_be_visible()
             bounds = link.bounding_box()
@@ -71,7 +74,7 @@ def test_cover_text_remains_accessible_without_artwork(page: Page, width: int) -
     page.set_viewport_size({WIDTH: width, HEIGHT: 900})
     page.set_content(str(cover))
     page.add_style_tag(content=(ROOT / "website/static/styles.css").read_text(encoding="utf-8"))
-    expect(page.get_by_role("heading", level=1, name="Mail Collection Toolkit")).to_be_visible()
+    expect(page.get_by_role("heading", level=1, name="Email Collection Toolkit")).to_be_visible()
     download = page.get_by_role("link", name="Show all installers", exact=True)
     expect(download).to_be_visible()
     expect(download).to_have_attribute(
@@ -104,6 +107,6 @@ def test_cover_text_remains_accessible_without_artwork(page: Page, width: int) -
         selection.addRange(range);
         return selection.toString();
     }""")
-    assert "Mail Collection Toolkit" in selected_text
+    assert "Email Collection Toolkit" in selected_text
     assert "has a history." in selected_text
     assert "Keep it" in selected_text

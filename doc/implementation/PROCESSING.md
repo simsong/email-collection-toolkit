@@ -1,0 +1,239 @@
+<!-- Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved. -->
+
+# Processing implementation
+
+Current implementation and validation boundaries. Deferred feature designs
+live in [plans](../plans/README.md); historical evidence does not validate this revision.
+
+### CLI processor framework
+
+Dispatch job identity, provenance and cancellation follow the [processor requirements](../requirements/PROCESSING.md#production-cli-processor-and-identity-integration).
+
+
+For persistent attempt counts, timing and error reporting, follow the [processor contract](../PLUGINS.md).
+
+
+For About inventory discovery and compatibility, follow [PLUGINS.md](../PLUGINS.md).
+
+
+Keep header and signature counts separate as defined in [PLUGINS.md](../PLUGINS.md).
+
+
+Persist scanner evidence and retryable failures according to [PLUGINS.md](../PLUGINS.md).
+
+
+Promote attached messages only under the transfer-validation rules in [PLUGINS.md](../PLUGINS.md).
+
+
+Apply the configured MIME, attached-message and text limits in [PLUGINS.md](../PLUGINS.md); retain failed, retryable jobs.
+
+`MimeLimits` and a traversal-local `MimeBudget` charge all split/decoded output
+before writing. A root MIME traversal visits nested attached messages before
+releasing any child emissions, so budgets cover the complete tree without
+per-message resets bypassing the root limit. Part and attached-message counts
+are checked before creating/decoding further children. Limit exceptions make
+the job retryable; per-invocation temporary files are cleaned. Quoted-printable
+decoding preserves incomplete escapes across bounded chunks. `make test-mime-limits`
+uses actual CLI archives to check failure, preservation and configuration retry.
+
+The processing package implements API v2 manifests, typed objects/results,
+in-process execution and a serial rank-barrier dispatcher. Make processor
+provides init, plugins, submit, run, status and explicit reprocess commands.
+Each archive is protected by the existing writer lease. Queue release and job
+checkpoints use SQLite transactions; emission files are copied and fsynced
+before committing references. Parent-job dependencies prevent work from
+overtaking failed ranks. Restart recovers abandoned running work and reuses
+completed invocations.
+
+processing/sql/V2__processing.sql is a fresh framework schema, not a V1
+migration. It is packaged independently of the production sql/ directory.
+The focused framework target also runs catalog regression tests to enforce
+that separation.
+It includes the identity and organization relationships needed by the pickers.
+Production CLI ingest now calls `ProductionPipeline` from the existing source
+integrity/publication host. The three registered trees scan/file, extract headers
+and queue content, then dispatch streamed MIME payloads to text, conversion,
+identity and attached-message plugins. Canonical publication keeps its existing
+journal and deduplication key. `processing.sqlite3` records raw references,
+occurrences, jobs, evidence and picker state beside the catalog/search databases.
+`process` resumes saved jobs without rereading sources; incomplete source
+traversals are continued by repeating ingest. Configuration/code changes and
+explicit replay rebuild automatic evidence while retaining manual decisions.
+The default registry is packaged under `plugins/processors`; `processors` lists
+it. The independent `make processor` fixture harness remains available.
+
+Python plugins run synchronously in the host. A per-call context binds namespace
+settings, deadline and cancellation checks. `remaining_seconds` bounds native
+scanner I/O; POSIX main-thread invocations also receive an alarm. Portable or
+background-thread execution requires cooperative checks. Late results never
+publish. There is no separate Python worker executable. The Rust PST adapter
+alone uses the external importer protocol, spooling output and retaining failed
+tails with source/executable hashes and diagnostics under `processing-pst`.
+`make test` builds the helper; real fixture tests cover partial-run recovery.
+
+`make test-processors` runs lint/types and substantive framework tests;
+`make test-cli-processors` validates production pipelines, deferred resume,
+HTML/RTF selection, child byte preservation, identity edits and PST extraction.
+No native windows or private archives are used. Desktop processor integration is
+validated separately by `make test-gui-processing`.
+
+On a positive ClamAV result, best-effort header metadata cannot prevent filing.
+If parsing fails, quarantine records the raw digest as identity, labels its
+required date/envelope placeholder `quarantine-unknown`, records the defect and
+aborts subsequent processors. A real undated EICAR CLI test verifies exact bytes,
+the positive scan checkpoint and exclusion from search/content processing.
+
+HTML, RTF, text indexing and signature extraction use bounded reads and an 8 MiB
+default UTF-8 output bound (`max_text_bytes` in each plugin's configuration).
+Over-limit parts abort with a retained-content diagnostic. Generation invalidation
+attaches the search database to the processing connection and uses SQLite's
+rollback-journal multi-database transaction to remove FTS/suggestion data and queue
+replacement jobs together; a SQLite trigger that rejects deletion checks rollback
+of both databases after search-row changes have begun.
+Provider domains use a built-in local set plus `plugins.identity-evidence.provider_domains`;
+their evidence remains, but automatic affiliations are suppressed. PST receipts
+record exit status after reaping even on timeout. Retained stdout/stderr prefixes
+obey configured limits, with observed sizes and truncation flags in the receipt.
+
+ProcessingObject.get_my_config() returns a defensive dictionary snapshot from
+plugins.<manifest kind> in installation and archive config.yaml, with archive
+values taking precedence. write_my_config(values, scope="archive") stages a
+replacement of that plugin's selected layer; scope="installation" selects the
+shared layer. Installation config.yaml lives beside application preferences;
+the CLI --installation-config option provides an explicit path. The parent
+preflights all writes after a successful rank using file locks and expected-value
+hashes, then journals the batch before atomic file replacements. Recovery finishes
+the batch before plugin reads. Equal-value replay is harmless; preflight conflicts
+fail the job and require fresh invocations. See PLUGINS.md for the API.
+Tests cover recursive precedence, namespace isolation, both write scopes,
+abort/exception/timeout isolation and malformed settings without mocks.
+Regression tests also cover later-plugin conflicts, interrupted multi-file
+configuration publication, unreadable input recovery, invalid MIME tokens and
+7z inventory size/digest checks.
+
+The verifier SIGINT tests synchronize on consumption of FIFO data before
+sending the signal, then close the writer so buffered I/O returns and Python
+can deliver a pending signal. Holding the writer open indefinitely previously
+caused intermittent CI timeouts. The tests require exit 130 with an incomplete
+verification message, no traceback and no success output in normal/quiet modes;
+they do not assert interrupt latency for I/O that never returns.
+
+## Desktop processing and synthetic matcher
+
+[The proposed processor graphs](../PLUGINS.md#processing-graph-design-and-deferred-capabilities)
+and website plugin page describe the agreed direction, including resumable work
+selection, handoff plugins, first-class attached messages and durable tags.
+Ingest owns scanning and filing, message processing owns header metadata, and
+content processing owns MIME dispatch. Content-only resumption operates on
+eligible already-ingested messages. Standard deduplication shares message
+content/metadata while separate observations retain attachment provenance.
+All plugins may access all headers and content of their current message.
+Filing may read what it needs after ClamAV. Content-discovered child messages
+enter message processing directly without another antivirus scan, retaining
+parent scan provenance; the handoff uses shared deduplication/publication
+services to establish their records and durable content references.
+The graphic is a shared SVG in `website/static/images/processor-dag.svg`.
+The CLI dispatcher, production extraction, attachment promotion and identity/tag
+persistence are implemented. `gui_processing.py` supplies read-only status and
+identity queries plus writer-leased manual edits. `GuiApi.resume_processing`
+builds an `IngestRequest` from saved policy and starts the existing GUI import
+thread; it never starts a Python plugin subprocess. Ingest saves resolved owner
+rules and plugin/config paths in `processing_settings` before message processing.
+Run history preserves unfinished source roots across later rootless content runs.
+Content-only work reuses archived objects, and read-only access never creates a
+missing processing database. Unsupported/missing saved policy reports an error.
+
+`processing.js` shows the two checked resume options on opening and provides an
+explicit **Continue Processing** action. `identity.html` and `identity.js` subclass the shared
+matcher widgets with database queries, distinct per-group counts and immediate
+manual writes. Name moves and separation update manual address assignments;
+institutions retain domain-based membership and permit name edits. Prototype
+undo/reset are not exposed for persisted edits. Authoritative matching remains
+unconnected and disabled. About groups the registered processor manifests by
+subscribed type. `gui_provenance.py` reads attachment tags and parent occurrences;
+search rows show the gray tag and the viewer links to each parent and MIME path.
+A parent outside the current search results opens in the viewer without trying
+to select or scroll to an absent result row.
+`make website-preview-screenshots` builds the website and renders its homepage,
+Searching and Importing pages using local assets into ignored checkout-root output.
+The headless tests use real bridges, queues and SQLite databases, including edits
+surviving replay, competing writers, content resume without source files, and
+attached-message navigation. Native macOS window behavior remains an opt-in check.
+
+The standalone `make matcher-prototype` opens independent name and institution
+windows through a temporary `LoopbackAssetServer` and pywebview. Use
+`ARGS="--kind name"` or `ARGS="--kind institution"` to open just one. Closing both
+windows stops the server. The launcher does not construct the archive
+application, read preferences, or open databases. `gui/matcher.js` defines the
+shared `MatcherWindow`, model, and immutable message/address record classes.
+`matcher-types.js` supplies `NameMatcherWindow` and `InstitutionMatcherWindow`
+subclasses with their respective labels and matcher callbacks.
+`matcher-demo.js` supplies twelve fictional addresses, deterministic synthetic
+message dates/identifiers, name groups, and institution groups (including an
+explicit unassigned/personal group). Its two predefined name matches and one
+institution match do not execute an authoritative research algorithm.
+
+The shared window owns 39px disclosure triangles, mailbox/domain substring
+filters, optional inclusive date bounds, header sorting, selection, parent/child
+drag moves, a destination picker including hidden groups, separation, reset, and
+session-only undo. Date filters project message observations without changing
+the source records; first/last use and counts reflect that projection. Empty
+date controls display “Any date”, overriding WKWebView's current-date placeholder
+while leaving the native date editor available on focus. Group
+counts use distinct message identifiers, including a shared-message fixture.
+Clicking Messages initially sorts descending; other headers initially sort
+ascending. Repeated clicks reverse direction, with `aria-sort` and visible
+arrows. Sorting reorders groups and their children independently.
+Parent moves include hidden children and every original observation; the
+selection toolbar reports the complete source count. A matcher batch applies
+to a separate model and becomes one undo step; failures leave data unchanged,
+and mutation controls are disabled while it runs. Filter edits reveal matching
+children; disclosure can then collapse them. A filtered group badge shows
+matching/total addresses. `make test-matcher-prototype` runs Ruff, focused
+lint/type checks, and real Chromium interactions for filters, inclusive/open
+and reversed date ranges, count deduplication, sorting, disclosure, dragging,
+separation, undo/reset, matcher batches, both subclasses, and minimum layout.
+This is a synthetic UI experiment; catalog integration and authoritative
+matching remain unimplemented. Browser evidence does not establish native Cocoa
+drag behavior; manual testing uses `make matcher-prototype`.
+
+## Catalog-derived Contacts
+
+Contacts are a derived address-level projection over the catalog. The projection uses each message's `From`, `To`, `Cc`, and `Bcc` headers once and write
+one deduplicated address appearance per message. It derives the
+default **Meaningful** relation: outgoing direct To/Bcc recipients and incoming
+From addresses only when an exact configured owner address is in To. This
+preserves all-header statistics while avoiding Cc and indirect mailing-list
+traffic in meaningful-contact results.
+The include/exclude owner rules route Sent mail. A separate owner-address
+editor remains planned; see [plans/CONTACTS.md](../plans/CONTACTS.md).
+`mailarchiver human-contacts` is the initial read-only consumer. Its
+`--owner-address-file` accepts the existing owner aliases with newline, comma,
+or semicolon separators; it resolves them only to catalogued Sent sender
+addresses. Optional repeatable `--owner-address` values are exact overrides.
+The command defaults to meaningful Contacts and exposes the all-header
+projection only with `--all`; table, TSV, and JSON output share one typed row
+model.
+Contacts opens the catalog with `Path.resolve().as_uri()` and SQLite `mode=ro`,
+matching the schema validators. This preserves Windows drive-letter URI syntax
+and encodes path characters without allowing database creation or writes.
+Before rendering, it applies the strict versioned `contact_filters.yaml`
+policy. It classifies malformed Unicode/control values and forbidden local-part
+characters as bogus, configured provider/list patterns as mailing lists,
+configured automated patterns as service identities, and only then includes
+the remaining addresses. The policy deliberately keeps ordinary SMTPUTF8
+addresses possible; it does not use non-ASCII alone as a rejection rule.
+Bogus local-part and domain patterns report `invalid-local-part` and
+`invalid-domain` respectively, with local-part rules evaluated first. Empty
+domains are also rejected as `invalid-domain` after the local-part checks.
+The policy resolver first checks `<archive>/contact_filters.yaml`; when
+that file is absent it uses `src/mailarchiver/contact_filters.yaml` from
+the installed package. A `mode: replace` archive policy is a complete strict
+Pydantic replacement. A `mode: extend` policy may provide rule lists only; it
+is unioned with the packaged lists in order, removing duplicates, while
+packaged scalar values remain authoritative. The effective policy is therefore
+complete and reproducible without field-by-field scalar merging.
+Each pattern uses a Pydantic `AfterValidator` to compile with the same
+case-insensitive flags used by classification. Regex and YAML errors become
+path-qualified `ValueError` diagnostics handled by the Contacts CLI; invalid
+rules cannot remain hidden behind earlier matches or an empty catalog.

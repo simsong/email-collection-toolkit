@@ -15,15 +15,13 @@ experiments to compare. The system is precision-first: a false merge is more
 damaging than a missed merge, and every automatic merge must be explainable and
 reversible.
 
-Development lives on the long-running `research-name-matching` branch. The
-branch contains research documentation, extraction and evaluation code, fixtures,
-and reproducible result formats; it does not contain production UX work. Keep it
-current by merging `main` into it, preserving an explicit merge history rather
-than rebasing the shared research record.
+The notebook originated on `research-name-matching`; its extractor and documents
+are now present in this checkout. Research plans below do not establish a
+production matcher or current results. Record new experiments in the run log.
 
 ## Development data and validity
 
-The current private archive has 1,200,791 catalogued messages, 219,074 email
+The September 2026 development snapshot had 1,200,791 catalogued messages, 219,074 email
 addresses, 102,322 distinct sending addresses, and 154,915 distinct recipient
 addresses. Its canonical MBOX payload is about 39.7 GB across 81 generations.
 The disposable search database contains 214,926 address suggestions, but about
@@ -44,12 +42,7 @@ an explicit, separately authorized run and a documented disclosure policy.
 
 The current prototype performs read-only evidence extraction:
 
-```shell
-make name-matcher-observations \
-  ARCHIVE=/Users/simsong/mail-archive \
-  OUTPUT=build/name-evidence.sqlite3 \
-  ARGS='--limit 10000 --workers 4'
-```
+See the [CLI reference](../../CLI_REFERENCE.md#research-and-diagnostic-commands) for invocation.
 
 It writes a private SQLite database plus a YAML summary and refuses to overwrite
 an existing output. It extracts all display-name/address observations from

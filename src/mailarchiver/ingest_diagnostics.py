@@ -1,5 +1,13 @@
 # Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved.
 
+# Purpose: Attach bounded, useful source identity to ingest failures.
+# How it works:
+# Summarize parser and validation exceptions without dumping complete messages or traceback
+# locals.
+# Fundamental dependents:
+# - sources: malformed local inputs need trustworthy contextual errors.
+# - __main__: run failures must retain source identity without unbounded output.
+
 """Local import failure evidence without copying whole messages or traceback locals."""
 
 import hashlib

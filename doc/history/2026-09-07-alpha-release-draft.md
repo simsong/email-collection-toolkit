@@ -1,15 +1,18 @@
 <!-- Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved. -->
 
-# Email Collection Toolkit v1.0.0 alpha — draft release notes
+# 2026-09-07-Alpha-Release-Draft
 
-Status: unreleased scope draft, 2026-09-07. The first alpha tag and minimum macOS version are pending.
-Apple Silicon only; these notes describe the proposed v1.0.0 destination, not a
-tested release artifact. Remove or explicitly defer unfinished features before
-publishing release notes. The current release roadmap is in
-[V1_0_0_SCOPE.md](V1_0_0_SCOPE.md).
+**Historical record.** Archived October 16, 2026. Statements, counts and findings
+describe the recorded revisions, not current support. Use the
+[documentation guide](../README.md) for current behavior.
 
-Email Collection Toolkit brings local and remote email together into a searchable personal
-archive on your Apple Silicon Mac. Windows support is planned for v1.1.0.
+## Email Collection Toolkit v1.0.0 alpha — draft release notes
+
+Status: historical, unreleased scope draft from 2026-09-07. The product has
+since shipped alpha candidates and gained a Windows Python package. The feature
+list below records the proposal at that date, not current availability. See
+[USER_MANUAL.md](../USER_MANUAL.md) for current workflows and
+[RELEASE_NOTES.md](../RELEASE_NOTES.md) for subsequent changes.
 
 ## Installation and updates
 
@@ -99,7 +102,7 @@ archive on your Apple Silicon Mac. Windows support is planned for v1.1.0.
 ## Deferred from the proposed v1.0.0 scope
 
 Windows GUI/installer and Windows antivirus integration target v1.1.0. The
-compiled UI candidates are [Dioxus Desktop and Tauri](DIOXUS.md), retaining Python ingest
+compiled UI candidates are [Dioxus Desktop and Tauri](../RUST_GUI_EXPERIMENTS.md), retaining Python ingest
 and preservation. This migration is planned and is not part of the current
 pywebview alpha implementation. Windows delivery requires full ingest; Linux/snap
 delivery is deferred. Proposed
@@ -114,5 +117,5 @@ deferrals remain recommendations.
 Plan comparable trial implementations in Dioxus and Tauri before choosing a
 framework. Either approach retains the Python archive engine.
 
-See [the scope and issue review](V1_0_0_SCOPE.md) for open-issue dispositions,
+See [the scope and issue review](2026-09-21-alpha-scope.md) for open-issue dispositions,
 integration status, unresolved release decisions, and validation requirements.

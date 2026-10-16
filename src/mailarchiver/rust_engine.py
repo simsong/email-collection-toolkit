@@ -1,10 +1,13 @@
 # Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved.
-# Expose archive services to the Rust desktop without loading the Python GUI.
-# A private stdin/stdout JSON-line channel binds every request to one archive.
-# Typed requests validate operations; writer leases serialize mutations across windows.
-# Imports run on a worker and retain canonical bytes through the existing engine.
-# Closing the owning pipe requests message-boundary cancellation and bounded exit.
-# This transitional helper can be replaced without changing the shared HTML interface.
+
+# Purpose: Retain the private archive-service protocol for the retired Rust GUI.
+# How it works:
+# Serve typed JSON-line requests over owned pipes and supervise Python archive work with writer
+# leases.
+# Fundamental dependents:
+# - rust/mailsearch-gui/src/engine.rs: the historical desktop helper client relies on this
+#   protocol.
+
 from __future__ import annotations
 
 import os
