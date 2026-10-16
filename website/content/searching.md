@@ -21,6 +21,12 @@ search: every supplied term must match. The empty search screen includes a
 built-in reference and examples; submitting an empty query does not list the
 whole archive.
 
+Search ignores case and accents and treats `ß`/`ẞ` as `ss`, without stemming
+or a case-sensitivity setting. Existing indexes need no rebuild. Symbols inside
+quotes are significant: `"CACM-"` requires the hyphen, and `"Ham+Sandwhich"`
+requires the plus. Outside quotes, punctuation separates words as before.
+Word boundaries still apply. Quoted symbols with no words scan the indexed text.
+
 | Search | Finds |
 | --- | --- |
 | `exhibition` | The word in indexed headers or message text |
@@ -61,6 +67,10 @@ Click **×** to remove a filter, or press Delete in an empty input field.
 
 ## Sort and read results
 
+The archive-status banner across the bottom of the window shows each message
+on its own line. It currently says **Currently only .txt email attachments are
+indexed**. The ingest-history line remains available below it.
+
 Sort the complete matching set by **date**, **subject**, or **sender**, in either
 direction. Large searches show an initial group of 2,000 results and retrieve
 the rest automatically. **Searching in background** indicates more results
@@ -90,17 +100,6 @@ Command-A selects results when the result list has focus, or displayed message
 text when the message body has focus. The copy-text control copies visible
 message text. Save and print controls operate on the selected message.
 
-## Include attachment text
-
-Enable **Search attachments** to include indexed text attachments. The archive
-must first have been indexed with attachment support. PDF and Microsoft Office
-attachment-text extraction are not currently implemented; the checkbox does
-not add those capabilities.
-
-```console
-make run ARGS='--archive "/path/to/collection" refresh-index --index-attachments'
-```
-
 ## Original folders and saved filter sets
 
 Enable **Show original folder structure** to reveal the **Original mailboxes**
@@ -118,16 +117,13 @@ Use **Filter set → Save...** to name a folder selection. Select its name to
 restore it, or **None** for no folder filter. The **...** manager renames and
 deletes saved sets. These are local preferences, not changes to the archive.
 
-## Independent windows and command-line search
+## Independent windows
 
 **Window → New Search Window** gives the same collection another independent
-query and selection. You can also search from a terminal:
+query and selection.
 
-```console
-make search ARGS='--archive "/path/to/collection" subject:"annual report" after:2024-01-01'
-```
-
+For terminal commands, see [Advanced → Command Line](@/advanced.md#command-line).
 See the [user manual](https://github.com/simsong/email-collection-toolkit/blob/main/doc/USER_MANUAL.md)
-for command-line options, search-index rebuilding, keyboard controls, and the
-full message-viewing workflow. Semantic search and live provider ingestion are
-planned work, not features of the current search interface.
+for keyboard controls and the full message-viewing workflow. Semantic search
+and live provider ingestion are planned work, not features of the current search
+interface.

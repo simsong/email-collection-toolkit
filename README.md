@@ -554,6 +554,12 @@ search client can include attachments explicitly.
 
 ## Search mail
 
+Search ignores case and accents and treats `ß`/`ẞ` as `ss`, without stemming.
+Existing indexes need no rebuild. Quotes preserve symbols: `"CACM-"` requires
+the hyphen, and `"Ham+Sandwhich"` requires the plus. Unquoted punctuation keeps
+ordinary word-search behavior. To pass quoted search-box syntax through a shell,
+use `uv run mailsearch --query '"Ham+Sandwhich"'`.
+
 `mailsearch` is a read-only search command.  Ordinary words search indexed
 headers and body text. `to:` filters recipient addresses, `from:` filters
 senders, and `subject:` filters subjects. `date:YYYY-MM-DD` selects the 50-hour worldwide calendar-date window

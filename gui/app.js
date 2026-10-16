@@ -103,7 +103,7 @@ async function initialize() {
     "sort-by", "sort-direction", "search-attachments", "show-original-folders", "mailbox-browser", "mailbox-tree", "show-source-volumes", "filter-set", "manage-filter-sets",
     "save-filter-dialog", "save-filter-form", "filter-set-name", "cancel-save-filter", "manage-filter-dialog", "filter-set-list", "close-filter-manager",
     "message-pane", "message-content", "message-well", "computed-date-banner", "message-selection-summary", "message-file-well", "message-file-name", "message-subject", "message-headers", "part-select", "message-find", "message-find-query", "message-find-status", "message-find-previous", "message-find-next", "message-find-close", "remote-content",
-    "copy-message-text", "save-message", "print-message", "body-view", "attachment-section", "attachment-list", "attachment-preview", "provenance-section", "message-locations", "ingest-status-line", "link-dialog", "link-destination", "link-ignore", "link-copy", "link-open", "error"]) {
+    "copy-message-text", "save-message", "print-message", "body-view", "attachment-section", "attachment-list", "attachment-preview", "provenance-section", "message-locations", "archive-status-banner", "archive-status-messages", "ingest-status-line", "link-dialog", "link-destination", "link-ignore", "link-copy", "link-open", "error"]) {
     elements[id] = byId(id);
   }
   await initializeResultTable();
@@ -455,9 +455,20 @@ function applyStatus(status) {
     : status.untitled ? "Untitled — Email Collection Toolkit" : "Email Collection Toolkit";
   elements.search.disabled = !status.ready;
   elements["result-status"].textContent = status.ready ? "Enter a search." : "Use File → New or Open to begin.";
+  elements["archive-status-banner"].hidden = !status.ready;
+  renderArchiveStatus(status.ready ? status.archive_status_messages || [] : []);
   const notice = status.notices?.at(-1);
   if (notice && notice.severity !== "information") showError(notice.message);
   if (status.ready) elements.search.focus();
+}
+
+function renderArchiveStatus(messages) {
+  const lines = messages.map(message => {
+    const line = document.createElement("p");
+    line.textContent = message;
+    return line;
+  });
+  elements["archive-status-messages"].replaceChildren(...lines);
 }
 
 async function refreshIngestOverview() {

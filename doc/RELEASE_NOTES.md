@@ -21,6 +21,25 @@ the Windows runtime's complete license evidence before MSIX assembly.
 
 # Release notes
 
+## Archive status and command-line documentation
+
+- Add a multiline archive-status banner at the bottom of search windows with
+  the current text-attachment indexing limitation. Preserve ingest-history and
+  hovered-link status. The separate Tika indexer and progress action remain planned.
+- Centralize website terminal instructions under **Advanced → Command Line**.
+
+## Natural search matching
+
+- Ignore case and accents, and match `ß`/`ẞ` with `ss`, across content, subjects,
+  names and addresses. Existing search indexes work without rebuilding.
+- Preserve symbols inside quotes: `"CACM-"` requires the hyphen and
+  `"Ham+Sandwhich"` requires the plus. Apply the literal check before result
+  counts and pagination, including optional attachment searches.
+- Add CLI `--query` for intact search-box syntax. Keep stemming disabled and
+  preserve original message bytes, displayed headers and previews.
+- Keep CLI subject/sender pages in their complete requested order instead of
+  sorting a limited newest-first prefix.
+
 ## Windows public signing preparation
 
 - Require Microsoft Artifact Signing and GitHub OIDC for future MSIX release and
