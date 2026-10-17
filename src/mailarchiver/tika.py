@@ -1,6 +1,16 @@
 # Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved.
 
-"""Verified installation of the optional Apache Tika command-line layout."""
+"""Verified installation of the optional Apache Tika command-line layout.
+
+Purpose: Install a verified optional Tika distribution layout for developer experiments.
+
+How it works:
+Check archive checksums/members and stage the tool without adding an ingest-time extractor.
+
+Fundamental dependents:
+
+- Makefile installation targets invoke this tool; archive modules do not require it.
+"""
 
 from __future__ import annotations
 

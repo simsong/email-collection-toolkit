@@ -1,6 +1,17 @@
 # Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved.
 
-"""Export private, hash-verified examples of ambiguous h3 equivalence classes."""
+"""Export private, hash-verified examples of ambiguous h3 equivalence classes.
+
+Purpose: Export private examples of ambiguous semantic-message equivalence.
+
+How it works:
+Verify canonical/cache variants and publish bounded private review manifests without changing
+source stores.
+
+Fundamental dependents:
+
+- No production module depends on this standalone diagnostic review workflow.
+"""
 
 from __future__ import annotations
 

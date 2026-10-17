@@ -1,5 +1,18 @@
 # Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved.
-"""Fresh framework storage and atomic queue/checkpoint operations."""
+
+"""Fresh framework storage and atomic queue/checkpoint operations.
+
+Purpose: Persist processor objects, queues, invocations and replay generations.
+
+How it works:
+Snapshot verified content and atomically track job completion, handoffs and reprocessing
+without losing manual state.
+
+Fundamental dependents:
+
+- ``processing.runtime``: interruption-safe dispatch relies on these durable checkpoints.
+- ``processing.production``: deferred content work and replay need the same saved objects.
+"""
 from __future__ import annotations
 
 import hashlib
@@ -65,7 +78,7 @@ def snapshot(archive: Path, path: Path) -> ContentReference:
     """Copy once into content-addressed storage before committing a DB reference."""
     destination = archive / "objects"
     destination.mkdir(exist_ok=True)
-    with tempfile.NamedTemporaryFile(dir=destination, delete=False) as target:
+    with tempfile.NamedTemporaryFile(dir=destination, prefix=".object-", delete=False) as target:
         temporary = Path(target.name)
         try:
             with path.open("rb") as source:

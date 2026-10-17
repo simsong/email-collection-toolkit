@@ -9,7 +9,7 @@ eyebrow = "For archivists"
 [[extra.stages]]
 number = "01"
 title = "Identify email files"
-description = "Scan selected local directories for MBOX, EML, Maildir, Emacs RMAIL Babyl, and complete Apple Mail .emlx messages."
+description = "Scan selected local directories for MBOX, EML, Maildir, Emacs RMAIL Babyl, complete Apple Mail .emlx messages and, on macOS, Outlook PST/OST files."
 
 [[extra.stages]]
 number = "02"
@@ -57,8 +57,8 @@ estate.
 ## What is not yet available
 
 Current releases do not connect directly to Gmail or Microsoft 365 accounts.
-Local PST and OST readers are available in the development checkout; installed
-helper packaging and format qualification are separate requirements. The program
+The macOS application bundles best-effort PST and OST readers; the Windows
+package does not yet include them, and format qualification continues. The program
 does not import Mailbag packages, transfer files
 to ePADD automatically, redact messages, or produce a complete finding aid.
 

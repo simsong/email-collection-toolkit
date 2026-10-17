@@ -53,18 +53,14 @@ resolved timestamps in UTC and preserve original message headers. Existing
 date-recovery rules and mailbox filing are unchanged; no archive rebuild is
 needed for the new search boundaries.
 
-## Planned compiled desktop experience
+## Desktop application
 
-The compiled desktop UI will evaluate Dioxus Desktop and Tauri with the system webview.
-Ingest, search, and canonical archive preservation remain in Python. Windows
-with full ingest is the next platform priority; Linux/snap delivery is deferred.
-The current application remains Python/pywebview, and this decision is not a
-Windows release announcement. See the
-[architecture decision](https://github.com/simsong/email-collection-toolkit/blob/main/doc/DIOXUS.md)
-for migration and validation requirements.
-
-Plan comparable trial implementations in Dioxus and Tauri before choosing a
-framework. Either approach retains the Python archive engine.
+The supported desktop uses Python and pywebview on macOS and Windows. The
+earlier Rust GUI experiment is retired; independent Rust tools remain part of
+the archive system. See the
+[desktop retrospective](https://github.com/simsong/email-collection-toolkit/blob/main/rust/README.md)
+for the architecture history. Available installers and platform requirements
+are shown on the [homepage](@/_index.md).
 
 ## Apple Mail as a temporary provider adapter
 
@@ -227,6 +223,6 @@ cannot be reconstructed from the original messages. Back up the entire archive,
 including operational databases and configuration. Run `make verify ARCHIVE=/path/to/archive` after
 ingest or transfer; verification is read-only.
 
-The [user manual](https://github.com/simsong/email-collection-toolkit/blob/main/doc/USER_MANUAL.md)
+The [detailed reference manual](https://github.com/simsong/email-collection-toolkit/blob/main/doc/USER_MANUAL.md)
 and [Apple Mail cache report](https://github.com/simsong/email-collection-toolkit/blob/main/doc/APPLE_MAIL_CACHE.md)
 provide the complete operational guidance.

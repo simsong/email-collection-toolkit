@@ -13,21 +13,20 @@ Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved.
 
 `make dmg` builds the primary Python/pywebview application. `make python-dmg`
 is an equivalent explicit target. The Rust GUI is retired; see the
-[retrospective](../rust/README.md). Bundle identity and the Python Sparkle updater
+[retrospective](RUST_GUI_EXPERIMENTS.md). Bundle identity and the Python Sparkle updater
 are retained.
 
 On a logged-in Mac with this checkout's development environment and `uv`:
 
-```sh
-make dmg
-```
+See [CLI_REFERENCE.md](CLI_REFERENCE.md#build-the-python-dmg) for this recipe.
 
 The target installs only project-local packaging dependencies, then uses
 PyInstaller to bundle the private Python runtime, Python extension libraries,
 SQL/YAML resources, plug-in manifests, and verifier source. Python supplies the entry point and uses system WebKit through pywebview.
 The bundle also contains Sparkle and notices for bundled importer dependencies. Users
 need no Python, `uv`, Homebrew, or source checkout for the supported local-mail
-GUI. ClamAV is optional. Experimental PDF extraction/OCR, Tika/Java and the
+GUI. The ClamAV engine, FreshClam and baseline definitions are bundled, and
+the builder fails without them. Experimental PDF extraction/OCR, Tika/Java and the
 Apple Intelligence command are not included in this desktop workflow.
 
 The [ingest executables](PST_IMPORTER.md#platform-packaging-and-qualification)
@@ -105,17 +104,13 @@ The shipped executable also accepts `--self-test`, `--self-test-gui`, and
 `--report /absolute/path/report.json`. Advanced users can access the bundled
 archive CLI with `--cli`, without a separately installed Python:
 
-```sh
-"/Applications/Email Collection Toolkit.app/Contents/MacOS/Email Collection Toolkit" --self-test
-"/Applications/Email Collection Toolkit.app/Contents/MacOS/Email Collection Toolkit" --self-test-gui
-"/Applications/Email Collection Toolkit.app/Contents/MacOS/Email Collection Toolkit" --cli --help
-```
+See [CLI_REFERENCE.md](CLI_REFERENCE.md#check-the-installed-macos-executable) for this recipe.
 
-## Optional antivirus
+## Bundled antivirus
 
-The [embedded antivirus migration planned for PR #124](EMBEDDED_CLAMAV.md)
-will replace this setup with a bundled library and offline definitions, with
-updates under Application Support and refreshed app releases at least quarterly.
+The application scans with [embedded libclamav](EMBEDDED_CLAMAV.md) and offline
+definitions, with updates under Application Support and refreshed app releases
+at least quarterly. Users may still explicitly import without scanning.
 The DMG bundles libclamav, FreshClam, and the definitions in `etc/clamdb/`.
 Install ClamAV for development, then run `make freshclam`: it seeds the ignored
 project directory from an installed database (normally
@@ -143,16 +138,13 @@ scanned by a later ordinary import; a rescan command remains future work.
 
 For local signing with a certificate and private key already in your Keychain:
 
-```sh
-make list-signatures
-make dmg-signed
-```
+See [CLI_REFERENCE.md](CLI_REFERENCE.md#select-a-developer-id-identity) for this recipe.
 
 `dmg-signed` defaults to the first valid **Developer ID Application** identity
 listed by macOS. It fails before building if none is available. To select a
 different identity, use `make dmg-signed SIGNING_IDENTITY=HASH`, using the
 certificate hash from `list-signatures`. The target signs both the application
-and DMG; notarization remains separate.
+and DMG; notarize separately with `make notarize-dmg DMG=...`.
 
 On an isolated GitHub-hosted runner, `make dmg` and `make check-release` import a Developer ID Application
 identity when both
@@ -203,9 +195,7 @@ The mounted local tests do not establish downloaded-file Gatekeeper acceptance.
    Developer ID Installer is for `.pkg` installers, not this drag-install DMG.
 3. Build with the default Developer ID Application identity from your Keychain:
 
-   ```sh
-   make dmg-signed
-   ```
+   See [CLI_REFERENCE.md](CLI_REFERENCE.md#select-a-developer-id-identity) for this recipe.
 
 4. For a tagged release, GitHub Actions submits the DMG with `notarytool`,
    staples the accepted ticket, validates it, and requires Gatekeeper
@@ -220,15 +210,7 @@ After the intended version change is merged into `main`, use a clean checkout
 and replace the example tag with `v` plus the exact `pyproject.toml` version.
 Do not move or reuse an already published tag.
 
-```sh
-git switch main
-git pull --ff-only origin main
-release_tag=v1.0.0a10
-make release-tag-check GITHUB_REF_NAME="$release_tag"
-git tag -a "$release_tag" -m "Release $release_tag"
-make release-tag-check GITHUB_REF_NAME="$release_tag" ARGS=--require-annotated
-git push origin "refs/tags/$release_tag"
-```
+See [CLI_REFERENCE.md](CLI_REFERENCE.md#publish-a-matching-annotated-tag) for this recipe.
 
 The tag push is the only trigger for [the release workflow](../.github/workflows/release.yml)
 for tags beginning with `v`. It checks that the tag is annotated, points to a

@@ -1,5 +1,17 @@
 # Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved.
-"""Archive-backed desktop access to the same processor services as the CLI."""
+
+"""Archive-backed desktop access to the same processor services as the CLI.
+
+Purpose: Expose durable processing and identity workflows to desktop bridges.
+
+How it works:
+Query saved queues, reconstruct resumable policy and lease manual identity writes through
+shared services.
+
+Fundamental dependents:
+
+- ``gui_app``: processing dialogs and identity pickers depend on this archive-backed bridge.
+"""
 from __future__ import annotations
 
 import sqlite3

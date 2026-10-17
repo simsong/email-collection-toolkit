@@ -3,10 +3,10 @@
 # Gmail client registration is unavailable
 
 The Google authorization prototype and its registration command have been removed.
-Live Google ingestion will be reimplemented when needed. No Google Cloud project,
-OAuth client, or account authorization is required for the current application.
+Google API/OAuth ingestion remains deferred. The standalone IMAP CLI uses
+password/app-password authentication where permitted; it has no OAuth client
+or Google Cloud registration.
 
-Use Google Takeout to export MBOX and import those files locally. For example,
-export your.name@gmail.com through Takeout. See the Gmail acquisition guide for
-the supported workflow. The former registration illustrations remain historical
+For IMAP or offline Takeout workflows, see [GMAIL.md](GMAIL.md) and the
+[CLI reference](CLI_REFERENCE.md). The former registration illustrations remain historical
 assets, not instructions for the current software.

@@ -40,13 +40,9 @@ remains available for maintainers experimenting with the future API adapter.
 
 ## Current acquisition boundaries
 
-No release Desktop OAuth client is bundled yet. The shared-client end-user
-flow remains deferred until a maintainer supplies and validates that public
-configuration in release artifacts. Current authorization requires a developer
-client override. Installing that override validates and writes the same bytes.
-Known consumer domains need no DNS lookup; transient DNS and token-refresh
-transport failures are disclosed as errors rather than negative detection or
-fresh consent. Credentials are stored only after the profile matches.
+The Google authorization prototype and its developer client override have
+been removed. The current application contains no OAuth client and performs no
+Google account authorization; use Google Takeout.
 
 Directory import reports and skips `.partial.emlx` records and imports complete
 supported messages. Direct selection of a partial record is rejected. Detached

@@ -2,9 +2,9 @@
 
 # Embedded antivirus and offline definitions
 
-Status: local changes for PR #124. Python/Rust library scanning, infected-only
-API headers, definition refresh, About freshness reporting, and DMG bundling
-are implemented. Project-owned code is GPL-2.0-only; dependency distribution
+Status: merged with PR #124 and shipping. Python/Rust library scanning,
+infected-only API headers, definition refresh, About freshness reporting, DMG
+bundling and the Windows MSIX runtime are implemented. Project-owned code is GPL-2.0-only; dependency distribution
 compatibility remains unresolved; see below.
 
 ## Licensing and distribution

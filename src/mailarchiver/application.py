@@ -1,6 +1,18 @@
 # Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved.
 
-"""Document and window ownership for the cross-platform desktop application."""
+"""Document and window ownership for the cross-platform desktop application.
+
+Purpose: Own archive documents, logical windows and desktop lifecycle state.
+
+How it works:
+Validate/create archives and coordinate documents, preferences and import ownership
+independently of native widgets.
+
+Fundamental dependents:
+
+- ``gui_app``: native windows and menus follow this document controller.
+- ``imap_cli``: archive creation and validation share these document rules.
+"""
 
 from __future__ import annotations
 

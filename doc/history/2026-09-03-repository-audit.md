@@ -1,6 +1,12 @@
 <!-- Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved. -->
 
-# Historical repository audit
+# 2026-09-03-Repository-Audit
+
+**Historical record.** Archived October 16, 2026. Statements, counts and findings
+describe the recorded revisions, not current support. Use the
+[documentation guide](../README.md) for current behavior.
+
+## Historical repository audit
 
 Recovered during checkout reconciliation on 2026-09-08. Findings and validation
 below describe the pinned 2026-09-03/04 revisions, not current release status.

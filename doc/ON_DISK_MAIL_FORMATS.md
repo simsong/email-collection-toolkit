@@ -219,7 +219,7 @@ source lacked that property.
 
 | Layer | Format/source | Status | Preservation rule |
 |---|---|---|---|
-| Canonical archive | Standard MBOX inside BagIt/Mailbag | Implemented | RFC 5322 bytes are canonical; SQLite/search are rebuildable derivatives. |
+| Canonical archive | Standard MBOX inside BagIt/Mailbag | Implemented | Canonical message bytes and manifests are portable; search is rebuildable, manual state requires backup. |
 | Local mailbox | MBOX | Implemented | Stream and preserve message bytes with mboxrd-aware recovery. |
 | Local mailbox | Emacs RMAIL Babyl | Implemented | Preserve recovered RFC 5322 message; Babyl labels are source metadata. |
 | Local message | `.eml` | Implemented | Treat the file as one RFC 5322 source message. |
@@ -233,49 +233,15 @@ source lacked that property.
 | Thunderbird | mbox plus `.msf`/profile hierarchy | Planned | MBOX is the message format; profile indexes are metadata and must not be trusted as complete. |
 | Working IMAP cache | provider-specific local cache | Planned | Offline-only; report headers-only, evicted, partial, and detached content. |
 | Gmail Takeout | MBOX | Baseline supported by MBOX path | It is an MBOX source, not a separate binary parser. |
-| Live Gmail/IMAP/O365/Exchange | Remote provider/API | Planned/stubbed as documented | Remote reads require explicit authorization and provider-specific provenance; no source mutation. |
+| Live IMAP (including Gmail All Mail) | Verified-TLS password-based adapter | Implemented standalone CLI | Read-only fetches and per-account checkpoints; no OAuth or scheduled background sync. |
+| Gmail API / O365 / Exchange | Provider API / OAuth | Planned | Separate authorization and provenance; no source mutation. |
 
-## Original two-week development plan (superseded)
+## Superseded development plan
 
-The following 2026-08-31 sequence is retained as research history. Follow the
-[executable qualification criteria](PST_IMPORTER.md#platform-packaging-and-qualification)
-for new work; the original estimate does not cover independent-pass comparison
-or the Windows/macOS/Snap packaging work.
-
-### Week 1: fixture laboratory and parser spike
-
-* Build the private fixture directory and a manifest schema; fetch the three
-  `freepst` files without committing them.
-* On Windows, generate a clean Unicode PST and a cached OST from deterministic
-  seed messages. Record Outlook build, header signature, counts, hashes, and
-  expected folder/item/attachment facts.
-* Add a read-only pypff probe that reports file kind, header/version class,
-  folder tree, item classes, item identifiers, and attachment counts. Do not
-  publish canonical messages yet.
-* Compare the probe with libratom and at least one independent tool on the
-  public PST/OST files. Record disagreements instead of choosing whichever
-  tool emits more output.
-
-### Week 2: typed import slice and GUI proof
-
-* Implement the PST/OST local adapter using the existing typed plug-in contract,
-  including source hashes, native folder/item provenance, incomplete-item
-  observations, and explicit reconstruction metadata.
-* Publish one small generated PST and one generated/public OST into a copied
-  test archive through the normal Makefile test path. Validate no source
-  mutation, item accounting, duplicate Message-ID handling, attachment
-  accounting, and rerun/idempotence.
-* Add a GUI “import preview” that shows detected format, parser, folder/item
-  counts, incomplete items, and the planned destination before publication.
-* End with a go/no-go report for broader PST/OST support. If the adapter meets
-  the acceptance criteria, start the AI finding-aid design on top of the now
-  searchable, provenance-rich catalog rather than building AI against a
-  partial source import.
-
-The two-week exit criterion is not “a PST opens.” It is: a user can select a
-copy of a PST or OST, see what will be imported, understand what is incomplete,
-and obtain a rerunnable archive whose reconstructed records retain enough
-provenance to be audited.
+The original two-week parser spike has been replaced by the implemented PST/OST
+adapters. [PST_IMPORTER.md](PST_IMPORTER.md) owns their current stream contract,
+reconstruction limits and qualification; this inventory retains the format and
+fixture research, not a second implementation roadmap.
 
 ## References
 

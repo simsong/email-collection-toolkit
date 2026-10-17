@@ -32,12 +32,13 @@ The resolver will produce a reviewable match list. A librarian will be able to:
 * record a short reason or source for the decision.
 
 The original email address, original display-name observations, source
-provenance, and raw messages remain unchanged. Match decisions and canonical
-names are rebuildable analysis metadata. An accepted match is therefore a
+provenance, and raw messages remain unchanged. Manual match decisions and canonical
+names are durable analysis assertions that require backup. An accepted match is therefore a
 reviewed assertion about identity, not a rewrite of the preserved email.
 
-As of 2026-09-03, the repository has an experimental, read-only observation and
-signature extractor but no selected production matcher or match-review editor.
+The evidence extractor is experimental and no production matcher has been
+selected. Manual identity editing exists separately in the current desktop and
+CLI; this proposed matching/review workflow is not implemented.
 
 ## Do librarians need to edit configuration files?
 

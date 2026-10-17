@@ -1,6 +1,17 @@
 # Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved.
 
-"""Classify address identities conservatively for the human-contacts view."""
+"""Classify address identities conservatively for the human-contacts view.
+
+Purpose: Classify human, automated, list and invalid contact addresses.
+
+How it works:
+Apply versioned packaged or archive-local regex policies with explicit replacement/extension
+semantics.
+
+Fundamental dependents:
+
+- ``contacts``: meaningful-correspondent reports depend on these classification decisions.
+"""
 
 from __future__ import annotations
 

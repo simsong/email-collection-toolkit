@@ -1,5 +1,18 @@
 # Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved.
-"""Typed production services and provenance carried across processor workers."""
+
+"""Typed production services and provenance carried across processor workers.
+
+Purpose: Define durable production policy, provenance and publication result types.
+
+How it works:
+Carry filing destinations, source/parent evidence and derived metadata across retries and
+processor handoffs.
+
+Fundamental dependents:
+
+- ``processing.production``: replay/publication require these typed service results.
+- ``__main__``: canonical admission must retain policy and source provenance consistently.
+"""
 from __future__ import annotations
 
 from datetime import datetime
@@ -44,12 +57,14 @@ class SourceMetadata(Contract):
     normalization: MboxNormalization | None = None
     scan_evidence: ScanEvidence | None = None
     scan_responsibility: Literal["host", "producer"] = "host"
+    provider_metadata_json: str | None = None
 
     def mail_object(self, raw: bytes) -> MailObject:
         return MailObject(source=self.source, work_id=self.work_id, cursor=self.cursor, raw=raw,
                           source_date_utc=self.source_date,
                           mbox_envelope=None if self.envelope_hex is None else bytes.fromhex(self.envelope_hex),
-                          mbox_normalization=self.normalization)
+                          mbox_normalization=self.normalization,
+                          provider_metadata_json=self.provider_metadata_json)
 
 
 class ContentMetadata(Contract):

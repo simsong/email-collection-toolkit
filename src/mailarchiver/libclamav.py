@@ -1,5 +1,17 @@
 # Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved.
-"""Small ctypes binding to the public libclamav 1.x C ABI, hosted off the UI process."""
+
+"""Small ctypes binding to the public libclamav 1.x C ABI, hosted off the UI process.
+
+Purpose: Wrap the public native ClamAV ABI for isolated scan workers.
+
+How it works:
+Load the selected library, own compiled engines and return typed verdicts for supplied bytes.
+
+Fundamental dependents:
+
+- ``scanner``: run-owned workers depend on these native engine operations.
+- ``clamav_update``: candidate definition validation ultimately uses this engine boundary.
+"""
 from __future__ import annotations
 
 import ctypes as c

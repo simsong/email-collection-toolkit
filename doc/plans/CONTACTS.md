@@ -2,48 +2,26 @@
 
 # Contacts and geography design
 
+**Planned design.** Current partial capabilities and limitations are identified below.
+
 Only the read-only `human-contacts` CLI and filtering policy are implemented.
 The Contacts window, geographic database, updater, and identity resolution below
 are planned work, not shipped features.
 
-## Scope and terminology
+## Planned Contacts window
 
-A **Contact** is one normalized email address, not a resolved person. It has
-header observations, display-name observations, dates, message counts, and
-geographic evidence. The later authoritative-name index may merge Contacts
-into People; it must not overwrite or collapse Contact evidence.
+A Contact is one normalized email address, not an automatically resolved person.
+The proposed window displays first/last use and message counts, with a default
+Meaningful filter. Use the existing [Contacts contract](../requirements/PROCESSING.md#catalog-derived-contacts)
+for exact direct-correspondent semantics, evidence preservation and policy rules.
+The CLI already provides that projection; its options live in the
+[CLI reference](../CLI_REFERENCE.md#identities-and-contacts).
 
-Contact extraction reads `From`, `To`, `Cc`, and `Bcc` once per message. Each
-address contributes at most one appearance to a message's all-header count and
-date range. The initial Contacts window displays the address, first and last
-appearance, and number of messages. Its **Meaningful** filter is checked by
-default. A contact is meaningful when it is a direct To or outgoing Bcc
-recipient of an owner-sent message, or the From address of an incoming message
-whose `To` header contains an exact configured owner address. Cc recipients
-are not meaningful; multiple To recipients are. A mailing-list message is
-meaningful only under that same direct-owner-in-To rule.
-
-The existing `owner-names.txt` remains the current ingest classifier. The
-Contacts implementation will ask for exact owner addresses when creating an
-archive and allow them to be revised through **File → Properties**. Those
-addresses supply the direct-owner test; name fragments must not do so.
-
-`human-contacts` excludes non-human identities through a versioned local
-policy: mailing-list providers/hosts, automated or no-reply services, malformed
-or replacement-character addresses, and local parts longer than 48 characters.
-Classification records a reason and is conservative: ordinary non-ASCII SMTPUTF8
-addresses remain eligible. The policy is seeded from Google Groups' documented
-group-email model and LISTSERV's CataList, but no maintained universal list-host
-database exists; additions are narrow and reviewable.
-Policy allow rules are explicit, documented exceptions evaluated before every
-exclusion rule; they preserve known personal identities such as =@ex.com and
-voicemail identities at vm.vonage.com.
-The complete packaged policy may be copied to an archive root as
-`contact_filters.yaml`. The archive-local policy is strictly validated
-and takes precedence, preserving the exact filtering decision with the archive.
-`mode: replace` requires a complete replacement policy; `mode: extend` unions
-each supplied rule list with the packaged list in order and removes duplicates.
-Extension does not change packaged scalar thresholds.
+Future archive creation and File → Properties controls will maintain a reviewed
+exact owner-address set for Contacts, separate from the include/exclude rules
+that classify Sent mail. Name fragments cannot establish that owner predicate.
+A later authoritative matcher may relate multiple Contacts to a Person without
+replacing address observations; no matching engine is selected.
 
 ## Geographic evidence
 

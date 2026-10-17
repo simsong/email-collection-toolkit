@@ -1,6 +1,18 @@
 # Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved.
 
-"""Derive robust message identity, addresses, subjects, and dates from raw mail."""
+"""Derive robust message identity, addresses, subjects, and dates from raw mail.
+
+Purpose: Derive typed identity, address, date and header metadata from raw mail.
+
+How it works:
+Parse derived copies, resolve plausible dates and retain defects while hashing original RFC
+bytes.
+
+Fundamental dependents:
+
+- ``processing.builtin``: filing/header processors rely on these metadata decisions.
+- ``__main__``: duplicate admission and date/category routing use this identity contract.
+"""
 
 from __future__ import annotations
 

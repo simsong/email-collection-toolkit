@@ -1,11 +1,15 @@
 # Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved.
-# Run a bounded external command whose lifetime belongs to its caller.
-# A spawned supervisor creates a private POSIX process group for the command.
-# Its parent-sentinel watcher kills that group if the caller exits abruptly.
-# This closes the startup race between launching a child and recording its PID.
-# Ordinary completion returns captured output; failures retain diagnostic text.
-# Definition updates use this path so forced GUI Quit cannot orphan FreshClam.
 
+"""Purpose: Contain the lifetime and output of an explicitly launched external command.
+
+How it works:
+Use a private supervisor/process group or Windows job and reap descendants on timeout or owner
+death.
+
+Fundamental dependents:
+
+- ``clamav_update``: definition refresh depends on FreshClam cleanup during cancellation or Quit.
+"""
 from __future__ import annotations
 
 import multiprocessing

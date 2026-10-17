@@ -27,3 +27,22 @@ Dates outside the configured plausible year range are retained as source bytes
 but do not control routing. Date-resolution defects are recorded in the
 catalog so a later review can distinguish a header date from derived evidence.
 
+## Bounds and evidence
+
+`--earliest-year` sets the first plausible header year (default 1900); dates
+more than one year in the future are also implausible. Resolved timestamps are stored in UTC; typed source timestamps must be
+timezone-aware and are normalized to UTC.
+A valid Date is retained when it is within two days of the usable Received
+median. An absent/invalid Date with usable Received evidence uses that median.
+The body scan is considered only without usable Received evidence and with a
+missing or epoch-like Date through 1980. Choose the most recent plausible
+embedded candidate using packaged localized quote patterns, replacing a usable
+epoch-like Date only when the candidate is later.
+
+The catalog records `date`, `received-median`, `received`, `body-embedded` or
+`source-fallback`, `previous-message` or `path-year` as applicable. With no header date, source-specific metadata
+(such as IMAP INTERNALDATE) precedes the prior stream date and path-year fallback.
+Do not route undated input into an invented year-zero mailbox. Source year
+fallback and parser failures remain explicit; no current-time replacement is
+permitted. This routing policy is separate from synthesizing a missing MBOX
+envelope, whose byte contract is in [INTEGRITY_CONTROLS.md](INTEGRITY_CONTROLS.md).

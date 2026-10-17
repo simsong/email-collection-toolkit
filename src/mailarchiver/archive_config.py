@@ -3,6 +3,18 @@
 """Human-editable, per-archive operational configuration.
 
 Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved.
+
+
+Purpose: Persist validated per-archive operational settings without credentials.
+
+How it works:
+Read supported YAML versions and atomically save owner, plugin and nonsecret IMAP
+configuration.
+
+Fundamental dependents:
+
+- ``document_options``: import defaults depend on the saved owner rules.
+- ``imap_source``: saved account definitions identify remote acquisition settings.
 """
 
 from __future__ import annotations
@@ -12,10 +24,11 @@ from pathlib import Path
 import tempfile
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, JsonValue
+from pydantic import BaseModel, ConfigDict, Field, JsonValue, model_validator
 from yaml import YAMLError, safe_dump, safe_load
 
 from .owner_rules import OwnerRules
+from .imap_models import ImapAccount
 from .mbox import DEFAULT_MBOX_MAX_BYTES
 
 ARCHIVE_CONFIG_FILENAME = "config.yaml"
@@ -25,11 +38,18 @@ class ArchiveConfig(BaseModel):
     """Settings that describe how the application should open an archive."""
 
     model_config = ConfigDict(extra="forbid", validate_assignment=True)
-    version: Literal[1, 2] = 2
+    version: Literal[1, 2, 3] = 2
     last_import_directory: Path | None = None
     owner: OwnerRules | None = None
     mbox_max_bytes: int = Field(default=DEFAULT_MBOX_MAX_BYTES, gt=0, strict=True)
     plugins: dict[str, dict[str, JsonValue]] = Field(default_factory=dict)
+    imap_sources: list[ImapAccount] = Field(default_factory=list, exclude_if=lambda value: not value)
+
+    @model_validator(mode="after")
+    def unique_imap_ids(self) -> ArchiveConfig:
+        if len({source.id for source in self.imap_sources}) != len(self.imap_sources):
+            raise ValueError("IMAP source IDs must be unique within an archive")
+        return self
 
 
 def config_path(archive: Path) -> Path:
@@ -51,7 +71,7 @@ def load_archive_config(archive: Path) -> ArchiveConfig:
 def save_archive_config(archive: Path, config: ArchiveConfig) -> None:
     """Atomically write readable YAML beside the archive's operational state."""
     archive.mkdir(parents=True, exist_ok=True)
-    config.version = 2
+    config.version = 3 if config.imap_sources else 2
     path = config_path(archive)
     descriptor, temporary = tempfile.mkstemp(prefix=".config-", dir=archive)
     try:

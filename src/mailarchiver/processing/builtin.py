@@ -1,5 +1,18 @@
 # Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved.
-"""In-process production plugins derive typed results; the host owns publication."""
+
+"""In-process production plugins derive typed results; the host owns publication.
+
+Purpose: Implement the production processors behind packaged plugin factories.
+
+How it works:
+Return typed scan, filing, header, MIME, text and identity results; the host retains
+publication authority.
+
+Fundamental dependents:
+
+- plugins.processors adapters: their factories expose these processor implementations.
+- ``processing.production``: the production pipeline relies on these stage semantics.
+"""
 from __future__ import annotations
 
 import hashlib

@@ -71,6 +71,7 @@ Get-ChildItem (Join-Path $PythonEnvironment 'Lib/site-packages') | Where-Object 
 Copy-Item -LiteralPath (Join-Path $root 'src/mailarchiver') -Destination $site -Recurse
 [IO.File]::WriteAllText((Join-Path $privatePython 'python312._pth'), ".`nLib`nDLLs`nLib/site-packages`n", [Text.UTF8Encoding]::new($false))
 Copy-Item -LiteralPath (Join-Path $root 'gui') -Destination (Join-Path $privatePython 'Lib/gui') -Recurse
+Copy-Item -LiteralPath (Join-Path $root 'LICENSE') -Destination (Join-Path $privatePython 'Lib/gui/LICENSE')
 $clamav = Join-Path $privatePython 'clamav'
 Copy-Item -LiteralPath $ClamavDirectory -Destination $clamav -Recurse
 Copy-Item -LiteralPath $DefinitionsDirectory -Destination (Join-Path $clamav 'definitions') -Recurse

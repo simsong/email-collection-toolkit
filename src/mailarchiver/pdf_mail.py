@@ -1,6 +1,17 @@
 # Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved.
 
-"""Extract printed email records from standalone PDFs without modifying them."""
+"""Extract printed email records from standalone PDFs without modifying them.
+
+Purpose: Extract reviewable derived messages from printed-email PDF sources.
+
+How it works:
+Hash the PDF, segment Poppler page text and exclusively publish provenance-rich derived MBOX
+records.
+
+Fundamental dependents:
+
+- No internal module relies on this standalone extractor; its output can be ingested.
+"""
 
 from __future__ import annotations
 

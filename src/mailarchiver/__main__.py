@@ -1,6 +1,18 @@
 # Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved.
 
-"""Run canonical mail ingest, provenance review, reports, and FTS rebuilds."""
+"""Run canonical mail ingest, provenance review, reports, and FTS rebuilds.
+
+Purpose: Coordinate archive ingest, reports, provenance review and index rebuilding.
+
+How it works:
+Drive source workers and the production processor pipeline while serializing canonical
+publication and recovery.
+
+Fundamental dependents:
+
+- ``imap_cli``: remote downloads use this same ingest and checkpoint engine.
+- ``gui_app``: desktop imports and resumed processing use its typed ingest service.
+"""
 
 from __future__ import annotations
 
@@ -86,6 +98,7 @@ from .plugin_api import (
     ProgressEvent,
     SkippedInput,
     SourceContainerMetadata,
+    SourceObservation,
     SourceSpec,
 )
 from .plugin_loader import PluginDiscoveryError, load_plugins
@@ -107,6 +120,7 @@ from .sources import (
 from .standalone_verify import semantic_bytes
 from .sqlite_paths import sqlite_uri
 from .writer_lock import ArchiveBusyError, WriterLease
+from .imap_state import initialize_state, record_download, refresh_observation
 
 DEFAULT_REPORT_TOP = 10
 PROGRESS_REFRESH_SECONDS = 0.25
@@ -373,7 +387,8 @@ def formatted_duration(seconds: float) -> str:
 
 def safe_status_text(value: str) -> str:
     """Collapse untrusted plug-in status text to one bounded printable line."""
-    return " ".join(value.split())[:80] or "working"
+    printable = "".join(character if character.isprintable() else " " for character in value)
+    return " ".join(printable.split())[:80] or "working"
 
 
 def overall_progress(state: ProgressState, now: float) -> OverallProgress:
@@ -1141,7 +1156,8 @@ def _run_ingest(request: IngestRequest, writer_lease: WriterLease, outcome: Inge
     if not owners.include:
         raise ValueError("Set owner include rules in config.yaml or supply --owner-names-file before importing.")
     plugins = load_plugins(request.plugin_dir, archive=request.archive, installation_config=request.installation_config, scan_policy=request.scan_policy)
-    source_specs = [SourceSpec(locator=str(Path(root).resolve()) if Path(root).exists() else root) for root in request.roots]
+    source_specs = [SourceSpec(locator=str(Path(root).resolve())
+                              if "://" not in root and Path(root).exists() else root) for root in request.roots]
     selected_sources: list[tuple[SourceSpec, LoadedPlugin]] = []
     selected_source_keys: set[tuple[str, str, str | None]] = set()
     for source_spec in source_specs:
@@ -1178,6 +1194,9 @@ def _run_ingest(request: IngestRequest, writer_lease: WriterLease, outcome: Inge
     )
     archive_integrity = MailbagArchiveIntegrityControls()
     catalog = create_catalog(catalog_path, check_same_thread=False)
+    if any(plugin.manifest.kind == "imap" for _spec, plugin in selected_sources):
+        initialize_state(catalog)
+        catalog.commit()
     try:
         list(archive_integrity.initialize(archive_reference))
     except BaseException:
@@ -1394,6 +1413,7 @@ def _run_ingest(request: IngestRequest, writer_lease: WriterLease, outcome: Inge
              hashlib.sha256(semantic_bytes(source.raw)).hexdigest(), disposition, detail),
         )
         assert cursor.lastrowid is not None
+        record_download(catalog, source, cursor.lastrowid, disposition)
         return cursor.lastrowid
 
     def prior_source_evidence(source_file_pk: int, control_id: str) -> tuple[IntegrityEvidence, ...]:
@@ -1729,11 +1749,18 @@ def _run_ingest(request: IngestRequest, writer_lease: WriterLease, outcome: Inge
                 if isinstance(item, ProgressEvent):
                     progress.record_plugin_event(item, display_path)
                     continue
-                if not isinstance(item, MailObject):
+                if not isinstance(item, (MailObject, SourceObservation)):
                     raise TypeError(
                         f"source plug-in {work.plugin.manifest.kind} yielded unsupported "
                         f"{type(item).__name__}"
                     )
+                if isinstance(item, SourceObservation):
+                    if item.work_id != work.container.work_id or item.source != work.container.source:
+                        raise RuntimeError("Provider observation belongs to the wrong container")
+                    with publication_lock:
+                        refresh_observation(catalog, item)
+                        catalog.commit()
+                    continue
                 source = item
                 if source.work_id != work.container.work_id or source.source != work.container.source:
                     raise RuntimeError(
@@ -1775,7 +1802,8 @@ def _run_ingest(request: IngestRequest, writer_lease: WriterLease, outcome: Inge
                     prior_date=prior_date, source_date=source.source_date_utc,
                     envelope_hex=None if source.mbox_envelope is None else source.mbox_envelope.hex(),
                     normalization=source.mbox_normalization, scan_evidence=evidence,
-                    scan_responsibility=source.scan_responsibility)
+                    scan_responsibility=source.scan_responsibility,
+                    provider_metadata_json=source.provider_metadata_json)
                 with publication_lock:
                     try:
                         decision = pipeline.ingest(source, metadata)

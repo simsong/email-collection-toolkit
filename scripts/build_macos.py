@@ -508,6 +508,7 @@ def build(signing_identity: str, *, gui: bool = False, log_contents: bool = Fals
                    "--hidden-import", "mailarchiver.rust_engine",
                    "--add-data", f"{plugins}:mailarchiver/plugins",
                    "--add-data", f"{ROOT / 'gui'}:gui",
+                   "--add-data", f"{ROOT / 'LICENSE'}:gui",
                    "--add-data", f"{ROOT / 'src/mailarchiver/standalone_verify.py'}:mailarchiver",
                    "--add-data", f"{notices}:Third Party Notices",
                    *clamav_bundle_arguments(work),

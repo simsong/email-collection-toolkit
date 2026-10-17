@@ -13,19 +13,14 @@ Run it only through the Makefile:
 make test-e2e
 ```
 
-## Compiled UI trial and migration boundary
+## Desktop boundary
 
-The compiled UI candidates are [Dioxus Desktop and Tauri](DIOXUS.md), retaining the
-Python ingest engine. The suite and pywebview bridge descriptions below cover
-the current implementation. Migration must reuse preservation fixtures and
-logical assertions, adapt the frontend driver, test the typed worker protocol,
-and add native tests for each trial on macOS and Windows. A Chromium pass or skipped
-Cocoa test is not validation of either Windows frontend. Packaged acceptance must cover full
-ingest, cancellation/recovery, isolated HTML, and clean installation without
-developer runtimes. These migration tests are not implemented yet.
-
-Plan comparable trial implementations in Dioxus and Tauri before choosing a
-framework. Either approach retains the Python archive engine.
+The suite and pywebview bridge descriptions below cover the current Python
+desktop on macOS and Windows. The compiled Rust UI was retired (see
+[the retrospective](RUST_GUI_EXPERIMENTS.md)); its tests are historical. A Chromium
+pass or skipped Cocoa test is not validation of the Windows WebView2 host;
+Windows evidence comes from `make test-python-reader-native` and the installed
+MSIX checks described in [WINDOWS_MSIX_TEST.md](WINDOWS_MSIX_TEST.md).
 
 ## Synthetic name-resolution benchmark
 

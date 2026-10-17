@@ -103,6 +103,7 @@ def main() -> int:
     required = [
         root / "website/content/_index.md",
         root / "website/content/use-cases.md",
+        root / "website/content/manual.md",
         root / "website/content/about.md", root / "website/content/changelog.md",
         root / "website/content/privacy.md", root / "website/content/rights.md",
         root / "website/themes/envelope-rainbow/theme.toml",
