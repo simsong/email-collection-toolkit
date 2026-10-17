@@ -54,6 +54,15 @@ def known_observation(database: sqlite3.Connection, source: SourceReference,
 
 def remember(database: sqlite3.Connection, source: SourceReference,
              metadata: ImapMessageMetadata, observation_pk: int) -> None:
+    if metadata.download is None:
+        # Metadata-only refreshes, including Gmail UID epoch changes, must keep
+        # the original download evidence attached to this committed observation.
+        previous = database.execute("SELECT labels_json FROM imap_seen WHERE source_id=? AND observation_pk=? "
+                                    "AND json_type(labels_json,'$.download')='object' LIMIT 1",
+                                    (source.source_id, observation_pk)).fetchone()
+        if previous:
+            prior = ImapMessageMetadata.model_validate_json(previous[0])
+            metadata = metadata.model_copy(update={"download": prior.download})
     database.execute("INSERT INTO imap_seen VALUES (?,?,?,?,?,?,?) "
                      "ON CONFLICT(source_id,mailbox,uid_validity,uid) DO UPDATE SET "
                      "gmail_id=excluded.gmail_id,labels_json=excluded.labels_json,observation_pk=excluded.observation_pk",

@@ -3,7 +3,7 @@
 # Purpose: Define typed nonsecret accounts and remote message observations.
 # How it works:
 # Validate connection settings and preserve mailbox epochs, Gmail identities, labels and
-# download totals.
+# wire-normalization evidence and download totals.
 # Fundamental dependents:
 # - archive_config: persisted IMAP accounts use these validation rules.
 # - imap_source: discovery and acquisition share these provider identity types.
@@ -59,6 +59,15 @@ class ImapMailbox(BaseModel):
     uid_next: int = Field(default=1, ge=1)
 
 
+class ImapDownload(BaseModel):
+    """Wire provenance before the explicitly selected IMAP line-ending conversion."""
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    normalization: Literal["crlf-to-lf"] = "crlf-to-lf"
+    source_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    source_byte_length: int = Field(ge=0)
+    crlf_pairs: int = Field(ge=0)
+
+
 class ImapMessageMetadata(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
     uid_validity: int = Field(gt=0)
@@ -67,6 +76,7 @@ class ImapMessageMetadata(BaseModel):
     gmail_id: str | None = Field(default=None, pattern=r"^[0-9]+$")
     labels: tuple[str, ...] = ()
     internal_date: datetime | None = None
+    download: ImapDownload | None = None
 
 
 class ImapTotals(BaseModel):

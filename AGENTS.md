@@ -32,7 +32,9 @@ indexes are rebuildable derivatives.
 
 * Never modify, delete, move, label, mark read, or otherwise mutate a source
   mailbox, Gmail account, IMAP account, Apple Mail store, or input archive.
-* Preserve original RFC 5322 bytes. MIME parsing, text extraction, malformed
+* Preserve original RFC 5322 bytes, except the explicitly authorized IMAP
+  acquisition policy: convert CRLF to LF before ingest, retaining lone CR and
+  original wire SHA-256/size in provider provenance. MIME parsing, text extraction, malformed
   MIME handling, and Unicode decoding are best-effort derived operations and
   must never cause a message to be dropped or rewritten.
 * A positive ClamAV result routes a message to `INFECTED1.mbox`; it is not a

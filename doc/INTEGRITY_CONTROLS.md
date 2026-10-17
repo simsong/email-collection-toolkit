@@ -16,6 +16,12 @@ with the source observation when a mail object is ingested and declared as
 and archive checkpoint fixity remain distinct even when both happen to use
 SHA-256.
 
+IMAP acquisition explicitly normalizes CRLF to LF before ingest: canonical
+`h2`/observation `raw_sha256` describe the normalized bytes. Provider download
+metadata separately records the fetched `source_sha256`, `source_byte_length`
+and `crlf_pairs`; those are wire provenance, not canonical fixity. Lone CR is
+retained. Existing archive records and local-file imports are not normalized.
+
 ## Status
 
 The canonical mailarchiver directory is a native

@@ -65,7 +65,9 @@ directory, and a `data/mbox/` payload directory.
   they may be content, such as terminal progress output emailed from stdout,
   rather than line terminators. Platform newline translation must not change
   source bytes. This policy does not change the explicitly documented MBOX
-  framing rules or normalize bytes before canonical integrity hashing.
+  framing rules. The explicit IMAP acquisition exception converts CRLF to LF
+  before canonical hashing and records original wire hash/size; local imports
+  and existing archives retain their original line endings.
 * Preserve every available original `From ` record delimiter, including sender,
   timestamp, whitespace, and line ending. Carry MBOX framing separately from
   RFC message bytes so message hashes and deduplication stay unchanged except

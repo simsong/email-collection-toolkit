@@ -6,6 +6,14 @@ Entries describe their recorded revisions. For current behavior use the
 [user manual](USER_MANUAL.md) and [CLI reference](CLI_REFERENCE.md). Retired
 Rust delivery plans and historical package checks are not current acceptance.
 
+## IMAP line endings
+
+New IMAP downloads convert CRLF to LF before canonical hashing and ingest, retaining
+lone CR and original wire hash/size/count evidence. Metadata-only label refreshes
+preserve that evidence. Existing archives and local imports are not rewritten.
+Unencoded MIME payload line endings follow the same conversion; base64 attachment
+decoding is unchanged.
+
 ## Processor working-object cleanup
 
 All production ingestion (including IMAP), resume and reprocess operations now

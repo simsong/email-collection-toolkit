@@ -21,7 +21,8 @@ platform or release gate has passed. [Future work](plans/README.md) is separate.
 
 - Release completed processor working files while preserving recovery inputs;
   see [working-object lifetime](implementation/PROCESSING.md#working-object-lifetime).
-- Preserve source stores and original message bytes; canonical MBOX/manifests
+- Preserve source stores and original message bytes, with the documented IMAP
+  CRLF-to-LF acquisition exception; canonical MBOX/manifests
   remain the portable preservation record.
 - Back up manual decisions, configuration and operational history; rebuilding
   search does not recover that durable state.

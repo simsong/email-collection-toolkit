@@ -381,7 +381,14 @@ LIST and read-only EXAMINE, freezes UIDVALIDITY/UIDNEXT, and snapshots bounded w
 ranges through the existing discovery database. Each worker owns a TLS session,
 enumerates at most 65,536 UID numbers per SEARCH, fetches metadata in batches of
 256 messages, and streams complete BODY.PEEK literals through ordinary ingest.
-BODY size and UID identity must match before publication. Gmail selects only the
+BODY size and UID identity must match the original wire literal before
+`normalize_download` replaces CRLF pairs with LF. It does not decode or
+reserialize MIME, remove lone CR, or add a final newline. `ImapDownload` records
+`source_sha256`, `source_byte_length`, `crlf_pairs` and the `crlf-to-lf` policy;
+`remember` preserves this evidence across metadata-only refreshes, including
+Gmail epoch changes. Canonical hashes and duplicate admission use LF-normalized
+bytes. Old archived messages/checkpoints and local-file imports are unchanged;
+refetched legacy CRLF messages can therefore create a distinct LF variant. Gmail selects only the
 special-use `\\All` mailbox; X-GM-MSGID and X-GM-LABELS replace header-based matching.
 INTERNALDATE is an explicit source-date fallback, not a rewrite of RFC 5322 headers.
 
@@ -401,7 +408,8 @@ and synthetic messages. It exercises actual CLI/ingest behavior and source
 immutability, rather than a mocked IMAP client. Native secrets access is substituted
 only in tests. Live Gmail, native Windows consoles and native keyring interaction
 are separate acceptance checks. Scheduling, background operation and graphs remain
-unimplemented. All attachment bytes are preserved; indexing uses the existing
+unimplemented. Encoded attachments retain their decoded bytes; unencoded payload
+line endings follow the same CRLF conversion. Indexing uses the existing
 extractors and does not gain PDF/Office extraction in this change.
 
 ## Current acquisition boundaries

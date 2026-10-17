@@ -1,6 +1,6 @@
 # Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved.
 # Test standalone IMAP acquisition against an actual disposable TLS mail server.
-# Verify full MIME bytes, attachments, source flags, concurrency and durable reruns.
+# Verify LF normalization, wire provenance, attachments, source flags and durable reruns.
 # Exercise both TLS modes and the real CLI-to-ingest path without desktop windows.
 # Gmail-specific response parsing and account-scoped identities use recorded metadata.
 # Only the OS credential boundary is injected to protect the user's native keychain.
@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from contextlib import closing
 from datetime import UTC, datetime
+from email.parser import BytesParser
 import hashlib
 from pathlib import Path
 import sqlite3
@@ -25,7 +26,7 @@ from mailarchiver.application import create_empty_archive
 from mailarchiver.archive_config import load_archive_config, save_archive_config
 from mailarchiver.imap_cli import SyncReporter, parser, synchronize
 from mailarchiver.imap_credentials import save_password
-from mailarchiver.imap_models import ImapMailbox, ImapMessageMetadata
+from mailarchiver.imap_models import ImapDownload, ImapMailbox, ImapMessageMetadata
 from mailarchiver.imap_cli import prompt_account
 from mailarchiver.imap_protocol import ImapSession, body_literal, decode_mailbox, message_metadata, response_tokens, selected_mailboxes
 from mailarchiver.imap_state import initialize_state, known_observation, record_download, refresh_observation, totals
@@ -56,9 +57,9 @@ raise SystemExit(main())
 
 
 @pytest.mark.parametrize("tls", ["implicit", "starttls"])
-def test_cli_real_server_preserves_bytes_skips_spam_and_resumes(tmp_path: Path,
+def test_cli_real_server_normalizes_crlf_skips_spam_and_resumes(tmp_path: Path,
         monkeypatch: pytest.MonkeyPatch, tls: str, capsys: pytest.CaptureFixture[str]) -> None:
-    """Real TLS acquisition is byte-preserving, read-only, threaded and repeatable."""
+    """IMAP requirements: normalize CRLF once, retain lone CR/wire evidence, and stay read-only."""
     assert tls in {"implicit", "starttls"}
     server = DisposableImap(tmp_path, "implicit" if tls == "implicit" else "starttls")
     account = server.start()
@@ -70,10 +71,13 @@ def test_cli_real_server_preserves_bytes_skips_spam_and_resumes(tmp_path: Path,
         b"From: other@example.org\r\nMessage-ID: <same@example.org>\r\n"
         b"Subject: attachments\x1b[31m\r\nMIME-Version: 1.0\r\nContent-Type: multipart/mixed; boundary=x\r\n\r\n"
         b"--x\r\nContent-Type: text/plain\r\n\r\nbody\r\n--x\r\nContent-Type: text/plain\r\n"
-        b"Content-Disposition: attachment; filename=example.txt\r\n\r\nneedle-attachment\r\n--x--\r\n",
+        b"Content-Disposition: attachment; filename=example.txt\r\n\r\nneedle-attachment\r\n"
+        b"--x\r\nContent-Type: application/octet-stream\r\nContent-Transfer-Encoding: base64\r\n"
+        b"Content-Disposition: attachment; filename=blob.bin\r\n\r\nAP8NCmJpbmFyeQ==\r\n--x--\r\n",
         b"From: other@example.org\r\nMessage-ID: <same@example.org>\r\nSubject: distinct bytes\r\n\r\nFrom preservation\r\n",
         b"From: other@example.org\r\nSubject: malformed MIME\r\nContent-Type: multipart/mixed; boundary=missing\r\n\r\n\xff retained\r\n",
     ]
+    normalized = [raw.replace(b"\r\n", b"\n") for raw in messages]
     try:
         with server.connect() as client:
             assert client.create("Projects")[0] == "OK"
@@ -104,13 +108,17 @@ def test_cli_real_server_preserves_bytes_skips_spam_and_resumes(tmp_path: Path,
         assert not list((archive / "objects").iterdir())
         with closing(sqlite3.connect(archive / "archive.sqlite3")) as database:
             hashes = {row[0] for row in database.execute("SELECT sha256 FROM messages")}
-            assert hashes == {hashlib.sha256(raw).hexdigest() for raw in messages}
+            assert hashes == {hashlib.sha256(raw).hexdigest() for raw in normalized}
             for digest, filename, offset, length in database.execute(
                     "SELECT m.sha256,g.filename,l.byte_offset,l.byte_length FROM messages m "
                     "JOIN locations l USING(message_pk) JOIN mbox_generations g USING(generation_pk)"):
                 raw = read_verified_location(archive / "data/mbox" / filename,
                     MboxLocation(byte_offset=offset, byte_length=length), digest)
-                assert raw in messages
+                assert raw in normalized
+                assert b"\r\n" not in raw
+                if b"filename=blob.bin" in raw:
+                    attachment = next(part for part in BytesParser().parsebytes(raw).walk() if part.get_filename() == "blob.bin")
+                    assert attachment.get_payload(decode=True) == b"\x00\xff\r\nbinary"
             assert database.execute("SELECT count(*) FROM imap_seen").fetchone() == (4,)
             unscanned = database.execute("SELECT count(*) FROM metadata_defects WHERE field='antivirus' "
                                          "AND detail LIKE 'not-scanned:%'").fetchone()[0]
@@ -119,6 +127,14 @@ def test_cli_real_server_preserves_bytes_skips_spam_and_resumes(tmp_path: Path,
             assert database.execute("SELECT count(*) FROM source_files WHERE source_path LIKE '%SpAm%'").fetchone() == (0,)
         assert synchronize(args) == 0
         assert totals(archive) == summary
+        with closing(sqlite3.connect(archive / "archive.sqlite3")) as database:
+            evidence = [ImapMessageMetadata.model_validate_json(row[0]).download
+                        for row in database.execute("SELECT labels_json FROM imap_seen")]
+            assert len(evidence) == 4
+            for original in messages:
+                assert any(item is not None and item.source_sha256 == hashlib.sha256(original).hexdigest()
+                           and item.source_byte_length == len(original) and item.crlf_pairs == original.count(b"\r\n")
+                           for item in evidence)
         output = capsys.readouterr().err
         assert "completed: newly archived=0 duplicate downloads=0" in output
         assert "archived: demouser: INBOX:" in output or "archived: demouser: Projects:" in output
@@ -192,7 +208,8 @@ def test_gmail_checkpoint_is_account_scoped_refreshes_labels_and_counts_atomical
     archive = tmp_path / "archive"
     create_empty_archive(archive)
     source = SourceReference(plugin_kind="imap", source_id="account1", native_id="All Mail", display_name="All Mail")
-    metadata = ImapMessageMetadata(uid_validity=1, uid=7, gmail_id="18446744073709551615", labels=("Projects/2026",))
+    metadata = ImapMessageMetadata(uid_validity=1, uid=7, gmail_id="18446744073709551615", labels=("Projects/2026",),
+        download=ImapDownload(source_sha256=hashlib.sha256(b"fixture").hexdigest(), source_byte_length=7, crlf_pairs=0))
     with closing(sqlite3.connect(archive / "archive.sqlite3")) as database:
         initialize_state(database)
         database.execute("INSERT INTO ingest_runs(run_pk,started_at) VALUES (1,?)", (datetime.now(UTC).isoformat(),))
@@ -212,7 +229,7 @@ def test_gmail_checkpoint_is_account_scoped_refreshes_labels_and_counts_atomical
         item = metadata.model_copy(update={"uid": 10, "gmail_id": str(18446744073709551615 - 10)})
         assert known_observation(database, source, item) == 10
         assert known_observation(database, source.model_copy(update={"source_id": "account2"}), item) is None
-        changed = item.model_copy(update={"uid_validity": 2, "uid": 400, "labels": ("New/Label",)})
+        changed = item.model_copy(update={"uid_validity": 2, "uid": 400, "labels": ("New/Label",), "download": None})
         event = SourceObservation(work_id="work", source=source, cursor="2:400", provider_metadata_json=changed.model_dump_json())
         refresh_observation(database, event)
         database.rollback()
@@ -220,6 +237,8 @@ def test_gmail_checkpoint_is_account_scoped_refreshes_labels_and_counts_atomical
         refresh_observation(database, event)
         database.commit()
         assert known_observation(database, source, changed) == 10
+        saved = database.execute("SELECT labels_json FROM imap_seen WHERE uid_validity=2").fetchone()[0]
+        assert ImapMessageMetadata.model_validate_json(saved).download == metadata.download
         assert totals(archive).archived == 10
         assert database.execute("SELECT parent FROM imap_mailboxes WHERE name='New/Label'").fetchone() == ("New",)
 
@@ -364,3 +383,20 @@ def test_cli_new_archive_prompts_save_secret_and_run(tmp_path: Path) -> None:
         os.close(master)
         os.close(slave)
         server.close()
+
+
+@pytest.mark.parametrize(("wire", "expected"), [
+    (b"Subject: mixed\r\n\r\n\xff\x00line\rlone\nLF\r\nend", b"Subject: mixed\n\n\xff\x00line\rlone\nLF\nend"),
+    (b"Subject: LF\n\nbody\rlone", b"Subject: LF\n\nbody\rlone"),
+    (b"", b""),
+])
+def test_download_normalization_retains_lone_cr_and_wire_evidence(wire: bytes, expected: bytes) -> None:
+    """Normalize before ingest hashing, without decoding, adding final LF, or stripping lone CR."""
+    from mailarchiver.imap_source import normalize_download
+    original = ImapMessageMetadata(uid_validity=1, uid=1)
+    normalized, metadata = normalize_download(wire, original)
+    assert normalized == expected
+    assert original.download is None
+    assert metadata.download == ImapDownload(source_sha256=hashlib.sha256(wire).hexdigest(),
+        source_byte_length=len(wire), crlf_pairs=wire.count(b"\r\n"))
+    assert normalize_download(normalized, original)[0] == normalized

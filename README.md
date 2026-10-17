@@ -238,7 +238,9 @@ the workflows and GUI; [requirements](doc/requirements.md) and
 The standalone Python CLI configures an account interactively, synchronizes once
 and exits. It defaults to eight workers, excludes spam-named generic mailboxes,
 and uses Gmail All Mail plus Gmail IDs/labels. Passwords use the native macOS or
-Windows secret store. New and duplicate download totals are separate. See the
+Windows secret store. New downloads normalize CRLF to LF before ingest and retain
+original wire hashes/sizes as provenance; existing archives and local imports
+keep their line endings. New and duplicate download totals are separate. See the
 [IMAP command reference](doc/CLI_REFERENCE.md#imap-downloads). Scheduling, graphs
 and desktop account setup remain planned.
 

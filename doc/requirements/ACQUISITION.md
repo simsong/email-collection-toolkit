@@ -40,7 +40,16 @@ membership through `X-GM-MSGID` and `X-GM-LABELS`; other folders are not fetched
 All Mail coverage is explicit: Spam/Trash-only messages are not included.
 
 Acquisition uses EXAMINE and BODY.PEEK, never mutating source messages or flags.
-Complete MIME bytes and attachments enter the existing ingest pipeline. INTERNALDATE
+After validating the complete BODY.PEEK literal, replace CRLF pairs with LF
+before ingest; retain lone CR, existing LF, and missing final newlines. Do not
+parse/reserialize MIME. This applies throughout the message, including unencoded
+MIME payloads; base64 attachment payload bytes remain unchanged when decoded.
+Record original wire SHA-256, byte length and converted CRLF count in provider
+metadata and retain this evidence across metadata-only label/UID refreshes.
+Canonical hashes/deduplication use the normalized bytes. Existing checkpoints and
+archived messages are not rewritten; old CRLF and new LF variants have distinct
+canonical hashes if a later UID reset requires refetching. Local-file imports
+keep their original bytes. MIME messages enter the existing ingest pipeline. INTERNALDATE
 supplies a source date for malformed or missing message dates. Committed account/
 mailbox/UIDVALIDITY/UID observations avoid repeating body transfer. Gmail IDs are
 account-scoped unsigned decimal strings and survive UID epoch changes. Generic

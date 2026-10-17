@@ -2,8 +2,8 @@
 
 # Purpose: Adapt generic IMAP and Gmail All Mail to the shared source contract.
 # How it works:
-# Freeze mailbox UID ranges, give each worker a session and emit bytes or known-message metadata
-# observations.
+# Freeze UID ranges and emit LF-normalized message bytes with original wire hashes, or refresh
+# known-message metadata without another body transfer.
 # Fundamental dependents:
 # - __main__: source workers consume this provider through the plugin contract.
 # - imap_cli: synchronization depends on its account locator and discovery semantics.
@@ -12,6 +12,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Iterator
+from hashlib import sha256
 from contextlib import closing
 from math import ceil
 from pathlib import Path
@@ -23,7 +24,7 @@ from pydantic import BaseModel, Field
 
 from .archive_config import load_archive_config
 from .imap_credentials import password_for
-from .imap_models import ImapAccount, ImapMailbox
+from .imap_models import ImapAccount, ImapDownload, ImapMailbox, ImapMessageMetadata
 from .imap_protocol import ImapSession, UID_BATCH_SIZE
 from .imap_state import known_observation
 from .plugin_api import (
@@ -34,6 +35,13 @@ from .plugin_api import (
 from .sqlite_paths import sqlite_uri
 
 UID_SEARCH_WINDOW = 65536
+
+
+def normalize_download(raw: bytes, metadata: ImapMessageMetadata) -> tuple[bytes, ImapMessageMetadata]:
+    """Record verified wire evidence, then apply only the IMAP CRLF-to-LF policy."""
+    evidence = ImapDownload(source_sha256=sha256(raw).hexdigest(), source_byte_length=len(raw),
+                            crlf_pairs=raw.count(b"\r\n"))
+    return raw.replace(b"\r\n", b"\n"), metadata.model_copy(update={"download": evidence})
 
 
 class ImapWork(BaseModel):
@@ -135,6 +143,7 @@ class ImapSourcePlugin(SourcePlugin):
                                 yield SourceObservation(work_id=container.work_id, source=container.source,
                                     cursor=cursor, provider_metadata_json=payload)
                             else:
+                                normalized, metadata = normalize_download(session.body(metadata), metadata)
                                 yield MailObject(work_id=container.work_id, source=container.source, cursor=cursor,
-                                    raw=session.body(metadata), provider_metadata_json=payload,
+                                    raw=normalized, provider_metadata_json=metadata.model_dump_json(),
                                     source_date_utc=metadata.internal_date)
