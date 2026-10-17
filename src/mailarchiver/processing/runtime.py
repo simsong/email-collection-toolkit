@@ -35,6 +35,7 @@ from .api import (
 )
 from .registry import fingerprint, subscribers
 from .store import content_reference, enqueue, report, snapshot
+from .objects import collect_objects
 
 
 class ProcessorServices(Protocol):
@@ -238,8 +239,15 @@ def run(database: sqlite3.Connection, plugins: tuple[PluginSpec, ...], *, retry:
         failures: list[Exception] | None = None, message_id: str | None = None) -> RunReport:
     """Caller holds the archive writer lease. Atomic output release follows each barrier."""
     prepare_run(database, plugins, retry=retry)
-    dispatch(database, plugins, max_jobs=max_jobs, installation_config=installation_config,
-             pipelines=pipelines, services=services, cancelled=cancelled, failures=failures, message_id=message_id)
+    try:
+        dispatch(database, plugins, max_jobs=max_jobs, installation_config=installation_config,
+                 pipelines=pipelines, services=services, cancelled=cancelled, failures=failures, message_id=message_id)
+    finally:
+        if services is None:
+            # Production owns cleanup after canonical publication/checkpointing;
+            # the harness has only source snapshots and must preserve those.
+            archive = Path(database.execute("PRAGMA database_list").fetchone()[2]).parent
+            collect_objects(database, archive)
     return report(database, tuple(p.manifest.kind for p in plugins))
 
 
@@ -276,14 +284,15 @@ def dispatch(database: sqlite3.Connection, plugins: tuple[PluginSpec, ...], *,
             break
         job_id, payload = row
         item = ProcessingObject.model_validate_json(payload).model_copy(update={"job_id": job_id})
-        if services is not None:
-            item = services.prepare(item)
-        recover_config_transaction(item.archive.path)
         try:
+            if services is not None:
+                item = services.prepare(item)
+            recover_config_transaction(item.archive.path)
             input_error = "input digest mismatch" if any(
                 content_reference(ref.path).sha256 != ref.sha256 for ref in (item.message_ref, item.content_ref)) else None
-        except OSError as error:
+        except (OSError, ValueError) as error:
             input_error = f"input unreadable: {error}"
+            failures.append(error)
         if input_error:
             with database:
                 database.execute("UPDATE jobs SET status='failed',detail=? WHERE job_id=?", (input_error, job_id))

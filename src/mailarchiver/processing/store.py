@@ -74,7 +74,7 @@ def snapshot(archive: Path, path: Path) -> ContentReference:
     """Copy once into content-addressed storage before committing a DB reference."""
     destination = archive / "objects"
     destination.mkdir(exist_ok=True)
-    with tempfile.NamedTemporaryFile(dir=destination, delete=False) as target:
+    with tempfile.NamedTemporaryFile(dir=destination, prefix=".object-", delete=False) as target:
         temporary = Path(target.name)
         try:
             with path.open("rb") as source:

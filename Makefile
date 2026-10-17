@@ -996,3 +996,8 @@ prepare-windows-updater:
 clamav-seed:
 	@test -n "$(SEED_DIRECTORY)" || { echo 'Specify SEED_DIRECTORY containing existing ClamAV definitions'; exit 2; }
 	uv run --locked python -m mailarchiver.clamav_update --seed "$(SEED_DIRECTORY)"
+
+# Disposable archives exercise object cleanup, recovery and canonical replay.
+.PHONY: test-processing-cleanup
+test-processing-cleanup:
+	uv run --locked pytest -q tests/test_processing_objects.py $(PYTEST_ARGS)

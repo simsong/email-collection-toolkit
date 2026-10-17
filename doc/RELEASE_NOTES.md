@@ -6,6 +6,13 @@ Entries describe their recorded revisions. For current behavior use the
 [user manual](USER_MANUAL.md) and [CLI reference](CLI_REFERENCE.md). Retired
 Rust delivery plans and historical package checks are not current acceptance.
 
+## Processor working-object cleanup
+
+All production ingestion (including IMAP), resume and reprocess operations now
+release completed working files. Unfinished-job inputs and retry outputs remain;
+reprocessing regenerates inputs from verified canonical MBOX records. The test
+harness retains original snapshots, and unknown/symlinked files are preserved.
+
 ## Documentation consolidation
 
 - Split requirements and implementation into paired subsystem guides, retaining

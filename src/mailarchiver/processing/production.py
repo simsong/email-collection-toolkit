@@ -25,6 +25,8 @@ from ..public_suffix import registrable_domain
 
 from ..catalog import address_pk
 from ..message import ParsedMessage, parse_message
+from ..mbox import MboxLocation, read_verified_location
+from ..layout import mbox_path
 from ..plugin_api import MailObject
 from ..plugin_configuration import read_plugin_configuration
 from ..plugin_loader import builtin_plugin_directory
@@ -34,6 +36,7 @@ from .api import (
     ProcessingResult, RAW_MESSAGE, RunReport,
 )
 from .contracts import AddressEvidence, ContentMetadata, HeaderMetadata, MailboxReference, MimeInventory, ProcessingPolicy, SourceMetadata
+from .objects import collect_objects
 from .registry import fingerprint, load_processors
 from .runtime import dispatch, prepare_run, run
 from .store import DATABASE, connect, enqueue, report, snapshot
@@ -92,11 +95,49 @@ class ProductionPipeline:
             self.database.execute("INSERT OR REPLACE INTO processing_settings VALUES('configuration',?)", (self._configuration_hash(),))
             self.database.execute("INSERT OR REPLACE INTO processing_settings VALUES('policy',?)",
                 (self.policy.model_dump_json(exclude={"scanner_configuration"}),))
-        self.database.close()
+        try:
+            collect_objects(self.database, self.archive, self._canonical_bytes)
+        finally:
+            self.database.close()
+
+    def _canonical_bytes(self, digest: str) -> bytes:
+        row = self.catalog.execute(
+            "SELECT g.filename,l.byte_offset,l.byte_length FROM messages m "
+            "JOIN locations l USING(message_pk) JOIN mbox_generations g USING(generation_pk) "
+            "WHERE m.sha256=?", (digest,)).fetchone()
+        if row is None:
+            raise ValueError("message has no canonical MBOX location")
+        filename, offset, length = row
+        return read_verified_location(mbox_path(self.archive, filename),
+            MboxLocation(byte_offset=offset, byte_length=length), digest)
+
+    def _restore_message(self, item: ProcessingObject) -> ProcessingObject:
+        # Historical roots use logical content identities. New generations need
+        # a current, owned raw snapshot, not a completed job's discarded outputs.
+        directory = self.archive / "objects"
+        if directory.is_symlink():
+            raise ValueError("processor objects directory must not be a symlink")
+        path = directory / item.message_ref.sha256
+        if path.is_symlink():
+            raise ValueError("processor message object must not be a symlink")
+        if not path.exists():
+            raw = self._canonical_bytes(item.message_ref.sha256)
+            with tempfile.NamedTemporaryFile(delete_on_close=False) as temporary:
+                temporary.write(raw)
+                temporary.close()
+                reference = snapshot(self.archive, Path(temporary.name))
+            if reference.sha256 != item.message_ref.sha256:
+                raise ValueError("restored message digest mismatch")
+        else:
+            reference = ContentReference(path=path, sha256=item.message_ref.sha256)
+        content = ContentReference(path=directory / item.content_ref.sha256, sha256=item.content_ref.sha256)
+        return item.model_copy(update={"archive": ArchiveContext(path=self.archive),
+                                       "message_ref": reference, "content_ref": content})
 
     def prepare(self, item: ProcessingObject) -> ProcessingObject:
         if self.cancelled is not None:
             self.cancelled()
+        item = self._restore_message(item)
         row = self.database.execute("SELECT scan_status FROM message_state WHERE message_id=?", (item.message_id,)).fetchone()
         return item.model_copy(update={"application": ApplicationContext(policy=self.policy),
                                       "scan_provenance": row[0] if row and row[0] else item.scan_provenance})

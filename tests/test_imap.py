@@ -101,6 +101,7 @@ def test_cli_real_server_preserves_bytes_skips_spam_and_resumes(tmp_path: Path,
         assert summary.archived == 3
         assert summary.duplicates == 1
         assert summary.errors == 0
+        assert not list((archive / "objects").iterdir())
         with closing(sqlite3.connect(archive / "archive.sqlite3")) as database:
             hashes = {row[0] for row in database.execute("SELECT sha256 FROM messages")}
             assert hashes == {hashlib.sha256(raw).hexdigest() for raw in messages}
@@ -133,6 +134,7 @@ def test_cli_real_server_preserves_bytes_skips_spam_and_resumes(tmp_path: Path,
         assert synchronize(args) == 0
         assert totals(archive).archived == 3
         assert totals(archive).duplicates == 2
+        assert not list((archive / "objects").iterdir())
     finally:
         server.close()
 

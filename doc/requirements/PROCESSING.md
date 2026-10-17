@@ -2,6 +2,22 @@
 
 # Processing requirements
 
+## Working-object lifetime
+
+All production ingest and processing operations, including IMAP, shall release
+completed working objects under the archive writer lease. Pending, running and
+failed jobs shall retain both input objects and successful invocation outputs
+needed for rank retry. Keep unpublished originals and originals whose canonical
+MBOX copy cannot be verified. Standalone processor harnesses shall keep their
+original snapshots because they have no canonical MBOX fallback.
+
+Completed and aborted job records are audit history: their content hashes/paths
+need not name resident working files. Reprocessing shall reconstruct missing raw
+inputs from SHA-256-verified canonical MBOX records and regenerate derived parts;
+it shall preserve manual decisions and antivirus provenance. Never collect through
+symlinks or delete unknown files. Cleanup shall not modify source mail or canonical
+payloads. Validate with `make test-processing-cleanup`.
+
 Current subsystem contract and acceptance boundaries. This is not a claim of
 platform/release acceptance. Deferred features live in [plans](../plans/README.md).
 
