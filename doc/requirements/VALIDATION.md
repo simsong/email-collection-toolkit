@@ -5,6 +5,14 @@
 Current subsystem contract and acceptance boundaries. This is not a claim of
 platform/release acceptance. Deferred features live in [plans](../plans/README.md).
 
+## Offline IMAP fixtures
+
+Disposable IMAP server greetings shall use a fixed local identity rather than
+resolving the runner hostname. Integration tests shall retain real TLS validation,
+read-only source checks, byte normalization and interrupt/restart behavior.
+Fixture setup connections shall have bounded timeouts so failures cannot hang
+indefinitely. No change to the production downloader's socket timeout is required.
+
 ## Recovered offline diagnostic boundaries
 
 ClamAV initialization and native scanning must have hard deadlines and remove

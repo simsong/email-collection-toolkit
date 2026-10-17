@@ -613,6 +613,7 @@ test-mailsearch:
 imap:
 	uv run --locked mailarchiver-imap $(IMAP_ARGS)
 
+# The test fixture sets FQDN=localhost so server greetings never query host DNS.
 test-imap:
 	uv run --locked pytest -q tests/test_imap.py
 

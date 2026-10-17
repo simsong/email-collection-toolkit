@@ -254,6 +254,7 @@ and desktop account setup remain planned.
 | `MAILARCHIVER_CLAMAV_UPDATES` | Per-user definition update storage |
 | `MAILARCHIVER_FRESHCLAM` | One-shot definition updater executable |
 | `MAILARCHIVER_CLAMAV_CERTIFICATES` | Signature verification certificates |
+| `FQDN` | IMAP tests set `localhost` for the disposable server greeting, avoiding host reverse DNS; unused by the downloader |
 | `SSL_CERT_FILE`, `SSL_CERT_DIR` | Standard TLS trust overrides for private IMAP servers |
 | `CARGO`, `RUST_TARGET_DIR` | Cargo executable and Make-selected build output (default `target/`) |
 | `ECT_RUST_RECENT_TEST_ROOT`, `ECT_RUST_RECENT_TEST_NAME` | Internal isolated recent-archive test fixtures |

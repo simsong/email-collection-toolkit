@@ -103,9 +103,9 @@ class DisposableImap:
         if self.account is None:
             raise RuntimeError("fixture server has not started")
         if self.tls == "implicit":
-            client = imaplib.IMAP4_SSL("localhost", self.account.port, ssl_context=self.context)
+            client = imaplib.IMAP4_SSL("localhost", self.account.port, ssl_context=self.context, timeout=10)
         else:
-            client = imaplib.IMAP4("localhost", self.account.port)
+            client = imaplib.IMAP4("localhost", self.account.port, timeout=10)
             client.starttls(ssl_context=self.context)
         client.login("demouser", "demopass")
         return client

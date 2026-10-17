@@ -5,6 +5,16 @@
 Current implementation and validation boundaries. Deferred feature designs
 live in [plans](../plans/README.md); historical evidence does not validate this revision.
 
+## Offline IMAP fixtures
+
+The autouse fixture defined in the module in `tests/test_imap.py` sets pymap's `FQDN`
+configuration to `localhost` for each test and restores the original environment
+afterward. This bypasses pymap's synchronous `socket.getfqdn()` greeting fallback,
+which can block its asyncio server loop on hosted-runner DNS. Fixture setup
+connections use a ten-second timeout. `make test-imap` checks the greeting through
+real TLS connections, including a subprocess whose audit hook rejects reverse-DNS
+lookups, and retains all acquisition and recovery assertions.
+
 ## CI and release validation
 
 Ordinary runner jobs use macos-15. Continuous integration runs `make check-static`

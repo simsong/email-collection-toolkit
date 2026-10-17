@@ -6,6 +6,12 @@ Entries describe their recorded revisions. For current behavior use the
 [user manual](USER_MANUAL.md) and [CLI reference](CLI_REFERENCE.md). Retired
 Rust delivery plans and historical package checks are not current acceptance.
 
+## IMAP integration-test reliability
+
+Pin the disposable IMAP server greeting to `localhost`, avoiding synchronous host
+reverse-DNS lookups on CI runners. Bound setup connections without increasing
+production socket timeouts or weakening TLS, normalization, or recovery checks.
+
 ## IMAP line endings
 
 New IMAP downloads convert CRLF to LF before canonical hashing and ingest, retaining

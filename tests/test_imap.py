@@ -56,6 +56,12 @@ raise SystemExit(main())
 """
 
 
+@pytest.fixture(autouse=True)
+def imap_server_identity(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Keep the real loopback server's greeting independent of host reverse DNS."""
+    monkeypatch.setenv("FQDN", "localhost")
+
+
 @pytest.mark.parametrize("tls", ["implicit", "starttls"])
 def test_cli_real_server_normalizes_crlf_skips_spam_and_resumes(tmp_path: Path,
         monkeypatch: pytest.MonkeyPatch, tls: str, capsys: pytest.CaptureFixture[str]) -> None:
@@ -80,6 +86,7 @@ def test_cli_real_server_normalizes_crlf_skips_spam_and_resumes(tmp_path: Path,
     normalized = [raw.replace(b"\r\n", b"\n") for raw in messages]
     try:
         with server.connect() as client:
+            assert b"Server ready localhost" in client.welcome
             assert client.create("Projects")[0] == "OK"
             assert client.create("MixedSpAmFolder")[0] == "OK"
             for raw in messages:
@@ -400,3 +407,28 @@ def test_download_normalization_retains_lone_cr_and_wire_evidence(wire: bytes, e
     assert metadata.download == ImapDownload(source_sha256=hashlib.sha256(wire).hexdigest(),
         source_byte_length=len(wire), crlf_pairs=wire.count(b"\r\n"))
     assert normalize_download(normalized, original)[0] == normalized
+
+
+def test_disposable_server_greeting_needs_no_reverse_dns(tmp_path: Path) -> None:
+    """Offline fixture requirement: real TLS greeting succeeds with reverse DNS denied."""
+    code = """
+from pathlib import Path
+import sys
+from tests.imap_fixture import DisposableImap
+
+def reject_reverse_dns(event, _arguments):
+    if event == 'socket.gethostbyaddr':
+        raise RuntimeError('reverse DNS is unavailable in the fixture')
+
+sys.addaudithook(reject_reverse_dns)
+server = DisposableImap(Path(sys.argv[1]), 'implicit')
+server.start()
+try:
+    with server.connect() as client:
+        assert b'Server ready localhost' in client.welcome
+finally:
+    server.close()
+"""
+    result = subprocess.run([sys.executable, "-c", code, str(tmp_path)], cwd=ROOT,
+                            capture_output=True, text=True, check=False, timeout=30)
+    assert result.returncode == 0, result.stdout + result.stderr
