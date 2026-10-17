@@ -1,14 +1,18 @@
 # Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved.
 
-# Purpose: Host archive documents, importing, search and viewing in pywebview.
-# How it works:
-# Bind native windows and menus to shared archive services, typed bridges and cooperative job
-# shutdown.
-# Fundamental dependents:
-# - desktop_entry: packaged Windows startup uses this desktop lifecycle.
-# - self_test: native application acceptance exercises its real windows and bridges.
+"""Host archive documents, ingest workflows, search, and reading in pywebview.
 
-"""Host archive documents, ingest workflows, search, and reading in pywebview."""
+Purpose: Host archive documents, importing, search and viewing in pywebview.
+
+How it works:
+Bind native windows and menus to shared archive services, typed bridges and cooperative job
+shutdown.
+
+Fundamental dependents:
+
+- ``desktop_entry``: packaged Windows startup uses this desktop lifecycle.
+- ``self_test``: native application acceptance exercises its real windows and bridges.
+"""
 
 from __future__ import annotations
 

@@ -1,16 +1,20 @@
 # Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved.
 
-# Purpose: Persist validated per-archive operational settings without credentials.
-# How it works:
-# Read supported YAML versions and atomically save owner, plugin and nonsecret IMAP
-# configuration.
-# Fundamental dependents:
-# - document_options: import defaults depend on the saved owner rules.
-# - imap_source: saved account definitions identify remote acquisition settings.
-
 """Human-editable, per-archive operational configuration.
 
 Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved.
+
+
+Purpose: Persist validated per-archive operational settings without credentials.
+
+How it works:
+Read supported YAML versions and atomically save owner, plugin and nonsecret IMAP
+configuration.
+
+Fundamental dependents:
+
+- ``document_options``: import defaults depend on the saved owner rules.
+- ``imap_source``: saved account definitions identify remote acquisition settings.
 """
 
 from __future__ import annotations

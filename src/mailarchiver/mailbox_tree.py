@@ -1,13 +1,17 @@
 # Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved.
 
-# Purpose: Build logical source-mailbox trees and saved folder selections.
-# How it works:
-# Aggregate source hierarchy/provenance and persist per-user filter sets outside the archive.
-# Fundamental dependents:
-# - gui_app: the original-folder explorer needs these nodes and saved selections.
-# - mailsearch: folder constraints must use the same selection model.
+"""Build original-mailbox trees and persist per-user filter sets.
 
-"""Build original-mailbox trees and persist per-user filter sets."""
+Purpose: Build logical source-mailbox trees and saved folder selections.
+
+How it works:
+Aggregate source hierarchy/provenance and persist per-user filter sets outside the archive.
+
+Fundamental dependents:
+
+- ``gui_app``: the original-folder explorer needs these nodes and saved selections.
+- ``mailsearch``: folder constraints must use the same selection model.
+"""
 
 from __future__ import annotations
 

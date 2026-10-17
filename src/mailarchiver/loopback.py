@@ -1,14 +1,18 @@
 # Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved.
 
-# Purpose: Serve only authenticated packaged GUI assets on local ephemeral ports.
-# How it works:
-# Allowlist static resources and validate nonce-bearing requests without exposing archive
-# service HTTP APIs.
-# Fundamental dependents:
-# - gui_app: browser windows load their trusted application interface here.
-# - self_test: GUI acceptance uses the production asset-delivery boundary.
+"""Authenticated loopback-only delivery of packaged GUI assets.
 
-"""Authenticated loopback-only delivery of packaged GUI assets."""
+Purpose: Serve only authenticated packaged GUI assets on local ephemeral ports.
+
+How it works:
+Allowlist static resources and validate nonce-bearing requests without exposing archive
+service HTTP APIs.
+
+Fundamental dependents:
+
+- ``gui_app``: browser windows load their trusted application interface here.
+- ``self_test``: GUI acceptance uses the production asset-delivery boundary.
+"""
 
 from __future__ import annotations
 

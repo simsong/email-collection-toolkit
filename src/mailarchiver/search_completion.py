@@ -1,14 +1,18 @@
 # Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved.
 
-# Purpose: Suggest selectors from observed header roles and identity evidence.
-# How it works:
-# Parse the active token and query bounded address/subject choices using shared selector
-# semantics.
-# Fundamental dependents:
-# - gui_app: search tiles and suggestion menus depend on these typed choices.
-# - gui_service: reader-facing completion uses this archive-query boundary.
+"""Complete selectors from catalog roles and live names, before content indexing.
 
-"""Complete selectors from catalog roles and live names, before content indexing."""
+Purpose: Suggest selectors from observed header roles and identity evidence.
+
+How it works:
+Parse the active token and query bounded address/subject choices using shared selector
+semantics.
+
+Fundamental dependents:
+
+- ``gui_app``: search tiles and suggestion menus depend on these typed choices.
+- ``gui_service``: reader-facing completion uses this archive-query boundary.
+"""
 from __future__ import annotations
 
 import re

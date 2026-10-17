@@ -1,14 +1,18 @@
 # Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved.
 
-# Purpose: Define durable production policy, provenance and publication result types.
-# How it works:
-# Carry filing destinations, source/parent evidence and derived metadata across retries and
-# processor handoffs.
-# Fundamental dependents:
-# - processing.production: replay/publication require these typed service results.
-# - __main__: canonical admission must retain policy and source provenance consistently.
+"""Typed production services and provenance carried across processor workers.
 
-"""Typed production services and provenance carried across processor workers."""
+Purpose: Define durable production policy, provenance and publication result types.
+
+How it works:
+Carry filing destinations, source/parent evidence and derived metadata across retries and
+processor handoffs.
+
+Fundamental dependents:
+
+- ``processing.production``: replay/publication require these typed service results.
+- ``__main__``: canonical admission must retain policy and source provenance consistently.
+"""
 from __future__ import annotations
 
 from datetime import datetime

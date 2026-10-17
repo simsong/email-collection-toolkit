@@ -1,13 +1,17 @@
 # Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved.
 
-# Purpose: Capture stable origin identity and read-only filesystem metadata.
-# How it works:
-# Resolve source mount/volume information separately from message paths and raw content.
-# Fundamental dependents:
-# - sources: local container provenance depends on stable volume identity.
-# - __main__: source observations need comparable origins across repeated acquisitions.
+"""Capture stable identity and read-only OS metadata for source-mail volumes.
 
-"""Capture stable identity and read-only OS metadata for source-mail volumes."""
+Purpose: Capture stable origin identity and read-only filesystem metadata.
+
+How it works:
+Resolve source mount/volume information separately from message paths and raw content.
+
+Fundamental dependents:
+
+- ``sources``: local container provenance depends on stable volume identity.
+- ``__main__``: source observations need comparable origins across repeated acquisitions.
+"""
 
 from __future__ import annotations
 

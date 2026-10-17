@@ -1,13 +1,17 @@
 # Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved.
 
-# Purpose: Authenticate and filter the shared feed for the Python Windows package.
-# How it works:
-# Verify complete bounded XML and expose eligible signed enclosures through a tokenized local
-# gateway.
-# Fundamental dependents:
-# - winsparkle: native discovery depends on this trusted compatible feed view.
+"""Authenticated Python Windows appcast gateway.
 
-"""Authenticated Python Windows appcast gateway."""
+Purpose: Authenticate and filter the shared feed for the Python Windows package.
+
+How it works:
+Verify complete bounded XML and expose eligible signed enclosures through a tokenized local
+gateway.
+
+Fundamental dependents:
+
+- ``winsparkle``: native discovery depends on this trusted compatible feed view.
+"""
 from __future__ import annotations
 
 import base64

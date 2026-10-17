@@ -1,13 +1,16 @@
 # Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved.
 
-# Purpose: Retain the private archive-service protocol for the retired Rust GUI.
-# How it works:
-# Serve typed JSON-line requests over owned pipes and supervise Python archive work with writer
-# leases.
-# Fundamental dependents:
-# - rust/mailsearch-gui/src/engine.rs: the historical desktop helper client relies on this
-#   protocol.
+"""Purpose: Retain the private archive-service protocol for the retired Rust GUI.
 
+How it works:
+Serve typed JSON-line requests over owned pipes and supervise Python archive work with writer
+leases.
+
+Fundamental dependents:
+
+- ``rust/mailsearch-gui/src/engine.rs``: the historical desktop helper client relies on this
+  protocol.
+"""
 from __future__ import annotations
 
 import os

@@ -1,14 +1,18 @@
 # Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved.
 
-# Purpose: Represent antivirus outcomes and producer scan provenance consistently.
-# How it works:
-# Validate typed verdicts, diagnostics and infected-only API header evidence across
-# scanner/processor boundaries.
-# Fundamental dependents:
-# - scanner: scan workers exchange verdicts using this model.
-# - processing.builtin: quarantine and retry decisions rely on the same evidence semantics.
+"""Scan results and the infected-message headers used by API producers.
 
-"""Scan results and the infected-message headers used by API producers."""
+Purpose: Represent antivirus outcomes and producer scan provenance consistently.
+
+How it works:
+Validate typed verdicts, diagnostics and infected-only API header evidence across
+scanner/processor boundaries.
+
+Fundamental dependents:
+
+- ``scanner``: scan workers exchange verdicts using this model.
+- ``processing.builtin``: quarantine and retry decisions rely on the same evidence semantics.
+"""
 from __future__ import annotations
 
 from typing import Literal

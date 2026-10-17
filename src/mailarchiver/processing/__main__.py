@@ -1,13 +1,17 @@
 # Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved.
 
-# Purpose: Run the standalone durable processor harness with trusted plugins.
-# How it works:
-# Initialize disposable state, submit copied inputs and dispatch/retry jobs while reporting
-# typed statistics.
-# Fundamental dependents:
-# - Framework acceptance uses this CLI; production ingestion calls the framework directly.
+"""Run the standalone processor harness with trusted plugins and durable jobs.
 
-"""Run the standalone processor harness with trusted plugins and durable jobs."""
+Purpose: Run the standalone durable processor harness with trusted plugins.
+
+How it works:
+Initialize disposable state, submit copied inputs and dispatch/retry jobs while reporting
+typed statistics.
+
+Fundamental dependents:
+
+- Framework acceptance uses this CLI; production ingestion calls the framework directly.
+"""
 from __future__ import annotations
 
 import argparse

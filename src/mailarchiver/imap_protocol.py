@@ -1,13 +1,17 @@
 # Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved.
 
-# Purpose: Implement verified-TLS, read-only IMAP discovery and byte retrieval.
-# How it works:
-# Parse bounded mailbox/FETCH responses and use EXAMINE and BODY.PEEK without changing source
-# flags.
-# Fundamental dependents:
-# - imap_source: remote workers depend on these authenticated sessions and exact body bytes.
+"""Verified TLS sessions and bounded read-only IMAP acquisition.
 
-"""Verified TLS sessions and bounded read-only IMAP acquisition."""
+Purpose: Implement verified-TLS, read-only IMAP discovery and byte retrieval.
+
+How it works:
+Parse bounded mailbox/FETCH responses and use EXAMINE and BODY.PEEK without changing source
+flags.
+
+Fundamental dependents:
+
+- ``imap_source``: remote workers depend on these authenticated sessions and exact body bytes.
+"""
 from __future__ import annotations
 
 import base64

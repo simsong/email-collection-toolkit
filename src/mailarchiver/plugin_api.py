@@ -1,14 +1,18 @@
 # Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved.
 
-# Purpose: Define immutable source, message, integrity and progress contracts.
-# How it works:
-# Validate typed plugin boundaries so local and remote providers fit one discovery/acquisition
-# protocol.
-# Fundamental dependents:
-# - plugin_loader: discovered implementations must satisfy these interfaces.
-# - __main__: source scheduling and canonical observation use these shared data types.
+"""Versioned contracts shared by ingest plug-ins and the framework.
 
-"""Versioned contracts shared by ingest plug-ins and the framework."""
+Purpose: Define immutable source, message, integrity and progress contracts.
+
+How it works:
+Validate typed plugin boundaries so local and remote providers fit one discovery/acquisition
+protocol.
+
+Fundamental dependents:
+
+- ``plugin_loader``: discovered implementations must satisfy these interfaces.
+- ``__main__``: source scheduling and canonical observation use these shared data types.
+"""
 
 from __future__ import annotations
 

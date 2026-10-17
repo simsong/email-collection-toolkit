@@ -1,14 +1,18 @@
 # Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved.
 
-# Purpose: Adapt the shared update service to native Windows WinSparkle.
-# How it works:
-# Retain SDK callbacks, use an authenticated feed gateway and reserve archive writes before
-# installation.
-# Fundamental dependents:
-# - gui_app: Windows update actions depend on this native adapter.
-# - updates: Windows installation uses its backend implementation of shared policy.
+"""Windows update adapter for the shared Python application.
 
-"""Windows update adapter for the shared Python application."""
+Purpose: Adapt the shared update service to native Windows WinSparkle.
+
+How it works:
+Retain SDK callbacks, use an authenticated feed gateway and reserve archive writes before
+installation.
+
+Fundamental dependents:
+
+- ``gui_app``: Windows update actions depend on this native adapter.
+- ``updates``: Windows installation uses its backend implementation of shared policy.
+"""
 from __future__ import annotations
 
 from collections.abc import Callable

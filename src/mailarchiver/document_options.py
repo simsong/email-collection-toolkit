@@ -1,14 +1,18 @@
 # Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved.
 
-# Purpose: Manage document owner rules and import defaults under a writer lease.
-# How it works:
-# Load configured/legacy rules, expose revisioned edit state and reject conflicting persisted
-# changes.
-# Fundamental dependents:
-# - gui_app: import confirmation and owner editors use these settings.
-# - __main__: CLI ingestion relies on the same default classification rules.
+"""Archive owner include/exclude settings and derived detected addresses.
 
-"""Archive owner include/exclude settings and derived detected addresses."""
+Purpose: Manage document owner rules and import defaults under a writer lease.
+
+How it works:
+Load configured/legacy rules, expose revisioned edit state and reject conflicting persisted
+changes.
+
+Fundamental dependents:
+
+- ``gui_app``: import confirmation and owner editors use these settings.
+- ``__main__``: CLI ingestion relies on the same default classification rules.
+"""
 
 from __future__ import annotations
 

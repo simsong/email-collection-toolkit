@@ -1,13 +1,17 @@
 # Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved.
 
-# Purpose: Contain Windows utility descendants within a native job object.
-# How it works:
-# Join the supervisor to a kill-on-close job before spawning children so owner death cannot
-# orphan utilities.
-# Fundamental dependents:
-# - owned_command: Windows command supervision depends on this lifetime containment.
+"""Lifetime containment for explicitly launched Windows utilities.
 
-"""Lifetime containment for explicitly launched Windows utilities."""
+Purpose: Contain Windows utility descendants within a native job object.
+
+How it works:
+Join the supervisor to a kill-on-close job before spawning children so owner death cannot
+orphan utilities.
+
+Fundamental dependents:
+
+- ``owned_command``: Windows command supervision depends on this lifetime containment.
+"""
 from __future__ import annotations
 
 import ctypes as c

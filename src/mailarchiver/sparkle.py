@@ -1,14 +1,18 @@
 # Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved.
 
-# Purpose: Adapt the shared update service to macOS Sparkle.
-# How it works:
-# Load the pinned framework and retain native delegates that honor channel policy and writer-
-# fenced installation.
-# Fundamental dependents:
-# - gui_app: installed macOS update actions depend on this native adapter.
-# - updates: macOS installation uses its backend implementation of shared policy.
+"""PyObjC adapter for the pinned Sparkle framework in an installed macOS app.
 
-"""PyObjC adapter for the pinned Sparkle framework in an installed macOS app."""
+Purpose: Adapt the shared update service to macOS Sparkle.
+
+How it works:
+Load the pinned framework and retain native delegates that honor channel policy and writer-
+fenced installation.
+
+Fundamental dependents:
+
+- ``gui_app``: installed macOS update actions depend on this native adapter.
+- ``updates``: macOS installation uses its backend implementation of shared policy.
+"""
 
 from __future__ import annotations
 

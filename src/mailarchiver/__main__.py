@@ -1,14 +1,18 @@
 # Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved.
 
-# Purpose: Coordinate archive ingest, reports, provenance review and index rebuilding.
-# How it works:
-# Drive source workers and the production processor pipeline while serializing canonical
-# publication and recovery.
-# Fundamental dependents:
-# - imap_cli: remote downloads use this same ingest and checkpoint engine.
-# - gui_app: desktop imports and resumed processing use its typed ingest service.
+"""Run canonical mail ingest, provenance review, reports, and FTS rebuilds.
 
-"""Run canonical mail ingest, provenance review, reports, and FTS rebuilds."""
+Purpose: Coordinate archive ingest, reports, provenance review and index rebuilding.
+
+How it works:
+Drive source workers and the production processor pipeline while serializing canonical
+publication and recovery.
+
+Fundamental dependents:
+
+- ``imap_cli``: remote downloads use this same ingest and checkpoint engine.
+- ``gui_app``: desktop imports and resumed processing use its typed ingest service.
+"""
 
 from __future__ import annotations
 

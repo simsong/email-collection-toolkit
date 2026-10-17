@@ -1,14 +1,18 @@
 # Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved.
 
-# Purpose: Reserve explicit provider schemes whose acquisition is unavailable.
-# How it works:
-# Recognize reserved source forms and fail clearly instead of treating them as supported
-# adapters.
-# Fundamental dependents:
-# - plugin_loader: manifests retain discoverable reserved providers.
-# - __main__: source selection must reject unsupported account/stream modes explicitly.
+"""Reserved source plug-ins whose provider adapters are not implemented yet.
 
-"""Reserved source plug-ins whose provider adapters are not implemented yet."""
+Purpose: Reserve explicit provider schemes whose acquisition is unavailable.
+
+How it works:
+Recognize reserved source forms and fail clearly instead of treating them as supported
+adapters.
+
+Fundamental dependents:
+
+- ``plugin_loader``: manifests retain discoverable reserved providers.
+- ``__main__``: source selection must reject unsupported account/stream modes explicitly.
+"""
 
 from __future__ import annotations
 

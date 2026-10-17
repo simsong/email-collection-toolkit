@@ -1,14 +1,18 @@
 # Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved.
 
-# Purpose: Present Windows controls for the shared update policy.
-# How it works:
-# Expose a restricted webview bridge that persists explicit channel/check choices through the
-# controller.
-# Fundamental dependents:
-# - gui_app: Windows update settings actions depend on this preferences window.
-# - winsparkle: installed discovery follows the settings edited through this bridge.
+"""Windows update settings for the common Python update service.
 
-"""Windows update settings for the common Python update service."""
+Purpose: Present Windows controls for the shared update policy.
+
+How it works:
+Expose a restricted webview bridge that persists explicit channel/check choices through the
+controller.
+
+Fundamental dependents:
+
+- ``gui_app``: Windows update settings actions depend on this preferences window.
+- ``winsparkle``: installed discovery follows the settings edited through this bridge.
+"""
 from __future__ import annotations
 
 from collections.abc import Callable

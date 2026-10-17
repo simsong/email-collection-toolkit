@@ -1,13 +1,17 @@
 # Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved.
 
-# Purpose: Bootstrap ClamAV in an isolated Windows interpreter.
-# How it works:
-# Load native dependencies before conflicting application DLLs, then exchange scan requests over
-# owned pipes.
-# Fundamental dependents:
-# - scanner: Windows scan workers require this loader and process boundary.
+"""Private Windows scanner process and early native loader.
 
-"""Private Windows scanner process and early native loader."""
+Purpose: Bootstrap ClamAV in an isolated Windows interpreter.
+
+How it works:
+Load native dependencies before conflicting application DLLs, then exchange scan requests over
+owned pipes.
+
+Fundamental dependents:
+
+- ``scanner``: Windows scan workers require this loader and process boundary.
+"""
 from __future__ import annotations
 
 import ctypes as c

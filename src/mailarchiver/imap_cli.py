@@ -1,13 +1,17 @@
 # Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved.
 
-# Purpose: Provide standalone interactive setup and one-run IMAP synchronization.
-# How it works:
-# Save native-keyring credentials, acquire the archive lease, run ingest and report checkpointed
-# progress.
-# Fundamental dependents:
-# - No internal module relies on this standalone CLI; it drives the shared ingest engine.
+"""Configure and synchronize read-only IMAP sources from a terminal.
 
-"""Configure and synchronize read-only IMAP sources from a terminal."""
+Purpose: Provide standalone interactive setup and one-run IMAP synchronization.
+
+How it works:
+Save native-keyring credentials, acquire the archive lease, run ingest and report checkpointed
+progress.
+
+Fundamental dependents:
+
+- No internal module relies on this standalone CLI; it drives the shared ingest engine.
+"""
 from __future__ import annotations
 
 import argparse

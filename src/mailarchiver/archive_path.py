@@ -1,14 +1,18 @@
 # Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved.
 
-# Purpose: Define consistent archive selection for command-line readers and writers.
-# How it works:
-# Resolve the explicit archive option or shared environment default and report missing
-# selections.
-# Fundamental dependents:
-# - __main__: archive operations use this selection contract.
-# - mailsearch: search and message display must choose the same archive.
+"""Share archive-path CLI and environment handling across read-only commands.
 
-"""Share archive-path CLI and environment handling across read-only commands."""
+Purpose: Define consistent archive selection for command-line readers and writers.
+
+How it works:
+Resolve the explicit archive option or shared environment default and report missing
+selections.
+
+Fundamental dependents:
+
+- ``__main__``: archive operations use this selection contract.
+- ``mailsearch``: search and message display must choose the same archive.
+"""
 
 from __future__ import annotations
 

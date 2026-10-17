@@ -1,14 +1,18 @@
 # Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved.
 
-# Purpose: Build synthetic archives for portable reader/package acceptance.
-# How it works:
-# Reserve a new fixture, exercise real reader services and compare before/after file
-# inventories.
-# Fundamental dependents:
-# - scripts.test_python_reader_native: native reader acceptance uses this collection contract.
-# - scripts.win.test_windows_msix: relocated-package checks need the same verified fixture.
+"""Synthetic, portable reader acceptance collection and checks.
 
-"""Synthetic, portable reader acceptance collection and checks."""
+Purpose: Build synthetic archives for portable reader/package acceptance.
+
+How it works:
+Reserve a new fixture, exercise real reader services and compare before/after file
+inventories.
+
+Fundamental dependents:
+
+- ``scripts.test_python_reader_native``: native reader acceptance uses this collection contract.
+- ``scripts.win.test_windows_msix``: relocated-package checks need the same verified fixture.
+"""
 from __future__ import annotations
 
 from contextlib import closing

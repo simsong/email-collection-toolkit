@@ -1,14 +1,18 @@
 # Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved.
 
-# Purpose: Own the shared selector language and indexed predicate construction.
-# How it works:
-# Recognize values, resolve names and worldwide dates, and produce parameter-bound SQL
-# constraints.
-# Fundamental dependents:
-# - mailsearch: compiled searches depend on this interpretation of selectors.
-# - search_completion: suggestions must recognize and normalize the same selector types.
+"""Shared selector recognition and indexed SQL for CLI, tiles and completion.
 
-"""Shared selector recognition and indexed SQL for CLI, tiles and completion."""
+Purpose: Own the shared selector language and indexed predicate construction.
+
+How it works:
+Recognize values, resolve names and worldwide dates, and produce parameter-bound SQL
+constraints.
+
+Fundamental dependents:
+
+- ``mailsearch``: compiled searches depend on this interpretation of selectors.
+- ``search_completion``: suggestions must recognize and normalize the same selector types.
+"""
 from __future__ import annotations
 
 import re

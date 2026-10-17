@@ -1,14 +1,18 @@
 # Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved.
 
-# Purpose: Validate the installed Windows desktop with disposable archive state.
-# How it works:
-# Exercise production search, registry resources and verified reads through isolated package
-# entry points.
-# Fundamental dependents:
-# - desktop_entry: Windows package self-test activation dispatches here.
-# - scripts.desktop_entry: shared packaged diagnostics select this Windows acceptance path.
+"""Headless Python desktop acceptance for installed Windows packages.
 
-"""Headless Python desktop acceptance for installed Windows packages."""
+Purpose: Validate the installed Windows desktop with disposable archive state.
+
+How it works:
+Exercise production search, registry resources and verified reads through isolated package
+entry points.
+
+Fundamental dependents:
+
+- ``desktop_entry``: Windows package self-test activation dispatches here.
+- ``scripts.desktop_entry``: shared packaged diagnostics select this Windows acceptance path.
+"""
 from __future__ import annotations
 
 from contextlib import closing

@@ -1,14 +1,18 @@
 # Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved.
 
-# Purpose: Define explicit address/glob rules for identifying owner-sent mail.
-# How it works:
-# Normalize includes/excludes and apply case-insensitive whole-mailbox matching with exclusions
-# taking precedence.
-# Fundamental dependents:
-# - message: Sent classification depends on this exact matching policy.
-# - document_options: rule editors and persisted defaults must expose the same semantics.
+"""Explicit, case-insensitive mailbox/address glob rules for Sent classification.
 
-"""Explicit, case-insensitive mailbox/address glob rules for Sent classification."""
+Purpose: Define explicit address/glob rules for identifying owner-sent mail.
+
+How it works:
+Normalize includes/excludes and apply case-insensitive whole-mailbox matching with exclusions
+taking precedence.
+
+Fundamental dependents:
+
+- ``message``: Sent classification depends on this exact matching policy.
+- ``document_options``: rule editors and persisted defaults must expose the same semantics.
+"""
 
 from __future__ import annotations
 

@@ -1,14 +1,18 @@
 # Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved.
 
-# Purpose: Adapt generic IMAP and Gmail All Mail to the shared source contract.
-# How it works:
-# Freeze UID ranges and emit LF-normalized message bytes with original wire hashes, or refresh
-# known-message metadata without another body transfer.
-# Fundamental dependents:
-# - __main__: source workers consume this provider through the plugin contract.
-# - imap_cli: synchronization depends on its account locator and discovery semantics.
+"""Read-only generic IMAP and Gmail All Mail source adapter.
 
-"""Read-only generic IMAP and Gmail All Mail source adapter."""
+Purpose: Adapt generic IMAP and Gmail All Mail to the shared source contract.
+
+How it works:
+Freeze UID ranges and emit LF-normalized message bytes with original wire hashes, or refresh
+known-message metadata without another body transfer.
+
+Fundamental dependents:
+
+- ``__main__``: source workers consume this provider through the plugin contract.
+- ``imap_cli``: synchronization depends on its account locator and discovery semantics.
+"""
 from __future__ import annotations
 
 from collections.abc import Callable, Iterator

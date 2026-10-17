@@ -1,14 +1,18 @@
 # Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved.
 
-# Purpose: Persist processor objects, queues, invocations and replay generations.
-# How it works:
-# Snapshot verified content and atomically track job completion, handoffs and reprocessing
-# without losing manual state.
-# Fundamental dependents:
-# - processing.runtime: interruption-safe dispatch relies on these durable checkpoints.
-# - processing.production: deferred content work and replay need the same saved objects.
+"""Fresh framework storage and atomic queue/checkpoint operations.
 
-"""Fresh framework storage and atomic queue/checkpoint operations."""
+Purpose: Persist processor objects, queues, invocations and replay generations.
+
+How it works:
+Snapshot verified content and atomically track job completion, handoffs and reprocessing
+without losing manual state.
+
+Fundamental dependents:
+
+- ``processing.runtime``: interruption-safe dispatch relies on these durable checkpoints.
+- ``processing.production``: deferred content work and replay need the same saved objects.
+"""
 from __future__ import annotations
 
 import hashlib

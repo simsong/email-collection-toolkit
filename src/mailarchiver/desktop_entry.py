@@ -1,13 +1,17 @@
 # Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved.
 
-# Purpose: Activate the isolated Python desktop in Windows packages.
-# How it works:
-# Dispatch installed self-tests or normal startup through the shared Python GUI entry point.
-# Fundamental dependents:
-# - windows_self_test: installed activation must reach its package acceptance mode.
-# - gui_app: Windows package launches route into its normal desktop lifecycle.
+"""Isolated Python desktop activation for the Windows package.
 
-"""Isolated Python desktop activation for the Windows package."""
+Purpose: Activate the isolated Python desktop in Windows packages.
+
+How it works:
+Dispatch installed self-tests or normal startup through the shared Python GUI entry point.
+
+Fundamental dependents:
+
+- ``windows_self_test``: installed activation must reach its package acceptance mode.
+- ``gui_app``: Windows package launches route into its normal desktop lifecycle.
+"""
 from __future__ import annotations
 
 import multiprocessing

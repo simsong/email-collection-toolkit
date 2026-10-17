@@ -1,14 +1,18 @@
 # Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved.
 
-# Purpose: Exclude concurrent archive writers and conflicting application installation.
-# How it works:
-# Own cross-process leases and shared application activity guards, releasing OS locks on exit or
-# death.
-# Fundamental dependents:
-# - __main__: ingest and recovery require an exclusive archive writer.
-# - updates: installation must wait for and exclude all participating archive writes.
+"""Cross-process exclusive writer lease for one archive.
 
-"""Cross-process exclusive writer lease for one archive."""
+Purpose: Exclude concurrent archive writers and conflicting application installation.
+
+How it works:
+Own cross-process leases and shared application activity guards, releasing OS locks on exit or
+death.
+
+Fundamental dependents:
+
+- ``__main__``: ingest and recovery require an exclusive archive writer.
+- ``updates``: installation must wait for and exclude all participating archive writes.
+"""
 
 from __future__ import annotations
 

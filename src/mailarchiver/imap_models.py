@@ -1,14 +1,18 @@
 # Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved.
 
-# Purpose: Define typed nonsecret accounts and remote message observations.
-# How it works:
-# Validate connection settings and preserve mailbox epochs, Gmail identities, labels and
-# wire-normalization evidence and download totals.
-# Fundamental dependents:
-# - archive_config: persisted IMAP accounts use these validation rules.
-# - imap_source: discovery and acquisition share these provider identity types.
+"""Typed operational configuration and provider observations for read-only IMAP.
 
-"""Typed operational configuration and provider observations for read-only IMAP."""
+Purpose: Define typed nonsecret accounts and remote message observations.
+
+How it works:
+Validate connection settings and preserve mailbox epochs, Gmail identities, labels and
+wire-normalization evidence and download totals.
+
+Fundamental dependents:
+
+- ``archive_config``: persisted IMAP accounts use these validation rules.
+- ``imap_source``: discovery and acquisition share these provider identity types.
+"""
 from __future__ import annotations
 
 from typing import Literal

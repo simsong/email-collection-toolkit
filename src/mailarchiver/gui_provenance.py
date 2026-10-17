@@ -1,13 +1,17 @@
 # Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved.
 
-# Purpose: Read parent/child message relationships without creating processing state.
-# How it works:
-# Query existing processor occurrences and attachment tags through read-only database
-# connections.
-# Fundamental dependents:
-# - gui_service: attached-message navigation and provenance views rely on these relationships.
+"""Read processor-owned attachment provenance without creating a processing database.
 
-"""Read processor-owned attachment provenance without creating a processing database."""
+Purpose: Read parent/child message relationships without creating processing state.
+
+How it works:
+Query existing processor occurrences and attachment tags through read-only database
+connections.
+
+Fundamental dependents:
+
+- ``gui_service``: attached-message navigation and provenance views rely on these relationships.
+"""
 from __future__ import annotations
 
 import json

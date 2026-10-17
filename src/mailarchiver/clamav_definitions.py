@@ -1,14 +1,18 @@
 # Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved.
 
-# Purpose: Locate native antivirus resources and select immutable definition generations.
-# How it works:
-# Validate definition metadata and choose bundled or per-user resources without editing an
-# archive.
-# Fundamental dependents:
-# - scanner: scan workers need compatible engine and signature paths.
-# - clamav_update: new generations must follow the same resource-selection rules.
+"""Offline ClamAV resources and immutable per-user definition generations.
 
-"""Offline ClamAV resources and immutable per-user definition generations."""
+Purpose: Locate native antivirus resources and select immutable definition generations.
+
+How it works:
+Validate definition metadata and choose bundled or per-user resources without editing an
+archive.
+
+Fundamental dependents:
+
+- ``scanner``: scan workers need compatible engine and signature paths.
+- ``clamav_update``: new generations must follow the same resource-selection rules.
+"""
 from __future__ import annotations
 
 import calendar

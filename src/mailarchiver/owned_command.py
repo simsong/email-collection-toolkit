@@ -1,12 +1,15 @@
 # Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved.
 
-# Purpose: Contain the lifetime and output of an explicitly launched external command.
-# How it works:
-# Use a private supervisor/process group or Windows job and reap descendants on timeout or owner
-# death.
-# Fundamental dependents:
-# - clamav_update: definition refresh depends on FreshClam cleanup during cancellation or Quit.
+"""Purpose: Contain the lifetime and output of an explicitly launched external command.
 
+How it works:
+Use a private supervisor/process group or Windows job and reap descendants on timeout or owner
+death.
+
+Fundamental dependents:
+
+- ``clamav_update``: definition refresh depends on FreshClam cleanup during cancellation or Quit.
+"""
 from __future__ import annotations
 
 import multiprocessing

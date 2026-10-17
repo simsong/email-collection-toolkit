@@ -1,12 +1,18 @@
 # Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved.
-# Purpose: Reclaim processor working files without losing retry or replay inputs.
-# How it works:
-# Trace live jobs and checkpoint outputs, retain unpublished originals, and unlink
-# only unreferenced owned objects after the caller has stopped processor workers.
-# Fundamental dependents:
-# - production: completed archive operations release reconstructable working data.
-# - runtime: standalone harness runs release outputs while preserving source snapshots.
-"""Writer-owned working-object collection for production and the processor harness."""
+
+"""Writer-owned working-object collection for production and the processor harness.
+
+Purpose: Reclaim processor working files without losing retry or replay inputs.
+
+How it works:
+Trace live jobs and checkpoint outputs, retain unpublished originals, and unlink
+only unreferenced owned objects after the caller has stopped processor workers.
+
+Fundamental dependents:
+
+- ``production``: completed archive operations release reconstructable working data.
+- ``runtime``: standalone harness runs release outputs while preserving source snapshots.
+"""
 from __future__ import annotations
 
 import hashlib

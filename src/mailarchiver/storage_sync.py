@@ -1,14 +1,18 @@
 # Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved.
 
-# Purpose: Publish flushed files with platform-appropriate rename durability.
-# How it works:
-# Replace files atomically, flush POSIX directories and use Windows write-through publication
-# with bounded retries.
-# Fundamental dependents:
-# - mbox: canonical journal/publication steps depend on these storage guarantees.
-# - bagit: checkpoint files must use the same durable replacement boundary.
+"""File publication primitives shared by the archive writer and metadata stores.
 
-"""File publication primitives shared by the archive writer and metadata stores."""
+Purpose: Publish flushed files with platform-appropriate rename durability.
+
+How it works:
+Replace files atomically, flush POSIX directories and use Windows write-through publication
+with bounded retries.
+
+Fundamental dependents:
+
+- ``mbox``: canonical journal/publication steps depend on these storage guarantees.
+- ``bagit``: checkpoint files must use the same durable replacement boundary.
+"""
 from __future__ import annotations
 
 import ctypes

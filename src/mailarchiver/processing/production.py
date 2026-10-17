@@ -1,14 +1,18 @@
 # Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved.
 
-# Purpose: Host durable ingest, message and content pipelines for real archives.
-# How it works:
-# Translate typed processor results into catalog/index publication while retaining provenance
-# and replay state.
-# Fundamental dependents:
-# - __main__: normal ingest and content resumption delegate to this host.
-# - gui_processing: desktop continuation depends on its persisted policy and queues.
+"""Production CLI host for the durable ingest, message and content processor trees.
 
-"""Production CLI host for the durable ingest, message and content processor trees."""
+Purpose: Host durable ingest, message and content pipelines for real archives.
+
+How it works:
+Translate typed processor results into catalog/index publication while retaining provenance
+and replay state.
+
+Fundamental dependents:
+
+- ``__main__``: normal ingest and content resumption delegate to this host.
+- ``gui_processing``: desktop continuation depends on its persisted policy and queues.
+"""
 from __future__ import annotations
 
 import hashlib

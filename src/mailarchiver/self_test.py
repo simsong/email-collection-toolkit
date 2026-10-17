@@ -1,16 +1,20 @@
 # Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved.
 
-# Purpose: Exercise source and packaged desktop behavior using disposable mail.
-# How it works:
-# Create synthetic archives and drive real ingest, verification, GUI and bundled-resource
-# checks.
-# Fundamental dependents:
-# - scripts.desktop_entry: packaged self-test switches dispatch to these checks.
-# - scripts.build_macos: mounted application acceptance depends on their evidence.
-
 """Disposable end-to-end checks for source and frozen desktop installations.
 
 Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved.
+
+
+Purpose: Exercise source and packaged desktop behavior using disposable mail.
+
+How it works:
+Create synthetic archives and drive real ingest, verification, GUI and bundled-resource
+checks.
+
+Fundamental dependents:
+
+- ``scripts.desktop_entry``: packaged self-test switches dispatch to these checks.
+- ``scripts.build_macos``: mounted application acceptance depends on their evidence.
 """
 
 from __future__ import annotations

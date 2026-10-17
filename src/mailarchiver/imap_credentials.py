@@ -1,14 +1,18 @@
 # Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved.
 
-# Purpose: Store and retrieve IMAP secrets through native operating-system vaults.
-# How it works:
-# Select macOS Keychain or Windows Credential Manager explicitly and key secrets by saved
-# account identity.
-# Fundamental dependents:
-# - imap_cli: interactive setup must persist passwords outside archives.
-# - imap_source: download sessions need the matching native-vault credential.
+"""Native macOS Keychain and Windows Credential Manager access.
 
-"""Native macOS Keychain and Windows Credential Manager access."""
+Purpose: Store and retrieve IMAP secrets through native operating-system vaults.
+
+How it works:
+Select macOS Keychain or Windows Credential Manager explicitly and key secrets by saved
+account identity.
+
+Fundamental dependents:
+
+- ``imap_cli``: interactive setup must persist passwords outside archives.
+- ``imap_source``: download sessions need the matching native-vault credential.
+"""
 import sys
 
 from keyring.backend import KeyringBackend

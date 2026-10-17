@@ -1,14 +1,18 @@
 # Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved.
 
-# Purpose: Supply native Windows handles and locks for archive durability.
-# How it works:
-# Pin non-reparse directories and open protected lock files with OS-owned shared/exclusive
-# locking.
-# Fundamental dependents:
-# - writer_lock: Windows writers/installers rely on these exclusion primitives.
-# - plugin_configuration: configuration publication needs the same native locking semantics.
+"""Windows storage primitives; imported only on Windows.
 
-"""Windows storage primitives; imported only on Windows."""
+Purpose: Supply native Windows handles and locks for archive durability.
+
+How it works:
+Pin non-reparse directories and open protected lock files with OS-owned shared/exclusive
+locking.
+
+Fundamental dependents:
+
+- ``writer_lock``: Windows writers/installers rely on these exclusion primitives.
+- ``plugin_configuration``: configuration publication needs the same native locking semantics.
+"""
 from __future__ import annotations
 
 import ctypes as c

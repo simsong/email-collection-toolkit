@@ -1,14 +1,18 @@
 # Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved.
 
-# Purpose: Construct portable SQLite URI filenames without weakening access modes.
-# How it works:
-# Escape literal path characters and retain UNC servers in the path rather than the URI
-# authority.
-# Fundamental dependents:
-# - application: archive validation must open the intended local/network database.
-# - mailsearch: read-only queries require the same exact path and locking semantics.
+"""Portable SQLite URI filenames for the shared Python application.
 
-"""Portable SQLite URI filenames for the shared Python application."""
+Purpose: Construct portable SQLite URI filenames without weakening access modes.
+
+How it works:
+Escape literal path characters and retain UNC servers in the path rather than the URI
+authority.
+
+Fundamental dependents:
+
+- ``application``: archive validation must open the intended local/network database.
+- ``mailsearch``: read-only queries require the same exact path and locking semantics.
+"""
 from pathlib import Path, PurePath, PureWindowsPath
 from typing import Literal
 from urllib.parse import quote

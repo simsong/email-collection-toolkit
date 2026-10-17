@@ -1,14 +1,18 @@
 # Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved.
 
-# Purpose: Map canonical package versions to installer and updater identities.
-# How it works:
-# Validate supported versions and derive monotonically ordered build/channel metadata from one
-# version input.
-# Fundamental dependents:
-# - scripts.release_files: artifact staging depends on the shared release identity.
-# - windows_update_feed: update filtering must compare the same mapped versions.
+"""Shared package, bundle, and Sparkle release version mapping.
 
-"""Shared package, bundle, and Sparkle release version mapping."""
+Purpose: Map canonical package versions to installer and updater identities.
+
+How it works:
+Validate supported versions and derive monotonically ordered build/channel metadata from one
+version input.
+
+Fundamental dependents:
+
+- ``scripts.release_files``: artifact staging depends on the shared release identity.
+- ``windows_update_feed``: update filtering must compare the same mapped versions.
+"""
 
 from packaging.version import InvalidVersion, Version
 

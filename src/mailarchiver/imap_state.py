@@ -1,14 +1,18 @@
 # Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved.
 
-# Purpose: Maintain transactional remote checkpoints and hourly acquisition accounting.
-# How it works:
-# Commit UID/Gmail observations, label hierarchy and distinct new/duplicate totals with catalog
-# publication.
-# Fundamental dependents:
-# - imap_source: successful checkpoints prevent repeated body transfers.
-# - imap_cli: status reporting depends on committed account totals.
+"""Transactional IMAP progress, label hierarchy and hourly download statistics.
 
-"""Transactional IMAP progress, label hierarchy and hourly download statistics."""
+Purpose: Maintain transactional remote checkpoints and hourly acquisition accounting.
+
+How it works:
+Commit UID/Gmail observations, label hierarchy and distinct new/duplicate totals with catalog
+publication.
+
+Fundamental dependents:
+
+- ``imap_source``: successful checkpoints prevent repeated body transfers.
+- ``imap_cli``: status reporting depends on committed account totals.
+"""
 from __future__ import annotations
 
 from datetime import UTC, datetime

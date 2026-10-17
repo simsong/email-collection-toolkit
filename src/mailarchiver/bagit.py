@@ -1,14 +1,18 @@
 # Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved.
 
-# Purpose: Publish the archive's interoperable Mailbag metadata and fixity checkpoint.
-# How it works:
-# Stream message locations into integrity records, CSV and manifests, publishing tag fixity
-# last.
-# Fundamental dependents:
-# - __main__: completed and interrupted ingests require a valid checkpoint.
-# - application: new archives need this native preservation layout.
+"""Publish native Mailbag metadata, payload manifests, and durable tag fixity.
 
-"""Publish native Mailbag metadata, payload manifests, and durable tag fixity."""
+Purpose: Publish the archive's interoperable Mailbag metadata and fixity checkpoint.
+
+How it works:
+Stream message locations into integrity records, CSV and manifests, publishing tag fixity
+last.
+
+Fundamental dependents:
+
+- ``__main__``: completed and interrupted ingests require a valid checkpoint.
+- ``application``: new archives need this native preservation layout.
+"""
 
 from __future__ import annotations
 

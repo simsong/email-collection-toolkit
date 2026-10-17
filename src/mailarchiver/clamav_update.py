@@ -1,14 +1,18 @@
 # Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved.
 
-# Purpose: Refresh antivirus definitions through an explicit one-shot operation.
-# How it works:
-# Supervise FreshClam, validate candidate signatures by scanning, and atomically select a new
-# generation.
-# Fundamental dependents:
-# - gui_app: the About/update workflow depends on verified definition refresh.
-# - self_test: packaged acceptance exercises this same update and publication path.
+"""Explicit, one-shot FreshClam updates; publish only successfully tested generations.
 
-"""Explicit, one-shot FreshClam updates; publish only successfully tested generations."""
+Purpose: Refresh antivirus definitions through an explicit one-shot operation.
+
+How it works:
+Supervise FreshClam, validate candidate signatures by scanning, and atomically select a new
+generation.
+
+Fundamental dependents:
+
+- ``gui_app``: the About/update workflow depends on verified definition refresh.
+- ``self_test``: packaged acceptance exercises this same update and publication path.
+"""
 from __future__ import annotations
 
 import argparse
