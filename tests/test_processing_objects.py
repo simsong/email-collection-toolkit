@@ -49,10 +49,10 @@ def test_completed_local_ingest_reprocesses_from_canonical_bytes(tmp_path: Path)
 
 
 def test_deferred_and_partial_content_keep_live_inputs(tmp_path: Path) -> None:
-    """Deferred work keeps roots and then parts until their queued consumers finish."""
+    """Deferred work regenerates roots from canonical MBOX and retains live derived parts."""
     raw = HEADER + b"Content-Type: text/plain\r\n\r\nrecoverabletoken\r\n"
     archive, source = ingest(tmp_path, raw, "--defer-content")
-    assert hashlib.sha256(raw).hexdigest() in objects(archive)
+    assert not objects(archive)
     source.unlink()
     cli(archive, "process", "--max-jobs", "1")
     assert objects(archive)
@@ -75,6 +75,9 @@ def test_failed_rank_keeps_checkpoint_outputs_and_harness_roots(tmp_path: Path) 
         assert run(database, plugins).failed == 1
         derived = archive / "objects" / hashlib.sha256(b"derived").hexdigest()
         assert derived.read_bytes() == b"derived"
+        database.execute("DROP TABLE object_references")
+        database.commit()
+    with connect(archive) as database:
         (archive / "ready").touch()
         assert run(database, plugins, retry=True).failed == 0
         assert not derived.exists()
@@ -119,6 +122,7 @@ def test_cleanup_retains_original_if_canonical_copy_is_damaged(tmp_path: Path) -
     archive, _ = ingest(tmp_path, raw, "--defer-content")
     path = mbox_directory(archive) / "2024-Archive1.mbox"
     path.write_bytes(path.read_bytes().replace(b"originaltoken", b"damaged-token"))
+    (archive / "objects" / hashlib.sha256(raw).hexdigest()).write_bytes(raw)
     result = subprocess.run([sys.executable, "-m", "mailarchiver", "--archive", str(archive), "process"],
                             capture_output=True, text=True, check=False, timeout=60)
     assert result.returncode != 0 and 'hash mismatch' in result.stderr
@@ -145,3 +149,40 @@ def test_reprocessing_missing_objects_rejects_corrupt_canonical_bytes(tmp_path: 
     cli(archive, "process")
     assert not objects(archive)
     assert read_message_bytes(archive, 1) == raw
+
+
+def test_shared_derived_input_survives_other_message_completion(tmp_path: Path) -> None:
+    """A shared output stays live until every message's queued consumer commits."""
+    plugin(tmp_path, "emit", 'return ProcessingResult(emissions=(Emission(content_ref=item.create_content(b"shared"), content_type="text/plain"),))',
+           emits='"text/plain"')
+    plugin(tmp_path, "consume", 'assert item.content_ref.path.read_bytes() == b"shared"\nreturn ProcessingResult()',
+           subscribes="text/plain")
+    plugins = load_processors((tmp_path,))
+    archive = tmp_path / "archive"
+    second = tmp_path / "second.eml"
+    second.write_bytes(MESSAGE.read_bytes() + b"different")
+    with connect(archive, create=True) as database:
+        submit(database, archive, MESSAGE, fingerprint(plugins))
+        submit(database, archive, second, fingerprint(plugins))
+        assert run(database, plugins, max_jobs=2).pending == 2
+        shared = archive / "objects" / hashlib.sha256(b"shared").hexdigest()
+        assert run(database, plugins, max_jobs=1).pending == 1
+        assert shared.read_bytes() == b"shared"
+        assert run(database, plugins).pending == 0
+        assert not shared.exists()
+
+
+def test_collection_rejects_uncommitted_processing_records(tmp_path: Path) -> None:
+    """No file is removed while processing references are still uncommitted."""
+    archive = tmp_path / "archive"
+    with connect(archive, create=True) as database:
+        directory = archive / "objects"
+        directory.mkdir()
+        candidate = directory / ("a" * 64)
+        candidate.write_bytes(b"orphan")
+        database.execute("BEGIN")
+        with pytest.raises(ValueError, match="committed processing"):
+            collect_objects(database, archive)
+        assert candidate.exists()
+        database.commit()
+        assert collect_objects(database, archive) == 1

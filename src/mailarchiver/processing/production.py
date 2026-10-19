@@ -70,6 +70,7 @@ class ProductionPipeline:
         self.publisher = publish
         self.installation_config = installation_config
         self.cancelled = cancelled
+        self._ingesting = False
         self.plugins = load_processors((builtin_plugin_directory(), *plugin_dirs))
         self.registry_hash = fingerprint(self.plugins)
         self.database = connect(self.archive, create=not (self.archive / DATABASE).exists(), production=True)
@@ -103,6 +104,13 @@ class ProductionPipeline:
             collect_objects(self.database, self.archive, self._canonical_bytes)
         finally:
             self.database.close()
+
+    def release(self, message_id: str) -> None:
+        if self._ingesting:
+            return
+        if self.catalog.in_transaction:
+            raise ValueError("object cleanup requires committed catalog records")
+        collect_objects(self.database, self.archive, self._canonical_bytes, message_id=message_id)
 
     def _canonical_bytes(self, digest: str) -> bytes:
         row = self.catalog.execute(
@@ -187,12 +195,14 @@ class ProductionPipeline:
             if self.cancelled is not None:
                 self.cancelled()
             self._finish_ingest_message(str(row[0]))
+            self.release(str(row[0]))
 
     def _finish_ingest_message(self, message_id: str) -> None:
         # The host serializes ingest calls under its publication lock. Finish
         # this message before honoring cooperative Quit; processor deadlines
         # still apply, and GUI termination has its own five-second hard limit.
         cancelled, self.cancelled = self.cancelled, None
+        ingesting, self._ingesting = self._ingesting, True
         try:
             failures: list[Exception] = []
             dispatch(self.database, self.plugins, pipelines=("ingest", "message"),
@@ -200,6 +210,8 @@ class ProductionPipeline:
             self._raise_failures(("ingest", "message"), failures)
         finally:
             self.cancelled = cancelled
+            self._ingesting = ingesting
+
     def resume(self, pipelines: tuple[Pipeline, ...], *, max_jobs: int | None = None, message_id: str | None = None) -> RunReport:
         failures: list[Exception] = []
         result = run(self.database, self.plugins, retry=True, pipelines=pipelines, max_jobs=max_jobs,

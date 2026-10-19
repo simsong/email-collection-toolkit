@@ -65,6 +65,30 @@ def test_real_library_clean_mime_eicar_and_concurrent_verdicts(scanner: ClamScan
     assert scanner.scan(tmp_path / "absent.eml").status == "scanner-error"
 
 
+def test_link_mismatches_are_not_detections_but_attachments_still_are(
+    scanner: ClamScanner, tmp_path: Path, capfd: pytest.CaptureFixture[str],
+) -> None:
+    """SCANNING: disable suspicious-link checks while retaining MIME malware detection."""
+    html = (b'<html><body><a href="http://go.amex/fixture">https://cdaas.americanexpress.com</a>'
+            b'<a href="http://m.amex/fixture">americanexpress.com</a>'
+            b'<a href="http://unrelated.example/fixture">https://www.paypal.com</a></body></html>')
+    for infected in (False, True):
+        raw = (b'From: sender@example.test\nMIME-Version: 1.0\nContent-Type: multipart/mixed; boundary="fixture"\n\n'
+               b'--fixture\nContent-Type: text/html\n\n' + html + b'\n')
+        if infected:
+            raw += (b'--fixture\nContent-Type: application/octet-stream\nContent-Transfer-Encoding: base64\n\n'
+                    + base64.encodebytes(EICAR))
+        raw += b'--fixture--\n'
+        path = tmp_path / "links.eml"
+        path.write_bytes(raw)
+        for result in (scanner.scan(path), scanner.scan_sample(raw)):
+            assert result.status == ("infected" if infected else "clean")
+            if infected:
+                assert "eicar" in result.detail.lower()
+        assert path.read_bytes() == raw
+    assert "Suspicious link found!" not in capfd.readouterr().err
+
+
 @pytest.mark.parametrize("invalid_library", [False, True])
 def test_library_startup_failure_has_diagnostics_and_no_worker(tmp_path: Path, invalid_library: bool) -> None:
     library = tmp_path / "libclamav"

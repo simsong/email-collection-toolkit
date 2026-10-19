@@ -133,6 +133,10 @@ and unchanged-container counts. Control-C prints and flushes
 ingest handler also announces interruptions during preflight. The reporter emits
 the notice once and starts subsequent dashboard frames below it. Real-SIGINT
 tests hold a worker blocked until the acknowledgement is observed.
+Each source worker closes its iterator in `finally`, including early interruption,
+so generator-owned SQLite connections close on their creating thread. Scanner
+children ignore SIGINT; the parent finishes active work and closes them through
+IPC. Real process-group SIGINT tests exercise scanning and resumable downloads.
 Control-C commits completed work, closes the
 temporary scanner, publishes a BagIt/Mailbag checkpoint, reports a controlled interruption, and
 prints the partial-run archive report before returning 130.  An `ENOSPC` append is truncated back to the prior MBOX size where

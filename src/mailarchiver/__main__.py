@@ -32,13 +32,13 @@ import threading
 import tempfile
 import time
 from collections import Counter, deque
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Iterator
 from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
 from datetime import UTC, datetime
 from importlib.metadata import version
 from pathlib import Path
 from types import TracebackType
-from typing import Literal, TextIO, TypeVar
+from typing import Literal, Protocol, TextIO, TypeVar, runtime_checkable
 from urllib.parse import quote
 from uuid import uuid4
 
@@ -131,6 +131,13 @@ DISCOVERY_PHASE = "discovering sources"
 TOP_LINE_STYLE = "\x1b[37;44m"
 ANSI_RESET = "\x1b[0m"
 WorkerItem = TypeVar("WorkerItem")
+
+
+@runtime_checkable
+class _ClosableIterator(Protocol):
+    """Source iterators may own thread-bound connections and temporary files."""
+
+    def close(self) -> None: ...
 
 
 class IngestOutcome(BaseModel):
@@ -1694,6 +1701,7 @@ def _run_ingest(request: IngestRequest, writer_lease: WriterLease, outcome: Inge
         display_path = work.container.source.display_name
         byte_length = work.container.estimated_bytes or 0
         source: MailObject | None = None
+        items: Iterator[MailObject | SourceObservation | ProgressEvent] | None = None
         try:
             check_interrupted()
             if stop.is_set():
@@ -1822,6 +1830,7 @@ def _run_ingest(request: IngestRequest, writer_lease: WriterLease, outcome: Inge
                         observe(source, "duplicate", "same Message-ID and SHA-256", parsed.sha256, decision.message_pk)
                         progress.record_disposition("duplicate")
                     catalog.commit()
+                    pipeline.release(parsed.sha256)
 
             check_interrupted()
             if stop.is_set():
@@ -1837,7 +1846,11 @@ def _run_ingest(request: IngestRequest, writer_lease: WriterLease, outcome: Inge
             stop.set()
             raise
         finally:
-            progress.record_file_inactive(display_path)
+            try:
+                if isinstance(items, _ClosableIterator):
+                    items.close()
+            finally:
+                progress.record_file_inactive(display_path)
 
     def capture_discovery(
         selections: Iterable[tuple[SourceSpec, LoadedPlugin]],

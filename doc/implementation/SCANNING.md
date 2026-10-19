@@ -65,6 +65,17 @@ durable evidence, source immutability, and isolated headless diagnostics.
 
 ### Embedded scanner configuration
 
+Python `libclamav.Engine` and Rust `mct-importer::antivirus::Scanner` load official
+databases with `CL_DB_PHISHING | CL_DB_BYTECODE | CL_DB_OFFICIAL_ONLY`, omitting
+`CL_DB_PHISHING_URLS`. This disables the URL-phishing module and its suspicious-link
+diagnostics/verdicts while retaining signature-based detections and bytecode.
+Parser options and encrypted/over-limit checks are unchanged. Both file and
+bounded in-memory Python scans use this engine policy; producer scan headers
+remain authoritative. Already-running engines retain their prior configuration
+until restarted, and existing quarantine records are not reclassified.
+`make test-clamav` and `make test-clamav-rust` exercise mismatched-link HTML mail,
+with and without a base64 EICAR attachment, using the real engine and definitions.
+
 MAILARCHIVER_CLAMAV_LIBRARY and MAILARCHIVER_CLAMAV_DATABASE select explicit
 development resources. MAILARCHIVER_CLAMAV_CERTIFICATES selects signature trust
 material, MAILARCHIVER_FRESHCLAM the updater, and MAILARCHIVER_CLAMAV_UPDATES a

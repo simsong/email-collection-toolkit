@@ -78,8 +78,10 @@ message processing, retaining their original antivirus provenance. It never
 unquarantines infected messages. Original source bytes, canonical MBOX files and
 manual decisions are retained. Working `objects/` files, including synthetic
 parts, are outside the canonical BagIt payload. Completed working files are
-collected; live jobs retain their inputs and retry checkpoints. New production
-generations restore raw inputs from verified MBOX records and regenerate parts.
+collected after each message publication and SQL commit, then after completed
+processing jobs. Live jobs retain derived inputs and retry checkpoints; raw
+inputs are reconstructed from verified canonical MBOX records when needed.
+New production generations regenerate derived parts.
 The standalone harness retains its original input snapshots for replay.
 
 `identities` returns JSON address rows with canonical names, first/last use and

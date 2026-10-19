@@ -272,7 +272,8 @@ def test_reporter_updates_while_sync_is_running(tmp_path: Path, capsys: pytest.C
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="POSIX SIGINT delivery; native Windows console acceptance remains separate")
-def test_cli_ctrl_c_checkpoints_and_next_invocation_resumes(tmp_path: Path) -> None:
+@pytest.mark.parametrize("scan", [False, True])
+def test_cli_ctrl_c_checkpoints_and_next_invocation_resumes(tmp_path: Path, scan: bool) -> None:
     """Interrupt the real CLI process during downloads, then finish without duplicate publication."""
     server = DisposableImap(tmp_path, "implicit")
     account = server.start()
@@ -284,21 +285,37 @@ def test_cli_ctrl_c_checkpoints_and_next_invocation_resumes(tmp_path: Path) -> N
     save_archive_config(archive, config)
     environment = os.environ.copy()
     environment["SSL_CERT_FILE"] = str(server.certificate)
-    command = [sys.executable, "-c", CLI_DRIVER, "--archive", str(archive), "--no-scan", "--workers", "8"]
+    command = [sys.executable, "-c", CLI_DRIVER, "--archive", str(archive), "--workers", "8"]
+    if not scan:
+        command.append("--no-scan")
     process: subprocess.Popen[bytes] | None = None
     try:
         with server.connect() as client:
-            for index in range(80):
-                raw = f"From: fixture@example.org\r\nSubject: {index}\r\n\r\n".encode() + b"preserved\r\n" * 500
-                assert client.append("INBOX", None, None, raw)[0] == "OK"
+            for mailbox in range(8):
+                name = f"folder{mailbox}"
+                assert client.create(name)[0] == "OK"
+                for index in range(10):
+                    raw = f"From: fixture@example.org\r\nSubject: {mailbox}-{index}\r\n\r\n".encode() + b"preserved\r\n" * 500
+                    assert client.append(name, None, None, raw)[0] == "OK"
         with (tmp_path / "interrupted.log").open("wb") as log:
-            process = subprocess.Popen(command, cwd=ROOT, env=environment, stdout=log, stderr=log)
-            deadline = time.monotonic() + 20
-            while totals(archive).archived == 0 and process.poll() is None and time.monotonic() < deadline:
+            process = subprocess.Popen(command, cwd=ROOT, env=environment, stdout=log, stderr=log, start_new_session=True)
+            deadline = time.monotonic() + 120
+            released = False
+            while process.poll() is None and time.monotonic() < deadline:
+                with closing(sqlite3.connect(archive / "archive.sqlite3")) as database:
+                    row = database.execute("SELECT sha256 FROM messages ORDER BY message_pk LIMIT 1").fetchone()
+                if row and not (archive / "objects" / row[0]).exists():
+                    released = True
+                    break
                 time.sleep(0.01)
             assert 0 < totals(archive).archived < 80, (tmp_path / "interrupted.log").read_text()
-            process.send_signal(signal.SIGINT)
+            assert released, "first committed message remained cached while download continued"
+            os.killpg(process.pid, signal.SIGINT)
             assert process.wait(timeout=30) == 130, (tmp_path / "interrupted.log").read_text()
+        interrupted_log = (tmp_path / "interrupted.log").read_text()
+        assert "Traceback" not in interrupted_log and "Exception ignored" not in interrupted_log
+        assert "SpawnProcess" not in interrupted_log
+        assert totals(archive).errors == 0
         partial = totals(archive).archived
         assert 0 < partial < 80
         resumed = subprocess.run(command, cwd=ROOT, env=environment, capture_output=True, timeout=60)

@@ -39,7 +39,7 @@ from .api import (
 )
 from .registry import fingerprint, subscribers
 from .store import content_reference, enqueue, report, snapshot
-from .objects import collect_objects
+from .objects import collect_objects, index_outputs
 
 
 class ProcessorServices(Protocol):
@@ -47,6 +47,7 @@ class ProcessorServices(Protocol):
     def publish(self, database: sqlite3.Connection, job_id: int, item: ProcessingObject,
                 plugin: PluginSpec, result: ProcessingResult) -> None: ...
     def complete(self, item: ProcessingObject) -> None: ...
+    def release(self, message_id: str) -> None: ...
 
 
 class CurrentSourceLoader(SourceFileLoader):
@@ -201,6 +202,8 @@ def _checkpoint(database: sqlite3.Connection, job_id: int, plugin: PluginSpec, i
                          ("completed" if success else "failed", elapsed,
                           response.result.model_dump_json() if success and response.result else response.model_dump_json(),
                           response.error, invocation_id))
+        if success and response.result is not None:
+            index_outputs(database, job_id, item.message_ref.sha256, response.result)
         if not success and response.result is not None and response.result.scan is not None and services is not None:
             services.publish(database, job_id, item, plugin, ProcessingResult(scan=response.result.scan))
     return response.result if success else None
@@ -351,4 +354,8 @@ def dispatch(database: sqlite3.Connection, plugins: tuple[PluginSpec, ...], *,
                 services.complete(item)
             with database:
                 database.execute("UPDATE jobs SET status='completed' WHERE job_id=?", (job_id,))
+        if services is not None:
+            services.release(item.message_id)
+        else:
+            collect_objects(database, item.archive.path, message_id=item.message_id)
         processed += 1

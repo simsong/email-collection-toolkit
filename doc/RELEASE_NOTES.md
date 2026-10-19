@@ -6,6 +6,22 @@ Entries describe their recorded revisions. For current behavior use the
 [user manual](USER_MANUAL.md) and [CLI reference](CLI_REFERENCE.md). Retired
 Rust delivery plans and historical package checks are not current acceptance.
 
+## Incremental cache release and IMAP interruption
+
+Release cached raw messages after each durable MBOX publication and SQL commit,
+including deferred-content imports. Restore raw inputs from verified canonical
+records for later processing; retain live derived inputs and retry checkpoints.
+Ctrl-C closes IMAP iterators on their owning workers and leaves scanner shutdown
+to the parent, avoiding cross-thread SQLite errors and scanner tracebacks.
+
+## Suspicious-link scanning
+
+Disable ClamAV's URL-phishing module in Python and Rust scanners to avoid
+quarantining mail for mismatched marketing links. Malware/phishing signatures,
+bytecode and attachment scanning remain enabled. URL-module detections of genuine
+phishing links are also disabled. Restart an active import to use the new policy;
+existing quarantined messages are not automatically reclassified.
+
 ## IMAP integration-test reliability
 
 Pin the disposable IMAP server greeting to `localhost`, avoiding synchronous host

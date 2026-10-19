@@ -22,6 +22,13 @@ recorded in THIRD_PARTY_NOTICES.md.
   `not-scanned` in run status and an antivirus metadata defect on each new message.
   Earlier run status without this field is unknown, not presumed scanned.
   Repeat imports do not retroactively scan previously archived messages.
+* Python and Rust scanners disable ClamAV's URL-phishing module, including
+  suspicious-link domain/protocol mismatch checks. These checks can flag legitimate
+  marketing redirects. Signature-based malware/phishing and bytecode scanning,
+  MIME/attachment parsing, and encrypted/over-limit reporting remain enabled.
+  This policy also removes URL-module detections of genuine phishing links;
+  a clean scan is not a guarantee that links are safe. Existing quarantine
+  decisions are not retroactively changed.
 * Host ingestion shares one compiled engine across native scan threads.
   A temporary app-owned worker provides startup/scan deadlines; it exposes no
   persistent service or socket. Python records scan results through the existing

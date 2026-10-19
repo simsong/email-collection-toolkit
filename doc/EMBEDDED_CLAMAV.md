@@ -32,6 +32,12 @@ The prototype uses Python ctypes and Rust libloading bindings to the public
 libclamav 1.x ABI, checked against the installed 1.5.4 header. Future ABI changes
 require binding review. Package the selected engine and its dependency closure.
 
+Both bindings disable the URL-phishing module (`CL_DB_PHISHING_URLS`), including
+suspicious-link checks, while retaining official malware/phishing signatures,
+bytecode and MIME/attachment scanning. This also disables that module's genuine
+phishing detections; clean scans do not establish link safety. See the
+[scanner configuration](implementation/SCANNING.md#embedded-scanner-configuration).
+
 One compiled Python engine is shared by concurrent native scan threads;
 ctypes releases the GIL during calls. Per-call options and verdict storage are
 independent. Short IPC locks never surround a scan. An app-owned temporary

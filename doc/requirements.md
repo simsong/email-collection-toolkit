@@ -19,7 +19,10 @@ platform or release gate has passed. [Future work](plans/README.md) is separate.
 
 ## Shared boundaries
 
-- Release completed processor working files while preserving recovery inputs;
+- Embedded scanners disable URL-phishing checks while retaining malware scanning;
+  see the [scanning policy](requirements/SCANNING.md#malware-handling).
+- Release cached raw mail after each MBOX publication and SQL commit, preserving
+  live derived inputs and retry checkpoints;
   see [working-object lifetime](requirements/PROCESSING.md#working-object-lifetime).
 - Preserve source stores and original message bytes, with the documented IMAP
   CRLF-to-LF acquisition exception; canonical MBOX/manifests

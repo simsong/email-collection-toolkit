@@ -23,6 +23,7 @@ import tempfile
 from importlib.resources import files
 from pathlib import Path
 
+from .objects import ensure_object_index, index_inputs
 from .api import ArchiveContext, ContentReference, PluginStatistics, ProcessingObject, RAW_MESSAGE, RunReport
 from ..catalog import PROCESSING_DATABASE as DATABASE
 from ..catalog import require_processing_schema
@@ -62,6 +63,7 @@ def connect(archive: Path, *, create: bool = False, production: bool = False) ->
     try:
         database.execute("PRAGMA foreign_keys=ON")
         require_processing_schema(database)
+        ensure_object_index(database)
     except BaseException:
         database.close()
         raise
@@ -99,8 +101,10 @@ def snapshot(archive: Path, path: Path) -> ContentReference:
 def enqueue(database: sqlite3.Connection, item: ProcessingObject, registry_hash: str, parent_job_id: int | None = None) -> None:
     payload = item.model_copy(update={"job_id": None}).model_dump_json()
     identity = hashlib.sha256((registry_hash + payload + str(parent_job_id)).encode()).hexdigest()
-    database.execute("INSERT OR IGNORE INTO jobs(identity,item_json,registry_hash,parent_job_id,status) VALUES(?,?,?,?,'pending')",
-                     (identity, payload, registry_hash, parent_job_id))
+    row = database.execute("INSERT OR IGNORE INTO jobs(identity,item_json,registry_hash,parent_job_id,status) "
+                           "VALUES(?,?,?,?,'pending') RETURNING job_id", (identity, payload, registry_hash, parent_job_id)).fetchone()
+    if row is not None:
+        index_inputs(database, int(row[0]), item)
 
 
 def submit(database: sqlite3.Connection, archive: Path, source: Path, registry_hash: str) -> str:

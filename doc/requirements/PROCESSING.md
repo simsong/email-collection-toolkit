@@ -5,11 +5,13 @@
 ## Working-object lifetime
 
 All production ingest and processing operations, including IMAP, shall release
-completed working objects under the archive writer lease. Pending, running and
-failed jobs shall retain both input objects and successful invocation outputs
-needed for rank retry. Keep unpublished originals and originals whose canonical
-MBOX copy cannot be verified. Standalone processor harnesses shall keep their
-original snapshots because they have no canonical MBOX fallback.
+cached raw messages after their canonical MBOX publication and catalog/processing
+SQL commits, without waiting for the import to finish. Deferred processing shall
+reconstruct raw input from verified canonical bytes. Pending, running and failed
+jobs shall retain derived inputs and successful outputs needed for rank retry.
+Keep unpublished originals and originals whose canonical MBOX copy cannot be
+verified. Standalone processor harnesses shall keep their original snapshots
+because they have no canonical MBOX fallback. Collection holds the writer lease.
 
 Completed and aborted job records are audit history: their content hashes/paths
 need not name resident working files. Reprocessing shall reconstruct missing raw

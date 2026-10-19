@@ -66,7 +66,9 @@ promotions are not counted as separate network downloads.
 Status prints at startup, every 300 seconds and on exit. `--show-messages` adds
 per-download dispositions and subjects. Ctrl-C cooperatively stops and checkpoints,
 returning 130; network operations retain a 30-second socket timeout. Reruns resume
-committed progress. Default scanning remains required; only explicit `--no-scan`
+committed progress. Workers shall close source iterators on their owning threads;
+terminal process-group interrupts shall not abort scanner children mid-message.
+Default scanning remains required; only explicit `--no-scan`
 permits unscanned ingest. Attachment extraction retains current local-import limits.
 No scheduler, background agent, graphical panel or graph is delivered in this phase.
 Integration tests use a real disposable TLS IMAP server and synthetic mail; tests

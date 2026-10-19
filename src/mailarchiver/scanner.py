@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import multiprocessing
 import os
+import signal
 import tempfile
 import time
 from collections.abc import Callable
@@ -98,6 +99,7 @@ def exit_with_parent(sentinel: int) -> None:
 
 def engine_worker(connection: ScannerConnection, library: Path, definitions: DefinitionSet, workers: int, temporary_directory: Path) -> None:
     """Share one immutable engine among native scan threads; ctypes releases the GIL."""
+    signal.signal(signal.SIGINT, signal.SIG_IGN)
     parent = multiprocessing.parent_process()
     if parent is not None:
         Thread(target=exit_with_parent, args=(parent.sentinel,), name="clamav-owner", daemon=True).start()

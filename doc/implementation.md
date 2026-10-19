@@ -19,7 +19,10 @@ platform or release gate has passed. [Future work](plans/README.md) is separate.
 
 ## Shared boundaries
 
-- Release completed processor working files while preserving recovery inputs;
+- Python and Rust omit the URL-phishing database option;
+  see [scanner configuration](implementation/SCANNING.md#embedded-scanner-configuration).
+- Release cached raw mail after each MBOX publication and SQL commit, preserving
+  live derived inputs and retry checkpoints;
   see [working-object lifetime](implementation/PROCESSING.md#working-object-lifetime).
 - Preserve source stores and original message bytes, with the documented IMAP
   CRLF-to-LF acquisition exception; canonical MBOX/manifests
