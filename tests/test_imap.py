@@ -30,6 +30,7 @@ from mailarchiver.imap_models import ImapDownload, ImapMailbox, ImapMessageMetad
 from mailarchiver.imap_cli import prompt_account
 from mailarchiver.imap_protocol import ImapSession, body_literal, decode_mailbox, message_metadata, response_tokens, selected_mailboxes
 from mailarchiver.imap_state import initialize_state, known_observation, record_download, refresh_observation, totals
+from mailarchiver.gui_processing import unfinished_work
 from mailarchiver.mbox import MboxLocation, read_verified_location
 from mailarchiver.owner_rules import OwnerRules
 from mailarchiver.plugin_api import MailObject, SourceObservation, SourceReference
@@ -318,10 +319,17 @@ def test_cli_ctrl_c_checkpoints_and_next_invocation_resumes(tmp_path: Path, scan
         assert totals(archive).errors == 0
         partial = totals(archive).archived
         assert 0 < partial < 80
+        # Desktop recovery must describe the actual CLI interruption before a
+        # user chooses to reconnect, including a readable nonsecret account.
+        saved = unfinished_work(archive).imports
+        assert len(saved) == 1 and saved[0].archived == partial
+        assert saved[0].duplicates == 0 and not saved[0].interruption_estimated
+        assert account.username in saved[0].sources[0] and account.server in saved[0].sources[0]
         resumed = subprocess.run(command, cwd=ROOT, env=environment, capture_output=True, timeout=60)
         assert resumed.returncode == 0, resumed.stderr.decode()
         assert totals(archive).archived == 80
         assert totals(archive).duplicates == 0
+        assert not unfinished_work(archive).source_roots
     finally:
         if process is not None and process.poll() is None:
             process.kill()

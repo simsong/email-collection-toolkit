@@ -68,7 +68,7 @@ from .archive_config import (
     remember_import_directory,
 )
 from .plugin_api import PluginManifest
-from .gui_processing import picker_page, registered_acquisition_plugins, registered_processors, resume_request, save_identity, unfinished_work
+from .gui_processing import abort_processing, picker_page, registered_acquisition_plugins, registered_processors, resume_request, save_identity, unfinished_work
 from .processing.api import ProcessorManifest
 from .processing.identities import IdentityFilter, ManualDecision
 from .gui_service import (
@@ -718,7 +718,7 @@ class WindowBridge:
 
 
 SEARCH_BRIDGE_METHODS = (
-    "processing_work", "resume_processing", "open_picker",
+    "processing_work", "resume_processing", "abort_processing", "open_picker",
     "status", "activate", "search", "suggestions", "ingest_overview", "open_ingest_window",
     "mailbox_tree", "saved_filter_sets", "save_filter_set", "rename_filter_set", "delete_filter_set",
     "open_message_window", "request_previews", "take_previews", "message", "part", "attachment",
@@ -827,6 +827,11 @@ class GuiApi:
             raise ValueError("Processing requires an open archive document.")
         request = resume_request(self._archive(), ingest, content)
         return self.application.start_import(self, [], processing_request=request)
+
+    def abort_processing(self, status_ids: list[str]) -> bool:
+        with self.application.writer_activity() if self.application else nullcontext():
+            abort_processing(self._archive(), status_ids)
+        return True
 
     def open_picker(self, kind: str) -> bool:
         if kind not in ("name", "institution"):

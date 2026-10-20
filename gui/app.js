@@ -401,9 +401,7 @@ async function verifyNativeHtmlFindHighlight() {
 }
 
 function showBridgeFailure() {
-  const error = byId("error");
-  error.textContent = "The native application bridge did not start. Restart mailsearch-gui and check its terminal output.";
-  error.hidden = false;
+  showError("The native application bridge did not start. Restart mailsearch-gui and check its terminal output.");
 }
 
 async function chooseArchive() {
@@ -2152,10 +2150,44 @@ async function call(operation) {
 }
 
 function showError(message) {
-  elements.error.textContent = message;
-  elements.error.hidden = false;
+  const panel = byId("error");
+  const pill = byId("notice-pill");
+  if (!showError.messages) showError.messages = [];
+  if (showError.messages.at(-1) === message) return;
+  showError.messages.push(message);
+  panel.replaceChildren();
+  const history = document.createElement("div");
+  history.className = "notice-history";
+  for (const text of showError.messages) {
+    const item = document.createElement("p");
+    item.textContent = text;
+    history.append(item);
+  }
+  const collapse = document.createElement("button");
+  collapse.type = "button";
+  collapse.textContent = "Collapse messages";
+  const hide = () => {
+    panel.hidden = true;
+    pill.hidden = false;
+    pill.setAttribute("aria-expanded", "false");
+  };
+  collapse.addEventListener("click", () => { clearTimeout(showError.timer); hide(); pill.focus(); });
+  panel.append(history, collapse);
+  panel.hidden = false;
+  pill.hidden = true;
+  pill.textContent = `Messages (${showError.messages.length})`;
+  pill.setAttribute("aria-expanded", "true");
+  pill.onclick = () => {
+    clearTimeout(showError.timer);
+    panel.hidden = false;
+    pill.hidden = true;
+    pill.setAttribute("aria-expanded", "true");
+    collapse.focus();
+  };
   clearTimeout(showError.timer);
-  showError.timer = setTimeout(() => { elements.error.hidden = true; }, 6000);
+  showError.timer = setTimeout(() => {
+    if (!panel.contains(document.activeElement) && !panel.matches(":hover")) hide();
+  }, 6000);
 }
 
 function formatDate(value) {

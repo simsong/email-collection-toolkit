@@ -18,6 +18,8 @@ import sqlite3
 from collections.abc import Iterator
 from contextlib import closing, contextmanager
 from pathlib import Path
+from datetime import datetime
+from urllib.parse import urlsplit
 
 from typing import Literal
 from uuid import uuid4
@@ -27,6 +29,7 @@ from pydantic import BaseModel, Field
 from .sqlite_paths import sqlite_uri
 
 from .__main__ import IngestRequest
+from .archive_config import load_archive_config
 from .ingest_status import read_ingest_history
 from .plugin_api import PluginManifest
 from .plugin_loader import builtin_plugin_directory, discover_manifests
@@ -34,8 +37,26 @@ from .processing.api import ProcessorManifest
 from .processing.contracts import ProcessingPolicy
 from .processing.identities import AddressRow, IdentityFilter, ManualDecision, addresses, edit, organizations
 from .processing.registry import load_processors
-from .processing.store import DATABASE
+from .processing.store import DATABASE, USER_CANCELLED
 from .writer_lock import WriterLease
+
+
+ABORTED_IMPORTS = "aborted-imports"
+
+
+class AbortedImports(BaseModel):
+    status_ids: set[str] = Field(default_factory=set)
+
+
+class InterruptedImport(BaseModel):
+    status_ids: list[str]
+    source_roots: list[str]
+    sources: list[str]
+    started_at: datetime
+    interrupted_at: datetime
+    interruption_estimated: bool
+    archived: int = 0
+    duplicates: int = 0
 
 
 class ProcessingWork(BaseModel):
@@ -44,6 +65,7 @@ class ProcessingWork(BaseModel):
     failed: int = 0
     source_roots: list[str] = Field(default_factory=list)
     available: bool = False
+    imports: list[InterruptedImport] = Field(default_factory=list)
 
     @property
     def incomplete(self) -> bool:
@@ -56,17 +78,27 @@ def connection(archive: Path) -> Iterator[sqlite3.Connection]:
         yield database
 
 
+def _source_identity(root: str) -> str:
+    # IMAP query parameters describe the invocation, not a different account.
+    return f"imap://{urlsplit(root).netloc}" if root.startswith("imap://") else root
+
+
+def _source_label(archive: Path, root: str) -> str:
+    if not root.startswith("imap://"):
+        return root
+    account = next((account for account in load_archive_config(archive).imap_sources
+                    if account.id == urlsplit(root).netloc), None)
+    return f"IMAP: {account.username} on {account.server}:{account.port}" if account else root
+
+
 def unfinished_work(archive: Path) -> ProcessingWork:
     work = ProcessingWork(available=(archive / DATABASE).is_file())
-    # Rootless content runs must not hide an interrupted source traversal.
-    seen: set[str] = set()
-    for status in read_ingest_history(archive).statuses:
-        for root in status.source_roots:
-            if root not in seen and status.state != "completed":
-                work.source_roots.append(root)
-            seen.add(root)
+    aborted = AbortedImports()
     if work.available:
         with connection(archive) as database:
+            row = database.execute("SELECT value FROM processing_settings WHERE name=?", (ABORTED_IMPORTS,)).fetchone()
+            if row:
+                aborted = AbortedImports.model_validate_json(row[0])
             for pipeline, count, failed in database.execute("""SELECT json_extract(item_json,'$.pipeline'),
                 count(*),sum(status='failed') FROM jobs WHERE status IN ('pending','running','failed')
                 GROUP BY json_extract(item_json,'$.pipeline')"""):
@@ -75,7 +107,51 @@ def unfinished_work(archive: Path) -> ProcessingWork:
                 else:
                     work.content += count
                 work.failed += failed
+    # Rootless content runs must not hide a source traversal. Completed or
+    # explicitly abandoned runs close the preceding continuation for that root.
+    closed: set[str] = set()
+    for status in read_ingest_history(archive).statuses:
+        if status.state == "completed" or status.status_id in aborted.status_ids:
+            closed.update(_source_identity(root) for root in status.source_roots)
+            continue
+        roots = sorted(root for root in set(status.source_roots) if _source_identity(root) not in closed)
+        if not roots:
+            continue
+        identities = {_source_identity(root) for root in roots}
+        prior = next((item for item in work.imports
+                      if {_source_identity(root) for root in item.source_roots} == identities), None)
+        if prior is not None:
+            prior.started_at = min(prior.started_at, status.started_at)
+            prior.status_ids.append(status.status_id)
+            prior.archived += status.counts.archived
+            prior.duplicates += status.counts.duplicates
+            continue
+        work.imports.append(InterruptedImport(status_ids=[status.status_id], source_roots=roots,
+            sources=[_source_label(archive, root) for root in roots],
+            started_at=status.started_at, interrupted_at=status.completed_at or status.updated_at,
+            interruption_estimated=status.completed_at is None,
+            archived=status.counts.archived, duplicates=status.counts.duplicates))
+    work.source_roots = list(dict.fromkeys(root for item in work.imports for root in item.source_roots))
     return work
+
+
+def abort_processing(archive: Path, status_ids: list[str]) -> None:
+    """Abandon saved traversal/jobs under the writer lease, retaining mail and history."""
+    with WriterLease.acquire(archive, str(archive.resolve()), "Abort saved import", uuid4().hex, "2"):
+        work = unfinished_work(archive)
+        current = {status_id for item in work.imports for status_id in item.status_ids}
+        if current != set(status_ids):
+            raise ValueError("Saved imports changed. Reopen Continue Processing to review them.")
+        if not work.available:
+            raise ValueError("No saved processing database is available.")
+        with closing(sqlite3.connect(sqlite_uri(archive / DATABASE, mode="rw"), uri=True)) as database, database:
+            row = database.execute("SELECT value FROM processing_settings WHERE name=?", (ABORTED_IMPORTS,)).fetchone()
+            aborted = AbortedImports.model_validate_json(row[0]) if row else AbortedImports()
+            aborted.status_ids.update(current)
+            database.execute("INSERT OR REPLACE INTO processing_settings VALUES(?,?)",
+                             (ABORTED_IMPORTS, aborted.model_dump_json()))
+            database.execute("UPDATE jobs SET status='aborted',detail=? "
+                             "WHERE status IN ('pending','running','failed')", (USER_CANCELLED,))
 
 
 def resume_request(archive: Path, ingest: bool, content: bool) -> IngestRequest:

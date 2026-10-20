@@ -19,6 +19,10 @@ platform or release gate has passed. [Future work](plans/README.md) is separate.
 
 ## Shared boundaries
 
+- Desktop recovery summarizes saved attempts and records lease-protected aborts;
+  warning history collapses to a reopenable pill. See
+  [desktop recovery](implementation/DESKTOP.md#saved-import-recovery-and-notices).
+
 - Python and Rust omit the URL-phishing database option;
   see [scanner configuration](implementation/SCANNING.md#embedded-scanner-configuration).
 - Release cached raw mail after each MBOX publication and SQL commit, preserving

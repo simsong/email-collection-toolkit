@@ -13,6 +13,10 @@ or phrase, then narrow the collection by person, date, subject, or source folder
 
 *The working interface with a synthetic collection. No private email is shown.*
 
+Warnings and errors collapse to a **Messages** pill near the bottom. Click it
+to read the full text and earlier messages from the same window; **Collapse
+messages** returns to the pill. Native application notices are also in About.
+
 ## Words, phrases, and selectors
 
 Enter words to search indexed headers and message text. Put a phrase in double

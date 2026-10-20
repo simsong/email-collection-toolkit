@@ -19,6 +19,9 @@ platform or release gate has passed. [Future work](plans/README.md) is separate.
 
 ## Shared boundaries
 
+- Desktop recovery requires an informed continue/defer/abort choice, and collapsed
+  warnings remain readable; see [desktop recovery](requirements/DESKTOP.md#saved-import-recovery-and-notices).
+
 - Embedded scanners disable URL-phishing checks while retaining malware scanning;
   see the [scanning policy](requirements/SCANNING.md#malware-handling).
 - Release cached raw mail after each MBOX publication and SQL commit, preserving

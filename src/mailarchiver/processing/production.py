@@ -43,7 +43,7 @@ from .contracts import AddressEvidence, ContentMetadata, HeaderMetadata, Mailbox
 from .objects import collect_objects
 from .registry import fingerprint, load_processors
 from .runtime import dispatch, prepare_run, run
-from .store import DATABASE, connect, enqueue, report, snapshot
+from .store import DATABASE, USER_CANCELLED, connect, enqueue, report, snapshot
 
 Publisher = Callable[[MailObject, ParsedMessage, MailboxReference, int], int]
 PROVIDER_DOMAINS = "provider_domains"
@@ -177,6 +177,13 @@ class ProductionPipeline:
         existing = self.catalog.execute("SELECT message_pk FROM messages WHERE sha256=?", (reference.sha256,)).fetchone()
         with self.database:
             item = self._admit(reference, metadata)
+            # Retry only unpublished ingest roots. Cancelled derived jobs may
+            # have lost their temporary inputs and require explicit reprocessing.
+            self.database.execute("UPDATE jobs SET status='pending',detail='' WHERE status='aborted' "
+                "AND detail=? AND parent_job_id IS NULL AND json_extract(item_json,'$.pipeline')='ingest' "
+                "AND json_extract(item_json,'$.message_id')=? AND NOT EXISTS "
+                "(SELECT 1 FROM message_state WHERE message_id=? AND parsed_json IS NOT NULL)",
+                (USER_CANCELLED, item.message_id, item.message_id))
             state = self.database.execute("SELECT parsed_json FROM message_state WHERE message_id=?", (item.message_id,)).fetchone()
             if state is None or state[0] is None:
                 enqueue(self.database, item, self.registry_hash)

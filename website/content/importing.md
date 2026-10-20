@@ -42,6 +42,15 @@ you and requires an explicit choice to import without scanning.
 
 *The working import-history interface after importing synthetic messages.*
 
+
+When reopening an archive with unfinished work, review the source, import start,
+latest interruption and saved imported/duplicate counts. An unclean stop shows
+its last saved progress time because the exact interruption time is unknown.
+Choose **Continue** to use the saved settings, **Ask me later** to defer until
+another opening, or **Abort import** to cancel saved work while keeping archived
+messages and history. A new explicit import can read the source again; use
+explicit reprocessing to regenerate previously cancelled derived work.
+
 ## Standalone IMAP CLI
 
 The Python `mailarchiver-imap` command runs without the desktop on macOS and

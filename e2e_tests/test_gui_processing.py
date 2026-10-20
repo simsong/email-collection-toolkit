@@ -10,7 +10,7 @@ from playwright.sync_api import Page, expect
 from mailarchiver.__main__ import run_ingest
 from mailarchiver.gui_app import GUI_DIRECTORY, SEARCH_BRIDGE_METHODS, IdentityPickerApi
 from mailarchiver.gui_processing import PickerPage, resume_request, unfinished_work
-from tests.test_gui_processing import build_deferred_archive, open_headless, wait_for_import
+from tests.test_gui_processing import build_deferred_archive, build_interrupted_archive, open_headless, wait_for_import
 
 
 def expose(page: Page, api: object, names: tuple[str, ...]) -> None:
@@ -35,7 +35,7 @@ def test_incomplete_dialog_resumes_content_without_sources(tmp_path: Path, page:
         expect(dialog).to_be_visible()
         expect(page.locator("#continue-ingest")).to_be_checked()
         expect(page.locator("#continue-content")).to_be_checked()
-        page.get_by_role("button", name="Later", exact=True).click()
+        page.get_by_role("button", name="Ask me later", exact=True).click()
         expect(dialog).not_to_be_visible()
         assert unfinished_work(archive).content > 0
         page.reload()
@@ -59,6 +59,51 @@ def test_incomplete_dialog_resumes_content_without_sources(tmp_path: Path, page:
         page.get_by_role("button", name="Open parent message").click()
         expect(page.locator("#message-subject")).to_have_text("Parent")
         assert not errors
+    finally:
+        api.close()
+
+
+def test_resume_summary_later_abort_and_retained_notices(tmp_path: Path, page: Page) -> None:
+    """Recovery requirement: informed decisions never auto-start; collapsed errors stay readable."""
+    archive = build_interrupted_archive(tmp_path)
+    app, api = open_headless(archive, tmp_path / "preferences.json")
+    app.add_notice("error", "Synthetic startup warning: a long explanation that must remain available.")
+    expose(page, api, SEARCH_BRIDGE_METHODS)
+    try:
+        page.goto((GUI_DIRECTORY / "index.html").as_uri())
+        dialog = page.locator("#processing-dialog")
+        expect(dialog).to_be_visible()
+        expect(page.locator("#processing-imports")).to_contain_text("sam@example.test on imap.example.test:993")
+        expect(page.locator("#processing-imports")).to_contain_text("Import started:")
+        expect(page.locator("#processing-imports")).to_contain_text("interruption time unknown")
+        expect(page.locator("#processing-imports")).to_contain_text("Messages imported: 10 · Duplicates ignored: 6")
+        assert api.document is not None and api.document.ingest_job is None
+        previews = GUI_DIRECTORY.parent / ".tmp/gui-previews"
+        previews.mkdir(parents=True, exist_ok=True)
+        page.screenshot(path=str(previews / "import-resume.png"))
+        page.get_by_role("button", name="Ask me later", exact=True).click()
+        expect(dialog).not_to_be_visible()
+        expect(page.locator("#notice-pill")).to_be_visible(timeout=9000)
+        page.screenshot(path=str(previews / "notice-pill.png"))
+        page.get_by_role("button", name="Messages (1)", exact=True).click()
+        expect(page.locator("#error")).to_contain_text("Synthetic startup warning")
+        page.evaluate("window.mailArchiverNotice('Second warning with <script>literal text</script>')")
+        expect(page.locator("#error")).to_contain_text("Synthetic startup warning")
+        expect(page.locator("#error")).to_contain_text("Second warning with <script>literal text</script>")
+        assert page.locator("#error script").count() == 0
+        page.get_by_role("button", name="Collapse messages", exact=True).click()
+        page.get_by_role("button", name="Messages (2)", exact=True).press("Enter")
+        expect(page.locator("#error")).to_contain_text("Second warning")
+        page.screenshot(path=str(previews / "notice-expanded.png"))
+        page.reload()
+        expect(dialog).to_be_visible()
+        page.get_by_role("button", name="Abort import", exact=True).click()
+        expect(dialog).not_to_be_visible()
+        assert not unfinished_work(archive).incomplete
+        page.reload()
+        expect(dialog).not_to_be_visible()
+        assert api.document.ingest_job is None
+        page.screenshot(path=str(tmp_path / "retained-notice.png"))
     finally:
         api.close()
 

@@ -6,6 +6,15 @@ Entries describe their recorded revisions. For current behavior use the
 [user manual](USER_MANUAL.md) and [CLI reference](CLI_REFERENCE.md). Retired
 Rust delivery plans and historical package checks are not current acceptance.
 
+## Informed import recovery and retained warnings
+
+The desktop asks before continuing saved imports, showing source/account,
+first start, latest interruption (or last saved progress), imported messages and
+duplicates ignored. Choose Abort import, Ask me later, or Continue. Abort keeps
+archived mail and history while cancelling saved traversal and outstanding jobs.
+Search-window warnings collapse to a message pill that reopens their full text
+and earlier messages for the lifetime of the window.
+
 ## Incremental cache release and IMAP interruption
 
 Release cached raw messages after each durable MBOX publication and SQL commit,

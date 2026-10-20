@@ -98,6 +98,9 @@ def snapshot(archive: Path, path: Path) -> ContentReference:
     return ContentReference(path=final.resolve(), sha256=reference.sha256)
 
 
+USER_CANCELLED = "Cancelled by user"
+
+
 def enqueue(database: sqlite3.Connection, item: ProcessingObject, registry_hash: str, parent_job_id: int | None = None) -> None:
     payload = item.model_copy(update={"job_id": None}).model_dump_json()
     identity = hashlib.sha256((registry_hash + payload + str(parent_job_id)).encode()).hexdigest()

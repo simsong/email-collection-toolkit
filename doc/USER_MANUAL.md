@@ -52,6 +52,16 @@ The code has inactive integration points for Gmail API, Microsoft Exchange,
 and standard input containing NUL-separated messages; these are not CLI ingest
 modes yet.
 
+## Continuing an interrupted import
+
+When reopening an archive with unfinished work, review the source, import start,
+latest interruption and saved imported/duplicate counts. An unclean stop shows
+its last saved progress time because the exact interruption time is unknown.
+Choose **Continue** to use the saved settings, **Ask me later** to defer until
+another opening, or **Abort import** to cancel saved work while keeping archived
+messages and history. A new explicit import can read the source again; use
+explicit reprocessing to regenerate previously cancelled derived work.
+
 ## Before you begin
 
 Ask the person who installed Email Collection Toolkit to confirm that:

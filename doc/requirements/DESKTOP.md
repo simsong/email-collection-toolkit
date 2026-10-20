@@ -5,6 +5,28 @@
 Current subsystem contract and acceptance boundaries. This is not a claim of
 platform/release acceptance. Deferred features live in [plans](../plans/README.md).
 
+## Saved import recovery and notices
+
+Opening an archive with unfinished work asks before reconnecting or processing.
+Show source identity (IMAP username, server and port), first start and latest
+interruption, messages imported and duplicates ignored. Sum saved attempt counts
+since the preceding completion or explicit abort; these are saved progress totals,
+not a fresh count from the server. If a process died without a final status, show
+its last saved progress time and state that the interruption time is unknown.
+Offer **Abort import**, **Ask me later**, and **Continue**. Later and closing the
+dialog preserve work and ask again on reopening; Continue uses the selected
+phases and saved policy. Abort cancels all displayed saved traversal and pending,
+running or failed jobs under the archive writer lease, retaining archived mail,
+source checkpoints and run history. A changed source history blocks a stale abort.
+A later explicit import can begin a new continuation; cancelled derived work may
+be regenerated with explicit reprocessing.
+
+Search-window warnings and errors collapse after six seconds to a bottom message
+pill, rather than disappearing. The pill reopens all messages received in that
+window; reopening leaves the text visible until manually collapsed. Messages are
+plain text in a scrollable region, including earlier warnings after another
+arrives. Native application notices also remain in About during the session.
+
 ## Desktop Help and user manual
 
 macOS and Windows provide a Help menu with Community Forum, Contact Support,

@@ -5,6 +5,33 @@
 Current implementation and validation boundaries. Deferred feature designs
 live in [plans](../plans/README.md); historical evidence does not validate this revision.
 
+## Saved import recovery and notices
+
+`gui_processing.unfinished_work` groups typed unfinished run snapshots by source,
+stopping at a completion or explicit abort. Rootless processing does not hide
+source recovery. The bridge returns nonsecret source labels, first start, latest
+final/heartbeat timestamp, interruption uncertainty and saved archived/duplicate
+counts. IMAP labels read configuration without keyring access or a connection.
+`processing.js` shows these details before the existing explicit resume call.
+Later and Escape close the dialog without a write. The abort bridge reserves
+application writer activity so Quit waits for it and rejects later writes.
+`abort_processing` holds the
+writer lease, rejects changed source status IDs, atomically stores typed aborted
+IDs in `processing_settings` and changes outstanding jobs to the existing
+`aborted` state. Status snapshots and canonical data remain intact. Explicit
+message admission retries user-cancelled unpublished ingest roots; cancelled
+derived jobs remain aborted until explicit reprocessing regenerates their inputs.
+
+`app.js` retains distinct consecutive notice text in window memory, rendered with
+`textContent`. After six seconds the banner becomes a keyboard-operable message
+pill; hover/focus keeps it expanded. Reopening shows scrollable history and a
+Collapse button without a timeout. New warnings retain previous text. Native
+notices also remain in About for the application session. Bridge-start and
+processing errors use the same banner. `make test-gui-processing` exercises real
+archive/bridge continuation, deferral, lease conflicts, stale abort rejection,
+recorded crash snapshots and browser interactions. `make test-imap` checks the
+summary against a real interrupted disposable TLS IMAP download.
+
 ## Controller, search UI and message viewing
 
 `mailarchiver.application` is the platform-neutral desktop lifecycle layer.

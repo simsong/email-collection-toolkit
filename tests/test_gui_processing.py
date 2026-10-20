@@ -7,6 +7,7 @@ import os
 from collections.abc import Callable
 from pathlib import Path
 from threading import Event
+from datetime import UTC, datetime, timedelta
 
 import pytest
 
@@ -14,7 +15,10 @@ from mailarchiver.__main__ import IngestRequest, run_ingest
 from mailarchiver.application import ApplicationController, ApplicationPreferencesStore
 from mailarchiver.document_options import DocumentOptions
 from mailarchiver.gui_app import GuiApi, IdentityPickerApi, PyWebViewApplication
-from mailarchiver.gui_processing import PickerPage, registered_processors, resume_request, unfinished_work
+from mailarchiver.gui_processing import PickerPage, abort_processing, registered_processors, resume_request, unfinished_work
+from mailarchiver.ingest_status import IngestCounts, IngestStatusFile, read_ingest_history
+from mailarchiver.archive_config import load_archive_config, save_archive_config
+from mailarchiver.imap_models import ImapAccount
 from mailarchiver.gui_service import describe_message, search_page
 from mailarchiver.owner_rules import OwnerRules
 from mailarchiver.standalone_verify import verify_archive
@@ -240,6 +244,107 @@ def test_quit_with_deferred_but_not_started_work_does_not_start_processing(tmp_p
         assert exited.wait(2)
         assert unfinished_work(archive) == before
         assert api.document.ingest_job is None
+    finally:
+        app.shutdown()
+        api.close()
+
+
+def build_interrupted_archive(root: Path) -> Path:
+    """Real archive/queues plus recorded run snapshots, including an abandoned heartbeat."""
+    archive = build_deferred_archive(root)
+    config = load_archive_config(archive)
+    config.imap_sources = [ImapAccount(id="saved-account", server="imap.example.test", username="sam@example.test")]
+    save_archive_config(archive, config)
+    template = read_ingest_history(archive).statuses[0]
+    start = datetime(2026, 10, 1, 10, tzinfo=UTC)
+    source = "imap://saved-account?archive=fixture&workers=8"
+    for attempt, state, archived, duplicates in ((0, "completed", 100, 50), (1, "interrupted", 7, 2), (2, "running", 3, 4)):
+        timestamp = start + timedelta(days=attempt)
+        status = template.model_copy(update={"status_id": f"ingest-fixture-{attempt}",
+            "source_roots": [source.replace("workers=8", f"workers={attempt + 1}")],
+            "started_at": timestamp, "updated_at": timestamp + timedelta(hours=1),
+            "completed_at": None if state == "running" else timestamp + timedelta(hours=1),
+            "state": state, "counts": IngestCounts(archived=archived, duplicates=duplicates)})
+        IngestStatusFile(archive, status.status_id).write(status)
+    return archive
+
+
+def test_saved_import_summary_abort_and_new_attempt(tmp_path: Path) -> None:
+    """Desktop recovery: source identity, cumulative attempts, crash uncertainty and durable abort."""
+    archive = build_interrupted_archive(tmp_path)
+    work = unfinished_work(archive)
+    assert len(work.imports) == 1
+    saved = work.imports[0]
+    assert saved.sources == ["IMAP: sam@example.test on imap.example.test:993"]
+    assert saved.started_at == datetime(2026, 10, 2, 10, tzinfo=UTC)
+    assert saved.interrupted_at == datetime(2026, 10, 3, 11, tzinfo=UTC)
+    assert saved.interruption_estimated and saved.archived == 10 and saved.duplicates == 6
+    assert saved.status_ids == ["ingest-fixture-2", "ingest-fixture-1"]
+    history = {path: path.read_bytes() for path in (archive / "status").glob("ingest-*.json")}
+    canonical = {path: path.read_bytes() for path in (archive / "data").rglob("*") if path.is_file()}
+    with WriterLease.acquire(archive, str(archive), "fixture active import", "active", "test"):
+        with pytest.raises(ArchiveBusyError):
+            abort_processing(archive, saved.status_ids)
+    with pytest.raises(ValueError, match="Saved imports changed"):
+        abort_processing(archive, ["ingest-fixture-1"])
+    assert unfinished_work(archive) == work
+    abort_processing(archive, saved.status_ids)
+    assert not unfinished_work(archive).incomplete
+    assert all(path.read_bytes() == content for path, content in (history | canonical).items())
+    with sqlite3.connect(archive / "processing.sqlite3") as database:
+        assert database.execute("SELECT count(*) FROM jobs WHERE status='aborted'").fetchone()[0] > 0
+    # A later, explicit import is a new continuation, not suppressed by the old abort.
+    later = next(status for status in read_ingest_history(archive).statuses
+                 if status.status_id == "ingest-fixture-1").model_copy(update={
+        "status_id": "ingest-fixture-new", "started_at": datetime(2026, 10, 4, tzinfo=UTC),
+        "state": "interrupted", "completed_at": datetime(2026, 10, 4, 1, tzinfo=UTC),
+        "counts": IngestCounts(archived=1)})
+    IngestStatusFile(archive, later.status_id).write(later)
+    new_work = unfinished_work(archive)
+    assert len(new_work.imports) == 1
+    assert new_work.imports[0].archived == 1
+    assert not new_work.imports[0].interruption_estimated
+
+
+def test_abort_cleanup_duplicate_admission_and_explicit_reprocessing(tmp_path: Path) -> None:
+    """Aborted derived jobs cannot be revived with collected inputs; reprocessing regenerates them."""
+    archive = build_deferred_archive(tmp_path)
+    run_ingest(resume_request(archive, False, True).model_copy(update={"max_content_jobs": 1}), terminal=False)
+    assert unfinished_work(archive).content
+    abort_processing(archive, [])
+    with sqlite3.connect(archive / "processing.sqlite3") as database:
+        cancelled = [row[0] for row in database.execute("SELECT job_id FROM jobs WHERE status='aborted'")]
+    assert cancelled
+    # A no-op writer performs real object collection after the abort.
+    run_ingest(resume_request(archive, False, True), terminal=False)
+    copied = tmp_path / "duplicate.eml"
+    copied.write_bytes(RAW)
+    run_ingest(IngestRequest(archive=archive, roots=[str(copied)], scan_policy="not-scanned",
+                            owner_rules=OwnerRules(include=["owner@example.test"])), terminal=False)
+    with sqlite3.connect(archive / "processing.sqlite3") as database:
+        assert all(database.execute("SELECT status FROM jobs WHERE job_id=?", (job,)).fetchone() == ("aborted",)
+                   for job in cancelled)
+        assert database.execute("SELECT count(*) FROM jobs WHERE status='failed'").fetchone() == (0,)
+    assert not unfinished_work(archive).incomplete
+    assert not search_page(archive, "subject:GUI").results
+    run_ingest(resume_request(archive, False, True).model_copy(update={"reprocess": True}), terminal=False)
+    assert search_page(archive, "subject:GUI").results[0].attached_message
+    assert not unfinished_work(archive).incomplete
+    assert not verify_archive(archive)
+
+
+def test_abort_rejects_a_write_after_quit_is_reserved(tmp_path: Path) -> None:
+    """All desktop writes, including cancelling saved work, obey the application shutdown boundary."""
+    archive = build_deferred_archive(tmp_path)
+    exited = Event()
+    app, api = open_headless(archive, tmp_path / "preferences.json", exit_process=lambda _status: exited.set())
+    before = unfinished_work(archive)
+    try:
+        app.request_quit(confirm_ingest=False)
+        assert exited.wait(2)
+        with pytest.raises(ValueError, match="quitting"):
+            api.abort_processing([])
+        assert unfinished_work(archive) == before
     finally:
         app.shutdown()
         api.close()

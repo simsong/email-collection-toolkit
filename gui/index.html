@@ -31,10 +31,13 @@
       <dialog id="processing-dialog" aria-labelledby="processing-heading">
         <h2 id="processing-heading">Incomplete work</h2>
         <p id="processing-detail"></p>
+        <div id="processing-imports"></div>
+        <p>Saved counts cover these import attempts. Abort cancels all saved work shown here and keeps messages already archived.</p>
         <p><label><input id="continue-ingest" type="checkbox" checked> Continue ingest</label></p>
         <p><label><input id="continue-content" type="checkbox" checked> Continue content processing</label></p>
         <p id="processing-error" role="alert"></p>
-        <button id="processing-later" type="button">Later</button>
+        <button id="processing-abort" type="button">Abort import</button>
+        <button id="processing-later" type="button">Ask me later</button>
         <button id="processing-continue" type="button">Continue</button>
       </dialog>
       <section class="workspace">
@@ -138,6 +141,7 @@
       </section>
       <button id="ingest-status-line" class="ingest-status-line no-print" type="button" hidden></button>
       <div id="error" role="alert" hidden></div>
+      <button id="notice-pill" class="no-print" type="button" aria-controls="error" aria-expanded="false" hidden></button>
       <dialog id="link-dialog">
         <form method="dialog">
           <h2>Open external link?</h2>
