@@ -246,6 +246,10 @@ and desktop account setup remain planned.
 
 ### Runtime configuration
 
+Use **File → Customizable Default Lists…** for owner/sender defaults, reply-address
+patterns, contact filters and other shared lists. See [Customizable Default Lists](doc/CUSTOMIZABLE_DEFAULT_LISTS.md)
+for all files, personal locations, archive precedence and reset behavior.
+
 | Variable / Make parameter | Purpose |
 | --- | --- |
 | `MAIL_ARCHIVE_DIR` | Default archive for local ingest/search; explicit `--archive` wins |
@@ -456,3 +460,20 @@ installation checks and signatures for both installers and complete XML.
 `make release-candidate-base APPCAST=...` authenticates published history and
 `make release-candidate-feed APPCAST=...` signs/verifies a candidate. No release
 or tag is created by restoring Python defaults.
+
+### Optional local name-matching experiments
+
+`make name-matcher-observations ARCHIVE=/path/to/archive OUTPUT=/private/evidence.sqlite3`
+creates verified evidence without changing the archive. Then run
+`make name-matcher-experiments ARCHIVE=/path/to/archive EVIDENCE=/private/evidence.sqlite3 OUTPUT=/private/run`.
+The optional, locked environment lives in `research/name-matcher`; its dependencies
+are separate from the desktop application. `NAME_RESEARCH_ENV` overrides that
+environment's project directory. `ARCHIVE` selects the read-only source,
+`EVIDENCE` selects the extracted observations, `OUTPUT` selects private derivatives,
+and `ARGS` supplies additional research CLI arguments.
+`DATABASE` selects a frozen experiment and `LABELS` selects an exported owner-review
+JSON for `make name-matcher-owner-review DATABASE=... LABELS=... OUTPUT=...html`.
+Keep private outputs out
+of Git. The report contains timings, synthetic metrics, limitations, and fifty
+proposed matches for owner review; unlabeled archive accuracy is not invented.
+Use `make test-name-matcher-experiments` for the focused validation.

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import sqlite3
+from email.header import Header
 import os
 from collections.abc import Callable
 from pathlib import Path
@@ -15,7 +16,7 @@ from mailarchiver.__main__ import IngestRequest, run_ingest
 from mailarchiver.application import ApplicationController, ApplicationPreferencesStore
 from mailarchiver.document_options import DocumentOptions
 from mailarchiver.gui_app import GuiApi, IdentityPickerApi, PyWebViewApplication
-from mailarchiver.gui_processing import PickerPage, abort_processing, registered_processors, resume_request, unfinished_work
+from mailarchiver.gui_processing import PickerPage, PickerSearch, abort_processing, registered_processors, resume_request, unfinished_work
 from mailarchiver.ingest_status import IngestCounts, IngestStatusFile, read_ingest_history
 from mailarchiver.archive_config import load_archive_config, save_archive_config
 from mailarchiver.imap_models import ImapAccount
@@ -348,3 +349,122 @@ def test_abort_rejects_a_write_after_quit_is_reserved(tmp_path: Path) -> None:
     finally:
         app.shutdown()
         api.close()
+
+
+def test_picker_count_search_uses_exact_filtered_header_and_signature_evidence(tmp_path: Path) -> None:
+    """Desktop requirement: clicked counts select distinct evidence messages, including signatures."""
+    archive = build_deferred_archive(tmp_path)
+    run_ingest(resume_request(archive, False, True), terminal=False)
+    picker = IdentityPickerApi(archive, "name")
+    groups = PickerPage.model_validate(picker.query({})).groups
+    sender = next(group for group in groups if group.label == "Sender")
+    child = next(group for group in groups if group.label == "Child")
+    signature = next(group for group in groups if group.label.startswith("signature@"))
+    for member in (signature, child):
+        picker.update({"operation": "merge-person", "subject": member.id, "target": sender.id})
+    api = GuiApi(archive)
+    try:
+        for action, expected in (("header", 2), ("signature", 1)):
+            result = PickerSearch.model_validate(picker.search({"group_id": sender.id, "action": action}))
+            assert result.identity_messages is not None
+            scope = result.identity_messages.model_dump(mode="json")
+            rows = api.search("", identity_messages=scope)["results"]
+            assert len(rows) == expected
+            assert api.search_count("", identity_messages=scope)["total"] == expected
+            assert len(api.search("", limit=1, offset=1, identity_messages=scope)["results"]) == expected - 1
+            if action == "header":
+                assert len(api.search("parenttoken", identity_messages=scope)["results"]) == 1
+        selected = PickerSearch.model_validate(picker.search({"group_id": sender.id, "action": "header",
+            "filters": {"domain": "lab.", "start": "2024-01-02", "end": "2024-01-02"}}))
+        assert selected.identity_messages is not None
+        assert selected.identity_messages.address_ids == [sender.addresses[0].address_id]
+        scope = selected.identity_messages.model_dump(mode="json")
+        assert [row["subject"] for row in api.search("", identity_messages=scope)["results"]] == ["Parent"]
+        signature_search = PickerSearch.model_validate(picker.search({"group_id": sender.id,
+            "address_id": signature.addresses[0].address_id, "action": "signature"}))
+        assert signature_search.identity_messages is not None
+        assert len(search_page(archive, "", identity_messages=signature_search.identity_messages).results) == 1
+        with pytest.raises(ValueError, match="no longer visible"):
+            picker.search({"group_id": sender.id, "address_id": 999999, "action": "header"})
+        with pytest.raises(ValueError, match="no longer visible"):
+            picker.search({"group_id": sender.id, "action": "header", "filters": {"start": "2025-01-01"}})
+    finally:
+        api.close()
+
+
+def build_phone_archive(tmp_path: Path) -> Path:
+    """Purpose-made three-message phone evidence collection."""
+    source=tmp_path/'phones'
+    source.mkdir()
+    for index,(sender,day,phones) in enumerate((('first@example.test',2,'+1 (617) 555-0102\n+1 617 555 0102'),
+        ('first@example.test',3,'+44 20 7946 0958'),('second@example.test',3,'+1 (617) 555-0102'))):
+        (source/f'{index}.eml').write_text(f'From: Avery Morgan <{sender}>\nTo: owner@example.test\n'
+            f'Message-ID: <phones-{index}@example.test>\nDate: Wed, {day:02d} Jan 2024 10:00:00 +0000\n'
+            f'Subject: Phone fixture\n\nMessage body.\n-- \nAvery Morgan\n{phones}\n')
+    archive=tmp_path/'archive'
+    run_ingest(IngestRequest(archive=archive,roots=[str(source)],scan_policy='not-scanned',
+        owner_rules=OwnerRules(include=['owner@example.test'])),terminal=False)
+    return archive
+
+
+def build_entity_archive(tmp_path: Path) -> Path:
+    """A company and an uncertain international name, both real ingested observations."""
+    source=tmp_path/'entities'
+    source.mkdir()
+    for index,(name,sender) in enumerate([('The SANS Institute','training@example.test'),('王小明','wang@example.test')]):
+        (source/f'{index}.eml').write_text(f'From: {Header(name,"utf-8").encode()} <{sender}>\nTo: owner@example.test\n'
+            f'Message-ID: <entity-{index}@example.test>\nDate: Tue, 02 Jan 2024 10:00:00 +0000\nSubject: Entity fixture\n\nBody\n')
+    archive=tmp_path/'archive'
+    run_ingest(IngestRequest(archive=archive,roots=[str(source)],scan_policy='not-scanned',
+        owner_rules=OwnerRules(include=['owner@example.test'])),terminal=False)
+    return archive
+
+
+def test_name_picker_filters_companies_reversibly_without_removing_evidence(tmp_path: Path) -> None:
+    """Person-only views hide recognized organizations, retain unknown names and preserve search/counts."""
+    archive=build_entity_archive(tmp_path)
+    picker=IdentityPickerApi(archive,'name')
+    default=PickerPage.model_validate(picker.query({}))
+    assert default.excluded_addresses==1
+    assert any(row.label=='王小明' for row in default.groups)
+    assert not any(row.label=='The SANS Institute' for row in default.groups)
+    all_rows=PickerPage.model_validate(picker.query({'include_non_people':True}))
+    company=next(row for row in all_rows.groups if row.label=='The SANS Institute')
+    assert company.messages==1 and all_rows.total_addresses==default.total_addresses
+    assert any(row.label=='example.test' for row in PickerPage.model_validate(IdentityPickerApi(archive,'institution').query({})).groups)
+
+
+def test_signature_phone_numbers_follow_grouping_and_date_filters(tmp_path: Path) -> None:
+    """Name picker requirement: observed phones deduplicate, follow manual groups and stay dated."""
+    archive=build_phone_archive(tmp_path)
+    picker=IdentityPickerApi(archive,'name')
+    groups=PickerPage.model_validate(picker.query({})).groups
+    first=next(group for group in groups if group.addresses[0].address=='first@example.test')
+    second=next(group for group in groups if group.addresses[0].address=='second@example.test')
+    assert {phone.normalized for phone in first.phone_numbers}=={'+16175550102','+442079460958'}
+    assert first.signature_messages==0  # A phone is not an email-address signature appearance.
+    picker.update({'operation':'merge-person','subject':second.id,'target':first.id})
+    merged=PickerPage.model_validate(picker.query({'name':'Avery Morgan'})).groups[0]
+    assert len(merged.phone_numbers)==2
+    dated=PickerPage.model_validate(picker.query({'name':'Avery Morgan','end':'2024-01-02'})).groups[0]
+    assert [phone.normalized for phone in dated.phone_numbers]==['+16175550102']
+    run_ingest(resume_request(archive,False,True).model_copy(update={'reprocess':True}),terminal=False)
+    assert len(PickerPage.model_validate(picker.query({'name':'Avery Morgan'})).groups[0].phone_numbers)==2
+
+
+@pytest.mark.parametrize('quoted',[
+    '-----Original Message-----\nFrom: Other <other@example.test>\nMessage\n-- \nOther\n+1 212 555 0199\n',
+    'On Tuesday, Other wrote:\n'+'Old message line\n'*20+'+1 212 555 0199\n',
+    '---------- Forwarded message ---------\nOld message\n-- \nOther\n+1 212 555 0199\n',
+])
+def test_phone_processor_trims_replies_before_selecting_sender_signature(tmp_path: Path, quoted: str) -> None:
+    """Phone ownership boundary: quoted signatures and long replies never become sender evidence."""
+    source=tmp_path/'reply.eml'
+    source.write_text('From: Current Sender <sender@example.test>\nTo: owner@example.test\n'
+        'Date: Tue, 02 Jan 2024 10:00:00 +0000\nMessage-ID: <reply@example.test>\n'
+        'Subject: Reply\n\nCurrent body\nPhone: +1 (617) 555-0102\n'+quoted)
+    archive=tmp_path/'archive'
+    run_ingest(IngestRequest(archive=archive,roots=[str(source)],scan_policy='not-scanned',
+        owner_rules=OwnerRules(include=['owner@example.test'])),terminal=False)
+    group=PickerPage.model_validate(IdentityPickerApi(archive,'name').query({'mailbox':'sender'})).groups[0]
+    assert [phone.normalized for phone in group.phone_numbers]==['+16175550102']

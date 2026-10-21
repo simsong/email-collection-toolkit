@@ -177,3 +177,14 @@ indexed probes that a superficial index-name assertion would miss. Subject
 substring searches have a separate linear-work budget because an ordinary
 B-tree cannot seek a leading-wildcard pattern. Tests check plan properties rather
 than snapshotting SQLite's entire version-dependent explanation.
+
+## Live grouped names
+
+`prepare_names` builds `observed_address_names` from header evidence, search
+suggestions, canonical names and manual person aliases. `address_search_names`
+projects those names across current `person_addresses` membership, then unions
+organization-domain names without person expansion. Every search/completion
+connection reads current membership; no index rebuild is required. Literal
+address matching still uses the catalog address predicate. Email-fragment
+recognition permits quoted local parts while retaining name lookup for labels
+such as `Jane @ Lab`.

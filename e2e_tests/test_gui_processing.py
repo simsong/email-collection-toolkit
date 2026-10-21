@@ -3,14 +3,29 @@
 from __future__ import annotations
 
 import json
+from urllib.parse import urlencode
 from pathlib import Path
 
 from playwright.sync_api import Page, expect
 
 from mailarchiver.__main__ import run_ingest
-from mailarchiver.gui_app import GUI_DIRECTORY, SEARCH_BRIDGE_METHODS, IdentityPickerApi
+from mailarchiver.gui_app import GUI_DIRECTORY, SEARCH_BRIDGE_METHODS, GuiApi, IdentityPickerApi
 from mailarchiver.gui_processing import PickerPage, resume_request, unfinished_work
-from tests.test_gui_processing import build_deferred_archive, build_interrupted_archive, open_headless, wait_for_import
+from tests.test_gui_processing import build_entity_archive, build_phone_archive, build_deferred_archive, build_interrupted_archive, open_headless, wait_for_import
+
+
+def test_name_picker_reveals_filtered_company_without_losing_unknown_person(tmp_path: Path,page: Page) -> None:
+    """Reversible entity filter uses shipped UI and real SBook-backed archive query."""
+    picker=IdentityPickerApi(build_entity_archive(tmp_path),'name')
+    expose(page,picker,('query','update'))
+    page.goto((GUI_DIRECTORY/'identity.html').as_uri())
+    expect(page.locator('tr.group').filter(has_text='王小明')).to_have_count(1)
+    expect(page.locator('tr.group').filter(has_text='The SANS Institute')).to_have_count(0)
+    expect(page.locator('#summary')).to_contain_text('1 non-person addresses hidden')
+    page.locator('#show-non-people').check()
+    expect(page.locator('tr.group').filter(has_text='The SANS Institute')).to_have_count(1)
+    page.locator('#show-non-people').uncheck()
+    expect(page.locator('tr.group').filter(has_text='The SANS Institute')).to_have_count(0)
 
 
 def expose(page: Page, api: object, names: tuple[str, ...]) -> None:
@@ -247,3 +262,92 @@ def test_sender_selector_cannot_become_a_subject_filter(tmp_path: Path, page: Pa
         expect(page.locator(".result-subject")).to_have_text(["from:simsong"])
     finally:
         api.close()
+
+
+def test_picker_double_click_and_count_navigation(tmp_path: Path, page: Page) -> None:
+    """Desktop requirement: actual click events open searchable names and exact count projections."""
+    archive = build_deferred_archive(tmp_path)
+    run_ingest(resume_request(archive, False, True), terminal=False)
+    picker = IdentityPickerApi(archive, "name")
+    opened: list[dict[str, object]] = []
+
+    def search(selection: dict[str, object]) -> dict[str, object]:
+        result = picker.search(selection)
+        opened.append(result)
+        return result
+
+    expose(page, picker, ("query", "update"))
+    page.expose_function("bridge_search", search)
+    page.add_init_script("window.pywebview.api.search = (...args) => window.bridge_search(...args);")
+    page.goto((GUI_DIRECTORY / "identity.html").as_uri())
+    group = page.locator("tr.group").filter(has=page.locator(".row-label", has_text="Sender"))
+    group.locator(".row-label").dblclick()
+    expect(page.locator("#status")).to_have_text("Opened search in a new window.")
+    assert opened.pop()["query"] == "any:Sender"
+    group.locator(".row-label").press("Enter")
+    page.wait_for_function("document.querySelector('#status').textContent === 'Opened search in a new window.'")
+    page.locator("#domain-filter").fill("lab.")
+    expect(page.locator("tr.group")).to_have_count(1)
+    page.locator("#start-date").fill("2024-01-02")
+    page.locator("#end-date").fill("2024-01-02")
+    expect(page.locator("tr.group .message-count").first).to_have_text("1")
+    page.locator("tr.group .message-count").first.click()
+    expect(page.locator("#status")).to_have_text("Opened search in a new window.")
+    result = opened[-1]
+    scope = result["identity_messages"]
+    assert isinstance(scope, dict) and scope["kind"] == "header"
+    previews = GUI_DIRECTORY.parent / ".tmp/gui-previews"
+    previews.mkdir(parents=True, exist_ok=True)
+    page.screenshot(path=str(previews / "identity-navigation.png"), full_page=True)
+    reader = page.context.new_page()
+    api = GuiApi(archive)
+    expose(reader, api, SEARCH_BRIDGE_METHODS)
+    try:
+        reader.goto((GUI_DIRECTORY / "index.html").as_uri() + "?" + urlencode({
+            "query": "", "identity-messages": json.dumps(scope)}))
+        expect(reader.locator(".result-subject")).to_have_text(["Parent"])
+        expect(reader.locator(".search-chip")).to_contain_text("Sender · Messages · 2024-01-02")
+        reader.evaluate("window.archiveDidChange()")
+        expect(reader.locator("#result-status")).to_have_text("1 message")
+        reader.screenshot(path=str(previews / "identity-scoped-search.png"))
+        reader.locator("#search").fill("childtoken")
+        reader.locator("#search").press("Enter")
+        expect(reader.locator(".result-subject")).to_have_count(0)
+        reader.get_by_role("button", name="Remove identity messages filter").click()
+        expect(reader.locator(".result-subject")).to_have_text(["GUI child"])
+        reader.screenshot(path=str(previews / "identity-search.png"))
+    finally:
+        reader.close()
+        api.close()
+
+
+def test_name_picker_phone_disclosure_expands_rows_and_keeps_single_number_plain(tmp_path: Path,page: Page) -> None:
+    """Phone requirement: actual saved signature observations display and disclosure expands the row."""
+    archive=build_phone_archive(tmp_path)
+    api=IdentityPickerApi(archive,'name')
+    groups=PickerPage.model_validate(api.query({})).groups
+    first=next(group for group in groups if group.addresses[0].address=='first@example.test')
+    second=next(group for group in groups if group.addresses[0].address=='second@example.test')
+    expose(page,api,('query','update','search'))
+    page.goto((GUI_DIRECTORY/'identity.html').as_uri())
+    multiple=page.locator(f'tr.group[data-group-id="{first.id}"]')
+    single=page.locator(f'tr.group[data-group-id="{second.id}"]')
+    expect(multiple.locator('summary')).to_have_text('2 phone numbers')
+    collapsed=multiple.evaluate('(row)=>row.offsetHeight')
+    multiple.locator('summary').click()
+    expect(multiple.locator('.phone-numbers li')).to_have_text(['+1 (617) 555-0102','+44 20 7946 0958'])
+    assert multiple.evaluate('(row)=>row.offsetHeight')>collapsed
+    multiple.locator('summary').press('Enter')
+    expect(multiple.locator('.phone-numbers li').first).to_be_hidden()
+    expect(single.locator('.phone-column')).to_have_text('+1 (617) 555-0102')
+    expect(single.locator('summary')).to_have_count(0)
+    single.drag_to(multiple)
+    expect(page.locator('tr.group').filter(has_text='Avery Morgan')).to_have_count(1)
+    expect(multiple.locator('summary')).to_have_text('2 phone numbers')
+    multiple.locator('summary').click()
+    previews=GUI_DIRECTORY.parent/'.tmp/gui-previews'
+    previews.mkdir(parents=True,exist_ok=True)
+    page.screenshot(path=str(previews/'name-phones.png'),full_page=True)
+    page.locator('#end-date').fill('2024-01-02')
+    expect(multiple.locator('.phone-column')).to_have_text('+1 (617) 555-0102')
+    expect(multiple.locator('summary')).to_have_count(0)

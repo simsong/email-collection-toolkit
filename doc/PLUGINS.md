@@ -354,6 +354,11 @@ emitted framework types. Actual parts retain their MIME types, including
 `message/rfc822`. These framework labels are internal types,
 not headers added to canonical messages.
 
+`ProcessingResult.phone_numbers` carries typed normalized/display phone candidates
+from detected signatures. The host attaches them to the message sender as `phone`
+evidence; they do not add email-address observations or signature-email counts.
+The picker displays observed candidates without asserting ownership.
+
 A result contains emitted processing objects, typed diagnostics, and one
 control outcome: continue, abort part, abort message, or fail import. Publications,
 catalog changes and handoff requests use application services rather than
@@ -950,3 +955,10 @@ message hashing and deduplication. Errors are reported for operator action;
 re-import the stream and let ordinary deduplication handle repeated messages.
 There is no automatic API restart. Explicit `--no-scan` bypasses scan handling.
 Ordinary file imports continue to use host scanning.
+
+## Shared customizable lists
+
+Provider domains and routing/name extraction use the [Customizable Default Lists](CUSTOMIZABLE_DEFAULT_LISTS.md)
+service. Existing identity-evidence `provider_domains` plugin additions remain additive.
+Header processor version 2 adds role-preserving routing candidates. The host records
+matching candidates as typed `routing-address` evidence, retaining the policy revision.

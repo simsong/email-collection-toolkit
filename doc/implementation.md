@@ -19,6 +19,22 @@ platform or release gate has passed. [Future work](plans/README.md) is separate.
 
 ## Shared boundaries
 
+- [Customizable Default Lists](CUSTOMIZABLE_DEFAULT_LISTS.md) provide typed bundled
+  templates, personal overrides, revisioned archive snapshots and a shared editor.
+  Provider-scoped reply-address rules retain attributed routing evidence without
+  accepting identity merges. Owner defaults start empty and prompt during setup.
+
+- Pinned SBook5 lexical data drives reversible person-view filtering, independently
+  of linkage scores and manual decisions; see [processing](implementation/PROCESSING.md#sbook-entity-filter).
+
+- Optional linkage engines share frozen candidates and private reports; see
+  [comparison implementation](implementation/PROCESSING.md#optional-name-linkage-comparison).
+  Stable review labels retain independent non-person flags and unlabeled notes.
+
+- Identity picker navigation uses typed selections and read-only evidence scopes.
+  Typed signature-phone observations feed expandable name-row phone lists.
+  See [desktop implementation](implementation/DESKTOP.md#identity-picker-search-navigation).
+
 - Desktop recovery summarizes saved attempts and records lease-protected aborts;
   warning history collapses to a reopenable pill. See
   [desktop recovery](implementation/DESKTOP.md#saved-import-recovery-and-notices).

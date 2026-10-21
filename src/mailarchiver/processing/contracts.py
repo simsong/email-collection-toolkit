@@ -24,6 +24,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from ..scan_evidence import ScanEvidence as ScanEvidence, ScanFailure as ScanFailure, ScanStatus as ScanStatus
 from ..message import ParsedMessage
 from ..owner_rules import OwnerRules
+from ..reply_addresses import RoutingCandidate
 from ..plugin_api import MailObject, SourceReference
 from ..mbox_framing import MboxNormalization
 from ..search import IndexedAttachment, SuggestedAddress
@@ -90,10 +91,16 @@ class HeaderMetadata(Contract):
     parsed: ParsedMessage
     suggestions: tuple[SuggestedAddress, ...] = ()
     search_headers: str = ""
+    routing_candidates: tuple[RoutingCandidate,...] = ()
 
 
 class TextContent(Contract):
     text: str
+
+
+class PhoneNumber(Contract):
+    normalized: str = Field(pattern=r"^\+?\d{7,15}$")
+    display: str = Field(min_length=1, max_length=64)
 
 
 class AddressEvidence(Contract):

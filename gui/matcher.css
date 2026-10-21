@@ -83,3 +83,14 @@ footer { display: flex; justify-content: space-between; padding: 12px 24px 0; fo
 .archive-picker .identity-column { width: 48%; }
 .archive-picker .count-column { width: 12%; }
 .archive-picker td:not(:first-child) { white-space: nowrap; }
+
+.archive-picker .message-count { padding: 0; border: 0; background: none; color: #175da1; text-decoration: underline; font: inherit; }
+.archive-picker .message-count:disabled { color: inherit; text-decoration: none; }
+
+.archive-picker .identity-column { width: 36%; }
+.archive-picker .phone-column { width: 22%; white-space: normal; }
+.phone-numbers summary { cursor: pointer; }
+.phone-numbers ul { margin: 6px 0 0; padding-left: 16px; }
+.phone-numbers li { margin: 4px 0; }
+.institution-picker .phone-column { display: none; }
+.institution-picker .people-filter { display: none; }

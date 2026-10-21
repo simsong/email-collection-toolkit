@@ -1,0 +1,25 @@
+<!doctype html>
+<!-- Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved.
+     Edit any registered list using its shared validated YAML service.
+     Scope distinguishes a personal template from the bound archive instance.
+     The bridge supplies normalized text, revision and source provenance.
+     Explicit save/reset actions publish changes; loading never writes settings.
+     This page is also used for the initial empty owner-template setup. -->
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-eval'; style-src 'self'; object-src 'none'; connect-src 'self'">
+<title>Customizable Default Lists</title><link rel="stylesheet" href="options.css">
+</head>
+<body><main>
+<h1>Customizable Default Lists</h1>
+<p>Personal defaults seed new archive settings. Saved archive lists keep their own values.</p>
+<label for="list">List</label><select id="list" disabled></select>
+<label for="scope">Edit</label><select id="scope" disabled><option value="personal">Personal defaults</option><option value="archive">This archive</option></select>
+<p id="description"></p><p id="setup" hidden>Set up your owner / sender identities: replace include: [] with your email addresses or owner rules. These identify your Sent messages. You can close this window and return using File → Customizable Default Lists.</p>
+<p id="origin"></p><details><summary>Template files</summary><p id="paths"></p></details>
+<label for="yaml">YAML configuration</label><textarea id="yaml" rows="18" spellcheck="false" autocapitalize="off" disabled></textarea>
+<div class="actions"><button id="save" disabled>Save</button><button id="reset" disabled>Reset to defaults</button><button id="reload" disabled>Reload</button></div>
+<p id="effects">Archive rule changes apply to future processing. The next processing run rebuilds derived evidence for changed archive policies. Owner-rule changes affect future imports.</p>
+<p id="status" role="status"></p><p id="error" role="alert" hidden></p>
+</main><script src="default-lists.js"></script></body></html>

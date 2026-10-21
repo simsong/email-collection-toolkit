@@ -1,0 +1,7 @@
+# Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved.
+# Explicit person overrides take precedence over automatic SBook classification.
+version: 1
+person_name_patterns: []
+organization_name_patterns: []
+service_local_patterns:
+  - '^(?:no-?reply|mailer-daemon|bounce|returns?|reply|support|info|sales|admin|newsletters?|notifications?)(?:$|[+._-])'

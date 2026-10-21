@@ -17,6 +17,7 @@ Fundamental dependents:
 from __future__ import annotations
 
 import argparse
+import json
 import shlex
 import shutil
 import sqlite3
@@ -40,6 +41,7 @@ from .mailbox_tree import MailboxSelection
 from .mbox import MboxLocation, read_verified_location
 from .message import decoded_header
 from .search import SEARCH_CATEGORIES, decoded_part, html_text, is_attachment
+from .processing.identities import IdentityMessages
 from .search_selectors import SELECTORS, SearchStatement, prepare_names, selector_for
 
 DEFAULT_LIMIT = 10
@@ -51,6 +53,7 @@ RESET = "\033[0m"
 class SearchTerms(BaseModel):
     """Structured selectors and free-text terms accepted by mailsearch."""
 
+    identity_messages: IdentityMessages | None = None
     address_names: bool = False
     any_address: list[str] = Field(default_factory=list)
     to: list[str] = Field(default_factory=list)
@@ -136,6 +139,14 @@ def _search_predicate(
             predicate = spec.sql(spec.tag, str(value), terms.address_names)
             clauses.append(predicate.sql)
             parameters.extend(predicate.parameters)
+    if scope := terms.identity_messages:
+        clauses.append("m.sha256 IN (SELECT im.sha256 FROM identities.messages im "
+            "JOIN identities.message_addresses ma USING(message_id) "
+            "WHERE ma.address_id IN (SELECT value FROM json_each(?)) AND ma.kind=? "
+            "AND (?='' OR date(ma.seen_at)>=?) AND (?='' OR date(ma.seen_at)<=?))")
+        start = scope.start.isoformat() if scope.start else ""
+        end = scope.end.isoformat() if scope.end else ""
+        parameters.extend((json.dumps(scope.address_ids), scope.kind, start, start, end, end))
     if terms.text and include_text:
         if search_attachments:
             for term in terms.text:
@@ -183,7 +194,7 @@ def _candidate_source(
     """Choose filtering indexes before sort indexes for both pages and counts."""
     if terms.text:
         source = "messages m INDEXED BY messages_sha256 "
-    elif terms.any_address or terms.to or terms.cc or terms.bcc or terms.subject or mailbox_selections:
+    elif terms.identity_messages or terms.any_address or terms.to or terms.cc or terms.bcc or terms.subject or mailbox_selections:
         # Membership queries supply rowids; category/sort scans defeat sparse filters.
         source = "messages m NOT INDEXED "
     elif terms.from_:
@@ -357,6 +368,7 @@ def _is_plain_text_search(
         and (sort_by is not SortField.DATE or direction is SortDirection.DESCENDING)
         and not search_attachments
         and not mailbox_selections
+        and terms.identity_messages is None
         and not any(structured)
     )
 

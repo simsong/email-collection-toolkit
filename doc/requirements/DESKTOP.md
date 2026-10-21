@@ -595,3 +595,27 @@ instead of validating a different revision from the Rust build.
 Pages deploys on every `main` push and after a tagged release
 publishes, using the release run's signed appcast rather than a release-list
 query for that new asset; the two deployment paths are serialized.
+
+## Identity picker navigation
+
+Double-click a canonical name or address (or press Enter on its label) to open
+an Any-address search in a new window bound to the picker archive. Name searches
+expand original header names, canonical names and merged aliases across every
+address in the current manual person group. Literal email searches remain
+address-specific. Explicit group aliases survive separating a member address.
+Manual merges, address moves, separation and names save immediately and survive
+processor replay; automatic authoritative matching remains disabled.
+
+Name rows show available sender-signature phone candidates, deduplicated by their
+normalized number within the displayed addresses and dates. Show a single number
+directly; multiple numbers use a keyboard-accessible disclosure triangle that
+expands the row to list all numbers. Preserve observed spelling and do not imply
+verified ownership. Institution rows do not show this column.
+
+Click a nonzero Messages or Signatures count to open its distinct message set,
+using the displayed member addresses, inclusive date bounds and evidence channel.
+A filtered parent includes only its visible addresses. The resulting search has
+a removable identity filter; additional terms and sorting refine that set.
+No canonical message or source mailbox is changed. `make test-gui-processing`
+checks grouping, search expansion, count projections, pagination and browser
+navigation with purpose-made archives.

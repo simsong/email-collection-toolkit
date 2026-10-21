@@ -6,6 +6,39 @@ Entries describe their recorded revisions. For current behavior use the
 [user manual](USER_MANUAL.md) and [CLI reference](CLI_REFERENCE.md). Retired
 Rust delivery plans and historical package checks are not current acceptance.
 
+## Customizable Default Lists
+
+One editor now manages bundled YAML templates, per-user overrides and revisioned
+archive settings for owners/senders, reply-address patterns, contact filters,
+provider domains, entity rules, display, date patterns and source rules. Empty
+personal owner defaults prompt during new-archive setup. Provider-scoped rules
+extract names from routing addresses or display names and retain attributed evidence
+without accepting identity merges. See [Customizable Default Lists](CUSTOMIZABLE_DEFAULT_LISTS.md).
+
+## Name picker search navigation
+
+Person views now use pinned SBook5 codewords and gazetteers to hide recognized
+company/organization and service entries, with a control to show them. Uncertain
+names remain visible. The private review retains all pair IDs and labels.
+The optional research runner also includes a separate Splink full-name-frequency
+comparison, giving rare-name agreements more weight than common-name agreements.
+
+Double-click a name to search it, or click a message/signature count to open its
+filtered evidence messages. Original header names now expand across manually
+grouped addresses without reindexing. Automatic matching remains disabled.
+Name rows also show available signature phone candidates: one number directly,
+or a disclosure triangle that expands multiple numbers. Existing content needs
+explicit reprocessing to acquire the new phone evidence.
+
+The optional local research harness now compares rules, signature/graph ablations,
+Fellegi–Sunter, Dedupe and Splink on frozen candidates and produces a private report
+with timings, synthetic metrics and 50 proposals for owner labeling. Unlabeled
+archive scores are not reported as measured accuracy.
+Owner review separates **Same identity** / **Different identities** from an
+independent **Not a person** checkbox, allowing a match between addresses for
+one organization. Existing decisions and comments are preserved; previous
+non-person choices migrate to checked flags without assuming a link decision.
+
 ## Informed import recovery and retained warnings
 
 The desktop asks before continuing saved imports, showing source/account,

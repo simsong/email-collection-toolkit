@@ -501,7 +501,7 @@ test-matcher-prototype: ruff
 gui-smoke: test-native-gui
 
 .PHONY: test-native-application
-test-native-application:
+test-native-application: ruff
 	MAILARCHIVER_NATIVE_APPLICATION_E2E=1 uv run pytest -q e2e_tests/test_ingest_verify.py::test_native_application_lifecycle
 
 .PHONY: check-archive-open
@@ -824,8 +824,15 @@ test-pff: pst-importer mcti-scan pff-converter test-pff-converter
 	uv run --locked pytest -q tests/test_pff_source.py tests/test_cli_processing.py tests/test_plugin_loader.py tests/test_source_integrity.py
 
 .PHONY: test-gui-processing
+IDENTITY_SEARCH_CHECK_FILES = src/mailarchiver/name_entities.py src/mailarchiver/gui_processing.py src/mailarchiver/gui_app.py \
+	src/mailarchiver/gui_service.py src/mailarchiver/mailsearch.py src/mailarchiver/search_selectors.py \
+	src/mailarchiver/processing/identities.py src/mailarchiver/processing/phones.py tests/test_gui_processing.py tests/test_search_completion.py \
+	e2e_tests/test_gui_processing.py e2e_tests/native_application_probe.py
 test-gui-processing: ruff
-	uv run --locked pytest -q tests/test_gui_processing.py
+	uv run --locked pylint $(IDENTITY_SEARCH_CHECK_FILES)
+	uv run --locked ty check $(IDENTITY_SEARCH_CHECK_FILES) --error-on-warning
+	uv run --locked pyright $(IDENTITY_SEARCH_CHECK_FILES) --warnings
+	uv run --locked pytest -q tests/test_gui_processing.py tests/test_search_completion.py tests/test_mailsearch.py
 	uv run --locked pytest -q --browser chromium e2e_tests/test_gui_processing.py
 
 .PHONY: website-preview-screenshots
@@ -1002,3 +1009,42 @@ clamav-seed:
 .PHONY: test-processing-cleanup
 test-processing-cleanup:
 	uv run --locked pytest -q tests/test_processing_objects.py $(PYTEST_ARGS)
+
+# NAME_RESEARCH_ENV selects the isolated, locked optional matcher dependencies.
+# ARCHIVE is read-only; EVIDENCE is a verified extraction; OUTPUT is a private derivative directory.
+NAME_RESEARCH_ENV ?= research/name-matcher
+.PHONY: name-matcher-experiments test-name-matcher-experiments
+name-matcher-experiments:
+	uv run --project "$(NAME_RESEARCH_ENV)" --locked python -m scripts.name_matcher.experiments --archive "$(ARCHIVE)" --evidence "$(EVIDENCE)" --output "$(OUTPUT)" $(ARGS)
+
+test-name-matcher-experiments: ruff
+	uv run --locked python -m pylint --source-roots="$(CURDIR)" scripts/name_matcher/linkage.py scripts/name_matcher/engines.py scripts/name_matcher/experiments.py scripts/name_matcher/evaluate.py tests/test_name_linkage_experiments.py
+	uv run --locked ty check scripts/name_matcher/linkage.py scripts/name_matcher/engines.py scripts/name_matcher/experiments.py scripts/name_matcher/evaluate.py tests/test_name_linkage_experiments.py --error-on-warning
+	uv run --locked pyright scripts/name_matcher/linkage.py scripts/name_matcher/engines.py scripts/name_matcher/experiments.py scripts/name_matcher/evaluate.py tests/test_name_linkage_experiments.py --warnings
+	uv run --project "$(NAME_RESEARCH_ENV)" --locked python -m pytest -q tests/test_name_linkage_experiments.py
+
+# DATABASE is a frozen experimental comparison; LABELS is an exported owner review.
+.PHONY: name-matcher-owner-review
+name-matcher-owner-review:
+	uv run --project "$(NAME_RESEARCH_ENV)" --locked python -m scripts.name_matcher.evaluate --database "$(DATABASE)" --labels "$(LABELS)" --output "$(OUTPUT)"
+
+.PHONY: test-name-matcher-report
+test-name-matcher-report: ruff
+	uv run --locked python -m pylint --source-roots="$(CURDIR)" e2e_tests/test_name_experiment_report.py
+	uv run --locked ty check e2e_tests/test_name_experiment_report.py --error-on-warning
+	uv run --locked pyright e2e_tests/test_name_experiment_report.py --warnings
+	uv run --locked pytest -q --browser chromium e2e_tests/test_name_experiment_report.py
+
+# Isolated fixtures only; no real archive or user preference files are edited.
+CUSTOM_LIST_SOURCES = e2e_tests/native_application_probe.py tests/test_gui_service.py src/mailarchiver/custom_lists.py src/mailarchiver/list_catalog.py src/mailarchiver/list_models.py src/mailarchiver/reply_addresses.py src/mailarchiver/gui_default_lists.py
+.PHONY: test-customizable-lists
+test-customizable-lists: ruff
+	uv run --locked pylint $(CUSTOM_LIST_SOURCES) src/mailarchiver/configuration.py src/mailarchiver/contact_filtering.py src/mailarchiver/document_options.py src/mailarchiver/message.py src/mailarchiver/sources.py src/mailarchiver/gui_app.py src/mailarchiver/gui_processing.py src/mailarchiver/processing tests/test_custom_lists.py e2e_tests/test_default_lists.py
+	uv run --locked ty check $(CUSTOM_LIST_SOURCES) src/mailarchiver/gui_app.py src/mailarchiver/processing tests/test_custom_lists.py e2e_tests/test_default_lists.py --error-on-warning
+	uv run --locked pyright $(CUSTOM_LIST_SOURCES) src/mailarchiver/gui_app.py src/mailarchiver/processing tests/test_custom_lists.py e2e_tests/test_default_lists.py --warnings
+	uv run --locked pytest -q tests/test_custom_lists.py tests/test_owner_rules.py tests/test_sources.py tests/test_message.py tests/test_contact_filtering.py
+	$(MAKE) test-customizable-lists-browser
+
+.PHONY: test-customizable-lists-browser
+test-customizable-lists-browser:
+	uv run --locked pytest -q --browser chromium e2e_tests/test_default_lists.py

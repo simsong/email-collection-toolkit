@@ -88,3 +88,11 @@ supported operator, and concrete examples.
 Index extraction and insertion happen after canonical MBOX/catalog publication.
 An indexing failure is recorded as a metadata defect and does not reject mail;
 `refresh-index` repairs missing disposable content.
+
+## Manual name expansion
+
+Address selectors and completion resolve an observed human name to every address
+in its current manually assigned person group without rebuilding indexes.
+Canonical and merged alias names have the same expansion. Email substring queries
+remain address-specific; organization names retain their domain-based membership.
+`make test-gui-processing` verifies live merge and separation behavior.

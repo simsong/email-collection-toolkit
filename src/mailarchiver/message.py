@@ -32,8 +32,7 @@ from pathlib import Path
 from typing import Literal
 
 from ftfy import fix_encoding
-from pydantic import BaseModel, Field
-from yaml import safe_load
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from .encoding import decode_text
 
@@ -52,19 +51,26 @@ BODY_DATE_HEADER = re.compile(r"(?im)^[ \t>]*Date:[ \t]*(.+)$")
 class MessagePatternConfig(BaseModel):
     """Localized patterns used while recovering dates from quoted message text."""
 
+    model_config = ConfigDict(extra='forbid')
     mode: Literal["replace", "extend"]
     quoted_body_date: list[str] = Field(min_length=1)
 
+    @field_validator('quoted_body_date')
+    @classmethod
+    def valid_date_patterns(cls, values: list[str]) -> list[str]:
+        for value in values:
+            try:
+                groups=re.compile(value,re.I|re.M).groups
+            except re.error as error:
+                raise ValueError(f'Invalid date pattern: {error}') from error
+            if groups!=1:
+                raise ValueError('Quoted date patterns must have exactly one capture group')
+        return values
+
 
 def _load_message_patterns() -> MessagePatternConfig:
-    with Path(__file__).with_name("message_patterns.yaml").open(encoding="utf-8") as source:
-        return MessagePatternConfig.model_validate(safe_load(source))
-
-
-MESSAGE_PATTERNS = _load_message_patterns()
-QUOTED_BODY_DATE_PATTERNS = tuple(
-    re.compile(pattern, re.IGNORECASE | re.MULTILINE) for pattern in MESSAGE_PATTERNS.quoted_body_date
-)
+    from .list_catalog import MESSAGE_PATTERNS
+    return MESSAGE_PATTERNS.template()
 
 
 class MetadataDefect(BaseModel):
@@ -176,7 +182,8 @@ def embedded_body_date(message: Message, earliest_year: int = 1900) -> datetime 
         for value in BODY_DATE_HEADER.findall(body)
         if (parsed := parse_date(value.lstrip("> "), earliest_year)) is not None
     ]
-    for pattern in QUOTED_BODY_DATE_PATTERNS:
+    for expression in _load_message_patterns().quoted_body_date:
+        pattern=re.compile(expression,re.I|re.M)
         for value in pattern.findall(body):
             for format_string in ("%B %d, %Y, at %I:%M %p", "%b %d, %Y, at %I:%M %p"):
                 try:

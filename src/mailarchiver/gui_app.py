@@ -61,6 +61,7 @@ from .application import (
 )
 from .scanner import CLAMAV_DOWNLOAD_URL, UNSCANNED_WARNING, ScannerAvailability, scanner_availability
 from .configuration import GuiConfiguration, application_configuration
+from .gui_default_lists import DefaultListsApi
 from .document_options import DocumentOptions, OwnerRulesState
 from .owner_rules import OwnerRules
 from .archive_config import (
@@ -68,9 +69,9 @@ from .archive_config import (
     remember_import_directory,
 )
 from .plugin_api import PluginManifest
-from .gui_processing import abort_processing, picker_page, registered_acquisition_plugins, registered_processors, resume_request, save_identity, unfinished_work
+from .gui_processing import abort_processing, picker_page, picker_search, PickerSearchRequest, registered_acquisition_plugins, registered_processors, resume_request, save_identity, unfinished_work
 from .processing.api import ProcessorManifest
-from .processing.identities import IdentityFilter, ManualDecision
+from .processing.identities import IdentityFilter, IdentityMessages, ManualDecision
 from .gui_service import (
     MessagePreview,
     MessageView,
@@ -628,6 +629,16 @@ class IdentityPickerApi:
             save_identity(self.archive, ManualDecision.model_validate(decision))
         return True
 
+    def search(self, selection: dict[str, Any]) -> dict[str, Any]:
+        result = picker_search(self.archive, self.kind, PickerSearchRequest.model_validate(selection))
+        parameters = [("query", result.query)]
+        if result.identity_messages is not None:
+            parameters.append(("identity-messages", result.identity_messages.model_dump_json()))
+        if self.application is not None:
+            document = next(document for document in self.application.controller.documents() if document.path == self.archive)
+            self.application.create_search_window(self.application.controller.new_search_window(document), parameters=parameters)
+        return result.model_dump(mode="json")
+
 
 class AboutApi:
     """Application health and explicitly requested definition refresh."""
@@ -920,10 +931,12 @@ class GuiApi:
         search_attachments: bool = False,
         mailbox_selections: list[str] | None = None,
         limit: int = DEFAULT_PAGE_SIZE,
+        identity_messages: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         page = search_page(
             self._archive(), query, offset, limit, sort_by, direction,
             search_attachments, mailbox_selections,
+            IdentityMessages.model_validate(identity_messages) if identity_messages is not None else None,
         )
         if page.error is not None:
             return page.model_dump(mode="json")
@@ -941,9 +954,11 @@ class GuiApi:
         query: str,
         search_attachments: bool = False,
         mailbox_selections: list[str] | None = None,
+        identity_messages: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         return search_count(
-            self._archive(), query, search_attachments, mailbox_selections
+            self._archive(), query, search_attachments, mailbox_selections,
+            identity_messages=IdentityMessages.model_validate(identity_messages) if identity_messages is not None else None,
         ).model_dump(mode="json")
 
     def suggestions(self, query: str, limit: int = 20) -> dict[str, Any]:
@@ -1431,6 +1446,7 @@ class PyWebViewApplication:
         self._apis: dict[str, GuiApi] = {}
         self._ingest_apis: dict[str, IngestWindowApi] = {}
         self._options_apis: dict[str, DocumentOptionsApi] = {}
+        self._default_lists_apis: dict[str, DefaultListsApi] = {}
         self._native_search_ids: dict[str, str] = {}
         self._native_child_ids: dict[str, str] = {}
         self._about_api = AboutApi(self)
@@ -1672,7 +1688,7 @@ class PyWebViewApplication:
             acquisition_plugins=registered_acquisition_plugins(active.path if active else None),
         )
 
-    def create_search_window(self, session: SearchWindow) -> GuiApi:
+    def create_search_window(self, session: SearchWindow, *, parameters: list[tuple[str, str]] | None = None) -> GuiApi:
         document = self.controller.document(session.document_id)
         api = GuiApi(
             document.path,
@@ -1683,7 +1699,7 @@ class PyWebViewApplication:
         status = api.status()
         window = webview.create_window(
             _window_title(document, int(status["message_count"])),
-            self.asset_url("index.html"),
+            self.asset_url("index.html", parameters),
             js_api=WindowBridge(api, SEARCH_BRIDGE_METHODS),
             width=session.geometry.width,
             height=session.geometry.height,
@@ -2155,6 +2171,47 @@ class PyWebViewApplication:
         document = self.active_document()
         return self.open_ingest_window(document) if document is not None else False
 
+    def open_default_lists(self, document: ArchiveDocument | None = None, *, personal: bool = False) -> bool:
+        api = None if personal or document else self.active_api()
+        document = None if personal else (document or (api.document if api else None))
+        native = webview.active_window() if not personal and document is None else None
+        child_id = self._native_child_ids.get(native.uid) if native else None
+        if child_id:
+            document = self.controller.document(child_id)
+        archive = document.path if document else None
+        document_id = document.descriptor.document_id if document and archive else 'personal'
+        with self._lock:
+            editor = self._default_lists_apis.get(document_id)
+            if editor is not None:
+                editor.window.restore()
+                editor.window.show()
+                return True
+            editor = DefaultListsApi(archive, identity=document.descriptor.identity if document and archive else '',
+                version=application_metadata().version, writer_activity=self.writer_activity)
+            window = webview.create_window(
+                f"{APPLICATION_NAME} — Customizable Default Lists" + (f" — {archive}" if archive else ""),
+                self.asset_url("default-lists.html"), js_api=WindowBridge(editor, ("catalog", "load", "update")),
+                width=800, height=820, min_size=(600, 560), menu=self.menu())
+            if window is None:
+                raise RuntimeError("pywebview failed to create a window")
+            editor.window = window
+            self._default_lists_apis[document_id] = editor
+            if archive:
+                self._native_child_ids[window.uid] = document_id
+                self.controller.attach_child_window(document_id, window.uid)
+
+            def closed(*_args: object) -> None:
+                with self._lock:
+                    self._default_lists_apis.pop(document_id, None)
+                    self._native_child_ids.pop(window.uid, None)
+                if archive:
+                    self.controller.close_child_window(document_id, window.uid)
+                self._refresh_menus()
+
+            window.events.closed += closed
+        self._refresh_menus()
+        return True
+
     def open_document_options(self, document: ArchiveDocument | None = None) -> bool:
         if document is None:
             native = webview.active_window()
@@ -2202,7 +2259,7 @@ class PyWebViewApplication:
         window = webview.create_window(
             f"{APPLICATION_NAME} — {kind.title()} matcher — {document.display_path}",
             self.asset_url("identity.html", [("kind", kind)]),
-            js_api=WindowBridge(api, ("query", "update")),
+            js_api=WindowBridge(api, ("query", "update", "search")),
             width=1100, height=750, min_size=(900, 560), menu=self.menu(),
         )
         if window is None:
@@ -2285,6 +2342,7 @@ class PyWebViewApplication:
         windows = [api.window for api in self._search_apis()]
         windows.extend(api.window for api in self._ingest_apis.values())
         windows.extend(api.window for api in self._options_apis.values())
+        windows.extend(api.window for api in self._default_lists_apis.values())
         windows.append(self._about_window)
         windows.append(self._license_window)
         if self._setup_api is not None:
@@ -2331,6 +2389,8 @@ class PyWebViewApplication:
             )
         for api in tuple(self._options_apis.values()):
             items.append(MenuAction(api.window.title, lambda uid=api.window.uid: self.focus_window(uid)))
+        for editor in tuple(self._default_lists_apis.values()):
+            items.append(MenuAction(editor.window.title, lambda uid=editor.window.uid: self.focus_window(uid)))
         return items
 
     def _can_close_search_window(self, window_id: str, window: Any) -> bool:
@@ -2577,7 +2637,8 @@ class PyWebViewApplication:
                     child = active.uid in self._native_child_ids
                 setup = self._setup_api
                 busy = setup is not None and setup._lock.locked()
-                enabled = child or active is self._license_window or (setup is not None and active is setup.window) or (
+                list_editor = any(editor.window is active for editor in self._default_lists_apis.values())
+                enabled = child or list_editor or active is self._license_window or (setup is not None and active is setup.window) or (
                     search_id is not None and self.controller.can_close_window(search_id)
                 )
                 close_item.setEnabled_(enabled and not busy)
@@ -2646,6 +2707,7 @@ def application_menu(application: PyWebViewApplication) -> list[Menu]:
         return [
             Menu("File", [*file_items, MenuAction("Import…", application.import_active_document),
                           MenuAction("Document Options…", application.open_document_options),
+                          MenuAction("Customizable Default Lists…", application.open_default_lists),
                           MenuAction("Close", application.close_active_window),
                           MenuSeparator(), MenuAction("Quit", application.request_quit)]),
             Menu("Window", [MenuAction("New Search Window", application.new_search_window),
@@ -2659,6 +2721,7 @@ def application_menu(application: PyWebViewApplication) -> list[Menu]:
         (
             MenuAction("Import…", application.import_active_document),
             MenuAction("Document Options…", application.open_document_options),
+                          MenuAction("Customizable Default Lists…", application.open_default_lists),
             MenuAction("Close", application.close_active_window),
         )
     )
@@ -2849,6 +2912,9 @@ def main() -> int:
             application.create_about_window(hidden=True)
         if prompt_for_archive:
             application.show_setup()
+            from .list_catalog import OWNERS
+            if not OWNERS.template().include:
+                application.open_default_lists(personal=True)
         for session in startup.windows:
             if controller.document(session.document_id).descriptor.untitled:
                 controller.close_window(session.window_id)

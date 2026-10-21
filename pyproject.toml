@@ -53,6 +53,7 @@ where = ["src"]
 mailarchiver = [
     "*.yaml",
     "*.swift",
+    "sbook/*",
     "public_suffix_list.dat",
     "sql/*.sql",
     "processing/sql/*.sql",

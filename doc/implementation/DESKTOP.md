@@ -789,3 +789,23 @@ partial-append recovery, native-source and loopback-HTTP message boundaries, and
 duplicate-free restart. `make test-native-quit` tests the real Cocoa About window
 during periodic status polling. Its existing `MAILARCHIVER_NATIVE_GUI_E2E` opt-in
 flag requires a macOS GUI session. These tests use only disposable archives.
+
+## Identity picker search navigation
+
+`IdentityPickerApi.search` validates a typed selection against `picker_page`,
+opens a search session for the picker archive and passes startup query parameters.
+Name labels produce shell-quoted Any selectors; unnamed groups labeled with an
+email address use a full-group header scope to distinguish them from individual
+address searches. Counts produce `IdentityMessages`
+with the visible address IDs, channel, inclusive dates and display label.
+`gui/app.js` runs the startup search and displays a removable scope chip; search
+page and count bridges apply the same scope. The read-only SQL joins processing
+evidence to catalog messages by SHA-256, preserving distinct messages and excluding
+the plain-text fast path for scoped searches. `make test-native-application` exercises real Cocoa picker navigation while another
+archive is open; Chromium exercises filtered counts, the removable scope chip
+and the shipped widgets through real bridges.
+
+`PhoneNumber` observations are projected onto address rows and unioned for each
+visible person group. The Name table renders one observed number directly or a
+native HTML `details` disclosure for multiple numbers. Chromium and native Cocoa
+fixtures exercise expansion alongside name/count navigation and manual grouping.

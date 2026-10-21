@@ -443,3 +443,14 @@ def test_job_identity_survives_retry_and_new_submission_gets_its_own(tmp_path: P
         for stored_id, result in database.execute("SELECT job_id,result_json FROM invocations WHERE status='completed'"):
             assert json.loads(result)["diagnostics"] == [str(stored_id)]
         assert database.execute("SELECT count(DISTINCT job_id) FROM invocations").fetchone() == (2,)
+
+
+def test_signature_phones_preserve_spelling_and_exclude_dates_and_quoted_replies() -> None:
+    """Phone observations are candidates, deduplicated without country inference or quoted mail."""
+    from mailarchiver.processing.phones import signature_phone_numbers
+
+    phones=signature_phone_numbers('Phone: +1 (617) 555-0102\nOffice: +1 617 555 0102\n'
+        'Mobile: +44 20 7946 0958\nDate: 2024-01-02\nOn Tuesday, Person wrote:\n'
+        '> Telephone: +1 212 555 0199\n')
+    assert [(phone.normalized,phone.display) for phone in phones]==[
+        ('+16175550102','+1 (617) 555-0102'),('+442079460958','+44 20 7946 0958')]

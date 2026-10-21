@@ -1,0 +1,16 @@
+# Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved.
+# These are routing endpoints, not accepted person aliases.
+version: 1
+rules:
+  - id: github-reply
+    domains: [reply.github.com]
+    address_pattern: '^reply\+(?P<token>[^@\s]+)@reply\.github\.com$'
+    family: github-reply
+    name_source: display-name
+    fallback_name: GitHub notification routing
+  - id: musicmatch-response
+    domains: [response.musicmatch.com]
+    address_pattern: '^mm(?P<campaign>\d+)\.(?P<recipient>\d+)@response\.musicmatch\.com$'
+    family: musicmatch-response
+    name_source: fixed
+    fallback_name: Musicmatch

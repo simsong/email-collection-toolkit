@@ -74,10 +74,15 @@ def worldwide_bounds(value: str) -> tuple[str, str]:
             (midnight + timedelta(days=1, hours=12)).isoformat())
 
 
+def is_address_fragment(value: str) -> bool:
+    """Distinguish email substrings (including quoted local parts) from human names."""
+    return re.fullmatch(r'(?:"[^"]*"|[^\s<>]*)@[^\s<>]*', value) is not None
+
+
 def matching_addresses(value: str, names: bool = False) -> SearchStatement:
     sql = "SELECT address_pk FROM email_addresses WHERE lower(address) LIKE ? ESCAPE '\\'"
     parameters: list[str | int] = [contains(value)]
-    if names:
+    if names and not is_address_fragment(value):
         sql += (" UNION SELECT a.address_pk FROM address_search_names n "
                 "JOIN email_addresses a ON a.address=n.address WHERE lower(n.name) LIKE ? ESCAPE '\\'")
         parameters.append(contains(value))
@@ -167,6 +172,14 @@ def prepare_names(database: sqlite3.Connection, archive: Path) -> None:
             "JOIN identities.person_addresses pa USING(address_id) JOIN identities.person_aliases n USING(person_id)",
             f"SELECT a.address,json_extract(e.value,'{EVIDENCE_NAME_PATH}') FROM identities.addresses a "
             "JOIN identities.evidence e USING(address_id) WHERE e.kind='header'",
-            "SELECT address,name FROM organization_address_names",
         ))
-    database.execute("CREATE TEMP VIEW address_search_names AS " + " UNION ".join(sources))
+    database.execute("CREATE TEMP VIEW observed_address_names AS " + " UNION ".join(sources))
+    expanded = "SELECT address,name FROM observed_address_names"
+    if (archive / "processing.sqlite3").is_file():
+        expanded += (" UNION SELECT member.address,n.name FROM observed_address_names n "
+            "JOIN identities.addresses observed ON observed.address=n.address "
+            "JOIN identities.person_addresses owner ON owner.address_id=observed.address_id "
+            "JOIN identities.person_addresses peer ON peer.person_id=owner.person_id "
+            "JOIN identities.addresses member ON member.address_id=peer.address_id"
+            " UNION SELECT address,name FROM organization_address_names")
+    database.execute("CREATE TEMP VIEW address_search_names AS " + expanded)
