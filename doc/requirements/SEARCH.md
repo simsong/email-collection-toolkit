@@ -7,6 +7,21 @@ platform/release acceptance. Deferred features live in [plans](../plans/README.m
 
 ## Search database
 
+Search ignores case and combining accents and treats `ß`/`ẞ` as `ss`, without
+stemming or a case-sensitivity option. The same normalization applies to query
+text, indexed derivatives, subject/address/name selectors and suggestions.
+Existing word indexes remain usable without reindexing: query compilation must
+include native vocabulary spellings that normalize to the requested words.
+Canonical bytes, hashes, displayed headers and previews remain unchanged.
+Inside quotes, punctuation and symbols are significant, including prefixes,
+suffixes and separators: `"CACM-"` requires the hyphen and `"Ham+Sandwhich"`
+requires the plus. Candidate words retain native word/phrase boundaries;
+quoted symbols are checked in normalized candidate text before counting,
+ordering and pagination. Unquoted separators retain ordinary word-search
+behavior. Quoted text consisting only of symbols uses a literal scan.
+Attachment-inclusive searches apply each term's word and literal predicates
+within the same body/header or attachment text, then intersect the terms.
+
 `search.sqlite3` is a separate, disposable SQLite FTS5 database.  It indexes
 normal Sent and Archive message SHA-256, normalized headers, `text/plain` body text when present,
 otherwise rendered `text/html`, otherwise safe single-part message text.  It

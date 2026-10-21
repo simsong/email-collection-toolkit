@@ -595,3 +595,11 @@ instead of validating a different revision from the Rust build.
 Pages deploys on every `main` push and after a tagged release
 publishes, using the release run's signed appcast rather than a release-list
 query for that new asset; the two deployment paths are serialized.
+
+## Archive status banner
+
+Search windows reserve footer space for ordered plain-text archive notices,
+rendered with `textContent`, beside the existing ingest-history and link status.
+The banner is hidden without an archive, in standalone readers, and in print.
+The initial notice states that only text attachments are indexed. Tika extraction
+and its indexing action/progress remain planned; no fabricated progress is shown.

@@ -15,7 +15,8 @@ The repository keeps these reports as source-controlled working documents:
 - [Email servers research](https://github.com/simsong/email-collection-toolkit/blob/main/doc/Email%20Servers.md)—read-only source and provider considerations.
 
 Some reports discuss planned work. The
-[README](https://github.com/simsong/email-collection-toolkit/blob/main/README.md) lists
-the available commands and source formats. The
+[Command Line reference](@/advanced.md#command-line) collects terminal commands;
+the [README](https://github.com/simsong/email-collection-toolkit/blob/main/README.md)
+lists source formats. The
 [release notes](https://github.com/simsong/email-collection-toolkit/blob/main/doc/RELEASE_NOTES.md)
 list changes by release.

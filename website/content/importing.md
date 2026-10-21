@@ -132,8 +132,8 @@ Takeout export, local cache, or IMAP account is not added to the canonical
 archive twice. Every source observation is retained, and neither action deletes
 canonical mail.
 
-Import/Rebuild is not `refresh-index`. The latter reads messages already in the
+Import/Rebuild differs from a search-index refresh, which reads messages already in the
 archive and replaces only the disposable search index.
 
-See the [CLI reference](https://github.com/simsong/email-collection-toolkit/blob/main/doc/CLI_REFERENCE.md)
-for the currently available explicit-path commands.
+See [Advanced → Command Line](@/advanced.md#command-line) for terminal commands
+and the full command reference.

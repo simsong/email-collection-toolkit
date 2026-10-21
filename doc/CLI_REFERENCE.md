@@ -141,6 +141,12 @@ canonical content deduplication then recognizes.
 
 ## Search and message display
 
+Search ignores case and accents and treats `ß`/`ẞ` as `ss`, without stemming.
+Existing indexes need no rebuild. Quoted symbols remain significant: `"CACM-"`
+requires the hyphen and `"Ham+Sandwhich"` requires the plus. Word boundaries apply.
+Use `mailsearch --query '"Ham+Sandwhich"'` to preserve quoted search-box syntax
+through the shell.
+
 Wrapper: `make search ARGS='OPTIONS SEARCH ...'`; entry point: `mailsearch`.
 With no search terms it lists normal indexed messages. Infected/excluded records
 are outside ordinary search; use `review` for source dispositions.

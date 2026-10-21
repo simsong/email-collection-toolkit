@@ -19,6 +19,8 @@ platform or release gate has passed. [Future work](plans/README.md) is separate.
 
 ## Shared boundaries
 
+- Natural search preserves quoted symbols and works with existing indexes;
+  see [search behavior](requirements/SEARCH.md).
 - Desktop recovery requires an informed continue/defer/abort choice, and collapsed
   warnings remain readable; see [desktop recovery](requirements/DESKTOP.md#saved-import-recovery-and-notices).
 

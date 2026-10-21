@@ -301,6 +301,10 @@ packages. Stop writers first and investigate every failure before continued use.
 
 ## Search with the graphical interface
 
+Search ignores case and accents and treats `ß`/`ẞ` as `ss`, without stemming.
+Existing indexes need no rebuild. Quoted symbols remain significant: `"CACM-"`
+requires the hyphen and `"Ham+Sandwhich"` requires the plus. Word boundaries apply.
+
 Start the graphical search interface with:
 
 See the [CLI reference](CLI_REFERENCE.md#desktop) for invocation.
@@ -496,6 +500,10 @@ See the [CLI reference](CLI_REFERENCE.md#local-archive-commands) for invocation.
 PDF and Microsoft Office attachment extraction is not implemented yet.
 
 ## Viewing messages
+
+The archive-status banner displays notices on separate lines, including the
+current text-attachment indexing limitation. The ingest-history line remains
+clickable; a separate Tika indexing action and progress display remain planned.
 
 Select a search result to view it beside the result list, or double-click the
 result to open it in an independent window. That window has its own scrollbar,

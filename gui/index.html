@@ -71,6 +71,7 @@
             <section class="search-help" aria-label="Search language help">
               <h2>Search the archive</h2>
               <p>Every search covers the complete archive. Separate terms are combined with AND; use quotes for a phrase.</p>
+              <p>Search ignores case and accents; ß and ss match. No stemming is applied. Quotes preserve symbols: <code>"CACM-"</code> requires the hyphen and <code>"Ham+Sandwhich"</code> requires the plus. Existing indexes need no rebuild.</p>
               <table>
                 <thead><tr><th>Search form</th><th>Example</th></tr></thead>
                 <tbody>
@@ -139,7 +140,10 @@
           </div>
         </article>
       </section>
-      <button id="ingest-status-line" class="ingest-status-line no-print" type="button" hidden></button>
+      <footer id="archive-status-banner" class="archive-status-banner no-print" aria-label="Archive status" hidden>
+        <div id="archive-status-messages" role="status" aria-live="polite"></div>
+        <button id="ingest-status-line" class="ingest-status-line" type="button" hidden></button>
+      </footer>
       <div id="error" role="alert" hidden></div>
       <button id="notice-pill" class="no-print" type="button" aria-controls="error" aria-expanded="false" hidden></button>
       <dialog id="link-dialog">

@@ -31,6 +31,7 @@ from pydantic import BaseModel
 
 from .encoding import decode_text
 from .message import decoded_header, decoded_message_header
+from .search_text import search_fold
 
 SEARCH_CATEGORIES = ("Archive", "Sent")
 QUARANTINE_MAILBOX = re.compile(r"^(?:INFECTED|MALFORMED)\d+\.mbox$")
@@ -226,13 +227,13 @@ def write_prepared_search_message(
     delete_indexed_message(search, digest)
     message_fts_rowid = search.execute(
         "INSERT INTO message_fts(sha256, content) VALUES (?, ?)",
-        (digest, prepared.content),
+        (digest, search_fold(prepared.content)),
     ).lastrowid
     assert message_fts_rowid is not None
     attachment_fts_rowid: int | None = None
     if prepared.attachment_content:
         attachment_fts_rowid = search.execute(
-            "INSERT INTO attachment_fts(sha256, content) VALUES (?, ?)", (digest, prepared.attachment_content)
+            "INSERT INTO attachment_fts(sha256, content) VALUES (?, ?)", (digest, search_fold(prepared.attachment_content))
         ).lastrowid
     search.execute(
         "INSERT INTO message_metadata(sha256, message_fts_rowid, attachment_fts_rowid, attachment_count, preview) "

@@ -15,6 +15,12 @@ archived mail and history while cancelling saved traversal and outstanding jobs.
 Search-window warnings collapse to a message pill that reopens their full text
 and earlier messages for the lifetime of the window.
 
+## Natural search and archive status
+
+Match case/accent variants and sharp s without rebuilding existing indexes.
+Preserve quoted symbols before counts, ordering and pagination; CLI `--query`
+retains quoted syntax. Search windows display a separate archive-status banner.
+
 ## Incremental cache release and IMAP interruption
 
 Release cached raw messages after each durable MBOX publication and SQL commit,

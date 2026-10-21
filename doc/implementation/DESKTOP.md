@@ -789,3 +789,11 @@ partial-append recovery, native-source and loopback-HTTP message boundaries, and
 duplicate-free restart. `make test-native-quit` tests the real Cocoa About window
 during periodic status polling. Its existing `MAILARCHIVER_NATIVE_GUI_E2E` opt-in
 flag requires a macOS GUI session. These tests use only disposable archives.
+
+## Archive status banner
+
+Search windows reserve footer space for ordered plain-text archive notices,
+rendered with `textContent`, beside the existing ingest-history and link status.
+The banner is hidden without an archive, in standalone readers, and in print.
+The initial notice states that only text attachments are indexed. Tika extraction
+and its indexing action/progress remain planned; no fabricated progress is shown.

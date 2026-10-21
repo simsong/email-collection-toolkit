@@ -177,3 +177,28 @@ indexed probes that a superficial index-name assertion would miss. Subject
 substring searches have a separate linear-work budget because an ordinary
 B-tree cannot seek a leading-wildcard pattern. Tests check plan properties rather
 than snapshotting SQLite's entire version-dependent explanation.
+
+## Natural search matching
+
+Natural search shares `search_text.search_fold`: Unicode case folding expands
+sharp s to `ss`, then NFD decomposition removes combining accents. New body
+and attachment FTS writes normalize only search content; previews and canonical
+mail retain their original text. The existing V1 index needs no rebuild.
+For legacy content, connection-local `fts5vocab` tables supply exceptional
+spellings whose normalization differs from their native token. Query compilation
+expands those words into FTS phrases; more than 64 phrase combinations use
+ANDed word alternatives followed by a normalized token-adjacency check.
+Indexed vocabulary lookups assemble native fragment phrases for legacy words
+split by combining accents. Ordinary queries do not scan isolated one-letter
+prefixes; exceptionally ambiguous fragmentations retain a bounded-expression
+prefix fallback. Native matches whose content contains combining marks and all extra
+candidates pass the normalized token-adjacency check, including Latin words.
+This also rejects legacy fragments that become interior parts of a normalized word.
+A bounded process cache follows the index's path, inode, size and nanosecond
+timestamps, sampled across attachment/read-lock acquisition. WAL indexes bypass
+that cache. This keeps vocabulary changes and atomic replacements visible.
+POSIX quote intent survives parsing for symbol-containing text; `search_literal`
+checks the normalized literal and its own word boundaries in each matching FTS table before counts, sorts
+or limits. Symbols-only quotes scan indexed text. Selectors and suggestions use
+the same registered normalization function. CLI `--query` preserves search-box
+quotation through shell parsing. Case sensitivity and stemming are not options.

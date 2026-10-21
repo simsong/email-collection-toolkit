@@ -19,6 +19,8 @@ platform or release gate has passed. [Future work](plans/README.md) is separate.
 
 ## Shared boundaries
 
+- Natural search preserves quoted symbols and works with existing indexes;
+  see [search behavior](implementation/SEARCH.md).
 - Desktop recovery summarizes saved attempts and records lease-protected aborts;
   warning history collapses to a reopenable pill. See
   [desktop recovery](implementation/DESKTOP.md#saved-import-recovery-and-notices).

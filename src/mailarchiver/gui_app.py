@@ -179,6 +179,7 @@ class GuiStatus(BaseModel):
     write_available: bool = True
     configuration: GuiConfiguration
     notices: list[ApplicationNotice] = Field(default_factory=list)
+    archive_status_messages: list[str] = Field(default_factory=list)
 
 
 class GuiIngestOverview(BaseModel):
@@ -807,6 +808,7 @@ class GuiApi:
             opened_in_new_window=opened_in_new_window,
             configuration=application_configuration().gui,
             notices=self.application.notices() if self.application else [],
+            archive_status_messages=["Currently only .txt email attachments are indexed"] if ready else [],
         ).model_dump(mode="json")
 
     def activate(self) -> bool:

@@ -233,6 +233,13 @@ reports, diagnostics and packaging. The [user manual](doc/USER_MANUAL.md) explai
 the workflows and GUI; [requirements](doc/requirements.md) and
 [implementation](doc/implementation.md) define preservation and recovery.
 
+### Search matching
+
+Search ignores case and accents and treats `ß`/`ẞ` as `ss`, without stemming.
+Existing indexes need no rebuild. Quoted symbols remain significant: `"CACM-"`
+requires the hyphen and `"Ham+Sandwhich"` requires the plus. Word boundaries apply.
+See the [search command reference](doc/CLI_REFERENCE.md#search-and-message-display).
+
 ### Standalone IMAP downloads
 
 The standalone Python CLI configures an account interactively, synchronizes once
