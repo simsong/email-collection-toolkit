@@ -1,11 +1,15 @@
 # Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved.
-# Normalize searchable derivatives without changing preserved mail or previews.
-# Case folding, decomposed accents and German sharp s share one text contract.
-# Existing FTS vocabulary supplies legacy spellings without rebuilding messages.
-# A bounded vocabulary cache follows read-locked SQLite file identities.
-# Phrase expansion uses native FTS positions; large expansions use a phrase check.
-# All database mutations here create connection-local temporary tables only.
-"""Shared search normalization and compatibility with existing word indexes."""
+
+"""Shared search normalization and compatibility with existing word indexes.
+
+Purpose: Match natural text without changing preserved mail, headers or previews.
+How it works:
+Case folding and accent removal share one contract; legacy FTS vocabulary and
+native positions preserve word boundaries without rebuilding existing indexes.
+Fundamental dependents:
+- ``mailsearch``: content queries require compatible vocabulary and literal checks.
+- ``search_selectors``: names and addresses use the same normalization contract.
+"""
 from __future__ import annotations
 
 import re
