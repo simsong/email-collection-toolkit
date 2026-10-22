@@ -19,6 +19,8 @@ platform or release gate has passed. [Future work](plans/README.md) is separate.
 
 ## Shared boundaries
 
+- Freeze all manifest-referenced acquisition adapters; validate local ingestion
+  with `make test-frozen-source-plugins` before packaging handoff.
 - Natural search preserves quoted symbols and works with existing indexes;
   see [search behavior](implementation/SEARCH.md).
 - Desktop recovery summarizes saved attempts and records lease-protected aborts;

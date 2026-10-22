@@ -302,3 +302,10 @@ The frozen controller/compiled delegate probe and real HTTPS standard-UI probe
 passed during development; these do not establish signed application replacement.
 [SPARKLE_UPDATES.md](../SPARKLE_UPDATES.md) records validation targets and remaining
 production acceptance, with macOS 15/arm64 as the configured initial target.
+
+## Frozen acquisition modules
+
+The macOS build derives hidden imports from trusted built-in acquisition manifests.
+`make test-frozen-source-plugins` uses those same arguments and resources to build
+a temporary PyInstaller CLI, ingest synthetic EML, and verify canonical bytes.
+This component test does not establish signed/notarized DMG or Windows acceptance.

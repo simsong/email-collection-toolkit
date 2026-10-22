@@ -15,6 +15,11 @@ archived mail and history while cancelling saved traversal and outstanding jobs.
 Search-window warnings collapse to a message pill that reopens their full text
 and earlier messages for the lifetime of the window.
 
+## Frozen acquisition adapters
+
+Derive macOS hidden imports from all built-in source/file manifests, including
+IMAP. Validate synthetic local ingest through a disposable frozen executable.
+
 ## Natural search and archive status
 
 Match case/accent variants and sharp s without rebuilding existing indexes.

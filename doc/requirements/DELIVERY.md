@@ -361,3 +361,9 @@ owns public trust, publisher identity, OIDC provisioning and verification.
 [DEVOPS.md](../DEVOPS.md) owns coordinated publication. Historical Rust/MSIX
 chronology is consolidated in [RUST_GUI_EXPERIMENTS.md](../RUST_GUI_EXPERIMENTS.md);
 it does not establish current-head packaging or Windows feature parity.
+
+## Frozen acquisition modules
+
+Every bundled source/file manifest must resolve in the frozen application, even
+when that provider is unused. Synthetic local ingest must load the registry and
+preserve canonical bytes without an installed source checkout.

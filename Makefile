@@ -1009,3 +1009,8 @@ clamav-seed:
 .PHONY: test-processing-cleanup
 test-processing-cleanup:
 	uv run --locked pytest -q tests/test_processing_objects.py $(PYTEST_ARGS)
+
+# Build a disposable frozen CLI and exercise manifest-loaded sources with synthetic mail.
+.PHONY: test-frozen-source-plugins
+test-frozen-source-plugins: ruff
+	uv run --locked --group packaging python scripts/check_frozen_source_plugins.py
