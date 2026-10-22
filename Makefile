@@ -38,6 +38,12 @@ test-updater-supervisor:
 test-definition-state:
 	uv run --locked pytest -q tests/test_clamav_definitions.py
 
+# Automatic refresh tests use local connectivity fixtures, never a public CDN.
+# MAILARCHIVER_CLAMAV_DATABASE pins explicit test/development definitions.
+.PHONY: test-definition-refresh
+test-definition-refresh:
+	uv run --locked pytest -q tests/test_clamav_refresh.py
+
 test-python-writer:
 	uv run --locked pytest -q tests/test_application.py tests/test_writer_lock.py tests/test_plugin_configuration.py tests/test_portable_writer.py $(PYTEST_ARGS)
 
@@ -469,7 +475,7 @@ extract-pdf-mail:
 	uv run extract-pdf-mail $(ARGS)
 
 pylint:
-	uv run --locked pylint src tests e2e_tests scripts
+	uv run --locked pylint src tests e2e_tests scripts conftest.py
 	uv run --locked --project converters/pff pylint --rcfile=pyproject.toml converters/pff/src converters/pff/tests converters/pff/entry.py
 
 run:

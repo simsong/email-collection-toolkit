@@ -1,8 +1,8 @@
 # Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved.
 
-"""Explicit, one-shot FreshClam updates; publish only successfully tested generations.
+"""One-shot FreshClam updates; publish only successfully tested generations.
 
-Purpose: Refresh antivirus definitions through an explicit one-shot operation.
+Purpose: Refresh antivirus definitions explicitly or before an ordinary scan session.
 
 How it works:
 Supervise FreshClam, validate candidate signatures by scanning, and atomically select a new
@@ -17,23 +17,58 @@ from __future__ import annotations
 
 import argparse
 import importlib
+import logging
 import os
 import shutil
 import subprocess
 import tempfile
 from contextlib import contextmanager
-from datetime import UTC, datetime
+from collections.abc import Callable
+from datetime import UTC, datetime, timedelta
+from http.client import HTTPException
 from pathlib import Path
+from urllib.error import HTTPError
+from urllib.request import Request, urlopen
 from uuid import uuid4
 
 from pydantic import BaseModel
 
-from .clamav_definitions import DEVELOPMENT_DATABASE, PREFIXES, ActiveDefinitions, DefinitionSet, certificates_path, read_definitions, selected_definitions, update_root, updater_path
+from .clamav_definitions import DATABASE_ENV, DEVELOPMENT_DATABASE, PREFIXES, ActiveDefinitions, DefinitionSet, certificates_path, read_definitions, selected_definitions, update_root, updater_path
 from .scanner import ClamScanner
 from .owned_command import run_owned_command
 from .writer_lock import application_write_activity
 
 EICAR = b"X5O!P%@AP[4\\PZX54(P^)7CC)7}$EICAR-STANDARD-ANTIVIRUS-TEST-FILE!$H+H*"
+DEFINITION_CHECK_URL = "https://database.clamav.net/"
+
+
+def internet_available() -> bool:
+    """Check the update site's HTTPS reachability without downloading definitions."""
+    try:
+        with urlopen(Request(DEFINITION_CHECK_URL, method="HEAD"), timeout=3):
+            return True
+    except HTTPError:
+        # Even an HTTP refusal establishes connectivity; FreshClam handles CDN policy.
+        return True
+    except (OSError, HTTPException):
+        return False
+
+
+def definitions_for_scan(definitions: DefinitionSet, *, now: datetime | None = None,
+                         status_callback: Callable[[], None] | None = None) -> DefinitionSet:
+    """Refresh old default definitions when online; age or update failure never blocks scanning."""
+    if os.environ.get(DATABASE_ENV) or (now or datetime.now(UTC)) <= definitions.daily.published + timedelta(days=1):
+        return definitions
+    if status_callback is not None:
+        status_callback()
+    if not internet_available():
+        return definitions
+    try:
+        refresh_definitions(status_callback=status_callback)
+        return selected_definitions()
+    except (OSError, ValueError, RuntimeError, EOFError) as error:
+        logging.getLogger(__name__).warning("Virus definition refresh failed; using existing definitions: %s", error)
+        return definitions
 
 
 class UpdateResult(BaseModel):
@@ -79,11 +114,11 @@ def update_lock(root: Path):
                 locking.flock(handle.fileno(), locking.LOCK_UN)
 
 
-def validate_definitions(definitions: DefinitionSet) -> None:
+def validate_definitions(definitions: DefinitionSet, status_callback: Callable[[], None] | None = None) -> None:
     """Verify native loading and real clean/EICAR verdicts before publishing."""
     if definitions.daily.published > datetime.now(UTC):
         raise ValueError("Updated definitions have a future publication date")
-    with ClamScanner(definitions=definitions) as scanner:
+    with ClamScanner(status_callback, definitions=definitions) as scanner:
         if scanner.infected(b"From: offline@example.test\nSubject: clean\n\nA clean validation message.\n"):
             raise ValueError("Clean definition-validation fixture was detected as infected")
         verdict = scanner.scan_sample(EICAR)
@@ -91,12 +126,13 @@ def validate_definitions(definitions: DefinitionSet) -> None:
             raise ValueError("Updated definitions did not detect EICAR")
 
 
-def publish_definitions(staging: Path, root: Path, baseline: DefinitionSet | None) -> UpdateResult:
+def publish_definitions(staging: Path, root: Path, baseline: DefinitionSet | None, *,
+                        status_callback: Callable[[], None] | None = None) -> UpdateResult:
     """Caller holds update_lock. A failed validation cannot replace active.json."""
     definitions = read_definitions(staging, "updated")
     if baseline is not None and definitions.daily.version < baseline.daily.version:
         raise ValueError("Refusing to replace definitions with an older daily database")
-    validate_definitions(definitions)
+    validate_definitions(definitions, status_callback)
     generation = uuid4().hex
     destination = root / "generations" / generation
     destination.parent.mkdir(parents=True, exist_ok=True)
@@ -115,17 +151,18 @@ def publish_definitions(staging: Path, root: Path, baseline: DefinitionSet | Non
 
 def publish_downloaded_definitions(
     staging: Path, root: Path, baseline: DefinitionSet | None, diagnostics: str,
+    *, status_callback: Callable[[], None] | None = None,
 ) -> UpdateResult:
     """Retain updater evidence even when publication already moved staging."""
     files = ", ".join(sorted(path.name for path in staging.iterdir()))
     try:
-        return publish_definitions(staging, root, baseline)
+        return publish_definitions(staging, root, baseline, status_callback=status_callback)
     except (OSError, ValueError, RuntimeError) as error:
         raise RuntimeError(f"Downloaded definitions failed validation or publication: {error}; files: {files}; "
                            f"FreshClam: {diagnostics[-4096:]}") from error
 
 
-def refresh_definitions() -> UpdateResult:
+def refresh_definitions(*, status_callback: Callable[[], None] | None = None) -> UpdateResult:
     root = update_root()
     with application_write_activity(), update_lock(root):
         try:
@@ -146,13 +183,14 @@ def refresh_definitions() -> UpdateResult:
             write_freshclam_config(configuration, certificates_path(), checks=0)
             try:
                 result = run_owned_command([str(updater_path()), f"--config-file={configuration}",
-                    f"--datadir={staging}", "--stdout"], timeout=600)
+                    f"--datadir={staging}", "--stdout"], timeout=600, status_callback=status_callback)
             finally:
                 if (staging / "freshclam.dat").is_file():
                     shutil.copyfile(staging / "freshclam.dat", state)
             if result.returncode or "cool-down until" in (result.stdout + result.stderr):
                 raise RuntimeError(f"Definition update failed ({result.returncode}): {(result.stdout + result.stderr)[-4096:]}")
-            return publish_downloaded_definitions(staging, root, baseline, result.stdout + result.stderr)
+            return publish_downloaded_definitions(staging, root, baseline, result.stdout + result.stderr,
+                                                 status_callback=status_callback)
 
 
 def seed_definitions(source: Path) -> UpdateResult:

@@ -185,6 +185,11 @@ make freshclam
 ```
 
 `make freshclam` seeds and updates `etc/clamdb` from the installed database.
+Before ordinary Python scan sessions, daily definitions over 24 hours old are
+automatically refreshed when the update site is reachable. Offline or failed
+updates retain the existing definitions; age alone does not prevent scanning.
+Explicit `MAILARCHIVER_CLAMAV_DATABASE` overrides remain pinned without automatic
+updates. `make test-definition-refresh` validates this policy with local fixtures.
 No ClamAV daemon is configured or started; see
 [embedded antivirus](doc/EMBEDDED_CLAMAV.md). Run the project command with `uv run mailarchiver`.
 
@@ -257,7 +262,7 @@ and desktop account setup remain planned.
 | --- | --- |
 | `MAIL_ARCHIVE_DIR` | Default archive for local ingest/search; explicit `--archive` wins |
 | `MAILARCHIVER_CLAMAV_LIBRARY` | Embedded native engine library override |
-| `MAILARCHIVER_CLAMAV_DATABASE` | Baseline definition directory |
+| `MAILARCHIVER_CLAMAV_DATABASE` | Pinned baseline definition directory; disables automatic refresh |
 | `MAILARCHIVER_CLAMAV_UPDATES` | Per-user definition update storage |
 | `MAILARCHIVER_FRESHCLAM` | One-shot definition updater executable |
 | `MAILARCHIVER_CLAMAV_CERTIFICATES` | Signature verification certificates |

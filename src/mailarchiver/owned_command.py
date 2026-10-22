@@ -16,6 +16,8 @@ import multiprocessing
 import os
 import signal
 import subprocess
+import time
+from collections.abc import Callable
 from multiprocessing.connection import Connection, wait
 from threading import Thread
 
@@ -63,7 +65,8 @@ def _terminate_group() -> None:
         os.killpg(os.getpid(), signal.SIGKILL)
 
 
-def run_owned_command(command: list[str], *, timeout: float) -> CommandResult:
+def run_owned_command(command: list[str], *, timeout: float,
+                      status_callback: Callable[[], None] | None = None) -> CommandResult:
     """Run a one-shot POSIX utility, including cleanup if its supervisor fails."""
     context = multiprocessing.get_context("spawn")
     receiver, sender = context.Pipe(duplex=False)
@@ -71,8 +74,12 @@ def run_owned_command(command: list[str], *, timeout: float) -> CommandResult:
     try:
         worker.start()
         sender.close()
-        if not receiver.poll(timeout + 5):
-            raise TimeoutError("command supervisor timed out")
+        deadline = time.monotonic() + timeout + 5
+        while not receiver.poll(min(0.25, max(0, deadline - time.monotonic()))):
+            if time.monotonic() >= deadline:
+                raise TimeoutError("command supervisor timed out")
+            if status_callback is not None:
+                status_callback()
         result = receiver.recv()
         if not isinstance(result, CommandResult):
             raise RuntimeError("invalid command supervisor response")

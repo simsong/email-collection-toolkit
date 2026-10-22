@@ -6,6 +6,14 @@ Entries describe their recorded revisions. For current behavior use the
 [user manual](USER_MANUAL.md) and [CLI reference](CLI_REFERENCE.md). Retired
 Rust delivery plans and historical package checks are not current acceptance.
 
+## Automatic virus definition refresh
+
+Before ordinary Python scan sessions, automatically refresh daily definitions
+over 24 hours old when the Internet update site is reachable. Reuse the verified
+one-shot updater and retain existing definitions when offline or an update fails.
+Definition age alone never blocks scanning. Explicit test/development definition
+overrides stay pinned; Stop/Quit remains effective during updates.
+
 ## Informed import recovery and retained warnings
 
 The desktop asks before continuing saved imports, showing source/account,

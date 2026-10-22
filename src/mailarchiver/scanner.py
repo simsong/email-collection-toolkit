@@ -182,6 +182,9 @@ class ClamScanner(AbstractContextManager["ClamScanner"]):
     def __enter__(self) -> Self:
         try:
             definitions = self.definitions or selected_definitions()
+            if self.definitions is None:
+                from .clamav_update import definitions_for_scan
+                definitions = definitions_for_scan(definitions, status_callback=self.status_callback)
             self.runtime = tempfile.TemporaryDirectory(prefix="libclamav-", dir=self.scan_temporary_directory)
             context = multiprocessing.get_context("spawn")
             self.connection, child = context.Pipe()
@@ -202,9 +205,11 @@ class ClamScanner(AbstractContextManager["ClamScanner"]):
             with _SESSIONS_LOCK:
                 _SESSIONS[self.session] = self
             return self
-        except (OSError, ValueError, RuntimeError, EOFError) as error:
+        except BaseException as error:
             self.__exit__()
-            raise ClamScannerStartupError(str(error)) from error
+            if isinstance(error, (OSError, ValueError, RuntimeError, EOFError)):
+                raise ClamScannerStartupError(str(error)) from error
+            raise
 
     def _receive(self, deadline: float, *, startup: bool = False) -> ScanEvidence:
         assert self.connection is not None

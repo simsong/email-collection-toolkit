@@ -97,7 +97,7 @@ extension-pkg-allow-list = ["pypff"]
 select = ["E4", "E7", "E9", "F"]
 
 [tool.ty.src]
-include = ["src", "scripts", "tests", "e2e_tests", "validation/aws"]
+include = ["src", "scripts", "tests", "e2e_tests", "validation/aws", "conftest.py"]
 
 [tool.ty.environment]
 extra-paths = ["typings", "scripts", "converters/pff/src"]
@@ -105,6 +105,6 @@ extra-paths = ["typings", "scripts", "converters/pff/src"]
 [tool.pyright]
 stubPath = "typings"
 extraPaths = ["scripts", "converters/pff/src"]
-include = ["src", "scripts", "tests", "e2e_tests", "validation/aws"]
+include = ["src", "scripts", "tests", "e2e_tests", "validation/aws", "conftest.py"]
 pythonVersion = "3.12"
 typeCheckingMode = "standard"

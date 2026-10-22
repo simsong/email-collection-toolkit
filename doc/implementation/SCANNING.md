@@ -18,7 +18,7 @@ Per-message hashing and deduplication belong to Python; there are no scan receip
 or additional database schema. Operators handle failures by re-importing.
 
 About displays definition dates and an amber recommendation after three calendar
-months, with explicit FreshClam refresh into immutable per-user generations.
+months, with manual and pre-scan FreshClam refresh into immutable per-user generations.
 Failed updates cannot replace active definitions. Project-owned Python, Rust,
 tools, documentation, and website code use GPL-2.0-only, with additional licenses
 available. The independent converter code uses GPLv3; upstream pypff/libpff
@@ -83,6 +83,34 @@ private update root. Frozen resource resolution uses the bundle rather than
 Homebrew. The DMG and MSIX builders bundle the engine and definitions, and
 release CI runs `make freshclam` first; see EMBEDDED_CLAMAV.md. Legacy
 MAILARCHIVER_CLAMD settings are ignored.
+
+### Automatic definition refresh
+
+`ClamScanner.__enter__` calls `clamav_update.definitions_for_scan` before starting
+its native worker. Daily publication ages strictly over 24 hours trigger a HEAD
+request to `https://database.clamav.net/` with a three-second socket timeout.
+An HTTP refusal still establishes connectivity; connection or HTTP protocol failures retain the
+current definitions without running FreshClam. Online sessions reuse
+`refresh_definitions`: its writer/update locks, 600-second owned-command timeout,
+clean/EICAR validation and atomic activation remain authoritative. Failed updates
+log a warning and retain the selected immutable baseline. Successful updates
+reselect definitions before loading the engine. Native startup retains its separate
+120-second deadline after this refresh.
+
+Updater polling and validation forward the scanner status callback, retaining
+progress refresh and cooperative Stop/Quit checks. Cancelled native startup reaps
+its candidate worker and temporary files before propagating cancellation. Explicit definition sets skip
+the automatic path, preventing recursive updates while validating a candidate.
+`MAILARCHIVER_CLAMAV_DATABASE` also pins development/test definitions. Running
+engines keep their selected generation; automatic refresh happens once per session,
+not once per message. `make test-definition-refresh` exercises the 24-hour boundary,
+local online/offline probes, update failure/selection, pinning and owned-command
+cancellation without contacting the public CDN. Real clean/EICAR validation remains
+covered by `make test-clamav`.
+The root pytest session fixture pins the selected existing generation for ordinary
+tests and inherited subprocesses, preventing stale local definitions from causing
+public-CDN requests or writes to user update storage. Automatic-refresh tests remove
+that pin explicitly and isolate their update directories and HTTP endpoints.
 
 
 Current MIME traversal uses the standard-library parser without explicit size,

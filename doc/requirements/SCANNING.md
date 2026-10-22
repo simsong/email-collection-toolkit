@@ -22,6 +22,16 @@ recorded in THIRD_PARTY_NOTICES.md.
   `not-scanned` in run status and an antivirus metadata defect on each new message.
   Earlier run status without this field is unknown, not presumed scanned.
   Repeat imports do not retroactively scan previously archived messages.
+* Before each ordinary Python scanner session, compare the selected daily database's
+  publication timestamp with the current UTC time. When it is strictly more than
+  24 hours old, check Internet reachability and, if online, automatically run the
+  one-shot definition updater before loading the scan engine. Definition age alone
+  never blocks scanning. Offline checks, CDN failures, updater contention and invalid
+  downloads retain the existing definitions; successful updates use the newly selected
+  validated generation. Stop/Quit must remain effective during the update.
+  Explicit `MAILARCHIVER_CLAMAV_DATABASE` overrides and caller-supplied definition
+  sets remain pinned without network checks, including candidate validation engines.
+  No resident updater or scheduled job is created.
 * Python and Rust scanners disable ClamAV's URL-phishing module, including
   suspicious-link domain/protocol mismatch checks. These checks can flag legitimate
   marketing redirects. Signature-based malware/phishing and bytecode scanning,

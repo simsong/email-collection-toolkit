@@ -28,6 +28,8 @@ platform or release gate has passed. [Future work](plans/README.md) is separate.
 
 - Embedded scanners disable URL-phishing checks while retaining malware scanning;
   see the [scanning policy](requirements/SCANNING.md#malware-handling).
+- Before Python scan sessions, refresh definitions over 24 hours old when online;
+  offline or failed refreshes retain existing definitions. See [scanning](requirements/SCANNING.md).
 - Release cached raw mail after each MBOX publication and SQL commit, preserving
   live derived inputs and retry checkpoints;
   see [working-object lifetime](requirements/PROCESSING.md#working-object-lifetime).

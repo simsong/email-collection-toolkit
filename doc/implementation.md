@@ -29,6 +29,8 @@ platform or release gate has passed. [Future work](plans/README.md) is separate.
 
 - Python and Rust omit the URL-phishing database option;
   see [scanner configuration](implementation/SCANNING.md#embedded-scanner-configuration).
+- Python scanner startup checks old definitions and reuses the validated one-shot
+  updater when online; see [automatic refresh](implementation/SCANNING.md#automatic-definition-refresh).
 - Release cached raw mail after each MBOX publication and SQL commit, preserving
   live derived inputs and retry checkpoints;
   see [working-object lifetime](implementation/PROCESSING.md#working-object-lifetime).
