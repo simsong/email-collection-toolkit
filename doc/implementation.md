@@ -31,6 +31,8 @@ platform or release gate has passed. [Future work](plans/README.md) is separate.
   see [scanner configuration](implementation/SCANNING.md#embedded-scanner-configuration).
 - Python scanner startup checks old definitions and reuses the validated one-shot
   updater when online; see [automatic refresh](implementation/SCANNING.md#automatic-definition-refresh).
+- Recovery rescans unsuccessful saved verdicts and drains archived content before
+  pending ingest in unbounded runs; see [processing recovery](implementation/PROCESSING.md#working-object-lifetime).
 - Release cached raw mail after each MBOX publication and SQL commit, preserving
   live derived inputs and retry checkpoints;
   see [working-object lifetime](implementation/PROCESSING.md#working-object-lifetime).

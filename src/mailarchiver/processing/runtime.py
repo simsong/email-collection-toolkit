@@ -41,6 +41,8 @@ from .registry import fingerprint, subscribers
 from .store import content_reference, enqueue, report, snapshot
 from .objects import collect_objects, index_outputs
 
+RANK_FAILURE = "rank failed; inspect invocations"
+
 
 class ProcessorServices(Protocol):
     def prepare(self, item: ProcessingObject) -> ProcessingObject: ...
@@ -243,12 +245,14 @@ def run(database: sqlite3.Connection, plugins: tuple[PluginSpec, ...], *, retry:
         max_jobs: int | None = None, installation_config: Path | None = None,
         pipelines: tuple[Pipeline, ...] = ("ingest", "message", "content"),
         services: ProcessorServices | None = None, cancelled: Callable[[], None] | None = None,
-        failures: list[Exception] | None = None, message_id: str | None = None) -> RunReport:
+        failures: list[Exception] | None = None, message_id: str | None = None,
+        continue_after_failure: bool = False) -> RunReport:
     """Caller holds the archive writer lease. Atomic output release follows each barrier."""
     prepare_run(database, plugins, retry=retry)
     try:
         dispatch(database, plugins, max_jobs=max_jobs, installation_config=installation_config,
-                 pipelines=pipelines, services=services, cancelled=cancelled, failures=failures, message_id=message_id)
+                 pipelines=pipelines, services=services, cancelled=cancelled, failures=failures, message_id=message_id,
+                 continue_after_failure=continue_after_failure)
     finally:
         if services is None:
             # Production owns cleanup after canonical publication/checkpointing;
@@ -275,7 +279,8 @@ def dispatch(database: sqlite3.Connection, plugins: tuple[PluginSpec, ...], *,
         max_jobs: int | None = None, installation_config: Path | None = None,
         pipelines: tuple[Pipeline, ...] = ("ingest", "message", "content"),
         services: ProcessorServices | None = None, cancelled: Callable[[], None] | None = None,
-        failures: list[Exception] | None = None, message_id: str | None = None) -> None:
+        failures: list[Exception] | None = None, message_id: str | None = None,
+        continue_after_failure: bool = False) -> None:
     """Dispatch prepared work without rescanning history or computing an aggregate report."""
     registry_hash = fingerprint(plugins)
     failures = failures if failures is not None else []
@@ -303,11 +308,15 @@ def dispatch(database: sqlite3.Connection, plugins: tuple[PluginSpec, ...], *,
         if input_error:
             with database:
                 database.execute("UPDATE jobs SET status='failed',detail=? WHERE job_id=?", (input_error, job_id))
+            if continue_after_failure:
+                processed += 1
+                continue
             break
         selected = subscribers(plugins, item)
         with database:
             database.execute("UPDATE jobs SET status='running' WHERE job_id=?", (job_id,))
         stop_import = False
+        explicit_stop = False
         aborted = False
         for rank in sorted({p.manifest.rank for p in selected}):
             if services is not None:
@@ -323,8 +332,9 @@ def dispatch(database: sqlite3.Connection, plugins: tuple[PluginSpec, ...], *,
             outcomes = [result.outcome for _, result in results]
             with database:
                 if failed or "fail-import" in outcomes:
-                    database.execute("UPDATE jobs SET status='failed',detail='rank failed; inspect invocations' WHERE job_id=?", (job_id,))
+                    database.execute("UPDATE jobs SET status='failed',detail=? WHERE job_id=?", (RANK_FAILURE, job_id))
                     stop_import = True
+                    explicit_stop = "fail-import" in outcomes
                 elif "abort-message" in outcomes or "abort-part" in outcomes:
                     if services is not None:
                         for plugin, result in results:
@@ -348,6 +358,11 @@ def dispatch(database: sqlite3.Connection, plugins: tuple[PluginSpec, ...], *,
             if stop_import or aborted:
                 break
         if stop_import:
+            if continue_after_failure:
+                if explicit_stop:
+                    raise RuntimeError("processor requested fail-import")
+                processed += 1
+                continue
             break
         if not aborted:
             if services is not None:

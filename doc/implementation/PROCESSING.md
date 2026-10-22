@@ -26,6 +26,27 @@ promises. Collection is restartable; interrupted deletion leaves extra files.
 `make test-processing-cleanup` and `make test-imap` cover canonical reconstruction,
 deferred/failed work, reference-index backfill, and release during a live import.
 
+`ClamAVProcessor` reuses saved host evidence only for `clean` and `infected`.
+Other saved statuses call the current scanner session; previous failed invocations
+remain in the processing audit history. Resumption needs no source reread or
+database migration, since retained raw objects are already digest-verified.
+After scanner startup, progress switches to `preparing processing`, then
+`recovering archived content` and `recovering pending imports`. With ingestion
+and unlimited content work enabled, the host drains eligible message/content
+jobs before replaying unpublished ingest roots or traversing sources, then runs
+content processing again for newly admitted mail. Deferred or explicitly bounded
+content runs retain their previous dispatch order and job budget.
+The preliminary pass retains failed jobs without raising their aggregate error;
+the ordinary final content pass still reports failures after mail admission.
+Its dispatcher continues independent jobs after failure while leaving descendants
+blocked behind failed prerequisites. Explicit `fail-import` results still stop the
+run, and cancellation still propagates. Normal dispatch retains its stop-on-error
+behavior; the preliminary pass is the only production caller opting into continuation.
+Failure summaries use the failed job's own invocation or input error, avoiding
+misattribution to an unrelated older extraction/scanner failure.
+`make test-ingest-recovery` uses real clean/EICAR scans, retained typed failures,
+repeat CLI recovery, a damaged pending object and independent atomic index repair.
+
 Current implementation and validation boundaries. Deferred feature designs
 live in [plans](../plans/README.md); historical evidence does not validate this revision.
 

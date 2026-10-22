@@ -20,6 +20,23 @@ it shall preserve manual decisions and antivirus provenance. Never collect throu
 symlinks or delete unknown files. Cleanup shall not modify source mail or canonical
 payloads. Validate with `make test-processing-cleanup`.
 
+Host-scanned ingest retries may reuse saved `clean` or `infected` verdicts for
+verified unchanged bytes. Saved `scanner-error`, `unscannable` or `not-scanned`
+evidence must trigger a fresh scan under the current scanning policy, rather
+than permanently replaying an old failure or bypassing required scanning.
+Retain earlier failed invocation records and the unpublished original bytes.
+Producer scan headers and explicit unscanned-import policy remain authoritative.
+When both ingestion and unbounded content processing are enabled, recover eligible
+archived message/content jobs before pending ingestion or source traversal. A
+failed pending ingest must not starve the existing archive's search reconstruction.
+Explicit deferred-content and content-job limits retain their existing behavior.
+Failed archived extraction remains durable and reportable, but the preliminary
+recovery pass must not prevent unrelated new mail from reaching canonical storage.
+Independent healthy archived jobs must continue after a failed job. Descendants
+of a failed prerequisite remain blocked; explicit `fail-import` and cancellation
+still stop the run.
+Validate with `make test-ingest-recovery`.
+
 Current subsystem contract and acceptance boundaries. This is not a claim of
 platform/release acceptance. Deferred features live in [plans](../plans/README.md).
 

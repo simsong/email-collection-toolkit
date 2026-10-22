@@ -35,6 +35,7 @@ from collections import Counter, deque
 from collections.abc import Callable, Iterable, Iterator
 from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
 from datetime import UTC, datetime
+from functools import partial
 from importlib.metadata import version
 from pathlib import Path
 from types import TracebackType
@@ -1967,6 +1968,7 @@ def _run_ingest(request: IngestRequest, writer_lease: WriterLease, outcome: Inge
             scanner.__enter__()
         elif request.continue_ingest:
             print("WARNING: importing without antivirus scanning; messages are NOT scanned or certified clean.", file=sys.stderr)
+        progress.set_phase("preparing processing")
         pipeline = ProductionPipeline(archive, catalog, search, ProcessingPolicy(
             owners=owners, earliest_year=request.earliest_year, index_attachments=request.index_attachments,
             scan_policy=request.scan_policy,
@@ -1983,7 +1985,17 @@ def _run_ingest(request: IngestRequest, writer_lease: WriterLease, outcome: Inge
                                       (pipeline.policy.model_dump_json(exclude={"scanner_configuration"}),))
         if request.reprocess:
             pipeline.reprocess()
+        def process_content(_unused: int, *, fail_on_error: bool = True) -> None:
+            assert pipeline is not None
+            pipeline.resume(("message", "content"), max_jobs=request.max_content_jobs, fail_on_error=fail_on_error)
+        if request.continue_ingest and request.continue_content and request.max_content_jobs is None:
+            # Restore searchable archived mail before retrying unpublished ingest
+            # roots; a new source/scanner failure must not starve this work.
+            progress.set_phase("recovering archived content")
+            run_file_workers([0], 1, partial(process_content, fail_on_error=False), stop, refresh_import,
+                             on_interrupt=progress.announce_interrupt)
         if request.continue_ingest:
+            progress.set_phase("recovering pending imports")
             def resume_ingest(_unused: int) -> None:
                 assert pipeline is not None
                 pipeline.resume_ingest()
@@ -2004,9 +2016,6 @@ def _run_ingest(request: IngestRequest, writer_lease: WriterLease, outcome: Inge
         check_interrupted()
         if request.continue_content:
             progress.set_phase("processing content")
-            def process_content(_unused: int) -> None:
-                assert pipeline is not None
-                pipeline.resume(("message", "content"), max_jobs=request.max_content_jobs)
             run_file_workers([0], 1, process_content, stop, refresh_import, on_interrupt=progress.announce_interrupt)
         catalog.commit()
         search.commit()

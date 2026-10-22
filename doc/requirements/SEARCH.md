@@ -103,3 +103,7 @@ supported operator, and concrete examples.
 Index extraction and insertion happen after canonical MBOX/catalog publication.
 An indexing failure is recorded as a metadata defect and does not reject mail;
 `refresh-index` repairs missing disposable content.
+Index-only repair must not resume pending ingestion, contact mail sources, or
+modify canonical MBOX bytes or the durable processing queue. Rebuild searchable
+non-quarantine mail from verified canonical locations and publish the replacement
+atomically. `make test-ingest-recovery` verifies repair beside a failed ingest root.

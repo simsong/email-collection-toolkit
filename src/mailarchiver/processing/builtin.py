@@ -99,7 +99,7 @@ class ClamAVProcessor:
             detection = str(headers.get(DETECTION_HEADER, ""))
             evidence = ScanEvidence(status="infected", detail=detection,
                 engine_version=headers.get(ENGINE_HEADER), signature_version=headers.get(DEFINITIONS_HEADER)) if detection else ScanEvidence(status="clean")
-        elif metadata and metadata.scan_evidence is not None:
+        elif metadata and metadata.scan_evidence is not None and metadata.scan_evidence.status in ("clean", "infected"):
             evidence = metadata.scan_evidence
         else:
             evidence = scan_message(policy.scanner_session, item.message_ref.path, item.remaining_seconds)

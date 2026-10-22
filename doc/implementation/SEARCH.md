@@ -79,6 +79,11 @@ source-preserving recovery path.
 
 ## Search schema and indexed projections
 
+`refresh-index` rebuilds from verified canonical MBOX locations without constructing
+a production processor pipeline or resuming its saved queue. It atomically replaces
+the disposable index and excludes quarantine mail, including when ingestion is failed.
+`make test-ingest-recovery` checks that processing state and MBOX bytes stay unchanged.
+
 `search.sqlite3` has its own packaged, versioned `sql/V1__search.sql` schema and
 does not use cross-database foreign keys. `create_search()` rejects unversioned
 or incompatible layouts. Ingest catches that specific condition, completes any

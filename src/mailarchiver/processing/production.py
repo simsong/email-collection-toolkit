@@ -42,7 +42,7 @@ from .api import (
 from .contracts import AddressEvidence, ContentMetadata, HeaderMetadata, MailboxReference, MimeInventory, ProcessingPolicy, SourceMetadata
 from .objects import collect_objects
 from .registry import fingerprint, load_processors
-from .runtime import dispatch, prepare_run, run
+from .runtime import RANK_FAILURE, dispatch, prepare_run, run
 from .store import DATABASE, USER_CANCELLED, connect, enqueue, report, snapshot
 
 Publisher = Callable[[MailObject, ParsedMessage, MailboxReference, int], int]
@@ -219,21 +219,23 @@ class ProductionPipeline:
             self.cancelled = cancelled
             self._ingesting = ingesting
 
-    def resume(self, pipelines: tuple[Pipeline, ...], *, max_jobs: int | None = None, message_id: str | None = None) -> RunReport:
+    def resume(self, pipelines: tuple[Pipeline, ...], *, max_jobs: int | None = None, message_id: str | None = None,
+               fail_on_error: bool = True) -> RunReport:
         failures: list[Exception] = []
         result = run(self.database, self.plugins, retry=True, pipelines=pipelines, max_jobs=max_jobs,
                      installation_config=self.installation_config, services=self, cancelled=self.cancelled, failures=failures,
-                     message_id=message_id)
-        self._raise_failures(pipelines, failures)
+                     message_id=message_id, continue_after_failure=not fail_on_error)
+        if fail_on_error:
+            self._raise_failures(pipelines, failures)
         return result
 
     def _raise_failures(self, pipelines: tuple[Pipeline, ...], failures: list[Exception]) -> None:
         placeholders = ",".join("?" for _ in pipelines)
-        failed = self.database.execute(f"SELECT detail FROM jobs WHERE status='failed' AND json_extract(item_json,'$.pipeline') IN ({placeholders}) LIMIT 1", pipelines).fetchone()
+        failed = self.database.execute(f"SELECT job_id,detail FROM jobs WHERE status='failed' AND json_extract(item_json,'$.pipeline') IN ({placeholders}) ORDER BY job_id LIMIT 1", pipelines).fetchone()
         if failed:
-            error = self.database.execute("SELECT error,kind FROM invocations WHERE status='failed' ORDER BY invocation_id DESC LIMIT 1").fetchone()
+            error = self.database.execute("SELECT error,kind FROM invocations WHERE job_id=? AND status='failed' ORDER BY invocation_id DESC LIMIT 1", (failed[0],)).fetchone() if failed[1] == RANK_FAILURE else None
             prefix = "failed to parse message" if error and error[1] in ("file-message", "headers") else "processor failed"
-            raise RuntimeError(f"{prefix}: {error[0] if error else failed[0]}") from (failures[-1] if failures else None)
+            raise RuntimeError(f"{prefix}: {error[0] if error else failed[1]}") from (failures[-1] if failures else None)
 
     def reprocess(self) -> None:
         generation = str(uuid4())

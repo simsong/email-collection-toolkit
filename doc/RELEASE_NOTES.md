@@ -6,6 +6,15 @@ Entries describe their recorded revisions. For current behavior use the
 [user manual](USER_MANUAL.md) and [CLI reference](CLI_REFERENCE.md). Retired
 Rust delivery plans and historical package checks are not current acceptance.
 
+## Recoverable scanner failures and search reconstruction
+
+Retry unsuccessful saved host scans with the current engine instead of replaying
+the prior failure. Normal runs with unlimited content processing restore archived
+message/content work before retrying pending ingestion, so another ingest failure
+cannot starve that search rebuild. Progress distinguishes scanner startup,
+processing preparation, archived-content recovery and pending imports. Existing
+`refresh-index` can repair the disposable index without resuming ingestion.
+
 ## Automatic virus definition refresh
 
 Before ordinary Python scan sessions, automatically refresh daily definitions

@@ -642,6 +642,10 @@ test-provenance:
 test-refresh-index:
 	uv run pytest -q tests/test_end_to_end.py::test_refresh_index_excludes_quarantine_mailboxes tests/test_end_to_end.py::test_refresh_index_interrupt_retains_prior_search_index
 
+.PHONY: test-ingest-recovery
+test-ingest-recovery:
+	uv run --locked pytest -q tests/test_ingest_recovery.py
+
 test-headers:
 	uv run pytest -q tests/test_message.py tests/test_search.py
 

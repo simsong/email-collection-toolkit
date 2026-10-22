@@ -344,6 +344,11 @@ Idle Quit exits after bounded private-export cleanup. Active imports finish thei
 current message and checkpoint; imports, settings saves, definition updates, and cleanup share one
 five-second deadline. Forced exit can leave stale manifests or an
 incomplete append; Continue Processing or reimport invokes archive recovery.
+Saved scanner failures are rescanned on retry. Normal runs with unlimited content
+processing restore archived content before pending ingestion, keeping existing mail
+searchable even if a pending import fails. To rebuild only the disposable search
+index without resuming ingestion, use `make run ARGS="--archive /path/to/archive refresh-index"`
+(add `--index-attachments` when wanted). `make test-ingest-recovery` validates these paths.
 
 `make test-native-gui` additionally exercises the hidden Cocoa/WKWebView bridge.
 This native target is an explicit local development check and does not run in
