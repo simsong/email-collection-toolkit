@@ -209,8 +209,9 @@ def test_headless_self_test_without_scanner_or_display(tmp_path: Path) -> None:
     assert not (tmp_path / "must-not-exist").exists()
 
 
-def test_scanner_failure_never_silently_imports_unscanned(tmp_path: Path) -> None:
-    """Mandatory scanning fails closed; explicit opt-out retains evidence and bytes."""
+@pytest.mark.parametrize("scan_flag,status", [("--clamav", "scanner-error"), ("--no-scan", "not-scanned")])
+def test_scanner_failure_never_silently_imports_unscanned(tmp_path: Path, scan_flag: str, status: str) -> None:
+    """SCANNING: the desktop CLI preserves mail with honest failure/explicit-opt-out evidence."""
     source = tmp_path / "message.eml"
     raw = b"From: sender@example.net\nDate: Mon, 07 Sep 2026 12:00:00 +0000\nSubject: Scanner regression\n\nOriginal bytes\n"
     source.write_bytes(raw)
@@ -220,16 +221,15 @@ def test_scanner_failure_never_silently_imports_unscanned(tmp_path: Path) -> Non
     archive = tmp_path / "test.mailarchive"
     command = [sys.executable, str(ROOT / "scripts/desktop_entry.py"), "--cli", "--archive", str(archive),
                "ingest", str(source), "--owner-names-file", str(owners)]
-    refused = subprocess.run(command + ["--clamav"], env=environment, capture_output=True, check=False, timeout=30)
-    assert refused.returncode != 0
-    with sqlite3.connect(archive / "archive.sqlite3") as catalog:
-        assert catalog.execute("SELECT count(*) FROM messages").fetchone() == (0,)
-    accepted = subprocess.run(command + ["--no-scan"], env=environment, capture_output=True, check=False, timeout=30)
+    accepted = subprocess.run(command + [scan_flag], env=environment, capture_output=True, check=False, timeout=30)
     assert accepted.returncode == 0, accepted.stdout + accepted.stderr
-    assert b"NOT scanned" in accepted.stderr
-    assert read_ingest_history(archive).statuses[0].scan_policy == "not-scanned"
+    assert (b"ClamAV startup failed:" if scan_flag == "--clamav" else b"NOT scanned") in accepted.stderr
+    assert read_ingest_history(archive).statuses[0].scan_policy == ("clamav" if scan_flag == "--clamav" else "not-scanned")
     with sqlite3.connect(archive / "archive.sqlite3") as catalog:
-        assert catalog.execute("SELECT count(*) FROM metadata_defects WHERE field='antivirus' AND detail LIKE 'not-scanned:%'").fetchone() == (1,)
+        assert catalog.execute("SELECT count(*) FROM messages").fetchone() == (1,)
+        assert catalog.execute("SELECT count(*) FROM metadata_defects WHERE field='antivirus' AND detail LIKE ?", (status + ":%",)).fetchone() == (1,)
+    with sqlite3.connect(archive / "processing.sqlite3") as processing:
+        assert processing.execute("SELECT scan_status FROM message_state").fetchone() == (status,)
     assert source.read_bytes() == raw
     assert not verify_archive(archive)
 

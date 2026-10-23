@@ -1,5 +1,17 @@
 # Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved.
-"""Small ctypes binding to the public libclamav 1.x C ABI, hosted off the UI process."""
+
+"""Small ctypes binding to the public libclamav 1.x C ABI, hosted off the UI process.
+
+Purpose: Wrap the public native ClamAV ABI for isolated scan workers.
+
+How it works:
+Load the selected library, own compiled engines and return typed verdicts for supplied bytes.
+
+Fundamental dependents:
+
+- ``scanner``: run-owned workers depend on these native engine operations.
+- ``clamav_update``: candidate definition validation ultimately uses this engine boundary.
+"""
 from __future__ import annotations
 
 import ctypes as c
@@ -11,7 +23,8 @@ from .clamav_definitions import DefinitionSet, certificates_path
 from .processing.contracts import ScanEvidence, ScanStatus
 
 
-CL_DB_STDOPT = 0x200A
+CL_DB_PHISHING = 0x2
+CL_DB_BYTECODE = 0x2000
 CL_DB_OFFICIAL_ONLY = 0x1000
 CL_ENGINE_CVDCERTSDIR = 37
 CL_SCAN_GENERAL_HEURISTICS = 0x4
@@ -77,8 +90,10 @@ class Engine:
                 self._check(self.lib.cl_engine_set_str(self.engine, CL_ENGINE_CVDCERTSDIR, os.fsencode(certs)))
             signatures = c.c_uint()
             for definition in definitions.files:
-                # Official signed databases only, phishing, URL and bytecode support.
-                self._check(self.lib.cl_load(os.fsencode(definition.path), self.engine, c.byref(signatures), CL_DB_STDOPT | CL_DB_OFFICIAL_ONLY))
+                # Keep signature and bytecode scanning; omit CL_DB_PHISHING_URLS
+                # so legitimate redirect links do not trigger URL-phishing heuristics.
+                self._check(self.lib.cl_load(os.fsencode(definition.path), self.engine, c.byref(signatures),
+                    CL_DB_PHISHING | CL_DB_BYTECODE | CL_DB_OFFICIAL_ONLY))
             if not signatures.value:
                 raise RuntimeError("ClamAV loaded no signatures")
             self._check(self.lib.cl_engine_compile(self.engine))

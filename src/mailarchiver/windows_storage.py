@@ -1,10 +1,18 @@
 # Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved.
-# Supply native file handles and byte-range locks for Windows archive writers.
-# Lock files are opened without following reparse points and cannot be deleted.
-# Directory handles pin the selected path while a writer lease is held.
-# Shared locks fence application writes against exclusive update installation.
-# Windows releases all handles and their locks if the owning process exits.
-"""Windows storage primitives; imported only on Windows."""
+
+"""Windows storage primitives; imported only on Windows.
+
+Purpose: Supply native Windows handles and locks for archive durability.
+
+How it works:
+Pin non-reparse directories and open protected lock files with OS-owned shared/exclusive
+locking.
+
+Fundamental dependents:
+
+- ``writer_lock``: Windows writers/installers rely on these exclusion primitives.
+- ``plugin_configuration``: configuration publication needs the same native locking semantics.
+"""
 from __future__ import annotations
 
 import ctypes as c

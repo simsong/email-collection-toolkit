@@ -1,6 +1,18 @@
 # Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved.
 
-"""Run canonical mail ingest, provenance review, reports, and FTS rebuilds."""
+"""Run canonical mail ingest, provenance review, reports, and FTS rebuilds.
+
+Purpose: Coordinate archive ingest, reports, provenance review and index rebuilding.
+
+How it works:
+Drive source workers and the production processor pipeline while serializing canonical
+publication and recovery.
+
+Fundamental dependents:
+
+- ``imap_cli``: remote downloads use this same ingest and checkpoint engine.
+- ``gui_app``: desktop imports and resumed processing use its typed ingest service.
+"""
 
 from __future__ import annotations
 
@@ -20,20 +32,21 @@ import threading
 import tempfile
 import time
 from collections import Counter, deque
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Iterator
 from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
 from datetime import UTC, datetime
+from functools import partial
 from importlib.metadata import version
 from pathlib import Path
 from types import TracebackType
-from typing import Literal, TextIO, TypeVar
+from typing import Literal, Protocol, TextIO, TypeVar, runtime_checkable
 from urllib.parse import quote
 from uuid import uuid4
 
 from pydantic import BaseModel, Field
 from tabulate import tabulate
 
-from .scan_evidence import ScanFailure
+from .scan_evidence import ScanEvidence, ScanFailure
 from .archive_integrity import MailbagArchiveIntegrityControls
 from .archive_path import add_archive_argument, require_archive
 from .contacts import contacts, load_owner_addresses, print_contacts
@@ -74,6 +87,7 @@ from .mbox import (
     rollover_destination,
 )
 from .message import ParsedMessage
+from .processing.api import PluginStatistics, ProcessingObject
 from .processing.contracts import MailboxReference, ProcessingPolicy, SourceMetadata
 from .processing.production import ProductionPipeline
 from .plugin_api import (
@@ -86,6 +100,7 @@ from .plugin_api import (
     ProgressEvent,
     SkippedInput,
     SourceContainerMetadata,
+    SourceObservation,
     SourceSpec,
 )
 from .plugin_loader import PluginDiscoveryError, load_plugins
@@ -107,6 +122,7 @@ from .sources import (
 from .standalone_verify import semantic_bytes
 from .sqlite_paths import sqlite_uri
 from .writer_lock import ArchiveBusyError, WriterLease
+from .imap_state import initialize_state, record_download, refresh_observation
 
 DEFAULT_REPORT_TOP = 10
 PROGRESS_REFRESH_SECONDS = 0.25
@@ -117,6 +133,13 @@ DISCOVERY_PHASE = "discovering sources"
 TOP_LINE_STYLE = "\x1b[37;44m"
 ANSI_RESET = "\x1b[0m"
 WorkerItem = TypeVar("WorkerItem")
+
+
+@runtime_checkable
+class _ClosableIterator(Protocol):
+    """Source iterators may own thread-bound connections and temporary files."""
+
+    def close(self) -> None: ...
 
 
 class IngestOutcome(BaseModel):
@@ -220,6 +243,10 @@ class ProgressUpdate(BaseModel):
     notice_kind: Literal["skipped input", "skipped unchanged"] | None = None
     notice_path: str | None = None
     notice_reason: str | None = None
+    processing_active: bool | None = None
+    processing_finished: bool = False
+    processing_job_id: int | None = None
+    processing_processor: str | None = None
 
 
 class ProgressState(BaseModel):
@@ -241,6 +268,10 @@ class ProgressState(BaseModel):
     workers: list[WorkerProgress] = Field(default_factory=list)
     counts: IngestCounts = Field(default_factory=IngestCounts)
     years: list[YearProgress] = Field(default_factory=list)
+    processing_active: bool = False
+    processing_jobs_completed: int = 0
+    processing_job_id: int | None = None
+    processing_processor: str | None = None
 
 
 class OverallProgress(BaseModel):
@@ -363,6 +394,24 @@ def formatted_bytes(value: int) -> str:
     raise AssertionError("unreachable")
 
 
+def processor_statistics_table(statistics: tuple[PluginStatistics, ...]) -> str:
+    """Render cumulative archive statistics with aligned counts and second timings."""
+    rows: list[tuple[str, ...]] = [("Processor", "Calls", "Errors", "Timeouts", "Min", "Max", "Mean", "Total")]
+    for statistic in statistics:
+        durations = (statistic.shortest, statistic.longest, statistic.average,
+                     statistic.total if statistic.invocations else None)
+        rows.append((statistic.kind, str(statistic.invocations), str(statistic.errors), str(statistic.timeouts),
+                     *("n/a" if value is None else f"{value:.3f}s" for value in durations)))
+    widths = [max(len(row[index]) for row in rows) for index in range(len(rows[0]))]
+    lines = ["Processor statistics (cumulative archive history)"]
+    for position, row in enumerate(rows):
+        lines.append("  ".join(value.ljust(widths[index]) if index == 0 else value.rjust(widths[index])
+                               for index, value in enumerate(row)))
+        if position == 0:
+            lines.append("  ".join("-" * width for width in widths))
+    return "\n".join(lines)
+
+
 def formatted_duration(seconds: float) -> str:
     remaining = max(0, math.ceil(seconds))
     hours, remaining = divmod(remaining, 3600)
@@ -373,7 +422,8 @@ def formatted_duration(seconds: float) -> str:
 
 def safe_status_text(value: str) -> str:
     """Collapse untrusted plug-in status text to one bounded printable line."""
-    return " ".join(value.split())[:80] or "working"
+    printable = "".join(character if character.isprintable() else " " for character in value)
+    return " ".join(printable.split())[:80] or "working"
 
 
 def overall_progress(state: ProgressState, now: float) -> OverallProgress:
@@ -407,6 +457,9 @@ def overall_progress(state: ProgressState, now: float) -> OverallProgress:
 
 
 def overall_line(state: ProgressState, now: float) -> str:
+    if state.processing_active:
+        return (f"Processing: {state.processing_jobs_completed:,} jobs finished  "
+                f"Job {state.processing_job_id}: {state.processing_processor}  Total/ETA pending discovery")
     if not state.inventory_complete:
         return f"Overall: discovering  {state.source_files_total:,} files  {formatted_bytes(state.source_bytes_total)} found"
     progress = overall_progress(state, now)
@@ -579,6 +632,15 @@ class ProgressReporter:
     def record_disposition(self, disposition: str) -> None:
         self.updates.put(ProgressUpdate(worker=self._worker_number(), disposition=disposition))
 
+    def record_processing(self, item: ProcessingObject, processor: str, finished: bool) -> None:
+        """Queue actual processor activity without counting recovered jobs as new mail."""
+        self.updates.put(ProgressUpdate(worker=self._worker_number(), phase=f"processing {processor}",
+            path=f"{item.pipeline} job {item.job_id}", activity_unit="jobs", processing_active=True,
+            processing_finished=finished, processing_job_id=item.job_id, processing_processor=processor))
+
+    def finish_processing(self) -> None:
+        self.updates.put(ProgressUpdate(worker=self._worker_number(), phase="idle", processing_active=False))
+
     def _send(
         self,
         phase: str,
@@ -643,6 +705,12 @@ class ProgressReporter:
             except queue.Empty:
                 break
             worker = self.state.workers[update.worker - 1]
+            if update.processing_active is not None:
+                self.state.processing_active = update.processing_active
+                self.state.processing_job_id = update.processing_job_id
+                self.state.processing_processor = update.processing_processor
+            if update.processing_finished:
+                self.state.processing_jobs_completed += 1
             if update.file_complete:
                 self.state.files_processed += 1
                 self.state.source_bytes_completed += update.bytes_total or 0
@@ -687,6 +755,8 @@ class ProgressReporter:
                     worker.activity_total = update.activity_total
                 if update.activity_unit is not None:
                     worker.activity_unit = update.activity_unit
+                if update.processing_active:
+                    worker.activity_done = self.state.processing_jobs_completed
             if update.message_date is not None:
                 self._record_message(update.message_date)
                 worker.messages_processed += 1
@@ -742,6 +812,8 @@ class ProgressReporter:
     def _worker_phase(self) -> str:
         if self.interrupt_announced:
             return "shutting down"
+        if self.state.processing_active:
+            return self.base_phase
         phases = {worker.phase for worker in self.state.workers}
         if phases != {"idle"}:
             return "ingesting"
@@ -788,6 +860,8 @@ class ProgressReporter:
         elapsed = max(now - state.started_monotonic, 0.001)
         phase_elapsed = max(now - self.phase_started_monotonic, 0.0)
         overall = overall_progress(state, now)
+        if state.processing_active:
+            overall = overall.model_copy(update={"eta": "calculating"})
         dates = "none" if state.earliest_date is None or state.latest_date is None else f"{state.earliest_date.date()}..{state.latest_date.date()}"
         year = "none" if state.current_year is None else str(state.current_year)
         if display_label == CLAMAV_START_PHASE:
@@ -823,6 +897,7 @@ class ProgressReporter:
                 f"files_total={state.source_files_total} eta={overall.eta.replace(' ', '')} "
                 f"processed={state.processed} "
                 f"active_workers={active} peak_workers={state.peak_active_files} "
+                f"processing_jobs_completed={state.processing_jobs_completed} "
                 f"rate={state.processed / elapsed:.2f}/s "
                 f"workers={workers} dates={dates} current_year={year} year_messages={state.current_year_messages} "
                 f"archived={state.counts.archived} seen_skipped={state.counts.duplicates} "
@@ -899,6 +974,10 @@ class ProgressReporter:
             years=state.years,
             failure_detail=failure_detail,
             scan_policy=self.scan_policy,
+            processing_active=state.processing_active,
+            processing_jobs_completed=state.processing_jobs_completed,
+            processing_job_id=state.processing_job_id,
+            processing_processor=state.processing_processor,
         )
         try:
             self.status_file.write(status)
@@ -1141,7 +1220,8 @@ def _run_ingest(request: IngestRequest, writer_lease: WriterLease, outcome: Inge
     if not owners.include:
         raise ValueError("Set owner include rules in config.yaml or supply --owner-names-file before importing.")
     plugins = load_plugins(request.plugin_dir, archive=request.archive, installation_config=request.installation_config, scan_policy=request.scan_policy)
-    source_specs = [SourceSpec(locator=str(Path(root).resolve()) if Path(root).exists() else root) for root in request.roots]
+    source_specs = [SourceSpec(locator=str(Path(root).resolve())
+                              if "://" not in root and Path(root).exists() else root) for root in request.roots]
     selected_sources: list[tuple[SourceSpec, LoadedPlugin]] = []
     selected_source_keys: set[tuple[str, str, str | None]] = set()
     for source_spec in source_specs:
@@ -1178,6 +1258,9 @@ def _run_ingest(request: IngestRequest, writer_lease: WriterLease, outcome: Inge
     )
     archive_integrity = MailbagArchiveIntegrityControls()
     catalog = create_catalog(catalog_path, check_same_thread=False)
+    if any(plugin.manifest.kind == "imap" for _spec, plugin in selected_sources):
+        initialize_state(catalog)
+        catalog.commit()
     try:
         list(archive_integrity.initialize(archive_reference))
     except BaseException:
@@ -1263,6 +1346,7 @@ def _run_ingest(request: IngestRequest, writer_lease: WriterLease, outcome: Inge
             raise IngestInterrupted("Processing stopped; unfinished work is retained.")
 
     scanner: ClamScanner | None = None
+    scanner_failure: ScanEvidence | None = None
     pipeline: ProductionPipeline | None = None
     discovery = sqlite3.connect("")
     discovery.executescript(
@@ -1394,6 +1478,7 @@ def _run_ingest(request: IngestRequest, writer_lease: WriterLease, outcome: Inge
              hashlib.sha256(semantic_bytes(source.raw)).hexdigest(), disposition, detail),
         )
         assert cursor.lastrowid is not None
+        record_download(catalog, source, cursor.lastrowid, disposition)
         return cursor.lastrowid
 
     def prior_source_evidence(source_file_pk: int, control_id: str) -> tuple[IntegrityEvidence, ...]:
@@ -1674,6 +1759,7 @@ def _run_ingest(request: IngestRequest, writer_lease: WriterLease, outcome: Inge
         display_path = work.container.source.display_name
         byte_length = work.container.estimated_bytes or 0
         source: MailObject | None = None
+        items: Iterator[MailObject | SourceObservation | ProgressEvent] | None = None
         try:
             check_interrupted()
             if stop.is_set():
@@ -1729,11 +1815,18 @@ def _run_ingest(request: IngestRequest, writer_lease: WriterLease, outcome: Inge
                 if isinstance(item, ProgressEvent):
                     progress.record_plugin_event(item, display_path)
                     continue
-                if not isinstance(item, MailObject):
+                if not isinstance(item, (MailObject, SourceObservation)):
                     raise TypeError(
                         f"source plug-in {work.plugin.manifest.kind} yielded unsupported "
                         f"{type(item).__name__}"
                     )
+                if isinstance(item, SourceObservation):
+                    if item.work_id != work.container.work_id or item.source != work.container.source:
+                        raise RuntimeError("Provider observation belongs to the wrong container")
+                    with publication_lock:
+                        refresh_observation(catalog, item)
+                        catalog.commit()
+                    continue
                 source = item
                 if source.work_id != work.container.work_id or source.source != work.container.source:
                     raise RuntimeError(
@@ -1758,24 +1851,29 @@ def _run_ingest(request: IngestRequest, writer_lease: WriterLease, outcome: Inge
                     with publication_lock:
                         archived = catalog.execute("SELECT 1 FROM messages WHERE sha256=?", (digest,)).fetchone() is not None
                     if not archived:
-                        if scanner is None:
+                        if scanner_failure is not None:
+                            evidence = scanner_failure
+                        elif scanner is None:
                             raise RuntimeError("embedded scanner is not ready")
-                        progress.record_worker("scanning", source.source.display_name,
+                        else:
+                            progress.record_worker("scanning", source.source.display_name,
                                                source.completed_bytes or 0, source.total_bytes or 0)
-                        with tempfile.TemporaryDirectory(prefix="scan-", dir=archive) as temporary:
-                            scan_path = Path(temporary) / "message.eml"
-                            scan_path.write_bytes(raw)
-                            try:
-                                evidence = scanner.scan(scan_path)
-                            except ScanFailure as error:
-                                evidence = error.evidence
+                            with tempfile.TemporaryDirectory(prefix="scan-", dir=archive) as temporary:
+                                scan_path = Path(temporary) / "message.eml"
+                                scan_path.write_bytes(raw)
+                                try:
+                                    evidence = scanner.scan(scan_path)
+                                except ScanFailure as error:
+                                    evidence = error.evidence
                 metadata = SourceMetadata(source=source.source, source_file_pk=source_file_pk,
                     work_id=source.work_id, cursor=source.cursor,
                     source_path=source_file.path if source_file is not None else None,
                     prior_date=prior_date, source_date=source.source_date_utc,
                     envelope_hex=None if source.mbox_envelope is None else source.mbox_envelope.hex(),
                     normalization=source.mbox_normalization, scan_evidence=evidence,
-                    scan_responsibility=source.scan_responsibility)
+                    scan_session=scanner.session if scanner is not None and evidence is not None else None,
+                    scan_responsibility=source.scan_responsibility,
+                    provider_metadata_json=source.provider_metadata_json)
                 with publication_lock:
                     try:
                         decision = pipeline.ingest(source, metadata)
@@ -1794,6 +1892,7 @@ def _run_ingest(request: IngestRequest, writer_lease: WriterLease, outcome: Inge
                         observe(source, "duplicate", "same Message-ID and SHA-256", parsed.sha256, decision.message_pk)
                         progress.record_disposition("duplicate")
                     catalog.commit()
+                    pipeline.release(parsed.sha256)
 
             check_interrupted()
             if stop.is_set():
@@ -1809,7 +1908,11 @@ def _run_ingest(request: IngestRequest, writer_lease: WriterLease, outcome: Inge
             stop.set()
             raise
         finally:
-            progress.record_file_inactive(display_path)
+            try:
+                if isinstance(items, _ClosableIterator):
+                    items.close()
+            finally:
+                progress.record_file_inactive(display_path)
 
     def capture_discovery(
         selections: Iterable[tuple[SourceSpec, LoadedPlugin]],
@@ -1923,13 +2026,18 @@ def _run_ingest(request: IngestRequest, writer_lease: WriterLease, outcome: Inge
         if request.scan_policy == "clamav" and request.continue_ingest:
             progress.set_phase(CLAMAV_START_PHASE)
             scanner = ClamScanner(refresh_import, workers=request.workers)
-            scanner.__enter__()
+            try:
+                scanner.__enter__()
+            except ClamScannerStartupError as error:
+                scanner_failure = ScanEvidence(status="scanner-error", detail=f"ClamAV startup failed: {error}")
+                print(f"{scanner_failure.detail}; retaining mail and recording scanner errors.", file=sys.stderr)
         elif request.continue_ingest:
             print("WARNING: importing without antivirus scanning; messages are NOT scanned or certified clean.", file=sys.stderr)
+        progress.set_phase("preparing processing")
         pipeline = ProductionPipeline(archive, catalog, search, ProcessingPolicy(
             owners=owners, earliest_year=request.earliest_year, index_attachments=request.index_attachments,
             scan_policy=request.scan_policy,
-            scanner_session=scanner.session if scanner is not None else None),
+            scanner_session=scanner.session if scanner is not None else None, scanner_failure=scanner_failure),
             publish_processed, plugin_dirs=tuple(request.plugin_dir), installation_config=request.installation_config,
             cancelled=check_processor_cancelled)
         with pipeline.database:
@@ -1942,10 +2050,27 @@ def _run_ingest(request: IngestRequest, writer_lease: WriterLease, outcome: Inge
                                       (pipeline.policy.model_dump_json(exclude={"scanner_configuration"}),))
         if request.reprocess:
             pipeline.reprocess()
+        def process_content(_unused: int, *, fail_on_error: bool = True) -> None:
+            assert pipeline is not None
+            try:
+                pipeline.resume(("message", "content"), max_jobs=request.max_content_jobs, fail_on_error=fail_on_error,
+                                progress=progress.record_processing)
+            finally:
+                progress.finish_processing()
+        if request.continue_ingest and request.continue_content and request.max_content_jobs is None:
+            # Restore searchable archived mail before retrying unpublished ingest
+            # roots; a new source/scanner failure must not starve this work.
+            progress.set_phase("recovering archived content")
+            run_file_workers([0], 1, partial(process_content, fail_on_error=False), stop, refresh_import,
+                             on_interrupt=progress.announce_interrupt)
         if request.continue_ingest:
+            progress.set_phase("recovering pending imports")
             def resume_ingest(_unused: int) -> None:
                 assert pipeline is not None
-                pipeline.resume_ingest()
+                try:
+                    pipeline.resume_ingest(progress=progress.record_processing)
+                finally:
+                    progress.finish_processing()
             run_file_workers([0], 1, resume_ingest, stop, refresh_import, on_interrupt=progress.announce_interrupt)
         progress.set_phase("checking sources")
         run_file_workers(
@@ -1963,9 +2088,6 @@ def _run_ingest(request: IngestRequest, writer_lease: WriterLease, outcome: Inge
         check_interrupted()
         if request.continue_content:
             progress.set_phase("processing content")
-            def process_content(_unused: int) -> None:
-                assert pipeline is not None
-                pipeline.resume(("message", "content"), max_jobs=request.max_content_jobs)
             run_file_workers([0], 1, process_content, stop, refresh_import, on_interrupt=progress.announce_interrupt)
         catalog.commit()
         search.commit()
@@ -2022,8 +2144,7 @@ def _run_ingest(request: IngestRequest, writer_lease: WriterLease, outcome: Inge
             )
             catalog.commit()
         if pipeline is not None:
-            for statistic in pipeline.statistics().statistics:
-                print(statistic.summary(), file=sys.stderr)
+            print(processor_statistics_table(pipeline.statistics().statistics), file=sys.stderr)
             pipeline.close()
         catalog.close()
         search.close()

@@ -5,8 +5,9 @@
 ## Scope and current implementation
 
 This guide covers distributing Email Collection Toolkit from GitHub Releases
-using a **Developer ID Application** certificate. The build and release workflow
-support optional signing; secrets must still be supplied by a repository admin.
+using a **Developer ID Application** certificate. Local builds may be unsigned;
+tagged releases and `[release-ci]` candidates must be signed and notarized.
+Secrets must be supplied by a repository admin.
 
 - `make dmg` uses an explicit `--signing-identity` if supplied. Otherwise, it
   imports the `.p12` when both signing secrets described below are present on
@@ -24,8 +25,10 @@ support optional signing; secrets must still be supplied by a repository admin.
   if the tag has moved to another commit. Both jobs require a version-matching
   annotated tag; unsigned tags are accepted without release-signing public keys.
   The release tag must contain this builder/workflow.
-- Automatic notarization and stapling remain **unimplemented**. A signed DMG
-  alone is not evidence of Gatekeeper acceptance.
+- `make notarize-dmg DMG=...` submits the signed DMG with `notarytool`,
+  staples the ticket and requires Gatekeeper acceptance. `release.yml` and
+  `release-candidate.yml` run it with the `APPLE_NOTARY_*` secrets. A signed
+  DMG alone is not evidence of Gatekeeper acceptance.
 
 See [macOS packaging](MACOS_DISTRIBUTION.md) for features, architecture limits,
 and Makefile targets. A successful unit test is not proof of Apple acceptance;
@@ -86,9 +89,7 @@ Use the Mac on which you generated the certificate signing request (CSR).
 
 List usable code-signing identities without exporting private keys:
 
-```sh
-security find-identity -v -p codesigning
-```
+See [CLI_REFERENCE.md](CLI_REFERENCE.md#inspect-signing-identities) for this recipe.
 
 Record the exact Developer ID Application identity name and Team ID. Do not
 select an Apple Development or Apple Distribution identity by accident.
@@ -153,9 +154,7 @@ Environment, so secrets stored only in an environment will not reach this job.
 3. Create `APPLE_CERTIFICATE_P12_BASE64`. To copy the encoded file without
    printing it into terminal output, run on your Mac:
 
-   ```sh
-   base64 -i "$HOME/Signing/DeveloperIDApplication.p12" | pbcopy
-   ```
+   See [CLI_REFERENCE.md](CLI_REFERENCE.md#copy-the-encrypted-certificate-export) for this recipe.
 
 4. Paste into the secret value and click **Add secret**. Base64 is an encoding,
    not encryption; the original `.p12` should already have an export password.
@@ -163,9 +162,7 @@ Environment, so secrets stored only in an environment will not reach this job.
    is not your Apple Account password or a notarization password.
 6. Clear the clipboard after saving:
 
-   ```sh
-   pbcopy < /dev/null
-   ```
+   See [CLI_REFERENCE.md](CLI_REFERENCE.md#clear-the-credential-clipboard) for this recipe.
 
 | Repository secret | Required value |
 | --- | --- |
@@ -260,15 +257,11 @@ reports are a separate `macos-packaging-reports` Actions artifact. Only explicit
 
 For a local build using an identity already in your Keychain:
 
-```sh
-make dmg ARGS='--signing-identity "Developer ID Application: YOUR NAME (TEAMID)"'
-```
+See [CLI_REFERENCE.md](CLI_REFERENCE.md#build-with-an-explicit-signing-identity) for this recipe.
 
 To deliberately produce the unsigned variant locally:
 
-```sh
-make dmg ARGS='--signing-identity -'
-```
+See [CLI_REFERENCE.md](CLI_REFERENCE.md#build-an-unsigned-local-artifact) for this recipe.
 
 `make test-signing` exercises optional credential selection, warning/naming,
 malformed Base64, identity selection, secret-safe failures, and workflow
@@ -278,20 +271,11 @@ do not import your real signing key or establish Apple notarization acceptance.
 
 ### Separate notarization after signing
 
-Use section 4 to obtain notarization authentication. This step is manual; the
-workflow does not read any notarization secrets. Work on the exact signed DMG
-from the build. The following native Apple commands are an operator procedure,
-not an additional automated release target:
+Use section 4 to obtain notarization authentication. Release CI notarizes
+automatically through `make notarize-dmg`; the following native Apple commands
+are the equivalent manual operator procedure for a locally signed DMG:
 
-```sh
-DMG="$PWD/dist/Email-Collection-Toolkit-VERSION-ARCH.dmg"
-NOTARY_PROFILE='mail-archiver-release'
-
-# Prompts securely for authentication; do not enter passwords in shell history.
-xcrun notarytool store-credentials "$NOTARY_PROFILE"
-xcrun notarytool submit "$DMG" --keychain-profile "$NOTARY_PROFILE" \
-  --wait --timeout 30m --output-format json > "$DMG.notarization.json"
-```
+See [CLI_REFERENCE.md](CLI_REFERENCE.md#submit-a-signed-dmg-for-notarization) for this recipe.
 
 Require `status` to be **Accepted** and retain the submission `id`. Upload
 success, `In Progress`, or a timeout is not acceptance. Query a pending
@@ -316,9 +300,7 @@ regenerate the complete `SHA256SUMS` using the final stapled DMG and source
 archive before publication. Do not reuse the pre-stapling checksum or overwrite
 a published release casually. A per-file SHA-256 check on macOS is:
 
-```sh
-(cd "$(dirname "$DMG")" && shasum -a 256 "$(basename "$DMG")")
-```
+See [CLI_REFERENCE.md](CLI_REFERENCE.md#hash-the-validated-dmg) for this recipe.
 
 For the first notarized release, download through a browser on another supported
 Mac, verify its checksum, drag the app to Applications, and launch normally.

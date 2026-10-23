@@ -194,49 +194,24 @@ def write_legacy_mbox(path: Path, raw: bytes) -> None:
     framed = envelope + raw.replace(b"\nFrom ", b"\n>From ")
     path.write_bytes(framed + (b"" if framed.endswith(b"\n") else b"\n") + b"\n")
 
-def test_verifier_recovers_multiple_ambiguous_from_lines(tmp_path: Path) -> None:
-    """Requirement: independent verification tests every bounded MBOX quote interpretation."""
-    raw = b"Message-ID: <quoted@example>\n\nFrom one\n>From two\nFrom three\n"
-    path = tmp_path / "quoted.mbox"
+@pytest.mark.parametrize("message_id,raw", [
+    pytest.param("quoted@example", b"Message-ID: <quoted@example>\n\nFrom one\n>From two\nFrom three\n",
+                 id="multiple-ambiguous-from-lines"),
+    pytest.param("no-final-newline@example", b"Message-ID: <no-final-newline@example>\n\nbody",
+                 id="writer-added-final-newline"),
+    pytest.param("source-envelope@example", b"From legacy.example Sat Jan 01 00:00:00 2000\n"
+                 b"Message-ID: <source-envelope@example>\n\nFrom body\n>From literal\n", id="source-envelope"),
+])
+def test_verifier_recovers_legacy_framing(tmp_path: Path, message_id: str, raw: bytes) -> None:
+    """ARCHIVE: legacy mboxo preserves ambiguous quoting, missing final LF and source envelopes."""
+    path = tmp_path / "legacy.mbox"
     write_legacy_mbox(path, raw)
-    sidecar = tmp_path / "quoted.mbox.integrity"
-    digest = hashlib.sha256(raw).hexdigest()
-    write_integrity_file(path, sidecar, (IntegrityMessage("quoted@example", digest, raw),), 1)
-
-    assert verify_mbox(path, sidecar) == []
-
-
-def test_verifier_recovers_message_without_source_final_newline(tmp_path: Path) -> None:
-    """Regression: independent verification recognizes one writer-added final LF."""
-    raw = b"Message-ID: <no-final-newline@example>\n\nbody"
-    path = tmp_path / "no-final-newline.mbox"
-    write_legacy_mbox(path, raw)
-    sidecar = tmp_path / "no-final-newline.mbox.integrity"
+    sidecar = tmp_path / "legacy.mbox.integrity"
     digest = hashlib.sha256(raw).hexdigest()
     write_integrity_file(
         path,
         sidecar,
-        (IntegrityMessage("no-final-newline@example", digest, raw),),
-        1,
-    )
-
-    assert verify_mbox(path, sidecar) == []
-
-
-def test_verifier_recovers_original_leading_from_envelope(tmp_path: Path) -> None:
-    """Requirement: independent h2 verification considers a source-supplied envelope line."""
-    raw = (
-        b"From legacy.example Sat Jan 01 00:00:00 2000\n"
-        b"Message-ID: <source-envelope@example>\n\nFrom body\n>From literal\n"
-    )
-    path = tmp_path / "source-envelope.mbox"
-    write_legacy_mbox(path, raw)
-    sidecar = tmp_path / "source-envelope.mbox.integrity"
-    digest = hashlib.sha256(raw).hexdigest()
-    write_integrity_file(
-        path,
-        sidecar,
-        (IntegrityMessage("source-envelope@example", digest, raw),),
+        (IntegrityMessage(message_id, digest, raw),),
         1,
     )
 

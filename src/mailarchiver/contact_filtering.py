@@ -1,13 +1,23 @@
 # Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved.
 
-"""Classify address identities conservatively for the human-contacts view."""
+"""Classify address identities conservatively for the human-contacts view.
+
+Purpose: Classify human, automated, list and invalid contact addresses.
+
+How it works:
+Apply versioned packaged or archive-local regex policies with explicit replacement/extension
+semantics.
+
+Fundamental dependents:
+
+- ``contacts``: meaningful-correspondent reports depend on these classification decisions.
+"""
 
 from __future__ import annotations
 
 import re
 import unicodedata
 from enum import StrEnum
-from functools import lru_cache
 from pathlib import Path
 from typing import Annotated, Literal
 
@@ -117,16 +127,10 @@ def extend_contact_filters(
     )
 
 
-@lru_cache(maxsize=None)
 def contact_filters(archive: Path | None = None) -> ContactFilterConfiguration:
     """Return an archive-local policy when present, otherwise the packaged default."""
-    packaged = load_contact_filters(Path(__file__).with_name("contact_filters.yaml"))
-    assert isinstance(packaged, ContactFilterConfiguration)
-    override = None if archive is None else archive / "contact_filters.yaml"
-    if override is None or not override.is_file():
-        return packaged
-    configured = load_contact_filters(override)
-    return configured if isinstance(configured, ContactFilterConfiguration) else extend_contact_filters(packaged, configured)
+    from .list_catalog import CONTACT_FILTERS
+    return CONTACT_FILTERS.read(archive)
 
 
 def _matches(value: str, patterns: tuple[str, ...]) -> bool:

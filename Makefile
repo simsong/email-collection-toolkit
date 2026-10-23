@@ -21,7 +21,7 @@ test-windows-package-entry:
 .PHONY: test-updater-supervisor
 .PHONY: test-windows-scanner
 test-windows-scanner:
-	uv run --locked pytest -q tests/test_windows_scanner.py
+	uv run --locked pytest -q tests/test_windows_scanner.py tests/test_scanner.py::test_startup_deadline_reaps_worker
 
 .PHONY: test-windows-updater
 test-windows-updater:
@@ -37,6 +37,12 @@ test-updater-supervisor:
 .PHONY: test-definition-state
 test-definition-state:
 	uv run --locked pytest -q tests/test_clamav_definitions.py
+
+# Automatic refresh tests use local connectivity fixtures, never a public CDN.
+# MAILARCHIVER_CLAMAV_DATABASE pins explicit test/development definitions.
+.PHONY: test-definition-refresh
+test-definition-refresh:
+	uv run --locked pytest -q tests/test_clamav_refresh.py
 
 test-python-writer:
 	uv run --locked pytest -q tests/test_application.py tests/test_writer_lock.py tests/test_plugin_configuration.py tests/test_portable_writer.py $(PYTEST_ARGS)
@@ -348,9 +354,8 @@ dmg: python-dmg
 python-dmg: ruff syntax-check sparkle-tools pst-importer mcti-scan pff-converter-bundle
 	uv run --group packaging python scripts/build_macos.py $(if $(SIGNING_IDENTITY),--signing-identity "$(SIGNING_IDENTITY)") $(ARGS)
 
-# Rust is the primary desktop app; SIGNING_IDENTITY selects Developer ID
-# (default ad-hoc), RUST_TARGET_DIR selects its release binary build directory.
-# Mounted acceptance is headless; interaction testing belongs to the user.
+# Retired Rust GUI packaging, kept for reference. The rust-gui-retired
+# prerequisite added below fails before this recipe runs; use make dmg.
 .PHONY: rust-dmg
 rust-dmg: ruff syntax-check sparkle-tools pst-importer mcti-scan pff-converter-bundle
 	uv run --locked python scripts/rust_release_metadata.py --build-command $(CARGO_RUN) build --locked --release -p mailsearch-rust --bin mailsearch-webview
@@ -470,7 +475,7 @@ extract-pdf-mail:
 	uv run extract-pdf-mail $(ARGS)
 
 pylint:
-	uv run --locked pylint src tests e2e_tests scripts
+	uv run --locked pylint src tests e2e_tests scripts conftest.py
 	uv run --locked --project converters/pff pylint --rcfile=pyproject.toml converters/pff/src converters/pff/tests converters/pff/entry.py
 
 run:
@@ -502,7 +507,7 @@ test-matcher-prototype: ruff
 gui-smoke: test-native-gui
 
 .PHONY: test-native-application
-test-native-application:
+test-native-application: ruff
 	MAILARCHIVER_NATIVE_APPLICATION_E2E=1 uv run pytest -q e2e_tests/test_ingest_verify.py::test_native_application_lifecycle
 
 .PHONY: check-archive-open
@@ -525,11 +530,11 @@ WEBSITE_PREVIEW_PORT ?= 1111
 website-preview:
 	zola --root website serve --interface 127.0.0.1 --port $(WEBSITE_PREVIEW_PORT) --output-dir "$(CURDIR)/.tmp/website-preview" --force
 
-# Run rendered release-metadata cases after CI provisions Zola.
+# Run rendered manual links and release-metadata cases after CI provisions Zola.
 .PHONY: website-download-check
 website-download-check:
 	@command -v zola >/dev/null || { echo 'Zola is required for rendered download validation'; exit 2; }
-	uv run --locked pytest -q tests/test_website_scripts.py::test_static_platform_downloads_render_without_javascript
+	uv run --locked pytest -q tests/test_website_scripts.py::test_manual_index_links_to_built_guides tests/test_website_scripts.py::test_static_platform_downloads_render_without_javascript
 	uv run --locked pytest -q --browser chromium e2e_tests/test_website_downloads.py
 
 website-build-check: website-check
@@ -609,17 +614,38 @@ test-data-quality:
 test-mailsearch:
 	uv run pytest -q tests/test_mailsearch.py
 
+# IMAP_ARGS supplies standalone CLI arguments; no password environment variable is supported.
+.PHONY: imap test-imap
+imap:
+	uv run --locked mailarchiver-imap $(IMAP_ARGS)
+
+# Pytest starts/stops loopback TLS IMAP, seeds three INBOX messages, and checks CLI/GUI search.
+# The fixture sets FQDN=localhost so server greetings never query host DNS.
+test-imap:
+	uv run --locked pytest -q tests/test_imap.py
+.PHONY: test-natural-search
+test-natural-search:
+	uv run --locked pytest -q tests/test_search_text.py tests/test_mailsearch.py tests/test_search.py tests/test_search_completion.py tests/test_gui_service.py
+
 test-name-resolution:
 	uv run pytest -q tests/test_name_resolution_benchmark.py tests/test_name_matcher_research.py
 
 test-gui:
 	uv run pytest -q tests/test_gui_service.py tests/test_search_completion.py
 
+.PHONY: test-archive-status
+test-archive-status:
+	uv run --locked pytest -q --browser chromium e2e_tests/test_archive_status.py
+
 test-provenance:
 	uv run pytest -q tests/test_catalog.py tests/test_sources.py
 
 test-refresh-index:
 	uv run pytest -q tests/test_end_to_end.py::test_refresh_index_excludes_quarantine_mailboxes tests/test_end_to_end.py::test_refresh_index_interrupt_retains_prior_search_index
+
+.PHONY: test-ingest-recovery
+test-ingest-recovery:
+	uv run --locked pytest -q tests/test_ingest_recovery.py tests/test_end_to_end.py::test_clamav_startup_failure_records_error_and_continues
 
 test-headers:
 	uv run pytest -q tests/test_message.py tests/test_search.py
@@ -816,8 +842,15 @@ test-pff: pst-importer mcti-scan pff-converter test-pff-converter
 	uv run --locked pytest -q tests/test_pff_source.py tests/test_cli_processing.py tests/test_plugin_loader.py tests/test_source_integrity.py
 
 .PHONY: test-gui-processing
+IDENTITY_SEARCH_CHECK_FILES = src/mailarchiver/name_entities.py src/mailarchiver/gui_processing.py src/mailarchiver/gui_app.py \
+	src/mailarchiver/gui_service.py src/mailarchiver/mailsearch.py src/mailarchiver/search_selectors.py \
+	src/mailarchiver/processing/identities.py src/mailarchiver/processing/phones.py tests/test_gui_processing.py tests/test_search_completion.py \
+	e2e_tests/test_gui_processing.py e2e_tests/native_application_probe.py
 test-gui-processing: ruff
-	uv run --locked pytest -q tests/test_gui_processing.py
+	uv run --locked pylint $(IDENTITY_SEARCH_CHECK_FILES)
+	uv run --locked ty check $(IDENTITY_SEARCH_CHECK_FILES) --error-on-warning
+	uv run --locked pyright $(IDENTITY_SEARCH_CHECK_FILES) --warnings
+	uv run --locked pytest -q tests/test_gui_processing.py tests/test_search_completion.py tests/test_mailsearch.py
 	uv run --locked pytest -q --browser chromium e2e_tests/test_gui_processing.py
 
 .PHONY: website-preview-screenshots
@@ -989,3 +1022,52 @@ prepare-windows-updater:
 clamav-seed:
 	@test -n "$(SEED_DIRECTORY)" || { echo 'Specify SEED_DIRECTORY containing existing ClamAV definitions'; exit 2; }
 	uv run --locked python -m mailarchiver.clamav_update --seed "$(SEED_DIRECTORY)"
+
+# Disposable archives exercise object cleanup, recovery and canonical replay.
+.PHONY: test-processing-cleanup
+test-processing-cleanup:
+	uv run --locked pytest -q tests/test_processing_objects.py $(PYTEST_ARGS)
+
+# Build a disposable frozen CLI and exercise manifest-loaded sources with synthetic mail.
+.PHONY: test-frozen-source-plugins
+test-frozen-source-plugins: ruff
+	uv run --locked --group packaging python scripts/check_frozen_source_plugins.py
+
+# NAME_RESEARCH_ENV selects the isolated, locked optional matcher dependencies.
+# ARCHIVE is read-only; EVIDENCE is a verified extraction; OUTPUT is a private derivative directory.
+NAME_RESEARCH_ENV ?= research/name-matcher
+.PHONY: name-matcher-experiments test-name-matcher-experiments
+name-matcher-experiments:
+	uv run --project "$(NAME_RESEARCH_ENV)" --locked python -m scripts.name_matcher.experiments --archive "$(ARCHIVE)" --evidence "$(EVIDENCE)" --output "$(OUTPUT)" $(ARGS)
+
+test-name-matcher-experiments: ruff
+	uv run --locked python -m pylint --source-roots="$(CURDIR)" scripts/name_matcher/linkage.py scripts/name_matcher/engines.py scripts/name_matcher/experiments.py scripts/name_matcher/evaluate.py tests/test_name_linkage_experiments.py
+	uv run --locked ty check scripts/name_matcher/linkage.py scripts/name_matcher/engines.py scripts/name_matcher/experiments.py scripts/name_matcher/evaluate.py tests/test_name_linkage_experiments.py --error-on-warning
+	uv run --locked pyright scripts/name_matcher/linkage.py scripts/name_matcher/engines.py scripts/name_matcher/experiments.py scripts/name_matcher/evaluate.py tests/test_name_linkage_experiments.py --warnings
+	uv run --project "$(NAME_RESEARCH_ENV)" --locked python -m pytest -q tests/test_name_linkage_experiments.py
+
+# DATABASE is a frozen experimental comparison; LABELS is an exported owner review.
+.PHONY: name-matcher-owner-review
+name-matcher-owner-review:
+	uv run --project "$(NAME_RESEARCH_ENV)" --locked python -m scripts.name_matcher.evaluate --database "$(DATABASE)" --labels "$(LABELS)" --output "$(OUTPUT)"
+
+.PHONY: test-name-matcher-report
+test-name-matcher-report: ruff
+	uv run --locked python -m pylint --source-roots="$(CURDIR)" e2e_tests/test_name_experiment_report.py
+	uv run --locked ty check e2e_tests/test_name_experiment_report.py --error-on-warning
+	uv run --locked pyright e2e_tests/test_name_experiment_report.py --warnings
+	uv run --locked pytest -q --browser chromium e2e_tests/test_name_experiment_report.py
+
+# Isolated fixtures only; no real archive or user preference files are edited.
+CUSTOM_LIST_SOURCES = e2e_tests/native_application_probe.py tests/test_gui_service.py src/mailarchiver/custom_lists.py src/mailarchiver/list_catalog.py src/mailarchiver/list_models.py src/mailarchiver/reply_addresses.py src/mailarchiver/gui_default_lists.py
+.PHONY: test-customizable-lists
+test-customizable-lists: ruff
+	uv run --locked pylint $(CUSTOM_LIST_SOURCES) src/mailarchiver/configuration.py src/mailarchiver/contact_filtering.py src/mailarchiver/document_options.py src/mailarchiver/message.py src/mailarchiver/sources.py src/mailarchiver/gui_app.py src/mailarchiver/gui_processing.py src/mailarchiver/processing tests/test_custom_lists.py e2e_tests/test_default_lists.py
+	uv run --locked ty check $(CUSTOM_LIST_SOURCES) src/mailarchiver/gui_app.py src/mailarchiver/processing tests/test_custom_lists.py e2e_tests/test_default_lists.py --error-on-warning
+	uv run --locked pyright $(CUSTOM_LIST_SOURCES) src/mailarchiver/gui_app.py src/mailarchiver/processing tests/test_custom_lists.py e2e_tests/test_default_lists.py --warnings
+	uv run --locked pytest -q tests/test_custom_lists.py tests/test_owner_rules.py tests/test_sources.py tests/test_message.py tests/test_contact_filtering.py
+	$(MAKE) test-customizable-lists-browser
+
+.PHONY: test-customizable-lists-browser
+test-customizable-lists-browser:
+	uv run --locked pytest -q --browser chromium e2e_tests/test_default_lists.py

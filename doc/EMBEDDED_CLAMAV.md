@@ -2,9 +2,9 @@
 
 # Embedded antivirus and offline definitions
 
-Status: local changes for PR #124. Python/Rust library scanning, infected-only
-API headers, definition refresh, About freshness reporting, and DMG bundling
-are implemented. Project-owned code is GPL-2.0-only; dependency distribution
+Status: merged with PR #124 and shipping. Python/Rust library scanning,
+infected-only API headers, definition refresh, About freshness reporting, DMG
+bundling and the Windows MSIX runtime are implemented. Project-owned code is GPL-2.0-only; dependency distribution
 compatibility remains unresolved; see below.
 
 ## Licensing and distribution
@@ -31,6 +31,12 @@ source arrangements. Do not describe the prototype as approved for release.
 The prototype uses Python ctypes and Rust libloading bindings to the public
 libclamav 1.x ABI, checked against the installed 1.5.4 header. Future ABI changes
 require binding review. Package the selected engine and its dependency closure.
+
+Both bindings disable the URL-phishing module (`CL_DB_PHISHING_URLS`), including
+suspicious-link checks, while retaining official malware/phishing signatures,
+bytecode and MIME/attachment scanning. This also disables that module's genuine
+phishing detections; clean scans do not establish link safety. See the
+[scanner configuration](implementation/SCANNING.md#embedded-scanner-configuration).
 
 One compiled Python engine is shared by concurrent native scan threads;
 ctypes releases the GIL during calls. Per-call options and verdict storage are

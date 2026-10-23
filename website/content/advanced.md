@@ -12,6 +12,73 @@ and working mail-client caches.
 See the [plugin system and proposed processor DAGs](@/plugins.md) for source,
 message-ingest, and deferred content-processing boundaries.
 
+## Command Line
+
+Run these commands from a source checkout. The desktop search language is
+also available in the terminal; quote the complete query to retain its syntax.
+
+### Search
+
+```console
+make search ARGS="--archive '/path/to/collection' --query 'subject:\"annual report\" after:2024-01-01'"
+```
+
+Use the same [words, phrases, and selectors](@/searching.md#words-phrases-and-selectors)
+as the search window. For a query containing spaces, pass `--query` with a
+single argument inside `ARGS`, as above.
+
+### Processing and identities
+
+Inspect the registered processors, check saved work, or resume deferred content
+processing without rereading source files:
+
+```console
+make run ARGS='--archive "/path/to/collection" processors'
+make run ARGS='--archive "/path/to/collection" processing-status'
+make run ARGS='--archive "/path/to/collection" process --phase content'
+```
+
+Inspect the address and organization data used by the desktop pickers:
+
+```console
+make run ARGS='--archive "/path/to/collection" identities addresses'
+make run ARGS='--archive "/path/to/collection" identities organizations'
+```
+
+### Compare Apple Mail with an archive
+
+From the source checkout, run:
+
+```console
+make compare-apple-mail
+```
+
+The command compares `~/Library/Mail` with `~/mail-archive` read-only. Alternate
+locations may be supplied through `ARGS`. It reports exact raw matches,
+semantic-only matches, cache-only and archive-only messages, ambiguous h3
+matches, excluded partial records, and aggregate header names that Apple added,
+removed, or changed. It never prints message content or header values and keeps
+its path/hash index in a disposable temporary database.
+
+On the September 6, 2026 comparison, 12,426 complete cache records were exact
+raw matches and 20,046 were h3 matches with different raw bytes. Of the latter,
+19,537 differed only in formatting. The aggregate report found 508 occurrences
+each of Apple-only `Received`, `Return-Path`, and `X-Mailer`, and 508 of
+archive-only `X-Universally-Unique-Identifier`; one Gmail pair lacked
+`X-GM-THRID` and `X-Gmail-Labels` in Apple Mail. These are point-in-time
+results from a live cache.
+
+### Verify an archive
+
+After ingest or transfer, run the read-only archive verification:
+
+```console
+make verify ARCHIVE=/path/to/archive
+```
+
+See the [full command reference](https://github.com/simsong/email-collection-toolkit/blob/main/doc/USER_MANUAL.md)
+for import, search-index refresh, and other command options.
+
 ## Date handling
 
 CLI and GUI date searches use the same worldwide calendar-date boundaries.
@@ -53,18 +120,14 @@ resolved timestamps in UTC and preserve original message headers. Existing
 date-recovery rules and mailbox filing are unchanged; no archive rebuild is
 needed for the new search boundaries.
 
-## Planned compiled desktop experience
+## Desktop application
 
-The compiled desktop UI will evaluate Dioxus Desktop and Tauri with the system webview.
-Ingest, search, and canonical archive preservation remain in Python. Windows
-with full ingest is the next platform priority; Linux/snap delivery is deferred.
-The current application remains Python/pywebview, and this decision is not a
-Windows release announcement. See the
-[architecture decision](https://github.com/simsong/email-collection-toolkit/blob/main/doc/DIOXUS.md)
-for migration and validation requirements.
-
-Plan comparable trial implementations in Dioxus and Tauri before choosing a
-framework. Either approach retains the Python archive engine.
+The supported desktop uses Python and pywebview on macOS and Windows. The
+earlier Rust GUI experiment is retired; independent Rust tools remain part of
+the archive system. See the
+[desktop retrospective](https://github.com/simsong/email-collection-toolkit/blob/main/rust/README.md)
+for the architecture history. Available installers and platform requirements
+are shown on the [homepage](@/_index.md).
 
 ## Apple Mail as a temporary provider adapter
 
@@ -189,29 +252,6 @@ byte algorithm is in the [integrity controls](https://github.com/simsong/email-c
 h3 is used for reconciliation and forensic lookup. It does not authorize the
 importer to merge or delete raw variants.
 
-## Compare Apple Mail with an archive
-
-From the source checkout, run:
-
-```console
-make compare-apple-mail
-```
-
-The command compares `~/Library/Mail` with `~/mail-archive` read-only. Alternate
-locations may be supplied through `ARGS`. It reports exact raw matches,
-semantic-only matches, cache-only and archive-only messages, ambiguous h3
-matches, excluded partial records, and aggregate header names that Apple added,
-removed, or changed. It never prints message content or header values and keeps
-its path/hash index in a disposable temporary database.
-
-On the September 6, 2026 comparison, 12,426 complete cache records were exact
-raw matches and 20,046 were h3 matches with different raw bytes. Of the latter,
-19,537 differed only in formatting. The aggregate report found 508 occurrences
-each of Apple-only `Received`, `Return-Path`, and `X-Mailer`, and 508 of
-archive-only `X-Universally-Unique-Identifier`; one Gmail pair lacked
-`X-GM-THRID` and `X-Gmail-Labels` in Apple Mail. These are point-in-time
-results from a live cache.
-
 ## Source controls and archive verification
 
 Source-file fingerprints and append checkpoints make normal reruns efficient.
@@ -224,9 +264,9 @@ The canonical archive uses standard MBOX plus BagIt and Mailbag metadata.
 `h3` supports semantic reconciliation. Search indexes and automatic evidence are rebuildable. Preserve
 `processing.sqlite3`: manual names, identity decisions, affiliations and tags
 cannot be reconstructed from the original messages. Back up the entire archive,
-including operational databases and configuration. Run `make verify ARCHIVE=/path/to/archive` after
-ingest or transfer; verification is read-only.
+including operational databases and configuration. Use the read-only
+[verification command](#verify-an-archive) after ingest or transfer.
 
-The [user manual](https://github.com/simsong/email-collection-toolkit/blob/main/doc/USER_MANUAL.md)
+The [detailed reference manual](https://github.com/simsong/email-collection-toolkit/blob/main/doc/USER_MANUAL.md)
 and [Apple Mail cache report](https://github.com/simsong/email-collection-toolkit/blob/main/doc/APPLE_MAIL_CACHE.md)
 provide the complete operational guidance.

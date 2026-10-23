@@ -1,11 +1,17 @@
 # Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved.
-# Authenticate complete appcast bytes before exposing updates to WinSparkle.
-# Filter the shared feed to the Python package identity and selected channel.
-# Preserve signed installer URLs and signatures for the native verifier.
-# A token-protected loopback endpoint serves only bounded authenticated XML.
-# Source downloads have finite timeouts and never expose local files.
-# The application owns the gateway lifetime; it installs no persistent service.
-"""Authenticated Python Windows appcast gateway."""
+
+"""Authenticated Python Windows appcast gateway.
+
+Purpose: Authenticate and filter the shared feed for the Python Windows package.
+
+How it works:
+Verify complete bounded XML and expose eligible signed enclosures through a tokenized local
+gateway.
+
+Fundamental dependents:
+
+- ``winsparkle``: native discovery depends on this trusted compatible feed view.
+"""
 from __future__ import annotations
 
 import base64

@@ -1,6 +1,18 @@
 # Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved.
 
-"""Typed, append-by-run ingest status files shared by the CLI and GUI."""
+"""Typed, append-by-run ingest status files shared by the CLI and GUI.
+
+Purpose: Persist typed progress and history independently for each ingest run.
+
+How it works:
+Atomically publish snapshots and read current/stale/completed status for concurrent UI
+consumers.
+
+Fundamental dependents:
+
+- ``__main__``: workers publish progress through this shared run format.
+- ``gui_app``: status lines and ingest-history windows interpret that same format.
+"""
 
 from __future__ import annotations
 
@@ -89,6 +101,10 @@ class IngestStatus(BaseModel):
     years: list[YearProgress]
     failure_detail: str | None = None
     scan_policy: Literal["clamav", "not-scanned", "unknown"] = "unknown"
+    processing_active: bool = False
+    processing_jobs_completed: int = 0
+    processing_job_id: int | None = None
+    processing_processor: str | None = None
 
     @field_validator("started_at", "updated_at", "completed_at")
     @classmethod

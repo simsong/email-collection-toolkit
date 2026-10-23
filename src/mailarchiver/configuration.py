@@ -1,10 +1,20 @@
 # Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved.
 
-"""Load validated packaged application configuration."""
+"""Load validated packaged application configuration.
+
+Purpose: Load strictly validated packaged display policy.
+
+How it works:
+Cache typed YAML settings so GUI rendering receives validated values rather than arbitrary
+configuration.
+
+Fundamental dependents:
+
+- ``gui_app``: desktop initialization depends on validated display policy.
+"""
 
 from __future__ import annotations
 
-from functools import lru_cache
 from pathlib import Path
 from typing import Literal
 
@@ -36,7 +46,7 @@ def load_configuration(path: Path) -> ApplicationConfiguration:
         return ApplicationConfiguration.model_validate(safe_load(source))
 
 
-@lru_cache(maxsize=1)
 def application_configuration() -> ApplicationConfiguration:
     """Return the packaged application configuration."""
-    return load_configuration(Path(__file__).with_name("configuration.yaml"))
+    from .list_catalog import DISPLAY
+    return DISPLAY.template()

@@ -1,0 +1,27 @@
+# Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved.
+# Isolate optional linkage libraries from the normal desktop/runtime environment.
+# This project supplies reproducible Dedupe and Splink dependencies through uv.
+# Root Makefile targets run the shared research modules using this environment.
+# No private evidence or model outputs belong in this dependency directory.
+# The lockfile fixes the package versions used by published local run reports.
+# Archive access and output destinations remain explicit runner arguments.
+[project]
+name = "mailarchiver-name-experiments"
+version = "0.1.0"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "btrees<6.5",
+    "dedupe>=3.0.3",
+    "mailarchiver",
+    "numpy>=2.5.4",
+    "pydantic>=2.14.1",
+    "pytest>=9.1.1",
+    "pyyaml>=6.0.3",
+    "ruff>=0.17.1",
+    "scikit-learn>=1.9.1",
+    "scipy>=1.18.1",
+    "splink>=5.0.0",
+]
+
+[tool.uv.sources]
+mailarchiver = { path = "../../", editable = true }

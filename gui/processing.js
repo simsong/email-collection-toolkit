@@ -13,9 +13,9 @@ window.addEventListener("pywebviewready", async () => {
   }
   const dialog = document.getElementById("processing-dialog");
   const error = document.getElementById("processing-error");
+  let statusIds = [];
   function showError(message) {
-    const notice = document.getElementById("error");
-    notice.textContent = message; notice.hidden = false;
+    window.mailArchiverNotice(message);
   }
   async function showWork(always = false) {
     if (!api.processing_work) return;
@@ -25,6 +25,20 @@ window.addEventListener("pywebviewready", async () => {
       if (work.active || (!always && !(work.ingest || work.content || work.source_roots.length))) return;
       document.getElementById("processing-detail").textContent =
         `${work.ingest} ingest jobs, ${work.content} message/content jobs, ${work.failed || 0} failed jobs; ${work.source_roots.length} unfinished source imports. Saved import settings will be used.`;
+      statusIds = (work.imports || []).flatMap(item => item.status_ids);
+      const imports = document.getElementById("processing-imports");
+      imports.replaceChildren();
+      for (const item of work.imports || []) {
+        const section = document.createElement("section");
+        const heading = document.createElement("h3");
+        heading.textContent = item.sources.join("; ");
+        const detail = document.createElement("p");
+        detail.textContent = `Import started: ${new Date(item.started_at).toLocaleString()}\n` +
+          `${item.interruption_estimated ? "Last saved progress (interruption time unknown)" : "Last interrupted"}: ${new Date(item.interrupted_at).toLocaleString()}\n` +
+          `Messages imported: ${item.archived.toLocaleString()} · Duplicates ignored: ${item.duplicates.toLocaleString()}`;
+        section.append(heading, detail);
+        imports.append(section);
+      }
       error.textContent = "";
       document.getElementById("continue-ingest").checked = true;
       document.getElementById("continue-content").checked = true;
@@ -33,6 +47,14 @@ window.addEventListener("pywebviewready", async () => {
   }
   document.getElementById("processing-open").addEventListener("click", () => showWork(true));
   document.getElementById("processing-later").addEventListener("click", () => dialog.close());
+  document.getElementById("processing-abort").addEventListener("click", async event => {
+    event.target.disabled = true;
+    try {
+      if (!api.abort_processing || !await api.abort_processing(statusIds)) throw new Error("Saved work could not be aborted.");
+      dialog.close();
+    } catch (failure) { error.textContent = failure.message || String(failure); }
+    finally { event.target.disabled = false; }
+  });
   document.getElementById("processing-continue").addEventListener("click", async event => {
     if (!document.getElementById("continue-ingest").checked && !document.getElementById("continue-content").checked) {
       dialog.close(); return;

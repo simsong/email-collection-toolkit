@@ -25,6 +25,7 @@ from pathlib import Path
 from typing import Literal
 
 from mailarchiver.self_test import SelfTestReport
+from mailarchiver.plugin_loader import discover_manifests
 from mailarchiver.clamav_definitions import DEVELOPMENT_DATABASE, certificates_path, library_path, read_definitions, updater_path
 from packaging.requirements import Requirement
 from packaging.utils import canonicalize_name
@@ -69,6 +70,12 @@ PLIST_EXTENSION = "public.filename-extension"
 COPYRIGHT = "Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved."
 MACHO_MAGIC = {bytes.fromhex(value) for value in ("feedface", "cefaedfe", "feedfacf", "cffaedfe", "cafebabe", "bebafeca", "cafebabf", "bfbafeca")}
 HISTORICAL_PRE_SPARKLE_TAG = "v1.0.0a10"
+
+
+def plugin_import_arguments() -> list[str]:
+    """Freeze every manifest-referenced module, including dynamically loaded sources."""
+    modules = sorted({manifest.entrypoint.partition(":")[0] for manifest in discover_manifests()})
+    return [argument for module in modules for argument in ("--hidden-import", module)]
 
 
 class ImageEntry(BaseModel):
@@ -501,13 +508,13 @@ def build(signing_identity: str, *, gui: bool = False, log_contents: bool = Fals
                    "--workpath", str(work / "work"), "--specpath", str(work),
                    "--copy-metadata", "mailarchiver", "--collect-data", "mailarchiver",
                    "--collect-data", "webview", "--hidden-import", "webview.platforms.cocoa",
-                   "--hidden-import", "mailarchiver.sources", "--hidden-import", "mailarchiver.source_stubs",
-                   "--hidden-import", "mailarchiver.pst_source", "--hidden-import", "mailarchiver.pff_source",
+                   *plugin_import_arguments(),
                    "--exclude-module", "pypff",
                    "--hidden-import", "mailarchiver.processing.builtin",
                    "--hidden-import", "mailarchiver.rust_engine",
                    "--add-data", f"{plugins}:mailarchiver/plugins",
                    "--add-data", f"{ROOT / 'gui'}:gui",
+                   "--add-data", f"{ROOT / 'LICENSE'}:gui",
                    "--add-data", f"{ROOT / 'src/mailarchiver/standalone_verify.py'}:mailarchiver",
                    "--add-data", f"{notices}:Third Party Notices",
                    *clamav_bundle_arguments(work),

@@ -99,12 +99,11 @@ The [processor contract](https://github.com/simsong/email-collection-toolkit/blo
 specifies the API v2 manifest, one typed processing object and result,
 framework content types, rank barriers, aborts, timeout enforcement, archive
 services and durable handoffs. Existing source/file API v1 plugins remain
-supported before raw-message dispatch. Use `make run ARGS="--archive PATH
-processors"` to inspect the production registry, `processing-status` to inspect
-work, and `process --phase content` to resume content without source files.
-`identities addresses` and `identities organizations` expose picker data through
-the CLI. Plugins use cooperative cancellation and I/O deadlines; late results
-are rejected before publication.
+supported before raw-message dispatch. See
+[Command Line → Processing and identities](@/advanced.md#processing-and-identities)
+to inspect the production registry, saved work, and picker data, or resume
+content processing without source files. Plugins use cooperative cancellation
+and I/O deadlines; late results are rejected before publication.
 
 The complete design checkpoints plugin versions, configuration and input identity so retries
 can skip completed work. Publication and queue handoff share a recovery

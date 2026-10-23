@@ -8,7 +8,9 @@ from html.parser import HTMLParser
 import subprocess
 import sys
 import tomllib
+import shutil
 from pathlib import Path
+from urllib.parse import unquote, urljoin, urlsplit
 
 import pytest
 from yaml import safe_load
@@ -29,6 +31,56 @@ RUNS_ON = "runs-on"
 STEPS = "steps"
 RUN = "run"
 NEEDS = "needs"
+
+
+def test_manual_index_links_to_built_guides(tmp_path: Path) -> None:
+    """Requirement: the manual and navigation reach all four guides, retaining old Features URLs."""
+    if not shutil.which("zola"):
+        pytest.skip("Zola is required for built-site navigation acceptance")
+    root = Path(__file__).parents[1]
+    output = tmp_path / "site"
+    subprocess.run(["zola", "--root", str(root / "website"), "build", "--output-dir", str(output)],
+                   check=True, capture_output=True, text=True)
+    from bs4 import BeautifulSoup  # pylint: disable=import-outside-toplevel
+
+    page = BeautifulSoup((output / "manual/index.html").read_text(encoding="utf-8"), "html.parser")
+    guides = page.select("main .prose ul a")
+    assert [link.get_text() for link in guides] == ["Importing", "Searching", "Features", "Advanced"]
+    for link, path in zip(guides, ("importing", "searching", "features", "advanced"), strict=True):
+        assert link[HREF] == f"https://simsong.github.io/email-collection-toolkit/{path}/"
+        assert (output / path / "index.html").is_file()
+    for path in ("index.html", "manual/index.html", "features/index.html"):
+        document = BeautifulSoup((output / path).read_text(encoding="utf-8"), "html.parser")
+        navigation = document.select("nav a")
+        assert "Advanced" not in [link.get_text() for link in navigation]
+        assert "Documentation" not in [link.get_text() for link in navigation]
+        manual = next(link for link in navigation if link.get_text() == "User Manual")
+        assert manual[HREF] == "https://simsong.github.io/email-collection-toolkit/manual"
+    redirect = (output / "use-cases/index.html").read_text(encoding="utf-8")
+    assert "https://simsong.github.io/email-collection-toolkit/features/" in redirect
+    # Requirement: pages consistently use current routes and reach real pages/anchors.
+    base = "https://simsong.github.io/email-collection-toolkit/"
+    for path in output.rglob("*.html"):
+        document = BeautifulSoup(path.read_text(encoding="utf-8"), "html.parser")
+        if document.h1 is not None:
+            assert "Mail Collection Toolkit" not in document.h1.get_text()
+        for link in document.select("a[href]"):
+            href = urljoin(base + path.relative_to(output).as_posix(), str(link[HREF]))
+            if not href.startswith(base):
+                continue
+            destination = urlsplit(href.removeprefix(base))
+            assert destination.path.rstrip("/") != "use-cases", (path, href)
+            target = output / unquote(destination.path)
+            if not target.suffix:
+                target /= "index.html"
+            assert target.is_file(), (path, href)
+            if destination.fragment and target.suffix == ".html":
+                content = BeautifulSoup(target.read_text(encoding="utf-8"), "html.parser")
+                assert content.find(id=unquote(destination.fragment)) is not None, (path, href)
+    home = BeautifulSoup((output / "index.html").read_text(encoding="utf-8"), "html.parser")
+    assert home.h1 is not None and home.h1.get_text() == "Email Collection Toolkit"
+    manual_card = home.select_one(".resource-card[href$='/manual']")
+    assert manual_card is not None and "User Manual" in manual_card.get_text()
 
 
 def test_signing_workflows_pin_setup_actions() -> None:

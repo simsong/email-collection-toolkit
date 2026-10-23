@@ -1,10 +1,18 @@
 # Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved.
-# Publish already-flushed archive files using each platform's durable rename.
-# POSIX additionally flushes directory metadata after namespace changes.
-# Windows uses a write-through rename because directory fsync is unavailable.
-# Callers still flush file contents before publication and retain recovery intent.
-# Failed publication propagates; it must never be treated as a completed write.
-"""File publication primitives shared by the archive writer and metadata stores."""
+
+"""File publication primitives shared by the archive writer and metadata stores.
+
+Purpose: Publish flushed files with platform-appropriate rename durability.
+
+How it works:
+Replace files atomically, flush POSIX directories and use Windows write-through publication
+with bounded retries.
+
+Fundamental dependents:
+
+- ``mbox``: canonical journal/publication steps depend on these storage guarantees.
+- ``bagit``: checkpoint files must use the same durable replacement boundary.
+"""
 from __future__ import annotations
 
 import ctypes

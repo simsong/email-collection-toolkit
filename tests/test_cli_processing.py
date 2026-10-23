@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 import sqlite3
 import subprocess
 import sys
@@ -15,6 +16,8 @@ from mailarchiver.layout import mbox_directory
 from mailarchiver.standalone_verify import verify_archive
 from mailarchiver.pst_source import ImportReceipt
 from mailarchiver.processing.builtin import QUARANTINE_UNKNOWN_DATE
+from mailarchiver.__main__ import processor_statistics_table
+from mailarchiver.processing.api import PluginStatistics
 from e2e_tests.eicar_fixture import EICAR_PIECES
 from mailarchiver.archive_config import ArchiveConfig, load_archive_config, save_archive_config
 from mailarchiver.plugin_configuration import ConfigValues
@@ -50,6 +53,42 @@ def ingest(tmp_path: Path, raw: bytes, *arguments: str) -> tuple[Path, Path]:
 HEADER = (b"From: Sender <sender@lab.example.ac.uk>\r\nTo: owner@example.test\r\n"
           b"Date: Tue, 02 Jan 2024 10:00:00 +0000\r\nMessage-ID: <parent@example.test>\r\n"
           b"Subject: Parent\r\nMIME-Version: 1.0\r\n")
+
+
+def test_statistics_table_aligns_counts_and_preserves_unavailable_timings() -> None:
+    """PROCESSING: cumulative counts stay paired with timings, including errors and no samples."""
+    statistics = (
+        PluginStatistics(kind="clamav", invocations=2262, errors=7, timeouts=2,
+                         shortest=0.001, longest=123.456, average=0.002, total=300.5),
+        PluginStatistics(kind="attached-message", invocations=0, errors=0, timeouts=0,
+                         shortest=None, longest=None, average=None, total=0),
+    )
+    title, header, separator, scanned, unused = processor_statistics_table(statistics).splitlines()
+    assert title == "Processor statistics (cumulative archive history)"
+    assert header.split() == ["Processor", "Calls", "Errors", "Timeouts", "Min", "Max", "Mean", "Total"]
+    assert scanned.split() == ["clamav", "2262", "7", "2", "0.001s", "123.456s", "0.002s", "300.500s"]
+    assert unused.split() == ["attached-message", "0", "0", "0", "n/a", "n/a", "n/a", "n/a"]
+    ends = [match.end() for match in re.finditer(r"\S+", header)][1:]
+    assert [match.end() for match in re.finditer(r"\S+", scanned)][1:] == ends
+    assert [match.end() for match in re.finditer(r"\S+", unused)][1:] == ends
+    assert len(separator) == len(header)
+
+
+def test_cli_emits_statistics_table_on_stderr(tmp_path: Path) -> None:
+    """PROCESSING: a real CLI import prints a table while status stays machine-readable JSON."""
+    source = tmp_path / "source.eml"
+    source.write_bytes(HEADER + b"\r\nBody\r\n")
+    owners = tmp_path / "owners.txt"
+    owners.write_text("owner@example.test\n", encoding="utf-8")
+    archive = tmp_path / "archive"
+    result = cli(archive, "ingest", "--no-scan", "--owner-names-file", str(owners), str(source))
+    title = "Processor statistics (cumulative archive history)"
+    table = result.stderr.split(title + "\n", 1)[1].splitlines()
+    assert table[0].split() == ["Processor", "Calls", "Errors", "Timeouts", "Min", "Max", "Mean", "Total"]
+    rows = {row.split()[0]: row.split()[1:] for row in table[2:] if len(row.split()) == 8}
+    assert rows["file-message"][:3] == ["1", "0", "0"]
+    status = json.loads(cli(archive, "processing-status").stdout)
+    assert status["failed"] == 0 and status["pending"] == 0
 
 
 def test_cli_reprocess_preserves_new_owner_defaults_and_old_processing_policy(tmp_path: Path) -> None:

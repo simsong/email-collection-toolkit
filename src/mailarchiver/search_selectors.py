@@ -1,10 +1,18 @@
 # Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved.
-# Own selector recognition and bound predicates for CLI, GUI and completion.
-# Normalized text and worldwide calendar dates define the common reader contract.
-# Address, recipient, subject and date filters select candidates through indexes.
-# Live header, person and institution names come from read-only derived views.
-# Callers compose complete statements without changing canonical message bytes.
-"""Shared selector recognition and indexed SQL for CLI, tiles and completion."""
+
+"""Shared selector recognition and indexed SQL for CLI, tiles and completion.
+
+Purpose: Own the shared selector language and indexed predicate construction.
+
+How it works:
+Recognize values, resolve names and worldwide dates, and produce parameter-bound SQL
+constraints.
+
+Fundamental dependents:
+
+- ``mailsearch``: compiled searches depend on this interpretation of selectors.
+- ``search_completion``: suggestions must recognize and normalize the same selector types.
+"""
 from __future__ import annotations
 
 import re
@@ -14,6 +22,7 @@ from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 
 from .sqlite_paths import sqlite_uri
+from .search_text import register_search_functions, search_fold
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict
@@ -33,7 +42,7 @@ def contains(value: str) -> str:
 
 
 def recognize_text(value: str) -> str | None:
-    return value.strip().casefold() or None
+    return search_fold(value.strip()) or None
 
 
 def recognize_date(value: str) -> str | None:
@@ -66,13 +75,18 @@ def worldwide_bounds(value: str) -> tuple[str, str]:
             (midnight + timedelta(days=1, hours=12)).isoformat())
 
 
+def is_address_fragment(value: str) -> bool:
+    """Distinguish email substrings (including quoted local parts) from human names."""
+    return re.fullmatch(r'(?:"[^"]*"|[^\s<>]*)@[^\s<>]*', value) is not None
+
+
 def matching_addresses(value: str, names: bool = False) -> SearchStatement:
-    sql = "SELECT address_pk FROM email_addresses WHERE lower(address) LIKE ? ESCAPE '\\'"
-    parameters: list[str | int] = [contains(value)]
-    if names:
+    sql = "SELECT address_pk FROM email_addresses WHERE search_fold(address) LIKE ? ESCAPE '\\'"
+    parameters: list[str | int] = [contains(search_fold(value))]
+    if names and not is_address_fragment(value):
         sql += (" UNION SELECT a.address_pk FROM address_search_names n "
-                "JOIN email_addresses a ON a.address=n.address WHERE lower(n.name) LIKE ? ESCAPE '\\'")
-        parameters.append(contains(value))
+                "JOIN email_addresses a ON a.address=n.address WHERE search_fold(n.name) LIKE ? ESCAPE '\\'")
+        parameters.append(contains(search_fold(value)))
     return SearchStatement(sql=sql, parameters=parameters)
 
 
@@ -98,7 +112,7 @@ def address_sql(tag: str, value: str, names: bool) -> SearchStatement:
 def subject_sql(_tag: str, value: str, _names: bool) -> SearchStatement:
     return SearchStatement(sql=("m.message_pk IN (SELECT subject_match.message_pk "
         "FROM messages subject_match INDEXED BY messages_subject_message "
-        "WHERE lower(subject_match.subject) LIKE ? ESCAPE '\\')"), parameters=[contains(value)])
+        "WHERE search_fold(subject_match.subject) LIKE ? ESCAPE '\\')"), parameters=[contains(search_fold(value))])
 
 
 def date_sql(tag: str, value: str, _names: bool) -> SearchStatement:
@@ -143,11 +157,12 @@ ORGANIZATION_NAMES_SQL = """CREATE TEMP VIEW organization_address_names AS
         SELECT address,substr(domain,instr(domain,'.')+1) FROM suffixes WHERE instr(domain,'.')>0)
     SELECT a.address,o.name FROM identities.organization_domains d
     CROSS JOIN identities.organizations o ON o.organization_id=d.organization_id
-    CROSS JOIN suffixes a ON a.domain=d.domain"""
+    CROSS JOIN suffixes a ON a.domain=d.domain WHERE d.provider=0"""
 
 
 def prepare_names(database: sqlite3.Connection, archive: Path) -> None:
     """Read live identity edits and header names without rebuilding the content index."""
+    register_search_functions(database)
     sources = ["SELECT address, display_name AS name FROM search.address_suggestions"]
     if (archive / "processing.sqlite3").is_file():
         database.execute("ATTACH DATABASE ? AS identities", (sqlite_uri(archive / 'processing.sqlite3'),))
@@ -159,6 +174,14 @@ def prepare_names(database: sqlite3.Connection, archive: Path) -> None:
             "JOIN identities.person_addresses pa USING(address_id) JOIN identities.person_aliases n USING(person_id)",
             f"SELECT a.address,json_extract(e.value,'{EVIDENCE_NAME_PATH}') FROM identities.addresses a "
             "JOIN identities.evidence e USING(address_id) WHERE e.kind='header'",
-            "SELECT address,name FROM organization_address_names",
         ))
-    database.execute("CREATE TEMP VIEW address_search_names AS " + " UNION ".join(sources))
+    database.execute("CREATE TEMP VIEW observed_address_names AS " + " UNION ".join(sources))
+    expanded = "SELECT address,name FROM observed_address_names"
+    if (archive / "processing.sqlite3").is_file():
+        expanded += (" UNION SELECT member.address,n.name FROM observed_address_names n "
+            "JOIN identities.addresses observed ON observed.address=n.address "
+            "JOIN identities.person_addresses owner ON owner.address_id=observed.address_id "
+            "JOIN identities.person_addresses peer ON peer.person_id=owner.person_id "
+            "JOIN identities.addresses member ON member.address_id=peer.address_id"
+            " UNION SELECT address,name FROM organization_address_names")
+    database.execute("CREATE TEMP VIEW address_search_names AS " + expanded)

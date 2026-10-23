@@ -7,8 +7,10 @@ let statuses = [];
 let selectedStatusId = new URLSearchParams(window.location.search).get("status");
 let initialized = false;
 let importing = false;
+let starting = false;
 const byId = id => document.getElementById(id);
 const integer = value => Number(value || 0).toLocaleString();
+const processingActive = status => status.processing_active && status.state === "running";
 
 window.addEventListener("pywebviewready", initialize);
 window.setTimeout(() => {
@@ -37,10 +39,14 @@ async function refreshHistory() {
     byId("antivirus-warning").hidden = !antivirus || antivirus.configured;
     byId("antivirus-detail").textContent = antivirus?.detail || "";
     const history = await window.pywebview.api.history();
+    const previousLatestId = statuses[0]?.status_id;
     statuses = history.statuses || [];
-    if (!statuses.some(status => status.status_id === selectedStatusId)) {
+    const newRun = previousLatestId && statuses[0] && previousLatestId !== statuses[0].status_id;
+    if (newRun || (starting && !history.starting) || !statuses.some(status => status.status_id === selectedStatusId)) {
       selectedStatusId = statuses[0]?.status_id || null;
     }
+    starting = Boolean(history.starting);
+    byId("starting-import").hidden = !starting;
     render(history.errors || []);
     const canImport = await window.pywebview.api.can_import_directory?.();
     byId("import-directory").disabled = importing || !canImport;
@@ -83,6 +89,9 @@ function historyRow(status) {
   row.setAttribute("aria-selected", String(status.status_id === selectedStatusId));
   const dot = document.createElement("span");
   dot.className = `state-dot ${status.state}`;
+  dot.setAttribute("aria-hidden", "true");
+  dot.textContent = ["failed", "disk-full", "stale"].includes(status.state) ? "X"
+    : ["running", "completed"].includes(status.state) ? "✓" : "Ⅱ";
   const main = document.createElement("span");
   main.className = "history-main";
   const title = document.createElement("span");
@@ -91,7 +100,7 @@ function historyRow(status) {
   state.className = "history-state";
   state.textContent = status.state;
   const percent = document.createElement("span");
-  percent.textContent = `${Number(status.percent).toFixed(1)}%`;
+  percent.textContent = processingActive(status) ? "Processing" : `${Number(status.percent).toFixed(1)}%`;
   title.append(state, percent);
   const time = document.createElement("span");
   time.className = "history-time";
@@ -136,11 +145,18 @@ function renderDetail(status) {
   track.className = "progress-track";
   const fill = document.createElement("div");
   fill.className = "progress-fill";
+  const processingNow = processingActive(status);
+  if (processingNow) fill.classList.add("indeterminate");
   fill.style.width = `${Math.max(0, Math.min(Number(status.percent), 100))}%`;
   track.append(fill);
   const caption = document.createElement("div");
   caption.className = "progress-caption";
-  caption.append(textSpan(status.phase), textSpan(`${Number(status.percent).toFixed(1)}% · ETA ${status.eta}`));
+  track.setAttribute("role", "progressbar");
+  track.setAttribute("aria-label", processingNow ? "Processing jobs" : "Source import progress");
+  const processing = `${integer(status.processing_jobs_completed)} jobs finished · ${status.processing_processor || "preparing"}`;
+  track.setAttribute("aria-valuetext", processingNow ? processing : `${Number(status.percent).toFixed(1)}%`);
+  if (!processingNow) track.setAttribute("aria-valuenow", Number(status.percent));
+  caption.append(textSpan(status.phase), textSpan(processingNow ? processing : `${Number(status.percent).toFixed(1)}% · ETA ${status.eta}`));
 
   detail.append(heading, track, caption, statistics(status));
   if (status.failure_detail) detail.append(section("Failure", textBlock(status.failure_detail, "failure")));
@@ -148,7 +164,7 @@ function renderDetail(status) {
   if (status.source_roots.length) {
     const sources = document.createElement("ul");
     sources.className = "source-list";
-    for (const source of status.source_roots) {
+    for (const source of status.source_labels) {
       const item = document.createElement("li");
       item.textContent = source;
       sources.append(item);
@@ -173,10 +189,12 @@ function statistics(status) {
     ["Peak workers", integer(status.peak_workers)],
   ];
   const grid = document.createElement("div");
+  if (status.processing_active || status.processing_jobs_completed) values.splice(2, 0, ["Processing jobs finished", integer(status.processing_jobs_completed)]);
   grid.className = "statistics";
   for (const [label, value] of values) {
     const cell = document.createElement("div");
     cell.className = "stat";
+    if (label === "Processing jobs finished") cell.title = "Saved processing work for messages or MIME parts, including metadata extraction and search indexing. Several jobs can belong to one email; this is not a count of newly imported messages.";
     cell.append(textSpan(label), textBlock(value, "strong"));
     grid.append(cell);
   }

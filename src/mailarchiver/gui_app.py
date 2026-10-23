@@ -1,11 +1,24 @@
 # Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved.
 
-"""Expose the read-only archive services through a macOS-first pywebview shell."""
+"""Host archive documents, ingest workflows, search, and reading in pywebview.
+
+Purpose: Host archive documents, importing, search and viewing in pywebview.
+
+How it works:
+Bind native windows and menus to shared archive services, typed bridges and cooperative job
+shutdown.
+
+Fundamental dependents:
+
+- ``desktop_entry``: packaged Windows startup uses this desktop lifecycle.
+- ``self_test``: native application acceptance exercises its real windows and bridges.
+"""
 
 from __future__ import annotations
 
 
 import argparse
+from html import escape
 import json
 import logging
 import os
@@ -48,6 +61,7 @@ from .application import (
 )
 from .scanner import CLAMAV_DOWNLOAD_URL, UNSCANNED_WARNING, ScannerAvailability, scanner_availability
 from .configuration import GuiConfiguration, application_configuration
+from .gui_default_lists import DefaultListsApi
 from .document_options import DocumentOptions, OwnerRulesState
 from .owner_rules import OwnerRules
 from .archive_config import (
@@ -55,9 +69,9 @@ from .archive_config import (
     remember_import_directory,
 )
 from .plugin_api import PluginManifest
-from .gui_processing import picker_page, registered_acquisition_plugins, registered_processors, resume_request, save_identity, unfinished_work
+from .gui_processing import abort_processing, picker_page, picker_search, PickerSearchRequest, registered_acquisition_plugins, registered_processors, resume_request, save_identity, source_label, unfinished_work
 from .processing.api import ProcessorManifest
-from .processing.identities import IdentityFilter, ManualDecision
+from .processing.identities import IdentityFilter, IdentityMessages, ManualDecision
 from .gui_service import (
     MessagePreview,
     MessageView,
@@ -80,8 +94,8 @@ from .gui_service import (
     write_messages_zip,
 )
 from .ingest_status import (
-    IngestHistory,
     IngestStatus,
+    IngestStatusReadError,
     latest_ingest_status,
     read_ingest_history,
 )
@@ -97,6 +111,25 @@ EXTERNAL_LINK_SCHEMES = frozenset({"http", "https", "mailto"})
 INTERNET_CHECK_URL = "https://www.example.com/"
 INTERNET_CHECK_INTERVAL_SECONDS = 30.0
 QUIT_TIMEOUT_SECONDS = 5.0
+HELP_LINKS = (
+    ("Community Forum", "https://github.com/simsong/email-collection-toolkit/discussions"),
+    ("Contact Support", "https://github.com/simsong/email-collection-toolkit/issues"),
+    ("User Manual", "https://simsong.github.io/email-collection-toolkit/manual/"),
+    ("Source Code", "https://github.com/simsong/email-collection-toolkit"),
+)
+
+
+def license_html() -> str:
+    """Display the packaged project license, falling back to the source checkout."""
+    path = GUI_DIRECTORY / "LICENSE"
+    if not path.is_file():
+        path = GUI_DIRECTORY.parent / "LICENSE"
+    text = escape(path.read_text(encoding="utf-8"))
+    return ('<!doctype html><html lang="en"><meta charset="utf-8">'
+            '<meta name="viewport" content="width=device-width, initial-scale=1">'
+            '<title>License</title><body style="margin:24px">'
+            '<h1>License</h1><pre style="white-space:pre-wrap;overflow-wrap:anywhere">'
+            f'{text}</pre></body></html>')
 
 
 def owner_rules_text(include: str, exclude: str) -> OwnerRules:
@@ -147,10 +180,21 @@ class GuiStatus(BaseModel):
     write_available: bool = True
     configuration: GuiConfiguration
     notices: list[ApplicationNotice] = Field(default_factory=list)
+    archive_status_messages: list[str] = Field(default_factory=list)
 
 
 class GuiIngestOverview(BaseModel):
     status: IngestStatus | None = None
+
+
+class GuiIngestStatus(IngestStatus):
+    source_labels: list[str]
+
+
+class GuiIngestHistory(BaseModel):
+    statuses: list[GuiIngestStatus]
+    errors: list[IngestStatusReadError]
+    starting: bool = False
 
 
 class DragExport(BaseModel):
@@ -553,8 +597,14 @@ class IngestWindowApi:
 
     def history(self) -> dict[str, Any]:
         if self.archive is None:
-            return IngestHistory(statuses=[], errors=[]).model_dump(mode="json")
-        return read_ingest_history(self.archive).model_dump(mode="json")
+            return GuiIngestHistory(statuses=[], errors=[]).model_dump(mode="json")
+        history = read_ingest_history(self.archive)
+        statuses = [GuiIngestStatus(**status.model_dump(), source_labels=[source_label(self.archive, root)
+                    for root in status.source_roots]) for status in history.statuses]
+        job = self._document.ingest_job if self._document is not None else None
+        starting = bool(job is not None and not job.finished.is_set()
+                        and not any(status.started_at >= job.started_at for status in statuses))
+        return GuiIngestHistory(statuses=statuses, errors=history.errors, starting=starting).model_dump(mode="json")
 
     def antivirus(self) -> dict[str, object]:
         return scanner_availability().model_dump(mode="json")
@@ -595,6 +645,16 @@ class IdentityPickerApi:
         with self.application.writer_activity() if self.application else nullcontext():
             save_identity(self.archive, ManualDecision.model_validate(decision))
         return True
+
+    def search(self, selection: dict[str, Any]) -> dict[str, Any]:
+        result = picker_search(self.archive, self.kind, PickerSearchRequest.model_validate(selection))
+        parameters = [("query", result.query)]
+        if result.identity_messages is not None:
+            parameters.append(("identity-messages", result.identity_messages.model_dump_json()))
+        if self.application is not None:
+            document = next(document for document in self.application.controller.documents() if document.path == self.archive)
+            self.application.create_search_window(self.application.controller.new_search_window(document), parameters=parameters)
+        return result.model_dump(mode="json")
 
 
 class AboutApi:
@@ -686,7 +746,7 @@ class WindowBridge:
 
 
 SEARCH_BRIDGE_METHODS = (
-    "processing_work", "resume_processing", "open_picker",
+    "processing_work", "resume_processing", "abort_processing", "open_picker",
     "status", "activate", "search", "suggestions", "ingest_overview", "open_ingest_window",
     "mailbox_tree", "saved_filter_sets", "save_filter_set", "rename_filter_set", "delete_filter_set",
     "open_message_window", "request_previews", "take_previews", "message", "part", "attachment",
@@ -775,6 +835,7 @@ class GuiApi:
             opened_in_new_window=opened_in_new_window,
             configuration=application_configuration().gui,
             notices=self.application.notices() if self.application else [],
+            archive_status_messages=["Currently only .txt email attachments are indexed"] if ready else [],
         ).model_dump(mode="json")
 
     def activate(self) -> bool:
@@ -795,6 +856,11 @@ class GuiApi:
             raise ValueError("Processing requires an open archive document.")
         request = resume_request(self._archive(), ingest, content)
         return self.application.start_import(self, [], processing_request=request)
+
+    def abort_processing(self, status_ids: list[str]) -> bool:
+        with self.application.writer_activity() if self.application else nullcontext():
+            abort_processing(self._archive(), status_ids)
+        return True
 
     def open_picker(self, kind: str) -> bool:
         if kind not in ("name", "institution"):
@@ -883,10 +949,12 @@ class GuiApi:
         search_attachments: bool = False,
         mailbox_selections: list[str] | None = None,
         limit: int = DEFAULT_PAGE_SIZE,
+        identity_messages: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         page = search_page(
             self._archive(), query, offset, limit, sort_by, direction,
             search_attachments, mailbox_selections,
+            IdentityMessages.model_validate(identity_messages) if identity_messages is not None else None,
         )
         if page.error is not None:
             return page.model_dump(mode="json")
@@ -904,9 +972,11 @@ class GuiApi:
         query: str,
         search_attachments: bool = False,
         mailbox_selections: list[str] | None = None,
+        identity_messages: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         return search_count(
-            self._archive(), query, search_attachments, mailbox_selections
+            self._archive(), query, search_attachments, mailbox_selections,
+            identity_messages=IdentityMessages.model_validate(identity_messages) if identity_messages is not None else None,
         ).model_dump(mode="json")
 
     def suggestions(self, query: str, limit: int = 20) -> dict[str, Any]:
@@ -1394,10 +1464,12 @@ class PyWebViewApplication:
         self._apis: dict[str, GuiApi] = {}
         self._ingest_apis: dict[str, IngestWindowApi] = {}
         self._options_apis: dict[str, DocumentOptionsApi] = {}
+        self._default_lists_apis: dict[str, DefaultListsApi] = {}
         self._native_search_ids: dict[str, str] = {}
         self._native_child_ids: dict[str, str] = {}
         self._about_api = AboutApi(self)
         self._about_window: Any = None
+        self._license_window: Any = None
         self._reader_window: Any = None
         self._setup_api: SetupApi | None = None
         self._setup_visible = False
@@ -1511,6 +1583,30 @@ class PyWebViewApplication:
         suffix = f"?{urlencode(parameters)}" if parameters else ""
         return f"{GUI_DIRECTORY / asset}{suffix}"
 
+    def show_license(self) -> None:
+        """Open a selectable offline license; reuse it until its window closes."""
+        with self._lock:
+            if self._license_window is not None:
+                self._license_window.restore()
+                self._license_window.show()
+                return
+            window = webview.create_window(
+                f"License — {APPLICATION_NAME}", html=license_html(),
+                width=760, height=640, min_size=(400, 300),
+                text_select=True, menu=self.menu(),
+            )
+            if window is None:
+                raise RuntimeError("pywebview failed to create a license window")
+            self._license_window = window
+
+            def closed(*_args: object) -> None:
+                with self._lock:
+                    self._license_window = None
+                self._refresh_menus()
+
+            window.events.closed += closed
+        self._refresh_menus()
+
     def create_about_window(self, *, hidden: bool = False) -> None:
         """Retain the application anchor; show health on an explicit About request."""
         if self._connectivity is None:
@@ -1610,7 +1706,7 @@ class PyWebViewApplication:
             acquisition_plugins=registered_acquisition_plugins(active.path if active else None),
         )
 
-    def create_search_window(self, session: SearchWindow) -> GuiApi:
+    def create_search_window(self, session: SearchWindow, *, parameters: list[tuple[str, str]] | None = None) -> GuiApi:
         document = self.controller.document(session.document_id)
         api = GuiApi(
             document.path,
@@ -1621,7 +1717,7 @@ class PyWebViewApplication:
         status = api.status()
         window = webview.create_window(
             _window_title(document, int(status["message_count"])),
-            self.asset_url("index.html"),
+            self.asset_url("index.html", parameters),
             js_api=WindowBridge(api, SEARCH_BRIDGE_METHODS),
             width=session.geometry.width,
             height=session.geometry.height,
@@ -1871,19 +1967,7 @@ class PyWebViewApplication:
             f"Exclude: {', '.join(owner_rules.exclude) or '(none)'}\n\n{antivirus.detail}"
         )
         if not antivirus.configured:
-            choice = (
-                macos_alert(title, confirmation, ("Cancel", "Import Without Scanning", "Install ClamAV…"),
-                            body_width=IMPORT_CONFIRMATION_WIDTH)
-                if sys.platform == "darwin" else
-                (1 if anchor.create_confirmation_dialog(title, confirmation + "\n\nImport WITHOUT antivirus scanning?") else 0)
-            )
-            if choice == 2:
-                import webbrowser  # pylint: disable=import-outside-toplevel
-                webbrowser.open(CLAMAV_DOWNLOAD_URL)
-                return False
-            if choice != 1:
-                return False
-            return self.start_import(api, roots, owner_rules=owner_rules, owner_revision=owner_revision, scan_policy="not-scanned")
+            self.add_notice("warning", f"{destination}: antivirus unavailable; scanner errors will be recorded while importing continues.")
         confirmed = (
             macos_alert(title, confirmation, ("Import", "Cancel"), body_width=IMPORT_CONFIRMATION_WIDTH) == 0
             if sys.platform == "darwin" else anchor.create_confirmation_dialog(title, confirmation)
@@ -2077,6 +2161,18 @@ class PyWebViewApplication:
         return result.errors
 
     def close_active_window(self) -> bool:
+        if sys.platform == "darwin" and not import_module("Foundation").NSThread.isMainThread():
+            finished, closed = Event(), Event()
+
+            def close() -> None:
+                try:
+                    if self.close_active_window():
+                        closed.set()
+                finally:
+                    finished.set()
+
+            import_module("PyObjCTools.AppHelper").callAfter(close)
+            return finished.wait(5) and closed.is_set()
         if self._setup_api is not None and self._setup_api._lock.locked():
             return False
         native = webview.active_window()
@@ -2092,6 +2188,47 @@ class PyWebViewApplication:
     def open_active_ingest_window(self) -> bool:
         document = self.active_document()
         return self.open_ingest_window(document) if document is not None else False
+
+    def open_default_lists(self, document: ArchiveDocument | None = None, *, personal: bool = False) -> bool:
+        api = None if personal or document else self.active_api()
+        document = None if personal else (document or (api.document if api else None))
+        native = webview.active_window() if not personal and document is None else None
+        child_id = self._native_child_ids.get(native.uid) if native else None
+        if child_id:
+            document = self.controller.document(child_id)
+        archive = document.path if document else None
+        document_id = document.descriptor.document_id if document and archive else 'personal'
+        with self._lock:
+            editor = self._default_lists_apis.get(document_id)
+            if editor is not None:
+                editor.window.restore()
+                editor.window.show()
+                return True
+            editor = DefaultListsApi(archive, identity=document.descriptor.identity if document and archive else '',
+                version=application_metadata().version, writer_activity=self.writer_activity)
+            window = webview.create_window(
+                f"{APPLICATION_NAME} — Customizable Default Lists" + (f" — {archive}" if archive else ""),
+                self.asset_url("default-lists.html"), js_api=WindowBridge(editor, ("catalog", "load", "update")),
+                width=800, height=820, min_size=(600, 560), menu=self.menu())
+            if window is None:
+                raise RuntimeError("pywebview failed to create a window")
+            editor.window = window
+            self._default_lists_apis[document_id] = editor
+            if archive:
+                self._native_child_ids[window.uid] = document_id
+                self.controller.attach_child_window(document_id, window.uid)
+
+            def closed(*_args: object) -> None:
+                with self._lock:
+                    self._default_lists_apis.pop(document_id, None)
+                    self._native_child_ids.pop(window.uid, None)
+                if archive:
+                    self.controller.close_child_window(document_id, window.uid)
+                self._refresh_menus()
+
+            window.events.closed += closed
+        self._refresh_menus()
+        return True
 
     def open_document_options(self, document: ArchiveDocument | None = None) -> bool:
         if document is None:
@@ -2140,7 +2277,7 @@ class PyWebViewApplication:
         window = webview.create_window(
             f"{APPLICATION_NAME} — {kind.title()} matcher — {document.display_path}",
             self.asset_url("identity.html", [("kind", kind)]),
-            js_api=WindowBridge(api, ("query", "update")),
+            js_api=WindowBridge(api, ("query", "update", "search")),
             width=1100, height=750, min_size=(900, 560), menu=self.menu(),
         )
         if window is None:
@@ -2223,7 +2360,9 @@ class PyWebViewApplication:
         windows = [api.window for api in self._search_apis()]
         windows.extend(api.window for api in self._ingest_apis.values())
         windows.extend(api.window for api in self._options_apis.values())
+        windows.extend(api.window for api in self._default_lists_apis.values())
         windows.append(self._about_window)
+        windows.append(self._license_window)
         if self._setup_api is not None:
             windows.append(self._setup_api.window)
         window = next((candidate for candidate in windows if candidate is not None and candidate.uid == uid), None)
@@ -2242,6 +2381,8 @@ class PyWebViewApplication:
             items.append(MenuAction("Get started", self.show_setup))
         if self._about_window is not None and self._about_visible:
             items.append(MenuAction(f"About {APPLICATION_NAME}", lambda: self.focus_window(self._about_window.uid)))
+        if self._license_window is not None:
+            items.append(MenuAction("License", lambda: self.focus_window(self._license_window.uid)))
         for index, api in enumerate(self._search_apis(), 1):
             if api.window is None:
                 continue
@@ -2266,6 +2407,8 @@ class PyWebViewApplication:
             )
         for api in tuple(self._options_apis.values()):
             items.append(MenuAction(api.window.title, lambda uid=api.window.uid: self.focus_window(uid)))
+        for editor in tuple(self._default_lists_apis.values()):
+            items.append(MenuAction(editor.window.title, lambda uid=editor.window.uid: self.focus_window(uid)))
         return items
 
     def _can_close_search_window(self, window_id: str, window: Any) -> bool:
@@ -2419,6 +2562,7 @@ class PyWebViewApplication:
         windows.extend(api.window for api in self._ingest_apis.values())
         windows.append(self._about_window)
         windows.append(self._reader_window)
+        windows.append(self._license_window)
         if self._setup_api is not None:
             windows.append(self._setup_api.window)
         for window in windows:
@@ -2511,7 +2655,8 @@ class PyWebViewApplication:
                     child = active.uid in self._native_child_ids
                 setup = self._setup_api
                 busy = setup is not None and setup._lock.locked()
-                enabled = child or (setup is not None and active is setup.window) or (
+                list_editor = any(editor.window is active for editor in self._default_lists_apis.values())
+                enabled = child or list_editor or active is self._license_window or (setup is not None and active is setup.window) or (
                     search_id is not None and self.controller.can_close_window(search_id)
                 )
                 close_item.setEnabled_(enabled and not busy)
@@ -2571,16 +2716,22 @@ def application_menu(application: PyWebViewApplication) -> list[Menu]:
     ]
     if recent:
         file_items.append(Menu("Open Recent", recent))
+    help_items: list[Menu | MenuAction | MenuSeparator] = [
+        MenuAction(title, lambda destination=url: open_external_url(destination))
+        for title, url in HELP_LINKS
+    ]
+    help_items.append(MenuAction("License", application.show_license))
     if sys.platform == "win32":
         return [
             Menu("File", [*file_items, MenuAction("Import…", application.import_active_document),
                           MenuAction("Document Options…", application.open_document_options),
+                          MenuAction("Customizable Default Lists…", application.open_default_lists),
                           MenuAction("Close", application.close_active_window),
                           MenuSeparator(), MenuAction("Quit", application.request_quit)]),
             Menu("Window", [MenuAction("New Search Window", application.new_search_window),
                             MenuAction("Ingests", application.open_active_ingest_window),
                             *application.window_menu_items()]),
-            Menu("Help", [MenuAction("About", application.create_about_window),
+            Menu("Help", [*help_items, MenuSeparator(), MenuAction("About", application.create_about_window),
                           MenuAction("Check for Updates…", application.updates.check),
                           MenuAction("Update Settings…", application.show_update_preferences)]),
         ]
@@ -2588,6 +2739,7 @@ def application_menu(application: PyWebViewApplication) -> list[Menu]:
         (
             MenuAction("Import…", application.import_active_document),
             MenuAction("Document Options…", application.open_document_options),
+                          MenuAction("Customizable Default Lists…", application.open_default_lists),
             MenuAction("Close", application.close_active_window),
         )
     )
@@ -2598,6 +2750,7 @@ def application_menu(application: PyWebViewApplication) -> list[Menu]:
             [MenuAction("New Search Window", application.new_search_window),
              MenuAction("Ingests", application.open_active_ingest_window), *application.window_menu_items()],
         ),
+        Menu("Help", help_items),
     ]
 
 
@@ -2777,6 +2930,9 @@ def main() -> int:
             application.create_about_window(hidden=True)
         if prompt_for_archive:
             application.show_setup()
+            from .list_catalog import OWNERS
+            if not OWNERS.template().include:
+                application.open_default_lists(personal=True)
         for session in startup.windows:
             if controller.document(session.document_id).descriptor.untitled:
                 controller.close_window(session.window_id)

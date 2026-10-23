@@ -1,0 +1,25 @@
+# Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved.
+version: 1
+domains:
+  - gmail.com
+  - googlemail.com
+  - outlook.com
+  - hotmail.com
+  - live.com
+  - msn.com
+  - yahoo.com
+  - yahoo.co.uk
+  - yahoo.co.jp
+  - ymail.com
+  - aol.com
+  - icloud.com
+  - me.com
+  - mac.com
+  - proton.me
+  - protonmail.com
+  - pm.me
+  - fastmail.com
+  - hey.com
+  - mail.com
+  - gmx.com
+  - gmx.de

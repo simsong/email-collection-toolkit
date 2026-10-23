@@ -1,12 +1,17 @@
 # Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved.
-# Build folder selections from derived source observations, without changing mail.
-# Versioned tokens identify logical folders and optionally their source volume.
-# Saved filters share one per-user JSON format with the Rust desktop reader.
-# Mutations hold a stable companion-file OS lock before loading preferences.
-# Synced temporary-file replacement publishes complete snapshots to readers.
-# Closing the lock handle releases ownership after success, failure or a crash.
 
-"""Build original-mailbox trees and persist per-user filter sets."""
+"""Build original-mailbox trees and persist per-user filter sets.
+
+Purpose: Build logical source-mailbox trees and saved folder selections.
+
+How it works:
+Aggregate source hierarchy/provenance and persist per-user filter sets outside the archive.
+
+Fundamental dependents:
+
+- ``gui_app``: the original-folder explorer needs these nodes and saved selections.
+- ``mailsearch``: folder constraints must use the same selection model.
+"""
 
 from __future__ import annotations
 

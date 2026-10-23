@@ -9,7 +9,7 @@ import pytest
 
 from mailarchiver.__main__ import IngestRequest, run_ingest
 from mailarchiver.gui_app import IdentityPickerApi
-from mailarchiver.gui_processing import PickerPage, unfinished_work
+from mailarchiver.gui_processing import PickerPage, PickerSearch, unfinished_work
 from mailarchiver.gui_service import search_page, search_suggestions
 from mailarchiver.mailsearch import parse_query, search_result_count
 from mailarchiver.owner_rules import OwnerRules
@@ -124,3 +124,48 @@ def test_invalid_dates_have_no_date_completions(tmp_path: Path, value: str) -> N
     assert recognize_date(value) is None
     assert not any(item.tag in ("date", "before", "after") for item in search_suggestions(archive, value).items)
     assert search_page(archive, f'date:"{value}"').error
+
+
+def test_observed_names_expand_across_manual_groups_and_separate_immediately(tmp_path: Path) -> None:
+    """SEARCH: live groups and Unicode-normalized aliases compose without rebuilding indexes."""
+    archive = completion_archive(tmp_path)
+    picker = IdentityPickerApi(archive, "name")
+    groups = PickerPage.model_validate(picker.query({})).groups
+    alpha = next(group for group in groups if group.label == "Simson Header")
+    hidden = next(group for group in groups if group.label == "Hidden Name")
+    picker.update({"operation": "merge-person", "subject": hidden.id, "target": alpha.id})
+    picker.update({"operation": "rename-person", "subject": alpha.id, "name": "Jörg Straße"})
+    for name in ("Simson Header", "Hidden Name", "Jörg Straße", "jorg strasse"):
+        assert len(search_page(archive, f'any:"{name}"').results) == 3
+    assert len(search_page(archive, 'bcc:"Simson Header"').results) == 1
+    assert len(search_page(archive, 'any:alpha@example.test').results) == 2
+    picker.update({"operation": "separate-address", "subject": hidden.addresses[0].address_id})
+    assert len(search_page(archive, 'any:"Simson Header"').results) == 2
+    # A merged canonical name remains an explicit group alias after one address separates.
+    assert len(search_page(archive, 'any:"Hidden Name"').results) == 3
+
+
+def test_email_group_alias_does_not_broaden_an_address_row_search(tmp_path: Path) -> None:
+    """Literal addresses stay specific even when a grouped canonical name or alias is that email."""
+    archive = completion_archive(tmp_path)
+    picker = IdentityPickerApi(archive, "name")
+    groups = PickerPage.model_validate(picker.query({})).groups
+    alpha = next(group for group in groups if group.label == "Simson Header")
+    hidden = next(group for group in groups if group.label == "Hidden Name")
+    picker.update({"operation": "rename-person", "subject": hidden.id, "name": "hidden@example.test"})
+    picker.update({"operation": "merge-person", "subject": hidden.id, "target": alpha.id})
+    selected = PickerSearch.model_validate(picker.search({"group_id": alpha.id,
+        "address_id": hidden.addresses[0].address_id}))
+    assert len(search_page(archive, selected.query).results) == 1
+    assert search_suggestions(archive, "hidden@example.test").items[0].message_count == 1
+    picker.update({"operation": "rename-person", "subject": alpha.id, "name": "hidden@example.test"})
+    selected = PickerSearch.model_validate(picker.search({"group_id": alpha.id}))
+    assert selected.identity_messages is not None
+    assert len(search_page(archive, selected.query, identity_messages=selected.identity_messages).results) == 3
+
+    picker.update({"operation": "rename-person", "subject": alpha.id, "name": "Jane @ Lab"})
+    selected = PickerSearch.model_validate(picker.search({"group_id": alpha.id}))
+    assert selected.identity_messages is None
+    assert len(search_page(archive, selected.query).results) == 3
+    assert len(search_page(archive, 'any:"Jane @ Lab"').results) == 3
+    assert search_suggestions(archive, "Jane @ Lab").items[0].message_count == 3

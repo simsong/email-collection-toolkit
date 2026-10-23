@@ -1,6 +1,18 @@
 # Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved.
 
-"""Versioned contracts shared by ingest plug-ins and the framework."""
+"""Versioned contracts shared by ingest plug-ins and the framework.
+
+Purpose: Define immutable source, message, integrity and progress contracts.
+
+How it works:
+Validate typed plugin boundaries so local and remote providers fit one discovery/acquisition
+protocol.
+
+Fundamental dependents:
+
+- ``plugin_loader``: discovered implementations must satisfy these interfaces.
+- ``__main__``: source scheduling and canonical observation use these shared data types.
+"""
 
 from __future__ import annotations
 
@@ -135,6 +147,7 @@ class MailObject(FrozenModel):
     total_bytes: int | None = Field(default=None, ge=0)
     exclusion_reason: str | None = None
     scan_responsibility: Literal["host", "producer"] = "host"
+    provider_metadata_json: str | None = None
 
     @field_validator("mbox_envelope")
     @classmethod
@@ -221,6 +234,15 @@ class SourceIntegrityControls(ABC):
         """Validate stable completion and yield the final evidence."""
 
 
+class SourceObservation(FrozenModel):
+    """Refresh metadata for an already committed provider message without fetching its body."""
+
+    work_id: str
+    source: SourceReference
+    cursor: str
+    provider_metadata_json: str
+
+
 class SourcePlugin(ABC):
     """Discover schedulable containers and stream their messages."""
 
@@ -238,7 +260,7 @@ class SourcePlugin(ABC):
     @abstractmethod
     def messages(
         self, container: MailContainer, resume_cursor: str | None
-    ) -> Iterator[MailObject | ProgressEvent]:
+    ) -> Iterator[MailObject | SourceObservation | ProgressEvent]:
         """Yield messages from one container without creating threads."""
 
 

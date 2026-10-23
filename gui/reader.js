@@ -1,4 +1,4 @@
-// Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved.
+/* Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved. */
 // Bind the welcome button to the shared Python document-opening action.
 // A standard system file picker runs without granting the page filesystem access.
 // Pending and failed operations remain visible in this window.

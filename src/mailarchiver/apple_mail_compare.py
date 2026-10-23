@@ -1,6 +1,17 @@
 # Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved.
 
-"""Compare complete Apple Mail EMLX records with an Email Collection Toolkit archive read-only."""
+"""Compare complete Apple Mail EMLX records with an Email Collection Toolkit archive read-only.
+
+Purpose: Reconcile complete Apple Mail cache messages with a canonical archive.
+
+How it works:
+Index cache hashes privately and compare raw/semantic identities without changing either
+store.
+
+Fundamental dependents:
+
+- ``h3_review``: ambiguous-class exports use its cache inventory and comparison machinery.
+"""
 
 from __future__ import annotations
 

@@ -149,6 +149,11 @@ def main() -> None:
         def finish_settings() -> None:
             assert started.wait(5)
             sleep(0.3)
+            # Release the delayed read, then allow ordinary repeated settings reads.
+            # Keep the FIFO handle alive only for the first reader already waiting.
+            ready = config.with_suffix(".ready")
+            ready.write_text("{}\n", encoding="utf-8")
+            os.replace(ready, config)
             os.write(descriptor, b"{}\n")
             os.close(descriptor)
 

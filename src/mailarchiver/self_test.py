@@ -3,6 +3,18 @@
 """Disposable end-to-end checks for source and frozen desktop installations.
 
 Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved.
+
+
+Purpose: Exercise source and packaged desktop behavior using disposable mail.
+
+How it works:
+Create synthetic archives and drive real ingest, verification, GUI and bundled-resource
+checks.
+
+Fundamental dependents:
+
+- ``scripts.desktop_entry``: packaged self-test switches dispatch to these checks.
+- ``scripts.build_macos``: mounted application acceptance depends on their evidence.
 """
 
 from __future__ import annotations
@@ -100,6 +112,7 @@ def exercise_core(directory: Path, report: SelfTestReport) -> Path:
 def exercise_gui(archive: Path, directory: Path, report: SelfTestReport) -> None:
     """Show production windows and exercise the actual WKWebView promise bridge."""
     import webview  # pylint: disable=import-outside-toplevel
+    from webview.menu import MenuAction  # pylint: disable=import-outside-toplevel
     from .application import ApplicationController, ApplicationPreferencesStore  # pylint: disable=import-outside-toplevel
     from .gui_app import AboutStatus, GUI_DIRECTORY, PyWebViewApplication, configure_macos_application, install_macos_document_events  # pylint: disable=import-outside-toplevel
     from .loopback import LoopbackAssetServer  # pylint: disable=import-outside-toplevel
@@ -157,6 +170,26 @@ def exercise_gui(archive: Path, directory: Path, report: SelfTestReport) -> None
                 raise AssertionError(f"Unexpected startup errors: {startup_errors}")
             report.checks.append("startup has no spurious document-open errors")
             report.checks.extend(["visible About, search, and Ingests windows", "native search bridge", "missing-ClamAV banner and history warning"])
+            # Requirement: Help opens the complete offline license and reuses its window.
+            help_menu = next(menu for menu in application.menu() if menu.title == "Help")
+            license_action = next(item for item in help_menu.items if getattr(item, "title", None) == "License")
+            assert isinstance(license_action, MenuAction)
+            license_action.function()
+            license_window = next(window for window in webview.windows if window.title.startswith("License —"))
+            if not license_window.events.loaded.wait(20):
+                raise TimeoutError("license window did not load")
+            expected_license = (GUI_DIRECTORY.parent / "LICENSE")
+            if not expected_license.is_file():
+                expected_license = GUI_DIRECTORY / "LICENSE"
+            if license_window.evaluate_js("document.querySelector('pre').textContent") != expected_license.read_text(encoding="utf-8"):
+                raise AssertionError("license viewer does not contain the complete embedded license")
+            license_action.function()
+            if len([window for window in webview.windows if window.title.startswith("License —")]) != 1:
+                raise AssertionError("repeated License action created another window")
+            license_window.destroy()
+            if not license_window.events.closed.wait(10):
+                raise TimeoutError("license window did not close")
+            report.checks.append("Help License opens complete offline text, reuses its window and closes")
             # Exercise the real source picker and its banner without selecting any user data.
             appkit = import_module("AppKit")
             foundation = import_module("Foundation")
@@ -176,6 +209,11 @@ def exercise_gui(archive: Path, directory: Path, report: SelfTestReport) -> None
                     menu = native.mainMenu()
                     if [item.title() for item in menu.itemArray()][1:5] != ["File", "Edit", "View", "Window"]:
                         raise AssertionError("native menu order is incorrect")
+                    help_items = menu.itemWithTitle_("Help").submenu().itemArray()
+                    if [item.title() for item in help_items] != [
+                        "Community Forum", "Contact Support", "User Manual", "Source Code", "License",
+                    ]:
+                        raise AssertionError("native Help menu destinations are incorrect")
                     if menu.itemWithTitle_("File").submenu().itemWithTitle_("Open…").keyEquivalent() != "o":
                         raise AssertionError("Command-O is not bound to Open")
                     application_menu = menu.itemAtIndex_(0).submenu()

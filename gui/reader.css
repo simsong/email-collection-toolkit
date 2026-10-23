@@ -1,4 +1,5 @@
-/* Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved.
+/* Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved. */
+/*
  * Style the reader's small Windows welcome window with native system fonts.
  * Content wraps as the window or display scale changes.
  * Open and New use the shared document actions.

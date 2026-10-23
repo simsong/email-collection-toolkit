@@ -1,9 +1,23 @@
 # Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved.
-"""Direct libclamav scanning in a bounded, run-owned worker; no resident daemon."""
+
+"""Direct libclamav scanning in a bounded, run-owned worker; no resident daemon.
+
+Purpose: Supervise bounded antivirus scans without a resident service.
+
+How it works:
+Run native engines in owned workers, enforce deadlines and return typed scan evidence to
+message processing.
+
+Fundamental dependents:
+
+- ``processing.builtin``: antivirus admission depends on these actual verdicts.
+- ``clamav_update``: definition generations require real clean/infected validation scans.
+"""
 from __future__ import annotations
 
 import multiprocessing
 import os
+import signal
 import tempfile
 import time
 from collections.abc import Callable
@@ -85,6 +99,7 @@ def exit_with_parent(sentinel: int) -> None:
 
 def engine_worker(connection: ScannerConnection, library: Path, definitions: DefinitionSet, workers: int, temporary_directory: Path) -> None:
     """Share one immutable engine among native scan threads; ctypes releases the GIL."""
+    signal.signal(signal.SIGINT, signal.SIG_IGN)
     parent = multiprocessing.parent_process()
     if parent is not None:
         Thread(target=exit_with_parent, args=(parent.sentinel,), name="clamav-owner", daemon=True).start()
@@ -167,6 +182,9 @@ class ClamScanner(AbstractContextManager["ClamScanner"]):
     def __enter__(self) -> Self:
         try:
             definitions = self.definitions or selected_definitions()
+            if self.definitions is None:
+                from .clamav_update import definitions_for_scan
+                definitions = definitions_for_scan(definitions, status_callback=self.status_callback)
             self.runtime = tempfile.TemporaryDirectory(prefix="libclamav-", dir=self.scan_temporary_directory)
             context = multiprocessing.get_context("spawn")
             self.connection, child = context.Pipe()
@@ -187,9 +205,11 @@ class ClamScanner(AbstractContextManager["ClamScanner"]):
             with _SESSIONS_LOCK:
                 _SESSIONS[self.session] = self
             return self
-        except (OSError, ValueError, RuntimeError, EOFError) as error:
+        except BaseException as error:
             self.__exit__()
-            raise ClamScannerStartupError(str(error)) from error
+            if isinstance(error, (OSError, ValueError, RuntimeError, EOFError)):
+                raise ClamScannerStartupError(str(error)) from error
+            raise
 
     def _receive(self, deadline: float, *, startup: bool = False) -> ScanEvidence:
         assert self.connection is not None

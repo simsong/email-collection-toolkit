@@ -44,6 +44,10 @@ from mailarchiver.ingest_status import (
 )
 from mailarchiver.plugin_api import ProgressEvent
 from mailarchiver.sources import SourceInventory
+from mailarchiver.processing.registry import fingerprint, load_processors
+from mailarchiver.processing.runtime import run
+from mailarchiver.processing.store import connect, submit
+from tests.test_processing import MESSAGE, plugin
 
 
 def test_overall_progress_uses_concurrent_source_bytes_for_percentage_and_eta() -> None:
@@ -430,6 +434,49 @@ def test_numbered_worker_rows_are_main_rendered_without_wrapping(capsys: pytest.
     rendered = [part.split("\n", 1)[0] for part in output.split("\r\x1b[2K")[1:]]
     plain = [re.sub(r"\x1b\[[0-9;]*m", "", line) for line in rendered]
     assert plain and all(len(line) <= progress.terminal_columns for line in plain)
+
+
+def test_processor_recovery_publishes_live_activity_and_finished_jobs(tmp_path: Path) -> None:
+    """Recovery progress: real processor work appears before completion, without inventing imported mail."""
+    plugin(tmp_path, "gate", 'while not (item.archive.path / "release").exists():\n'
+           '    item.check_cancelled()\n    time.sleep(0.01)\nreturn ProcessingResult()', timeout=5)
+    plugins = load_processors((tmp_path,))
+    archive = tmp_path / "archive"
+    with connect(archive, create=True) as database:
+        submit(database, archive, MESSAGE, fingerprint(plugins))
+    started = datetime.now(UTC)
+    status_file = IngestStatusFile(archive, new_status_id(started, 1, os.getpid()))
+    progress = ProgressReporter(status_file=status_file, archive=archive, run_pk=1, terminal=False)
+    progress.set_phase("recovering archived content")
+    snapshots = []
+
+    def recover(_unused: int) -> None:
+        try:
+            with connect(archive) as database:
+                run(database, plugins, progress=progress.record_processing)
+        finally:
+            progress.finish_processing()
+
+    def display() -> None:
+        progress.display(None)
+        status = read_ingest_history(archive).statuses[0]
+        if status.processing_active and status.processing_processor == "gate":
+            snapshots.append(status)
+            (archive / "release").touch()
+
+    run_file_workers([0], 1, recover, threading.Event(), display)
+    progress.finish("completed")
+    assert snapshots
+    active = snapshots[0]
+    assert active.phase == "recovering archived content"
+    assert active.processing_job_id == 1 and active.processing_jobs_completed == 0
+    assert active.active_workers == 1 and active.workers[0].phase == "processing gate"
+    assert active.workers[0].activity_unit == "jobs" and active.eta == "calculating"
+    final = read_ingest_history(archive).statuses[0]
+    assert final.processing_jobs_completed == 1 and not final.processing_active
+    assert final.processing_job_id is final.processing_processor is None
+    assert final.active_workers == 0 and final.workers[0].phase == "idle"
+    assert final.processed_messages == final.files_processed == final.counts.archived == 0
 
 
 def test_progress_status_file_preserves_final_run_statistics(tmp_path: Path) -> None:

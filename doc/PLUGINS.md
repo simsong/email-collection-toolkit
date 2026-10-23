@@ -10,18 +10,8 @@ are created. The Rust PST importer remains an external executable. Use a fresh d
 there is no requirement to migrate or preserve existing generated archive
 formats. Source mail remains immutable.
 
-Run these commands through the Makefile from the repository checkout root.
-`build/` is ignored and holds only disposable example archives:
-
-~~~sh
-make processor ARGS="--archive build/processor-demo --plugin-dir tests/processing_plugins init"
-make processor ARGS="--archive build/processor-demo --plugin-dir tests/processing_plugins plugins"
-make processor ARGS="--archive build/processor-demo --plugin-dir tests/processing_plugins submit tests/data/credible_date_with_quoted_body.eml"
-make processor ARGS="--archive build/processor-demo --plugin-dir tests/processing_plugins run --max-jobs 1"
-make processor ARGS="--archive build/processor-demo --plugin-dir tests/processing_plugins run"
-make processor ARGS="--archive build/processor-demo --plugin-dir tests/processing_plugins status"
-make test-processors
-~~~
+The [processor harness reference](CLI_REFERENCE.md#processor-harness) documents
+disposable fixtures and execution. Production uses the local archive commands.
 
 The plugins command prints manifests; status and run print typed JSON reports
 with persistent invocation counts and timings. A failed run exits 1.
@@ -75,15 +65,7 @@ selection, attached messages and the real Rust PST adapter.
 
 ### Production CLI
 
-~~~sh
-make run ARGS="--archive build/demo ingest --owner-names-file tests/fixtures/owner-names.txt --clamav --defer-content tests/data/three_messages.mbox"
-make run ARGS="--archive build/demo processors"
-make run ARGS="--archive build/demo processing-status"
-make run ARGS="--archive build/demo process --phase content"
-make run ARGS="--archive build/demo identities addresses --mailbox sender --start 2024-01-01"
-make run ARGS="--archive build/demo identities organizations --domain example.net"
-make test-cli-processors
-~~~
+See [CLI_REFERENCE.md](CLI_REFERENCE.md#local-archive-commands) for execution recipes.
 
 `ingest` finishes ingest/message jobs before running content. `--defer-content`
 leaves content pending. `process --phase ingest|content|all` resumes stored jobs
@@ -95,7 +77,12 @@ code, policy or effective settings changes queue a new generation automatically;
 message processing, retaining their original antivirus provenance. It never
 unquarantines infected messages. Original source bytes, canonical MBOX files and
 manual decisions are retained. Working `objects/` files, including synthetic
-parts, are outside the canonical BagIt payload.
+parts, are outside the canonical BagIt payload. Completed working files are
+collected after each message publication and SQL commit, then after completed
+processing jobs. Live jobs retain derived inputs and retry checkpoints; raw
+inputs are reconstructed from verified canonical MBOX records when needed.
+New production generations regenerate derived parts.
+The standalone harness retains its original input snapshots for replay.
 
 `identities` returns JSON address rows with canonical names, first/last use and
 distinct message counts, or organization rows grouped by parent domain using an
@@ -205,7 +192,7 @@ effective settings, processing code and policy to invalidate completed derived
 work. The registry fingerprint covers manifests and local Python code, including helpers.
 
 
-## Proposed ranked processing graphs
+## Processing graph design and deferred capabilities
 
 ![Proposed container, message and content processor DAGs](../website/static/images/processor-dag.svg)
 
@@ -367,6 +354,11 @@ emitted framework types. Actual parts retain their MIME types, including
 `message/rfc822`. These framework labels are internal types,
 not headers added to canonical messages.
 
+`ProcessingResult.phone_numbers` carries typed normalized/display phone candidates
+from detected signatures. The host attaches them to the message sender as `phone`
+evidence; they do not add email-address observations or signature-email counts.
+The picker displays observed candidates without asserting ownership.
+
 A result contains emitted processing objects, typed diagnostics, and one
 control outcome: continue, abort part, abort message, or fail import. Publications,
 catalog changes and handoff requests use application services rather than
@@ -390,8 +382,8 @@ Separate child-message jobs have their own abort scope once durably submitted.
 
 A positive antivirus result is a handled message abort: commit quarantine and
 its observation before stopping downstream work. A scanner error or timeout
-is never a clean verdict. Record the failure, retain recoverable input and leave
-the work retryable; stop normal filing of that input. Malformed MIME, decoding
+is never a clean verdict. Record the failure, preserve the original message and
+continue importing automatically; no manual-review gate is permitted. Malformed MIME, decoding
 failures and unscannable content must never silently discard original bytes.
 
 In-process plugins must honor cancellation and pass their remaining timeout to
@@ -466,10 +458,17 @@ channel across all visible member addresses.
 
 Scanner invocations persist typed clean/infected/not-scanned/unscannable/scanner-error
 results with diagnostics and engine/signature versions (NULL if unavailable).
-Errors and reported encryption/size-limit heuristics block filing and retain
-raw input for retry. Version queries are cached per daemon configuration;
-which unscannable conditions are reported depends on the daemon configuration.
-Failed invocations may publish scan evidence only, never content or filing.
+Python host ingestion archives originals unchanged for `unscannable` and
+`scanner-error` outcomes, including encryption, size limits, deadlines and engine
+failures. It records an antivirus metadata defect and continues automatically.
+Incomplete/error scans never become clean verdicts. The scan
+diagnostic and engine/signature versions remain in the invocation record.
+Engine and definition versions are read once per scanner
+session; which unscannable conditions are reported depends on libclamav's scan options.
+Only scan evidence is retained from failed processor output, never its content
+or filing requests. The host's accepted outcome permits normal filing or
+synthesizes automatic quarantine for a known positive. Failed attempt/timeout
+counters remain in audit history.
 
 
 Attached-message promotion requires valid transfer decoding. Invalid base64
@@ -636,6 +635,14 @@ source account; the framework scopes it by plug-in kind and source ID.
 containing non-secret provider provenance. The framework stores it with the
 source container; access tokens and credentials are forbidden.
 
+The built-in IMAP source may also yield `SourceObservation` to refresh already
+committed message metadata without retrieving a body. Its work/source identity
+must match the container; the host updates the committed IMAP checkpoint without
+incrementing download counts. This metadata-only handler is currently IMAP-specific.
+Optional `MailObject.provider_metadata_json` carries typed provider metadata through
+durable ingest retries; attached-message promotions clear their parent's remote
+identity metadata. Existing source plugins need not emit either addition.
+
 `MailObject` is one streamed message. `raw` is the provider's original RFC 5322
 representation. `work_id` binds it to its container, while `cursor` is an
 opaque source-native record locator. Optional message and byte fields report
@@ -672,7 +679,7 @@ class SourcePlugin(ABC):
 
     def messages(
         self, container: MailContainer, resume_cursor: str | None
-    ) -> Iterator[MailObject | ProgressEvent]: ...
+    ) -> Iterator[MailObject | SourceObservation | ProgressEvent]: ...
 ```
 
 The framework requires exactly one source plug-in to recognize each command-line
@@ -869,7 +876,7 @@ The completed source and file registries are immutable.
 |---|---|
 | `file-folder` | production |
 | `gmail` | reserved stub; no account access |
-| `imap` | reserved stub; no server access |
+| `imap` | standalone read-only password/app-password CLI; Gmail uses All Mail IDs and labels |
 | `o365` | reserved stub; no Microsoft Graph access |
 | `microsoft-exchange` | reserved stub; no Exchange access |
 | `stdin` | reserved stub; intended for NUL-delimited records |
@@ -955,3 +962,10 @@ message hashing and deduplication. Errors are reported for operator action;
 re-import the stream and let ordinary deduplication handle repeated messages.
 There is no automatic API restart. Explicit `--no-scan` bypasses scan handling.
 Ordinary file imports continue to use host scanning.
+
+## Shared customizable lists
+
+Provider domains and routing/name extraction use the [Customizable Default Lists](CUSTOMIZABLE_DEFAULT_LISTS.md)
+service. Existing identity-evidence `provider_domains` plugin additions remain additive.
+Header processor version 2 adds role-preserving routing candidates. The host records
+matching candidates as typed `routing-address` evidence, retaining the policy revision.

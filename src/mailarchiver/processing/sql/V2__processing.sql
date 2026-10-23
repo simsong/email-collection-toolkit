@@ -28,6 +28,9 @@ CREATE TABLE invocations (
  started_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 CREATE INDEX invocations_job_kind ON invocations(job_id,kind,status);
+CREATE TABLE accepted_invocations (
+ invocation_id INTEGER PRIMARY KEY REFERENCES invocations, result_json TEXT NOT NULL
+);
 CREATE TABLE persons(person_id INTEGER PRIMARY KEY, canonical_name TEXT NOT NULL, manual INTEGER NOT NULL DEFAULT 0 CHECK(manual IN(0,1)));
 CREATE TABLE addresses(address_id INTEGER PRIMARY KEY, address TEXT NOT NULL UNIQUE, mailbox TEXT NOT NULL, domain TEXT NOT NULL);
 CREATE TABLE person_addresses(

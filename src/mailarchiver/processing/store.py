@@ -1,5 +1,18 @@
 # Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved.
-"""Fresh framework storage and atomic queue/checkpoint operations."""
+
+"""Fresh framework storage and atomic queue/checkpoint operations.
+
+Purpose: Persist processor objects, queues, invocations and replay generations.
+
+How it works:
+Snapshot verified content and atomically track job completion, handoffs and reprocessing
+without losing manual state.
+
+Fundamental dependents:
+
+- ``processing.runtime``: interruption-safe dispatch relies on these durable checkpoints.
+- ``processing.production``: deferred content work and replay need the same saved objects.
+"""
 from __future__ import annotations
 
 import hashlib
@@ -10,6 +23,7 @@ import tempfile
 from importlib.resources import files
 from pathlib import Path
 
+from .objects import ensure_object_index, index_inputs
 from .api import ArchiveContext, ContentReference, PluginStatistics, ProcessingObject, RAW_MESSAGE, RunReport
 from ..catalog import PROCESSING_DATABASE as DATABASE
 from ..catalog import require_processing_schema
@@ -49,6 +63,11 @@ def connect(archive: Path, *, create: bool = False, production: bool = False) ->
     try:
         database.execute("PRAGMA foreign_keys=ON")
         require_processing_schema(database)
+        ensure_object_index(database)
+        with database:
+            database.execute("CREATE INDEX IF NOT EXISTS jobs_status_order ON jobs(status,job_id)")
+            database.execute("CREATE TABLE IF NOT EXISTS accepted_invocations ("
+                             "invocation_id INTEGER PRIMARY KEY REFERENCES invocations, result_json TEXT NOT NULL)")
     except BaseException:
         database.close()
         raise
@@ -65,7 +84,7 @@ def snapshot(archive: Path, path: Path) -> ContentReference:
     """Copy once into content-addressed storage before committing a DB reference."""
     destination = archive / "objects"
     destination.mkdir(exist_ok=True)
-    with tempfile.NamedTemporaryFile(dir=destination, delete=False) as target:
+    with tempfile.NamedTemporaryFile(dir=destination, prefix=".object-", delete=False) as target:
         temporary = Path(target.name)
         try:
             with path.open("rb") as source:
@@ -83,11 +102,16 @@ def snapshot(archive: Path, path: Path) -> ContentReference:
     return ContentReference(path=final.resolve(), sha256=reference.sha256)
 
 
+USER_CANCELLED = "Cancelled by user"
+
+
 def enqueue(database: sqlite3.Connection, item: ProcessingObject, registry_hash: str, parent_job_id: int | None = None) -> None:
     payload = item.model_copy(update={"job_id": None}).model_dump_json()
     identity = hashlib.sha256((registry_hash + payload + str(parent_job_id)).encode()).hexdigest()
-    database.execute("INSERT OR IGNORE INTO jobs(identity,item_json,registry_hash,parent_job_id,status) VALUES(?,?,?,?,'pending')",
-                     (identity, payload, registry_hash, parent_job_id))
+    row = database.execute("INSERT OR IGNORE INTO jobs(identity,item_json,registry_hash,parent_job_id,status) "
+                           "VALUES(?,?,?,?,'pending') RETURNING job_id", (identity, payload, registry_hash, parent_job_id)).fetchone()
+    if row is not None:
+        index_inputs(database, int(row[0]), item)
 
 
 def submit(database: sqlite3.Connection, archive: Path, source: Path, registry_hash: str) -> str:

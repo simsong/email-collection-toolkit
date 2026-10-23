@@ -1,10 +1,17 @@
 # Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved.
-# Bind a one-shot Windows supervisor and its descendants to a native job object.
-# The job kills every member when its last handle closes, including on crashes.
-# The supervisor owns the only handle and joins before it launches any utility.
-# This closes the child-start race and prevents abandoned definition updaters.
-# No background service, scheduled task, or machine-wide configuration is used.
-"""Lifetime containment for explicitly launched Windows utilities."""
+
+"""Lifetime containment for explicitly launched Windows utilities.
+
+Purpose: Contain Windows utility descendants within a native job object.
+
+How it works:
+Join the supervisor to a kill-on-close job before spawning children so owner death cannot
+orphan utilities.
+
+Fundamental dependents:
+
+- ``owned_command``: Windows command supervision depends on this lifetime containment.
+"""
 from __future__ import annotations
 
 import ctypes as c
