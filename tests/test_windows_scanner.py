@@ -2,7 +2,8 @@
 # Exercise the official Windows scanner with Python's SSL library already loaded.
 # Validate clean streamed files and real EICAR memory samples concurrently.
 # Check that input bytes remain intact and missing inputs are reported as errors.
-# Verify the helper lifetime and hard startup deadline without replacing the DLL.
+# Verify the inherited helper lifetime without replacing the DLL.
+# The Make target also runs the shared cross-platform startup-deadline regression.
 # These tests require the prepared x64 runtime and validated user definitions.
 """Requirements: isolated native dependencies, real verdicts, bounded worker lifetime."""
 from __future__ import annotations
@@ -22,7 +23,7 @@ from time import monotonic
 import pytest
 
 from mailarchiver.clamav_update import EICAR
-from mailarchiver.scanner import ClamScanner, ClamScannerStartupError, scanner_availability
+from mailarchiver.scanner import ClamScanner, scanner_availability
 
 pytestmark = pytest.mark.skipif(os.name != "nt", reason="Windows DLL load-order regression")
 
@@ -50,13 +51,6 @@ def test_real_scanner_after_python_ssl_import(tmp_path: Path) -> None:
             assert missing_result.result().status == "scanner-error"
         assert hashlib.sha256(clean.read_bytes()).digest() == digest
     assert not worker.is_alive()
-
-
-def test_windows_startup_deadline_reaps_native_worker() -> None:
-    scanner = ClamScanner(startup_timeout_seconds=1e-9)
-    with pytest.raises(ClamScannerStartupError, match="startup timed out"):
-        scanner.__enter__()
-    assert scanner.process is None and scanner.connection is None
 
 
 def test_windows_scanner_exits_after_abrupt_owner_death(tmp_path: Path) -> None:

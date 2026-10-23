@@ -35,6 +35,7 @@ def main() -> None:
             "--specpath", str(work), "--copy-metadata", "mailarchiver", "--collect-data", "mailarchiver",
             *plugin_import_arguments(), "--hidden-import", "mailarchiver.processing.builtin",
             "--exclude-module", "pypff", "--add-data", f"{ROOT / 'src/mailarchiver/plugins'}:mailarchiver/plugins",
+            "--add-data", f"{ROOT / 'src/mailarchiver/standalone_verify.py'}:mailarchiver",
             str(entry)], cwd=ROOT, check=True)
         raw = (b"From: fixture@example.test\nDate: Mon, 01 Jan 2024 12:00:00 +0000\n"
                b"Subject: Frozen source registry\n\nSynthetic preserved bytes.\n")

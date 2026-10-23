@@ -7,6 +7,7 @@ let statuses = [];
 let selectedStatusId = new URLSearchParams(window.location.search).get("status");
 let initialized = false;
 let importing = false;
+let starting = false;
 const byId = id => document.getElementById(id);
 const integer = value => Number(value || 0).toLocaleString();
 const processingActive = status => status.processing_active && status.state === "running";
@@ -38,10 +39,14 @@ async function refreshHistory() {
     byId("antivirus-warning").hidden = !antivirus || antivirus.configured;
     byId("antivirus-detail").textContent = antivirus?.detail || "";
     const history = await window.pywebview.api.history();
+    const previousLatestId = statuses[0]?.status_id;
     statuses = history.statuses || [];
-    if (!statuses.some(status => status.status_id === selectedStatusId)) {
+    const newRun = previousLatestId && statuses[0] && previousLatestId !== statuses[0].status_id;
+    if (newRun || (starting && !history.starting) || !statuses.some(status => status.status_id === selectedStatusId)) {
       selectedStatusId = statuses[0]?.status_id || null;
     }
+    starting = Boolean(history.starting);
+    byId("starting-import").hidden = !starting;
     render(history.errors || []);
     const canImport = await window.pywebview.api.can_import_directory?.();
     byId("import-directory").disabled = importing || !canImport;
@@ -84,6 +89,9 @@ function historyRow(status) {
   row.setAttribute("aria-selected", String(status.status_id === selectedStatusId));
   const dot = document.createElement("span");
   dot.className = `state-dot ${status.state}`;
+  dot.setAttribute("aria-hidden", "true");
+  dot.textContent = ["failed", "disk-full", "stale"].includes(status.state) ? "X"
+    : ["running", "completed"].includes(status.state) ? "✓" : "Ⅱ";
   const main = document.createElement("span");
   main.className = "history-main";
   const title = document.createElement("span");
@@ -181,11 +189,12 @@ function statistics(status) {
     ["Peak workers", integer(status.peak_workers)],
   ];
   const grid = document.createElement("div");
-  if (status.processing_active || status.processing_jobs_completed) values.splice(2, 0, ["Processing jobs", integer(status.processing_jobs_completed)]);
+  if (status.processing_active || status.processing_jobs_completed) values.splice(2, 0, ["Processing jobs finished", integer(status.processing_jobs_completed)]);
   grid.className = "statistics";
   for (const [label, value] of values) {
     const cell = document.createElement("div");
     cell.className = "stat";
+    if (label === "Processing jobs finished") cell.title = "Saved processing work for messages or MIME parts, including metadata extraction and search indexing. Several jobs can belong to one email; this is not a count of newly imported messages.";
     cell.append(textSpan(label), textBlock(value, "strong"));
     grid.append(cell);
   }

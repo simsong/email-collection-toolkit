@@ -194,6 +194,7 @@ class GuiIngestStatus(IngestStatus):
 class GuiIngestHistory(BaseModel):
     statuses: list[GuiIngestStatus]
     errors: list[IngestStatusReadError]
+    starting: bool = False
 
 
 class DragExport(BaseModel):
@@ -600,7 +601,10 @@ class IngestWindowApi:
         history = read_ingest_history(self.archive)
         statuses = [GuiIngestStatus(**status.model_dump(), source_labels=[source_label(self.archive, root)
                     for root in status.source_roots]) for status in history.statuses]
-        return GuiIngestHistory(statuses=statuses, errors=history.errors).model_dump(mode="json")
+        job = self._document.ingest_job if self._document is not None else None
+        starting = bool(job is not None and not job.finished.is_set()
+                        and not any(status.started_at >= job.started_at for status in statuses))
+        return GuiIngestHistory(statuses=statuses, errors=history.errors, starting=starting).model_dump(mode="json")
 
     def antivirus(self) -> dict[str, object]:
         return scanner_availability().model_dump(mode="json")
@@ -2157,6 +2161,18 @@ class PyWebViewApplication:
         return result.errors
 
     def close_active_window(self) -> bool:
+        if sys.platform == "darwin" and not import_module("Foundation").NSThread.isMainThread():
+            finished, closed = Event(), Event()
+
+            def close() -> None:
+                try:
+                    if self.close_active_window():
+                        closed.set()
+                finally:
+                    finished.set()
+
+            import_module("PyObjCTools.AppHelper").callAfter(close)
+            return finished.wait(5) and closed.is_set()
         if self._setup_api is not None and self._setup_api._lock.locked():
             return False
         native = webview.active_window()

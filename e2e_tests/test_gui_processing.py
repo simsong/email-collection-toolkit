@@ -10,9 +10,11 @@ from pathlib import Path
 from playwright.sync_api import Page, expect
 
 from mailarchiver.__main__ import run_ingest
+from mailarchiver.application import IngestJob
 from mailarchiver.gui_app import AboutApi, GUI_DIRECTORY, SEARCH_BRIDGE_METHODS, GuiApi, IdentityPickerApi, IngestWindowApi
 from mailarchiver.gui_processing import PickerPage, resume_request, unfinished_work
 from mailarchiver.ingest_status import IngestStatusFile, read_ingest_history
+from mailarchiver.writer_lock import WriterLease
 from tests.test_gui_processing import build_entity_archive, build_phone_archive, build_deferred_archive, build_interrupted_archive, open_headless, wait_for_import
 
 
@@ -146,6 +148,78 @@ def test_processing_history_shows_jobs_instead_of_zero_source_progress(tmp_path:
     page.reload()
     expect(page.locator(".state-badge")).to_have_text("failed")
     expect(page.locator(".progress-fill.indeterminate")).to_have_count(0)
+
+
+def test_history_startup_and_status_symbols(tmp_path: Path, page: Page) -> None:
+    """Desktop accessibility: accepted startup is visible before a run snapshot; status uses symbols."""
+    archive = build_interrupted_archive(tmp_path)
+    app, api = open_headless(archive, tmp_path / "preferences.json")
+    assert api.document is not None and api.search_window is not None
+    document = api.document
+    template = read_ingest_history(archive).statuses[0]
+    job = IngestJob(operation_id="visible-startup", owner_window_id=api.search_window.window_id)
+    lease = WriterLease.acquire(archive, document.descriptor.identity, "test", job.operation_id, "test")
+    app.controller.begin_ingest(document.descriptor.document_id, job, lease)
+    history_api = IngestWindowApi(archive, application=app, document=document)
+    expose(page, history_api, ("history", "antivirus", "can_import_directory"))
+    try:
+        page.goto((GUI_DIRECTORY / "ingests.html").as_uri())
+        expect(page.get_by_role("status")).to_contain_text("Starting — preparing archive…")
+        expect(page.locator("#starting-import .state-dot")).to_have_text("✓")
+        for state, symbol in (("failed", "X"), ("disk-full", "X"), ("stale", "X"),
+                              ("interrupted", "Ⅱ"), ("completed", "✓"), ("running", "✓")):
+            now = datetime.now(UTC)
+            status = template.model_copy(update={"status_id": f"ingest-symbol-{state}", "state": state,
+                "started_at": now, "updated_at": now, "completed_at": None, "failure_detail": None})
+            IngestStatusFile(archive, status.status_id).write(status)
+            page.evaluate("window.refreshHistory()")
+            dot = page.locator(f".state-dot.{state}").last
+            expect(dot).to_have_text(symbol)
+            expect(dot).to_have_css("width", "22px")
+            expect(dot).to_have_css("height", "22px")
+            expect(dot).to_have_attribute("aria-hidden", "true")
+            expect(page.locator("#starting-import")).to_be_hidden()
+            if state == "failed":
+                expect(page.locator(".history-row.selected .state-dot")).to_have_class("state-dot failed")
+            page.locator(".history-row").filter(has=page.locator(f".state-dot.{state}")).last.click()
+            expect(page.locator(".state-badge")).to_have_text(state)
+        app.controller.finish_ingest(document.descriptor.document_id, job.operation_id, published=False)
+        assert not history_api.history()["starting"]
+        next_job = IngestJob(operation_id="startup-stopped", owner_window_id=api.search_window.window_id)
+        next_lease = WriterLease.acquire(archive, document.descriptor.identity, "test", next_job.operation_id, "test")
+        app.controller.begin_ingest(document.descriptor.document_id, next_job, next_lease)
+        page.evaluate("window.refreshHistory()")
+        expect(page.get_by_role("status")).to_be_visible()
+        next_job.finished.set()
+        page.evaluate("window.refreshHistory()")
+        expect(page.get_by_role("status")).to_be_hidden()
+        app.controller.finish_ingest(document.descriptor.document_id, next_job.operation_id, published=False)
+        old_failure = page.locator(".history-row").filter(has=page.locator(".state-dot.failed"))
+        old_failure.click()
+        page.evaluate("window.refreshHistory()")
+        expect(page.locator(".state-badge")).to_have_text("failed")
+        fast_job = IngestJob(operation_id="fast-startup", owner_window_id=api.search_window.window_id)
+        fast_lease = WriterLease.acquire(archive, document.descriptor.identity, "test", fast_job.operation_id, "test")
+        app.controller.begin_ingest(document.descriptor.document_id, fast_job, fast_lease)
+        now = datetime.now(UTC)
+        fast_status = template.model_copy(update={"status_id": "ingest-fast-startup", "state": "completed",
+            "started_at": now, "updated_at": now, "completed_at": now, "run_pk": template.run_pk + 1})
+        IngestStatusFile(archive, fast_status.status_id).write(fast_status)
+        app.controller.finish_ingest(document.descriptor.document_id, fast_job.operation_id, published=False)
+        # No poll observed this operation's transient starting state or active job.
+        page.evaluate("window.refreshHistory()")
+        expect(page.locator(".state-badge")).to_have_text("completed")
+        expect(page.locator(".detail-heading h1")).to_have_text(f"Ingest {fast_status.run_pk}")
+        old_failure.click()
+        page.evaluate("window.refreshHistory()")
+        expect(page.locator(".state-badge")).to_have_text("failed")
+        previews = GUI_DIRECTORY.parent / ".tmp/gui-previews"
+        previews.mkdir(parents=True, exist_ok=True)
+        page.screenshot(path=str(previews / "ingest-status-symbols.png"))
+    finally:
+        if document.ingest_job is not None:
+            app.controller.finish_ingest(document.descriptor.document_id, document.ingest_job.operation_id, published=False)
+        api.close()
 
 
 def test_resume_summary_later_abort_and_retained_notices(tmp_path: Path, page: Page) -> None:

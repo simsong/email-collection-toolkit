@@ -50,18 +50,26 @@ def scanner():
 
 
 def test_real_library_clean_mime_eicar_and_concurrent_verdicts(scanner: ClamScanner, tmp_path: Path) -> None:
+    """SCANNING: direct and registered APIs scan real files concurrently without a database."""
     clean = tmp_path / "clean.eml"
     clean.write_bytes(b"From: sender@example.test\nSubject: clean\n\nordinary text\n")
     infected = tmp_path / "attachment.eml"
     infected.write_bytes(b"From: sender@example.test\nMIME-Version: 1.0\nContent-Type: application/octet-stream\n"
                          b"Content-Transfer-Encoding: base64\n\n" + base64.encodebytes(EICAR))
-    original = tuple(hashlib.sha256(path.read_bytes()).hexdigest() for path in (clean, infected))
+    plain_eicar = tmp_path / "eicar"
+    plain_eicar.write_bytes(EICAR)
+    plain_clean = tmp_path / "clean"
+    plain_clean.write_bytes(b"ordinary test bytes")
+    sources = (clean, infected, plain_clean, plain_eicar)
+    original = tuple(hashlib.sha256(path.read_bytes()).hexdigest() for path in sources)
     paths = [clean, infected] * 3
     with ThreadPoolExecutor(max_workers=3) as pool:
         results = list(pool.map(lambda path: scan_message(scanner.session, path, 30), paths))
+        direct = list(pool.map(scanner.scan, sources))
     assert [result.status for result in results] == ["clean", "infected"] * 3
-    assert all(result.engine_version and "daily:" in (result.signature_version or "") for result in results)
-    assert tuple(hashlib.sha256(path.read_bytes()).hexdigest() for path in (clean, infected)) == original
+    assert [result.status for result in direct] == ["clean", "infected", "clean", "infected"]
+    assert all(result.engine_version and "daily:" in (result.signature_version or "") for result in results + direct)
+    assert tuple(hashlib.sha256(path.read_bytes()).hexdigest() for path in sources) == original
     assert scanner.scan(tmp_path / "absent.eml").status == "scanner-error"
 
 
@@ -118,7 +126,7 @@ def test_startup_deadline_reaps_worker() -> None:
     instance = ClamScanner(startup_timeout_seconds=1e-9)
     with pytest.raises(ClamScannerStartupError, match="startup timed out"):
         instance.__enter__()
-    assert instance.process is None
+    assert instance.process is None and instance.connection is None
 
 
 def test_scan_deadline_reaps_worker_and_removes_plaintext(tmp_path: Path) -> None:
@@ -141,17 +149,6 @@ def test_worker_crash_is_a_typed_failure(scanner: ClamScanner, tmp_path: Path) -
     assert path.read_bytes() == b"retained source"
     with pytest.raises(ScanFailure, match="session is not ready"):
         scan_message(scanner.session, path, 1)
-
-
-def test_direct_scans_need_no_database(scanner: ClamScanner, tmp_path: Path) -> None:
-    """The native scanner returns results without a database or caller-supplied hashes."""
-    clean = tmp_path / "clean"
-    infected = tmp_path / "eicar"
-    clean.write_bytes(b"ordinary test bytes")
-    infected.write_bytes(EICAR)
-    with ThreadPoolExecutor(max_workers=2) as pool:
-        results = list(pool.map(scanner.scan, [clean, infected]))
-    assert {result.status for result in results} == {"clean", "infected"}
 
 
 @pytest.mark.parametrize("infected", [False, True])

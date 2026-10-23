@@ -142,7 +142,14 @@ def test_ingest_routes_preserves_and_indexes_messages(
     archive = tmp_path / "archive"
     owner_names = Path(__file__).parent / "fixtures" / "owner-names.txt"
 
-    result = run_ingest(source, archive, owner_names)
+    # The real import also proves that obsolete daemon settings are irrelevant.
+    environment = os.environ.copy()
+    environment.update(MAILARCHIVER_CLAMD=str(tmp_path / "missing-daemon"),
+                       MAILARCHIVER_CLAMDSCAN=str(tmp_path / "missing-client"),
+                       MAILARCHIVER_CLAMD_CONFIG=str(tmp_path / "missing-config"))
+    original_sources = {path: path.read_bytes() for path in source.rglob("*") if path.is_file()}
+    result = run_ingest(source, archive, owner_names, environment=environment)
+    assert {path: path.read_bytes() for path in source.rglob("*") if path.is_file()} == original_sources
     infected_path = source / "emlx_maildir/2024/infected/003-infected.emlx"
     infected_path.unlink()
     assert not infected_path.exists()
@@ -1214,21 +1221,6 @@ def test_clamav_startup_failure_records_error_and_continues(tmp_path: Path) -> N
         assert processing.execute("SELECT scan_status FROM message_state").fetchone() == ("scanner-error",)
     with sqlite3.connect(archive / "search.sqlite3") as search:
         assert search.execute("SELECT count(*) FROM message_fts WHERE message_fts MATCH 'body'").fetchone() == (1,)
-
-
-def test_embedded_scanner_ignores_absent_daemon_configuration(tmp_path: Path) -> None:
-    """Offline library scanning requires no daemon executable, socket or configuration."""
-    source = tmp_path / "source.eml"
-    raw = b"Message-ID: <embedded@example>\nDate: Thu, 1 Feb 2024 12:00:00 +0000\n\nbody\n"
-    source.write_bytes(raw)
-    archive = tmp_path / "archive"
-    owners = Path(__file__).parent / "fixtures/owner-names.txt"
-    environment = os.environ.copy()
-    environment.update(MAILARCHIVER_CLAMD=str(tmp_path / "missing-daemon"),
-                       MAILARCHIVER_CLAMDSCAN=str(tmp_path / "missing-client"),
-                       MAILARCHIVER_CLAMD_CONFIG=str(tmp_path / "missing-config"))
-    assert_success(run_ingest(source, archive, owners, environment=environment))
-    assert source.read_bytes() == raw
 
 
 @pytest.mark.parametrize("empty_partial", [False, True])

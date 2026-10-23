@@ -1,13 +1,15 @@
 # Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved.
 # Test standalone IMAP acquisition against an actual disposable TLS mail server.
 # Verify LF normalization, wire provenance, attachments, source flags and durable reruns.
-# Exercise both TLS modes and the real CLI-to-ingest path without desktop windows.
+# Exercise both TLS modes and real CLI/background-GUI ingestion without native windows.
+# Require downloaded bodies and attachments to reach the production search service.
 # Gmail-specific response parsing and account-scoped identities use recorded metadata.
 # Only the OS credential boundary is injected to protect the user's native keychain.
 # These tests establish local behavior, not live Gmail or native Windows acceptance.
 """Requirements: read-only resumable IMAP, correct counters and standalone CLI operation."""
 from __future__ import annotations
 
+from collections.abc import Iterator
 from contextlib import closing
 from datetime import UTC, datetime
 from email.parser import BytesParser
@@ -22,6 +24,7 @@ import time
 
 import pytest
 
+from mailarchiver.__main__ import IngestRequest
 from mailarchiver.application import create_empty_archive
 from mailarchiver.archive_config import load_archive_config, save_archive_config
 from mailarchiver.imap_cli import SyncReporter, parser, synchronize
@@ -31,6 +34,11 @@ from mailarchiver.imap_cli import prompt_account
 from mailarchiver.imap_protocol import ImapSession, body_literal, decode_mailbox, message_metadata, response_tokens, selected_mailboxes
 from mailarchiver.imap_state import initialize_state, known_observation, record_download, refresh_observation, totals
 from mailarchiver.gui_processing import unfinished_work
+from mailarchiver.gui_service import SearchPage, search_page
+from mailarchiver.ingest_status import read_ingest_history
+from mailarchiver.imap_source import imap_locator
+from mailarchiver.standalone_verify import verify_archive
+from tests.test_gui_processing import open_headless, wait_for_import
 from mailarchiver.mbox import MboxLocation, read_verified_location
 from mailarchiver.owner_rules import OwnerRules
 from mailarchiver.plugin_api import MailObject, SourceObservation, SourceReference
@@ -63,18 +71,23 @@ def imap_server_identity(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("FQDN", "localhost")
 
 
-@pytest.mark.parametrize("tls", ["implicit", "starttls"])
-def test_cli_real_server_normalizes_crlf_skips_spam_and_resumes(tmp_path: Path,
-        monkeypatch: pytest.MonkeyPatch, tls: str, capsys: pytest.CaptureFixture[str]) -> None:
-    """IMAP requirements: normalize CRLF once, retain lone CR/wire evidence, and stay read-only."""
+@pytest.fixture
+def imap_server(tmp_path: Path, request: pytest.FixtureRequest) -> Iterator[DisposableImap]:
+    """Pytest owns the isolated TLS listener, including cleanup after setup/assertion failures."""
+    tls = getattr(request, "param", "implicit")
     assert tls in {"implicit", "starttls"}
     server = DisposableImap(tmp_path, "implicit" if tls == "implicit" else "starttls")
-    account = server.start()
-    archive = tmp_path / "collection.mailarchive"
-    keyring = FixtureKeyring()
-    monkeypatch.setattr("mailarchiver.imap_credentials.native_keyring", lambda: keyring)
-    monkeypatch.setenv("SSL_CERT_FILE", str(server.certificate))
-    messages = [
+    try:
+        server.start()
+        yield server
+    finally:
+        server.close()
+
+
+@pytest.fixture
+def imap_messages() -> tuple[bytes, ...]:
+    """Three authored messages cover attachments, duplicate IDs and malformed MIME/encoding."""
+    return (
         b"From: other@example.org\r\nMessage-ID: <same@example.org>\r\n"
         b"Subject: attachments\x1b[31m\r\nMIME-Version: 1.0\r\nContent-Type: multipart/mixed; boundary=x\r\n\r\n"
         b"--x\r\nContent-Type: text/plain\r\n\r\nbody\r\n--x\r\nContent-Type: text/plain\r\n"
@@ -83,84 +96,163 @@ def test_cli_real_server_normalizes_crlf_skips_spam_and_resumes(tmp_path: Path,
         b"Content-Disposition: attachment; filename=blob.bin\r\n\r\nAP8NCmJpbmFyeQ==\r\n--x--\r\n",
         b"From: other@example.org\r\nMessage-ID: <same@example.org>\r\nSubject: distinct bytes\r\n\r\nFrom preservation\r\n",
         b"From: other@example.org\r\nSubject: malformed MIME\r\nContent-Type: multipart/mixed; boundary=missing\r\n\r\n\xff retained\r\n",
-    ]
+    )
+
+
+@pytest.fixture
+def imap_inbox(imap_server: DisposableImap, imap_messages: tuple[bytes, ...]) -> DisposableImap:
+    """Populate exactly three synthetic INBOX messages, retaining mixed seen/unseen flags."""
+    with imap_server.connect() as client:
+        for index, raw in enumerate(imap_messages):
+            flags = r"(\Seen)" if index == 0 else None
+            assert client.append("INBOX", flags, '"01-Oct-2026 10:00:00 +0000"', raw)[0] == "OK"
+    return imap_server
+
+
+@pytest.fixture
+def imap_archive(tmp_path: Path, imap_inbox: DisposableImap, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """Configure a synthetic archive with real TLS trust and an isolated native-secrets boundary."""
+    account = imap_inbox.account
+    assert account is not None
+    keyring = FixtureKeyring()
+    monkeypatch.setattr("mailarchiver.imap_credentials.native_keyring", lambda: keyring)
+    monkeypatch.setenv("SSL_CERT_FILE", str(imap_inbox.certificate))
+    archive = tmp_path / "collection.mailarchive"
+    create_empty_archive(archive)
+    config = load_archive_config(archive)
+    config.owner = OwnerRules(include=["demouser"])
+    config.imap_sources = [account]
+    save_archive_config(archive, config)
+    save_password(account, "demopass")
+    return archive
+
+
+def assert_imap_searchable(archive: Path) -> None:
+    """Acquisition/search requirements: archival success must also finish deferred indexing."""
+    assert len(search_page(archive, "").results) == 3
+    for query, attachments, subject in (
+        ("body", False, "attachments"), ("preservation", False, "distinct bytes"),
+        ("needle", True, "attachments"), ("subject:malformed", False, "malformed MIME"),
+    ):
+        result = search_page(archive, query, search_attachments=attachments)
+        assert result.error is None and len(result.results) == 1, (query, result)
+        assert result.results[0].subject.startswith(subject)
+    assert not search_page(archive, "needle").results
+    with closing(sqlite3.connect(archive / "processing.sqlite3")) as database:
+        assert database.execute("SELECT count(*) FROM jobs WHERE status!='completed'").fetchone() == (0,)
+        assert database.execute("SELECT count(*) FROM invocations WHERE kind='text-index' AND status='completed'").fetchone()[0] > 0
+
+
+@pytest.mark.parametrize("imap_server", ["implicit", "starttls"], indirect=True)
+def test_cli_real_server_normalizes_crlf_skips_spam_and_resumes(imap_archive: Path,
+        imap_inbox: DisposableImap, imap_messages: tuple[bytes, ...], capsys: pytest.CaptureFixture[str]) -> None:
+    """IMAP requirements: normalize CRLF once, retain lone CR/wire evidence, and stay read-only."""
+    server, archive, messages = imap_inbox, imap_archive, imap_messages
+    tls = server.tls
     normalized = [raw.replace(b"\r\n", b"\n") for raw in messages]
+    with server.connect() as client:
+        assert b"Server ready localhost" in client.welcome
+        assert client.create("Projects")[0] == "OK"
+        assert client.create("MixedSpAmFolder")[0] == "OK"
+        assert client.append("Projects", None, None, messages[0])[0] == "OK"
+        assert client.append("MixedSpAmFolder", None, None, b"Subject: excluded spam\r\n\r\nspam\r\n")[0] == "OK"
+        client.select("INBOX", readonly=True)
+        before = client.uid("FETCH", "1:*", "(UID FLAGS RFC822.SIZE)")[1]
+    assert "demopass" not in (archive / "config.yaml").read_text()
+    arguments = ["--archive", str(archive), "--show-messages"]
+    if tls == "starttls":
+        arguments.append("--no-scan")
+    args = parser().parse_args(arguments)
+    assert args.workers == 8
+    assert synchronize(args) == 0
+    summary = totals(archive)
+    assert summary.archived == 3
+    assert summary.duplicates == 1
+    assert summary.errors == 0
+    assert_imap_searchable(archive)
+    assert not list((archive / "objects").iterdir())
+    with closing(sqlite3.connect(archive / "archive.sqlite3")) as database:
+        hashes = {row[0] for row in database.execute("SELECT sha256 FROM messages")}
+        assert hashes == {hashlib.sha256(raw).hexdigest() for raw in normalized}
+        for digest, filename, offset, length in database.execute(
+                "SELECT m.sha256,g.filename,l.byte_offset,l.byte_length FROM messages m "
+                "JOIN locations l USING(message_pk) JOIN mbox_generations g USING(generation_pk)"):
+            raw = read_verified_location(archive / "data/mbox" / filename,
+                MboxLocation(byte_offset=offset, byte_length=length), digest)
+            assert raw in normalized
+            assert b"\r\n" not in raw
+            if b"filename=blob.bin" in raw:
+                attachment = next(part for part in BytesParser().parsebytes(raw).walk() if part.get_filename() == "blob.bin")
+                assert attachment.get_payload(decode=True) == b"\x00\xff\r\nbinary"
+        assert database.execute("SELECT count(*) FROM imap_seen").fetchone() == (4,)
+        unscanned = database.execute("SELECT count(*) FROM metadata_defects WHERE field='antivirus' "
+                                     "AND detail LIKE 'not-scanned:%'").fetchone()[0]
+        assert unscanned == (3 if tls == "starttls" else 0)
+        assert database.execute("SELECT sum(archived),sum(duplicates) FROM imap_hourly").fetchone() == (3, 1)
+        assert database.execute("SELECT count(*) FROM source_files WHERE source_path LIKE '%SpAm%'").fetchone() == (0,)
+    assert synchronize(args) == 0
+    assert totals(archive) == summary
+    assert_imap_searchable(archive)
+    with closing(sqlite3.connect(archive / "archive.sqlite3")) as database:
+        evidence = [ImapMessageMetadata.model_validate_json(row[0]).download
+                    for row in database.execute("SELECT labels_json FROM imap_seen")]
+        assert len(evidence) == 4
+        for original in messages:
+            assert any(item is not None and item.source_sha256 == hashlib.sha256(original).hexdigest()
+                       and item.source_byte_length == len(original) and item.crlf_pairs == original.count(b"\r\n")
+                       for item in evidence)
+    output = capsys.readouterr().err
+    assert "completed: newly archived=0 duplicate downloads=0" in output
+    assert "archived: demouser: INBOX:" in output or "archived: demouser: Projects:" in output
+    assert "?partition=" not in output
+    assert "\x1b" not in output
+    with server.connect() as client:
+        client.select("INBOX", readonly=True)
+        assert client.uid("FETCH", "1:*", "(UID FLAGS RFC822.SIZE)")[1] == before
+    with server.connect() as client:
+        assert client.delete("Projects")[0] == "OK"
+        assert client.create("Projects")[0] == "OK"
+        assert client.append("Projects", None, None, messages[0])[0] == "OK"
+    assert synchronize(args) == 0
+    assert totals(archive).archived == 3
+    assert totals(archive).duplicates == 2
+    assert not list((archive / "objects").iterdir())
+
+
+def test_gui_background_ingests_three_inbox_messages_and_indexes_them(imap_archive: Path,
+        imap_inbox: DisposableImap, imap_messages: tuple[bytes, ...], tmp_path: Path) -> None:
+    """Desktop IMAP requirement: the actual background entry point archives/indexes and reruns read-only."""
+    account = imap_inbox.account
+    assert account is not None
+    with imap_inbox.connect() as client:
+        assert client.select("INBOX", readonly=True)[1] == [b"3"]
+        before = client.uid("FETCH", "1:*", "(UID FLAGS RFC822.SIZE BODY.PEEK[])")[1]
+    app, api = open_headless(imap_archive, tmp_path / "preferences.json")
+    request = IngestRequest(archive=imap_archive, roots=[imap_locator(imap_archive, account, 8)],
+                            workers=8, index_attachments=True)
     try:
-        with server.connect() as client:
-            assert b"Server ready localhost" in client.welcome
-            assert client.create("Projects")[0] == "OK"
-            assert client.create("MixedSpAmFolder")[0] == "OK"
-            for raw in messages:
-                assert client.append("INBOX", None, '"01-Oct-2026 10:00:00 +0000"', raw)[0] == "OK"
-            assert client.append("Projects", None, None, messages[0])[0] == "OK"
-            assert client.append("MixedSpAmFolder", None, None, b"Subject: excluded spam\r\n\r\nspam\r\n")[0] == "OK"
-            client.select("INBOX", readonly=True)
-            before = client.uid("FETCH", "1:*", "(UID FLAGS RFC822.SIZE)")[1]
-        create_empty_archive(archive)
-        config = load_archive_config(archive)
-        config.owner = OwnerRules(include=["demouser"])
-        config.imap_sources = [account]
-        save_archive_config(archive, config)
-        save_password(account, "demopass")
-        assert "demopass" not in (archive / "config.yaml").read_text()
-        arguments = ["--archive", str(archive), "--show-messages"]
-        if tls == "starttls":
-            arguments.append("--no-scan")
-        args = parser().parse_args(arguments)
-        assert args.workers == 8
-        assert synchronize(args) == 0
-        summary = totals(archive)
-        assert summary.archived == 3
-        assert summary.duplicates == 1
-        assert summary.errors == 0
-        assert not list((archive / "objects").iterdir())
-        with closing(sqlite3.connect(archive / "archive.sqlite3")) as database:
-            hashes = {row[0] for row in database.execute("SELECT sha256 FROM messages")}
-            assert hashes == {hashlib.sha256(raw).hexdigest() for raw in normalized}
-            for digest, filename, offset, length in database.execute(
-                    "SELECT m.sha256,g.filename,l.byte_offset,l.byte_length FROM messages m "
-                    "JOIN locations l USING(message_pk) JOIN mbox_generations g USING(generation_pk)"):
-                raw = read_verified_location(archive / "data/mbox" / filename,
-                    MboxLocation(byte_offset=offset, byte_length=length), digest)
-                assert raw in normalized
-                assert b"\r\n" not in raw
-                if b"filename=blob.bin" in raw:
-                    attachment = next(part for part in BytesParser().parsebytes(raw).walk() if part.get_filename() == "blob.bin")
-                    assert attachment.get_payload(decode=True) == b"\x00\xff\r\nbinary"
-            assert database.execute("SELECT count(*) FROM imap_seen").fetchone() == (4,)
-            unscanned = database.execute("SELECT count(*) FROM metadata_defects WHERE field='antivirus' "
-                                         "AND detail LIKE 'not-scanned:%'").fetchone()[0]
-            assert unscanned == (3 if tls == "starttls" else 0)
-            assert database.execute("SELECT sum(archived),sum(duplicates) FROM imap_hourly").fetchone() == (3, 1)
-            assert database.execute("SELECT count(*) FROM source_files WHERE source_path LIKE '%SpAm%'").fetchone() == (0,)
-        assert synchronize(args) == 0
-        assert totals(archive) == summary
-        with closing(sqlite3.connect(archive / "archive.sqlite3")) as database:
-            evidence = [ImapMessageMetadata.model_validate_json(row[0]).download
-                        for row in database.execute("SELECT labels_json FROM imap_seen")]
-            assert len(evidence) == 4
-            for original in messages:
-                assert any(item is not None and item.source_sha256 == hashlib.sha256(original).hexdigest()
-                           and item.source_byte_length == len(original) and item.crlf_pairs == original.count(b"\r\n")
-                           for item in evidence)
-        output = capsys.readouterr().err
-        assert "completed: newly archived=0 duplicate downloads=0" in output
-        assert "archived: demouser: INBOX:" in output or "archived: demouser: Projects:" in output
-        assert "?partition=" not in output
-        assert "\x1b" not in output
-        with server.connect() as client:
-            client.select("INBOX", readonly=True)
-            assert client.uid("FETCH", "1:*", "(UID FLAGS RFC822.SIZE)")[1] == before
-        with server.connect() as client:
-            assert client.delete("Projects")[0] == "OK"
-            assert client.create("Projects")[0] == "OK"
-            assert client.append("Projects", None, None, messages[0])[0] == "OK"
-        assert synchronize(args) == 0
-        assert totals(archive).archived == 3
-        assert totals(archive).duplicates == 2
-        assert not list((archive / "objects").iterdir())
+        for _attempt in range(2):
+            assert app.start_import(api, [], processing_request=request)
+            wait_for_import(api)
+            assert not [notice for notice in app.notices() if notice.severity == "error"], app.notices()
+            status = read_ingest_history(imap_archive).statuses[0]
+            assert status.state == "completed", status.failure_detail
+            assert totals(imap_archive).archived == 3 and totals(imap_archive).duplicates == 0
+            assert not unfinished_work(imap_archive).incomplete
+            assert_imap_searchable(imap_archive)
+            results = SearchPage.model_validate(api.search("preservation"))
+            assert len(results.results) == 1 and results.results[0].subject == "distinct bytes"
+        with closing(sqlite3.connect(imap_archive / "archive.sqlite3")) as database:
+            assert {row[0] for row in database.execute("SELECT sha256 FROM messages")} == {
+                hashlib.sha256(raw.replace(b"\r\n", b"\n")).hexdigest() for raw in imap_messages}
+            assert database.execute("SELECT count(*) FROM imap_seen").fetchone() == (3,)
+        assert not verify_archive(imap_archive)
+        with imap_inbox.connect() as client:
+            assert client.select("INBOX", readonly=True)[1] == [b"3"]
+            assert client.uid("FETCH", "1:*", "(UID FLAGS RFC822.SIZE BODY.PEEK[])")[1] == before
     finally:
-        server.close()
+        app.shutdown()
+        api.close()
 
 
 def test_gmail_metadata_literals_and_modified_utf7() -> None:
@@ -198,17 +290,14 @@ def test_body_literal_allows_legal_fetch_order_and_unsolicited_flags() -> None:
         body_literal([(b"1 (BODY[] {3}", b"abc"), b" UID 7 RFC822.SIZE 4)"], 7)
 
 
-def test_untrusted_tls_is_rejected_before_login(tmp_path: Path) -> None:
+def test_untrusted_tls_is_rejected_before_login(imap_server: DisposableImap) -> None:
     """The importer must not offer an unverified or plaintext credential path."""
     import ssl  # pylint: disable=import-outside-toplevel
-    server = DisposableImap(tmp_path, "implicit")
-    account = server.start()
-    try:
-        with pytest.raises(ssl.SSLCertVerificationError):
-            with ImapSession(account, "demopass"):
-                pytest.fail("an untrusted server certificate was accepted")
-    finally:
-        server.close()
+    account = imap_server.account
+    assert account is not None
+    with pytest.raises(ssl.SSLCertVerificationError):
+        with ImapSession(account, "demopass"):
+            pytest.fail("an untrusted server certificate was accepted")
 
 
 def test_gmail_checkpoint_is_account_scoped_refreshes_labels_and_counts_atomically(tmp_path: Path) -> None:
@@ -274,10 +363,11 @@ def test_reporter_updates_while_sync_is_running(tmp_path: Path, capsys: pytest.C
 
 @pytest.mark.skipif(sys.platform == "win32", reason="POSIX SIGINT delivery; native Windows console acceptance remains separate")
 @pytest.mark.parametrize("scan", [False, True])
-def test_cli_ctrl_c_checkpoints_and_next_invocation_resumes(tmp_path: Path, scan: bool) -> None:
+def test_cli_ctrl_c_checkpoints_and_next_invocation_resumes(tmp_path: Path, imap_server: DisposableImap, scan: bool) -> None:
     """Interrupt the real CLI process during downloads, then finish without duplicate publication."""
-    server = DisposableImap(tmp_path, "implicit")
-    account = server.start()
+    server = imap_server
+    account = server.account
+    assert account is not None
     archive = tmp_path / "archive"
     create_empty_archive(archive)
     config = load_archive_config(archive)
@@ -334,7 +424,6 @@ def test_cli_ctrl_c_checkpoints_and_next_invocation_resumes(tmp_path: Path, scan
         if process is not None and process.poll() is None:
             process.kill()
             process.wait()
-        server.close()
 
 
 def test_configuration_identity_changes_and_legacy_compatibility(tmp_path: Path) -> None:
@@ -362,12 +451,13 @@ def test_configuration_identity_changes_and_legacy_compatibility(tmp_path: Path)
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="POSIX PTY; Windows native password-prompt acceptance remains separate")
-def test_cli_new_archive_prompts_save_secret_and_run(tmp_path: Path) -> None:
+def test_cli_new_archive_prompts_save_secret_and_run(tmp_path: Path, imap_server: DisposableImap) -> None:
     """Drive real terminal prompts through --new, including hidden password entry and saved reuse."""
     import pty  # pylint: disable=import-outside-toplevel
     import select  # pylint: disable=import-outside-toplevel
-    server = DisposableImap(tmp_path, "implicit")
-    account = server.start()
+    server = imap_server
+    account = server.account
+    assert account is not None
     archive = tmp_path / "new.mailarchive"
     environment = os.environ.copy()
     environment["SSL_CERT_FILE"] = str(server.certificate)
@@ -414,7 +504,6 @@ def test_cli_new_archive_prompts_save_secret_and_run(tmp_path: Path) -> None:
             process.wait()
         os.close(master)
         os.close(slave)
-        server.close()
 
 
 @pytest.mark.parametrize(("wire", "expected"), [

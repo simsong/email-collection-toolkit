@@ -560,16 +560,19 @@ def test_native_search_ui_smoke(native_smoke_archive: Path, tmp_path: Path) -> N
 )
 def test_native_application_lifecycle(native_smoke_archive: Path, tmp_path: Path) -> None:
     """About must populate through its real bridge; extensionless Open and menus must work."""
-    result = subprocess.run(
-        [sys.executable, str(Path(__file__).with_name("native_application_probe.py"))],
-        # Cocoa treats positional filesystem paths as document-open requests.
-        # Pass fixtures out of band so the probe can first test About alone.
-        env=os.environ | {
-            PROBE_ARCHIVE_ENV: str(native_smoke_archive),
-            PROBE_PREFERENCES_ENV: str(tmp_path / "preferences.json"),
-        },
-        capture_output=True, text=True, timeout=40, check=False,
-    )
+    try:
+        result = subprocess.run(
+            [sys.executable, str(Path(__file__).with_name("native_application_probe.py"))],
+            # Cocoa treats positional filesystem paths as document-open requests.
+            # Pass fixtures out of band so the probe can first test About alone.
+            env=os.environ | {
+                PROBE_ARCHIVE_ENV: str(native_smoke_archive),
+                PROBE_PREFERENCES_ENV: str(tmp_path / "preferences.json"),
+            },
+            capture_output=True, text=True, timeout=40, check=False,
+        )
+    except subprocess.TimeoutExpired as error:
+        pytest.fail(f"Native lifecycle timed out; captured stderr: {error.stderr!r}")
     assert result.returncode == 0, result.stdout + result.stderr
     assert "Production About, document bridge, and menus passed" in result.stdout
 

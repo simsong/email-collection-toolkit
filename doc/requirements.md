@@ -19,6 +19,13 @@ platform or release gate has passed. [Future work](plans/README.md) is separate.
 
 ## Shared boundaries
 
+- Shared test acceptance retains reader preservation, scanner API/platform
+  boundaries and all legacy MBOX recovery cases; see [validation](requirements/VALIDATION.md#shared-acceptance-coverage).
+
+- Ordinary pytest includes disposable TLS IMAP acquisition through CLI and GUI
+  background services, with three-message search/read-only/rerun checks;
+  see [validation](requirements/VALIDATION.md#offline-imap-fixtures).
+
 - Manual review must never gate application processing. Python ingestion records
   scan errors/incomplete scans and preserves originals while continuing;
   see [scanning](requirements/SCANNING.md#malware-handling).
@@ -48,6 +55,7 @@ platform or release gate has passed. [Future work](plans/README.md) is separate.
   non-person flags independently of identity-link judgments; see [processing research](requirements/PROCESSING.md#local-name-linkage-research).
 
 - Identity picker labels open name searches; count buttons open filtered evidence messages.
+  Native Close targets the focused window, including standalone list editors.
   Navigation retains the displayed visibility and date filters; provider domains
   are excluded from derived institution membership and search aliases.
   Name rows display observed signature phones, with multiple numbers expandable.
@@ -56,6 +64,8 @@ platform or release gate has passed. [Future work](plans/README.md) is separate.
 - Desktop recovery requires an informed Continue Import/defer/abort choice, and collapsed
   warnings remain readable; see [desktop recovery](requirements/DESKTOP.md#saved-import-recovery-and-notices).
   Ingest history displays IMAP accounts and servers instead of internal locators.
+  Startup is visible before the first run snapshot; enlarged status circles use
+  symbols alongside color and text labels.
 
 - Embedded scanners disable URL-phishing checks while retaining malware scanning;
   see the [scanning policy](requirements/SCANNING.md#malware-handling).

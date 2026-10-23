@@ -45,7 +45,7 @@ def scanner() -> Iterator[ClamScanner]:
 
 def encrypted_message(*, infected: bool = False) -> bytes:
     """Authored empty PDF encrypted by qpdf with fixture-user/fixture-owner passwords."""
-    pdf = (Path(__file__).parent / "data/encrypted-fixture.pdf").read_bytes()
+    pdf = (Path(__file__).parent / "fixtures/encrypted-fixture.pdf").read_bytes()
     raw = HEADER + (b'Content-Type: multipart/mixed; boundary="encrypted"\r\n\r\n'
         b'--encrypted\r\nContent-Type: text/plain\r\n\r\nencryptedfixturetoken\r\n'
         b'--encrypted\r\nContent-Type: application/pdf\r\nContent-Disposition: attachment; filename="encrypted.pdf"\r\n'

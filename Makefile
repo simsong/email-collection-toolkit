@@ -21,7 +21,7 @@ test-windows-package-entry:
 .PHONY: test-updater-supervisor
 .PHONY: test-windows-scanner
 test-windows-scanner:
-	uv run --locked pytest -q tests/test_windows_scanner.py
+	uv run --locked pytest -q tests/test_windows_scanner.py tests/test_scanner.py::test_startup_deadline_reaps_worker
 
 .PHONY: test-windows-updater
 test-windows-updater:
@@ -619,7 +619,8 @@ test-mailsearch:
 imap:
 	uv run --locked mailarchiver-imap $(IMAP_ARGS)
 
-# The test fixture sets FQDN=localhost so server greetings never query host DNS.
+# Pytest starts/stops loopback TLS IMAP, seeds three INBOX messages, and checks CLI/GUI search.
+# The fixture sets FQDN=localhost so server greetings never query host DNS.
 test-imap:
 	uv run --locked pytest -q tests/test_imap.py
 .PHONY: test-natural-search

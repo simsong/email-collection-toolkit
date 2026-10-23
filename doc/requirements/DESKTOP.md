@@ -11,6 +11,12 @@ During archived-content and pending-ingest recovery, show the active processor,
 job activity and finished-job count. Use an indeterminate progress bar while the
 job total is unknown; do not display an idle-worker dashboard or finalizing ETA
 for active recovery. Failed/stale saved runs shall not appear actively processing.
+History status circles are at least 22 pixels, with a check for running/completed,
+an X for failed/disk-full/stale, and a pause symbol for interrupted runs, alongside
+text labels. Accepted GUI imports show startup immediately while archive
+preparation precedes the first saved run snapshot; old failures retain their state.
+Explain that finished processing jobs are work for messages or MIME parts,
+potentially several per email, rather than newly imported message counts.
 
 Ingest history Sources shows IMAP username, hostname and port instead of internal
 account IDs and locator query options. Local paths remain readable. Missing or

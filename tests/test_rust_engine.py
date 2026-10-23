@@ -303,7 +303,10 @@ def test_owner_eof_during_import_startup_is_latched(tmp_path: Path) -> None:
     with peer(archive, tmp_path) as engine:
         assert engine.call("create")
         revision = DocumentOptions(archive).state().revision
-        names = archive / "owner-names.txt"
+        names = archive / "config.yaml"
+        original = names.read_text(encoding="utf-8") if names.exists() else "{}\n"
+        if names.exists():
+            names.rename(tmp_path / "original-config.yaml")
         os.mkfifo(names)
         request = Request(id=2, method="start_import", args=[{
             "source": str(source), "include": "alice@example.test", "revision": revision,
@@ -324,18 +327,21 @@ def test_owner_eof_during_import_startup_is_latched(tmp_path: Path) -> None:
                 assert engine.process.poll() is None
                 assert time.monotonic() < deadline, "Import startup did not reach its owner-rule read"
                 time.sleep(.01)
-        with os.fdopen(descriptor, "w", encoding="utf-8"):
+        with os.fdopen(descriptor, "w", encoding="utf-8") as delayed_settings:
             engine.process.stdin.close()
             deadline = time.monotonic() + 3
             while "Owner pipe closed: cancelling archive work" not in (tmp_path / "engine.log").read_text():
                 assert engine.process.poll() is None
                 assert time.monotonic() < deadline, "Owner EOF was not observed while startup was held"
                 time.sleep(.01)
+            ready = names.with_suffix(".ready")
+            ready.write_text(original, encoding="utf-8")
+            os.replace(ready, names)
+            delayed_settings.write(original)
         engine.process.wait(timeout=6)
         assert engine.process.stdout is not None
         reply = Reply.model_validate_json(engine.process.stdout.readline())
         assert reply.id == 2 and reply.error == "ValueError: The owning window has closed."
-        names.unlink()
     with WriterLease.acquire(archive, str(archive), "post-startup cancellation", "verify", "test"):
         with sqlite3.connect(archive / "archive.sqlite3") as database:
             assert database.execute("SELECT count(*) FROM messages").fetchone() == (0,)

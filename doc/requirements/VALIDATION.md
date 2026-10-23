@@ -5,6 +5,15 @@
 Current subsystem contract and acceptance boundaries. This is not a claim of
 platform/release acceptance. Deferred features live in [plans](../plans/README.md).
 
+## Shared acceptance coverage
+
+Reader acceptance must retain search, Unicode rendering, exact export and source
+immutability under URI-reserved archive paths. Shared scanner checks must cover
+direct and registered APIs, raw and MIME EICAR, concurrency and startup cleanup on
+both platforms. The Windows scanner target must include the shared deadline case.
+Legacy MBOX parameterization must retain ambiguous quoting, missing final newline
+and source-envelope cases; similar setup does not make their inputs redundant.
+
 ## Offline IMAP fixtures
 
 Disposable IMAP server greetings shall use a fixed local identity rather than
@@ -12,6 +21,11 @@ resolving the runner hostname. Integration tests shall retain real TLS validatio
 read-only source checks, byte normalization and interrupt/restart behavior.
 Fixture setup connections shall have bounded timeouts so failures cannot hang
 indefinitely. No change to the production downloader's socket timeout is required.
+Pytest shall own server startup/teardown and seed three INBOX messages. Both the
+CLI and GUI background entry point must archive them, finish indexing searchable
+bodies/attachments, and rerun without duplicate publication or source flag changes.
+Retain distinct protocol, TLS-rejection, byte-normalization and interruption tests;
+a successful three-message import does not establish those failure boundaries.
 
 ## Recovered offline diagnostic boundaries
 

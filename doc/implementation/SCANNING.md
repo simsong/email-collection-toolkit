@@ -24,7 +24,7 @@ quarantine or after ordinary filing replays the decision without rescanning.
 
 `make test-ingest-recovery` exercises the real engine against an authored
 encrypted PDF, both alone and alongside EICAR, then verifies continued imports,
-recorded evidence and canonical byte preservation. `tests/data/encrypted-fixture.pdf`
+recorded evidence and canonical byte preservation. `tests/fixtures/encrypted-fixture.pdf`
 is an empty PDF made with `qpdf --empty --encrypt fixture-user fixture-owner 256 --`
 and its output path; these are public fixture passwords, not account credentials.
 Tests use the checked-in fixture and require no qpdf installation.

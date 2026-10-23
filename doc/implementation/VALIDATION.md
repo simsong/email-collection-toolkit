@@ -5,6 +5,21 @@
 Current implementation and validation boundaries. Deferred feature designs
 live in [plans](../plans/README.md); historical evidence does not validate this revision.
 
+## Shared acceptance coverage
+
+`test_reserved_characters_and_read_only_attachments` checks SQLite URI handling;
+`test_reader_archive_under_uri_reserved_path` runs the complete shared reader
+acceptance (all sort orders, Unicode rendering, exact export and unchanged files),
+replacing the duplicate ordinary-path invocation. Both are included by
+`make test-python-reader`.
+The concurrent real-scanner test shares one engine across registered and direct
+calls, retaining plain clean/EICAR and MIME cases. The startup-deadline test checks
+both worker and connection cleanup and is reused by `make test-windows-scanner`;
+Windows DLL/SSL and inherited-owner regressions remain platform-specific.
+The existing routing/import regression also checks absent legacy daemon settings
+and unchanged sources, avoiding a separate successful import for the same contract.
+Three legacy MBOX recovery inputs share one parameterized test with named cases.
+
 ## Offline IMAP fixtures
 
 The autouse fixture defined in the module in `tests/test_imap.py` sets pymap's `FQDN`
@@ -14,6 +29,15 @@ which can block its asyncio server loop on hosted-runner DNS. Fixture setup
 connections use a ten-second timeout. `make test-imap` checks the greeting through
 real TLS connections, including a subprocess whose audit hook rejects reverse-DNS
 lookups, and retains all acquisition and recovery assertions.
+Function-scoped pytest fixtures own each listener, seed three messages (attachments,
+duplicate Message-ID with different content, malformed MIME/encoding), and configure
+an isolated archive/keyring. The existing TLS-mode CLI cases now assert production
+body/attachment search and completed processing jobs. A separate headless GUI test
+runs `start_import` on its actual background thread and repeats the import, checking
+the GUI search bridge, canonical hashes/integrity, UID checkpoints and unchanged
+seen/unseen flags. These run in ordinary pytest/`make check`; native window behavior
+and live Gmail remain separate acceptance boundaries. Shared fixtures replace
+repeated listener setup/teardown, without dropping distinct failure-mode tests.
 
 ## CI and release validation
 

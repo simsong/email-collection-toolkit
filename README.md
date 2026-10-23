@@ -256,6 +256,12 @@ keep their line endings. New and duplicate download totals are separate. See the
 [IMAP command reference](doc/CLI_REFERENCE.md#imap-downloads). Scheduling, graphs
 and desktop account setup remain planned.
 
+`make test-imap` starts disposable Python IMAP servers on loopback ports and
+loads three synthetic INBOX messages. It tests CLI and GUI background ingestion,
+searchable bodies/attachments, unchanged source flags, and idempotent reruns.
+The ordinary pytest suite (and `make check`) includes these tests; no external
+mail account or persistent server is required.
+
 ### Runtime configuration
 
 Use **File → Customizable Default Lists…** for owner/sender defaults, reply-address

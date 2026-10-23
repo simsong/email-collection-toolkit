@@ -21,6 +21,7 @@ import sqlite3
 import stat
 import sys
 import tempfile
+from datetime import UTC, datetime
 from hashlib import sha256
 from importlib.metadata import version
 from pathlib import Path
@@ -130,6 +131,7 @@ class IngestJob(BaseModel):
 
     operation_id: str
     owner_window_id: str
+    started_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     kind: Literal["ingest", "content"] = "ingest"
     stop: Event = Field(default_factory=Event, exclude=True)
     finished: Event = Field(default_factory=Event, exclude=True)

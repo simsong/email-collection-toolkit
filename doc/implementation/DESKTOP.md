@@ -12,6 +12,12 @@ Optional processing fields in ingest snapshots default safely for old history.
 finished-job count, processor name and the worker's job activity. Source-file and
 imported-message counters keep their original meaning; terminal/stale snapshots
 never use the active-processing bar.
+History uses 22-pixel circles with white check/X/pause symbols and visible state
+labels, so color is supplementary. `IngestJob.started_at` lets the history bridge
+expose accepted startup until a new run snapshot exists. The startup banner is
+polled each second. A newly appearing run is selected even if startup finishes
+between polls; further refreshes preserve manual history selection.
+Historical failures are not reclassified. The finished-job card explains its unit.
 The main search status line and About activity cards likewise show finished
 processing jobs and the current processor instead of a source percentage/ETA.
 
@@ -814,6 +820,10 @@ The initial notice states that only text attachments are indexed. Tika extractio
 and its indexing action/progress remain planned; no fabricated progress is shown.
 
 ## Identity picker search navigation
+
+Native Close callbacks from pywebview's worker threads dispatch Cocoa focus lookup
+and closure to the main thread, with a bounded result wait. This includes personal
+default-list editors that are not attached to an archive document.
 
 `IdentityPickerApi.search` validates a typed selection against `picker_page`,
 opens a search session for the picker archive and passes startup query parameters.

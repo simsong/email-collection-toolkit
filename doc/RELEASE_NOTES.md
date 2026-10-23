@@ -6,6 +6,14 @@ Entries describe their recorded revisions. For current behavior use the
 [user manual](USER_MANUAL.md) and [CLI reference](CLI_REFERENCE.md). Retired
 Rust delivery plans and historical package checks are not current acceptance.
 
+## Consolidated test coverage
+
+Removed repeated reader acceptance, scanner smoke/startup and daemon-independent
+import runs while retaining their assertions in shared tests. Windows scanner
+validation reuses the common startup deadline. Legacy MBOX recovery uses three
+named parameter cases; platform, fault-injection and independent-verifier coverage
+remain separate.
+
 ## Automatic handling without manual-review gates
 
 Python ingestion preserves originals for encryption, size limits, scanner
@@ -18,6 +26,15 @@ Accepted scan-error and quarantine decisions replay unchanged after an
 interruption, while the original failed invocation remains in audit history.
 
 ## Observable, indexed recovery
+
+Ordinary IMAP tests now share pytest-owned TLS servers and three-message INBOX
+fixtures. CLI and GUI background imports must produce searchable body/attachment
+content and preserve source flags across reruns; separate protocol/security and
+interruption tests remain.
+
+Ingest history shows accepted startup while the archive is being prepared.
+Larger status circles include check, X or pause symbols alongside text labels;
+finished-job counts explain that multiple processing jobs can belong to one email.
 
 Recovery now shows the active processor/job and finished-job count, with an
 indeterminate bar while the derived-work total is unknown. Imported-message and
@@ -52,6 +69,9 @@ Definition age alone never blocks scanning. Explicit test/development definition
 overrides stay pinned; Stop/Quit remains effective during updates.
 
 ## Customizable Default Lists
+
+Native Close resolves the focused window on Cocoa's main thread, including
+standalone personal list editors.
 
 The integrated Name search retains visibility/date filters for email-labelled
 groups. Provider-domain edits remove derived institution memberships and search

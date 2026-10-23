@@ -19,6 +19,12 @@ platform or release gate has passed. [Future work](plans/README.md) is separate.
 
 ## Shared boundaries
 
+- Reader/scanner acceptance reuses the stronger existing checks and Make targets;
+  legacy MBOX cases share setup. See [validation](implementation/VALIDATION.md#shared-acceptance-coverage).
+
+- Pytest-owned IMAP servers seed three INBOX messages and verify CLI/background-GUI
+  ingestion through searchable output; see [validation](implementation/VALIDATION.md#offline-imap-fixtures).
+
 - Python scan exceptions route automatically to retained originals with recorded
   evidence, without a manual-review gate; see [scanning](implementation/SCANNING.md#automatic-scan-error-handling).
 
@@ -46,6 +52,7 @@ platform or release gate has passed. [Future work](plans/README.md) is separate.
   Stable review labels retain independent non-person flags and unlabeled notes.
 
 - Identity picker navigation uses typed selections and read-only evidence scopes.
+  Native Close marshals Cocoa focus lookup and closure to the main thread.
   Email-labelled group fallbacks retain their filters; institution projections
   exclude provider domains without deleting durable organization records.
   Typed signature-phone observations feed expandable name-row phone lists.
@@ -55,6 +62,7 @@ platform or release gate has passed. [Future work](plans/README.md) is separate.
   warning history collapses to a reopenable pill. See
   [desktop recovery](implementation/DESKTOP.md#saved-import-recovery-and-notices).
   History source labels resolve account/server names without changing saved locators.
+  History also exposes accepted startup and uses enlarged check/X/pause circles.
 
 - Python and Rust omit the URL-phishing database option;
   see [scanner configuration](implementation/SCANNING.md#embedded-scanner-configuration).

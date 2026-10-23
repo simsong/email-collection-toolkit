@@ -18,7 +18,6 @@ data/
 # Publish only the focused synthetic preservation fixtures, not other local data.
 !/tests/data/
 /tests/data/*
-!/tests/data/encrypted-fixture.pdf
 !/tests/data/writer-preservation/
 /tests/data/writer-preservation/*
 !/tests/data/writer-preservation/2024/
