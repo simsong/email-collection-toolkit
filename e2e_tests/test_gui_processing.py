@@ -3,13 +3,15 @@
 from __future__ import annotations
 
 import json
+from datetime import UTC, datetime
 from pathlib import Path
 
 from playwright.sync_api import Page, expect
 
 from mailarchiver.__main__ import run_ingest
-from mailarchiver.gui_app import GUI_DIRECTORY, SEARCH_BRIDGE_METHODS, IdentityPickerApi
+from mailarchiver.gui_app import AboutApi, GUI_DIRECTORY, SEARCH_BRIDGE_METHODS, IdentityPickerApi, IngestWindowApi
 from mailarchiver.gui_processing import PickerPage, resume_request, unfinished_work
+from mailarchiver.ingest_status import IngestStatusFile, read_ingest_history
 from tests.test_gui_processing import build_deferred_archive, build_interrupted_archive, open_headless, wait_for_import
 
 
@@ -41,11 +43,13 @@ def test_incomplete_dialog_resumes_content_without_sources(tmp_path: Path, page:
         page.reload()
         expect(dialog).to_be_visible()
         page.locator("#continue-ingest").uncheck()
-        page.get_by_role("button", name="Continue", exact=True).click()
+        page.get_by_role("button", name="Continue Import", exact=True).click()
         expect(dialog).not_to_be_visible()
         if api.document and api.document.ingest_job:
             wait_for_import(api)
         assert not unfinished_work(archive).incomplete
+        recovered = read_ingest_history(archive).statuses[0]
+        assert recovered.processing_jobs_completed > 0 and not recovered.processing_active
         assert not any(notice.severity == "error" for notice in app.notices())
         page.reload()
         expect(dialog).not_to_be_visible()
@@ -61,6 +65,72 @@ def test_incomplete_dialog_resumes_content_without_sources(tmp_path: Path, page:
         assert not errors
     finally:
         api.close()
+
+
+def test_ingest_sources_show_account_and_server(tmp_path: Path, page: Page) -> None:
+    """Desktop source labels resolve saved IMAP IDs while keeping locator options out of view."""
+    archive = build_interrupted_archive(tmp_path)
+    expose(page, IngestWindowApi(archive), ("history", "antivirus", "can_import_directory"))
+    page.goto((GUI_DIRECTORY / "ingests.html").as_uri() + "?status=ingest-fixture-2")
+    sources = page.locator(".source-list")
+    expect(sources).to_have_text("IMAP: sam@example.test on imap.example.test:993")
+    assert "saved-account" not in sources.inner_text()
+    assert "archive=" not in sources.inner_text()
+    assert "workers=" not in sources.inner_text()
+    sources.scroll_into_view_if_needed()
+    previews = GUI_DIRECTORY.parent / ".tmp/gui-previews"
+    previews.mkdir(parents=True, exist_ok=True)
+    page.screenshot(path=str(previews / "imap-source-label.png"))
+
+
+def test_processing_history_shows_jobs_instead_of_zero_source_progress(tmp_path: Path, page: Page) -> None:
+    """Recovery UI: real history bridge renders recorded processor activity and avoids a false ETA."""
+    archive = build_interrupted_archive(tmp_path)
+    template = read_ingest_history(archive).statuses[0]
+    now = datetime.now(UTC)
+    worker = template.workers[0].model_copy(update={"phase": "processing mime", "path": "content job 42",
+        "activity_done": 1665, "activity_total": None, "activity_unit": "jobs"})
+    status = template.model_copy(update={"status_id": "ingest-processing-fixture", "state": "running",
+        "started_at": now, "updated_at": now, "completed_at": None, "phase": "recovering archived content",
+        "processing_active": True, "processing_job_id": 42, "processing_processor": "mime",
+        "processing_jobs_completed": 1665, "active_workers": 1, "workers": [worker], "percent": 0, "eta": "finalizing"})
+    status_file = IngestStatusFile(archive, status.status_id)
+    status_file.write(status)
+    expose(page, IngestWindowApi(archive), ("history", "antivirus", "can_import_directory"))
+    page.goto((GUI_DIRECTORY / "ingests.html").as_uri() + f"?status={status.status_id}")
+    expect(page.locator(".progress-caption")).to_contain_text("1,665 jobs finished · mime")
+    expect(page.locator(".progress-caption")).not_to_contain_text("finalizing")
+    expect(page.locator(".worker-table")).to_contain_text("processing mime")
+    expect(page.locator(".worker-table")).to_contain_text("1,665 jobs")
+    bar = page.get_by_role("progressbar", name="Processing jobs")
+    assert bar.get_attribute("aria-valuenow") is None
+    expect(page.locator(".progress-fill.indeterminate")).to_be_visible()
+    previews = GUI_DIRECTORY.parent / ".tmp/gui-previews"
+    previews.mkdir(parents=True, exist_ok=True)
+    page.screenshot(path=str(previews / "processing-progress.png"))
+    app, api = open_headless(archive, tmp_path / "preferences.json")
+    search_page, about_page = page.context.new_page(), page.context.new_page()
+    try:
+        status_file.write(status.model_copy(update={"updated_at": datetime.now(UTC)}))
+        expose(search_page, api, SEARCH_BRIDGE_METHODS)
+        search_page.goto((GUI_DIRECTORY / "index.html").as_uri())
+        expect(search_page.locator("#ingest-status-line")).to_contain_text("1,665 processing jobs finished · mime")
+        expect(search_page.locator("#ingest-status-line")).not_to_contain_text("0.0%")
+        status_file.write(status.model_copy(update={"updated_at": datetime.now(UTC)}))
+        expose(about_page, AboutApi(app), ("status",))
+        about_page.goto((GUI_DIRECTORY / "about.html").as_uri())
+        expect(about_page.locator(".activity")).to_contain_text("1,665 processing jobs finished · mime")
+        expect(about_page.locator(".activity")).not_to_contain_text("0.0%")
+    finally:
+        search_page.close()
+        about_page.close()
+        api.close()
+        app.shutdown()
+    (archive / "status" / f"{status.status_id}.json").write_text(
+        status.model_copy(update={"state": "failed"}).model_dump_json(), encoding="utf-8")
+    page.reload()
+    expect(page.locator(".state-badge")).to_have_text("failed")
+    expect(page.locator(".progress-fill.indeterminate")).to_have_count(0)
 
 
 def test_resume_summary_later_abort_and_retained_notices(tmp_path: Path, page: Page) -> None:

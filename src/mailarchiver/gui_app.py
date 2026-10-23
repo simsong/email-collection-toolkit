@@ -68,7 +68,7 @@ from .archive_config import (
     remember_import_directory,
 )
 from .plugin_api import PluginManifest
-from .gui_processing import abort_processing, picker_page, registered_acquisition_plugins, registered_processors, resume_request, save_identity, unfinished_work
+from .gui_processing import abort_processing, picker_page, registered_acquisition_plugins, registered_processors, resume_request, save_identity, source_label, unfinished_work
 from .processing.api import ProcessorManifest
 from .processing.identities import IdentityFilter, ManualDecision
 from .gui_service import (
@@ -93,8 +93,8 @@ from .gui_service import (
     write_messages_zip,
 )
 from .ingest_status import (
-    IngestHistory,
     IngestStatus,
+    IngestStatusReadError,
     latest_ingest_status,
     read_ingest_history,
 )
@@ -184,6 +184,15 @@ class GuiStatus(BaseModel):
 
 class GuiIngestOverview(BaseModel):
     status: IngestStatus | None = None
+
+
+class GuiIngestStatus(IngestStatus):
+    source_labels: list[str]
+
+
+class GuiIngestHistory(BaseModel):
+    statuses: list[GuiIngestStatus]
+    errors: list[IngestStatusReadError]
 
 
 class DragExport(BaseModel):
@@ -586,8 +595,11 @@ class IngestWindowApi:
 
     def history(self) -> dict[str, Any]:
         if self.archive is None:
-            return IngestHistory(statuses=[], errors=[]).model_dump(mode="json")
-        return read_ingest_history(self.archive).model_dump(mode="json")
+            return GuiIngestHistory(statuses=[], errors=[]).model_dump(mode="json")
+        history = read_ingest_history(self.archive)
+        statuses = [GuiIngestStatus(**status.model_dump(), source_labels=[source_label(self.archive, root)
+                    for root in status.source_roots]) for status in history.statuses]
+        return GuiIngestHistory(statuses=statuses, errors=history.errors).model_dump(mode="json")
 
     def antivirus(self) -> dict[str, object]:
         return scanner_availability().model_dump(mode="json")
@@ -1935,19 +1947,7 @@ class PyWebViewApplication:
             f"Exclude: {', '.join(owner_rules.exclude) or '(none)'}\n\n{antivirus.detail}"
         )
         if not antivirus.configured:
-            choice = (
-                macos_alert(title, confirmation, ("Cancel", "Import Without Scanning", "Install ClamAV…"),
-                            body_width=IMPORT_CONFIRMATION_WIDTH)
-                if sys.platform == "darwin" else
-                (1 if anchor.create_confirmation_dialog(title, confirmation + "\n\nImport WITHOUT antivirus scanning?") else 0)
-            )
-            if choice == 2:
-                import webbrowser  # pylint: disable=import-outside-toplevel
-                webbrowser.open(CLAMAV_DOWNLOAD_URL)
-                return False
-            if choice != 1:
-                return False
-            return self.start_import(api, roots, owner_rules=owner_rules, owner_revision=owner_revision, scan_policy="not-scanned")
+            self.add_notice("warning", f"{destination}: antivirus unavailable; scanner errors will be recorded while importing continues.")
         confirmed = (
             macos_alert(title, confirmation, ("Import", "Cancel"), body_width=IMPORT_CONFIRMATION_WIDTH) == 0
             if sys.platform == "darwin" else anchor.create_confirmation_dialog(title, confirmation)

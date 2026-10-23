@@ -377,8 +377,8 @@ Separate child-message jobs have their own abort scope once durably submitted.
 
 A positive antivirus result is a handled message abort: commit quarantine and
 its observation before stopping downstream work. A scanner error or timeout
-is never a clean verdict. Record the failure, retain recoverable input and leave
-the work retryable; stop normal filing of that input. Malformed MIME, decoding
+is never a clean verdict. Record the failure, preserve the original message and
+continue importing automatically; no manual-review gate is permitted. Malformed MIME, decoding
 failures and unscannable content must never silently discard original bytes.
 
 In-process plugins must honor cancellation and pass their remaining timeout to
@@ -453,10 +453,17 @@ channel across all visible member addresses.
 
 Scanner invocations persist typed clean/infected/not-scanned/unscannable/scanner-error
 results with diagnostics and engine/signature versions (NULL if unavailable).
-Errors and reported encryption/size-limit heuristics block filing and retain
-raw input for retry. Engine and definition versions are read once per scanner
+Python host ingestion archives originals unchanged for `unscannable` and
+`scanner-error` outcomes, including encryption, size limits, deadlines and engine
+failures. It records an antivirus metadata defect and continues automatically.
+Incomplete/error scans never become clean verdicts. The scan
+diagnostic and engine/signature versions remain in the invocation record.
+Engine and definition versions are read once per scanner
 session; which unscannable conditions are reported depends on libclamav's scan options.
-Failed invocations may publish scan evidence only, never content or filing.
+Only scan evidence is retained from failed processor output, never its content
+or filing requests. The host's accepted outcome permits normal filing or
+synthesizes automatic quarantine for a known positive. Failed attempt/timeout
+counters remain in audit history.
 
 
 Attached-message promotion requires valid transfer decoding. Invalid base64

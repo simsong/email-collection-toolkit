@@ -5,6 +5,30 @@
 Current embedded scanner integration and configuration. Release/license
 acceptance remains a separate gate; see [EMBEDDED_CLAMAV.md](../EMBEDDED_CLAMAV.md).
 
+## Automatic scan-error handling
+
+Python `ClamAVProcessor` retains `unscannable` and `scanner-error` evidence.
+Filing preserves originals and adds an antivirus metadata defect; the actual
+scan status, diagnostic and available versions remain recorded. Ingestion
+catches scanner startup failure once and passes transient `scanner_failure`
+through the processing policy. Fresh source-worker evidence is session-scoped,
+so scanner failure does not cause an immediate second blocking scan. The host
+accepts processor deadline/error evidence while keeping the failed invocation
+audit. Pending old failures get a fresh attempt when available. Positive
+detections retain the quarantine route. None requires manual review.
+If a deadline occurs after a scan result is produced, retain that evidence;
+a known positive still causes automatic quarantine even though its invocation
+audit records the deadline failure.
+The accepted decision and failed audit commit together. Interruption before
+quarantine or after ordinary filing replays the decision without rescanning.
+
+`make test-ingest-recovery` exercises the real engine against an authored
+encrypted PDF, both alone and alongside EICAR, then verifies continued imports,
+recorded evidence and canonical byte preservation. `tests/data/encrypted-fixture.pdf`
+is an empty PDF made with `qpdf --empty --encrypt fixture-user fixture-owner 256 --`
+and its output path; these are public fixture passwords, not account credentials.
+Tests use the checked-in fixture and require no qpdf installation.
+
 ## Embedded antivirus migration status
 
 [PR #124](../EMBEDDED_CLAMAV.md) uses libclamav directly from Python and Rust.

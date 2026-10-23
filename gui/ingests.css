@@ -41,6 +41,7 @@ body { display: flex; flex-direction: column; }
 .state-badge { padding: 5px 9px; border-radius: 999px; background: var(--surface); font-weight: 650; text-transform: capitalize; }
 .progress-track { height: 10px; margin: 22px 0 7px; overflow: hidden; border-radius: 999px; background: var(--surface); }
 .progress-fill { height: 100%; background: AccentColor; }
+.progress-fill.indeterminate { width: 100% !important; opacity: .6; background: repeating-linear-gradient(135deg, AccentColor 0 8px, transparent 8px 16px); }
 .progress-caption { display: flex; justify-content: space-between; color: var(--muted); }
 .statistics { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 8px; margin: 22px 0; }
 .stat { padding: 10px 12px; border: 1px solid var(--border); border-radius: 7px; background: var(--surface); }

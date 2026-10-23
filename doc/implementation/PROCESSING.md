@@ -2,7 +2,26 @@
 
 # Processing implementation
 
+`__main__.processor_statistics_table` renders the end-of-import stderr summary
+from the existing typed statistics report. Counts and second timings align in
+columns; the title identifies their cumulative archive scope. The JSON output
+of `processing-status` remains unchanged.
+
 ## Working-object lifetime
+
+Writer connections add `jobs_status_order(status,job_id)` to existing V2 queues.
+Dispatch filters pending jobs through that index, using correlated primary-key
+parent checks; per-message dispatch exposes a direct message-ID predicate to the
+existing message index. Pending-ingest recovery uses the same parent check.
+No completed history or dependency state is discarded.
+
+Optional dispatcher callbacks report job preparation, processor invocation and
+finished attempts (including failures/aborts). The production resume wrappers
+forward these events to the status driver and clear active state in `finally`.
+`processing_jobs_completed` counts finished attempts in this run, independently
+of imported messages; current processor/job and active-worker fields update
+through the existing worker queue. Derived jobs can emit more jobs, so their
+total and ETA remain unknown rather than inventing a source percentage.
 
 The source worker releases each message's cached raw bytes after MBOX publication
 and catalog/processing commits, under the publication lock and writer lease.
@@ -29,7 +48,18 @@ deferred/failed work, reference-index backfill, and release during a live import
 `ClamAVProcessor` reuses saved host evidence only for `clean` and `infected`.
 Other saved statuses call the current scanner session; previous failed invocations
 remain in the processing audit history. Resumption needs no source reread or
-database migration, since retained raw objects are already digest-verified.
+source access, since retained raw objects are already digest-verified.
+Current incomplete/failed scans permit filing with their actual provenance and
+an antivirus metadata defect. `SourceMetadata.scan_session` permits reuse of a
+fresh source-worker result only in its originating session; old unsuccessful
+evidence retries through the current engine. Host `failed` handling accepts
+scanner invocation exceptions/deadlines without changing their failed audit
+record, and permits the subsequent filing rank to preserve the original.
+An additive `accepted_invocations` table saves the host decision in the same
+transaction as the failed invocation. Recovery replays that decision as a
+checkpoint rather than rescanning after canonical publication; old failures
+without an accepted decision still retry normally.
+Other processor failures retain their existing dependency barriers.
 After scanner startup, progress switches to `preparing processing`, then
 `recovering archived content` and `recovering pending imports`. With ingestion
 and unlimited content work enabled, the host drains eligible message/content

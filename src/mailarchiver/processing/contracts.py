@@ -39,6 +39,7 @@ class ProcessingPolicy(Contract):
     index_attachments: bool = False
     scan_policy: Literal["clamav", "not-scanned"] = "clamav"
     scanner_session: str | None = Field(default=None, exclude=True)
+    scanner_failure: ScanEvidence | None = Field(default=None, exclude=True)
     # Legacy saved policies remain readable; these fields are no longer executed.
     scanner_configuration: Path | None = None
     scanner_executable: str = "clamdscan"
@@ -56,6 +57,7 @@ class SourceMetadata(Contract):
     envelope_hex: str | None = None
     normalization: MboxNormalization | None = None
     scan_evidence: ScanEvidence | None = None
+    scan_session: str | None = None
     scan_responsibility: Literal["host", "producer"] = "host"
     provider_metadata_json: str | None = None
 

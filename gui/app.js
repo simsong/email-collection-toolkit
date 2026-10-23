@@ -483,7 +483,10 @@ async function refreshIngestOverview() {
   }
   const messages = Number(status.processed_messages).toLocaleString();
   const percent = Number(status.percent).toFixed(1);
-  if (status.state === "running") {
+  if (status.state === "running" && status.processing_active) {
+    const jobs = Number(status.processing_jobs_completed).toLocaleString();
+    setIngestStatusText(`${status.phase} · ${jobs} processing jobs finished · ${status.processing_processor || "preparing"} · ${status.active_workers}/${status.configured_workers} workers`);
+  } else if (status.state === "running") {
     setIngestStatusText(`Ingesting ${percent}% · ${messages} messages · ${status.active_workers}/${status.configured_workers} workers · ETA ${status.eta}`);
   } else if (status.state === "completed") {
     setIngestStatusText(`Last ingest completed · ${messages} messages · ${formatElapsed(status.elapsed_seconds)} · Click for history`);

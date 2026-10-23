@@ -99,12 +99,17 @@ class ClamAVProcessor:
             detection = str(headers.get(DETECTION_HEADER, ""))
             evidence = ScanEvidence(status="infected", detail=detection,
                 engine_version=headers.get(ENGINE_HEADER), signature_version=headers.get(DEFINITIONS_HEADER)) if detection else ScanEvidence(status="clean")
-        elif metadata and metadata.scan_evidence is not None and metadata.scan_evidence.status in ("clean", "infected"):
+        elif metadata and metadata.scan_evidence is not None and (
+                metadata.scan_evidence.status in ("clean", "infected") or
+                metadata.scan_session is not None and metadata.scan_session == policy.scanner_session):
             evidence = metadata.scan_evidence
+        elif policy.scanner_failure is not None:
+            evidence = policy.scanner_failure
         else:
-            evidence = scan_message(policy.scanner_session, item.message_ref.path, item.remaining_seconds)
-        if evidence.status in ("scanner-error", "unscannable"):
-            raise ScanFailure(evidence)
+            try:
+                evidence = scan_message(policy.scanner_session, item.message_ref.path, item.remaining_seconds)
+            except ScanFailure as error:
+                evidence = error.evidence
         if evidence.status == "infected":
             return ProcessingResult(outcome="abort-message", scan=evidence,
                 filing=Filing(parsed=quarantine_metadata(item), mailbox=item.archive.mailbox("INFECTED", None)))
@@ -140,9 +145,12 @@ def quarantine_metadata(item: ProcessingObject) -> ParsedMessage:
 class FilingProcessor:
     def process(self, item: ProcessingObject) -> ProcessingResult:
         policy = item.application.policy
-        if policy is None or item.scan_provenance not in ("clean", "not-scanned"):
-            raise ValueError("filing requires a successful ingest scan decision")
+        if policy is None or item.scan_provenance not in ("clean", "not-scanned", "unscannable", "scanner-error"):
+            raise ValueError("filing requires an accepted ingest scan decision")
         parsed = parsed_input(item)
+        if item.scan_provenance in ("unscannable", "scanner-error"):
+            parsed = parsed.model_copy(update={"defects": [*parsed.defects,
+                MetadataDefect(field="antivirus", detail=f"{item.scan_provenance}: scan incomplete; archived unchanged")]})
         if parsed.autosave:
             return ProcessingResult(outcome="abort-message", filing=Filing(parsed=parsed))
         role = "Sender" if policy.owners.matches(parsed.sender) else "Archive"

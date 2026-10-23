@@ -7,12 +7,27 @@ live in [plans](../plans/README.md); historical evidence does not validate this 
 
 ## Saved import recovery and notices
 
+Optional processing fields in ingest snapshots default safely for old history.
+`ingests.js` renders running processing activity with a striped indeterminate bar,
+finished-job count, processor name and the worker's job activity. Source-file and
+imported-message counters keep their original meaning; terminal/stale snapshots
+never use the active-processing bar.
+The main search status line and About activity cards likewise show finished
+processing jobs and the current processor instead of a source percentage/ETA.
+
+`IngestWindowApi.history` adds typed `source_labels` for the Sources list using
+`gui_processing.source_label`, shared with recovery summaries. Labels resolve
+IMAP accounts from local configuration without keyring or network access; missing
+or invalid configuration falls back to an unavailable-account label. Raw
+`source_roots` and saved history files retain their resumable locators.
+
 `gui_processing.unfinished_work` groups typed unfinished run snapshots by source,
 stopping at a completion or explicit abort. Rootless processing does not hide
 source recovery. The bridge returns nonsecret source labels, first start, latest
 final/heartbeat timestamp, interruption uncertainty and saved archived/duplicate
 counts. IMAP labels read configuration without keyring access or a connection.
-`processing.js` shows these details before the existing explicit resume call.
+`processing.js` shows these details before the existing explicit resume call,
+triggered by the **Continue Import** button in `index.html`.
 Later and Escape close the dialog without a write. The abort bridge reserves
 application writer activity so Quit waits for it and rejects later writes.
 `abort_processing` holds the

@@ -83,12 +83,17 @@ def _source_identity(root: str) -> str:
     return f"imap://{urlsplit(root).netloc}" if root.startswith("imap://") else root
 
 
-def _source_label(archive: Path, root: str) -> str:
+def source_label(archive: Path, root: str) -> str:
+    """Describe a saved source without credentials, connections or locator options."""
     if not root.startswith("imap://"):
         return root
-    account = next((account for account in load_archive_config(archive).imap_sources
+    try:
+        accounts = load_archive_config(archive).imap_sources
+    except ValueError:
+        accounts = []
+    account = next((account for account in accounts
                     if account.id == urlsplit(root).netloc), None)
-    return f"IMAP: {account.username} on {account.server}:{account.port}" if account else root
+    return f"IMAP: {account.username} on {account.server}:{account.port}" if account else "IMAP: account unavailable"
 
 
 def unfinished_work(archive: Path) -> ProcessingWork:
@@ -127,7 +132,7 @@ def unfinished_work(archive: Path) -> ProcessingWork:
             prior.duplicates += status.counts.duplicates
             continue
         work.imports.append(InterruptedImport(status_ids=[status.status_id], source_roots=roots,
-            sources=[_source_label(archive, root) for root in roots],
+            sources=[source_label(archive, root) for root in roots],
             started_at=status.started_at, interrupted_at=status.completed_at or status.updated_at,
             interruption_estimated=status.completed_at is None,
             archived=status.counts.archived, duplicates=status.counts.duplicates))

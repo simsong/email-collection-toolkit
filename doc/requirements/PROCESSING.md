@@ -4,6 +4,13 @@
 
 ## Working-object lifetime
 
+Recovery shall expose the current processor/job and finished-job count while
+work is running, independently of newly imported message/file counts. Unknown
+derived job totals shall not appear as a source percentage or finalizing ETA.
+Queue selection shall use pending status and direct parent lookups rather than
+rescanning completed job history for each job. Adding this index shall preserve
+existing jobs, invocation history and recovery ordering.
+
 All production ingest and processing operations, including IMAP, shall release
 cached raw messages after their canonical MBOX publication and catalog/processing
 SQL commits, without waiting for the import to finish. Deferred processing shall
@@ -25,6 +32,15 @@ verified unchanged bytes. Saved `scanner-error`, `unscannable` or `not-scanned`
 evidence must trigger a fresh scan under the current scanning policy, rather
 than permanently replaying an old failure or bypassing required scanning.
 Retain earlier failed invocation records and the unpublished original bytes.
+Once the host accepts a failed invocation for automatic filing or quarantine,
+persist that decision atomically with its failed audit record. Interruption
+recovery shall replay the accepted decision, including known positive evidence,
+without rescanning and changing the category after canonical publication.
+Incomplete or failed scans permit unchanged canonical filing with their actual
+`unscannable` or `scanner-error` provenance. They never become clean verdicts
+or require manual review. Fresh source-worker scan evidence is scoped to the
+current scanner session so a timeout is not immediately repeated inside filing;
+old unsuccessful evidence still gets a new attempt when a scan session is available.
 Producer scan headers and explicit unscanned-import policy remain authoritative.
 When both ingestion and unbounded content processing are enabled, recover eligible
 archived message/content jobs before pending ingestion or source traversal. A
@@ -91,6 +107,9 @@ within pending/running/failed statuses rather than inventing a cancelled state.
 
 
 For persistent attempt counts, timing and error reporting, follow the [processor contract](../PLUGINS.md).
+End-of-import console statistics use an aligned table of processor calls, errors,
+timeouts and minimum/maximum/mean/total seconds, labeled as cumulative archive
+history. Uninvoked processors show unavailable timings rather than zero samples.
 
 
 For About inventory discovery and compatibility, follow [PLUGINS.md](../PLUGINS.md).

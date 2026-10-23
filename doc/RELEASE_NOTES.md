@@ -6,6 +6,34 @@ Entries describe their recorded revisions. For current behavior use the
 [user manual](USER_MANUAL.md) and [CLI reference](CLI_REFERENCE.md). Retired
 Rust delivery plans and historical package checks are not current acceptance.
 
+## Automatic handling without manual-review gates
+
+Python ingestion preserves originals for encryption, size limits, scanner
+errors and timeouts, records the actual scan outcome/diagnostic/versions,
+and continues. Scanner startup failure also records errors and continues;
+there is no separate approval prompt for unavailable antivirus. Antivirus
+metadata defects identify incomplete scans. Malware routes to quarantine
+automatically; no item waits for manual review.
+Accepted scan-error and quarantine decisions replay unchanged after an
+interruption, while the original failed invocation remains in audit history.
+
+## Observable, indexed recovery
+
+Recovery now shows the active processor/job and finished-job count, with an
+indeterminate bar while the derived-work total is unknown. Imported-message and
+source-file counts remain separate. Queue lookups use a status index and direct
+parent checks instead of scanning completed history for every job.
+
+## Readable processor statistics
+
+End-of-import console output presents processor counts and timings in an aligned
+table labeled as cumulative archive history, including failures from earlier runs.
+
+## Readable IMAP sources
+
+The Ingests Sources list shows the IMAP account, hostname and port instead of
+internal account IDs and locator options. Saved resume locators remain intact.
+
 ## Recoverable scanner failures and search reconstruction
 
 Retry unsuccessful saved host scans with the current engine instead of replaying
@@ -27,7 +55,7 @@ overrides stay pinned; Stop/Quit remains effective during updates.
 
 The desktop asks before continuing saved imports, showing source/account,
 first start, latest interruption (or last saved progress), imported messages and
-duplicates ignored. Choose Abort import, Ask me later, or Continue. Abort keeps
+duplicates ignored. Choose Abort import, Ask me later, or Continue Import. Abort keeps
 archived mail and history while cancelling saved traversal and outstanding jobs.
 Search-window warnings collapse to a message pill that reopens their full text
 and earlier messages for the lifetime of the window.

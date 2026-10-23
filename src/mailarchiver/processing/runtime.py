@@ -42,6 +42,7 @@ from .store import content_reference, enqueue, report, snapshot
 from .objects import collect_objects, index_outputs
 
 RANK_FAILURE = "rank failed; inspect invocations"
+ProcessingProgress = Callable[[ProcessingObject, str, bool], None]
 
 
 class ProcessorServices(Protocol):
@@ -50,6 +51,7 @@ class ProcessorServices(Protocol):
                 plugin: PluginSpec, result: ProcessingResult) -> None: ...
     def complete(self, item: ProcessingObject) -> None: ...
     def release(self, message_id: str) -> None: ...
+    def failed(self, item: ProcessingObject, plugin: PluginSpec, response: InvocationResponse) -> ProcessingResult | None: ...
 
 
 class CurrentSourceLoader(SourceFileLoader):
@@ -104,6 +106,7 @@ def invoke(plugin: PluginSpec, item: ProcessingObject, installation_config: Path
         item = item.model_copy(update={"application": ApplicationContext(policy=item.application.policy, workspace=Path(directory))})
         item.bind_configuration(configuration)
         item.bind_deadline(time.monotonic() + plugin.manifest.timeout_seconds, cancelled)
+        result = None
         try:
             factory_name = plugin.manifest.entrypoint.split(":")[1]
             with invocation_deadline(item), loaded_plugin(plugin) as module:
@@ -123,7 +126,10 @@ def invoke(plugin: PluginSpec, item: ProcessingObject, installation_config: Path
                     part_path=child.part_path) for child in result.promotions),
             }))
         except Exception as error:
-            return InvocationResponse.failure(error)
+            response = InvocationResponse.failure(error)
+            if isinstance(result, ProcessingResult) and result.scan is not None:
+                response = response.model_copy(update={"result": ProcessingResult(scan=result.scan)})
+            return response
 
 
 @contextmanager
@@ -175,7 +181,10 @@ def _checkpoint(database: sqlite3.Connection, job_id: int, plugin: PluginSpec, i
                 installation_config: Path | None, cancelled: Callable[[], None] | None,
                 failures: list[Exception], services: ProcessorServices | None) -> ProcessingResult | None:
     previous = database.execute(
-        "SELECT result_json FROM invocations WHERE job_id=? AND kind=? AND status='completed' ORDER BY invocation_id DESC LIMIT 1",
+        "SELECT coalesce(a.result_json,i.result_json) FROM invocations i "
+        "LEFT JOIN accepted_invocations a USING(invocation_id) "
+        "WHERE i.job_id=? AND i.kind=? AND (i.status='completed' OR a.invocation_id IS NOT NULL) "
+        "ORDER BY i.invocation_id DESC LIMIT 1",
         (job_id, plugin.manifest.kind)).fetchone()
     if previous:
         return ProcessingResult.model_validate_json(previous[0])
@@ -199,6 +208,7 @@ def _checkpoint(database: sqlite3.Connection, job_id: int, plugin: PluginSpec, i
         failures.append(response.cause)
     elapsed = time.monotonic() - started
     success = response.result is not None and response.error is None
+    accepted = services.failed(item, plugin, response) if not success and services is not None else None
     with database:
         database.execute("UPDATE invocations SET status=?,elapsed=?,result_json=?,error=? WHERE invocation_id=?",
                          ("completed" if success else "failed", elapsed,
@@ -206,8 +216,12 @@ def _checkpoint(database: sqlite3.Connection, job_id: int, plugin: PluginSpec, i
                           response.error, invocation_id))
         if success and response.result is not None:
             index_outputs(database, job_id, item.message_ref.sha256, response.result)
+        if accepted is not None:
+            database.execute("INSERT INTO accepted_invocations VALUES(?,?)", (invocation_id, accepted.model_dump_json()))
         if not success and response.result is not None and response.result.scan is not None and services is not None:
             services.publish(database, job_id, item, plugin, ProcessingResult(scan=response.result.scan))
+    if not success:
+        return accepted
     return response.result if success else None
 
 
@@ -246,13 +260,13 @@ def run(database: sqlite3.Connection, plugins: tuple[PluginSpec, ...], *, retry:
         pipelines: tuple[Pipeline, ...] = ("ingest", "message", "content"),
         services: ProcessorServices | None = None, cancelled: Callable[[], None] | None = None,
         failures: list[Exception] | None = None, message_id: str | None = None,
-        continue_after_failure: bool = False) -> RunReport:
+        continue_after_failure: bool = False, progress: ProcessingProgress | None = None) -> RunReport:
     """Caller holds the archive writer lease. Atomic output release follows each barrier."""
     prepare_run(database, plugins, retry=retry)
     try:
         dispatch(database, plugins, max_jobs=max_jobs, installation_config=installation_config,
                  pipelines=pipelines, services=services, cancelled=cancelled, failures=failures, message_id=message_id,
-                 continue_after_failure=continue_after_failure)
+                 continue_after_failure=continue_after_failure, progress=progress)
     finally:
         if services is None:
             # Production owns cleanup after canonical publication/checkpointing;
@@ -280,22 +294,26 @@ def dispatch(database: sqlite3.Connection, plugins: tuple[PluginSpec, ...], *,
         pipelines: tuple[Pipeline, ...] = ("ingest", "message", "content"),
         services: ProcessorServices | None = None, cancelled: Callable[[], None] | None = None,
         failures: list[Exception] | None = None, message_id: str | None = None,
-        continue_after_failure: bool = False) -> None:
+        continue_after_failure: bool = False, progress: ProcessingProgress | None = None) -> None:
     """Dispatch prepared work without rescanning history or computing an aggregate report."""
     registry_hash = fingerprint(plugins)
     failures = failures if failures is not None else []
     processed = 0
     while max_jobs is None or processed < max_jobs:
         placeholders = ",".join("?" for _ in pipelines)
+        message_filter = "" if message_id is None else "AND json_extract(item_json,'$.message_id')=? "
         row = database.execute("SELECT job_id,item_json FROM jobs WHERE status='pending' "
             f"AND json_extract(item_json,'$.pipeline') IN ({placeholders}) "
-            "AND (? IS NULL OR json_extract(item_json,'$.message_id')=?) "
-            "AND (parent_job_id IS NULL OR parent_job_id IN (SELECT job_id FROM jobs WHERE status='completed')) ORDER BY job_id LIMIT 1",
-            (*pipelines, message_id, message_id)).fetchone()
+            f"{message_filter}"
+            "AND (parent_job_id IS NULL OR EXISTS (SELECT 1 FROM jobs parent "
+            "WHERE parent.job_id=jobs.parent_job_id AND parent.status='completed')) ORDER BY job_id LIMIT 1",
+            (*pipelines, *((message_id,) if message_id is not None else ()))).fetchone()
         if row is None:
             break
         job_id, payload = row
         item = ProcessingObject.model_validate_json(payload).model_copy(update={"job_id": job_id})
+        if progress is not None:
+            progress(item, "preparing", False)
         try:
             if services is not None:
                 item = services.prepare(item)
@@ -308,6 +326,8 @@ def dispatch(database: sqlite3.Connection, plugins: tuple[PluginSpec, ...], *,
         if input_error:
             with database:
                 database.execute("UPDATE jobs SET status='failed',detail=? WHERE job_id=?", (input_error, job_id))
+            if progress is not None:
+                progress(item, "failed", True)
             if continue_after_failure:
                 processed += 1
                 continue
@@ -324,6 +344,8 @@ def dispatch(database: sqlite3.Connection, plugins: tuple[PluginSpec, ...], *,
             results: list[tuple[PluginSpec, ProcessingResult]] = []
             failed = False
             for plugin in (p for p in selected if p.manifest.rank == rank):
+                if progress is not None:
+                    progress(item, plugin.manifest.kind, False)
                 result = _checkpoint(database, job_id, plugin, item, installation_config, cancelled, failures, services)
                 if result is None:
                     failed = True
@@ -358,6 +380,8 @@ def dispatch(database: sqlite3.Connection, plugins: tuple[PluginSpec, ...], *,
             if stop_import or aborted:
                 break
         if stop_import:
+            if progress is not None:
+                progress(item, "failed", True)
             if continue_after_failure:
                 if explicit_stop:
                     raise RuntimeError("processor requested fail-import")
@@ -373,4 +397,6 @@ def dispatch(database: sqlite3.Connection, plugins: tuple[PluginSpec, ...], *,
             services.release(item.message_id)
         else:
             collect_objects(database, item.archive.path, message_id=item.message_id)
+        if progress is not None:
+            progress(item, "aborted" if aborted else "completed", True)
         processed += 1

@@ -36,7 +36,8 @@ The **Ingests** window shows retained runs, source paths, message counts,
 progress, worker activity, and failures. Open it from **Window → Ingests** or
 click the status line; **Import Directory…** starts another import into that
 window's archive. If antivirus scanning is unavailable, the application warns
-you and requires an explicit choice to import without scanning.
+you and records scanner-error evidence while importing continues automatically.
+Incomplete scans and encrypted attachments are recorded without a manual-review gate.
 
 ![The import history window showing a completed synthetic collection import](../images/importing-interface.png)
 
@@ -46,7 +47,7 @@ you and requires an explicit choice to import without scanning.
 When reopening an archive with unfinished work, review the source, import start,
 latest interruption and saved imported/duplicate counts. An unclean stop shows
 its last saved progress time because the exact interruption time is unknown.
-Choose **Continue** to use the saved settings, **Ask me later** to defer until
+Choose **Continue Import** to use the saved settings, **Ask me later** to defer until
 another opening, or **Abort import** to cancel saved work while keeping archived
 messages and history. A new explicit import can read the source again; use
 explicit reprocessing to regenerate previously cancelled derived work.

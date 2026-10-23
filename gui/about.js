@@ -78,7 +78,9 @@ function activityCard(activity) {
   const status = activity.status;
   if (activity.operation_id && !status) detail.textContent = "Import starting…";
   else if (!status) detail.textContent = "No ingest history.";
-  else if (status.state === "running") {
+  else if (status.state === "running" && status.processing_active) {
+    detail.textContent = `${status.phase} · ${Number(status.processing_jobs_completed).toLocaleString()} processing jobs finished · ${status.processing_processor || "preparing"}`;
+  } else if (status.state === "running") {
     detail.textContent = `${status.phase} · ${Number(status.percent).toFixed(1)}% · ${Number(status.processed_messages).toLocaleString()} messages · ETA ${status.eta}`;
   } else {
     detail.textContent = `Last ingest ${status.state} · ${status.phase} · ${Number(status.processed_messages).toLocaleString()} messages`;

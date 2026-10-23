@@ -64,6 +64,10 @@ def connect(archive: Path, *, create: bool = False, production: bool = False) ->
         database.execute("PRAGMA foreign_keys=ON")
         require_processing_schema(database)
         ensure_object_index(database)
+        with database:
+            database.execute("CREATE INDEX IF NOT EXISTS jobs_status_order ON jobs(status,job_id)")
+            database.execute("CREATE TABLE IF NOT EXISTS accepted_invocations ("
+                             "invocation_id INTEGER PRIMARY KEY REFERENCES invocations, result_json TEXT NOT NULL)")
     except BaseException:
         database.close()
         raise

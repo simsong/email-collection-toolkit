@@ -7,14 +7,24 @@ platform/release acceptance. Deferred features live in [plans](../plans/README.m
 
 ## Saved import recovery and notices
 
+During archived-content and pending-ingest recovery, show the active processor,
+job activity and finished-job count. Use an indeterminate progress bar while the
+job total is unknown; do not display an idle-worker dashboard or finalizing ETA
+for active recovery. Failed/stale saved runs shall not appear actively processing.
+
+Ingest history Sources shows IMAP username, hostname and port instead of internal
+account IDs and locator query options. Local paths remain readable. Missing or
+invalid account configuration shows an unavailable-account label; viewing history
+never connects to IMAP or changes saved source locators.
+
 Opening an archive with unfinished work asks before reconnecting or processing.
 Show source identity (IMAP username, server and port), first start and latest
 interruption, messages imported and duplicates ignored. Sum saved attempt counts
 since the preceding completion or explicit abort; these are saved progress totals,
 not a fresh count from the server. If a process died without a final status, show
 its last saved progress time and state that the interruption time is unknown.
-Offer **Abort import**, **Ask me later**, and **Continue**. Later and closing the
-dialog preserve work and ask again on reopening; Continue uses the selected
+Offer **Abort import**, **Ask me later**, and **Continue Import**. Later and closing the
+dialog preserve work and ask again on reopening; Continue Import uses the selected
 phases and saved policy. Abort cancels all displayed saved traversal and pending,
 running or failed jobs under the archive writer lease, retaining archived mail,
 source checkpoints and run history. A changed source history blocks a stale abort.
@@ -208,11 +218,12 @@ confirmation, and starts the same typed ingest service used by the CLI on a
 worker thread. ClamAV has an explicit opt-out; the DMG bundles the engine and
 project definitions, while development uses a local library and `etc/clamdb/`. Missing library
 or configuration files produce a warning banner in the Ingests window and
-macOS source picker. Final confirmation defaults to Cancel and offers
-Import Without Scanning or Install ClamAV; the latter opens the application
-release page, without installing software or starting a persistent service.
-Configured scanners must pass the existing startup check; errors stop import,
-never silently switch to unscanned mode. About displays scanner and definition availability, date, age and refresh status, and import history retains a visible unscanned warning.
+macOS source picker. Scanner unavailability introduces no extra approval or
+manual-review gate: import proceeds with scanner-error evidence and metadata
+defects. An optional installation link opens the application release page without
+installing software or starting a service. Startup errors likewise record evidence
+and continue. About displays scanner and definition availability, date, age and
+refresh status; explicit unscanned imports retain their warning in history.
 The Ingests window provides **Import Directory…**, bound to its own archive even
 when another archive is active. It opens the source picker directly, then
 uses the same owner-names setup, confirmation, and writer lease as File Import.

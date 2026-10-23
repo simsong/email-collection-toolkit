@@ -147,10 +147,17 @@ recorded in THIRD_PARTY_NOTICES.md.
   Year ranges must be ascending and correspondent limits must be nonnegative.
 * ClamAV outcomes are `clean`, `infected`, `unscannable`, or `scanner-error`,
   with scanner version, signature database version, and diagnostic retained.
+* Python host ingestion shall preserve originals unchanged and continue for
+  `unscannable` and `scanner-error`, including encrypted/over-limit input,
+  scanner startup failures and timeouts. Retain the verdict, diagnostic and
+  available engine/definition versions, with an antivirus metadata defect.
+  Never reinterpret an incomplete/error scan as clean. Positive detections
+  quarantine automatically. No manual review or scanner-availability approval
+  may gate continuation; storage/integrity failures and cancellation remain errors.
 * Only a positive detection routes a message to `INFECTED1.mbox`; an
   unscannable attachment or scanner failure does not destroy or silently
   exclude a message.
 * Infected and malformed quarantine mail remains catalogued but is excluded
   from the disposable search index, ordinary search listings, reports, and
   correspondent statistics. Its canonical MBOX content remains available for
-  an explicit future quarantine-review workflow.
+  optional inspection or export; it never gates later imports.

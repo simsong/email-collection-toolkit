@@ -19,12 +19,23 @@ platform or release gate has passed. [Future work](plans/README.md) is separate.
 
 ## Shared boundaries
 
+- Manual review must never gate application processing. Python ingestion records
+  scan errors/incomplete scans and preserves originals while continuing;
+  see [scanning](requirements/SCANNING.md#malware-handling).
+
+- Recovery shows active processor/job work independently of source-import counts,
+  and queue lookup avoids rescanning completed history; see [processing](requirements/PROCESSING.md).
+
+- End-of-import processor statistics use an aligned table labeled as cumulative
+  archive history; see [processing](requirements/PROCESSING.md).
+
 - Freeze all manifest-referenced acquisition adapters; validate local ingestion
   with `make test-frozen-source-plugins` before packaging handoff.
 - Natural search preserves quoted symbols and works with existing indexes;
   see [search behavior](requirements/SEARCH.md).
-- Desktop recovery requires an informed continue/defer/abort choice, and collapsed
+- Desktop recovery requires an informed Continue Import/defer/abort choice, and collapsed
   warnings remain readable; see [desktop recovery](requirements/DESKTOP.md#saved-import-recovery-and-notices).
+  Ingest history displays IMAP accounts and servers instead of internal locators.
 
 - Embedded scanners disable URL-phishing checks while retaining malware scanning;
   see the [scanning policy](requirements/SCANNING.md#malware-handling).

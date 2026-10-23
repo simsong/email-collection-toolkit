@@ -36,13 +36,13 @@ from ..plugin_configuration import read_plugin_configuration
 from ..plugin_loader import builtin_plugin_directory
 from ..search import PreparedSearchMessage, SEARCH_CATEGORIES, body_preview, delete_indexed_message, write_prepared_search_message
 from .api import (
-    ApplicationContext, ArchiveContext, ContentReference, Pipeline, PluginSpec, ProcessingObject,
+    ApplicationContext, ArchiveContext, ContentReference, InvocationResponse, Pipeline, PluginSpec, ProcessingObject,
     ProcessingResult, RAW_MESSAGE, RunReport,
 )
-from .contracts import AddressEvidence, ContentMetadata, HeaderMetadata, MailboxReference, MimeInventory, ProcessingPolicy, SourceMetadata
+from .contracts import AddressEvidence, ContentMetadata, Filing, HeaderMetadata, MailboxReference, MimeInventory, ProcessingPolicy, ScanEvidence, SourceMetadata
 from .objects import collect_objects
 from .registry import fingerprint, load_processors
-from .runtime import RANK_FAILURE, dispatch, prepare_run, run
+from .runtime import RANK_FAILURE, ProcessingProgress, dispatch, prepare_run, run
 from .store import DATABASE, USER_CANCELLED, connect, enqueue, report, snapshot
 
 Publisher = Callable[[MailObject, ParsedMessage, MailboxReference, int], int]
@@ -154,6 +154,17 @@ class ProductionPipeline:
         return item.model_copy(update={"application": ApplicationContext(policy=self.policy),
                                       "scan_provenance": row[0] if row and row[0] else item.scan_provenance})
 
+    def failed(self, item: ProcessingObject, plugin: PluginSpec, response: InvocationResponse) -> ProcessingResult | None:
+        """Preserve scanner failures in audit history while automatically retaining mail."""
+        if item.pipeline != "ingest" or plugin.manifest.kind != "clamav":
+            return None
+        evidence = response.result.scan if response.result is not None else None
+        if evidence is not None and evidence.status == "infected":
+            from .builtin import quarantine_metadata
+            return ProcessingResult(outcome="abort-message", scan=evidence,
+                filing=Filing(parsed=quarantine_metadata(item), mailbox=item.archive.mailbox("INFECTED", None)))
+        return ProcessingResult(scan=evidence or ScanEvidence(status="scanner-error", detail=response.error or "Scanner failed"))
+
     def _admit(self, reference: ContentReference, metadata: SourceMetadata, *, pipeline: Pipeline = "ingest",
                parent: str | None = None, part_path: tuple[int, ...] = (), scan: str | None = None, depth: int = 0) -> ProcessingObject:
         item = ProcessingObject(archive=ArchiveContext(path=self.archive), application=ApplicationContext(policy=self.policy),
@@ -193,18 +204,19 @@ class ProductionPipeline:
             raise RuntimeError("ingest processor tree ended without a filing decision")
         return IngestedMessage(parsed=ParsedMessage.model_validate_json(row[0]), message_pk=row[1], duplicate=existing is not None, excluded=bool(row[2]))
 
-    def resume_ingest(self) -> None:
+    def resume_ingest(self, *, progress: ProcessingProgress | None = None) -> None:
         """Replay durable ingest work with cooperative stops between messages."""
         while row := self.database.execute("SELECT json_extract(item_json,'$.message_id') FROM jobs "
                 "WHERE status IN ('pending','running','failed') AND json_extract(item_json,'$.pipeline') "
-                "IN ('ingest','message') AND (parent_job_id IS NULL OR parent_job_id IN "
-                "(SELECT job_id FROM jobs WHERE status='completed')) ORDER BY job_id LIMIT 1").fetchone():
+                "IN ('ingest','message') AND (parent_job_id IS NULL OR EXISTS "
+                "(SELECT 1 FROM jobs parent WHERE parent.job_id=jobs.parent_job_id "
+                "AND parent.status='completed')) ORDER BY job_id LIMIT 1").fetchone():
             if self.cancelled is not None:
                 self.cancelled()
-            self._finish_ingest_message(str(row[0]))
+            self._finish_ingest_message(str(row[0]), progress=progress)
             self.release(str(row[0]))
 
-    def _finish_ingest_message(self, message_id: str) -> None:
+    def _finish_ingest_message(self, message_id: str, *, progress: ProcessingProgress | None = None) -> None:
         # The host serializes ingest calls under its publication lock. Finish
         # this message before honoring cooperative Quit; processor deadlines
         # still apply, and GUI termination has its own five-second hard limit.
@@ -213,18 +225,19 @@ class ProductionPipeline:
         try:
             failures: list[Exception] = []
             dispatch(self.database, self.plugins, pipelines=("ingest", "message"),
-                     installation_config=self.installation_config, services=self, failures=failures, message_id=message_id)
+                     installation_config=self.installation_config, services=self, failures=failures, message_id=message_id,
+                     progress=progress)
             self._raise_failures(("ingest", "message"), failures)
         finally:
             self.cancelled = cancelled
             self._ingesting = ingesting
 
     def resume(self, pipelines: tuple[Pipeline, ...], *, max_jobs: int | None = None, message_id: str | None = None,
-               fail_on_error: bool = True) -> RunReport:
+               fail_on_error: bool = True, progress: ProcessingProgress | None = None) -> RunReport:
         failures: list[Exception] = []
         result = run(self.database, self.plugins, retry=True, pipelines=pipelines, max_jobs=max_jobs,
                      installation_config=self.installation_config, services=self, cancelled=self.cancelled, failures=failures,
-                     message_id=message_id, continue_after_failure=not fail_on_error)
+                     message_id=message_id, continue_after_failure=not fail_on_error, progress=progress)
         if fail_on_error:
             self._raise_failures(pipelines, failures)
         return result

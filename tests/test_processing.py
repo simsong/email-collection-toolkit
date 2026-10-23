@@ -10,7 +10,7 @@ from pathlib import Path
 
 import pytest
 
-from mailarchiver.processing.api import RAW_MESSAGE
+from mailarchiver.processing.api import RAW_MESSAGE, ProcessingObject
 from mailarchiver.processing.registry import fingerprint, load_processors
 from mailarchiver.processing.runtime import run
 from mailarchiver.processing.store import connect, report, submit
@@ -419,6 +419,38 @@ def test_error_text_is_not_a_timeout_and_empty_samples_are_unavailable(tmp_path:
         assert "shortest=n/a longest=n/a average=n/a total=n/a" in empty.summary()
         database.execute("INSERT INTO invocations(job_id,kind,version,rank,status) VALUES(1,'unreached','1',2,'running')")
         assert report(database, ("unreached",)).statistics[0].invocations == 0
+
+
+def test_dispatch_uses_indexed_pending_queue_with_large_completed_history(tmp_path: Path) -> None:
+    """PROCESSING: next-job selection must not scan completed history or rebuild all parent IDs."""
+    plugin(tmp_path, "simple", 'return ProcessingResult()')
+    plugins = load_processors((tmp_path,))
+    archive = tmp_path / "archive"
+    with connect(archive, create=True) as database:
+        submit(database, archive, MESSAGE, fingerprint(plugins))
+        payload = database.execute("SELECT item_json FROM jobs").fetchone()[0]
+        template = ProcessingObject.model_validate_json(payload)
+        database.execute("UPDATE jobs SET status='completed'")
+        database.executemany("INSERT INTO jobs(identity,item_json,registry_hash,status) VALUES(?,?,?,'completed')",
+            ((f"history-{number}", template.model_copy(update={"message_id": f"{number:064x}"}).model_dump_json(), fingerprint(plugins))
+             for number in range(5000)))
+        database.execute("INSERT INTO jobs(identity,parent_job_id,item_json,registry_hash,status) VALUES('live',1,?,?,'pending')",
+                         (payload, fingerprint(plugins)))
+        database.commit()
+        statements: list[str] = []
+        database.set_trace_callback(statements.append)
+        assert run(database, plugins).pending == 0
+        database.set_trace_callback(None)
+        selection = next(sql for sql in statements if sql.startswith("SELECT job_id,item_json FROM jobs WHERE status='pending'"))
+        plan = "\n".join(row[3] for row in database.execute("EXPLAIN QUERY PLAN " + selection))
+        assert "SEARCH jobs USING INDEX jobs_status_order" in plan
+        assert "SEARCH parent USING INTEGER PRIMARY KEY" in plan
+        assert "SCAN jobs" not in plan
+        database.execute("DROP INDEX jobs_status_order")
+        database.commit()
+    with connect(archive) as database:
+        assert database.execute("SELECT count(*) FROM jobs WHERE status='completed'").fetchone()[0] == 5002
+        assert database.execute("SELECT 1 FROM sqlite_master WHERE name='jobs_status_order'").fetchone()
 
 
 def test_job_identity_survives_retry_and_new_submission_gets_its_own(tmp_path: Path) -> None:

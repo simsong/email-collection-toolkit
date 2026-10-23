@@ -19,13 +19,23 @@ platform or release gate has passed. [Future work](plans/README.md) is separate.
 
 ## Shared boundaries
 
+- Python scan exceptions route automatically to retained originals with recorded
+  evidence, without a manual-review gate; see [scanning](implementation/SCANNING.md#automatic-scan-error-handling).
+
+- Indexed queue selection and dispatcher activity callbacks expose recovery work;
+  see [processing](implementation/PROCESSING.md).
+
+- End-of-import stderr renders typed processor statistics in aligned columns;
+  machine-readable status remains JSON. See [processing](implementation/PROCESSING.md).
+
 - Freeze all manifest-referenced acquisition adapters; validate local ingestion
   with `make test-frozen-source-plugins` before packaging handoff.
 - Natural search preserves quoted symbols and works with existing indexes;
   see [search behavior](implementation/SEARCH.md).
-- Desktop recovery summarizes saved attempts and records lease-protected aborts;
+- Desktop recovery summarizes saved attempts with a Continue Import action and records lease-protected aborts;
   warning history collapses to a reopenable pill. See
   [desktop recovery](implementation/DESKTOP.md#saved-import-recovery-and-notices).
+  History source labels resolve account/server names without changing saved locators.
 
 - Python and Rust omit the URL-phishing database option;
   see [scanner configuration](implementation/SCANNING.md#embedded-scanner-configuration).

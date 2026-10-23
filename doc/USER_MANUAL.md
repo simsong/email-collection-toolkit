@@ -57,7 +57,7 @@ modes yet.
 When reopening an archive with unfinished work, review the source, import start,
 latest interruption and saved imported/duplicate counts. An unclean stop shows
 its last saved progress time because the exact interruption time is unknown.
-Choose **Continue** to use the saved settings, **Ask me later** to defer until
+Choose **Continue Import** to use the saved settings, **Ask me later** to defer until
 another opening, or **Abort import** to cancel saved work while keeping archived
 messages and history. A new explicit import can read the source again; use
 explicit reprocessing to regenerate previously cancelled derived work.
@@ -322,9 +322,11 @@ confirmation, and starts import. When the embedded ClamAV engine or its
 definitions are missing or unusable, the import screen displays an antivirus
 warning. **Install ClamAV…** opens the Email Collection Toolkit releases page so
 you can download a build with a working engine; it does not install software
-automatically. You may instead explicitly choose **Import Without Scanning**, or
-Cancel. The unscanned warning is retained in import history. Repairing antivirus
-later does not scan previously imported messages automatically.
+automatically. Missing or failed scanning does not add an approval step: originals
+are archived with recorded scanner-error evidence and antivirus metadata notes.
+Encryption, size limits and scan timeouts also preserve originals and allow later
+mail to continue. No message waits for manual review. Repairing antivirus later
+does not scan previously imported messages automatically.
 The **Import Directory…** button in the Ingests window starts the same workflow
 for that window's archive, opening the same source picker directly.
 In the picker, select files or directories and click **Import**. You can also

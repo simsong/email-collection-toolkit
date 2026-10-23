@@ -14,7 +14,7 @@ import pytest
 from mailarchiver.__main__ import IngestRequest, run_ingest
 from mailarchiver.application import ApplicationController, ApplicationPreferencesStore
 from mailarchiver.document_options import DocumentOptions
-from mailarchiver.gui_app import GuiApi, IdentityPickerApi, PyWebViewApplication
+from mailarchiver.gui_app import GuiApi, GuiIngestHistory, IdentityPickerApi, IngestWindowApi, PyWebViewApplication
 from mailarchiver.gui_processing import PickerPage, abort_processing, registered_processors, resume_request, unfinished_work
 from mailarchiver.ingest_status import IngestCounts, IngestStatusFile, read_ingest_history
 from mailarchiver.archive_config import load_archive_config, save_archive_config
@@ -267,6 +267,28 @@ def build_interrupted_archive(root: Path) -> Path:
             "state": state, "counts": IngestCounts(archived=archived, duplicates=duplicates)})
         IngestStatusFile(archive, status.status_id).write(status)
     return archive
+
+
+@pytest.mark.parametrize("configuration", ["present", "missing", "invalid"])
+def test_history_labels_preserve_saved_imap_locators(tmp_path: Path, configuration: str) -> None:
+    """Desktop Sources shows account/server labels without changing resumable history."""
+    archive = build_interrupted_archive(tmp_path)
+    if configuration == "missing":
+        (archive / "config.yaml").unlink()
+    elif configuration == "invalid":
+        (archive / "config.yaml").write_text("imap_sources: invalid\n", encoding="utf-8")
+    snapshots = {path: path.read_bytes() for path in (archive / "status").glob("ingest-*.json")}
+    before = read_ingest_history(archive)
+    history = GuiIngestHistory.model_validate(IngestWindowApi(archive).history())
+    for status in history.statuses:
+        original = next(item for item in before.statuses if item.status_id == status.status_id)
+        assert status.source_roots == original.source_roots
+        if status.status_id.startswith("ingest-fixture-"):
+            expected = "IMAP: sam@example.test on imap.example.test:993" if configuration == "present" else "IMAP: account unavailable"
+            assert status.source_labels == [expected]
+        else:
+            assert status.source_labels == original.source_roots
+    assert all(path.read_bytes() == saved for path, saved in snapshots.items())
 
 
 def test_saved_import_summary_abort_and_new_attempt(tmp_path: Path) -> None:
