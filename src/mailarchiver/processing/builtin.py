@@ -25,11 +25,13 @@ from pydantic import BaseModel, ConfigDict, Field
 from striprtf.striprtf import rtf_to_text
 
 from ..encoding import decode_text
+from ..reply_addresses import RoutingCandidate
 from ..message import MetadataDefect, ParsedMessage, decoded_header, decoded_message_header, parse_message
 from ..search import html_text, suggested_addresses
 from .api import Emission, Handoff, ProcessingObject, ProcessingResult, PromotedMessage
 from .contracts import AddressEvidence, Filing, HeaderMetadata, MimeInventory, ScanEvidence, ScanFailure, ScanStatus, TextContent
 from ..scan_evidence import DETECTION_HEADER, ENGINE_HEADER, DEFINITIONS_HEADER
+from .phones import signature_phone_numbers
 from .mime import ExtractionLimitError, MimeLimits, extract_parts, read_headers
 
 SIGNATURE_LINES = "signature_lines"
@@ -168,7 +170,10 @@ class HeaderProcessor:
             raw = source.read(end)
         suggestions = tuple(suggested_addresses(headers))
         search_headers = "\n".join(decoded_message_header(raw, headers, name) for name in ("From", "To", "Cc", "Subject", "Date"))
-        return ProcessingResult(headers=HeaderMetadata(parsed=parsed, suggestions=suggestions, search_headers=search_headers),
+        routing=tuple(RoutingCandidate(address=address.strip(),display_name=decoded_header(name),header=field)
+            for field in ('from','to','cc','bcc','reply-to')
+            for name,address in getaddresses([str(value) for value in headers.get_all(field,[])]) if address.strip())
+        return ProcessingResult(headers=HeaderMetadata(parsed=parsed, suggestions=suggestions, search_headers=search_headers,routing_candidates=routing),
             evidence=tuple(AddressEvidence(address=identity.address, name=identity.display_name, kind="header")
                            for identity in suggestions if "@" in identity.address))
 
@@ -246,7 +251,7 @@ class IdentityProcessor:
                 named = next((decoded_header(name) for name, candidate in getaddresses([line])
                               if candidate.lower() == address and name), "")
                 evidence.append(AddressEvidence(address=address, name=named, kind="signature"))
-        return ProcessingResult(evidence=tuple(evidence))
+        return ProcessingResult(evidence=tuple(evidence), phone_numbers=signature_phone_numbers(text, count))
 
 
 class AttachedMessageLimits(BaseModel):

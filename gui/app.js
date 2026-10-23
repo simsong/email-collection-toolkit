@@ -51,6 +51,7 @@ const state = {
   activeFilterSet: "",
   treeRequest: 0,
   searchFilters: [],
+  identityMessages: null,
   suggestionRequest: 0,
   suggestionTimer: null,
   suggestionItems: [],
@@ -83,7 +84,7 @@ window.archiveDidChange = async () => {
   state.mailboxTree = [];
   applyStatus(status);
   await refreshIngestOverview();
-  if (state.query.trim() || (state.showTree && state.mailboxSelections.size)) await runSearch();
+  if (state.query.trim() || state.identityMessages || (state.showTree && state.mailboxSelections.size)) await runSearch();
 };
 window.setTimeout(() => {
   if (window.pywebview?.api?.status) initialize();
@@ -159,6 +160,14 @@ async function initialize() {
   applyStatus(status);
   await refreshIngestOverview();
   window.setInterval(refreshIngestOverview, INGEST_REFRESH_MS);
+  if (parameters.has("identity-messages")) {
+    state.identityMessages = JSON.parse(parameters.get("identity-messages"));
+    renderSearchFilters();
+  }
+  if (parameters.has("query") || state.identityMessages) {
+    elements.search.value = parameters.get("query") || "";
+    await runSearch();
+  }
   const message = Number(parameters.get("message"));
   if (message) await selectMessage(message);
 }
@@ -421,6 +430,7 @@ function resetArchiveView() {
   state.view = null;
   state.mailboxTree = [];
   state.searchFilters = [];
+  state.identityMessages = null;
   state.highlightTerms = [];
   state.messageFindQuery = "";
   state.messageFindTargets = [];
@@ -927,6 +937,18 @@ function renderSearchFilters() {
     chip.append(label, remove);
     return chip;
   });
+  if (state.identityMessages) {
+    const scope = state.identityMessages;
+    const chip = document.createElement("span"); chip.className = "search-chip";
+    const label = document.createElement("span"); label.className = "search-chip-label";
+    label.textContent = scope.label + (scope.start || scope.end ? ` · ${scope.start || "Any date"} – ${scope.end || "Any date"}` : "");
+    label.title = label.textContent;
+    const remove = document.createElement("button"); remove.type = "button";
+    remove.className = "search-chip-remove"; remove.textContent = "×";
+    remove.setAttribute("aria-label", "Remove identity messages filter");
+    remove.addEventListener("click", () => { state.identityMessages = null; renderSearchFilters(); runSearch(); });
+    chip.append(label, remove); chips.unshift(chip);
+  }
   elements["search-filters"]?.replaceChildren(...chips);
 }
 
@@ -983,26 +1005,26 @@ async function runSearch() {
   elements["message-content"].hidden = true;
   elements["result-status"].classList.remove("background-search");
   const mailboxSelections = state.showTree ? [...state.mailboxSelections] : [];
-  if (!query.trim() && !mailboxSelections.length) {
+  if (!query.trim() && !mailboxSelections.length && !state.identityMessages) {
     Object.assign(state, {query, sortBy, sortDirection, searchAttachments, offset: 0});
     renderSearchHelp();
     elements["result-status"].textContent = "Enter a search.";
     return;
   }
   elements["result-status"].textContent = "Searching…";
-  await runCompleteSearch({query, sortBy, sortDirection, searchAttachments, mailboxSelections, request});
+  await runCompleteSearch({query, sortBy, sortDirection, searchAttachments, mailboxSelections, request, identityMessages: state.identityMessages});
 }
 
 async function runCompleteSearch(context) {
-  const {query, sortBy, sortDirection, searchAttachments, mailboxSelections, request} = context;
+  const {query, sortBy, sortDirection, searchAttachments, mailboxSelections, request, identityMessages} = context;
   Object.assign(state, {query, sortBy, sortDirection, searchAttachments, offset: 0});
   clearResultViewport();
-  if (window.pywebview.api.search_start) {
+  if (window.pywebview.api.search_start && !identityMessages) {
     await runIncrementalSearch(context);
     return;
   }
   const first = await call(() => window.pywebview.api.search(
-    query, 0, sortBy, sortDirection, searchAttachments, mailboxSelections, RESULT_INITIAL_LIMIT,
+    query, 0, sortBy, sortDirection, searchAttachments, mailboxSelections, RESULT_INITIAL_LIMIT, ...(identityMessages ? [identityMessages] : []),
   ));
   if (request !== state.searchRequest) return;
   if (!first) { updateResultStatus(); return; }
@@ -1017,7 +1039,7 @@ async function runCompleteSearch(context) {
   elements["result-status"].classList.add("background-search");
   elements["result-status"].textContent = `Searching in background… ${state.offset.toLocaleString()} messages shown`;
   const remainder = await call(() => window.pywebview.api.search(
-    query, state.offset, sortBy, sortDirection, searchAttachments, mailboxSelections, 0,
+    query, state.offset, sortBy, sortDirection, searchAttachments, mailboxSelections, 0, ...(identityMessages ? [identityMessages] : []),
   ));
   if (request !== state.searchRequest) return;
   elements["result-status"].classList.remove("background-search");

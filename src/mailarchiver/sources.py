@@ -27,12 +27,10 @@ from collections.abc import Callable, Iterable, Iterator
 from email import policy
 from email.parser import BytesParser
 from fnmatch import fnmatchcase
-from functools import lru_cache
 from pathlib import Path
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
-from yaml import safe_load
 
 from .plugin_api import (
     FileProbe,
@@ -99,10 +97,9 @@ class LocalSourceRules(BaseModel):
     mbox: MboxRules
 
 
-@lru_cache(maxsize=1)
 def local_source_rules() -> LocalSourceRules:
-    with Path(__file__).with_name("local_source_rules.yaml").open(encoding="utf-8") as source:
-        return LocalSourceRules.model_validate(safe_load(source))
+    from .list_catalog import LOCAL_SOURCES
+    return LOCAL_SOURCES.template()
 
 
 class SourceMessage(BaseModel):

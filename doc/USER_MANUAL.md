@@ -334,7 +334,7 @@ navigate into a directory and import it; directories include supported mail
 files and subdirectories. No separate Files/Folders choice is needed.
 Every import displays both owner fields, prefilled from the archive's YAML.
 Before YAML owner settings exist, `owner-names.txt` in the archive and selected
-source roots can seed the fields. There is no built-in personal owner list.
+source roots can seed the fields. The personal owner template starts empty; customize it through **File → Customizable Default Lists…**.
 After **Continue**, review the destination, sources, and rules, then confirm
 **Import**. Canceling either dialog does not save rules. Source files are
 unchanged. Future imports show the saved rules again; lists are rewritten only
@@ -759,21 +759,11 @@ in the operating-system keychain or configured secrets provider. Import
 checkpoints and observations remain in `archive.sqlite3`; successful imports
 do not rewrite checkpoint state into the YAML file.
 
-Email Collection Toolkit's current application-level configuration is the versioned YAML
-file `src/mailarchiver/configuration.yaml` in the source checkout. It currently
-controls the search-highlight background used by the graphical message viewer:
-
-```yaml
-version: 1
-gui:
-  search_highlight_background: "#fff59d"
-```
-
-The color must be a six-digit hexadecimal CSS color beginning with `#`. The
-initial value, `#fff59d`, is yellow. Stop and restart the graphical interface
-after changing the file; configuration is validated and loaded once when the
-application starts. Email Collection Toolkit rejects unknown settings, unsupported
-versions, and invalid color values instead of passing them to the viewer.
+Use **File → Customizable Default Lists…** to edit personal templates or the open
+archive's list settings. The [Customizable Default Lists](CUSTOMIZABLE_DEFAULT_LISTS.md)
+page lists every file, scope, precedence rule and reset behavior, including owner
+rules and reply-address/name extraction. The display-policy list controls the
+six-digit search-highlight background color; reopen affected windows after editing.
 
 This YAML file contains packaged application display policy. It does not
 replace:
@@ -792,3 +782,40 @@ root. An archive-local copy takes precedence over the packaged source copy, so
 the archive retains the policy that produced its derived contact results.
 Packaged runtime YAML files declare `mode: replace`; an archive-local policy
 that supports `mode: extend` documents the lists it adds to that default.
+
+## Names and message navigation
+
+The Name matcher hides recognized company/organization and service identities.
+Check **Show non-person identities** to reveal them; uncertain names remain
+visible. This view filter does not delete addresses or change accepted groups.
+
+In the Name matcher, drag a canonical entry onto another to merge all its
+addresses, or move an individual address. Use Make separate to detach an address.
+Edits save immediately and survive processing reruns.
+
+The Phone numbers column shows numbers observed in sender signatures. One number
+appears directly; click the disclosure triangle for multiple numbers to expand
+the row and see them all. Group rows combine their visible addresses' numbers,
+and date filters also apply to phone observations. These are unverified contact
+candidates. Existing archives need content reprocessing to collect phone evidence;
+opening this window does not start it.
+
+Double-click a name to open an Any-address search across its grouped addresses.
+Original header names and merged canonical names also find the group; searching
+an email address stays specific to that address. Merged names remain group aliases
+even when an individual address is later separated.
+
+Click a Messages or Signatures number to open exactly that evidence channel for
+the displayed addresses and dates. A removable filter identifies the selection;
+enter more search terms to narrow it. Zero counts are disabled. The automatic
+authoritative matcher is not connected. The separate local research harness runs
+rules, signature and graph comparisons, Fellegi–Sunter, Dedupe and Splink and
+produces an owner-labeling report; it does not apply proposed groups.
+That report separates **Same identity** / **Different identities** from the
+**Not a person** checkbox. For example, two addresses for one organization can
+be **Same identity** and **Not a person** together. Identify A, B or both in the
+notes. Existing decisions and comments remain saved; previous non-person choices
+become checked boxes without guessing the link decision.
+The report has the same reversible filter. It retains original pair numbers and
+exports all fifty decisions, including hidden rows. Automatic SBook-derived
+classifications are displayed as evidence and are separate from your decisions.

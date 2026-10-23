@@ -15,6 +15,7 @@ Fundamental dependents:
 from __future__ import annotations
 
 import sqlite3
+import shlex
 from collections.abc import Iterator
 from contextlib import closing, contextmanager
 from pathlib import Path
@@ -27,15 +28,19 @@ from uuid import uuid4
 from pydantic import BaseModel, Field
 
 from .sqlite_paths import sqlite_uri
+from .name_entities import classify_name
+from .list_catalog import ENTITY_RULES
+from .search_selectors import is_address_fragment
 
 from .__main__ import IngestRequest
 from .archive_config import load_archive_config
 from .ingest_status import read_ingest_history
 from .plugin_api import PluginManifest
 from .plugin_loader import builtin_plugin_directory, discover_manifests
+from .processing.contracts import PhoneNumber
 from .processing.api import ProcessorManifest
 from .processing.contracts import ProcessingPolicy
-from .processing.identities import AddressRow, IdentityFilter, ManualDecision, addresses, edit, organizations
+from .processing.identities import AddressRow, IdentityFilter, IdentityMessages, ManualDecision, addresses, edit, organizations
 from .processing.registry import load_processors
 from .processing.store import DATABASE, USER_CANCELLED
 from .writer_lock import WriterLease
@@ -207,11 +212,13 @@ class PickerGroup(BaseModel):
     last_use: str | None = None
     messages: int = 0
     signature_messages: int = 0
+    phone_numbers: list[PhoneNumber] = Field(default_factory=list)
 
 
 class PickerPage(BaseModel):
     groups: list[PickerGroup] = Field(default_factory=list)
     total_addresses: int = 0
+    excluded_addresses: int = 0
 
 
 def picker_page(archive: Path, kind: Literal["name", "institution"], filters: IdentityFilter) -> PickerPage:
@@ -224,7 +231,11 @@ def picker_page(archive: Path, kind: Literal["name", "institution"], filters: Id
                            for row in organizations(database, filters)]
         else:
             by_id: dict[int, PickerGroup] = {}
+            entity_rules=ENTITY_RULES.read(archive)
             for row in addresses(database, filters):
+                if not filters.include_non_people and classify_name(row.canonical_name,row.address,entity_rules).non_person:
+                    page.excluded_addresses += 1
+                    continue
                 group = by_id.get(row.person_id)
                 if group is None:
                     group = PickerGroup(id=row.person_id, label=row.canonical_name, addresses=[])
@@ -232,6 +243,8 @@ def picker_page(archive: Path, kind: Literal["name", "institution"], filters: Id
                     by_id[row.person_id] = group
                 group.addresses.append(row)
         for group in page.groups:
+            unique_phones = {phone.normalized: phone for row in group.addresses for phone in row.phone_numbers}
+            group.phone_numbers = [unique_phones[key] for key in sorted(unique_phones)]
             ids = [row.address_id for row in group.addresses]
             if not ids:
                 continue
@@ -243,6 +256,38 @@ def picker_page(archive: Path, kind: Literal["name", "institution"], filters: Id
                 FROM message_addresses WHERE address_id IN ({','.join('?' for _ in ids)})
                 AND (? IS NULL OR date(seen_at)>=?) AND (? IS NULL OR date(seen_at)<=?)""", (*ids, start, start, end, end)).fetchone()
     return page
+
+
+class PickerSearchRequest(BaseModel):
+    group_id: int = Field(gt=0)
+    address_id: int | None = Field(default=None, gt=0)
+    action: Literal["name", "header", "signature"] = "name"
+    filters: IdentityFilter = Field(default_factory=IdentityFilter)
+
+
+class PickerSearch(BaseModel):
+    query: str = ""
+    identity_messages: IdentityMessages | None = None
+
+
+def picker_search(archive: Path, kind: Literal["name", "institution"], request: PickerSearchRequest) -> PickerSearch:
+    """Resolve clicks against the same filtered projection that supplied their counts."""
+    group = next((row for row in picker_page(archive, kind, request.filters).groups if row.id == request.group_id), None)
+    if group is None:
+        raise ValueError("identity is no longer visible; refresh the picker")
+    members = [row for row in group.addresses if request.address_id is None or row.address_id == request.address_id]
+    if not members:
+        raise ValueError("address is no longer visible; refresh the picker")
+    label = members[0].address if request.address_id is not None else group.label
+    if request.action == "name":
+        if request.address_id is not None or not is_address_fragment(label):
+            return PickerSearch(query="any:" + shlex.quote(label))
+        # An unnamed group's email label still represents the whole person.
+        return picker_search(archive, kind, request.model_copy(update={"action": "header"}))
+    return PickerSearch(identity_messages=IdentityMessages(
+        address_ids=[row.address_id for row in members], kind=request.action,
+        start=request.filters.start, end=request.filters.end,
+        label=f"{label} · {'Messages' if request.action == 'header' else 'Signatures'}"))
 
 
 def save_identity(archive: Path, decision: ManualDecision) -> None:

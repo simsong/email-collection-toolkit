@@ -312,3 +312,71 @@ Each pattern uses a Pydantic `AfterValidator` to compile with the same
 case-insensitive flags used by classification. Regex and YAML errors become
 path-qualified `ValueError` diagnostics handled by the Contacts CLI; invalid
 rules cannot remain hidden behind earlier matches or an empty catalog.
+
+## Signature phone display
+
+The production identity processor also emits typed `PhoneNumber` candidates from
+its detected signature text. `phones.py` retains optional `+` and 7–15 digits as
+the comparison key, keeps the observed display form, excludes date-shaped tokens,
+and trims the complete text at reply boundaries before selecting a signature or
+last-line window. The host stores these as generic `phone` evidence
+on the sender address without inserting email-address observations. Identity
+queries deduplicate numbers within the visible date range. Processor version 2
+collects these observations during content processing; previously processed
+archives need explicit reprocessing to acquire them. Merely opening the picker
+does not reprocess messages or import private research evidence.
+
+## Optional name-linkage comparison
+
+An additional Splink comparison enables native full-name term-frequency
+adjustments. The unadjusted engine remains a separate baseline. A real-engine
+regression compares rare/common exact names while holding other fields equal.
+Existing frozen reports retain their original scores until a separate run;
+review rows also show frequencies over the retained name variants.
+
+## SBook entity filter
+
+`name_entities.py` consumes pinned, licensed SBook5 company/address Flex sources,
+company expressions and first-name data under `mailarchiver/sbook`. It translates
+only whole-word company/organization rules and literal quote spans, not general
+scanner order, stock/city/address inference or every legacy pattern. Unicode
+boundaries and person/company conflicts retain uncertain names as unknown.
+Service mailbox prefixes are classified separately. This is an offline heuristic,
+not measured entity-classification accuracy. Packaged data needs no runtime Flex.
+
+`IdentityFilter.include_non_people` restores excluded addresses in the Name picker;
+institution projections retain them. Counts and search selections use the visible
+members. The private report filters its original rows without renumbering them;
+automatic classifications do not become owner labels. Show non-person identities
+also reveals owner-flagged rows. Export always retains all fifty decisions.
+
+## Research comparison implementation
+
+`evaluate.py` validates exported owner pair IDs and address mappings before
+joining frozen scores. It reports direct-pair confusion counts at fixed cutoffs,
+separately including all identity judgments and excluding explicit owner
+non-person annotations. Legacy `not-person` labels and notes containing that
+explicit phrase are exclusions, not guessed link decisions. A same-organization
+note alone is not promoted to a positive. These selected-sample diagnostics do
+not estimate archive recall/precision or train any model. Report files are new
+private derivatives; input labels, experiments and archives stay read-only.
+
+`scripts/name_matcher/linkage.py` defines bounded typed address profiles, frozen
+candidate blocks, fixed rules, an unlabeled binary-feature EM mixture and
+synthetic cluster/pair metrics. `engines.py` adapts real Dedupe and Splink APIs
+and performs two rounds of equivalence-projected correspondent inference.
+`experiments.py` aggregates verified header/signature evidence and catalog
+correspondents into a separate SQLite database, times engines, retains complete
+scores and emits a private HTML owner-review report. Optional packages are
+locked under `research/name-matcher`; normal application dependencies are unchanged.
+The report stores and exports a boolean `not_person` independently of its
+`match`/`non-match`/`insufficient` label; notes identify whether A, B or both are
+non-person identities. Legacy `not-person` labels become checked flags with an
+unlabeled link decision. Stable pair/storage keys preserve decisions and
+unlabeled comments across report UI updates.
+Dedupe currently trains on synthetic labels; Splink fits random-pair u values
+and blocked EM without owner labels. The repetition ablation measures recurring
+already-detected signature blocks, not the unimplemented general repeated-tail
+extractor. Fifty representative proposals are intentionally selected and cannot
+supply unbiased real-archive accuracy. `make test-name-matcher-experiments` runs
+ordered lint/type checks and real fixture/engine tests.

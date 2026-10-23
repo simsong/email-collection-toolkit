@@ -16,10 +16,12 @@ Fundamental dependents:
 from __future__ import annotations
 
 import sqlite3
+import json
 from datetime import date
 from typing import Literal
 
 from pydantic import BaseModel, Field
+from .contracts import PhoneNumber
 
 
 class AddressRow(BaseModel):
@@ -31,6 +33,7 @@ class AddressRow(BaseModel):
     last_use: str | None
     messages: int
     signature_messages: int = 0
+    phone_numbers: list[PhoneNumber] = Field(default_factory=list)
 
 
 class OrganizationRow(BaseModel):
@@ -46,6 +49,17 @@ class IdentityFilter(BaseModel):
     domain: str = ""
     start: date | None = None
     end: date | None = None
+    include_non_people: bool = False
+
+
+class IdentityMessages(BaseModel):
+    """Exact picker projection used by a count's message search."""
+
+    address_ids: list[int] = Field(min_length=1)
+    kind: Literal["header", "signature"]
+    start: date | None = None
+    end: date | None = None
+    label: str
 
 
 class ManualDecision(BaseModel):
@@ -71,15 +85,28 @@ def addresses(database: sqlite3.Connection, filters: IdentityFilter) -> list[Add
         AND instr(lower(a.domain),lower(?))>0 AND (? IS NULL OR date(m.seen_at)>=?)
         AND (? IS NULL OR date(m.seen_at)<=?) GROUP BY a.address_id ORDER BY lower(p.canonical_name),a.address""",
         (filters.name, filters.mailbox, filters.domain, start, start, end, end))
-    return [AddressRow(address_id=row[0], address=row[1], person_id=row[2], canonical_name=row[3],
+    result = [AddressRow(address_id=row[0], address=row[1], person_id=row[2], canonical_name=row[3],
                        first_use=row[4], last_use=row[5], messages=row[6], signature_messages=row[7]) for row in rows]
+    by_id = {row.address_id: row for row in result}
+    seen_numbers: dict[int, set[str]] = {}
+    for address_id,value in database.execute("""SELECT e.address_id,e.value FROM evidence e
+        JOIN message_addresses m ON m.message_id=e.message_id AND m.address_id=e.address_id AND m.kind='header'
+        WHERE e.kind='phone' AND e.address_id IN (SELECT value FROM json_each(?))
+        AND (? IS NULL OR date(m.seen_at)>=?) AND (? IS NULL OR date(m.seen_at)<=?) ORDER BY e.evidence_id""",
+        (json.dumps(list(by_id)),start,start,end,end)):
+        phone = PhoneNumber.model_validate_json(value)
+        seen = seen_numbers.setdefault(address_id,set())
+        if phone.normalized not in seen:
+            by_id[address_id].phone_numbers.append(phone)
+            seen.add(phone.normalized)
+    return result
 
 
 def organizations(database: sqlite3.Connection, filters: IdentityFilter) -> list[OrganizationRow]:
     entries = addresses(database, filters.model_copy(update={"name": ""}))
     result: list[OrganizationRow] = []
     for organization_id, name in database.execute("SELECT organization_id,name FROM organizations WHERE instr(lower(name),lower(?))>0 ORDER BY lower(name)", (filters.name,)):
-        domains = [row[0] for row in database.execute("SELECT domain FROM organization_domains WHERE organization_id=? ORDER BY domain", (organization_id,))]
+        domains = [row[0] for row in database.execute("SELECT domain FROM organization_domains WHERE organization_id=? AND provider=0 ORDER BY domain", (organization_id,))]
         members = [entry for entry in entries if any(entry.address.rpartition("@")[2] == domain or entry.address.endswith("." + domain) for domain in domains)]
         if members or not (filters.mailbox or filters.domain or filters.start or filters.end):
             result.append(OrganizationRow(organization_id=organization_id, name=name, domains=domains, addresses=members))

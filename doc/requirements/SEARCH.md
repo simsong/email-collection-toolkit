@@ -107,3 +107,12 @@ Index-only repair must not resume pending ingestion, contact mail sources, or
 modify canonical MBOX bytes or the durable processing queue. Rebuild searchable
 non-quarantine mail from verified canonical locations and publish the replacement
 atomically. `make test-ingest-recovery` verifies repair beside a failed ingest root.
+
+
+## Manual name expansion
+
+Address selectors and completion resolve an observed human name to every address
+in its current manually assigned person group without rebuilding indexes.
+Canonical and merged alias names have the same expansion. Email substring queries
+remain address-specific; organization names retain their domain-based membership.
+`make test-gui-processing` verifies live merge and separation behavior.

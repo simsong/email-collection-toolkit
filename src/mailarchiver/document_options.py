@@ -25,7 +25,7 @@ import tempfile
 from pydantic import BaseModel, Field
 from yaml import safe_dump, safe_load
 
-from .archive_config import load_archive_config, save_archive_config
+from .archive_config import load_archive_config
 from .owner_rules import OwnerRules, normalize_rules
 from .writer_lock import WriterLease
 
@@ -79,11 +79,12 @@ class DocumentOptions:
         return self._snapshot(roots)[0]
 
     def _snapshot(self, roots: list[Path] | None = None) -> tuple[OwnerRules, str]:
+        from .list_catalog import OWNERS
         saved = load_archive_config(self.archive).owner
-        base = saved if saved is not None else OwnerRules(include=read_owner_names(self.archive / OWNER_NAMES_FILENAME))
+        base = OWNERS.read(self.archive)
         revision = hashlib.sha256(base.model_dump_json().encode()).hexdigest()
         # Legacy files seed the editor only until the archive has saved YAML rules.
-        rules = base if saved is not None else OwnerRules(include=base.include + source_owner_names(roots or []))
+        rules = base if saved is not None else OwnerRules(include=base.include + source_owner_names(roots or []), exclude=base.exclude)
         return rules, revision
 
     def state(self, roots: list[Path] | None = None) -> OwnerRulesState:
@@ -104,10 +105,9 @@ class DocumentOptions:
         self._check_lease(lease)
         if revision is not None and revision != self.state().revision:
             raise ValueError("Owner rules changed in another window. Reload and try again.")
-        config = load_archive_config(self.archive)
-        if config.owner != rules:
-            config.owner = rules
-            save_archive_config(self.archive, config)
+        from .custom_lists import revision as list_revision
+        from .list_catalog import OWNERS
+        OWNERS.save_archive(self.archive,safe_dump(rules.model_dump(mode='json')),list_revision(OWNERS.read(self.archive)),lease)
         return self.state()
 
     def record_import(self, rules: OwnerRules, lease: WriterLease) -> None:

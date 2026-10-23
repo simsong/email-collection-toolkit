@@ -320,12 +320,17 @@ Current repository support:
 * a YAML synthetic benchmark with expected person groups; and
 * Makefile extraction and test commands.
 
-Not yet implemented:
+The desktop separately supports immediate manual person merges, address moves,
+separation and canonical-name edits. Name selectors expand observed human names
+across manually grouped addresses. These facilities do not run a research matcher;
+the authoritative matcher button remains disabled.
+
+Not yet implemented in the automatic-matching research prototype:
 
 * repeated-tail and supervised signature extractors;
 * interchangeable matcher adapters and calibrated scores;
 * labeled match/non-match training data beyond the synthetic benchmark;
-* candidate scoring and persistent person groups;
+* automatic candidate scoring and research-produced person groups;
 * match-list export and review persistence; and
 * production UX, which is intentionally excluded from the research branch.
 

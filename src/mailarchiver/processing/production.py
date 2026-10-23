@@ -34,7 +34,10 @@ from ..layout import mbox_path
 from ..plugin_api import MailObject
 from ..plugin_configuration import read_plugin_configuration
 from ..plugin_loader import builtin_plugin_directory
+from ..list_catalog import PROVIDER_DOMAINS as PROVIDER_LIST, REPLY_ADDRESSES, registered_lists
+from ..reply_addresses import match_reply_address
 from ..search import PreparedSearchMessage, SEARCH_CATEGORIES, body_preview, delete_indexed_message, write_prepared_search_message
+from .contracts import PhoneNumber
 from .api import (
     ApplicationContext, ArchiveContext, ContentReference, InvocationResponse, Pipeline, PluginSpec, ProcessingObject,
     ProcessingResult, RAW_MESSAGE, RunReport,
@@ -47,9 +50,6 @@ from .store import DATABASE, USER_CANCELLED, connect, enqueue, report, snapshot
 
 Publisher = Callable[[MailObject, ParsedMessage, MailboxReference, int], int]
 PROVIDER_DOMAINS = "provider_domains"
-PUBLIC_PROVIDERS = frozenset({"gmail.com", "googlemail.com", "outlook.com", "hotmail.com", "live.com", "msn.com",
-    "yahoo.com", "yahoo.co.uk", "yahoo.co.jp", "ymail.com", "aol.com", "icloud.com", "me.com", "mac.com",
-    "proton.me", "protonmail.com", "pm.me", "fastmail.com", "hey.com", "mail.com", "gmx.com", "gmx.de"})
 
 
 class IngestedMessage(BaseModel):
@@ -74,11 +74,16 @@ class ProductionPipeline:
         self.plugins = load_processors((builtin_plugin_directory(), *plugin_dirs))
         self.registry_hash = fingerprint(self.plugins)
         self.database = connect(self.archive, create=not (self.archive / DATABASE).exists(), production=True)
+        with self.database:
+            for definition in registered_lists():
+                if definition.archive_supported:
+                    definition.snapshot(self.database,self.archive)
+        self.reply_rules=REPLY_ADDRESSES.read(self.archive)
         self.configuration_hash = self._configuration_hash()
         supplied = read_plugin_configuration(self.archive, "identity-evidence", installation_config).get_my_config().get(PROVIDER_DOMAINS, [])
         if not isinstance(supplied, list) or any(not isinstance(domain, str) or not domain for domain in supplied):
             raise ValueError("provider_domains must be a list of domain names")
-        self.provider_domains = PUBLIC_PROVIDERS | {str(domain).lower() for domain in supplied}
+        self.provider_domains = set(PROVIDER_LIST.read(self.archive).domains) | {str(domain).lower() for domain in supplied}
         previous = self.database.execute("SELECT value FROM processing_settings WHERE name='configuration'").fetchone()
         if previous and previous[0] != self.configuration_hash:
             self.reprocess()
@@ -92,6 +97,14 @@ class ProductionPipeline:
         for plugin in self.plugins:
             settings = read_plugin_configuration(self.archive, plugin.manifest.kind, self.installation_config)
             digest.update(json.dumps(settings.get_my_config(), sort_keys=True).encode())
+        for definition in registered_lists():
+            if definition.archive_supported:
+                digest.update(definition.read(self.archive).model_dump_json().encode())
+        # Frozen builds carry modules as bytecode; header plugin versions cover
+        # implementation changes there, while source checkouts also hash helpers.
+        routing_source=Path(__file__).parents[1]/'reply_addresses.py'
+        if routing_source.is_file():
+            digest.update(routing_source.read_bytes())
         return digest.hexdigest()
 
     def close(self) -> None:
@@ -317,7 +330,21 @@ class ProductionPipeline:
         if result.text is not None:
             database.execute("INSERT OR REPLACE INTO content_parts VALUES(?,?,?,?,?,?,?)",
                 (item.message_id, json.dumps(item.part_path), plugin.manifest.kind, item.content_type, item.scope, int(item.synthetic), result.text.text))
-        self._evidence(item, plugin, result.evidence)
+        self._evidence(item, plugin, result.evidence, result.phone_numbers)
+        if result.headers is not None:
+            for candidate in result.headers.routing_candidates:
+                matched=match_reply_address(candidate,self.reply_rules)
+                if matched is None:
+                    continue
+                address=self.database.execute('SELECT address_id FROM addresses WHERE address=?',(candidate.address.lower(),)).fetchone()
+                address_id=address[0] if address else None
+                self.database.execute('INSERT OR IGNORE INTO evidence(message_id,part_path,plugin,version,kind,address_id,value) VALUES(?,?,?,?,?,?,?)',
+                    (item.message_id,json.dumps(item.part_path),plugin.manifest.kind,plugin.manifest.implementation_version,
+                     'routing-address',address_id,matched.model_dump_json()))
+                if address_id is not None and matched.name:
+                    self.database.execute('UPDATE persons SET canonical_name=? WHERE manual=0 AND canonical_name=? '
+                        'AND person_id=(SELECT person_id FROM person_addresses WHERE address_id=?)',
+                        (matched.name,candidate.address.lower(),address_id))
         if message_pk is not None:
             with self.catalog:
                 self.catalog.executemany("INSERT OR IGNORE INTO metadata_defects(message_pk,field,detail) VALUES(?,?,?)",
@@ -337,11 +364,12 @@ class ProductionPipeline:
             database.execute("INSERT OR IGNORE INTO message_tags SELECT ?,tagid FROM tags WHERE name='attachment'", (child_item.message_id,))
             enqueue(database, child_item, self.registry_hash, job_id)
 
-    def _evidence(self, item: ProcessingObject, plugin: PluginSpec, evidence: tuple[AddressEvidence, ...]) -> None:
+    def _evidence(self, item: ProcessingObject, plugin: PluginSpec, evidence: tuple[AddressEvidence, ...], phones: tuple[PhoneNumber, ...]) -> None:
         row = self.database.execute("SELECT parsed_json FROM message_state WHERE message_id=?", (item.message_id,)).fetchone()
         if not row or not row[0]:
             return
-        seen = ParsedMessage.model_validate_json(row[0]).date_utc
+        parsed = ParsedMessage.model_validate_json(row[0])
+        seen = parsed.date_utc
         part_path = json.dumps(item.part_path)
         self.database.execute("DELETE FROM evidence WHERE message_id=? AND part_path=? AND plugin=?", (item.message_id, part_path, plugin.manifest.kind))
         for entry in evidence:
@@ -364,11 +392,13 @@ class ProductionPipeline:
             if parent_domain in self.provider_domains:
                 self.database.execute("INSERT INTO organization_domains VALUES(?,NULL,1) ON CONFLICT(domain) DO UPDATE SET provider=1", (parent_domain,))
             organization = self.database.execute("SELECT organization_id,provider FROM organization_domains WHERE domain=?", (parent_domain,)).fetchone()
-            if organization:
-                organization_id = organization[0] if not organization[1] else None
+            if organization and parent_domain not in self.provider_domains:
+                self.database.execute("UPDATE organization_domains SET provider=0 WHERE domain=?", (parent_domain,))
+            if organization and (organization[0] is not None or parent_domain in self.provider_domains):
+                organization_id = organization[0] if parent_domain not in self.provider_domains else None
             else:
                 organization_id = self.database.execute("INSERT INTO organizations(name) VALUES(?) RETURNING organization_id", (parent_domain,)).fetchone()[0]
-                self.database.execute("INSERT INTO organization_domains VALUES(?,?,0)", (parent_domain, organization_id))
+                self.database.execute("INSERT INTO organization_domains VALUES(?,?,0) ON CONFLICT(domain) DO UPDATE SET organization_id=excluded.organization_id,provider=0", (parent_domain, organization_id))
             affiliation = self.database.execute("SELECT affiliation_id FROM affiliations WHERE person_id=? AND organization_id=? AND manual=0", (person_id, organization_id)).fetchone()
             if affiliation:
                 self.database.execute("UPDATE affiliations SET start_date=min(start_date,?),end_date=max(end_date,?) WHERE affiliation_id=?", (seen, seen, affiliation[0]))
@@ -377,6 +407,12 @@ class ProductionPipeline:
             self.database.execute("INSERT OR IGNORE INTO message_addresses VALUES(?,?,?,?)", (item.message_id, address_id, seen, entry.kind))
             self.database.execute("INSERT OR IGNORE INTO evidence(message_id,part_path,plugin,version,kind,address_id,person_id,organization_id,value) VALUES(?,?,?,?,?,?,?,?,?)",
                 (item.message_id, part_path, plugin.manifest.kind, plugin.manifest.implementation_version, entry.kind, address_id, person_id, organization_id, entry.model_dump_json()))
+
+        if phones:
+            sender = self.database.execute("SELECT a.address_id,p.person_id FROM addresses a JOIN person_addresses p USING(address_id) WHERE a.address=?", (parsed.sender.strip().lower(),)).fetchone()
+            if sender is not None:
+                self.database.executemany("INSERT OR IGNORE INTO evidence(message_id,part_path,plugin,version,kind,address_id,person_id,value) VALUES(?,?,?,?,?,?,?,?)",
+                    ((item.message_id,part_path,plugin.manifest.kind,plugin.manifest.implementation_version,"phone",sender[0],sender[1],phone.model_dump_json()) for phone in phones))
 
     def complete(self, item: ProcessingObject) -> None:
         if item.pipeline != "content":

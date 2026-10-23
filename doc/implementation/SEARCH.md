@@ -207,3 +207,14 @@ checks the normalized literal and its own word boundaries in each matching FTS t
 or limits. Symbols-only quotes scan indexed text. Selectors and suggestions use
 the same registered normalization function. CLI `--query` preserves search-box
 quotation through shell parsing. Case sensitivity and stemming are not options.
+
+## Live grouped names
+
+`prepare_names` builds `observed_address_names` from header evidence, search
+suggestions, canonical names and manual person aliases. `address_search_names`
+projects those names across current `person_addresses` membership, then unions
+organization-domain names without person expansion. Every search/completion
+connection reads current membership; no index rebuild is required. Literal
+address matching still uses the catalog address predicate. Email-fragment
+recognition permits quoted local parts while retaining name lookup for labels
+such as `Jane @ Lab`.

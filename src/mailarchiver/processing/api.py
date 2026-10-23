@@ -30,7 +30,7 @@ from ..plugin_configuration import ConfigScope, ConfigValues, ConfigWrite, Plugi
 from ..layout import mbox_path
 from .contracts import (
     AddressEvidence, ContentMetadata, Filing, HeaderMetadata, MailboxReference,
-    MimeInventory, ProcessingPolicy, ScanEvidence, ScanFailure, SourceMetadata, TextContent,
+    MimeInventory, PhoneNumber, ProcessingPolicy, ScanEvidence, ScanFailure, SourceMetadata, TextContent,
 )
 
 Pipeline = Literal["ingest", "message", "content"]
@@ -191,6 +191,7 @@ class ProcessingResult(Model):
     headers: HeaderMetadata | None = None
     text: TextContent | None = None
     evidence: tuple[AddressEvidence, ...] = ()
+    phone_numbers: tuple[PhoneNumber, ...] = ()
     mime: MimeInventory | None = None
     promotions: tuple[PromotedMessage, ...] = ()
 

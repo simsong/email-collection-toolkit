@@ -6,6 +6,8 @@ Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved.
 """
 
 import os
+import json
+import traceback
 from importlib import import_module
 from pathlib import Path
 from threading import Event
@@ -19,6 +21,7 @@ from mailarchiver.loopback import LoopbackAssetServer
 from mailarchiver.owner_rules import OwnerRules
 from mailarchiver.document_options import DocumentOptions
 from mailarchiver.writer_lock import WriterLease
+from mailarchiver.__main__ import IngestRequest, run_ingest
 
 AppHelper = import_module("PyObjCTools.AppHelper")
 NSApplication = import_module("AppKit").NSApplication
@@ -81,7 +84,7 @@ def main() -> None:
             assert status["metadata"]["version"], status
             assert status["disk_free_bytes"] > 0, status
             assert not [notice for notice in status["notices"] if notice["severity"] == "error"], status
-            assert about.evaluate_js("Object.keys(window.pywebview.api)") == ["status"]
+            assert about.evaluate_js("Object.keys(window.pywebview.api)") == ["status", "update_definitions"]
             application.add_notice("warning", "Native About regression check")
             evaluate_async(about, "refresh().then(() => true)")
             assert "Native About regression check" in about.evaluate_js("document.getElementById('notices').textContent")
@@ -145,6 +148,50 @@ def main() -> None:
             assert evaluate_async(api.window, "window.pywebview.api.status()")['message_count'] == 1
             assert api.window.evaluate_js("document.getElementById('choose-archive') === null")
             check_new_search(True)
+            # Picker navigation must create a real search window bound to its archive.
+            picker_root = Path(os.environ[PROBE_PREFERENCES_ENV]).parent / "picker-fixture"
+            picker_root.mkdir()
+            picker_source = picker_root / "message.eml"
+            picker_source.write_bytes(b"From: Native Picker <picker@example.test>\nTo: owner@example.test\n"
+                b"Date: Tue, 02 Jan 2024 10:00:00 +0000\nMessage-ID: <native-picker@example.test>\n"
+                b"Subject: Picker navigation\n\nSynthetic navigation fixture.\n-- \nNative Picker\n+1 (617) 555-0102\n+44 20 7946 0958\n")
+            picker_archive = picker_root / "archive"
+            run_ingest(IngestRequest(archive=picker_archive, roots=[str(picker_source)], scan_policy="not-scanned",
+                owner_rules=OwnerRules(include=["owner@example.test"]), continue_content=True), terminal=False)
+            picker_document = controller.open_document(picker_archive)
+            assert application.open_picker(picker_document, "name")
+            picker = next(window for window in webview.windows if " — Name matcher — " in window.title)
+            assert picker.events.loaded.wait(10), "Name picker bridge failed to load"
+            evaluate_async(picker, """(async () => {
+                const deadline = Date.now() + 5000;
+                while (!window.archivePicker?.model.groups.length && Date.now() < deadline)
+                    await new Promise(resolve => setTimeout(resolve, 20));
+                if (!window.archivePicker?.model.groups.length) throw new Error('No picker identities');
+                return true;
+            })()""")
+            assert picker.evaluate_js("document.querySelector('tr.group .phone-numbers summary').textContent") == "2 phone numbers"
+            picker.evaluate_js("document.querySelector('tr.group .phone-numbers summary').click()")
+            assert picker.evaluate_js("document.querySelector('tr.group .phone-numbers').open")
+            for selector, event in (("tr.group .row-label", "dblclick"), ("tr.group .message-count", "click")):
+                before = {window.uid for window in webview.windows}
+                picker.evaluate_js(f"document.querySelector('{selector}').dispatchEvent(new MouseEvent('{event}', {{bubbles:true}}))")
+                deadline = monotonic() + 10
+                while not any(window.uid not in before for window in webview.windows) and monotonic() < deadline:
+                    sleep(0.02)
+                opened = next(window for window in webview.windows if window.uid not in before)
+                assert opened.events.loaded.wait(10), "Picker search failed to load"
+                assert evaluate_async(opened, "window.pywebview.api.status()")['document_id'] == picker_document.descriptor.document_id
+                evaluate_async(opened, """(async () => {
+                    const deadline = Date.now() + 5000;
+                    while (!document.querySelector('.result-subject') && Date.now() < deadline)
+                        await new Promise(resolve => setTimeout(resolve, 20));
+                    if (!document.querySelector('.result-subject')) throw new Error('Picker search returned no messages');
+                    return true;
+                })()""")
+                opened.destroy()
+                assert opened.events.closed.wait(5)
+            picker.destroy()
+            assert picker.events.closed.wait(5)
             application._refresh_menus()  # pylint: disable=protected-access
             done = Event()
 
@@ -250,6 +297,54 @@ def main() -> None:
                 entered = macos_owner_rules(document.display_path, OwnerRules(include=["slg"], exclude=["*david*"]))
                 assert entered == (OwnerRules(include=["*simson*", "slg"], exclude=["*david*"]) if accept else None)
                 assert not (document.path / "owner-names.txt").exists(), "Entry alone must not save"
+            # A personal list editor is a standalone window: Command-W must be
+            # enabled even though it is not registered as an archive child.
+            assert application.open_default_lists(personal=True)
+            lists = next(window for window in webview.windows if window.title.endswith(" — Customizable Default Lists"))
+            assert lists.events.loaded.wait(10), "List editor bridge failed to load"
+            evaluate_async(lists, "(async () => { while(document.getElementById('save').disabled) "
+                "await new Promise(resolve => setTimeout(resolve, 10)); return true; })()")
+            assert lists.evaluate_js("document.getElementById('list').options.length") == 8
+            native_lists = lists.native
+            assert native_lists is not None
+            focused_list = Event()
+
+            def focus_list() -> None:
+                NSApplication.sharedApplication().activateIgnoringOtherApps_(True)
+                native_lists.makeKeyAndOrderFront_(None)
+                focused_list.set()
+
+            AppHelper.callAfter(focus_list)
+            assert focused_list.wait(5)
+            closed_menu = Event()
+
+            def check_list_close() -> None:
+                try:
+                    item = NSApplication.sharedApplication().mainMenu().itemWithTitle_("File").submenu().itemWithTitle_("Close")
+                    assert item.isEnabled() and item.keyEquivalent() == "w"
+                except Exception as error:  # pylint: disable=broad-exception-caught
+                    failures.append(str(error))
+                finally:
+                    closed_menu.set()
+
+            application._refresh_menus()  # pylint: disable=protected-access
+            AppHelper.callAfter(check_list_close)
+            assert closed_menu.wait(5)
+            assert application.close_active_window()
+            assert lists.events.closed.wait(5)
+            assert application.open_default_lists(api.document)
+            lists = next(window for window in webview.windows if " — Customizable Default Lists — " in window.title)
+            assert lists.events.loaded.wait(10)
+            evaluate_async(lists, "(async () => { while(document.getElementById('save').disabled) "
+                "await new Promise(resolve => setTimeout(resolve, 10)); return true; })()")
+            lists.evaluate_js("document.getElementById('list').value = 'reply-addresses'; document.getElementById('scope').value = 'archive'")
+            evaluate_async(lists, "load().then(() => true)")
+            lists.evaluate_js("document.getElementById('yaml').value = " + json.dumps("version: 1\nrules: []\n"))
+            evaluate_async(lists, "save(false).then(() => true)")
+            assert lists.evaluate_js("document.getElementById('status').textContent") == "Saved.", lists.evaluate_js("document.getElementById('error').textContent")
+            assert lists.evaluate_js("document.getElementById('origin').textContent").startswith("Source: archive database")
+            lists.destroy()
+            assert lists.events.closed.wait(5)
             assert application.open_document_options(api.document)
             options = next(window for window in webview.windows if " — Document Options — " in window.title)
             assert options.events.loaded.wait(10), "Options bridge failed to load"
@@ -295,8 +390,8 @@ def main() -> None:
                 controller.finish_ingest(document_id, "button-test", published=False)
             evaluate_async(ingest, "refreshHistory().then(() => true)")
             assert not ingest.evaluate_js("document.getElementById('import-directory').disabled")
-        except Exception as error:  # pylint: disable=broad-exception-caught
-            failures.append(str(error))
+        except Exception:  # pylint: disable=broad-exception-caught
+            failures.append(traceback.format_exc())
         finally:
             application.stop_imports_for_quit()
             for window in list(webview.windows):

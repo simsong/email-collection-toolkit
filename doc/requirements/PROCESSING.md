@@ -173,6 +173,10 @@ The main-window resume action is labeled **Continue Processing**.
 
 Archive-backed name and institution windows shall show header and signature
 addresses, date-filtered statistics, and distinct message counts per group. Name
+moves and phone display retain their separate evidence semantics: signature phone
+candidates are associated with the sender and never increase email signature
+counts. Extraction shall exclude date-shaped strings and quoted replies, preserve
+observed formatting and avoid inferred country or ownership. Name
 moves, separation and renames save immediately under the writer lease. Institution
 membership follows parent domains; institution names can be edited. The synthetic
 prototype retains its session-only undo; live edits are durable and do not expose
@@ -284,3 +288,35 @@ Organization-domain evidence uses the bundled ICANN Public Suffix List offline,
 including longest-match, wildcard and exception rules, with IDNA normalization.
 Private suffix entries remain excluded, matching the prior tldextract policy.
 No Requests-based fetching or public-suffix network update occurs at runtime.
+
+## Local name-linkage research
+
+Person-focused Name and research views shall hide recognized company/organization
+and service identities by default, with a control to show excluded entries.
+Unknown and conflicting names remain visible. Filtering changes no canonical
+message, address, manual group, frozen model score or saved owner decision.
+Reuse and attribute the SBook5 gazetteers; report the adaptation's limits rather
+than claiming equivalence to its entire parser. Owner non-person flags filter
+the review view independently of the same/different-identity decision.
+
+The optional Splink frequency comparison shall give stronger evidence to exact
+agreement on a rare full name than a common full name, all other comparisons
+equal. Frequencies count address identities, not message repetitions. This does
+not establish calibrated probabilities or justify merging services or namesakes.
+
+The comparison harness shall read only the named archive and a separately
+extracted evidence database. Freeze one bounded candidate set before comparing
+rules, signature ablations, collective neighborhoods, Fellegi–Sunter, Dedupe and
+Splink. Report extraction/preparation separately from model fit and scoring time.
+Synthetic training and evaluation entities must be disjoint. Evaluate pair and
+B³ cluster quality against declared labels, counting transitive false merges
+and missed candidate blocks. Never infer gold labels from matcher output or
+report unlabeled private-archive scores as observed precision/recall. Fifty
+stratified proposals support owner adjudication, not population accuracy claims.
+Owner decisions include same identity, different identities and insufficient
+evidence, with an independent not-a-person flag and optional notes. The same
+organization can be both a match and a non-person identity. Neither that flag
+nor insufficient evidence implies a pair negative. Existing decisions and
+unlabeled notes survive page reload, including legacy non-person classifications.
+No experiment applies groups to the source archive. The focused Makefile target
+exercises these contracts with miniature archives and real optional engines.
