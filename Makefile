@@ -644,7 +644,7 @@ test-refresh-index:
 
 .PHONY: test-ingest-recovery
 test-ingest-recovery:
-	uv run --locked pytest -q tests/test_ingest_recovery.py
+	uv run --locked pytest -q tests/test_ingest_recovery.py tests/test_end_to_end.py::test_clamav_startup_failure_records_error_and_continues
 
 test-headers:
 	uv run pytest -q tests/test_message.py tests/test_search.py

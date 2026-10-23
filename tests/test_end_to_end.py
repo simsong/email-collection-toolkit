@@ -31,6 +31,7 @@ from mailarchiver.catalog import address_pk, create_catalog, create_search
 from mailarchiver.gui_service import message_locations
 from mailarchiver.layout import mbox_directory
 from mailarchiver.mailbox_tree import mailbox_tree
+from mailarchiver.mailsearch import read_message_bytes
 from mailarchiver.mbox import MboxLocation, add_message, read_verified_location
 from mailarchiver.source_volume import METADATA_CURRENT_MOUNT_PATH
 from mailarchiver.standalone_verify import semantic_bytes
@@ -1163,8 +1164,8 @@ def test_unusable_source_fails_cleanly(
     assert not list(mbox_directory(archive).glob("*.mbox"))
 
 
-def test_clamav_startup_failure_prevents_worker_activity(tmp_path: Path) -> None:
-    """Regression: clamd must become ready before workers can parse or publish mail."""
+def test_clamav_startup_failure_records_error_and_continues(tmp_path: Path) -> None:
+    """SCANNING: startup failure records its diagnostic while workers retain and index mail."""
     source = tmp_path / "source.eml"
     source.write_bytes(
         b"Message-ID: <one@example>\nDate: Thu, 1 Feb 2024 12:00:00 +0000\n\nbody\n"
@@ -1194,19 +1195,25 @@ def test_clamav_startup_failure_prevents_worker_activity(tmp_path: Path) -> None
         env=environment,
     )
 
-    assert result.returncode == 1
+    assert_success(result)
     assert "ClamAV startup failed:" in result.stderr
     assert str(missing_clamd) in result.stderr
-    assert "processed=0 active_workers=0 peak_workers=0" in result.stderr
+    assert "retaining mail and recording scanner errors" in result.stderr
     assert "Traceback" not in result.stderr
-    assert not list(mbox_directory(archive).glob("*.mbox"))
     catalog = sqlite3.connect(archive / "archive.sqlite3")
     try:
-        assert catalog.execute("SELECT count(*) FROM source_files").fetchone() == (0,)
-        assert catalog.execute("SELECT count(*) FROM observations").fetchone() == (0,)
-        assert catalog.execute("SELECT result FROM ingest_runs").fetchone() == ("failed",)
+        assert catalog.execute("SELECT count(*) FROM source_files").fetchone() == (1,)
+        assert catalog.execute("SELECT count(*) FROM observations").fetchone() == (1,)
+        assert catalog.execute("SELECT result FROM ingest_runs").fetchone() == ("completed",)
+        message_pk, = catalog.execute("SELECT message_pk FROM messages").fetchone()
+        assert read_message_bytes(archive, message_pk) == source.read_bytes()
+        assert catalog.execute("SELECT count(*) FROM metadata_defects WHERE field='antivirus'").fetchone() == (1,)
     finally:
         catalog.close()
+    with sqlite3.connect(archive / "processing.sqlite3") as processing:
+        assert processing.execute("SELECT scan_status FROM message_state").fetchone() == ("scanner-error",)
+    with sqlite3.connect(archive / "search.sqlite3") as search:
+        assert search.execute("SELECT count(*) FROM message_fts WHERE message_fts MATCH 'body'").fetchone() == (1,)
 
 
 def test_embedded_scanner_ignores_absent_daemon_configuration(tmp_path: Path) -> None:
