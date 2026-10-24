@@ -885,3 +885,6 @@ and bounded shutdown; native UI marshaling and source-preservation rules remain.
 
 Track Cocoa Setup-window commands with futures. The named future shares command admission, error collection
 and bounded shutdown; native UI marshaling and source-preservation rules remain.
+
+Track startup export cleanup with an application future. The named future shares command admission, error collection
+and bounded shutdown; native UI marshaling and source-preservation rules remain.

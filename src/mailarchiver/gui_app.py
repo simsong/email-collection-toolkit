@@ -1483,7 +1483,6 @@ class PyWebViewApplication:
         self.controller = controller
         self.asset_server = asset_server
         self._exit_process = exit_process
-        Thread(target=cleanup_stale_exports, name="mailarchiver-stale-exports", daemon=True).start()
         self._apis: dict[str, GuiApi] = {}
         self._ingest_apis: dict[str, IngestWindowApi] = {}
         self._options_apis: dict[str, DocumentOptionsApi] = {}
@@ -1517,6 +1516,8 @@ class PyWebViewApplication:
                          automatic_checks=controller.preferences.automatic_update_checks),
             self.reserve_update_install, self.cancel_update_install, self.notify_update_deferred,
         )
+
+        self._submit_task("stale export cleanup", cleanup_stale_exports)
 
     def _submit_task(self, name: str, operation: Callable[[], None]) -> Future[None] | None:
         """Retain finite command futures; deadline/owner monitors remain independent."""

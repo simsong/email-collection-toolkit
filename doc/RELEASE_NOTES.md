@@ -18,6 +18,8 @@ Track Cocoa About-window commands with futures.
 
 Track Cocoa Setup-window commands with futures.
 
+Track startup export cleanup with an application future.
+
 ## Source publication futures
 
 Source workers retain their input handles and request publication through
