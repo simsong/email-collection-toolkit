@@ -72,6 +72,7 @@ platform or release gate has passed. [Future work](plans/README.md) is separate.
   leases and future-based shutdown waits; see [desktop](implementation/DESKTOP.md).
 - Track Cocoa archive-open callbacks with command futures; see [desktop](implementation/DESKTOP.md).
 - Track Cocoa About-window commands with futures; see [desktop](implementation/DESKTOP.md).
+- Track Cocoa Setup-window commands with futures; see [desktop](implementation/DESKTOP.md).
 - Confirmed Quit injects a shared modal shutdown overlay independently of its
   five-second watchdog; see [desktop shutdown](implementation/DESKTOP.md#cooperative-shutdown-and-writer-fencing).
 - Desktop recovery summarizes saved attempts with a Continue Import action and records lease-protected aborts;

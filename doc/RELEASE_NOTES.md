@@ -16,6 +16,8 @@ Track Cocoa archive-open callbacks with command futures.
 
 Track Cocoa About-window commands with futures.
 
+Track Cocoa Setup-window commands with futures.
+
 ## Source publication futures
 
 Source workers retain their input handles and request publication through

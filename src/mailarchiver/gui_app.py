@@ -2934,7 +2934,7 @@ def install_macos_document_events(application: PyWebViewApplication) -> None:
 
         def applicationShouldHandleReopen_hasVisibleWindows_(self, _sender, _visible):
             if macos_option_pressed():
-                Thread(target=application.show_setup, name="mailarchiver-setup", daemon=True).start()
+                application._submit_task("Setup window", application.show_setup)
             return True
 
     setattr(BrowserView, "AppDelegate", MailArchiverDelegate)
