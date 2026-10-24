@@ -23,12 +23,13 @@ from mailarchiver.layout import mbox_directory
 from mailarchiver.mailsearch import read_message_bytes
 from mailarchiver.message import ParsedMessage
 from mailarchiver.plugin_api import MailObject, SourceReference
+from mailarchiver.plugin_configuration import read_plugin_configuration
 from mailarchiver.processing.api import ApplicationContext, ArchiveContext, InvocationResponse, ProcessingObject, ProcessingResult, RAW_MESSAGE
 from mailarchiver.processing.builtin import ClamAVProcessor, FilingProcessor
 from mailarchiver.processing.contracts import MailboxReference, ProcessingPolicy, SourceMetadata
 from mailarchiver.processing.production import ProductionPipeline
 from mailarchiver.processing.registry import fingerprint, load_processors
-from mailarchiver.processing.runtime import RANK_FAILURE, invoke, run
+from mailarchiver.processing.runtime import InvocationRequest, RANK_FAILURE, invoke, run
 from mailarchiver.processing.store import connect, content_reference, enqueue, snapshot, submit
 from mailarchiver.scan_evidence import ScanEvidence, ScanFailure, ScanStatus
 from mailarchiver.scanner import ClamScanner
@@ -174,8 +175,9 @@ def test_scan_result_survives_a_post_result_deadline(tmp_path: Path) -> None:
     reference = content_reference(Path(__file__).parent / "data/credible_date_with_quoted_body.eml")
     item = ProcessingObject(archive=ArchiveContext(path=tmp_path), message_id=reference.sha256,
                             message_ref=reference, content_ref=reference, content_type=RAW_MESSAGE, pipeline="ingest")
+    request = InvocationRequest(plugin=spec, item=item, configuration=read_plugin_configuration(tmp_path, spec.manifest.kind))
     with ThreadPoolExecutor(max_workers=1) as pool:
-        response = pool.submit(invoke, spec, item).result(timeout=5)
+        response = pool.submit(invoke, request, tmp_path).result(timeout=5)
     assert response.timed_out and response.error is not None
     assert response.result is not None and response.result.scan is not None
     assert response.result.scan.status == "infected"
@@ -465,3 +467,42 @@ def test_recovery_preserves_failed_dependencies_and_explicit_stop(tmp_path: Path
             result = run(database, plugins, continue_after_failure=True)
             assert (result.failed, result.pending, result.completed) == (1, 1, 2)
             assert next(stat for stat in result.statistics if stat.kind == "child").invocations == 1
+
+
+def test_cli_saved_content_uses_worker_pool_and_preserves_search_and_bytes(tmp_path: Path) -> None:
+    """PROCESSING: saved worker count drives real concurrent recovery through canonical publication/search."""
+    from mailarchiver.ingest_status import read_ingest_history
+    source = tmp_path / "incoming"
+    source.mkdir()
+    originals = []
+    for number in range(3):
+        raw = HEADER.replace(b"<parent@example.test>", f"<parallel-{number}@example.test>".encode())
+        raw += f"\r\nparalleltoken{number}\r\n".encode()
+        originals.append(raw)
+        (source / f"{number}.eml").write_bytes(raw)
+    owners = tmp_path / "owners.txt"
+    owners.write_text("owner@example.test\n")
+    archive = tmp_path / "archive"
+    cli(archive, "ingest", "--no-scan", "--defer-content", "--workers", "2", "--owner-names-file", str(owners), str(source))
+    canonical = [(path, hashlib.sha256(path.read_bytes()).hexdigest()) for path in mbox_directory(archive).glob("*.mbox")]
+    plugin(tmp_path, "parallel-gate", '(item.archive.path / ("entered-" + item.message_id)).touch()\n'
+           'while len(list(item.archive.path.glob("entered-*"))) < 2:\n'
+           '    item.check_cancelled()\n    time.sleep(0.01)\nreturn ProcessingResult()', timeout=5)
+    manifest = tmp_path / "processors/parallel-gate/plugin.toml"
+    manifest.write_text(manifest.read_text().replace('pipeline="ingest"', 'pipeline="message"'))
+    cli(archive, "process", "--phase", "all", "--plugin-dir", str(tmp_path))
+    status = read_ingest_history(archive).statuses[0]
+    assert status.peak_workers == 2 and status.processing_jobs_completed > 0
+    assert status.active_workers == 0 and not status.processing_active
+    with sqlite3.connect(archive / "search.sqlite3") as search:
+        for number in range(3):
+            assert search.execute("SELECT count(*) FROM message_fts WHERE message_fts MATCH ?",
+                (f"paralleltoken{number}",)).fetchone() == (1,)
+    with sqlite3.connect(archive / "processing.sqlite3") as database:
+        assert database.execute("SELECT count(*),count(DISTINCT job_id) FROM invocations WHERE kind='parallel-gate'").fetchone() == (3, 3)
+        assert database.execute("SELECT count(*) FROM jobs WHERE status IN ('pending','running','failed')").fetchone() == (0,)
+        assert database.execute("PRAGMA foreign_key_check").fetchall() == []
+    assert {read_message_bytes(archive, number) for number in range(1, 4)} == set(originals)
+    assert canonical and all(hashlib.sha256(path.read_bytes()).hexdigest() == digest for path, digest in canonical)
+    assert [(source / f"{number}.eml").read_bytes() for number in range(3)] == originals
+    assert not verify_archive(archive)

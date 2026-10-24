@@ -43,6 +43,24 @@ window; reopening leaves the text visible until manually collapsed. Messages are
 plain text in a scrollable region, including earlier warnings after another
 arrives. Native application notices also remain in About during the session.
 
+## Shutdown feedback
+
+During active import, Quit offers **Suspend import and quit** and explains that
+saved work resumes later without duplicate imports. After confirmation, loaded
+application windows show a full-window translucent gray overlay (20% gray fill)
+with centered black **Shutting down…** text at 50% opacity. It covers existing
+dialogs, blocks content interaction and cannot be dismissed with Escape. Canceling
+Quit leaves the UI usable. Display must never delay the existing five-second
+shutdown deadline or interfere with deferred/canceled update installation.
+
+## Original mailbox labels
+
+Show IMAP folder names with percent escapes decoded exactly once, including spaces,
+Unicode and brackets. Preserve literal plus signs and encoded percent signs. Decode
+only display labels, after splitting the stored hierarchy: an escaped slash is part
+of a name, not another folder. Local filesystem names remain literal. Stored paths,
+counts, saved selections and search filtering remain unchanged in both volume modes.
+
 ## Desktop Help and user manual
 
 macOS and Windows provide a Help menu with Community Forum, Contact Support,

@@ -44,6 +44,7 @@ from mailarchiver.ingest_status import (
 )
 from mailarchiver.plugin_api import ProgressEvent
 from mailarchiver.sources import SourceInventory
+from mailarchiver.processing.api import ProcessingObject
 from mailarchiver.processing.registry import fingerprint, load_processors
 from mailarchiver.processing.runtime import run
 from mailarchiver.processing.store import connect, submit
@@ -438,42 +439,56 @@ def test_numbered_worker_rows_are_main_rendered_without_wrapping(capsys: pytest.
 
 def test_processor_recovery_publishes_live_activity_and_finished_jobs(tmp_path: Path) -> None:
     """Recovery progress: real processor work appears before completion, without inventing imported mail."""
-    plugin(tmp_path, "gate", 'while not (item.archive.path / "release").exists():\n'
+    plugin(tmp_path, "gate", 'while not (item.archive.path / f"release-{item.job_id}").exists():\n'
            '    item.check_cancelled()\n    time.sleep(0.01)\nreturn ProcessingResult()', timeout=5)
     plugins = load_processors((tmp_path,))
     archive = tmp_path / "archive"
     with connect(archive, create=True) as database:
         submit(database, archive, MESSAGE, fingerprint(plugins))
+        second = tmp_path / "second.eml"
+        second.write_bytes(b"Subject: second\n\nother body")
+        submit(database, archive, second, fingerprint(plugins))
     started = datetime.now(UTC)
     status_file = IngestStatusFile(archive, new_status_id(started, 1, os.getpid()))
-    progress = ProgressReporter(status_file=status_file, archive=archive, run_pk=1, terminal=False)
+    progress = ProgressReporter(worker_count=2, status_file=status_file, archive=archive, run_pk=1, terminal=False)
     progress.set_phase("recovering archived content")
     snapshots = []
+    partial_snapshots = []
+
+    def record(item: ProcessingObject, processor: str, finished: bool, worker: int) -> None:
+        progress.record_processing(item, processor, finished, worker)
+        if (processor == "gate" and not finished) or (finished and worker == 1):
+            progress.record_worker("ingesting", Path("derived-message"), 0, 0)
 
     def recover(_unused: int) -> None:
         try:
             with connect(archive) as database:
-                run(database, plugins, progress=progress.record_processing)
+                run(database, plugins, workers=2, progress=record)
         finally:
             progress.finish_processing()
 
     def display() -> None:
         progress.display(None)
         status = read_ingest_history(archive).statuses[0]
-        if status.processing_active and status.processing_processor == "gate":
+        if status.processing_active and status.active_workers == 2 and all(worker.phase == "processing gate" for worker in status.workers):
             snapshots.append(status)
-            (archive / "release").touch()
+            (archive / "release-1").touch()
+        elif status.processing_jobs_completed == 1 and status.active_workers == 1:
+            partial_snapshots.append(status)
+            (archive / "release-2").touch()
 
     run_file_workers([0], 1, recover, threading.Event(), display)
     progress.finish("completed")
     assert snapshots
     active = snapshots[0]
     assert active.phase == "recovering archived content"
-    assert active.processing_job_id == 1 and active.processing_jobs_completed == 0
-    assert active.active_workers == 1 and active.workers[0].phase == "processing gate"
+    assert active.processing_job_id in (1, 2) and active.processing_jobs_completed == 0
+    assert active.active_workers == 2 and active.workers[0].phase == "processing gate"
     assert active.workers[0].activity_unit == "jobs" and active.eta == "calculating"
+    assert partial_snapshots and partial_snapshots[0].processing_active
+    assert partial_snapshots[0].processing_job_id == 2 and partial_snapshots[0].processing_processor == "gate"
     final = read_ingest_history(archive).statuses[0]
-    assert final.processing_jobs_completed == 1 and not final.processing_active
+    assert final.processing_jobs_completed == 2 and not final.processing_active
     assert final.processing_job_id is final.processing_processor is None
     assert final.active_workers == 0 and final.workers[0].phase == "idle"
     assert final.processed_messages == final.files_processed == final.counts.archived == 0

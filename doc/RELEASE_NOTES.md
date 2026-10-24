@@ -6,6 +6,28 @@ Entries describe their recorded revisions. For current behavior use the
 [user manual](USER_MANUAL.md) and [CLI reference](CLI_REFERENCE.md). Retired
 Rust delivery plans and historical package checks are not current acceptance.
 
+## Suspending import on Quit
+
+Quit now offers **Suspend import and quit**. Confirmed shutdown dims the window
+and displays **Shutting down…** while restartable work finishes its checkpoint.
+
+## Original IMAP folder names
+
+The original-folder sidebar shows readable IMAP names such as `[Gmail]` and
+`All Mail`, decoding URL escapes once without changing saved folder selections.
+
+## Processing action state
+
+Continue Processing disables during a resume request, startup and active work,
+including activity started in another window, and re-enables when work ends.
+
+## Parallel archived-content processing
+
+Deferred recovery and final content processing now use the configured worker
+pool across independent messages. Per-message dependencies and retry checkpoints
+remain ordered, global job limits remain bounded, and progress reports concurrent
+workers. Queue/database publication stays serialized while processors execute.
+
 ## Consolidated test coverage
 
 Removed repeated reader acceptance, scanner smoke/startup and daemon-independent

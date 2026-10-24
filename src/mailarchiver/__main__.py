@@ -490,6 +490,7 @@ class ProgressReporter:
             workers=[WorkerProgress(worker=worker) for worker in range(1, worker_count + 1)],
         )
         self.updates: queue.SimpleQueue[ProgressUpdate] = queue.SimpleQueue()
+        self.processing_workers: list[ProgressUpdate | None] = [None] * worker_count
         self.driver_thread = threading.get_ident()
         self.output: TextIO | None = sys.stderr if terminal else None
         self.tty = self.output is not None and self.output.isatty()
@@ -632,10 +633,10 @@ class ProgressReporter:
     def record_disposition(self, disposition: str) -> None:
         self.updates.put(ProgressUpdate(worker=self._worker_number(), disposition=disposition))
 
-    def record_processing(self, item: ProcessingObject, processor: str, finished: bool) -> None:
+    def record_processing(self, item: ProcessingObject, processor: str, finished: bool, worker: int | None = None) -> None:
         """Queue actual processor activity without counting recovered jobs as new mail."""
-        self.updates.put(ProgressUpdate(worker=self._worker_number(), phase=f"processing {processor}",
-            path=f"{item.pipeline} job {item.job_id}", activity_unit="jobs", processing_active=True,
+        self.updates.put(ProgressUpdate(worker=worker or self._worker_number(), phase="idle" if finished else f"processing {processor}",
+            path=f"{item.pipeline} job {item.job_id}", activity_unit="jobs", processing_active=not finished,
             processing_finished=finished, processing_job_id=item.job_id, processing_processor=processor))
 
     def finish_processing(self) -> None:
@@ -706,9 +707,11 @@ class ProgressReporter:
                 break
             worker = self.state.workers[update.worker - 1]
             if update.processing_active is not None:
-                self.state.processing_active = update.processing_active
-                self.state.processing_job_id = update.processing_job_id
-                self.state.processing_processor = update.processing_processor
+                self.processing_workers[update.worker - 1] = update if update.processing_active else None
+                current = update if update.processing_active else next((entry for entry in self.processing_workers if entry), None)
+                self.state.processing_active = current is not None
+                self.state.processing_job_id = current.processing_job_id if current else None
+                self.state.processing_processor = current.processing_processor if current else None
             if update.processing_finished:
                 self.state.processing_jobs_completed += 1
             if update.file_complete:
@@ -723,6 +726,10 @@ class ProgressReporter:
                 worker.activity_done = None
                 worker.activity_total = None
                 worker.activity_unit = None
+            elif update.processing_active is None and self.state.processing_active:
+                # Child publication may emit source-style events on the coordinator.
+                # Preserve processing lanes, including idle ones, while counting below.
+                pass
             elif update.phase == "idle":
                 worker.phase = "idle"
                 worker.path = None
@@ -1137,11 +1144,13 @@ def process_archive(args: argparse.Namespace) -> None:
     archive = Path(args.archive)
     with sqlite3.connect(sqlite_uri(archive / "processing.sqlite3"), uri=True) as database:
         row = database.execute("SELECT value FROM processing_settings WHERE name='policy'").fetchone()
+        request_row = database.execute("SELECT value FROM processing_settings WHERE name='request'").fetchone()
     if row is None:
         raise ValueError("archive has no saved processor policy; ingest a source first")
     policy = ProcessingPolicy.model_validate_json(row[0])
+    saved_request = IngestRequest.model_validate_json(request_row[0]) if request_row else IngestRequest(archive=archive)
     run_ingest(IngestRequest(archive=archive, owner_rules=policy.owners, save_owner_defaults=False,
-        earliest_year=policy.earliest_year, index_attachments=policy.index_attachments,
+        earliest_year=policy.earliest_year, index_attachments=policy.index_attachments, workers=saved_request.workers,
         scan_policy=policy.scan_policy, continue_ingest=args.phase in ("ingest", "all"),
         continue_content=args.phase in ("content", "all"), max_content_jobs=args.max_jobs,
         plugin_dir=args.plugin_dir, installation_config=args.installation_config, reprocess=args.reprocess))
@@ -2054,7 +2063,7 @@ def _run_ingest(request: IngestRequest, writer_lease: WriterLease, outcome: Inge
             assert pipeline is not None
             try:
                 pipeline.resume(("message", "content"), max_jobs=request.max_content_jobs, fail_on_error=fail_on_error,
-                                progress=progress.record_processing)
+                                progress=progress.record_processing, workers=request.workers)
             finally:
                 progress.finish_processing()
         if request.continue_ingest and request.continue_content and request.max_content_jobs is None:
@@ -2451,7 +2460,7 @@ def main() -> int:
     scanning = ingest_parser.add_mutually_exclusive_group(required=True)
     scanning.add_argument("--clamav", action="store_true", help="scan new messages with on-demand ClamAV")
     scanning.add_argument("--no-scan", action="store_true", help="explicitly import without antivirus; record messages as not scanned")
-    ingest_parser.add_argument("--workers", type=positive_integer, default=min(os.cpu_count() or 1, 8), help="source mailfiles ingested concurrently (default: cores, capped at 8)")
+    ingest_parser.add_argument("--workers", type=positive_integer, default=min(os.cpu_count() or 1, 8), help="concurrent source and deferred-processing workers (default: cores, capped at 8)")
     ingest_parser.add_argument(
         "--plugin-dir",
         action="append",

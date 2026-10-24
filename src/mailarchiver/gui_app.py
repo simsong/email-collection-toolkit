@@ -185,6 +185,7 @@ class GuiStatus(BaseModel):
 
 class GuiIngestOverview(BaseModel):
     status: IngestStatus | None = None
+    active: bool = False
 
 
 class GuiIngestStatus(IngestStatus):
@@ -411,9 +412,9 @@ def application_icon_path() -> Path:
 
 IMPORT_CONFIRMATION_WIDTH = 560
 QUIT_IMPORT_MESSAGE = (
-    "Quitting will stop active ingest and content processing. Reopen the archive and use "
+    "Quitting will suspend active ingest and content processing. Reopen the archive and use "
     "Continue Processing to resume. Messages already archived will not be imported twice.\n\n"
-    "Each import will stop after its current message. The application will quit within five seconds; "
+    "Each import will pause after its current message. The application will quit within five seconds; "
     "unfinished work will be recovered when you resume."
 )
 
@@ -871,7 +872,8 @@ class GuiApi:
 
     def ingest_overview(self) -> dict[str, Any]:
         status = latest_ingest_status(self._archive()) if self.archive and _is_archive(self.archive) else None
-        return GuiIngestOverview(status=status).model_dump(mode="json")
+        active = bool(self.document and self.document.ingest_job) or bool(status and status.state == "running")
+        return GuiIngestOverview(status=status, active=active).model_dump(mode="json")
 
     def open_ingest_window(self, status_id: str | None = None) -> bool:
         """Open or focus the ingest browser shared by this archive document."""
@@ -2445,12 +2447,12 @@ class PyWebViewApplication:
             return
         if not self.prepare_quit() and confirm_ingest and self.has_active_ingest():
             if sys.platform == "darwin":
-                confirmed = macos_alert("Stop importing and quit?", QUIT_IMPORT_MESSAGE,
-                    ("Cancel", "Stop Import and Quit"), body_width=IMPORT_CONFIRMATION_WIDTH) == 1
+                confirmed = macos_alert("Suspend import and quit?", QUIT_IMPORT_MESSAGE,
+                    ("Cancel", "Suspend import and quit"), body_width=IMPORT_CONFIRMATION_WIDTH) == 1
             else:
                 # Do not route through _dialog_window's application-lock fallback.
                 anchor = webview.active_window() or self._about_window
-                confirmed = bool(anchor and anchor.create_confirmation_dialog("Stop importing and quit?", QUIT_IMPORT_MESSAGE))
+                confirmed = bool(anchor and anchor.create_confirmation_dialog("Suspend import and quit?", QUIT_IMPORT_MESSAGE))
             if not confirmed:
                 return
         deadline = time.monotonic() + QUIT_TIMEOUT_SECONDS
@@ -2469,6 +2471,8 @@ class PyWebViewApplication:
 
         # Arm independently before any snapshot/stop lock can wait on Cocoa.
         Thread(target=enforce_deadline, name="mailarchiver-quit-deadline", daemon=True).start()
+        if update_install or self.updates.status.phase not in {"deferred", "installing"}:
+            Thread(target=self._show_shutdown, name="mailarchiver-shutdown-display", daemon=True).start()
         jobs = self.stop_imports_for_quit()
         with self._lock:
             workers = tuple(self._import_threads)
@@ -2505,6 +2509,27 @@ class PyWebViewApplication:
             exit_if_allowed()
 
         Thread(target=finish_quit, name="mailarchiver-quit", daemon=True).start()
+
+    def _show_shutdown(self) -> None:
+        """Paint every loaded window without making Quit wait for a webview reply."""
+        windows = tuple(window for window in webview.windows if window.events.loaded.is_set())
+        if not windows:
+            return
+        try:
+            script = (GUI_DIRECTORY / "shutdown.js").read_text(encoding="utf-8")
+
+            def paint(window: Any) -> None:
+                try:
+                    # Each webview needs its own one-use loopback bootstrap URL.
+                    window.run_js(f"window.mailArchiverShutdownStylesheet = {json.dumps(self.asset_url('shutdown.css'))};\n" + script)
+                except Exception:  # pylint: disable=broad-exception-caught
+                    logging.getLogger(__name__).debug("Shutdown overlay unavailable", exc_info=True)
+
+            with ThreadPoolExecutor(max_workers=min(8, len(windows)), thread_name_prefix="shutdown-display") as executor:
+                for _result in executor.map(paint, windows):
+                    pass
+        except OSError:
+            logging.getLogger(__name__).debug("Shutdown overlay asset unavailable", exc_info=True)
 
     def prepare_quit(self) -> bool:
         """Reserve a known job-free Quit without waiting on application state."""

@@ -466,7 +466,12 @@ roots, Apple Mail `.mbox` package chains, and directories containing only
 direct EML/EMLX files become logical-mailbox leaves. Exact node counts use
 `COUNT(DISTINCT observations.message_pk)` with the path/volume and
 `observations_source_file_offset` indexes. Hidden-volume trees merge identical
-volume-relative paths. The two tree modes are cached for the active archive.
+volume-relative paths. IMAP-only branches use `urllib.parse.unquote` once for
+labels after hierarchy splitting; stored path/token keys and SQL counts stay
+escaped. Local and mixed-source branch labels remain literal. `make test-gui`
+checks both volume modes, exact selection filters and literal/Unicode names;
+`make test-gui-processing` checks the rendered Gmail tree and checkbox filtering.
+The two tree modes are cached for the active archive.
 
 Selected branches become one correlated `EXISTS` predicate inside the
 materialized candidate query, before its `LIMIT` and `OFFSET`. The predicate
@@ -722,7 +727,18 @@ pending work; deferred-but-unstarted jobs never become active merely on quit.
 
 ## Cooperative shutdown and writer fencing
 
-The Cocoa termination delegate confirms active ingest and requests bounded Quit.
+The Cocoa termination delegate confirms active ingest with **Suspend import and
+quit** and requests bounded Quit. After confirmation and watchdog arming, a
+best-effort background dispatcher injects `gui/shutdown.js` into loaded webviews
+through a bounded thread pool. The shared script closes existing and late-arriving dialogs and
+shows an idempotent full-window modal with 20% gray fill and centered 50%-opaque
+black Shutting down text; Escape cannot dismiss it. A shared external
+`shutdown.css` clears inherited modal backdrops before opening the overlay. Overlay replies are outside
+the shutdown completion budget. Deferred/installing Sparkle-owned termination
+skips the overlay, retaining usable windows if installation is canceled.
+`make test-gui-processing` verifies rendered styling and blocked interaction;
+`make test-native-quit` checks delivery to real Cocoa About and Ingest windows.
+
 `IngestJob.stop` signals all document jobs. The common local/native and API source
 loop checks cancellation before requesting another message. A fetch already in
 flight can finish; `ProductionPipeline.ingest` temporarily defers cooperative

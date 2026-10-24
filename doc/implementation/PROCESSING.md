@@ -9,6 +9,26 @@ of `processing-status` remains unchanged.
 
 ## Working-object lifetime
 
+`runtime.run` prepares interrupted checkpoints once. The dispatcher advances one
+generator per active message and submits its next invocation to a bounded
+`ThreadPoolExecutor`. Workers return typed results from isolated temporary
+workspaces. A single coordinator consumes completed futures, retains output
+bytes, commits checkpoints/configuration/catalog/search changes, and advances
+the generators. Workers never access the shared SQLite connections. At most one
+job per message runs at a time; parent/rank dependencies remain ordered. Queue
+selection stays streaming and the coordinator owns the global job budget.
+Failure/cancellation stops new claims while active work is checkpointed.
+An explicit `fail-import` ends its rank immediately; the coordinator submits no
+further invocations, including same-rank subscribers, after accepting that stop.
+Running inputs remain pinned against collection, including shared raw digests.
+Production passes `request.workers` to both archived-content and final-content
+passes; CLI `process` retains the saved request's worker count (or the ordinary
+default when no request is saved). Source admission retains its existing
+serialized publication path.
+Progress uses logical pool lanes; finishing one lane preserves other active jobs.
+Coordinator source-style publication events retain counters without replacing
+worker phases while any processing lane is active, including when lane 1 is idle.
+
 Writer connections add `jobs_status_order(status,job_id)` to existing V2 queues.
 Dispatch filters pending jobs through that index, using correlated primary-key
 parent checks; per-message dispatch exposes a direct message-ID predicate to the
@@ -219,7 +239,14 @@ Content-only work reuses archived objects, and read-only access never creates a
 missing processing database. Unsupported/missing saved policy reports an error.
 
 `processing.js` shows the two checked resume options on opening and provides an
-explicit **Continue Processing** action. `identity.html` and `identity.js` subclass the shared
+explicit **Continue Processing** action. The action starts disabled until status
+is known, stays disabled during the resume bridge request, and follows the shared
+ingest-overview poll afterward. The overview includes the document's accepted
+job before a status file exists. Resume generations reject replies started before
+a transition, while monotonically applied request numbers reject reordered polls
+without starving responses slower than the polling interval.
+Completion or rejection refreshes its state in every window.
+`identity.html` and `identity.js` subclass the shared
 matcher widgets with database queries, distinct per-group counts and immediate
 manual writes. Name moves and separation update manual address assignments;
 institutions retain domain-based membership and permit name edits. Prototype

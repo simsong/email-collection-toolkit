@@ -246,11 +246,11 @@ class ProductionPipeline:
             self._ingesting = ingesting
 
     def resume(self, pipelines: tuple[Pipeline, ...], *, max_jobs: int | None = None, message_id: str | None = None,
-               fail_on_error: bool = True, progress: ProcessingProgress | None = None) -> RunReport:
+               fail_on_error: bool = True, progress: ProcessingProgress | None = None, workers: int = 1) -> RunReport:
         failures: list[Exception] = []
         result = run(self.database, self.plugins, retry=True, pipelines=pipelines, max_jobs=max_jobs,
                      installation_config=self.installation_config, services=self, cancelled=self.cancelled, failures=failures,
-                     message_id=message_id, continue_after_failure=not fail_on_error, progress=progress)
+                     message_id=message_id, continue_after_failure=not fail_on_error, progress=progress, workers=workers)
         if fail_on_error:
             self._raise_failures(pipelines, failures)
         return result

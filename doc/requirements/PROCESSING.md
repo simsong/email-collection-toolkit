@@ -4,6 +4,17 @@
 
 ## Working-object lifetime
 
+Deferred message/content processing shall use the configured worker count to
+execute independent messages concurrently. Workers drain one shared durable
+queue, claim each job once, and preserve per-message rank/parent ordering and
+abort semantics. A content-job limit applies to the whole pool. Cancellation
+and explicit import failure stop new claims and leave unfinished work resumable.
+An explicit `fail-import` also stops remaining subscribers in the current rank.
+Keep inputs of running jobs resident; publication and object collection must not
+race active processors. Progress shall show each active worker and remain active
+until all workers finish. Validate with `make test-processors`,
+`make test-ingest-recovery`, `make test-progress` and `make test-processing-cleanup`.
+
 Recovery shall expose the current processor/job and finished-job count while
 work is running, independently of newly imported message/file counts. Unknown
 derived job totals shall not appear as a source percentage or finalizing ETA.
@@ -170,6 +181,9 @@ its existing graceful checkpoint behavior without the GUI's forced-exit deadline
 Matcher matrix cells use two-point vertical padding, black text and column
 headings, and dark supporting text. Live pickers have no Archive identities badge.
 The main-window resume action is labeled **Continue Processing**.
+It shall be disabled while a resume request is pending or archive processing is
+active, including startup before the first status snapshot and work started in
+another window. Completion or a rejected resume shall restore the action.
 
 Archive-backed name and institution windows shall show header and signature
 addresses, date-filtered statistics, and distinct message counts per group. Name

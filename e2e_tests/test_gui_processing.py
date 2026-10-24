@@ -9,13 +9,17 @@ from pathlib import Path
 
 from playwright.sync_api import Page, expect
 
-from mailarchiver.__main__ import run_ingest
+from mailarchiver.__main__ import IngestRequest, run_ingest
 from mailarchiver.application import IngestJob
 from mailarchiver.gui_app import AboutApi, GUI_DIRECTORY, SEARCH_BRIDGE_METHODS, GuiApi, IdentityPickerApi, IngestWindowApi
 from mailarchiver.gui_processing import PickerPage, resume_request, unfinished_work
 from mailarchiver.ingest_status import IngestStatusFile, read_ingest_history
+from mailarchiver.owner_rules import OwnerRules
 from mailarchiver.writer_lock import WriterLease
 from tests.test_gui_processing import build_entity_archive, build_phone_archive, build_deferred_archive, build_interrupted_archive, open_headless, wait_for_import
+from tests.test_gui_service import add_tree_source, make_gui_archive
+from tests.test_processing import plugin
+from tests.test_cli_processing import HEADER
 
 
 def test_name_picker_reveals_filtered_company_without_losing_unknown_person(tmp_path: Path,page: Page) -> None:
@@ -82,6 +86,78 @@ def test_incomplete_dialog_resumes_content_without_sources(tmp_path: Path, page:
         assert not errors
     finally:
         api.close()
+
+
+def test_continue_processing_disabled_until_background_work_finishes(tmp_path: Path, page: Page) -> None:
+    """Desktop processing: resume disables immediately and every window tracks real active work."""
+    plugin(tmp_path, "pause-content", '(item.archive.path / "processor-entered").touch()\n'
+           'while not (item.archive.path / "release-processor").exists():\n'
+           '    item.check_cancelled()\n    time.sleep(0.01)\nreturn ProcessingResult()')
+    manifest = tmp_path / "processors/pause-content/plugin.toml"
+    manifest.write_text(manifest.read_text().replace('pipeline="ingest"', 'pipeline="content"'))
+    source, archive = tmp_path / "input.eml", tmp_path / "archive"
+    source.write_bytes(HEADER + b"\r\nresume button fixture\r\n")
+    run_ingest(IngestRequest(archive=archive, roots=[str(source)], scan_policy="not-scanned",
+        owner_rules=OwnerRules(include=["owner@example.test"]), continue_content=False, plugin_dir=[tmp_path]), terminal=False)
+    app, api = open_headless(archive, tmp_path / "preferences.json")
+    assert api.document is not None
+    observer_api = GuiApi(archive, application=app, document=api.document,
+        search_window=app.controller.new_search_window(api.document))
+    observer = page.context.new_page()
+    try:
+        expose(page, api, SEARCH_BRIDGE_METHODS)
+        expose(observer, observer_api, SEARCH_BRIDGE_METHODS)
+        for window in (page, observer):
+            window.goto((GUI_DIRECTORY / "index.html").as_uri())
+            window.get_by_role("button", name="Ask me later", exact=True).click()
+            expect(window.locator("#processing-open")).to_be_enabled()
+        page.locator("#processing-open").click()
+        page.locator("#continue-ingest").uncheck()
+        with WriterLease.acquire(archive, api.document.descriptor.identity, "button fixture busy", "button-busy", "test"):
+            page.locator("#processing-continue").click()
+            expect(page.locator("#processing-error")).to_contain_text("Processing could not start")
+            expect(page.locator("#processing-open")).to_be_enabled()
+        page.locator("#processing-continue").evaluate("""button => button.addEventListener('click', () => {
+            window.resumeDisabledAtClick = document.getElementById('processing-open').disabled;
+        })""")
+        page.locator("#processing-continue").click()
+        assert page.evaluate("window.resumeDisabledAtClick") is True
+        expect(page.locator("#processing-dialog")).not_to_be_visible()
+        expect(page.locator("#processing-open")).to_be_disabled()
+        expect(observer.locator("#processing-open")).to_be_disabled()
+        page.reload()
+        expect(page.locator("#processing-open")).to_be_disabled()
+        expect(page.locator("#ingest-status-line")).to_contain_text("processing jobs finished")
+        assert (archive / "processor-entered").exists()
+        previews = GUI_DIRECTORY.parent / ".tmp/gui-previews"
+        previews.mkdir(parents=True, exist_ok=True)
+        page.screenshot(path=str(previews / "continue-processing-disabled.png"))
+        job = api.document.ingest_job
+        assert job is not None
+        observer.evaluate("""() => {
+            const overview = window.pywebview.api.ingest_overview;
+            window.overviewDeliveries = [];
+            window.pywebview.api.ingest_overview = async () => {
+                const result = await overview();
+                return new Promise(resolve => window.overviewDeliveries.push({result, resolve}));
+            };
+        }""")
+        (archive / "release-processor").touch()
+        assert job.finished.wait(30), "GUI processing did not finish"
+        expect(page.locator("#processing-open")).to_be_enabled()
+        observer.wait_for_function("window.overviewDeliveries.filter(item => !item.result.active).length >= 2")
+        observer.evaluate("""() => {
+            const delivery = window.overviewDeliveries.find(item => !item.result.active);
+            delivery.resolve(delivery.result);
+        }""")
+        expect(observer.locator("#processing-open")).to_be_enabled()
+        assert not unfinished_work(archive).incomplete
+    finally:
+        (archive / "release-processor").touch()
+        observer.close()
+        observer_api.close()
+        api.close()
+        app.shutdown()
 
 
 def test_ingest_sources_show_account_and_server(tmp_path: Path, page: Page) -> None:
@@ -163,6 +239,7 @@ def test_history_startup_and_status_symbols(tmp_path: Path, page: Page) -> None:
     history_api = IngestWindowApi(archive, application=app, document=document)
     expose(page, history_api, ("history", "antivirus", "can_import_directory"))
     try:
+        assert api.ingest_overview()["active"]
         page.goto((GUI_DIRECTORY / "ingests.html").as_uri())
         expect(page.get_by_role("status")).to_contain_text("Starting — preparing archive…")
         expect(page.locator("#starting-import .state-dot")).to_have_text("✓")
@@ -495,3 +572,82 @@ def test_name_picker_phone_disclosure_expands_rows_and_keeps_single_number_plain
     page.locator('#end-date').fill('2024-01-02')
     expect(multiple.locator('.phone-column')).to_have_text('+1 (617) 555-0102')
     expect(multiple.locator('summary')).to_have_count(0)
+
+
+def test_original_imap_folder_names_are_readable_and_selectable(tmp_path: Path, page: Page) -> None:
+    """Desktop requirement: real sidebar displays decoded Gmail names and filters by stored tokens."""
+    archive = make_gui_archive(tmp_path)
+    add_tree_source(archive, '{"stable_id":"imap-sidebar"}', "IMAP", "%5BGmail%5D/All%20Mail", "imap", [1])
+    api = GuiApi(archive, e2e_directory=tmp_path, preferences_file=tmp_path / "filters.json")
+    expose(page, api, SEARCH_BRIDGE_METHODS)
+    try:
+        page.goto((GUI_DIRECTORY / "index.html").as_uri())
+        page.locator("#show-original-folders").check()
+        gmail = page.locator('.mailbox-node[data-label="[Gmail]"]')
+        all_mail = page.locator('.mailbox-node[data-label="All Mail"]')
+        expect(gmail).to_contain_text("[Gmail] (1)")
+        expect(all_mail).to_contain_text("All Mail (1)")
+        expect(page.locator("#mailbox-tree")).not_to_contain_text("%20")
+        all_mail.locator('input[type="checkbox"]').check()
+        expect(page.locator("#result-status")).to_have_text("1 message")
+        expect(page.locator(".result")).to_have_count(1)
+        page.screenshot(path=str(tmp_path / "imap-folder-labels.png"))
+    finally:
+        api.close()
+
+
+def test_shutdown_overlay_dims_content_and_blocks_interaction(tmp_path: Path, page: Page) -> None:
+    """Desktop Quit requirement: confirmed shutdown stays visible over dialogs and blocks editing."""
+    archive = make_gui_archive(tmp_path)
+    api = GuiApi(archive, e2e_directory=tmp_path, preferences_file=tmp_path / "filters.json")
+    expose(page, api, SEARCH_BRIDGE_METHODS)
+    try:
+        page.goto((GUI_DIRECTORY / "index.html").as_uri())
+        search = page.locator("#search")
+        search.fill("multipart")
+        search.press("Enter")
+        expect(page.locator(".result")).to_have_count(1)
+        page.locator(".result").click()
+        page.locator("#message-content").wait_for(state="visible")
+        original_part = page.locator("#part-select").input_value()
+        # Delay delivery of a real bridge result, leaving its production handler in flight.
+        page.evaluate("""() => {
+            const original = window.pywebview.api.saved_filter_sets;
+            window.pywebview.api.saved_filter_sets = async (...args) => {
+                const result = await original(...args);
+                await new Promise(resolve => { window.releaseFilterReply = resolve; });
+                return result;
+            };
+            window.filterManagerFinished = false;
+            void openFilterManager().finally(() => { window.filterManagerFinished = true; });
+        }""")
+        page.wait_for_function("typeof window.releaseFilterReply === 'function'")
+        page.evaluate("document.querySelector('#processing-dialog').showModal()")
+        script = (GUI_DIRECTORY / "shutdown.js").read_text(encoding="utf-8")
+        page.evaluate(script)
+        overlay = page.get_by_role("dialog", name="Shutting down", exact=True)
+        expect(overlay).to_be_visible()
+        expect(overlay).to_have_text("Shutting down…")
+        expect(overlay).to_have_css("background-color", "rgba(128, 128, 128, 0.2)")
+        assert overlay.evaluate("element => getComputedStyle(element, '::backdrop').backgroundColor") == "rgba(0, 0, 0, 0)"
+        expect(overlay).to_have_css("color", "rgba(0, 0, 0, 0.5)")
+        assert page.locator("#processing-dialog").evaluate("element => !element.open")
+        page.evaluate("window.releaseFilterReply()")
+        page.wait_for_function("window.filterManagerFinished")
+        expect(page.locator("#manage-filter-dialog")).not_to_be_visible()
+        expect(overlay).to_be_visible()
+        assert overlay.evaluate("element => { const r = element.getBoundingClientRect(); return r.x === 0 && r.y === 0 && r.width === innerWidth && r.height === innerHeight; }")
+        page.keyboard.press("Escape")
+        expect(overlay).to_be_visible()
+        page.keyboard.press("Tab")
+        page.keyboard.type("blocked")
+        expect(search).to_have_value("multipart")
+        for shortcut in ("Control+f", "Meta+f", "Control+2", "Meta+2"):
+            page.keyboard.press(shortcut)
+            expect(page.locator("#message-find")).to_be_hidden()
+            expect(page.locator("#part-select")).to_have_value(original_part)
+        page.evaluate(script)
+        expect(page.locator("#shutdown-overlay")).to_have_count(1)
+        page.screenshot(path=str(tmp_path / "shutdown-overlay.png"))
+    finally:
+        api.close()

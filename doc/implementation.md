@@ -31,11 +31,17 @@ platform or release gate has passed. [Future work](plans/README.md) is separate.
 - Indexed queue selection and dispatcher activity callbacks expose recovery work;
   see [processing](implementation/PROCESSING.md).
 
+- Deferred message/content recovery uses the configured worker pool with ordered
+  per-message checkpoints; see [processing](implementation/PROCESSING.md).
+  The resume button follows pending requests and the shared activity poll.
+
 - End-of-import stderr renders typed processor statistics in aligned columns;
   machine-readable status remains JSON. See [processing](implementation/PROCESSING.md).
 
 - Freeze all manifest-referenced acquisition adapters; validate local ingestion
   with `make test-frozen-source-plugins` before packaging handoff.
+- Original-mailbox trees unquote IMAP display components once, preserving filter
+  tokens and local filenames; see [desktop](implementation/DESKTOP.md).
 - Natural search preserves quoted symbols and works with existing indexes;
   see [search behavior](implementation/SEARCH.md).
 
@@ -58,6 +64,8 @@ platform or release gate has passed. [Future work](plans/README.md) is separate.
   Typed signature-phone observations feed expandable name-row phone lists.
   See [desktop implementation](implementation/DESKTOP.md#identity-picker-search-navigation).
 
+- Confirmed Quit injects a shared modal shutdown overlay independently of its
+  five-second watchdog; see [desktop shutdown](implementation/DESKTOP.md#cooperative-shutdown-and-writer-fencing).
 - Desktop recovery summarizes saved attempts with a Continue Import action and records lease-protected aborts;
   warning history collapses to a reopenable pill. See
   [desktop recovery](implementation/DESKTOP.md#saved-import-recovery-and-notices).

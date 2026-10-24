@@ -64,7 +64,7 @@ There is no resident daemon. Positive detections are retained in numbered
 | --- | --- |
 | `--owner-names-file FILE` | Legacy owner include rules; otherwise use archive `config.yaml` |
 | `--earliest-year N` | First plausible routing year; default 1900 |
-| `--workers N` | Concurrent source workers; default CPU count capped at 8 |
+| `--workers N` | Concurrent source and deferred-processing workers; default CPU count capped at 8 |
 | `--index-attachments` | Index supported text attachments; does not add PDF/Office extraction |
 | `--defer-content` | File messages now, leave content processing pending |
 | `--plugin-dir DIR` | Repeatable trusted Python plugin root; code executes locally |
@@ -73,6 +73,8 @@ There is no resident daemon. Positive detections are retained in numbered
 Ctrl-C requests checkpointing and exits 130. Repeat ingest with the same source
 to resume traversal; `process` alone cannot discover unread source messages.
 `process` also accepts repeatable `--plugin-dir` and `--installation-config`.
+It uses the saved import worker count; older archives without a saved request
+use the CPU-count default capped at 8.
 Content-only processing defaults to phase `content`; already successful work is
 reused. `refresh-index` defaults to detected CPU count (or 2) and leaves the old
 index intact if interrupted before publication.

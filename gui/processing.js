@@ -60,12 +60,16 @@ window.addEventListener("pywebviewready", async () => {
       dialog.close(); return;
     }
     event.target.disabled = true;
+    window.mailArchiverProcessingStarting(true);
     try {
       if (!await api.resume_processing(document.getElementById("continue-ingest").checked,
         document.getElementById("continue-content").checked)) throw new Error("Processing could not start. Check About for details; another writer may be active.");
       dialog.close();
     } catch (failure) { error.textContent = failure.message || String(failure); }
-    finally { event.target.disabled = false; }
+    finally {
+      event.target.disabled = false;
+      window.mailArchiverProcessingStarting(false);
+    }
   });
   for (const kind of ["name", "institution"]) document.getElementById(`${kind}-picker`).addEventListener("click", async () => {
     try { await api.open_picker(kind); }

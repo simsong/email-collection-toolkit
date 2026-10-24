@@ -178,6 +178,11 @@ def test_cancel_quit_with_contended_state(tmp_path: Path, monkeypatch: pytest.Mo
         app.request_quit()
         assert monotonic() - started < 0.5
         assert confirmation.called or anchor.create_confirmation_dialog.called
+        if confirmation.called:
+            assert confirmation.call_args.args[0] == "Suspend import and quit?"
+            assert confirmation.call_args.args[2] == ("Cancel", "Suspend import and quit")
+        else:
+            assert anchor.create_confirmation_dialog.call_args.args[0] == "Suspend import and quit?"
         assert not app._quitting and app._quit_done is prior_event and not exited.is_set()
         assert not job.stop.is_set() and lease.acquired
     finally:

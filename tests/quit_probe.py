@@ -201,18 +201,39 @@ def main() -> None:
         else:
             app.request_quit(confirm_ingest=False)
 
-    if mode == "native":
+    if mode in {"native", "native-overlay"}:
         configure_macos_application()
         app.asset_server = LoopbackAssetServer(GUI_DIRECTORY)
         install_macos_document_events(app)
         app.create_about_window(hidden=True)
-        window = webview.windows[-1]
+        if mode == "native-overlay":
+            document = controller.create_document(root / "overlay-archive")
+            assert app.open_ingest_window(document)
 
         def native_quit() -> None:
-            assert window.events.loaded.wait(15)
+            for native_window in tuple(webview.windows):
+                assert native_window.events.loaded.wait(15)
             # Exercise real periodic status traffic before requesting Quit.
             sleep(1.2)
-            quit_app()
+            if mode == "native-overlay":
+                # Keep the real Quit waiter alive until both webviews paint.
+                with app.writer_activity():
+                    quit_app()
+                    for native_window in tuple(webview.windows):
+                        visible = False
+                        for _attempt in range(100):
+                            visible = native_window.evaluate_js("Boolean(document.querySelector('#shutdown-overlay[open]'))")
+                            if visible:
+                                break
+                            sleep(0.01)
+                        assert visible, "Confirmed Quit did not paint its shutdown overlay"
+                        assert native_window.evaluate_js("document.querySelector('#shutdown-overlay').textContent") == "Shutting down…"
+                        backdrop = native_window.evaluate_js("getComputedStyle(document.querySelector('#shutdown-overlay'), '::backdrop').backgroundColor")
+                        (root / f"overlay-backdrop-{native_window.uid}").write_text(str(backdrop))
+                        assert backdrop == "rgba(0, 0, 0, 0)", backdrop
+                    (root / "overlay-verified").touch()
+            else:
+                quit_app()
 
         webview.start(native_quit, http_server=False, private_mode=True)
     else:

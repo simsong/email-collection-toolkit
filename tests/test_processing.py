@@ -6,6 +6,7 @@ import json
 import sqlite3
 import subprocess
 import sys
+import threading
 from pathlib import Path
 
 import pytest
@@ -486,3 +487,129 @@ def test_signature_phones_preserve_spelling_and_exclude_dates_and_quoted_replies
         '> Telephone: +1 212 555 0199\n')
     assert [(phone.normalized,phone.display) for phone in phones]==[
         ('+16175550102','+1 (617) 555-0102'),('+442079460958','+44 20 7946 0958')]
+
+
+def test_parallel_dispatch_drains_independent_messages_with_one_global_budget(tmp_path: Path) -> None:
+    """PROCESSING: concurrent consumers preserve message barriers, exactly-once claims and global limits."""
+    plugin(tmp_path, "gate", 'marker = item.archive.path / ("entered-" + item.message_id)\n'
+           'marker.touch()\n'
+           'while len(list(item.archive.path.glob("entered-*"))) < 2:\n'
+           '    item.check_cancelled()\n    time.sleep(0.01)\n'
+           'return ProcessingResult(emissions=tuple(Emission(content_ref=item.content_ref, '
+           'content_type="text/plain", part_path=(part,)) for part in (1, 2)))', emits='"text/plain"', timeout=5)
+    plugin(tmp_path, "child", 'active = item.archive.path / ("active-" + item.message_id)\n'
+           'with active.open("x"):\n    time.sleep(0.01)\n'
+           'active.unlink()\nreturn ProcessingResult()', subscribes="text/plain")
+    plugins = load_processors((tmp_path,))
+    archive = tmp_path / "archive"
+    active: set[int] = set()
+    finished: list[int] = []
+    peak = 0
+    owner_thread = threading.get_ident()
+    with connect(archive, create=True) as database:
+        for number in range(3):
+            source = tmp_path / f"{number}.eml"
+            source.write_bytes(f"Subject: message {number}\n\nbody {number}".encode())
+            submit(database, archive, source, fingerprint(plugins))
+
+        def progress(item: ProcessingObject, _processor: str, done: bool, _worker: int) -> None:
+            nonlocal peak
+            assert threading.get_ident() == owner_thread
+            assert item.job_id is not None
+            if done:
+                assert item.job_id not in finished
+                finished.append(item.job_id)
+                active.remove(item.job_id)
+            else:
+                active.add(item.job_id)
+                peak = max(peak, len(active))
+                assert database.execute("SELECT count(*) FROM jobs child JOIN jobs parent "
+                    "ON parent.job_id=child.parent_job_id WHERE child.job_id=? AND parent.status<>'completed'",
+                    (item.job_id,)).fetchone() == (0,)
+
+        limited = run(database, plugins, workers=2, max_jobs=2, progress=progress)
+        assert (limited.completed, limited.pending, limited.failed) == (2, 5, 0)
+        assert len(finished) == 2 and peak == 2 and not active
+        result = run(database, plugins, workers=2, progress=progress)
+        assert (result.completed, result.pending, result.failed) == (9, 0, 0)
+        assert len(finished) == 9 and not active
+        assert [(stat.kind, stat.invocations) for stat in result.statistics] == [("child", 6), ("gate", 3)]
+        assert database.execute("SELECT count(*) FROM invocations WHERE status<>'completed'").fetchone() == (0,)
+        assert database.execute("PRAGMA foreign_key_check").fetchall() == []
+
+
+
+def test_parallel_cancellation_retains_checkpoints_and_clears_each_worker(tmp_path: Path) -> None:
+    """PROCESSING: cancelling concurrent invocations leaves retries without repeating completed ranks."""
+    plugin(tmp_path, "first", 'return ProcessingResult()')
+    plugin(tmp_path, "gate", 'while not (item.archive.path / "resume").exists():\n'
+           '    item.check_cancelled()\n    time.sleep(0.01)\nreturn ProcessingResult()', rank=2, timeout=5)
+    plugins = load_processors((tmp_path,))
+    archive = tmp_path / "archive"
+    stop = threading.Event()
+    entered: set[str] = set()
+    active: set[int] = set()
+    def cancelled() -> None:
+        if stop.is_set():
+            raise KeyboardInterrupt
+    def progress(item: ProcessingObject, processor: str, finished: bool, _worker: int) -> None:
+        assert item.job_id is not None
+        if finished:
+            active.remove(item.job_id)
+        else:
+            active.add(item.job_id)
+        if processor == "gate" and not finished:
+            entered.add(item.message_id)
+            if len(entered) == 2:
+                stop.set()
+    with connect(archive, create=True) as database:
+        for number in range(2):
+            source = tmp_path / f"{number}.eml"
+            source.write_bytes(f"Subject: message {number}\n\nbody".encode())
+            submit(database, archive, source, fingerprint(plugins))
+        with pytest.raises(KeyboardInterrupt):
+            run(database, plugins, workers=2, cancelled=cancelled, progress=progress)
+        assert len(entered) == 2 and not active
+        assert database.execute("SELECT count(*) FROM invocations WHERE status='running'").fetchone() == (0,)
+        (archive / "resume").touch()
+        result = run(database, plugins, workers=2, retry=True)
+        assert result.completed == 2 and result.pending == result.failed == 0
+        assert next(stat for stat in result.statistics if stat.kind == "first").invocations == 2
+
+
+@pytest.mark.parametrize("continue_after_failure", [False, True])
+@pytest.mark.parametrize("later_rank", [1, 2])
+def test_parallel_import_stop_preserves_inflight_checkpoints_and_blocks_remaining_subscribers(
+    tmp_path: Path, continue_after_failure: bool, later_rank: int,
+) -> None:
+    """PROCESSING: fail-import stops new invocations while preserving another worker's completed checkpoint."""
+    plugin(tmp_path, "gate", 'if item.content_ref.path.read_bytes().startswith(b"blocked"):\n'
+           '    while not (item.archive.path / "healthy-entered").exists():\n'
+           '        item.check_cancelled()\n        time.sleep(0.01)\n'
+           '    return ProcessingResult(outcome="fail-import")\n'
+           '(item.archive.path / "healthy-entered").touch()\n'
+           'while not (item.archive.path / "release-healthy").exists():\n'
+           '    item.check_cancelled()\n    time.sleep(0.01)\nreturn ProcessingResult()', timeout=5)
+    plugin(tmp_path, "later", 'with (item.archive.path / ("later-" + item.message_id)).open("x"):\n'
+           '    pass\nreturn ProcessingResult()', rank=later_rank)
+    plugins = load_processors((tmp_path,))
+    archive = tmp_path / "archive"
+    def progress(_item: ProcessingObject, processor: str, finished: bool, _worker: int) -> None:
+        if finished and processor == "failed":
+            (archive / "release-healthy").touch()
+    with connect(archive, create=True) as database:
+        for name in ("blocked", "healthy"):
+            source = tmp_path / name
+            source.write_bytes(name.encode())
+            message_id = submit(database, archive, source, fingerprint(plugins))
+        if continue_after_failure:
+            with pytest.raises(RuntimeError, match="processor requested fail-import"):
+                run(database, plugins, workers=2, continue_after_failure=True, progress=progress)
+        else:
+            assert run(database, plugins, workers=2, progress=progress).failed == 1
+        assert not list(archive.glob("later-*"))
+        assert database.execute("SELECT count(*) FROM invocations WHERE kind='gate' AND status='completed'").fetchone() == (2,)
+        result = run(database, plugins, workers=2, message_id=message_id)
+        assert result.completed == 1 and result.failed == 1 and result.pending == 0
+        assert len(list(archive.glob("later-*"))) == 1
+        assert next(stat for stat in result.statistics if stat.kind == "gate").invocations == 2

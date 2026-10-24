@@ -33,11 +33,17 @@ platform or release gate has passed. [Future work](plans/README.md) is separate.
 - Recovery shows active processor/job work independently of source-import counts,
   and queue lookup avoids rescanning completed history; see [processing](requirements/PROCESSING.md).
 
+- Deferred message/content recovery uses the configured worker pool with ordered
+  per-message checkpoints; see [processing](requirements/PROCESSING.md).
+  Continue Processing stays disabled during startup and active archive work.
+
 - End-of-import processor statistics use an aligned table labeled as cumulative
   archive history; see [processing](requirements/PROCESSING.md).
 
 - Freeze all manifest-referenced acquisition adapters; validate local ingestion
   with `make test-frozen-source-plugins` before packaging handoff.
+- Original IMAP folder labels decode percent escapes once while retaining stored
+  selection paths; see [desktop](requirements/DESKTOP.md).
 - Natural search preserves quoted symbols and works with existing indexes;
   see [search behavior](requirements/SEARCH.md).
 
@@ -61,6 +67,8 @@ platform or release gate has passed. [Future work](plans/README.md) is separate.
   Name rows display observed signature phones, with multiple numbers expandable.
   See [desktop navigation](requirements/DESKTOP.md#identity-picker-navigation).
 
+- Confirmed Quit offers **Suspend import and quit** and dims loaded windows with
+  a Shutting down notice; see [desktop shutdown](requirements/DESKTOP.md#shutdown-feedback).
 - Desktop recovery requires an informed Continue Import/defer/abort choice, and collapsed
   warnings remain readable; see [desktop recovery](requirements/DESKTOP.md#saved-import-recovery-and-notices).
   Ingest history displays IMAP accounts and servers instead of internal locators.

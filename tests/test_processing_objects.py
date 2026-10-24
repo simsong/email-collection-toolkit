@@ -186,3 +186,20 @@ def test_collection_rejects_uncommitted_processing_records(tmp_path: Path) -> No
         assert candidate.exists()
         database.commit()
         assert collect_objects(database, archive) == 1
+
+
+
+def test_collection_pins_running_raw_input_until_checkpoint(tmp_path: Path) -> None:
+    """PROCESSING: another worker's cleanup cannot unlink the raw input of an active processor."""
+    archive = tmp_path / "archive"
+    with connect(archive, create=True) as database:
+        submit(database, archive, MESSAGE, fingerprint(()))
+        root = Path(database.execute("SELECT content_path FROM messages").fetchone()[0])
+        with database:
+            database.execute("UPDATE jobs SET status='running'")
+        assert collect_objects(database, archive, lambda _digest: MESSAGE.read_bytes()) == 0
+        assert root.read_bytes() == MESSAGE.read_bytes()
+        with database:
+            database.execute("UPDATE jobs SET status='pending'")
+        assert collect_objects(database, archive, lambda _digest: MESSAGE.read_bytes()) == 1
+        assert not root.exists()

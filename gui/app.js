@@ -41,6 +41,10 @@ const state = {
   dragEpoch: 0,
   previewUrl: null,
   ingestStatusText: "",
+  processingStarting: false,
+  ingestOverviewGeneration: 0,
+  ingestOverviewRequest: 0,
+  ingestOverviewApplied: 0,
   linkDestination: "",
   pendingLink: "",
   showTree: false,
@@ -60,6 +64,12 @@ const state = {
 
 const elements = {};
 const byId = id => document.getElementById(id);
+window.mailArchiverProcessingStarting = starting => {
+  state.processingStarting = starting;
+  state.ingestOverviewGeneration += 1;
+  if (starting) byId("processing-open").disabled = true;
+  else void refreshIngestOverview();
+};
 let initialized = false;
 let previewQueue = Promise.resolve();
 const SUGGESTION_MINIMUM = 3;
@@ -480,10 +490,14 @@ function renderArchiveStatus(messages) {
 }
 
 async function refreshIngestOverview() {
+  const generation = state.ingestOverviewGeneration;
+  const request = ++state.ingestOverviewRequest;
   const overview = await call(() => window.pywebview.api.ingest_overview());
-  if (!overview) return;
+  if (!overview || generation !== state.ingestOverviewGeneration || request < state.ingestOverviewApplied) return;
+  state.ingestOverviewApplied = request;
   const line = elements["ingest-status-line"];
   const status = overview.status;
+  byId("processing-open").disabled = state.processingStarting || overview.active || status?.state === "running";
   line.hidden = elements.search.disabled;
   line.className = `ingest-status-line no-print${status ? ` ${status.state}` : ""}`;
   line.dataset.statusId = status?.status_id || "";

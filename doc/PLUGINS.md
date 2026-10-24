@@ -24,8 +24,11 @@ An unchanged registry makes repeated submissions/reprocessing idempotent.
 
 The registry validates local module:factory entrypoints without importing code,
 normalized exact MIME types, required lower-rank subscribers covering the same
-inputs, and acyclic type emissions. This initial serial dispatcher is a valid
-rank-barrier implementation; concurrency is deferred. It releases typed
+inputs, and acyclic type emissions. Production deferred processing uses a bounded thread pool: independent messages
+execute concurrently while each message retains serial rank/parent ordering.
+One coordinator consumes worker futures and commits queue/checkpoint/publication
+transactions; workers execute processors and return typed results.
+The standalone harness defaults to one consumer. The dispatcher releases typed
 emissions/handoffs transactionally and blocks them until the parent job completes.
 Part aborts retain sibling work; message aborts stop that message; import failure
 leaves other jobs pending. Unsubscribed objects complete without discarding bytes.
@@ -367,7 +370,9 @@ uncoordinated file/database writes. Plugins do not own threads or print reports.
 ### Dispatch, aborts and failure handling
 
 For each input object/type, finish all subscribers at a rank before releasing
-higher-ranked subscribers. Buffer emitted objects until the rank barrier has
+higher-ranked subscribers. An explicit `fail-import`, the strongest outcome,
+ends the rank immediately without starting remaining subscribers. Buffer emitted
+objects until the rank barrier has
 resolved; downstream consumers cannot outrun a scanner or another aborting
 subscriber. Cross-type required outputs and explicit dependencies also gate
 dispatch. The strongest outcome wins: import failure, message abort, part

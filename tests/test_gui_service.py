@@ -1015,6 +1015,30 @@ def test_original_mailbox_tree_deduplicates_counts_merges_volumes_and_filters(tm
     assert [item.message_pk for item in search_page(archive, "", mailbox_selections=[scoped.selection]).results] == [1]
 
 
+@pytest.mark.parametrize("show_volumes", [False, True])
+def test_imap_mailbox_labels_unquote_once_without_changing_selections(tmp_path: Path, show_volumes: bool) -> None:
+    """Desktop requirement: decode IMAP labels, retaining literal names and exact folder filters."""
+    archive = make_gui_archive(tmp_path)
+    identity = '{"stable_id":"imap-labels"}'
+    encoded = "%5BGmail%5D/All%20Mail"
+    add_tree_source(archive, identity, "IMAP", encoded, "imap", [1, 2])
+    add_tree_source(archive, identity, "IMAP", "%5BGmail%5D/Literal%2520%2B%25%2F%2E%C3%89", "imap", [1])
+    add_tree_source(archive, '{"stable_id":"local-labels"}', "Local", "Local%20Folder/A+B%25.mbox", "mbox", [2])
+    tree = mailbox_tree(archive, show_volumes)
+    gmail = find_tree_node(tree, "[Gmail]")
+    all_mail = find_tree_node(gmail.children, "All Mail")
+    literal = find_tree_node(gmail.children, "Literal%20+%/.É")
+    assert gmail.count == 2 and all_mail.count == 2 and literal.count == 1
+    assert not literal.children
+    selection = MailboxSelection.from_token(all_mail.selection)
+    assert selection.path == encoded
+    assert selection.volume_identity == (identity if show_volumes else None)
+    assert MailboxSelection.from_token(all_mail.logical_selection).path == encoded
+    assert [item.message_pk for item in search_page(archive, "", mailbox_selections=[all_mail.selection]).results] == [2, 1]
+    assert [item.message_pk for item in search_page(archive, "", mailbox_selections=[literal.selection]).results] == [1]
+    assert find_tree_node(tree, "Local%20Folder").children[0].label == "A+B%25.mbox"
+
+
 def test_filter_sets_are_versioned_and_atomically_managed(tmp_path: Path) -> None:
     """Requirement: named selections persist outside an archive and support rename/delete."""
     path = tmp_path / "preferences" / "filter-sets.json"

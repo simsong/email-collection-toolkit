@@ -27,6 +27,7 @@ from contextlib import contextmanager
 from itertools import groupby
 from pathlib import Path, PurePosixPath
 from typing import Literal
+from urllib.parse import unquote
 
 from pydantic import BaseModel, Field, field_validator
 
@@ -258,7 +259,7 @@ def _nodes(
             MailboxTreeNode(
                 selection=selection.token(),
                 logical_selection=MailboxSelection(path=path).token(),
-                label=label,
+                label=unquote(label) if all(row.source_kind == "imap" for row in branch_rows) else label,
                 count=_count(database, selection),
                 kind=kind,
                 children=children,

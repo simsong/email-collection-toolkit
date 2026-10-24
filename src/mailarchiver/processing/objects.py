@@ -90,7 +90,8 @@ def collect_objects(database: sqlite3.Connection, archive: Path,
                 removed += 1
             continue
         roles = {row[0] for row in database.execute(
-            "SELECT DISTINCT r.role FROM object_references r JOIN jobs j USING(job_id) "
+            "SELECT DISTINCT CASE WHEN j.status='running' THEN 'active' ELSE r.role END "
+            "FROM object_references r JOIN jobs j USING(job_id) "
             f"WHERE r.sha256=? AND j.{LIVE_JOBS}", (path.name,))}
         if roles - {'raw'}:
             continue
