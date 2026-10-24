@@ -997,7 +997,10 @@ test-rust-updater:
 
 # The transitional Rust engine test uses only synthetic archives and no GUI windows.
 .PHONY: test-rust-engine
-test-rust-engine:
+test-rust-engine: ruff
+	uv run --locked pylint src/mailarchiver/rust_engine.py tests/test_rust_engine.py
+	uv run --locked ty check src/mailarchiver/rust_engine.py tests/test_rust_engine.py --error-on-warning
+	uv run --locked pyright src/mailarchiver/rust_engine.py tests/test_rust_engine.py --warnings
 	uv run --locked pytest -q tests/test_rust_engine.py
 
 # RUST_WEBVIEW_BINARY selects the real dispatcher; tests never launch native windows.

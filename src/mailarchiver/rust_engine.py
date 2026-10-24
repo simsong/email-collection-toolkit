@@ -14,6 +14,8 @@ Fundamental dependents:
 from __future__ import annotations
 
 import os
+from collections.abc import Callable
+from concurrent.futures import Future, ThreadPoolExecutor
 from pathlib import Path
 from queue import Queue
 import signal
@@ -70,6 +72,11 @@ class JobState(BaseModel):
     generation: int = 0
 
 
+class JobOutcome(BaseModel):
+    error: str | None = None
+    warning: str | None = None
+
+
 class WorkState(BaseModel):
     available: bool
     ingest: int
@@ -111,7 +118,34 @@ class Engine:
         self.finished.set()
         self.idle = Event()
         self.idle.set()
-        self.job = JobState()
+        self._job = JobState()
+        self._executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="archive-adapter")
+        self._future: Future[JobOutcome] | None = None
+
+    @property
+    def job(self) -> JobState:
+        """The protocol owner applies worker results before exposing job state."""
+        future = self._future
+        if future is not None and (future.done() or self.finished.is_set()):
+            self._future = None
+            try:
+                outcome = future.result()
+            except BaseException as error:  # pylint: disable=broad-exception-caught
+                outcome = JobOutcome(error=f"{type(error).__name__}: {error}")
+            self._job = self._job.model_copy(update={"active": False, "generation": self._job.generation + 1,
+                                                   "error": outcome.error, "warning": outcome.warning})
+        return self._job
+
+    def _start_work(self, operation: Callable[[], JobOutcome], kind: Literal["import", "definitions"]) -> None:
+        generation = self.job.generation
+        self.finished.clear()
+        self._job = JobState(active=True, kind=kind, generation=generation)
+        try:
+            self._future = self._executor.submit(operation)
+        except BaseException:
+            self._job.active = False
+            self.finished.set()
+            raise
 
     def start(self, request: IngestRequest, revision: str | None = None) -> bool:
         if self.owner_lost.is_set():
@@ -129,30 +163,32 @@ class Engine:
         except Exception:
             lease.release()
             raise
-        self.finished.clear()
-        self.job = JobState(active=True, generation=self.job.generation)
-
-        def work() -> None:
+        def work() -> JobOutcome:
+            outcome = JobOutcome()
             try:
                 run_ingest(request, lease, terminal=False, stop_event=self.stop)
                 try:
                     if request.roots:
                         remember_import_directory(self.archive, [Path(root) for root in request.roots])
                 except (OSError, ValueError) as error:
-                    self.job.warning = f"Import completed, but the source directory could not be saved: {error}"
+                    outcome.warning = f"Import completed, but the source directory could not be saved: {error}"
             except IngestInterrupted:
                 pass
             except Exception as error:
-                self.job.error = f"{type(error).__name__}: {error}"
+                outcome.error = f"{type(error).__name__}: {error}"
             finally:
                 lease.release()
-                self.job.active = False
-                self.job.generation += 1
                 self.finished.set()
-        Thread(target=work, name="rust-import", daemon=True).start()
+            return outcome
+        try:
+            self._start_work(work, "import")
+        except BaseException:
+            lease.release()
+            raise
         return True
 
     def call(self, request: Request) -> JsonValue:
+        _job = self.job  # Consume any finished work before admitting another operation.
         method, args = request.method, request.args
         capabilities = Capabilities()
         if method == "capabilities":
@@ -163,16 +199,17 @@ class Engine:
         if method == "refresh_definitions":
             if not self.finished.is_set():
                 raise ValueError("Wait for the current import or definition update to finish.")
+            generation = self.job.generation
             self.finished.clear()
-            self.job = JobState(active=True, kind="definitions", generation=self.job.generation)
+            self._job = JobState(active=True, kind="definitions", generation=generation)
             def update() -> None:
                 try:
                     refresh_definitions()
                 except Exception as error:
-                    self.job.error = f"{type(error).__name__}: {error}"
+                    self._job.error = f"{type(error).__name__}: {error}"
                 finally:
-                    self.job.active = False
-                    self.job.generation += 1
+                    self._job.active = False
+                    self._job.generation += 1
                     self.finished.set()
             Thread(target=update, name="rust-definitions", daemon=True).start()
             return True

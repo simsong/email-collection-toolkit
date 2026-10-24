@@ -113,6 +113,8 @@ def test_completed_import_retains_success_when_directory_preference_fails(tmp_pa
     engine.start(IngestRequest(archive=archive, roots=[str(source)], owner_rules=OwnerRules(include=["alice@example.test"]),
                                scan_policy="not-scanned"))
     assert engine.finished.wait(60)
+    # Completion data remains private to its future until the owner consumes it.
+    assert engine._job.active and engine._job.generation == 0
     assert engine.job.error is None
     assert engine.job.warning and engine.job.warning.startswith("Import completed, but the source directory could not be saved:")
     assert not engine.job.active and engine.job.generation == 1

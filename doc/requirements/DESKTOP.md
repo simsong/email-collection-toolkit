@@ -688,3 +688,8 @@ and bounded shutdown; native UI marshaling and source-preservation rules remain.
 
 Track startup export cleanup with an application future. The named future shares command admission, error collection
 and bounded shutdown; native UI marshaling and source-preservation rules remain.
+
+The retained private archive adapter returns typed import outcomes to its protocol
+owner. Workers do not publish shared job status; generation changes once when the
+owner consumes completion, preserving errors, warnings, lease release and owner
+pipe-loss cancellation. This does not restore support for the retired Rust GUI.

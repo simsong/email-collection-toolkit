@@ -44,6 +44,8 @@ platform or release gate has passed. [Future work](plans/README.md) is separate.
   with `make test-frozen-source-plugins` before packaging handoff.
 - Source workers retain thread-bound input handles and return publication requests
   through futures; only their owner commits durable state. See [acquisition](requirements/ACQUISITION.md).
+- The retained private archive adapter publishes typed import future results on
+  its protocol owner, keeping owner-death supervision independent.
 - Preview workers return tracked results; current-generation GUI polling alone
   updates preview caches. See [desktop](requirements/DESKTOP.md).
 - Original IMAP folder labels decode percent escapes once while retaining stored

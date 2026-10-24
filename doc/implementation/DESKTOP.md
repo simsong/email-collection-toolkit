@@ -888,3 +888,9 @@ and bounded shutdown; native UI marshaling and source-preservation rules remain.
 
 Track startup export cleanup with an application future. The named future shares command admission, error collection
 and bounded shutdown; native UI marshaling and source-preservation rules remain.
+
+The private adapter uses a one-worker executor and retains a typed `JobOutcome`
+future. Its owner consumes completion before serializing status or admitting the
+next operation; the finished signal remains available to its independent owner
+watcher. `make test-rust-engine` now runs lint/type gates before real protocol,
+publication, warning and writer-exclusion tests.
