@@ -29,7 +29,7 @@ from mailarchiver.processing.builtin import ClamAVProcessor, FilingProcessor
 from mailarchiver.processing.contracts import MailboxReference, ProcessingPolicy, SourceMetadata
 from mailarchiver.processing.production import ProductionPipeline
 from mailarchiver.processing.registry import fingerprint, load_processors
-from mailarchiver.processing.runtime import InvocationRequest, RANK_FAILURE, invoke, run
+from mailarchiver.processing.runtime import InvocationRequest, RANK_FAILURE, dispatch, invoke, run
 from mailarchiver.processing.store import connect, content_reference, enqueue, snapshot, submit
 from mailarchiver.scan_evidence import ScanEvidence, ScanFailure, ScanStatus
 from mailarchiver.scanner import ClamScanner
@@ -135,8 +135,8 @@ def test_processor_scan_deadline_is_recorded_without_blocking_filing(tmp_path: P
     """SCANNING: a real dispatcher deadline retains its failed audit but completes the ingest job."""
     raw = HEADER + b"\r\ndeadline fixture\r\n"
     archive, _source = ingest(tmp_path, raw)
-    catalog = sqlite3.connect(archive / "archive.sqlite3", check_same_thread=False)
-    search = sqlite3.connect(archive / "search.sqlite3", check_same_thread=False)
+    catalog = sqlite3.connect(archive / "archive.sqlite3")
+    search = sqlite3.connect(archive / "search.sqlite3")
 
     def no_publication(_source: MailObject, _parsed: ParsedMessage, _mailbox: MailboxReference, _file: int) -> int:
         raise AssertionError("An already preserved message must not be republished")
@@ -154,8 +154,9 @@ def test_processor_scan_deadline_is_recorded_without_blocking_filing(tmp_path: P
         assert accepted.filing is not None and accepted.filing.mailbox is not None and accepted.filing.mailbox.category == "INFECTED"
         with pipeline.database:
             enqueue(pipeline.database, root.model_copy(update={"generation": "deadline-fixture", "pipeline": "ingest"}), pipeline.registry_hash)
-        with ThreadPoolExecutor(max_workers=1) as pool:
-            pool.submit(pipeline.resume_ingest).result(timeout=10)
+        # Native invocation runs in the pool; durable state stays on this owner.
+        dispatch(pipeline.database, pipeline.plugins, pipelines=("ingest", "message"),
+                 services=pipeline, workers=2)
         response = pipeline.database.execute("SELECT result_json FROM invocations WHERE kind='clamav' AND status='failed'").fetchone()
         assert response is not None and InvocationResponse.model_validate_json(response[0]).timed_out
         assert pipeline.database.execute("SELECT scan_status FROM message_state").fetchone() == ("scanner-error",)

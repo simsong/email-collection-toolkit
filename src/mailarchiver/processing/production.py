@@ -62,7 +62,8 @@ class IngestedMessage(BaseModel):
 class ProductionPipeline:
     def __init__(self, archive: Path, catalog: sqlite3.Connection, search: sqlite3.Connection,
                  policy: ProcessingPolicy, publish: Publisher, *, plugin_dirs: tuple[Path, ...] = (),
-                 installation_config: Path | None = None, cancelled: Callable[[], None] | None = None) -> None:
+                 installation_config: Path | None = None, cancelled: Callable[[], None] | None = None,
+                 heartbeat: Callable[[], None] | None = None) -> None:
         self.archive = archive.resolve()
         self.catalog = catalog
         self.search = search
@@ -70,6 +71,7 @@ class ProductionPipeline:
         self.publisher = publish
         self.installation_config = installation_config
         self.cancelled = cancelled
+        self.heartbeat = heartbeat
         self._ingesting = False
         self.plugins = load_processors((builtin_plugin_directory(), *plugin_dirs))
         self.registry_hash = fingerprint(self.plugins)
@@ -230,7 +232,7 @@ class ProductionPipeline:
             self.release(str(row[0]))
 
     def _finish_ingest_message(self, message_id: str, *, progress: ProcessingProgress | None = None) -> None:
-        # The host serializes ingest calls under its publication lock. Finish
+        # The owner-thread coordinator serializes ingest calls. Finish
         # this message before honoring cooperative Quit; processor deadlines
         # still apply, and GUI termination has its own five-second hard limit.
         cancelled, self.cancelled = self.cancelled, None
@@ -239,7 +241,7 @@ class ProductionPipeline:
             failures: list[Exception] = []
             dispatch(self.database, self.plugins, pipelines=("ingest", "message"),
                      installation_config=self.installation_config, services=self, failures=failures, message_id=message_id,
-                     progress=progress)
+                     progress=progress, heartbeat=self.heartbeat)
             self._raise_failures(("ingest", "message"), failures)
         finally:
             self.cancelled = cancelled
@@ -250,7 +252,7 @@ class ProductionPipeline:
         failures: list[Exception] = []
         result = run(self.database, self.plugins, retry=True, pipelines=pipelines, max_jobs=max_jobs,
                      installation_config=self.installation_config, services=self, cancelled=self.cancelled, failures=failures,
-                     message_id=message_id, continue_after_failure=not fail_on_error, progress=progress, workers=workers)
+                     message_id=message_id, continue_after_failure=not fail_on_error, progress=progress, workers=workers, heartbeat=self.heartbeat)
         if fail_on_error:
             self._raise_failures(pipelines, failures)
         return result

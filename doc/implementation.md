@@ -40,6 +40,8 @@ platform or release gate has passed. [Future work](plans/README.md) is separate.
 
 - Freeze all manifest-referenced acquisition adapters; validate local ingestion
   with `make test-frozen-source-plugins` before packaging handoff.
+- Source ingestion uses owner-thread completion futures instead of a shared
+  publication mutex; see [acquisition](implementation/ACQUISITION.md).
 - GUI preview polls collect typed future results and discard obsolete generations;
   see [desktop](implementation/DESKTOP.md).
 - Original-mailbox trees unquote IMAP display components once, preserving filter

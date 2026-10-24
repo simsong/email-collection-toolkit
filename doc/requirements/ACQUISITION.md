@@ -329,3 +329,12 @@ The independent Rust tools retain their requirements above: preserve hash-select
 bytes, borrow unchanged MIME text, bound transfer-decoder storage and batch
 quoted-printable output. Embedded messages may require retained decoded content.
 Tests must establish exact bytes, malformed-input behavior and bounded callbacks.
+
+## Owner-thread source publication
+
+Source pool threads retain each source iterator and thread-bound input handles.
+They submit typed publication operations as tracked futures; the owning driver
+alone mutates shared catalog, processing and search state and publishes
+MBOX checkpoints. Driver failure releases every queued waiter before joining
+workers. Progress retains the originating worker identity, and processor waits
+continue publishing status heartbeats. No publication mutex is needed.

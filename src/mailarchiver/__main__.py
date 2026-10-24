@@ -47,6 +47,7 @@ from pydantic import BaseModel, Field
 from tabulate import tabulate
 
 from .scan_evidence import ScanEvidence, ScanFailure
+from .future_coordinator import FutureCoordinator, WORKER_NUMBER
 from .archive_integrity import MailbagArchiveIntegrityControls
 from .archive_path import add_archive_argument, require_archive
 from .contacts import contacts, load_owner_addresses, print_contacts
@@ -688,6 +689,8 @@ class ProgressReporter:
 
     @staticmethod
     def _worker_number() -> int:
+        if (number := WORKER_NUMBER.get()) is not None:
+            return number
         name = threading.current_thread().name
         match = re.fullmatch(r"mailfile_(\d+)", name)
         if match is None:
@@ -1011,6 +1014,7 @@ def run_file_workers[WorkerItem](
     status_driver: Callable[[], None],
     concurrency: Callable[[WorkerItem], tuple[str, int | None]] | None = None,
     on_interrupt: Callable[[], None] | None = None,
+    coordinator: FutureCoordinator | None = None,
 ) -> None:
     """Run framework workers with optional source-declared per-key concurrency limits."""
     iterator = iter(items)
@@ -1021,6 +1025,14 @@ def run_file_workers[WorkerItem](
     lookahead = max(worker_count * 4, worker_count)
     exhausted = False
     discovery_error: tuple[BaseException, TracebackType | None] | None = None
+
+    def invoke(item: WorkerItem) -> None:
+        token = WORKER_NUMBER.set(ProgressReporter._worker_number())
+        try:
+            process(item)
+        finally:
+            WORKER_NUMBER.reset(token)
+
     try:
         while pending or waiting_items or not exhausted:
             if stop.is_set():
@@ -1059,18 +1071,22 @@ def run_file_workers[WorkerItem](
                 item, key, _limit = selected
                 if key is not None:
                     active[key] += 1
-                pending[pool.submit(process, item)] = key
+                pending[pool.submit(invoke, item)] = key
             if not pending:
                 if exhausted:
                     break
                 continue
             completed, _unfinished = wait(
-                pending.keys(),
+                (*pending, coordinator.ready) if coordinator is not None else pending.keys(),
                 timeout=PROGRESS_REFRESH_SECONDS,
                 return_when=FIRST_COMPLETED,
             )
+            if coordinator is not None:
+                coordinator.drain()
             status_driver()
             for future in completed:
+                if future not in pending:
+                    continue
                 key = pending.pop(future)
                 try:
                     future.result()
@@ -1082,6 +1098,8 @@ def run_file_workers[WorkerItem](
             raise error.with_traceback(traceback)
     except BaseException as error:
         stop.set()
+        if coordinator is not None:
+            coordinator.abort(error)
         for future in pending:
             future.cancel()
         if isinstance(error, KeyboardInterrupt) and on_interrupt is not None:
@@ -1101,7 +1119,7 @@ def open_ingest_search(
     """Open the disposable index, rebuilding an obsolete layout before ingest."""
     path = archive / "search.sqlite3"
     try:
-        search = create_search(path, check_same_thread=False)
+        search = create_search(path, check_same_thread=True)
     except UnsupportedSearchSchemaError as error:
         print(f"rebuilding obsolete search index: {error}", file=sys.stderr)
         recovery_path = archive / "search.sqlite3.recovery.tmp"
@@ -1113,7 +1131,7 @@ def open_ingest_search(
             recovery_search.close()
             recovery_path.unlink(missing_ok=True)
         rebuild_search_index(archive, index_attachments, writer_lease=writer_lease)
-        return create_search(path, check_same_thread=False), recovery
+        return create_search(path, check_same_thread=True), recovery
     try:
         return search, recover_publication(archive, catalog, search)
     except BaseException:
@@ -1266,7 +1284,7 @@ def _run_ingest(request: IngestRequest, writer_lease: WriterLease, outcome: Inge
         root=archive,
     )
     archive_integrity = MailbagArchiveIntegrityControls()
-    catalog = create_catalog(catalog_path, check_same_thread=False)
+    catalog = create_catalog(catalog_path, check_same_thread=True)
     if any(plugin.manifest.kind == "imap" for _spec, plugin in selected_sources):
         initialize_state(catalog)
         catalog.commit()
@@ -1337,7 +1355,7 @@ def _run_ingest(request: IngestRequest, writer_lease: WriterLease, outcome: Inge
     progress.scan_policy = request.scan_policy
     source_file_pks: dict[tuple[str, str, str], int] = {}
     source_volume_pks: dict[str, int] = {}
-    publication_lock = threading.RLock()
+    coordinator = FutureCoordinator()
     stop = threading.Event()
 
     def check_interrupted() -> None:
@@ -1661,7 +1679,7 @@ def _run_ingest(request: IngestRequest, writer_lease: WriterLease, outcome: Inge
                 ),
                 None,
             )
-        with publication_lock:
+        def publish_checkpoint() -> None:
             record_integrity_evidence(integrity_check_pk, evidence)
             catalog.execute(
                 "UPDATE source_integrity_checks SET subject_id = ?, completed_at = ? WHERE integrity_check_pk = ?",
@@ -1680,6 +1698,7 @@ def _run_ingest(request: IngestRequest, writer_lease: WriterLease, outcome: Inge
                 ),
             )
             catalog.commit()
+        coordinator.call(publish_checkpoint)
         progress.record_file_complete(path, progress_length)
 
     def archive_scanned(candidate: PendingScan, target: MailboxReference) -> int:
@@ -1762,6 +1781,42 @@ def _run_ingest(request: IngestRequest, writer_lease: WriterLease, outcome: Inge
             progress.record(parsed, source)
         return archive_scanned(PendingScan(source=source, parsed=parsed), target)
 
+    def publish_source(source: MailObject, metadata: SourceMetadata) -> ParsedMessage:
+        assert pipeline is not None
+        try:
+            decision = pipeline.ingest(source, metadata)
+        except RuntimeError as error:
+            cause = error.__cause__ or error
+            observe(source, "error", f"{type(cause).__name__}: {cause}", hashlib.sha256(source.raw).hexdigest())
+            catalog.commit()
+            raise
+        parsed = decision.parsed
+        progress.record(parsed, source)
+        if decision.excluded:
+            observe(source, "autosave-excluded", "X-Apple-Auto-Saved", parsed.sha256)
+            progress.record_disposition("autosave-excluded")
+        elif decision.duplicate:
+            observe(source, "duplicate", "same Message-ID and SHA-256", parsed.sha256, decision.message_pk)
+            progress.record_disposition("duplicate")
+        catalog.commit()
+        pipeline.release(parsed.sha256)
+        return parsed
+
+    def publish_observation(observation: SourceObservation) -> None:
+        refresh_observation(catalog, observation)
+        catalog.commit()
+
+    def publish_exclusion(source: MailObject, digest: str) -> None:
+        assert source.exclusion_reason is not None
+        observe(source, "source-metadata-excluded", source.exclusion_reason, digest)
+        catalog.commit()
+
+    def register_container(work: ContainerWork) -> tuple[int, tuple[IntegrityEvidence, ...]]:
+        source_file_pk = register_source_file(work)
+        prior = prior_source_evidence(source_file_pk, work.plugin.implementation.integrity_controls.control_id)
+        catalog.commit()
+        return source_file_pk, prior
+
     def ingest_container(work: ContainerWork) -> None:
         source_plugin = work.plugin.implementation
         source_file = local_source_file(work)
@@ -1774,16 +1829,11 @@ def _run_ingest(request: IngestRequest, writer_lease: WriterLease, outcome: Inge
             if stop.is_set():
                 return
             progress.record_worker("checking", display_path, 0, byte_length)
-            controls = source_plugin.integrity_controls
-            with publication_lock:
-                source_file_pk = register_source_file(work)
-                prior = prior_source_evidence(source_file_pk, controls.control_id)
-                catalog.commit()
+            source_file_pk, prior = coordinator.call(partial(register_container, work))
             progress.record_file(display_path, 0, byte_length)
             integrity_result = evaluate_integrity(work, prior)
             decision = integrity_result.decision
-            with publication_lock:
-                integrity_check_pk = begin_integrity_check(source_file_pk, work, integrity_result)
+            integrity_check_pk = coordinator.call(partial(begin_integrity_check, source_file_pk, work, integrity_result))
             if stop.is_set():
                 return
             if decision.action == "skip":
@@ -1799,13 +1849,12 @@ def _run_ingest(request: IngestRequest, writer_lease: WriterLease, outcome: Inge
                 except ValueError:
                     numeric_resume = None
             if numeric_resume is not None:
-                with publication_lock:
-                    row = catalog.execute(
+                row = coordinator.call(lambda: catalog.execute(
                         "SELECT messages.date_utc FROM observations JOIN messages USING (message_pk) "
                         "JOIN source_files USING (source_file_pk) WHERE source_file_pk = ? AND source_offset < ? "
                         "ORDER BY source_offset DESC LIMIT 1",
                         (source_file_pk, numeric_resume),
-                    ).fetchone()
+                    ).fetchone())
                 if row is not None:
                     prior_date = datetime.fromisoformat(row[0])
 
@@ -1832,9 +1881,7 @@ def _run_ingest(request: IngestRequest, writer_lease: WriterLease, outcome: Inge
                 if isinstance(item, SourceObservation):
                     if item.work_id != work.container.work_id or item.source != work.container.source:
                         raise RuntimeError("Provider observation belongs to the wrong container")
-                    with publication_lock:
-                        refresh_observation(catalog, item)
-                        catalog.commit()
+                    coordinator.call(partial(publish_observation, item))
                     continue
                 source = item
                 if source.work_id != work.container.work_id or source.source != work.container.source:
@@ -1845,9 +1892,7 @@ def _run_ingest(request: IngestRequest, writer_lease: WriterLease, outcome: Inge
                 progress.record_source(source)
                 if source.exclusion_reason is not None:
                     digest = hashlib.sha256(raw).hexdigest()
-                    with publication_lock:
-                        observe(source, "source-metadata-excluded", source.exclusion_reason, digest)
-                        catalog.commit()
+                    coordinator.call(partial(publish_exclusion, source, digest))
                     progress.record_disposition("source-metadata-excluded")
                     continue
                 if pipeline is None:
@@ -1857,8 +1902,7 @@ def _run_ingest(request: IngestRequest, writer_lease: WriterLease, outcome: Inge
                 evidence = None
                 if request.scan_policy == "clamav" and source.scan_responsibility == "host":
                     digest = hashlib.sha256(raw).hexdigest()
-                    with publication_lock:
-                        archived = catalog.execute("SELECT 1 FROM messages WHERE sha256=?", (digest,)).fetchone() is not None
+                    archived = coordinator.call(lambda: catalog.execute("SELECT 1 FROM messages WHERE sha256=?", (digest,)).fetchone() is not None)
                     if not archived:
                         if scanner_failure is not None:
                             evidence = scanner_failure
@@ -1883,25 +1927,8 @@ def _run_ingest(request: IngestRequest, writer_lease: WriterLease, outcome: Inge
                     scan_session=scanner.session if scanner is not None and evidence is not None else None,
                     scan_responsibility=source.scan_responsibility,
                     provider_metadata_json=source.provider_metadata_json)
-                with publication_lock:
-                    try:
-                        decision = pipeline.ingest(source, metadata)
-                    except RuntimeError as error:
-                        cause = error.__cause__ or error
-                        observe(source, "error", f"{type(cause).__name__}: {cause}", hashlib.sha256(raw).hexdigest())
-                        catalog.commit()
-                        raise
-                    parsed = decision.parsed
-                    prior_date = datetime.fromisoformat(parsed.date_utc)
-                    progress.record(parsed, source)
-                    if decision.excluded:
-                        observe(source, "autosave-excluded", "X-Apple-Auto-Saved", parsed.sha256)
-                        progress.record_disposition("autosave-excluded")
-                    elif decision.duplicate:
-                        observe(source, "duplicate", "same Message-ID and SHA-256", parsed.sha256, decision.message_pk)
-                        progress.record_disposition("duplicate")
-                    catalog.commit()
-                    pipeline.release(parsed.sha256)
+                parsed = coordinator.call(partial(publish_source, source, metadata))
+                prior_date = datetime.fromisoformat(parsed.date_utc)
 
             check_interrupted()
             if stop.is_set():
@@ -2048,7 +2075,7 @@ def _run_ingest(request: IngestRequest, writer_lease: WriterLease, outcome: Inge
             scan_policy=request.scan_policy,
             scanner_session=scanner.session if scanner is not None else None, scanner_failure=scanner_failure),
             publish_processed, plugin_dirs=tuple(request.plugin_dir), installation_config=request.installation_config,
-            cancelled=check_processor_cancelled)
+            cancelled=check_processor_cancelled, heartbeat=progress.refresh)
         with pipeline.database:
             saved_request = request.model_copy(update={"owner_rules": owners, "owner_names_file": None,
                 "plugin_dir": [path.resolve() for path in request.plugin_dir],
@@ -2062,8 +2089,9 @@ def _run_ingest(request: IngestRequest, writer_lease: WriterLease, outcome: Inge
         def process_content(_unused: int, *, fail_on_error: bool = True) -> None:
             assert pipeline is not None
             try:
-                pipeline.resume(("message", "content"), max_jobs=request.max_content_jobs, fail_on_error=fail_on_error,
-                                progress=progress.record_processing, workers=request.workers)
+                coordinator.call(partial(pipeline.resume, ("message", "content"), max_jobs=request.max_content_jobs,
+                                         fail_on_error=fail_on_error, progress=progress.record_processing,
+                                         workers=request.workers))
             finally:
                 progress.finish_processing()
         if request.continue_ingest and request.continue_content and request.max_content_jobs is None:
@@ -2071,16 +2099,16 @@ def _run_ingest(request: IngestRequest, writer_lease: WriterLease, outcome: Inge
             # roots; a new source/scanner failure must not starve this work.
             progress.set_phase("recovering archived content")
             run_file_workers([0], 1, partial(process_content, fail_on_error=False), stop, refresh_import,
-                             on_interrupt=progress.announce_interrupt)
+                             on_interrupt=progress.announce_interrupt, coordinator=coordinator)
         if request.continue_ingest:
             progress.set_phase("recovering pending imports")
             def resume_ingest(_unused: int) -> None:
                 assert pipeline is not None
                 try:
-                    pipeline.resume_ingest(progress=progress.record_processing)
+                    coordinator.call(partial(pipeline.resume_ingest, progress=progress.record_processing))
                 finally:
                     progress.finish_processing()
-            run_file_workers([0], 1, resume_ingest, stop, refresh_import, on_interrupt=progress.announce_interrupt)
+            run_file_workers([0], 1, resume_ingest, stop, refresh_import, on_interrupt=progress.announce_interrupt, coordinator=coordinator)
         progress.set_phase("checking sources")
         run_file_workers(
             snapshotted_containers(),
@@ -2093,11 +2121,12 @@ def _run_ingest(request: IngestRequest, writer_lease: WriterLease, outcome: Inge
                 work.plugin.implementation.capabilities.max_concurrency,
             ),
             on_interrupt=progress.announce_interrupt,
+            coordinator=coordinator,
         )
         check_interrupted()
         if request.continue_content:
             progress.set_phase("processing content")
-            run_file_workers([0], 1, process_content, stop, refresh_import, on_interrupt=progress.announce_interrupt)
+            run_file_workers([0], 1, process_content, stop, refresh_import, on_interrupt=progress.announce_interrupt, coordinator=coordinator)
         catalog.commit()
         search.commit()
         succeeded = True

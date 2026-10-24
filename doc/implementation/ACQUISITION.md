@@ -660,3 +660,14 @@ The generator produces a deterministic 7bit text MIME part with a counter and
 From-like lines. No h4 is introduced; comparison uses h3 and exact fixity h2.
 Rust is required to build the PST importer; released packages will
 bundle its native executable without requiring users to install Rust.
+
+## Owner-thread source publication
+
+`FutureCoordinator` retains typed owner operations and result futures, preserving
+worker context. A notification future wakes `run_file_workers` immediately; the
+driver consumes operations and returns results/errors while source iterators stay
+on their original worker. Catalog, processing and search connections keep SQLite thread
+checks enabled. Recovery/content phases use the same owner publication boundary;
+processor dispatch calls the driver heartbeat while waiting for native workers.
+`make test-source-coordination` verifies real SQLite thread ownership, abort
+release, source concurrency, real IMAP ingestion and current-message interruption.

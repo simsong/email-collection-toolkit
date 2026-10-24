@@ -792,10 +792,10 @@ checkpoint. Evidence is stored in `source_integrity_checks` and
 while provider version tokens, immutable identifiers, cursors, and metadata
 must not claim a hash algorithm.
 
-The framework consumes `complete()` outside the publication lock, forwarding
+The source worker consumes `complete()` before owner-thread publication, forwarding
 each `ProgressEvent` as it is yielded. This permits source hashing or provider
 I/O to proceed independently across workers. After the generator finishes and
-its evidence is validated, the framework acquires the publication lock only to
+its evidence is validated, a tracked future asks the owner thread to
 persist the final evidence and completed checkpoint atomically.
 
 The local source control calculates complete and prefix SHA-256 evidence. A

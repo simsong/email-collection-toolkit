@@ -59,7 +59,7 @@ def connect(archive: Path, *, create: bool = False, production: bool = False) ->
             replace_file(temporary, path)
         finally:
             temporary.unlink(missing_ok=True)
-    database = sqlite3.connect(path, check_same_thread=not production)
+    database = sqlite3.connect(path)
     try:
         database.execute("PRAGMA foreign_keys=ON")
         require_processing_schema(database)

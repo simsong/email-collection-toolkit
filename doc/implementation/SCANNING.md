@@ -40,7 +40,7 @@ drains accepted work after the shutdown sentinel. `make test-clamav` exercises
 clean, infected and error responses with more callers than scan workers, plus
 a saturated duplex-pipe stress case in a subprocess with an external deadline.
 Parent request serialization uses a separate lock from pending-result state,
-so blocked sends cannot prevent result delivery or session termination. Source workers scan before the publication lock,
+so blocked sends cannot prevent result delivery or session termination. Source workers scan before owner-thread publication,
 and Python records results in the existing processing database. Rust adds
 X-ClamAV-Detection, X-ClamAV-Engine-Version, and X-ClamAV-Definitions-Version
 only to infected messages. Python reads those headers to quarantine the emitted

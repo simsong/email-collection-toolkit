@@ -6,6 +6,12 @@ Entries describe their recorded revisions. For current behavior use the
 [user manual](USER_MANUAL.md) and [CLI reference](CLI_REFERENCE.md). Retired
 Rust delivery plans and historical package checks are not current acceptance.
 
+## Source publication futures
+
+Source workers retain their input handles and request publication through
+tracked futures. One owner now commits catalog/index/MBOX state without a
+publication mutex, preserving per-source ordering and cooperative interruption.
+
 ## Tracked preview results
 
 GUI preview workers return values; request/poll coordination applies current

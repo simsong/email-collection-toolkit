@@ -46,8 +46,8 @@ recorded in THIRD_PARTY_NOTICES.md.
 * Host ingestion shares one compiled engine across native scan threads.
   A temporary app-owned worker provides startup/scan deadlines; it exposes no
   persistent service or socket. Python records scan results through the existing
-  processing database. Source workers scan outside
-  the publication lock; canonical MBOX publication stays serialized.
+  processing database. Source workers scan before
+  owner-thread publication; canonical MBOX publication stays serialized.
 * API producers perform antivirus scanning themselves. Only infected messages
   carry `X-ClamAV-Detection`, `X-ClamAV-Engine-Version`, and
   `X-ClamAV-Definitions-Version` headers. Python reads the detection header to

@@ -278,7 +278,8 @@ def run(database: sqlite3.Connection, plugins: tuple[PluginSpec, ...], *, retry:
         pipelines: tuple[Pipeline, ...] = ("ingest", "message", "content"),
         services: ProcessorServices | None = None, cancelled: Callable[[], None] | None = None,
         failures: list[Exception] | None = None, message_id: str | None = None,
-        continue_after_failure: bool = False, progress: ProcessingProgress | None = None, workers: int = 1) -> RunReport:
+        continue_after_failure: bool = False, progress: ProcessingProgress | None = None, workers: int = 1,
+        heartbeat: Callable[[], None] | None = None) -> RunReport:
     """Caller holds the archive writer lease. Atomic output release follows each barrier."""
     if workers < 1:
         raise ValueError("processing workers must be positive")
@@ -286,7 +287,7 @@ def run(database: sqlite3.Connection, plugins: tuple[PluginSpec, ...], *, retry:
     try:
         dispatch(database, plugins, max_jobs=max_jobs, installation_config=installation_config,
                  pipelines=pipelines, services=services, cancelled=cancelled, failures=failures, message_id=message_id,
-                 continue_after_failure=continue_after_failure, progress=progress, workers=workers)
+                 continue_after_failure=continue_after_failure, progress=progress, workers=workers, heartbeat=heartbeat)
     finally:
         if services is None:
             # Production owns cleanup after canonical publication/checkpointing;
@@ -314,7 +315,8 @@ def dispatch(database: sqlite3.Connection, plugins: tuple[PluginSpec, ...], *,
         pipelines: tuple[Pipeline, ...] = ("ingest", "message", "content"),
         services: ProcessorServices | None = None, cancelled: Callable[[], None] | None = None,
         failures: list[Exception] | None = None, message_id: str | None = None,
-        continue_after_failure: bool = False, progress: ProcessingProgress | None = None, workers: int = 1) -> None:
+        continue_after_failure: bool = False, progress: ProcessingProgress | None = None, workers: int = 1,
+        heartbeat: Callable[[], None] | None = None) -> None:
     """Workers return results; this coordinator alone advances jobs and commits SQL."""
     if workers < 1:
         raise ValueError("processing workers must be positive")
@@ -385,7 +387,10 @@ def dispatch(database: sqlite3.Connection, plugins: tuple[PluginSpec, ...], *,
                         advance(job)
                     if not active:
                         break
-                    completed, _pending = wait([job.future for job in active if job.future is not None], return_when=FIRST_COMPLETED)
+                    completed, _pending = wait([job.future for job in active if job.future is not None],
+                                               timeout=0.25 if heartbeat is not None else None, return_when=FIRST_COMPLETED)
+                    if heartbeat is not None:
+                        heartbeat()
                     for job in tuple(active):
                         if job.future is None or job.future not in completed:
                             continue

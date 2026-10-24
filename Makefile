@@ -647,6 +647,16 @@ test-refresh-index:
 test-ingest-recovery:
 	uv run --locked pytest -q tests/test_ingest_recovery.py tests/test_end_to_end.py::test_clamav_startup_failure_records_error_and_continues
 
+.PHONY: test-source-coordination
+SOURCE_COORDINATION_CHECK_FILES = src/mailarchiver/future_coordinator.py src/mailarchiver/__main__.py \
+	src/mailarchiver/processing/runtime.py src/mailarchiver/processing/production.py src/mailarchiver/processing/store.py tests/test_future_coordinator.py
+SOURCE_COORDINATION_TESTS ?= tests/test_future_coordinator.py tests/test_progress.py tests/test_end_to_end.py tests/test_ingest_recovery.py tests/test_sources.py tests/test_source_integrity.py tests/test_imap.py tests/test_quit_import.py
+test-source-coordination: ruff
+	uv run --locked pylint $(SOURCE_COORDINATION_CHECK_FILES)
+	uv run --locked ty check $(SOURCE_COORDINATION_CHECK_FILES) --error-on-warning
+	uv run --locked pyright $(SOURCE_COORDINATION_CHECK_FILES) --warnings
+	uv run --locked pytest -q $(SOURCE_COORDINATION_TESTS)
+
 test-headers:
 	uv run pytest -q tests/test_message.py tests/test_search.py
 
