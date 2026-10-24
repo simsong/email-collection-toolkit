@@ -877,17 +877,10 @@ deadline. The independent watchdog, export cleanup and quit waiter remain outsid
 this pool. `make test-quit` covers pool saturation, queued import cancellation,
 visible command failure, and unchanged recovery and process-exit bounds.
 
-Track Cocoa archive-open callbacks with command futures. The named future shares command admission, error collection
-and bounded shutdown; native UI marshaling and source-preservation rules remain.
-
-Track Cocoa About-window commands with futures. The named future shares command admission, error collection
-and bounded shutdown; native UI marshaling and source-preservation rules remain.
-
-Track Cocoa Setup-window commands with futures. The named future shares command admission, error collection
-and bounded shutdown; native UI marshaling and source-preservation rules remain.
-
-Track startup export cleanup with an application future. The named future shares command admission, error collection
-and bounded shutdown; native UI marshaling and source-preservation rules remain.
+Cocoa Open, About and Setup commands and startup export cleanup share named
+futures, command admission, error collection and bounded shutdown. Native UI
+marshaling and source-preservation rules remain. Dedicated-thread exceptions
+are documented in the [threading audit](../THREADING.md).
 
 The private adapter uses a one-worker executor and retains a typed `JobOutcome`
 future. Its owner consumes completion before serializing status or admitting the

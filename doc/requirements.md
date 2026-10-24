@@ -75,10 +75,8 @@ platform or release gate has passed. [Future work](plans/README.md) is separate.
 
 - GUI imports use tracked futures; queued imports cancel safely on Quit,
   retaining restartable work. See [desktop](requirements/DESKTOP.md).
-- Track Cocoa archive-open callbacks with command futures; see [desktop](requirements/DESKTOP.md).
-- Track Cocoa About-window commands with futures; see [desktop](requirements/DESKTOP.md).
-- Track Cocoa Setup-window commands with futures; see [desktop](requirements/DESKTOP.md).
-- Track startup export cleanup with an application future; see [desktop](requirements/DESKTOP.md).
+- Cocoa Open/About/Setup commands and startup export cleanup use tracked futures;
+  see [desktop](requirements/DESKTOP.md) and the [threading audit](THREADING.md).
 - Confirmed Quit offers **Suspend import and quit** and dims loaded windows with
   a Shutting down notice; see [desktop shutdown](requirements/DESKTOP.md#shutdown-feedback).
 - Desktop recovery requires an informed Continue Import/defer/abort choice, and collapsed

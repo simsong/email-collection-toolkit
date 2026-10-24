@@ -677,17 +677,10 @@ imports without starting processing and releases their writer leases; running
 imports retain cooperative cancellation and the shared five-second deadline.
 Watchdogs and shutdown cleanup never depend on available command-pool capacity.
 
-Track Cocoa archive-open callbacks with command futures. The named future shares command admission, error collection
-and bounded shutdown; native UI marshaling and source-preservation rules remain.
-
-Track Cocoa About-window commands with futures. The named future shares command admission, error collection
-and bounded shutdown; native UI marshaling and source-preservation rules remain.
-
-Track Cocoa Setup-window commands with futures. The named future shares command admission, error collection
-and bounded shutdown; native UI marshaling and source-preservation rules remain.
-
-Track startup export cleanup with an application future. The named future shares command admission, error collection
-and bounded shutdown; native UI marshaling and source-preservation rules remain.
+Cocoa Open, About and Setup commands and startup export cleanup share named
+futures, command admission, error collection and bounded shutdown. Native UI
+marshaling and source-preservation rules remain. Dedicated-thread exceptions
+are documented in the [threading audit](../THREADING.md).
 
 The retained private archive adapter returns typed import and definition-update outcomes to its protocol
 owner. Workers do not publish shared job status; generation changes once when the

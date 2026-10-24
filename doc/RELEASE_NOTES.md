@@ -17,13 +17,9 @@ Desktop imports now retain executor futures. Quit cancels
 queued imports, releases their leases and preserves resumable work; unexpected
 command errors become visible application notices.
 
-Track Cocoa archive-open callbacks with command futures.
-
-Track Cocoa About-window commands with futures.
-
-Track Cocoa Setup-window commands with futures.
-
-Track startup export cleanup with an application future.
+Cocoa Open, About and Setup commands and startup export cleanup use the same
+tracked executor. Watchdogs, readers and service loops retain independent threads;
+see the [threading audit](THREADING.md).
 
 ## Source publication futures
 
