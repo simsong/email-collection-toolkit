@@ -69,7 +69,7 @@ from .archive_config import (
     remember_import_directory,
 )
 from .plugin_api import PluginManifest
-from .gui_processing import abort_processing, picker_page, picker_search, PickerSearchRequest, registered_acquisition_plugins, registered_processors, resume_request, save_identity, source_label, unfinished_work
+from .gui_processing import abort_processing, picker_page, picker_search, PickerSearchRequest, plugin_inventory, resume_request, save_identity, source_label, unfinished_work
 from .processing.api import ProcessorManifest
 from .processing.identities import IdentityFilter, IdentityMessages, ManualDecision
 from .gui_service import (
@@ -237,6 +237,7 @@ class AboutIngestStatus(BaseModel):
 class AboutStatus(BaseModel):
     acquisition_plugins: list[PluginManifest] = Field(default_factory=list)
     processors: list[ProcessorManifest] = Field(default_factory=list)
+    plugin_inventory_error: str | None = None
     metadata: ApplicationMetadata
     disk_path: str
     disk_free_bytes: int
@@ -1742,6 +1743,7 @@ class PyWebViewApplication:
                     status=latest_ingest_status(document.path),
                 )
             )
+        inventory = plugin_inventory(active.path if active else None)
         return AboutStatus(
             metadata=application_metadata(),
             disk_path=str(disk_path),
@@ -1750,8 +1752,9 @@ class PyWebViewApplication:
             notices=self.notices(),
             ingests=ingests,
             antivirus=scanner_availability(),
-            processors=registered_processors(active.path if active else None),
-            acquisition_plugins=registered_acquisition_plugins(active.path if active else None),
+            processors=inventory.processors,
+            acquisition_plugins=inventory.acquisition_plugins,
+            plugin_inventory_error=inventory.error,
         )
 
     def create_search_window(self, session: SearchWindow, *, parameters: list[tuple[str, str]] | None = None) -> GuiApi:

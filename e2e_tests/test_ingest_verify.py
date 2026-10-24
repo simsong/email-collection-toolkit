@@ -18,6 +18,7 @@ import sqlite3
 import subprocess
 import sys
 import time
+from contextlib import closing
 from pathlib import Path
 
 import pytest
@@ -42,6 +43,7 @@ from mailarchiver.gui_app import (
 )
 from mailarchiver.gui_service import MessageView, PartContent, SearchPage, write_message
 from mailarchiver.reader_fixture import inventory
+from mailarchiver.processing.store import connect as connect_processing
 from mailarchiver.search import index_message
 from mailarchiver.standalone_verify import INSTALLED_NAME
 
@@ -330,6 +332,18 @@ def test_about_window_displays_version_disk_and_warnings(tmp_path: Path, page: P
     for plugin in inventory.acquisition_plugins:
         expect(page.locator("#acquisition-plugins")).to_contain_text(f"{plugin.name} ({plugin.kind}) version {plugin.implementation_version}")
     assert {plugin.plugin_type for plugin in inventory.acquisition_plugins} == {"source", "file"}
+    assert first.path is not None
+    with closing(connect_processing(first.path, create=True, production=True)) as writer:
+        writer.execute("BEGIN EXCLUSIVE")
+        expect(page.locator("#plugin-inventory-error")).to_contain_text("archive is busy")
+        expect(page.locator("#plugin-inventory-error")).to_be_visible()
+        expect(page.locator("#error")).to_be_hidden()
+        assert "available on" in page.locator("#disk").inner_text()
+        assert "invalid" in page.locator("#notices").inner_text()
+        writer.rollback()
+    expect(page.locator("#plugin-inventory-error")).to_be_hidden()
+    expect(page.locator("#processors")).to_contain_text("clamav")
+    expect(page.locator("#acquisition-plugins")).to_contain_text(inventory.acquisition_plugins[0].name)
 
 
 def test_gui_import_uses_typed_ingest_service_without_a_subprocess(tmp_path: Path) -> None:

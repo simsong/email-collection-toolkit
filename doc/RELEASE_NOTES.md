@@ -6,6 +6,12 @@ Entries describe their recorded revisions. For current behavior use the
 [user manual](USER_MANUAL.md) and [CLI reference](CLI_REFERENCE.md). Retired
 Rust delivery plans and historical package checks are not current acceptance.
 
+## About status during imports
+
+An import writer's database lock no longer aborts the entire About status poll.
+Plugin inventories show a temporary retry message while other status remains
+available, then reload the archive's saved plugin configuration after the lock clears.
+
 ## Experimental Rust UI removed
 
 Preserve the October 10, 2026 retirement snapshot with signed tag

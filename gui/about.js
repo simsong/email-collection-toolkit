@@ -45,6 +45,8 @@ function render(status) {
     : "Unavailable";
   byId("definition-warning").hidden = !av?.warning;
   byId("definition-warning").textContent = av?.warning || "";
+  byId("plugin-inventory-error").hidden = !status.plugin_inventory_error;
+  byId("plugin-inventory-error").textContent = status.plugin_inventory_error || "";
   const types = [...new Set((status.processors || []).flatMap(plugin => plugin.subscribes))].sort();
   byId("processors").replaceChildren(...types.map(type => {
     const group = document.createElement("div");

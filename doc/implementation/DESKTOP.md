@@ -244,6 +244,11 @@ probe exercises dismissal, background updates, and explicit menu reopening.
 excluding public controller and window object graphs. About allows the same
 dynamic bridge generation as the other pages, retries bridge readiness, polls
 status each second, and clears stale errors after successful refresh.
+About reads saved plugin roots once for both inventories, using a 50 ms SQLite
+busy timeout. Only `SQLITE_BUSY`/`SQLITE_LOCKED` defer the inventory with an
+explicit retry message; disk, scanner, notices and ingest status still return.
+The next poll reloads the full saved registry, including custom plugins, rather
+than substituting bundled defaults. Other database errors remain visible.
 Archive Open validates schema metadata without `PRAGMA quick_check`, which
 previously scanned multi-gigabyte databases before opening any window. Existing
 extensionless directories remain accepted. `make check-archive-open ARCHIVE=...`

@@ -228,6 +228,9 @@ free space on the active archive's filesystem (or the user's home filesystem),
 live Internet reachability, startup errors, warnings, and each open archive's
 latest ingest status.
 About populates through the real native status bridge and polls once per second.
+An import writer's SQLite lock must not fail the whole status response. About
+bounds its plugin-settings lock wait to 50 ms, marks both inventories temporarily
+unavailable, and retries on the next poll without hiding other database errors.
 Its script policy must permit pywebview's dynamic bridge functions, as the search
 and ingest pages do. A delayed bridge retries and clears its warning on recovery.
 Only explicitly selected window methods are exposed to JavaScript; application

@@ -19,6 +19,9 @@ platform or release gate has passed. [Future work](plans/README.md) is separate.
 
 ## Shared boundaries
 
+- About shares one bounded plugin-settings read and defers only busy inventories;
+  see [desktop](implementation/DESKTOP.md).
+
 - Reader/scanner acceptance reuses the stronger existing checks and Make targets;
   legacy MBOX cases share setup. See [validation](implementation/VALIDATION.md#shared-acceptance-coverage).
 

@@ -78,8 +78,8 @@ class ProcessingWork(BaseModel):
 
 
 @contextmanager
-def connection(archive: Path) -> Iterator[sqlite3.Connection]:
-    with closing(sqlite3.connect(sqlite_uri(archive / DATABASE), uri=True)) as database:
+def connection(archive: Path, *, timeout: float = 5.0) -> Iterator[sqlite3.Connection]:
+    with closing(sqlite3.connect(sqlite_uri(archive / DATABASE), uri=True, timeout=timeout)) as database:
         yield database
 
 
@@ -186,10 +186,10 @@ def resume_request(archive: Path, ingest: bool, content: bool) -> IngestRequest:
                                       "max_content_jobs": None, "reprocess": False})
 
 
-def _plugin_roots(archive: Path | None) -> list[Path]:
+def _plugin_roots(archive: Path | None, *, timeout: float = 5.0) -> list[Path]:
     roots = [builtin_plugin_directory()]
     if archive is not None and (archive / DATABASE).is_file():
-        with connection(archive) as database:
+        with connection(archive, timeout=timeout) as database:
             row = database.execute("SELECT value FROM processing_settings WHERE name='request'").fetchone()
         if row:
             roots.extend(IngestRequest.model_validate_json(row[0]).plugin_dir)
@@ -202,6 +202,24 @@ def registered_processors(archive: Path | None = None) -> list[ProcessorManifest
 
 def registered_acquisition_plugins(archive: Path | None = None) -> list[PluginManifest]:
     return list(discover_manifests(_plugin_roots(archive)))
+
+
+class PluginInventory(BaseModel):
+    processors: list[ProcessorManifest] = Field(default_factory=list)
+    acquisition_plugins: list[PluginManifest] = Field(default_factory=list)
+    error: str | None = None
+
+
+def plugin_inventory(archive: Path | None) -> PluginInventory:
+    """Read both About inventories together without waiting for the import writer."""
+    try:
+        roots = _plugin_roots(archive, timeout=0.05)
+    except sqlite3.OperationalError as error:
+        if error.sqlite_errorcode & 0xFF not in (sqlite3.SQLITE_BUSY, sqlite3.SQLITE_LOCKED):
+            raise
+        return PluginInventory(error="Plugin inventory temporarily unavailable while the archive is busy. Retrying…")
+    return PluginInventory(processors=[plugin.manifest for plugin in load_processors(tuple(roots))],
+                           acquisition_plugins=list(discover_manifests(roots)))
 
 
 class PickerGroup(BaseModel):

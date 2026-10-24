@@ -19,6 +19,9 @@ platform or release gate has passed. [Future work](plans/README.md) is separate.
 
 ## Shared boundaries
 
+- About status remains available during import writer locks; plugin inventory
+  retries separately. See [desktop](requirements/DESKTOP.md).
+
 - Shared test acceptance retains reader preservation, scanner API/platform
   boundaries and all legacy MBOX recovery cases; see [validation](requirements/VALIDATION.md#shared-acceptance-coverage).
 

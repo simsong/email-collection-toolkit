@@ -8,6 +8,7 @@ import os
 from collections.abc import Callable
 from pathlib import Path
 from threading import Barrier, Event
+from time import monotonic
 from datetime import UTC, datetime, timedelta
 
 import pytest
@@ -16,7 +17,7 @@ from mailarchiver.__main__ import IngestRequest, run_ingest
 from mailarchiver.application import ApplicationController, ApplicationPreferencesStore
 from mailarchiver.document_options import DocumentOptions
 from mailarchiver.gui_app import GuiApi, GuiIngestHistory, IdentityPickerApi, IngestWindowApi, PyWebViewApplication
-from mailarchiver.gui_processing import PickerPage, PickerSearch, abort_processing, registered_processors, resume_request, unfinished_work
+from mailarchiver.gui_processing import PickerPage, PickerSearch, abort_processing, plugin_inventory, registered_processors, resume_request, unfinished_work
 from mailarchiver.ingest_status import IngestCounts, IngestStatusFile, read_ingest_history
 from mailarchiver.archive_config import load_archive_config, save_archive_config
 from mailarchiver.imap_models import ImapAccount
@@ -130,7 +131,7 @@ def test_picker_edits_filters_unique_counts_and_replay(tmp_path: Path) -> None:
 
 
 def test_gui_resume_retains_custom_processors_and_installation_configuration(tmp_path: Path) -> None:
-    """A GUI continuation must use the original plugin registry and fused installation settings."""
+    """Desktop: About survives writer locks; continuation retains the saved plugin registry."""
     from mailarchiver.archive_config import load_archive_config
 
     plugins = tmp_path / "plugins"
@@ -165,6 +166,19 @@ class Processor:
     source.unlink()
     app, api = open_headless(archive, tmp_path / "preferences.json")
     try:
+        with sqlite3.connect(archive / "processing.sqlite3") as writer:
+            writer.execute("BEGIN EXCLUSIVE")
+            started = monotonic()
+            busy = app.about_status()
+            assert monotonic() - started < 1, "About must not wait for the import writer"
+            assert "busy" in str(busy.plugin_inventory_error)
+            assert busy.disk_path == str(archive)
+            assert not busy.processors and not busy.acquisition_plugins
+            writer.rollback()
+        ready = app.about_status()
+        assert ready.plugin_inventory_error is None
+        assert any(plugin.kind == "gui-proof" for plugin in ready.processors)
+        assert {plugin.plugin_type for plugin in ready.acquisition_plugins} == {"source", "file"}
         assert api.resume_processing(False, True)
         wait_for_import(api)
         assert not any(notice.severity == "error" for notice in app.notices()), app.notices()
@@ -173,6 +187,14 @@ class Processor:
         assert any(plugin.kind == "gui-proof" for plugin in app.about_status().processors)
     finally:
         api.close()
+
+
+def test_plugin_inventory_does_not_hide_database_errors(tmp_path: Path) -> None:
+    """Desktop: only transient writer contention may defer the About plugin inventory."""
+    with sqlite3.connect(tmp_path / "processing.sqlite3") as database:
+        database.execute("CREATE TABLE unrelated(value TEXT)")
+    with pytest.raises(sqlite3.OperationalError, match="no such table: processing_settings"):
+        plugin_inventory(tmp_path)
 
 
 def test_content_only_quit_is_nonblocking_and_leaves_resumable_work(tmp_path: Path) -> None:
