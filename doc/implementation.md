@@ -41,7 +41,8 @@ platform or release gate has passed. [Future work](plans/README.md) is separate.
 - Freeze all manifest-referenced acquisition adapters; validate local ingestion
   with `make test-frozen-source-plugins` before packaging handoff.
 - Source ingestion uses owner-thread completion futures instead of a shared
-  publication mutex; see [acquisition](implementation/ACQUISITION.md).
+  publication mutex; one-worker processor futures keep its heartbeat live.
+  See [acquisition](implementation/ACQUISITION.md).
 - The private archive adapter collects typed import and definition-update outcomes before serializing
   job state; see [desktop](implementation/DESKTOP.md).
 - GUI preview polls collect typed future results and discard obsolete generations;

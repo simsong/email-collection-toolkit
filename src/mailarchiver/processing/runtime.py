@@ -328,7 +328,7 @@ def dispatch(database: sqlite3.Connection, plugins: tuple[PluginSpec, ...], *,
     failure: BaseException | None = None
     with tempfile.TemporaryDirectory(prefix="processing-") as directory:
         try:
-            with ThreadPoolExecutor(max_workers=workers) if workers > 1 else nullcontext() as pool:
+            with ThreadPoolExecutor(max_workers=workers) if workers > 1 or heartbeat is not None else nullcontext() as pool:
                 def advance(job: ActiveJob, response: InvocationResponse | None = None,
                             error: BaseException | None = None) -> None:
                     nonlocal stopped, failure

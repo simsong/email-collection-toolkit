@@ -157,6 +157,15 @@ entrypoint="plugin:create_plugin"
         while not (tmp_path / "entered").exists() and worker.is_alive() and monotonic() < deadline:
             sleep(0.01)
         assert (tmp_path / "entered").exists(), errors
+        # Source publication owns SQL, but a blocked processor must not prevent
+        # its coordinator from refreshing the GUI-visible status heartbeat.
+        before = read_ingest_history(archive).statuses[0]
+        deadline = monotonic() + 3
+        while (current := read_ingest_history(archive).statuses[0]).updated_at <= before.updated_at:
+            assert worker.is_alive(), errors
+            assert monotonic() < deadline, "Active processor blocked the status heartbeat"
+            sleep(0.01)
+        assert current.state == "running"
         stop.set()
         sleep(0.1)  # The processor actively checks cancellation during this interval.
         (tmp_path / "release").touch()

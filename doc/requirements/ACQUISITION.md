@@ -337,4 +337,5 @@ They submit typed publication operations as tracked futures; the owning driver
 alone mutates shared catalog, processing and search state and publishes
 MBOX checkpoints. Driver failure releases every queued waiter before joining
 workers. Progress retains the originating worker identity, and processor waits
-continue publishing status heartbeats. No publication mutex is needed.
+continue publishing status heartbeats, including one-worker message dispatch.
+No publication mutex is needed.

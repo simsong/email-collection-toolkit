@@ -669,5 +669,7 @@ driver consumes operations and returns results/errors while source iterators sta
 on their original worker. Catalog, processing and search connections keep SQLite thread
 checks enabled. Recovery/content phases use the same owner publication boundary;
 processor dispatch calls the driver heartbeat while waiting for native workers.
+A heartbeat-enabled one-worker dispatch also invokes processors through a retained
+future; only the standalone harness without a heartbeat may invoke inline.
 `make test-source-coordination` verifies real SQLite thread ownership, abort
 release, source concurrency, real IMAP ingestion and current-message interruption.

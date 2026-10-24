@@ -26,6 +26,8 @@ see the [threading audit](THREADING.md).
 Source workers retain their input handles and request publication through
 tracked futures. One owner now commits catalog/index/MBOX state without a
 publication mutex, preserving per-source ordering and cooperative interruption.
+Single-worker processor waits keep status updates live instead of falsely
+reporting a lost heartbeat.
 
 ## Tracked preview results
 
