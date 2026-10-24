@@ -679,3 +679,6 @@ Watchdogs and shutdown cleanup never depend on available command-pool capacity.
 
 Track Cocoa archive-open callbacks with command futures. The named future shares command admission, error collection
 and bounded shutdown; native UI marshaling and source-preservation rules remain.
+
+Track Cocoa About-window commands with futures. The named future shares command admission, error collection
+and bounded shutdown; native UI marshaling and source-preservation rules remain.

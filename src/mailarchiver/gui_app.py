@@ -2930,7 +2930,7 @@ def install_macos_document_events(application: PyWebViewApplication) -> None:
             application.updates.check()
 
         def showMailArchiverAbout_(self, _sender):
-            Thread(target=application.create_about_window, name="mailarchiver-about", daemon=True).start()
+            application._submit_task("About window", application.create_about_window)
 
         def applicationShouldHandleReopen_hasVisibleWindows_(self, _sender, _visible):
             if macos_option_pressed():

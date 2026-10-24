@@ -14,6 +14,8 @@ command errors become visible application notices.
 
 Track Cocoa archive-open callbacks with command futures.
 
+Track Cocoa About-window commands with futures.
+
 ## Source publication futures
 
 Source workers retain their input handles and request publication through
