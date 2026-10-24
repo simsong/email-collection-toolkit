@@ -670,3 +670,9 @@ navigation with purpose-made archives.
 Preview workers return results without mutating window state. GUI preview requests
 and polls consume completed futures, reject obsolete archive generations, surface
 reader failures and allow retry. Closing prevents new preview submissions.
+
+Application imports use retained futures. Application polling
+consumes unexpected command failures into visible notices. Quit cancels queued
+imports without starting processing and releases their writer leases; running
+imports retain cooperative cancellation and the shared five-second deadline.
+Watchdogs and shutdown cleanup never depend on available command-pool capacity.

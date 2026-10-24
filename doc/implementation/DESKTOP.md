@@ -868,3 +868,11 @@ preview lock; invalidation cancels queued obsolete work. Running obsolete result
 are consumed without publishing or clearing newer pending IDs. `make test-gui`
 uses real SQLite locking, archive replacement and missing-index failures to verify
 these boundaries without replacing the preview reader.
+
+An eight-worker application executor retains named import futures. Status/notice
+polls consume completed results and errors. Import futures remain tracked through
+worker tails; cancellation of a queued import closes its controller job and lease.
+Quit stops admission, cancels queued work and waits on futures under the existing
+deadline. The independent watchdog, export cleanup and quit waiter remain outside
+this pool. `make test-quit` covers pool saturation, queued import cancellation,
+visible command failure, and unchanged recovery and process-exit bounds.

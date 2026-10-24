@@ -75,9 +75,9 @@ def start_job(app: PyWebViewApplication, root: Path, number: int, blocked: bool)
             app.controller.finish_ingest(document.descriptor.document_id, job.operation_id, published=False)
             job.finished.set()
 
-    worker = Thread(target=work, daemon=False)
-    app._import_threads.append(worker)
-    worker.start()
+    worker = app._submit_task("Quit fixture import", work)
+    assert worker is not None
+    app._import_futures.add(worker)
     assert entered.wait(10)
 
 

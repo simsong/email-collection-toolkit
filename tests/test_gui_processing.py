@@ -7,7 +7,7 @@ from email.header import Header
 import os
 from collections.abc import Callable
 from pathlib import Path
-from threading import Event
+from threading import Barrier, Event
 from datetime import UTC, datetime, timedelta
 
 import pytest
@@ -505,3 +505,54 @@ def test_phone_processor_trims_replies_before_selecting_sender_signature(tmp_pat
         owner_rules=OwnerRules(include=['owner@example.test'])),terminal=False)
     group=PickerPage.model_validate(IdentityPickerApi(archive,'name').query({'mailbox':'sender'})).groups[0]
     assert [phone.normalized for phone in group.phone_numbers]==['+16175550102']
+
+
+def test_quit_cancels_queued_import_and_releases_its_lease(tmp_path: Path) -> None:
+    """Desktop futures: accepted but queued work must never begin after Quit."""
+    archive = build_deferred_archive(tmp_path)
+    exited, release = Event(), Event()
+    app, api = open_headless(archive, tmp_path / "preferences.json", exit_process=lambda _code: exited.set())
+    occupied = Barrier(9)
+
+    def block() -> None:
+        occupied.wait(timeout=5)
+        release.wait(10)
+
+    try:
+        for _ in range(8):
+            assert app._submit_task("occupied command", block) is not None
+        occupied.wait(timeout=5)
+        before = unfinished_work(archive)
+        assert api.resume_processing(False, True)
+        assert api.document is not None and api.document.ingest_job is not None
+        job = api.document.ingest_job
+        app.request_quit(confirm_ingest=False)
+        assert job.finished.wait(2)
+        assert api.document.ingest_job is None
+        assert unfinished_work(archive) == before
+        with WriterLease.acquire(archive, str(archive), "verify canceled future", "fixture", "test"):
+            pass
+        release.set()
+        assert exited.wait(3)
+    finally:
+        release.set()
+        app.shutdown()
+        api.close()
+
+
+def test_background_command_failure_is_observed_in_application_notices(tmp_path: Path) -> None:
+    """Desktop futures: finite command exceptions are consumed and visible to the application."""
+    app = PyWebViewApplication(ApplicationController(ApplicationPreferencesStore(tmp_path / "preferences.json")))
+
+    def fail() -> None:
+        raise ValueError("command fixture")
+
+    try:
+        future = app._submit_task("Fixture command", fail)
+        assert future is not None
+        with pytest.raises(ValueError, match="command fixture"):
+            future.result(timeout=2)
+        assert any(notice.severity == "error" and "Fixture command failed" in notice.message for notice in app.notices())
+        assert future not in app._tasks
+    finally:
+        app.shutdown()

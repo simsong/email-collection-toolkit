@@ -27,7 +27,7 @@ import signal
 import sys
 import tempfile
 import time
-from concurrent.futures import Future, ThreadPoolExecutor
+from concurrent.futures import CancelledError, Future, ThreadPoolExecutor
 from contextlib import contextmanager, nullcontext
 from collections.abc import Callable, Iterator
 from datetime import UTC, datetime
@@ -881,6 +881,8 @@ class GuiApi:
         return self.application.open_picker(self.document, kind)
 
     def ingest_overview(self) -> dict[str, Any]:
+        if self.application is not None:
+            self.application._reap_tasks()
         status = latest_ingest_status(self._archive()) if self.archive and _is_archive(self.archive) else None
         active = bool(self.document and self.document.ingest_job) or bool(status and status.state == "running")
         return GuiIngestOverview(status=status, active=active).model_dump(mode="json")
@@ -1501,7 +1503,9 @@ class PyWebViewApplication:
         self._lock = RLock()
         self._quitting = False
         self._quit_done = Event()
-        self._import_threads: list[Thread] = []
+        self._task_executor = ThreadPoolExecutor(max_workers=8, thread_name_prefix="mailarchiver-command")
+        self._tasks: dict[Future[None], str] = {}
+        self._import_futures: set[Future[None]] = set()
         self._writers: set[Event] = set()
         self._updates_started = False
         self._updating = False
@@ -1513,6 +1517,27 @@ class PyWebViewApplication:
                          automatic_checks=controller.preferences.automatic_update_checks),
             self.reserve_update_install, self.cancel_update_install, self.notify_update_deferred,
         )
+
+    def _submit_task(self, name: str, operation: Callable[[], None]) -> Future[None] | None:
+        """Retain finite command futures; deadline/owner monitors remain independent."""
+        with self._lock:
+            if self._quitting:
+                return None
+            future = self._task_executor.submit(operation)
+            self._tasks[future] = name
+            return future
+
+    def _reap_tasks(self) -> None:
+        with self._lock:
+            completed = [(future, self._tasks.pop(future)) for future in tuple(self._tasks) if future.done()]
+            self._import_futures.difference_update(future for future, _name in completed)
+        for future, name in completed:
+            try:
+                future.result()
+            except CancelledError:
+                pass
+            except BaseException as error:  # pylint: disable=broad-exception-caught
+                self.add_notice("error", f"{name} failed: {type(error).__name__}: {error}")
 
     @contextmanager
     def writer_activity(self) -> Iterator[None]:
@@ -1536,7 +1561,7 @@ class PyWebViewApplication:
                 return False
             if any(document.ingest_job for document in self.controller.documents()):
                 return False
-            if any(worker.is_alive() for worker in self._import_threads):
+            if any(not future.done() for future in self._import_futures):
                 return False
             if not WriterLease.reserve_update():
                 return False
@@ -1567,7 +1592,7 @@ class PyWebViewApplication:
         if self._sparkle is not None:
             self.add_notice("information", detail)
             if (self._definition_updates or any(document.ingest_job for document in self.controller.documents())
-                    or any(worker.is_alive() for worker in self._import_threads) or WriterLease.writers_active()):
+                    or any(not future.done() for future in self._import_futures) or WriterLease.writers_active()):
                 macos_alert("Update ready — archive work is active", detail, ("Wait for work to finish",))
 
     def start_updates(self) -> None:
@@ -1687,6 +1712,7 @@ class PyWebViewApplication:
                     api.window.run_js(f"window.mailArchiverNotice?.({json.dumps(message)});")
 
     def notices(self) -> list[ApplicationNotice]:
+        self._reap_tasks()
         with self._lock:
             return [notice.model_copy(deep=True) for notice in self._notices]
 
@@ -2049,15 +2075,29 @@ class PyWebViewApplication:
             finally:
                 job.finished.set()
 
-        worker = Thread(
-            target=import_worker,
-            name=f"mailarchiver-import-{operation_id[:8]}",
-            daemon=False,
-        )
+        def cancelled(future: Future[None]) -> None:
+            if future.cancelled():
+                try:
+                    self.controller.finish_ingest(document.descriptor.document_id, operation_id, published=False)
+                except ValueError:
+                    pass
+                finally:
+                    lease.release()
+                    job.finished.set()
+
         with self._lock:
-            self._import_threads = [thread for thread in self._import_threads if thread.is_alive()]
-            self._import_threads.append(worker)
-            worker.start()
+            try:
+                future = self._submit_task(f"Import for {document.display_path}", import_worker)
+                if future is None:
+                    self.controller.finish_ingest(document.descriptor.document_id, operation_id, published=False)
+                    job.finished.set()
+                    return False
+                self._import_futures.add(future)
+                future.add_done_callback(cancelled)
+            except BaseException:
+                self.controller.finish_ingest(document.descriptor.document_id, operation_id, published=False)
+                job.finished.set()
+                raise
         return True
 
     def stop_imports_for_quit(self) -> tuple[IngestJob, ...]:
@@ -2067,6 +2107,8 @@ class PyWebViewApplication:
             jobs = tuple(job for document in self.controller.documents() if (job := document.ingest_job) is not None)
             for job in jobs:
                 job.stop.set()
+            for future in tuple(self._import_futures):
+                future.cancel()
             return jobs
 
     def _run_import(
@@ -2441,9 +2483,13 @@ class PyWebViewApplication:
         ):
             return False
         with self._lock:
-            workers = tuple(self._import_threads)
+            workers = tuple(self._import_futures)
         for worker in workers:
-            worker.join()
+            try:
+                worker.result()
+            except BaseException:  # pylint: disable=broad-exception-caught
+                logging.getLogger(__name__).debug("Background import ended while closing", exc_info=True)
+        self._reap_tasks()
         return self.controller.can_close_window(window_id)
 
     def has_active_ingest(self) -> bool:
@@ -2494,13 +2540,14 @@ class PyWebViewApplication:
             Thread(target=self._show_shutdown, name="mailarchiver-shutdown-display", daemon=True).start()
         jobs = self.stop_imports_for_quit()
         with self._lock:
-            workers = tuple(self._import_threads)
+            workers = tuple(self._tasks)
             writers = tuple(self._writers)
             apis = tuple(self._apis.values())
         if not update_install and self.updates.status.phase in {"deferred", "installing"}:
             # Sparkle owns termination/relaunch and may still cancel installation.
             return
-        if not jobs and not writers and not apis and not any(worker.is_alive() for worker in workers):
+        self._task_executor.shutdown(wait=False, cancel_futures=True)
+        if not jobs and not writers and not apis and all(worker.done() for worker in workers):
             exit_if_allowed()
             return
 
@@ -2521,7 +2568,10 @@ class PyWebViewApplication:
             for job in jobs:
                 job.finished.wait(max(0.0, deadline - time.monotonic()))
             for worker in workers:
-                worker.join(max(0.0, deadline - time.monotonic()))
+                try:
+                    worker.result(timeout=max(0.0, deadline - time.monotonic()))
+                except BaseException:  # pylint: disable=broad-exception-caught
+                    logging.getLogger(__name__).debug("Background command ended during Quit", exc_info=True)
             cleaned.wait(max(0.0, deadline - time.monotonic()))
             # Do not acquire application/UI locks or enter interpreter finalization:
             # a stuck callback must not defeat the single shared quit deadline.
@@ -2566,9 +2616,14 @@ class PyWebViewApplication:
         """Release non-document resources after the native event loop exits."""
         self.stop_imports_for_quit()
         with self._lock:
-            workers = tuple(self._import_threads)
+            workers = tuple(self._import_futures)
+        self._task_executor.shutdown(wait=False, cancel_futures=True)
         for worker in workers:
-            worker.join()
+            try:
+                worker.result()
+            except BaseException:  # pylint: disable=broad-exception-caught
+                logging.getLogger(__name__).debug("Background import ended during shutdown", exc_info=True)
+        self._reap_tasks()
         if sys.platform == "darwin" and self._menu_observer is not None:
             from Foundation import NSNotificationCenter  # pylint: disable=import-outside-toplevel,no-name-in-module,import-error
             NSNotificationCenter.defaultCenter().removeObserver_(self._menu_observer)

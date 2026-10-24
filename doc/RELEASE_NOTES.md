@@ -6,6 +6,12 @@ Entries describe their recorded revisions. For current behavior use the
 [user manual](USER_MANUAL.md) and [CLI reference](CLI_REFERENCE.md). Retired
 Rust delivery plans and historical package checks are not current acceptance.
 
+## Tracked desktop imports
+
+Desktop imports now retain executor futures. Quit cancels
+queued imports, releases their leases and preserves resumable work; unexpected
+command errors become visible application notices.
+
 ## Source publication futures
 
 Source workers retain their input handles and request publication through

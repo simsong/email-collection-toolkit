@@ -71,6 +71,8 @@ platform or release gate has passed. [Future work](plans/README.md) is separate.
   Name rows display observed signature phones, with multiple numbers expandable.
   See [desktop navigation](requirements/DESKTOP.md#identity-picker-navigation).
 
+- GUI imports use tracked futures; queued imports cancel safely on Quit,
+  retaining restartable work. See [desktop](requirements/DESKTOP.md).
 - Confirmed Quit offers **Suspend import and quit** and dims loaded windows with
   a Shutting down notice; see [desktop shutdown](requirements/DESKTOP.md#shutdown-feedback).
 - Desktop recovery requires an informed Continue Import/defer/abort choice, and collapsed
