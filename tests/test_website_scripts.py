@@ -177,12 +177,10 @@ def test_ci_runs_parallel_branch_jobs_without_building_a_dmg() -> None:
     makefile = (workflow.parents[2] / "Makefile").read_text(encoding="utf-8")
     assert "check:\n\t$(MAKE) check-static\n\t$(MAKE) check-tests" in makefile
     for definition in workflow.parent.glob("*.yml"):
-        if definition.name in {"rust-reader.yml", "windows-msix.yml"}:
+        if definition.name == "windows-msix.yml":
             continue  # Its explicit multi-platform build matrix is checked below.
         configuration = safe_load(definition.read_text())
-        for name, job in configuration[JOBS].items():
-            if definition == workflow and name == "rust-gui":
-                continue  # The explicit macos-latest matrix is checked above.
+        for job in configuration[JOBS].values():
             assert job.get(RUNS_ON) == "macos-15" or "uses" in job, definition
 
 
@@ -234,7 +232,7 @@ def test_retired_reader_is_not_a_release_dependency() -> None:
         assert "mailsearch-rust" not in text
         assert "rust-reader.yml" not in text
         assert "test-rust-gui-native" not in text
-    assert (root / "rust/mailsearch-gui/ci/rust-reader.yml").is_file()
+    assert not (root / "rust/mailsearch-gui").exists()
 
 
 def test_release_workflow_validates_built_distributions() -> None:

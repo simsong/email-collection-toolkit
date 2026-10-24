@@ -624,9 +624,9 @@ Release assembly verifies the annotated tag's type, package version, and
 ancestry on `main` before installing project dependencies, building artifacts,
 or executing their entry points. Tag/version validation must not install the
 project itself. A shared identity preflight must succeed before either the
-macOS packaging job or the cross-platform Rust reader matrix starts.
+macOS or Windows packaging job starts.
 Preflight must check out the triggering commit, rejecting a tag that has moved
-instead of validating a different revision from the Rust build.
+instead of validating a different revision from the package build.
 Pages deploys on every `main` push and after a tagged release
 publishes, using the release run's signed appcast rather than a release-list
 query for that new asset; the two deployment paths are serialized.
@@ -681,8 +681,3 @@ Cocoa Open, About and Setup commands and startup export cleanup share named
 futures, command admission, error collection and bounded shutdown. Native UI
 marshaling and source-preservation rules remain. Dedicated-thread exceptions
 are documented in the [threading audit](../THREADING.md).
-
-The retained private archive adapter returns typed import and definition-update outcomes to its protocol
-owner. Workers do not publish shared job status; generation changes once when the
-owner consumes completion, preserving errors, warnings, lease release and owner
-pipe-loss cancellation. This does not restore support for the retired Rust GUI.

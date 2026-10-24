@@ -479,13 +479,11 @@ uses `observations_message_pk`, so multiple source observations provide union
 semantics without duplicating a canonical result. Hiding the explorer sends no
 selection while retaining its browser state. Versioned Pydantic filter sets
 are fsynced to a temporary file and atomically replaced in the platform's
-per-user preferences directory; the archive is never written. Both Python
-`FilterSetStore` and Rust `browse::filters` acquire the persistent `.lock`
+per-user preferences directory; the archive is never written. Python
+`FilterSetStore` acquires the persistent `.lock`
 companion before loading for save/rename/delete and hold it through replacement.
-Unix uses `flock`; Windows locks overlap on byte zero (Rust `File::lock`, Python
-`msvcrt.locking`). Closing releases ownership; the lock file is never removed.
-Read-only listing reads a complete published JSON snapshot. Real Rust RPC and
-Python subprocess tests hold the shared lock, publish an intervening baseline,
+Unix uses `flock`; Windows locks byte zero with `msvcrt.locking`. Closing releases ownership; the lock file is never removed.
+Read-only listing reads a complete published JSON snapshot. Real Python subprocess tests hold the shared lock, publish an intervening baseline,
 then verify that save, rename and delete retain all expected changes and leave
 archive bytes unchanged.
 
@@ -685,14 +683,6 @@ MSIX execution. [PYTHON_WEBVIEW.md](../PYTHON_WEBVIEW.md) tracks actual validati
 and outstanding native/signing gates; earlier Rust packaging evidence is not
 evidence for this Python payload.
 
-## Compiled desktop UI trials (retired)
-
-[RUST_GUI_EXPERIMENTS.md](../RUST_GUI_EXPERIMENTS.md) recorded planned Dioxus Desktop and Tauri trials; the
-Rust/Wry desktop migration that followed was retired on 2026-10-10 (see
-[the retrospective](../RUST_GUI_EXPERIMENTS.md)). `PyWebViewApplication`, `WindowBridge`,
-HTML/JavaScript and PyInstaller sections describe the current application on
-macOS and Windows.
-
 ## Windows development setup
 
 [WINDOWS.md](../WINDOWS.md) describes building and running the x64 Python/WebView2
@@ -790,24 +780,6 @@ it acquires the writer lease, rejects database/sidecar symlinks and hardlinks,
 opens the existing database read-write for rollback, and repeats validation.
 This also checks and recovers the optional `processing.sqlite3`, without creating
 or migrating it, before the GUI reads pending work or the saved resume request.
-The Rust webview creates its window before opening. Its dedicated `opening.html`
-page sends `opening_start` to the worker; `opening::open` first uses read-only
-Rust validation. Only `SQLITE_READONLY_ROLLBACK` starts the private Python helper
-for the existing lease-protected recovery above. Invalid and busy databases are
-opening failures, not implicit repair requests. Open and Open Recent launch this
-same path instead of recovering invisibly in the caller.
-The page announces "Recovery in progress…" and uses `performance.now()` for an
-elapsed counter, with no percentage or estimated completion time. Helper startup
-and recovery poll replies while checking an atomic Abort flag, without a fixed
-wall-clock cutoff. Abort is handled directly on the native event loop, independent
-of the busy worker; it closes the owner pipe and applies the existing five-second
-supervisor shutdown. SQLite remains responsible for its journals. Success must
-pass Rust validation again before publishing a reader. Abort or failure leaves
-the opening page visible with Close; a later Open probes afresh. Recent-document
-registration and archive actions occur only after validation, and the opening
-origin has a narrow IPC allowlist. `--opening-rpc` exposes this same worker for
-the real `make test-rust-recovery` SQLite/Chromium acceptance, without a native
-window or simulated recovery replies.
 Processing validation requires the complete V2 table set. New processing databases
 are initialized transactionally in a private sibling file and renamed into place
 only after closing the complete schema; interruption before publication can leave
@@ -881,13 +853,3 @@ Cocoa Open, About and Setup commands and startup export cleanup share named
 futures, command admission, error collection and bounded shutdown. Native UI
 marshaling and source-preservation rules remain. Dedicated-thread exceptions
 are documented in the [threading audit](../THREADING.md).
-
-The private adapter uses a one-worker executor and retains a typed `JobOutcome`
-future. Its owner consumes completion before serializing status or admitting the
-next operation; the finished signal remains available to its independent owner
-watcher. `make test-rust-engine` now runs lint/type gates before real protocol,
-publication, warning and writer-exclusion tests.
-
-Definition updates use the same retained future and owner-collected status. The
-real updater failure regression uses an isolated invalid cache path, verifying
-error retention and exactly one generation increment without network access.

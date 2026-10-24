@@ -45,8 +45,9 @@ platform or release gate has passed. [Future work](plans/README.md) is separate.
 - Source workers retain thread-bound input handles and return publication requests
   through futures; only their owner commits durable state. Single-worker processor
   waits retain live status heartbeats. See [acquisition](requirements/ACQUISITION.md).
-- The retained private archive adapter publishes typed import and definition-update future results on
-  its protocol owner, keeping owner-death supervision independent.
+- The experimental Rust UI, helper and obsolete build/test paths are removed from
+  the active checkout. The signed `experimental-rust-ui` tag preserves the
+  October 10, 2026 retirement snapshot; see the [archive note](RUST_GUI_EXPERIMENTS.md).
 - Preview workers return tracked results; current-generation GUI polling alone
   updates preview caches. See [desktop](requirements/DESKTOP.md).
 - Original IMAP folder labels decode percent escapes once while retaining stored

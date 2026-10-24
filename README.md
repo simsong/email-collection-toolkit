@@ -73,13 +73,14 @@ imports into archives through the shared Python engine; it is an alpha (publishe
 builds so far are test-signed; release workflows now require Microsoft public
 signing), and PST/OST converters are not yet packaged for Windows.
 
-The Rust GUI migration is retired. Its source remains in
-[`rust/mailsearch-gui`](rust/mailsearch-gui) outside the supported Cargo workspace.
-The historical GUI Make targets stop with a retirement message. See the detailed
-[migration retrospective](doc/RUST_GUI_EXPERIMENTS.md) for what was tried, measured limitations,
-lessons and the last compiling snapshot. Independent Rust importer, verifier,
-PST and MIME tools remain supported. `RUSTUP_TOOLCHAIN` can explicitly override
-the checkout's compiler; `rust-toolchain.toml` selects Rust 1.99 for these tools.
+The experimental Rust UI was retired on October 10, 2026 and removed from the
+active source tree, along with its helper and build/test paths. The signed
+[`experimental-rust-ui` tag](https://github.com/simsong/email-collection-toolkit/tree/experimental-rust-ui)
+and [`codex/experimental-rust-ui` branch](https://github.com/simsong/email-collection-toolkit/tree/codex/experimental-rust-ui)
+preserve the retirement snapshot. See the [archive note](doc/RUST_GUI_EXPERIMENTS.md).
+Independent Rust importer, verifier, PST and MIME tools remain supported.
+`RUSTUP_TOOLCHAIN` can explicitly override the checkout's compiler;
+`rust-toolchain.toml` selects Rust 1.99 for these tools.
 
 ## Rust importer development
 
@@ -279,7 +280,6 @@ for all files, personal locations, archive precedence and reset behavior.
 | `FQDN` | IMAP tests set `localhost` for the disposable server greeting, avoiding host reverse DNS; unused by the downloader |
 | `SSL_CERT_FILE`, `SSL_CERT_DIR` | Standard TLS trust overrides for private IMAP servers |
 | `CARGO`, `RUST_TARGET_DIR` | Cargo executable and Make-selected build output (default `target/`) |
-| `ECT_RUST_RECENT_TEST_ROOT`, `ECT_RUST_RECENT_TEST_NAME` | Internal isolated recent-archive test fixtures |
 | `ARGS`, `ARCHIVE`, `IMAP_ARGS` | Makefile command parameters; never a password channel |
 
 Legacy `MAILARCHIVER_CLAMD*` variables are unused. Scanning uses embedded
@@ -438,8 +438,6 @@ x64 alpha builds, not a fully validated Windows release.
 
 For direct Cargo commands, `CARGO_TARGET_DIR` selects a reusable build cache;
 for Make targets, use `RUST_TARGET_DIR` instead.
-`ECT_RUST_ENGINE_PYTHON` was the retired Rust GUI's helper-interpreter override;
-only historical Rust GUI tests still set it.
 
 Windows test signing uses the GitHub Actions secret/environment variable
 `MSIX_TEST_CERT_PFX_BASE64`, containing the base64-encoded persistent test PFX.

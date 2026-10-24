@@ -8,12 +8,9 @@ live in [plans](../plans/README.md); historical evidence does not validate this 
 ## macOS packaging
 
 `make dmg` builds the Python application described in
-[MACOS_DISTRIBUTION.md](../MACOS_DISTRIBUTION.md). The following Rust preview
-paragraphs are historical: `make rust-dmg` now stops with the retirement
-message.
-
-The retired Rust packaging path is described in
-[RUST_GUI_EXPERIMENTS.md](../RUST_GUI_EXPERIMENTS.md).
+[MACOS_DISTRIBUTION.md](../MACOS_DISTRIBUTION.md). Experimental Rust UI packaging
+and its helper have been removed; the historical snapshot is linked from the
+[archive note](../RUST_GUI_EXPERIMENTS.md).
 
 `make dmg-signed` calls `make dmg` with `--signing-identity` in `ARGS`, selecting
 the first Developer ID Application certificate hash from

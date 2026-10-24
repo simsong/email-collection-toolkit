@@ -8,6 +8,6 @@ to build and `make rust-check` to validate them. See the
 [CLI reference](../doc/CLI_REFERENCE.md#rust-tools) and
 [MCT contract](../doc/MCT_IMPORTER_API.md).
 
-The desktop GUI migration is retired and excluded from the supported workspace.
-Its architecture, measurements, build history and acceptance evidence are
-consolidated in [Rust GUI experiments](../doc/RUST_GUI_EXPERIMENTS.md).
+The experimental desktop UI and its helper/tests have been removed from this
+checkout. The signed `experimental-rust-ui` tag and `codex/experimental-rust-ui`
+branch preserve its retirement snapshot; see the [archive note](../doc/RUST_GUI_EXPERIMENTS.md).

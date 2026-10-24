@@ -354,17 +354,6 @@ dmg: python-dmg
 python-dmg: ruff syntax-check sparkle-tools pst-importer mcti-scan pff-converter-bundle
 	uv run --group packaging python scripts/build_macos.py $(if $(SIGNING_IDENTITY),--signing-identity "$(SIGNING_IDENTITY)") $(ARGS)
 
-# Retired Rust GUI packaging, kept for reference. The rust-gui-retired
-# prerequisite added below fails before this recipe runs; use make dmg.
-.PHONY: rust-dmg
-rust-dmg: ruff syntax-check sparkle-tools pst-importer mcti-scan pff-converter-bundle
-	uv run --locked python scripts/rust_release_metadata.py --build-command $(CARGO_RUN) build --locked --release -p mailsearch-rust --bin mailsearch-webview
-	uv run --locked --group packaging python scripts/build_macos.py --rust-binary "$(RUST_TARGET_DIR)/release/mailsearch-webview" $(if $(SIGNING_IDENTITY),--signing-identity "$(SIGNING_IDENTITY)") $(ARGS)
-
-.PHONY: test-rust-dmg
-test-rust-dmg: ruff
-	uv run --locked --group packaging pytest -q tests/test_packaging.py -k frozen_entry_dispatches_private_rust_service
-
 # APPLE_CERTIFICATE_P12_BASE64 and APPLE_CERTIFICATE_PASSWORD import the
 # Developer ID identity on hosted release runners; local builds use Keychain.
 # Use the first valid Developer ID Application identity in the Keychain search list.
@@ -429,11 +418,6 @@ test-signing: ruff
 .PHONY: test-sparkle-signing
 test-sparkle-signing: sparkle-tools ruff
 	uv run --locked --group packaging pytest -q tests/test_sparkle_signing.py
-
-.PHONY: test-rust-updates
-test-rust-updates: ruff
-	$(CARGO_RUN) build --locked -p mailsearch-rust --bin mailsearch-webview
-	RUST_WEBVIEW_BINARY="$(RUST_TARGET_DIR)/debug/mailsearch-webview$(RUST_EXE_SUFFIX)" uv run --locked pytest -q tests/test_rust_updates.py
 
 .PHONY: sparkle-probe test-updates
 sparkle-probe: sparkle-tools ruff
@@ -907,124 +891,8 @@ pff-converter-bundle: pff-converter
 test-pff-converter: pff-converter
 	uv run --locked --project converters/pff pytest -q converters/pff/tests
 
-# Rust GUI experiment: ARCHIVE is an existing archive directory; QUERY is literal search text.
-# RUST_GUI_DEMO selects a new synthetic fixture directory; no real mail is imported.
-# ECT_RUST_WEBVIEW_DIAGNOSTICS enables native navigation/IPC URL diagnostics.
-# ECT_RUST_PREFERENCES_TEST_ROOT/EDIT coordinate isolated child-process fixtures only.
-# ECT_RUST_ENGINE_PYTHON selects the prepared Python archive-service interpreter;
-# default: this checkout .venv/bin/python (Windows .venv/Scripts/python.exe).
-RUST_GUI_DEMO ?= $(CURDIR)/.tmp/rust-gui-demo
-.PHONY: rust-gui-build rust-gui rust-gui-demo rust-gui-smoke test-rust-gui
-rust-gui-build:
-	$(CARGO_RUN) reader-build
-
-rust-gui: rust-gui-build
-	$(CARGO_RUN) run-ect $(if $(ARCHIVE),--archive "$(ARCHIVE)")
-
-rust-gui-demo: rust-gui-build
-	$(CARGO_RUN) reader-demo "$(RUST_GUI_DEMO)"
-
-rust-gui-smoke: rust-gui-build
-	@test -n "$(ARCHIVE)" || { echo 'usage: make rust-gui-smoke ARCHIVE=/path/to/archive QUERY=words'; exit 2; }
-	$(CARGO_RUN) reader-smoke "$(ARCHIVE)" "$(QUERY)"
-
-# ECT_RUST_RECENT_TEST_ROOT/NAME are internal child-process fixture paths set by Rust tests.
-test-rust-gui:
-	$(CARGO_RUN) reader-check
-
-.PHONY: test-rust-gui-interop
-
-# RUST_GUI_BINARY tells the Python interoperability test which freshly built executable to use.
-test-rust-gui-interop: rust-gui-build
-	RUST_GUI_BINARY="$(RUST_TARGET_DIR)/debug/mailsearch-rust$(RUST_EXE_SUFFIX)" uv run --locked pytest -q tests/test_rust_gui.py
-
-# The original native-widget prototype remains available for comparison.
-.PHONY: rust-gui-egui
-rust-gui-egui: rust-gui-build
-	$(CARGO_RUN) run --locked -p mailsearch-rust --bin mailsearch-rust -- $(if $(ARCHIVE),--archive "$(ARCHIVE)")
-
-# RUST_WEBVIEW_BINARY selects the built Rust dispatcher for real headless browser tests.
-.PHONY: test-rust-webview
-test-rust-webview: rust-gui-build
-	RUST_WEBVIEW_BINARY="$(RUST_TARGET_DIR)/debug/mailsearch-webview$(RUST_EXE_SUFFIX)" uv run --locked pytest -q tests/test_rust_webview.py --browser chromium
-
-# Check startup button-to-IPC wiring without native windows or simulated archive replies.
-.PHONY: test-rust-startup
-test-rust-startup:
-	uv run --locked pytest -q tests/test_rust_webview.py -k startup_buttons --browser chromium
-
-# Real hot-journal recovery, foreground timer, >30-second wait and owner Abort.
-# Also exercises worker-owned startup initialization with an OS-stopped real helper.
-# RUST_WEBVIEW_BINARY selects the same native opening worker's diagnostic pipe.
-.PHONY: test-rust-recovery
-test-rust-recovery: rust-gui-build
-	RUST_WEBVIEW_BINARY="$(RUST_TARGET_DIR)/debug/mailsearch-webview$(RUST_EXE_SUFFIX)" uv run --locked pytest -q tests/test_rust_recovery.py --browser chromium
-
-# Read-only timing probe: prints counts/timings only, never message contents.
-.PHONY: rust-webview-probe
-rust-webview-probe: rust-gui-build
-	@test -n "$(ARCHIVE)" || { echo 'usage: make rust-webview-probe ARCHIVE=/path QUERY=words'; exit 2; }
-	$(CARGO_RUN) reader-probe "$(ARCHIVE)" "$(QUERY)"
-
-# RUST_GUI_ARTIFACT_DIR retains the synthetic .mailarchive, native PNG, hashes and logs.
-# Requires a logged-in macOS GUI session; uses explicitly unscanned synthetic EML only.
-# Exercises real owner/identity edits and processor-rerun persistence on that fixture.
-RUST_GUI_ARTIFACT_DIR ?= $(CURDIR)/.tmp/rust-gui-native
-.PHONY: test-rust-gui-native
-# Windows CI's Cargo native target also checks Ctrl-comma through the menu hook.
-test-rust-gui-native:
-	@test "$$(uname -s)" = Darwin || { echo 'native Rust GUI smoke currently requires macOS'; exit 2; }
-	$(CARGO_RUN) fmt -p mailsearch-rust -- --check
-	$(CARGO_RUN) clippy --locked -p mailsearch-rust --features native-smoke --all-targets -- -D warnings
-	RUST_GUI_ARTIFACT_DIR="$(RUST_GUI_ARTIFACT_DIR)" $(CARGO_RUN) reader-native-check
-
-# Compile native acceptance without claiming an unlocked desktop runtime check.
-.PHONY: check-rust-gui-native-build
-check-rust-gui-native-build:
-	$(CARGO_RUN) fmt -p mailsearch-rust -- --check
-	$(CARGO_RUN) clippy --locked -p mailsearch-rust --features native-smoke --all-targets -- -D warnings
-	$(CARGO_RUN) test --locked -p mailsearch-rust --features native-smoke --test native_smoke --test native_windows --no-run
-
-# ECT_WINSPARKLE_TEST_DLL points to the staged checksum-verified native SDK DLL.
-# APPDATA locates legacy Python update preferences on Windows; LOCALAPPDATA
-# continues to store Rust reader preferences separately from archives.
-# ECT_RELEASE_VERSION/BUILD/CHANNEL come from the shared release mapper.
-# ECT_UPDATE_FEED_URL/PUBLIC_KEY and ECT_RELEASE_* are common public build inputs.
-# ECT_RUST_NATIVE_CLOSE_SMOKE is used only by feature-gated lifecycle tests.
-.PHONY: test-rust-updater
-test-rust-updater:
-	$(CARGO_RUN) reader-updater-check
-
-# The transitional Rust engine test uses only synthetic archives and no GUI windows.
-.PHONY: test-rust-engine
-test-rust-engine: ruff
-	uv run --locked pylint src/mailarchiver/rust_engine.py tests/test_rust_engine.py
-	uv run --locked ty check src/mailarchiver/rust_engine.py tests/test_rust_engine.py --error-on-warning
-	uv run --locked pyright src/mailarchiver/rust_engine.py tests/test_rust_engine.py --warnings
-	uv run --locked pytest -q tests/test_rust_engine.py
-
-# RUST_WEBVIEW_BINARY selects the real dispatcher; tests never launch native windows.
-.PHONY: test-search-parity
-test-search-parity: rust-gui-build
-	RUST_WEBVIEW_BINARY="$(RUST_TARGET_DIR)/debug/mailsearch-webview$(RUST_EXE_SUFFIX)" uv run --locked pytest -q tests/test_mailsearch.py tests/test_search_parity.py
-
-# ARCHIVE/QUERY use the same read-only diagnostic contract as rust-webview-probe.
-.PHONY: rust-webview-release-probe
-rust-webview-release-probe:
-	@test -n "$(ARCHIVE)" || { echo 'usage: make rust-webview-release-probe ARCHIVE=/path QUERY=words'; exit 2; }
-	$(CARGO_RUN) build --locked --release -p mailsearch-rust --bin mailsearch-webview
-	"$(RUST_TARGET_DIR)/release/mailsearch-webview$(RUST_EXE_SUFFIX)" --probe "$(ARCHIVE)" "$(QUERY)"
-
-# The desktop experiment is retained for study, outside the supported workspace.
-# These historical targets fail explicitly rather than launching stale binaries.
-.PHONY: rust-gui-retired
-rust-gui-retired:
-	@echo 'Rust GUI retired: see rust/README.md. Use make gui or make dmg for Python.' >&2
-	@exit 2
-rust-dmg rust-gui-build test-rust-gui test-rust-startup test-rust-gui-native check-rust-gui-native-build test-rust-updater test-rust-updates rust-webview-release-probe: rust-gui-retired
-
 .PHONY: test-python-desktop-package
-test-python-desktop-package:
+test-python-desktop-package: ruff
 	uv run --locked --group packaging pytest -q tests/test_python_desktop_package.py tests/test_packaging.py tests/test_macos_signing.py tests/test_website_scripts.py
 .PHONY: prepare-windows-updater
 prepare-windows-updater:

@@ -54,7 +54,7 @@ or historical test result is not evidence that a feature shipped.
 | [project_direction.md](project_direction.md) | Current strategy and priorities; feature plans are indexed separately |
 | [Name Resolution Record Linkage.md](Name%20Resolution%20Record%20Linkage.md) | Name-resolution research design |
 | [research/name-matcher/README.md](research/name-matcher/README.md) | Notebook, experiments, literature and aggregate run log |
-| [RUST_GUI_EXPERIMENTS.md](RUST_GUI_EXPERIMENTS.md) | Single retired GUI retrospective |
+| [RUST_GUI_EXPERIMENTS.md](RUST_GUI_EXPERIMENTS.md) | Experimental UI archive pointers |
 | [history/README.md](history/README.md) | Dated audits, reconciliation, ecosystem research and superseded release scope |
 | [DATA_QUALITY_AUDIT.md](DATA_QUALITY_AUDIT.md) | Current diagnostic tooling; investigation results are archived |
 | [PYTHON_WEBVIEW.md](PYTHON_WEBVIEW.md) | Pointer from the integrated comparison experiment to current guides |

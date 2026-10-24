@@ -43,8 +43,9 @@ platform or release gate has passed. [Future work](plans/README.md) is separate.
 - Source ingestion uses owner-thread completion futures instead of a shared
   publication mutex; one-worker processor futures keep its heartbeat live.
   See [acquisition](implementation/ACQUISITION.md).
-- The private archive adapter collects typed import and definition-update outcomes before serializing
-  job state; see [desktop](implementation/DESKTOP.md).
+- The experimental Rust UI, helper and obsolete build/test paths are removed from
+  the active checkout. The signed `experimental-rust-ui` tag preserves the
+  October 10, 2026 retirement snapshot; see the [archive note](RUST_GUI_EXPERIMENTS.md).
 - GUI preview polls collect typed future results and discard obsolete generations;
   see [desktop](implementation/DESKTOP.md).
 - Original-mailbox trees unquote IMAP display components once, preserving filter

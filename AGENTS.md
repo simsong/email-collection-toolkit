@@ -48,6 +48,14 @@ indexes are rebuildable derivatives.
   scanning uses the embedded libclamav engine in a run-owned worker process;
   never add a resident daemon, on-access scanning, or scheduled scans.
 
+## Archived experimental UI
+
+The experimental Rust UI is preserved at tag `experimental-rust-ui` and branch
+`codex/experimental-rust-ui`, outside the active source tree. Do not include it
+in routine codebase/threading analysis or reconstruct it unless the user
+explicitly requests historical UI work. Independent Rust importer, verifier,
+MIME and build tools remain supported.
+
 ## Requirements and documentation
 
 Before implementing a behavior change, read `doc/requirements.md` and

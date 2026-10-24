@@ -120,9 +120,9 @@ instructions.
 Application identity in the local Keychain search list, overridable with
 `SIGNING_IDENTITY`. An absent identity or `-` must fail before building.
 
-The former `make rust-dmg` preview is retired. Its source and native acceptance
-history remain available for study in `rust/mailsearch-gui`; supported packaging
-must use the Python application and must not select an old Rust executable.
+The experimental Rust UI and its packaging path are removed from the active
+checkout and preserved at tag `experimental-rust-ui`. Supported packaging must
+use the Python application.
 `make list-signatures` must list valid local code-signing identities and their
 certificate hashes. `make notarize-dmg DMG=...` submits an already Developer ID
 signed DMG with protected App Store Connect API-key credentials, waits for

@@ -10,7 +10,6 @@ import plistlib
 import sqlite3
 import subprocess
 import sys
-from concurrent.futures import ThreadPoolExecutor
 from importlib import import_module
 from pathlib import Path
 
@@ -23,35 +22,6 @@ from mailarchiver.self_test import SelfTestReport
 from mailarchiver.standalone_verify import verify_archive
 
 ROOT = Path(__file__).resolve().parents[1]
-
-
-def test_frozen_entry_dispatches_private_rust_service(tmp_path: Path) -> None:
-    """Rust preview: service dispatch preserves JSON stdout without importing GUI."""
-    from mailarchiver.rust_engine import Reply, Request
-
-    request = Request(id=1, method="ping")
-    process = subprocess.Popen(
-        [sys.executable, str(ROOT / "scripts/desktop_entry.py"), "--rust-engine", str(tmp_path / "missing.mailarchive")],
-        stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-        text=True, cwd=tmp_path,
-    )
-    assert process.stdin is not None and process.stdout is not None
-    with ThreadPoolExecutor(max_workers=1) as pool:
-        response = pool.submit(process.stdout.readline)
-        try:
-            process.stdin.write(request.model_dump_json() + "\n")
-            process.stdin.flush()
-            reply = Reply.model_validate_json(response.result(timeout=10))
-        finally:
-            process.stdin.close()
-            try:
-                process.wait(timeout=6)
-            except subprocess.TimeoutExpired:
-                process.kill()
-                process.wait(timeout=2)
-    assert process.returncode == 0
-    assert reply.id == 1 and not reply.error
-    assert not (tmp_path / "missing.mailarchive").exists()
 
 
 def test_historical_notice_gate_matches_the_shipped_release(tmp_path: Path) -> None:
@@ -412,29 +382,6 @@ def test_release_staging_authenticates_base_bundle_and_excludes_private_files(tm
     with pytest.raises(ValueError, match="hash mismatch"):
         stage(windows, destination)
     assert bundle.read_bytes() == b"synthetic signed bundle fixture"
-
-
-def test_native_build_command_receives_mapped_identity_and_literal_arguments(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Build requirement: both native packages use the mapper, not inherited metadata."""
-    import tomllib
-    from mailarchiver.release_versions import release_metadata
-    from scripts.rust_release_metadata import BUILD, CHANNEL, FEED, PUBLIC_KEY, VERSION
-    from mailarchiver.update_metadata import SPARKLE_FEED_URL, SPARKLE_PUBLIC_KEY
-    from scripts.macos_signing import RELEASE_SECRET_NAMES
-
-    monkeypatch.setenv(BUILD, "incorrect inherited build")
-    for name in RELEASE_SECRET_NAMES:
-        monkeypatch.setenv(name, "synthetic-secret-must-not-reach-build")
-    _, channel, build, display = release_metadata(tomllib.loads((ROOT / "pyproject.toml").read_text())["project"]["version"])
-    names = (VERSION, BUILD, CHANNEL, FEED, PUBLIC_KEY)
-    child = f"import os,sys; print(*(os.environ[name] for name in {names!r}), sep='\\n'); print(sys.argv[1:])"
-    child += f"; assert not any(name in os.environ for name in {RELEASE_SECRET_NAMES!r})"
-    result = subprocess.run([sys.executable, ROOT / "scripts/rust_release_metadata.py", "--build-command",
-                             sys.executable, "-c", child, "--child-option", "literal value"],
-                            text=True, capture_output=True, check=True, timeout=15)
-    assert result.stdout.splitlines() == [display, str(build), channel, SPARKLE_FEED_URL, SPARKLE_PUBLIC_KEY,
-                                          "['--child-option', 'literal value']"]
-    assert os.environ[BUILD] == "incorrect inherited build"
 
 
 @pytest.mark.skipif(os.name != "nt", reason="Windows ClamAV preparation uses PowerShell")

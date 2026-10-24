@@ -1,6 +1,6 @@
 // Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved.
 // Order Rust validation consistently across Windows, macOS and Linux.
-// Cargo aliases invoke this executable for reader-only or workspace checks.
+// Cargo aliases invoke this executable for supported workspace checks.
 // Each stage invokes Cargo directly, preserving its environment and toolchain.
 // Formatting precedes Clippy, which precedes real unit and integration tests.
 // The first failed stage stops the workflow and preserves its exit status.
@@ -22,23 +22,10 @@ fn main() -> ExitCode {
             _ => ExitCode::FAILURE,
         };
     }
-    let scope = match args.as_slice() {
-        [command, scope]
-            if command == "check" && matches!(scope.as_str(), "reader" | "workspace") =>
-        {
-            scope
-        }
-        _ => {
-            eprintln!("Usage: cargo reader-check | cargo workspace-check");
-            return ExitCode::from(2);
-        }
-    };
-    let workspace = scope == "workspace";
-    let package = if workspace {
-        vec!["--workspace"]
-    } else {
-        vec!["-p", "mailsearch-rust"]
-    };
+    if args.as_slice() != ["check", "workspace"] {
+        eprintln!("Usage: cargo workspace-check | cargo msix-test");
+        return ExitCode::from(2);
+    }
     let cargo = env::var_os("CARGO").unwrap_or_else(|| "cargo".into());
     for (command, suffix) in [
         ("fmt", &["--", "--check"][..]),
@@ -46,13 +33,10 @@ fn main() -> ExitCode {
         ("test", &[][..]),
     ] {
         let mut args = vec![command];
-        if command == "fmt" && workspace {
+        if command == "fmt" {
             args.push("--all");
         } else {
-            if command != "fmt" {
-                args.push("--locked");
-            }
-            args.extend_from_slice(&package);
+            args.extend_from_slice(&["--locked", "--workspace"]);
         }
         args.extend_from_slice(suffix);
         eprintln!("cargo {}", args.join(" "));
