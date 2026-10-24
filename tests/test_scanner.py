@@ -45,7 +45,7 @@ def test_scanner_exits_with_owner_during_blocked_native_scan(tmp_path: Path) -> 
 
 @pytest.fixture
 def scanner():
-    with ClamScanner() as instance:
+    with ClamScanner(workers=2) as instance:
         yield instance
 
 
@@ -71,6 +71,31 @@ def test_real_library_clean_mime_eicar_and_concurrent_verdicts(scanner: ClamScan
     assert all(result.engine_version and "daily:" in (result.signature_version or "") for result in results + direct)
     assert tuple(hashlib.sha256(path.read_bytes()).hexdigest() for path in sources) == original
     assert scanner.scan(tmp_path / "absent.eml").status == "scanner-error"
+
+
+def test_scanner_duplex_backpressure_does_not_block_result_delivery(tmp_path: Path) -> None:
+    """SCANNING: saturated request/response pipes still drain tracked scan futures."""
+    # An external deadline also bounds a blocked send before the per-scan timer.
+    program = """from concurrent.futures import ThreadPoolExecutor
+from threading import Barrier
+from mailarchiver.scanner import ClamScanner
+
+if __name__ == "__main__":
+    callers = 160
+    ready = Barrier(callers)
+    sample = b"From: fixture@example.test\\nSubject: pipe pressure\\n\\n" + b"x" * 60000
+    with ClamScanner(workers=2) as scanner:
+        def scan(_number):
+            ready.wait(timeout=15)
+            return scanner.scan_sample(sample).status
+        with ThreadPoolExecutor(max_workers=callers) as pool:
+            results = list(pool.map(scan, range(callers)))
+        assert results == ["clean"] * callers, results
+"""
+    completed = subprocess.run([sys.executable, "-c", program], cwd=Path(__file__).parents[1],
+                               capture_output=True, text=True, timeout=40, check=False)
+    (tmp_path / "scanner-stress-stderr").write_text(completed.stderr)
+    assert completed.returncode == 0, completed.stderr
 
 
 def test_link_mismatches_are_not_detections_but_attachments_still_are(

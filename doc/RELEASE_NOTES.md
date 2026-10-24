@@ -6,6 +6,11 @@ Entries describe their recorded revisions. For current behavior use the
 [user manual](USER_MANUAL.md) and [CLI reference](CLI_REFERENCE.md). Retired
 Rust delivery plans and historical package checks are not current acceptance.
 
+## Tracked scanner results
+
+Native scan workers return typed future results. Their coordinator alone sends
+responses and drains accepted scans during shutdown.
+
 ## Suspending import on Quit
 
 Quit now offers **Suspend import and quit**. Confirmed shutdown dims the window

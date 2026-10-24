@@ -33,7 +33,14 @@ Tests use the checked-in fixture and require no qpdf installation.
 
 [PR #124](../EMBEDDED_CLAMAV.md) uses libclamav directly from Python and Rust.
 The Python session shares one compiled engine across concurrent native threads
-in a temporary worker process. Source workers scan before the publication lock,
+in a temporary worker process. Each scan future returns a typed `ScanResponse`;
+the process coordinator collects completed futures and alone sends responses.
+It polls incoming requests for at most 10ms while scans are outstanding and
+drains accepted work after the shutdown sentinel. `make test-clamav` exercises
+clean, infected and error responses with more callers than scan workers, plus
+a saturated duplex-pipe stress case in a subprocess with an external deadline.
+Parent request serialization uses a separate lock from pending-result state,
+so blocked sends cannot prevent result delivery or session termination. Source workers scan before the publication lock,
 and Python records results in the existing processing database. Rust adds
 X-ClamAV-Detection, X-ClamAV-Engine-Version, and X-ClamAV-Definitions-Version
 only to infected messages. Python reads those headers to quarantine the emitted

@@ -21,7 +21,7 @@ import signal
 import tempfile
 import time
 from collections.abc import Callable
-from concurrent.futures import Future, ThreadPoolExecutor
+from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait as wait_for_scans
 from contextlib import AbstractContextManager
 from datetime import UTC, datetime
 from multiprocessing.connection import wait
@@ -104,11 +104,10 @@ def engine_worker(connection: ScannerConnection, library: Path, definitions: Def
     if parent is not None:
         Thread(target=exit_with_parent, args=(parent.sentinel,), name="clamav-owner", daemon=True).start()
     engine = None
-    send_lock = RLock()
     try:
         engine = Engine(library, definitions, temporary_directory)
         connection.send(ScanEvidence(status="not-scanned", engine_version=engine.version, signature_version=definitions.versions))
-        def scan(request: ScanRequest) -> None:
+        def scan(request: ScanRequest) -> ScanResponse:
             assert engine is not None
             try:
                 if request.sample is not None:
@@ -120,16 +119,25 @@ def engine_worker(connection: ScannerConnection, library: Path, definitions: Def
             except Exception as error:
                 evidence = ScanEvidence(status="scanner-error", detail=f"{type(error).__name__}: {error}",
                                         engine_version=engine.version, signature_version=definitions.versions)
-            with send_lock:
-                connection.send(ScanResponse(request_id=request.request_id, evidence=evidence))
+            return ScanResponse(request_id=request.request_id, evidence=evidence)
         with ThreadPoolExecutor(max_workers=workers, thread_name_prefix="libclamav") as pool:
-            while True:
-                request = connection.recv()
-                if request is None:
-                    break
-                if not isinstance(request, ScanRequest):
-                    raise ValueError("Invalid scanner request")
-                pool.submit(scan, request)
+            pending: set[Future[ScanResponse]] = set()
+            accepting = True
+            while accepting or pending:
+                if accepting and (not pending or connection.poll(0.01)):
+                    request = connection.recv()
+                    if request is None:
+                        accepting = False
+                    elif isinstance(request, ScanRequest):
+                        pending.add(pool.submit(scan, request))
+                    else:
+                        raise ValueError("Invalid scanner request")
+                completed = {future for future in pending if future.done()}
+                if not accepting and pending and not completed:
+                    completed, _running = wait_for_scans(pending, return_when=FIRST_COMPLETED)
+                for future in completed:
+                    pending.remove(future)
+                    connection.send(future.result())
     except (EOFError, BrokenPipeError):
         pass
     except Exception as error:
@@ -174,6 +182,7 @@ class ClamScanner(AbstractContextManager["ClamScanner"]):
         self.process: BaseProcess | ScannerProcess | None = None
         self.connection: ScannerConnection | None = None
         self.lock = RLock()
+        self.send_lock = RLock()
         self.pending: dict[str, Future[ScanEvidence]] = {}
         self.reader: Thread | None = None
         self.runtime: tempfile.TemporaryDirectory[str] | None = None
@@ -261,7 +270,10 @@ class ClamScanner(AbstractContextManager["ClamScanner"]):
                 if self.connection is None or self.process is None or not self.process.is_alive():
                     raise RuntimeError("ClamAV worker is not running")
                 self.pending[request.request_id] = future
-                self.connection.send(request)
+                connection = self.connection
+            # A full request pipe must not hold the result reader's state lock.
+            with self.send_lock:
+                connection.send(request)
             remaining = deadline - time.monotonic()
             if remaining <= 0:
                 raise TimeoutError("ClamAV scan timed out")

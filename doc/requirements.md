@@ -75,6 +75,8 @@ platform or release gate has passed. [Future work](plans/README.md) is separate.
   Startup is visible before the first run snapshot; enlarged status circles use
   symbols alongside color and text labels.
 
+- Scanner threads return tracked results to their process coordinator, which alone
+  writes responses; see [scanning](requirements/SCANNING.md).
 - Embedded scanners disable URL-phishing checks while retaining malware scanning;
   see the [scanning policy](requirements/SCANNING.md#malware-handling).
 - Before Python scan sessions, refresh definitions over 24 hours old when online;

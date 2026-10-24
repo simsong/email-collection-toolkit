@@ -39,6 +39,10 @@ recorded in THIRD_PARTY_NOTICES.md.
   This policy also removes URL-module detections of genuine phishing links;
   a clean scan is not a guarantee that links are safe. Existing quarantine
   decisions are not retroactively changed.
+* The scan-worker coordinator owns response IPC and observes every submitted
+  future. Native scan threads return typed results without sending IPC or
+  mutating shared publication state. Shutdown drains accepted requests. Request
+  backpressure must not hold the state lock needed to deliver responses.
 * Host ingestion shares one compiled engine across native scan threads.
   A temporary app-owned worker provides startup/scan deadlines; it exposes no
   persistent service or socket. Python records scan results through the existing

@@ -72,6 +72,8 @@ platform or release gate has passed. [Future work](plans/README.md) is separate.
   History source labels resolve account/server names without changing saved locators.
   History also exposes accepted startup and uses enlarged check/X/pause circles.
 
+- Python scan futures return typed responses for coordinator-owned IPC;
+  see [scanning](implementation/SCANNING.md).
 - Python and Rust omit the URL-phishing database option;
   see [scanner configuration](implementation/SCANNING.md#embedded-scanner-configuration).
 - Python scanner startup checks old definitions and reuses the validated one-shot
