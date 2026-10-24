@@ -666,3 +666,7 @@ a removable identity filter; additional terms and sorting refine that set.
 No canonical message or source mailbox is changed. `make test-gui-processing`
 checks grouping, search expansion, count projections, pagination and browser
 navigation with purpose-made archives.
+
+Preview workers return results without mutating window state. GUI preview requests
+and polls consume completed futures, reject obsolete archive generations, surface
+reader failures and allow retry. Closing prevents new preview submissions.

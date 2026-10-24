@@ -183,6 +183,12 @@ class GuiStatus(BaseModel):
     archive_status_messages: list[str] = Field(default_factory=list)
 
 
+class PreviewRequest(BaseModel):
+    archive: Path
+    generation: int
+    message_pks: list[int]
+
+
 class GuiIngestOverview(BaseModel):
     status: IngestStatus | None = None
     active: bool = False
@@ -796,6 +802,8 @@ class GuiApi:
         self._preview_pending: set[int] = set()
         self._preview_error: str | None = None
         self._preview_generation = 0
+        self._preview_futures: dict[Future[list[MessagePreview]], PreviewRequest] = {}
+        self._preview_closed = False
         self._tree_cache: dict[bool, list[dict[str, Any]]] = {}
         self._message_count: int | None = None
         self._ingest_window_lock = Lock()
@@ -808,6 +816,8 @@ class GuiApi:
         """Discard derived view caches after a writer may have published."""
         with self._preview_lock:
             self._preview_generation += 1
+            for future in self._preview_futures:
+                future.cancel()
             self._preview_cache.clear()
             self._preview_pending.clear()
             self._preview_error = None
@@ -1014,42 +1024,45 @@ class GuiApi:
         if not message_pks or len(message_pks) > DEFAULT_PAGE_SIZE:
             raise ValueError(f"request between 1 and {DEFAULT_PAGE_SIZE} message previews")
         with self._preview_lock:
-            requested = set(message_pks)
-            missing = requested - self._preview_cache.keys() - self._preview_pending
-            self._preview_pending.update(missing)
+            if self._preview_closed:
+                raise ValueError("The preview window is closed.")
+            self._collect_previews()
+            missing = set(message_pks) - self._preview_cache.keys() - self._preview_pending
             self._preview_error = None
-        if missing:
-            archive = self._archive()
-            generation = self._preview_generation
-            self._preview_executor.submit(self._load_previews, archive, sorted(missing), generation)
+            if missing:
+                request = PreviewRequest(archive=self._archive(), generation=self._preview_generation,
+                                         message_pks=sorted(missing))
+                future = self._preview_executor.submit(message_previews, request.archive, request.message_pks)
+                self._preview_futures[future] = request
+                self._preview_pending.update(missing)
         return True
 
     def take_previews(self, message_pks: list[int]) -> dict[str, Any]:
         requested = set(message_pks)
         with self._preview_lock:
+            self._collect_previews()
             previews = [self._preview_cache[message_pk] for message_pk in message_pks if message_pk in self._preview_cache]
-            batch = PreviewBatch(
-                previews=previews,
-                pending=bool(requested & self._preview_pending),
-                error=self._preview_error,
-            )
+            batch = PreviewBatch(previews=previews, pending=bool(requested & self._preview_pending),
+                                 error=self._preview_error)
         return batch.model_dump(mode="json")
 
-    def _load_previews(self, archive: Path, message_pks: list[int], generation: int) -> None:
-        try:
-            previews = message_previews(archive, message_pks)
-            with self._preview_lock:
-                if generation == self._preview_generation and archive == self.archive:
+    def _collect_previews(self) -> None:
+        """Called with the preview lock; workers never mutate window state."""
+        for future, request in tuple(self._preview_futures.items()):
+            if not future.done():
+                continue
+            del self._preview_futures[future]
+            current = request.generation == self._preview_generation and request.archive == self.archive
+            try:
+                previews = future.result()
+                if current:
                     self._preview_cache.update((preview.message_pk, preview) for preview in previews)
-        except Exception as error:  # pylint: disable=broad-exception-caught
-            logging.getLogger(__name__).debug("Best-effort operation failed", exc_info=True)
-            with self._preview_lock:
-                if generation == self._preview_generation:
+            except Exception as error:  # pylint: disable=broad-exception-caught
+                if current:
                     self._preview_error = f"{type(error).__name__}: {error}"
-        finally:
-            with self._preview_lock:
-                if generation == self._preview_generation:
-                    self._preview_pending.difference_update(message_pks)
+            finally:
+                if current:
+                    self._preview_pending.difference_update(request.message_pks)
 
     def message(self, message_pk: int) -> dict[str, Any]:
         message = describe_message(self._archive(), message_pk)
@@ -1267,6 +1280,12 @@ class GuiApi:
         return True
 
     def close(self, *_args: object) -> None:
+        with self._preview_lock:
+            self._preview_closed = True
+            for future in self._preview_futures:
+                future.cancel()
+            self._preview_futures.clear()
+            self._preview_pending.clear()
         self._preview_executor.shutdown(wait=False, cancel_futures=True)
         if self.application is None or self.document is None:
             with self._ingest_window_lock:

@@ -42,6 +42,8 @@ platform or release gate has passed. [Future work](plans/README.md) is separate.
 
 - Freeze all manifest-referenced acquisition adapters; validate local ingestion
   with `make test-frozen-source-plugins` before packaging handoff.
+- Preview workers return tracked results; current-generation GUI polling alone
+  updates preview caches. See [desktop](requirements/DESKTOP.md).
 - Original IMAP folder labels decode percent escapes once while retaining stored
   selection paths; see [desktop](requirements/DESKTOP.md).
 - Natural search preserves quoted symbols and works with existing indexes;

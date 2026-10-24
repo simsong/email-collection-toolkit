@@ -861,3 +861,10 @@ and the shipped widgets through real bridges.
 visible person group. The Name table renders one observed number directly or a
 native HTML `details` disclosure for multiple numbers. Chromium and native Cocoa
 fixtures exercise expansion alongside name/count navigation and manual grouping.
+
+Preview requests retain each future with typed archive/generation/message metadata.
+`request_previews` and `take_previews` alone merge completed results under the
+preview lock; invalidation cancels queued obsolete work. Running obsolete results
+are consumed without publishing or clearing newer pending IDs. `make test-gui`
+uses real SQLite locking, archive replacement and missing-index failures to verify
+these boundaries without replacing the preview reader.

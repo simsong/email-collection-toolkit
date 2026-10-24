@@ -15,6 +15,7 @@ from importlib.metadata import version
 from webview.menu import MenuAction, MenuSeparator
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+from threading import Event
 
 import pytest
 from pydantic import ValidationError
@@ -665,6 +666,62 @@ def test_gui_loads_indexed_previews_on_its_background_worker(tmp_path: Path) -> 
         (1, "The report is ready."),
         (2, "Plain version."),
     ]
+
+
+def test_preview_futures_ignore_old_archive_and_observe_reader_failures(tmp_path: Path) -> None:
+    """Desktop previews: only current-generation results publish; failures are consumed and retryable."""
+    first = make_gui_archive(tmp_path / "first")
+    second = make_gui_archive(tmp_path / "second")
+    with sqlite3.connect(second / "search.sqlite3") as database:
+        database.execute("UPDATE message_metadata SET preview='New archive preview'")
+    blocker = sqlite3.connect(first / "search.sqlite3")
+    blocker.execute("BEGIN EXCLUSIVE")
+    release = Event()
+    api = GuiApi(first)
+    try:
+        api.request_previews([1])
+        old_future = next(iter(api._preview_futures))
+        deadline = time.monotonic() + 2
+        while not old_future.running() and time.monotonic() < deadline:
+            time.sleep(0.001)
+        assert old_future.running()
+        queued_gate = api._preview_executor.submit(release.wait)
+        api.archive = second
+        api.invalidate_archive()
+        api.request_previews([1])
+        current_future = next(future for future, request in api._preview_futures.items() if request.archive == second)
+        blocker.rollback()
+        assert old_future.result(timeout=5)[0].preview == "The report is ready."
+        batch = api.take_previews([1])
+        assert batch["pending"] and batch["previews"] == [] and batch["error"] is None
+        release.set()
+        queued_gate.result(timeout=5)
+        current_future.result(timeout=5)
+        assert api.take_previews([1])["previews"] == [{"message_pk": 1, "preview": "New archive preview"}]
+        api.invalidate_archive()
+        search = second / "search.sqlite3"
+        saved = search.with_suffix(".saved")
+        search.rename(saved)
+        search.write_bytes(b"invalid SQLite fixture")
+        try:
+            api.request_previews([1])
+            failed = next(iter(api._preview_futures))
+            with pytest.raises(sqlite3.DatabaseError):
+                failed.result(timeout=5)
+            batch = api.take_previews([1])
+            assert not batch["pending"] and batch["previews"] == [] and batch["error"]
+        finally:
+            search.unlink()
+            saved.rename(search)
+        api.request_previews([1])
+        next(iter(api._preview_futures)).result(timeout=5)
+        assert api.take_previews([1])["error"] is None
+    finally:
+        release.set()
+        blocker.close()
+        api.close()
+    with pytest.raises(ValueError, match="closed"):
+        api.request_previews([1])
 
 
 def test_gui_selects_multipart_views_and_sanitizes_html(tmp_path: Path) -> None:
