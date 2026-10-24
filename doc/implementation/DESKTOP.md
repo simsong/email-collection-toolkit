@@ -876,3 +876,6 @@ Quit stops admission, cancels queued work and waits on futures under the existin
 deadline. The independent watchdog, export cleanup and quit waiter remain outside
 this pool. `make test-quit` covers pool saturation, queued import cancellation,
 visible command failure, and unchanged recovery and process-exit bounds.
+
+Track Cocoa archive-open callbacks with command futures. The named future shares command admission, error collection
+and bounded shutdown; native UI marshaling and source-preservation rules remain.

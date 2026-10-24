@@ -2921,7 +2921,7 @@ def install_macos_document_events(application: PyWebViewApplication) -> None:
                     application.add_notice("error", f"Could not open archive: {error}")
                     AppHelper.callAfter(sender.replyToOpenOrPrint_, 1)
 
-            Thread(target=open_documents, name="mailarchiver-open-documents", daemon=True).start()
+            application._submit_task("Open archives", open_documents)
 
         def showUpdatePreferences_(self, _sender):
             application.show_update_preferences()
