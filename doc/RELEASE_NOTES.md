@@ -6,9 +6,9 @@ Entries describe their recorded revisions. For current behavior use the
 [user manual](USER_MANUAL.md) and [CLI reference](CLI_REFERENCE.md). Retired
 Rust delivery plans and historical package checks are not current acceptance.
 
-## Tracked private-adapter imports
+## Tracked private-adapter jobs
 
-The retained private archive adapter collects typed import outcomes through a
+The retained private archive adapter collects typed import and definition-update outcomes through a
 future on its protocol owner, preserving status generations and warnings.
 
 ## Tracked desktop commands

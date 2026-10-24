@@ -22,13 +22,14 @@ from typing import Iterator
 from pydantic import JsonValue
 import pytest
 
+from mailarchiver.clamav_definitions import UPDATE_ENV
 from mailarchiver.document_options import DocumentOptions
 from mailarchiver.owner_rules import OwnerRules
 from mailarchiver import rust_engine
 from mailarchiver.__main__ import IngestRequest
 from mailarchiver.archive_config import remember_import_directory
 from mailarchiver.ingest_status import latest_ingest_status
-from mailarchiver.rust_engine import Capabilities, Engine, ImportDefaults, Reply, Request
+from mailarchiver.rust_engine import Capabilities, Engine, ImportDefaults, JobState, Reply, Request
 from mailarchiver.writer_lock import WriterLease
 
 
@@ -350,3 +351,22 @@ def test_owner_eof_during_import_startup_is_latched(tmp_path: Path) -> None:
             assert database.execute("PRAGMA integrity_check").fetchone() == ("ok",)
     assert input_path.read_bytes() == raw
     assert not list((archive / "data/mbox").glob("*.mbox"))
+
+
+def test_definition_future_publishes_failure_once_on_protocol_poll(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Desktop worker ownership: a real updater fault is collected once, without network."""
+    blocked = tmp_path / "not-a-directory"
+    blocked.write_text("Preserve this fixture.\n")
+    monkeypatch.setenv(UPDATE_ENV, str(blocked))
+    engine = Engine(tmp_path / "untouched.mailarchive")
+    for generation in range(2):
+        assert engine.call(Request(id=1, method="refresh_definitions")) is True
+        assert engine.finished.wait(10)
+        assert engine._job.active and engine._job.kind == "definitions"
+        assert engine._job.generation == generation
+        status = JobState.model_validate(engine.call(Request(id=2, method="job_status")))
+        assert not status.active and status.generation == generation + 1
+        assert status.error and status.error.startswith("FileExistsError:")
+        assert engine.call(Request(id=3, method="job_status")) == status.model_dump(mode="json")
+    assert blocked.read_text() == "Preserve this fixture.\n"
+    assert not engine.archive.exists()

@@ -42,7 +42,7 @@ platform or release gate has passed. [Future work](plans/README.md) is separate.
   with `make test-frozen-source-plugins` before packaging handoff.
 - Source ingestion uses owner-thread completion futures instead of a shared
   publication mutex; see [acquisition](implementation/ACQUISITION.md).
-- The private archive adapter collects typed import outcomes before serializing
+- The private archive adapter collects typed import and definition-update outcomes before serializing
   job state; see [desktop](implementation/DESKTOP.md).
 - GUI preview polls collect typed future results and discard obsolete generations;
   see [desktop](implementation/DESKTOP.md).

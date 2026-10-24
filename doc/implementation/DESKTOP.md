@@ -894,3 +894,7 @@ future. Its owner consumes completion before serializing status or admitting the
 next operation; the finished signal remains available to its independent owner
 watcher. `make test-rust-engine` now runs lint/type gates before real protocol,
 publication, warning and writer-exclusion tests.
+
+Definition updates use the same retained future and owner-collected status. The
+real updater failure regression uses an isolated invalid cache path, verifying
+error retention and exactly one generation increment without network access.

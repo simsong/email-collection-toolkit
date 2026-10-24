@@ -199,19 +199,16 @@ class Engine:
         if method == "refresh_definitions":
             if not self.finished.is_set():
                 raise ValueError("Wait for the current import or definition update to finish.")
-            generation = self.job.generation
-            self.finished.clear()
-            self._job = JobState(active=True, kind="definitions", generation=generation)
-            def update() -> None:
+            def update() -> JobOutcome:
+                outcome = JobOutcome()
                 try:
                     refresh_definitions()
                 except Exception as error:
-                    self._job.error = f"{type(error).__name__}: {error}"
+                    outcome.error = f"{type(error).__name__}: {error}"
                 finally:
-                    self._job.active = False
-                    self._job.generation += 1
                     self.finished.set()
-            Thread(target=update, name="rust-definitions", daemon=True).start()
+                return outcome
+            self._start_work(update, "definitions")
             return True
         if method == "ping":
             return True
