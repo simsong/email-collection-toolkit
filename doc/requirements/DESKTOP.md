@@ -341,9 +341,11 @@ The OS lease is a nonblocking exclusive lock on
 `status/archive-write.lock`; diagnostic JSON in that file records the operation,
 PID, host, start time, version, and archive identity, but file presence never
 determines ownership and a process crash releases the lock. CLI ingest and
-search-index rebuild use the same lease. During Import, **File → Close** does
-nothing for the owning search window and that window's close box is refused;
-other search and child windows remain independently closeable. The Window menu
+search-index rebuild use the same lease. During Import, closing its owning search window transfers the same operation
+to another search window on that archive, preserving stop/completion signals and
+the writer lease. Only its last search window refuses Close until import finishes
+or suspends; the close callback returns promptly and explains Suspend Import.
+Other archives and child windows remain independently closeable. The Window menu
 lists the About, search, and Ingests windows and brings a selected window forward.
 
 `mailsearch` is a read-only command-line consumer of both databases.  It

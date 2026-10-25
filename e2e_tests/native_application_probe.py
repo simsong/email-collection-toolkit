@@ -475,6 +475,58 @@ def main() -> None:
                 controller.finish_ingest(document_id, "button-test", published=False)
             evaluate_async(ingest, "refreshHistory().then(() => true)")
             assert not ingest.evaluate_js("document.getElementById('import-directory').disabled")
+            # Shared-document Close must never wait for an import or a Cocoa dialog.
+            sibling = application.create_search_window(controller.new_search_window(document))
+            assert sibling.window.events.loaded.wait(10), "Second search bridge failed to load"
+            # Windows has no persistent About: only the search timer may deliver notices.
+            about.load_html("<p id='search-only-probe'>About polling paused for the search-only regression.</p>")
+            deadline = monotonic() + 3
+            while not about.evaluate_js("Boolean(document.getElementById('search-only-probe'))") and monotonic() < deadline:
+                sleep(0.02)
+            assert about.evaluate_js("Boolean(document.getElementById('search-only-probe'))")
+            job = IngestJob(operation_id="shared-close", owner_window_id=api.search_window.window_id)
+            lease = WriterLease.acquire(document.path, document.descriptor.identity, "test", job.operation_id, "test")
+            controller.begin_ingest(document_id, job, lease)
+            release_commands = Event()
+            try:
+                assert drain_bridge_calls()
+                AppHelper.callAfter(api.window.native.performClose_, None)
+                assert api.window.events.closed.wait(5), "Closing original import window blocked Cocoa"
+                transferred = document.ingest_job
+                assert transferred is not None and sibling.search_window is not None
+                assert transferred.owner_window_id == sibling.search_window.window_id
+                assert transferred.stop is job.stop and transferred.finished is job.finished and lease.acquired
+                assert evaluate_async(sibling.window, "window.pywebview.api.status()")['document_id'] == document_id
+                # Long imports occupy every command worker; notices must not use that pool.
+                started = [Event() for _ in range(8)]
+
+                def hold_command(ready: Event) -> None:
+                    ready.set()
+                    assert release_commands.wait(10), "Busy command fixture was not released"
+
+                for ready in started:
+                    application._submit_task("busy close fixture", lambda ready=ready: hold_command(ready))  # pylint: disable=protected-access
+                assert all(ready.wait(2) for ready in started)
+                # A bridge may own the app lock while waiting for Cocoa. Close must return.
+                main_returned = Event()
+                with application._lock:  # pylint: disable=protected-access
+                    AppHelper.callAfter(sibling.window.native.performClose_, None)
+                    AppHelper.callAfter(main_returned.set)
+                    assert main_returned.wait(2), "Last-window Close waited for the application lock"
+                assert sibling.window.evaluate_js("document.readyState") == "complete"
+                assert not sibling.window.events.closed.is_set()
+                evaluate_async(sibling.window, """(async () => {
+                    const deadline = Date.now() + 3000;
+                    while (!document.body.textContent.includes('Keep this last search window open') && Date.now() < deadline)
+                        await new Promise(resolve => setTimeout(resolve, 20));
+                    if (!document.body.textContent.includes('Keep this last search window open'))
+                        throw new Error('Last-window Close did not explain Suspend Import');
+                    return true;
+                })()""")
+            finally:
+                release_commands.set()
+                controller.finish_ingest(document_id, job.operation_id, published=False)
+            close_window(sibling.window)
         except Exception:  # pylint: disable=broad-exception-caught
             failures.append(traceback.format_exc())
         finally:

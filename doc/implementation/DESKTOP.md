@@ -127,8 +127,19 @@ cannot leave those navigation checks unexecuted.
 `PyWebViewApplication` adapts that model to native pywebview windows without
 putting platform imports in the controller. Its File menu asks for a new or
 empty destination and initializes it before creating a blank window, opens an
-archive in a new search window, runs Import, and closes the active window unless that window owns the
-running Import. Window close events enforce the same rule. The Window menu
+archive in a new search window, runs Import, and closes the active window unless
+it is the last search window for an active import. Closing an import owner
+atomically transfers its job to a surviving same-document search, preserving the
+operation ID, shared Events and writer lease. Native closing callbacks reserve
+logical closure immediately, so consecutive Close actions cannot transfer a job
+back to a disappearing window; the later closed event removes the native API.
+A last-window veto enqueues a typed notice without acquiring the application
+lock; normal search ingest-overview polling delivers it independently of import
+worker capacity or the presence of About.
+It returns without a synchronous dialog or waiting for import futures on Cocoa's
+main thread. Controller tests cover lease/signal preservation. Native lifecycle
+tests close the original search, query its sibling and verify a responsive
+last-window veto while the app lock is held and all command workers are busy. The Window menu
 routes to the active archive's shared Ingests child window and enumerates every
 About, search, and Ingests window. **Window → New Search Window** creates another
 view of the active archive; the macOS adapter disables it without an active

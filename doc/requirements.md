@@ -19,6 +19,9 @@ platform or release gate has passed. [Future work](plans/README.md) is separate.
 
 ## Shared boundaries
 
+- Closing an import owner transfers its operation to another same-archive search;
+  the last-window veto must never block the native event loop. See [desktop](requirements/DESKTOP.md).
+
 - Processing progress reports distinct archived messages still needing work,
   independent of task counts. See [desktop](requirements/DESKTOP.md).
 

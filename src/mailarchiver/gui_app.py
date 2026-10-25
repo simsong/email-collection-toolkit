@@ -35,6 +35,7 @@ from datetime import UTC, datetime
 from importlib import import_module
 from importlib.metadata import version
 from pathlib import Path
+from queue import Empty, SimpleQueue
 from threading import Event, Lock, RLock, Thread
 from typing import Any, Literal
 from urllib.parse import urlencode, urlsplit
@@ -1539,6 +1540,7 @@ class PyWebViewApplication:
         self._setup_visible = False
         self._about_visible = False
         self._notices: list[ApplicationNotice] = []
+        self._pending_notices: SimpleQueue[ApplicationNotice] = SimpleQueue()
         self._connectivity: ConnectivityMonitor | None = None
         self._menu_observer: Any = None
         self._lock = RLock()
@@ -1581,6 +1583,13 @@ class PyWebViewApplication:
                 pass
             except BaseException as error:  # pylint: disable=broad-exception-caught
                 self.add_notice("error", f"{name} failed: {type(error).__name__}: {error}")
+        # Search ingest_overview polls this too, even when no About window exists.
+        while True:
+            try:
+                notice = self._pending_notices.get_nowait()
+            except Empty:
+                break
+            self.add_notice(notice.severity, notice.message)
 
     @contextmanager
     def writer_activity(self) -> Iterator[None]:
@@ -1856,7 +1865,7 @@ class PyWebViewApplication:
             self._native_search_ids[window.uid] = session.window_id
         window.events.shown += lambda *_args: self.activate_window(session.window_id)
         window.events.restored += lambda *_args: self.activate_window(session.window_id)
-        window.events.closing += lambda *_args: self._can_close_search_window(session.window_id, window)
+        window.events.closing += lambda *_args: self._can_close_search_window(session.window_id)
         window.events.closed += lambda *_args: self._close_window(session.window_id)
         self._refresh_menus()
         return api
@@ -2343,7 +2352,7 @@ class PyWebViewApplication:
             return False
         with self._lock:
             search_id = self._native_search_ids.get(native.uid)
-        if search_id is not None and not self.controller.can_close_window(search_id):
+        if search_id is not None and not self._can_close_search_window(search_id):
             return False
         native.destroy()
         return True
@@ -2578,23 +2587,19 @@ class PyWebViewApplication:
             items.append(MenuAction(editor.window.title, lambda uid=editor.window.uid: self.focus_window(uid)))
         return items
 
-    def _can_close_search_window(self, window_id: str, window: Any) -> bool:
-        if self.controller.can_close_window(window_id):
-            return True
-        if not window.create_confirmation_dialog(
-            "Import is running",
-            "Wait for the import to finish before closing? Cancel keeps this window open.",
-        ):
+    def _can_close_search_window(self, window_id: str) -> bool:
+        # Reserve closure now: native closed callbacks run later on worker threads.
+        # A second Close must not transfer ownership back to a disappearing window.
+        try:
+            self.controller.close_window(window_id)
+        except ArchiveBusyError:
+            # The next status poll delivers this without a UI lock or import worker.
+            self._pending_notices.put(ApplicationNotice(severity="warning", message=
+                "Import is running. Keep this last search window open, use Suspend Import in Ingests, or Quit to suspend and exit."))
             return False
-        with self._lock:
-            workers = tuple(self._import_futures)
-        for worker in workers:
-            try:
-                worker.result()
-            except BaseException:  # pylint: disable=broad-exception-caught
-                logging.getLogger(__name__).debug("Background import ended while closing", exc_info=True)
-        self._reap_tasks()
-        return self.controller.can_close_window(window_id)
+        except ValueError:
+            pass  # A repeated native callback may refer to an already reserved close.
+        return True
 
     def has_active_ingest(self) -> bool:
         # Unknown state still requires confirmation, but never a pre-watchdog wait.

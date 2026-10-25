@@ -350,6 +350,12 @@ class ArchiveDocument:
 
     def detach_window(self, window_id: str) -> None:
         with self._lock:
+            job = self._ingest_job
+            if job is not None and job.owner_window_id == window_id:
+                replacement = next((item for item in self._window_ids if item != window_id), None)
+                if replacement is None:
+                    raise ArchiveBusyError("the last window running Import cannot close until Import finishes")
+                self._ingest_job = job.model_copy(update={"owner_window_id": replacement})
             self._window_ids.discard(window_id)
 
     def attach_child_window(self, window_id: str) -> None:
@@ -505,23 +511,22 @@ class ApplicationController:
             except KeyError as error:
                 raise ValueError(f"unknown search window {window_id}") from error
             document = self._documents[window.document_id]
-            if document.ingest_job is not None and document.ingest_job.owner_window_id == window_id:
-                raise ArchiveBusyError("the window running Import cannot close until Import finishes")
-            self._windows.pop(window_id)
             document.detach_window(window_id)
+            self._windows.pop(window_id)
             if self._active_window_id == window_id:
                 self._active_window_id = next(reversed(self._windows), None)
             self._release_if_unused(document)
             return document
 
     def can_close_window(self, window_id: str) -> bool:
-        """Return false only for the search window that owns the active ingest."""
+        """Keep an active ingest's last search window open; siblings may close."""
         with self._lock:
             window = self._windows.get(window_id)
             if window is None:
                 return False
             document = self._documents[window.document_id]
-            return document.ingest_job is None or document.ingest_job.owner_window_id != window_id
+            job = document.ingest_job
+            return job is None or job.owner_window_id != window_id or len(document.window_ids) > 1
 
     def windows(self) -> tuple[SearchWindow, ...]:
         """Return logical search windows in stable creation order."""

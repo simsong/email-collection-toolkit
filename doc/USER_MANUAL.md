@@ -413,9 +413,10 @@ Command-N creates an archive and Command-W closes an eligible search window.
 The About window remains available for the application run. It shows the
 installed version, free disk space, live Internet reachability, startup errors,
 warnings, and current or latest ingest activity. The Window menu lists it and
-every search and Ingests window. During Import, the search window that started
-the run cannot be closed from **File → Close** or its close box; other windows
-remain searchable and independently closeable.
+every search and Ingests window. During Import, you can close the original search window when another search
+window for that archive is open; the import continues in the remaining window.
+The last search window stays open until you suspend or finish its import. Use
+**Suspend Import** in Ingests, or Quit to suspend and exit.
 
 In About, **Show processor graph…** opens a separate window showing registered
 MIME types, their processors and possible output types, grouped by processing

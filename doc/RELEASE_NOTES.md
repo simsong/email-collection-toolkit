@@ -6,6 +6,13 @@ Entries describe their recorded revisions. For current behavior use the
 [user manual](USER_MANUAL.md) and [CLI reference](CLI_REFERENCE.md). Retired
 Rust delivery plans and historical package checks are not current acceptance.
 
+## Close search windows during import
+
+Fix a Cocoa main-thread deadlock when closing an importing search window.
+Transfer its active operation to a surviving search on the same archive without
+restarting work or releasing the writer lease. The last search window refuses
+Close promptly with a Suspend Import notice. Advance the development alpha.
+
 ## Saved messages remaining
 
 Add a distinct archived-email backlog counter alongside finished processing tasks.

@@ -19,6 +19,9 @@ platform or release gate has passed. [Future work](plans/README.md) is separate.
 
 ## Shared boundaries
 
+- Native Close reserves logical closure and transfers shared ingest ownership
+  before delayed closed callbacks; status polls deliver queued last-window notices. See [desktop](implementation/DESKTOP.md).
+
 - The owner status driver samples distinct saved-message backlog counts through
   an indexed read-only queue query. See [desktop](implementation/DESKTOP.md).
 
