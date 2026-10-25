@@ -35,6 +35,8 @@ progress and that worker's finished processing tasks. Preserve each worker's
 count across tasks and idle periods; never copy the global total into its row.
 Old snapshots without worker totals display unavailable rather than invented
 counts. Describe IMAP source containers as download partitions, not files.
+Use the worker table for worker activity; omit the Workers and Peak workers
+summary cards from both source-import and saved-mail processing views.
 
 Ingest history Sources shows IMAP username, hostname and port instead of internal
 account IDs and locator query options. Local paths remain readable. Missing or

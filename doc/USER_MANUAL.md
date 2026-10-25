@@ -64,7 +64,8 @@ import; IMAP containers are labeled download partitions.
 Each worker row identifies its operation, current task/source, download/import
 progress and its own finished processing-task total. An em dash means source
 progress does not apply; Unavailable means an older run did not record a reliable
-per-worker total. Worker counts remain visible while a worker is idle.
+per-worker total. Each row retains its task total while idle. Worker activity is
+shown in the table; there are no Workers or Peak workers summary cards.
 
 
 **Messages requiring processing** counts archived emails with unfinished work, once

@@ -291,6 +291,8 @@ def test_processing_history_shows_jobs_instead_of_zero_source_progress(tmp_path:
     expect(page.locator(".progress-caption")).not_to_contain_text("finalizing")
     expect(page.locator(".statistics")).not_to_contain_text("Source messages")
     expect(page.locator(".statistics")).not_to_contain_text("Files")
+    expect(page.locator(".statistics")).not_to_contain_text("Workers")
+    expect(page.locator(".statistics")).not_to_contain_text("Peak workers")
     remaining = page.locator(".stat").filter(has_text="Messages requiring processing").locator("strong")
     expect(remaining).to_have_text("37")
     expect(page.locator(".processing-explanation")).to_contain_text("Each email stays in the count until all its tasks finish")
@@ -340,6 +342,8 @@ def test_processing_history_shows_jobs_instead_of_zero_source_progress(tmp_path:
     expect(rows.nth(1).locator("td").nth(1)).to_have_text("Processing imported mail")
     expect(page.locator(".statistics")).to_contain_text("Source messages downloaded")
     expect(page.locator(".statistics")).to_contain_text("Download partitions finished")
+    expect(page.locator(".statistics")).not_to_contain_text("Workers")
+    expect(page.locator(".statistics")).not_to_contain_text("Peak workers")
     status_file.write(status.model_copy(update={"state": "completed", "updated_at": datetime.now(UTC),
         "activity_kind": "processing", "source_roots": ["imap://unavailable-account"],
         "processed_messages": 25, "files_processed": 8, "files_total": 8, "saved_messages_remaining": 0}))

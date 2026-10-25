@@ -37,6 +37,8 @@ labels render as Processing saved mail. Real gated jobs exercise unequal worker
 counts and idle transitions; browser cases cover stage gaps, old snapshots and
 mixed downloading/processing rows. Run these checks with `make test-ingest-progress`.
 Completed source runs retain their source totals alongside processing totals.
+The shared statistics renderer omits aggregate Workers and Peak workers cards;
+individual worker rows retain their activity and finished-task totals.
 `ingests.js` renders running processing activity with a striped indeterminate bar,
 finished-job count, processor name and the worker's job activity. Source-file and
 imported-message counters keep their original meaning; terminal/stale snapshots

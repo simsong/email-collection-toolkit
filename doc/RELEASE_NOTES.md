@@ -6,6 +6,11 @@ Entries describe their recorded revisions. For current behavior use the
 [user manual](USER_MANUAL.md) and [CLI reference](CLI_REFERENCE.md). Retired
 Rust delivery plans and historical package checks are not current acceptance.
 
+## Import progress cards
+
+Remove the Workers and Peak workers summary cards. The worker table continues
+to show each worker's activity and finished processing tasks.
+
 ## Saved-mail progress wording
 
 Rename the backlog card **Messages requiring processing**. Explain that an email

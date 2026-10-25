@@ -31,7 +31,8 @@ platform or release gate has passed. [Future work](plans/README.md) is separate.
   **Messages requiring processing**. See [desktop](implementation/DESKTOP.md).
 
 - Typed stage/worker activity selects meaningful progress cards and independent
-  per-worker task totals. See [desktop](implementation/DESKTOP.md).
+  per-worker table totals; aggregate worker cards are omitted.
+  See [desktop](implementation/DESKTOP.md).
 
 - Scanner startup runs in a tracked future while its owner refreshes status;
   see [scanning](implementation/SCANNING.md).

@@ -240,8 +240,6 @@ function statistics(status) {
     ["Infected", integer(status.counts.infected)],
     ["Unchanged", integer(status.counts.unchanged_sources)],
   ];
-  values.push(["Workers", `${integer(status.active_workers)} active / ${integer(status.configured_workers)}`],
-    ["Peak workers", integer(status.peak_workers)]);
   const grid = document.createElement("div");
   if (!processing && status.processing_jobs_completed) values.push(["Processing tasks finished", integer(status.processing_jobs_completed)]);
   if (!processing && status.saved_messages_remaining != null) values.push(["Messages requiring processing", integer(status.saved_messages_remaining)]);
