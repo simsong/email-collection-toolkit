@@ -533,6 +533,35 @@ def test_recovery_preserves_failed_dependencies_and_explicit_stop(tmp_path: Path
             assert next(stat for stat in result.statistics if stat.kind == "child").invocations == 1
 
 
+def test_saved_message_count_waits_for_body_and_attachment_tasks(tmp_path: Path) -> None:
+    """Desktop progress: finishing a task must not remove an email that still has other tasks."""
+    from mailarchiver.ingest_status import read_ingest_history
+    from mailarchiver.processing_progress import saved_messages_remaining
+
+    raw = HEADER + (b'Content-Type: multipart/mixed; boundary="parts"\r\n\r\n'
+        b'--parts\r\nContent-Type: text/plain\r\n\r\nbodytoken\r\n'
+        b'--parts\r\nContent-Type: text/plain\r\nContent-Disposition: attachment; filename="notes.txt"\r\n\r\nattachmenttoken\r\n'
+        b'--parts--\r\n')
+    archive, source = ingest(tmp_path, raw, "--defer-content")
+
+    def remaining() -> int:
+        with sqlite3.connect(archive / "processing.sqlite3") as database:
+            return saved_messages_remaining(database)
+
+    assert remaining() == 1
+    for pending_parts in (2, 1):
+        cli(archive, "process", "--phase", "content", "--max-jobs", "1")
+        status = read_ingest_history(archive).statuses[0]
+        assert status.processing_jobs_completed == 1
+        assert remaining() == status.saved_messages_remaining == 1
+        with sqlite3.connect(archive / "processing.sqlite3") as database:
+            assert database.execute("SELECT count(*) FROM jobs WHERE status='pending'").fetchone() == (pending_parts,)
+    cli(archive, "process", "--phase", "content")
+    assert remaining() == read_ingest_history(archive).statuses[0].saved_messages_remaining == 0
+    assert read_message_bytes(archive, 1) == source.read_bytes() == raw
+    assert not verify_archive(archive)
+
+
 def test_cli_saved_content_uses_worker_pool_and_preserves_search_and_bytes(tmp_path: Path) -> None:
     """PROCESSING: saved worker count drives real concurrent recovery through canonical publication/search."""
     from mailarchiver.ingest_status import read_ingest_history

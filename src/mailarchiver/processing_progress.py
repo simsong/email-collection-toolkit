@@ -5,7 +5,7 @@
 # Pending, running and failed work includes jobs blocked by unfinished parents.
 # The caller owns the existing SQLite connection and controls refresh frequency.
 # The status driver uses this read-only query; no queue or archive state is changed.
-# Keeping reporting outside the processor package preserves its replay fingerprint.
+# A message leaves the count only when none of its jobs still require processing.
 """Distinct saved-message backlog accounting for import progress."""
 from __future__ import annotations
 

@@ -154,8 +154,10 @@ count. Several processing tasks can belong to one email. IMAP source progress is
 reported as download partitions rather than files.
 
 
-**Saved messages remaining** counts archived emails with unfinished work, once
+**Messages requiring processing** counts archived emails with unfinished work, once
 per email even when several body or attachment tasks remain. Pending, running,
 failed and blocked work is included; mail still on the server is excluded.
 The count refreshes during processing and can increase if more saved-message
-work is discovered. Older runs may show Unavailable.
+work is discovered. Each email leaves the count only after its last task finishes.
+The count can stay level while earlier stages extract bodies and attachments and
+queue later work for the same emails. Older runs may show Unavailable.

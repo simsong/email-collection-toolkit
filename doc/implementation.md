@@ -27,7 +27,8 @@ platform or release gate has passed. [Future work](plans/README.md) is separate.
   before delayed closed callbacks; status polls deliver queued last-window notices. See [desktop](implementation/DESKTOP.md).
 
 - The owner status driver samples distinct saved-message backlog counts through
-  an indexed read-only queue query. See [desktop](implementation/DESKTOP.md).
+  an indexed read-only queue query; the UI explains final-task completion under
+  **Messages requiring processing**. See [desktop](implementation/DESKTOP.md).
 
 - Typed stage/worker activity selects meaningful progress cards and independent
   per-worker task totals. See [desktop](implementation/DESKTOP.md).

@@ -6,6 +6,13 @@ Entries describe their recorded revisions. For current behavior use the
 [user manual](USER_MANUAL.md) and [CLI reference](CLI_REFERENCE.md). Retired
 Rust delivery plans and historical package checks are not current acceptance.
 
+## Saved-mail progress wording
+
+Rename the backlog card **Messages requiring processing**. Explain that an email
+leaves the count only after all its body/attachment tasks finish, so finished
+tasks can increase while the message count stays level. Retain the existing
+distinct-message accounting and source/processing separation.
+
 ## Curator-controlled reprocessing
 
 Remove Python source-file hashing and automatic reprocessing after code,

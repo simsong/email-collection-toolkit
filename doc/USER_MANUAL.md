@@ -67,11 +67,13 @@ progress does not apply; Unavailable means an older run did not record a reliabl
 per-worker total. Worker counts remain visible while a worker is idle.
 
 
-**Saved messages remaining** counts archived emails with unfinished work, once
+**Messages requiring processing** counts archived emails with unfinished work, once
 per email even when several body or attachment tasks remain. Pending, running,
 failed and blocked work is included; mail still on the server is excluded.
 The count refreshes during processing and can increase if more saved-message
-work is discovered. Older runs may show Unavailable.
+work is discovered. An email leaves the count only after all its tasks finish.
+The count can stay level while earlier stages extract bodies and attachments;
+those emails still need their later processing tasks. Older runs may show Unavailable.
 
 ## Reprocessing saved mail
 

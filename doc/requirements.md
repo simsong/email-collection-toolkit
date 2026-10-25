@@ -26,8 +26,8 @@ platform or release gate has passed. [Future work](plans/README.md) is separate.
 - Closing an import owner transfers its operation to another same-archive search;
   the last-window veto must never block the native event loop. See [desktop](requirements/DESKTOP.md).
 
-- Processing progress reports distinct archived messages still needing work,
-  independent of task counts. See [desktop](requirements/DESKTOP.md).
+- Processing progress labels distinct archived messages **Messages requiring processing**;
+  each leaves the count after its final task finishes. See [desktop](requirements/DESKTOP.md).
 
 - Progress separates downloads/imports from saved-mail processing, with independent
   worker task totals. See [desktop](requirements/DESKTOP.md).

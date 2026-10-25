@@ -7,12 +7,14 @@ platform/release acceptance. Deferred features live in [plans](../plans/README.m
 
 ## Saved import recovery and notices
 
-During saved-mail processing, show **Saved messages remaining**. Count each
+During saved-mail processing, show **Messages requiring processing**. Count each
 canonical archived email once across its pending, running or failed jobs,
 including body/attachment work and blocked dependencies. Exclude unpublished
 inputs and future downloads. Refresh about once per second and at completion;
 zero means no known unfinished saved-message work, not that future downloads
-are complete. Old snapshots without the counter show Unavailable. This reporting
+are complete. Explain that an email leaves the count only when all its tasks finish;
+the count may stay level while earlier processing stages complete tasks.
+Old snapshots without the counter show Unavailable. This reporting
 must not change the processor configuration or trigger reprocessing.
 
 During archived-content and pending-ingest recovery, show the active processor,

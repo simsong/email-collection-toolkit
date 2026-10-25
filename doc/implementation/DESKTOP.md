@@ -13,7 +13,10 @@ status/job index limits work to pending/running/failed queues; blocked jobs
 remain included. `ProgressReporter` samples this read-only query on its owner
 connection at most once per second during processing stages, resets between
 stages and forces the final sample. Optional `saved_messages_remaining` is
-persisted with each snapshot and renders Unavailable for old history. Reporting
+persisted with each snapshot and renders as **Messages requiring processing**
+(Unavailable for old history). The explanation distinguishes finished tasks from
+emails whose final task has finished, including periods when the count stays level.
+Reporting
 is a read-only helper independent of processing execution. `make test-ingest-progress` covers duplicate part/identity counts,
 failures/blocked jobs, unpublished inputs, countdown snapshots, CLI completion
 and browser rendering.
