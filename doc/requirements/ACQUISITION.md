@@ -31,6 +31,9 @@ Configuration uses `config.yaml` version 3's typed `imap_sources`, with unique s
 IDs; passwords remain exclusively in the native OS keyring. Existing local-only
 version-1/2 configurations remain readable. Missing credentials require interactive
 `--configure`; unattended runs fail clearly without a plaintext or environment fallback.
+Development-app credential reads retain the existing interpreter's Keychain trust
+without changing vault access rules. Report native failure status without exposing
+passwords or raw private backend exception text.
 
 Each invocation synchronizes once and exits. Eight download workers are the default;
 `--workers` sets a positive count. Generic IMAP includes every selectable mailbox
@@ -55,6 +58,11 @@ mailbox/UIDVALIDITY/UID observations avoid repeating body transfer. Gmail IDs ar
 account-scoped unsigned decimal strings and survive UID epoch changes. Generic
 epoch changes can require refetching, followed by canonical content deduplication.
 Metadata-only refreshes update Gmail labels without increasing download counts.
+Within each worker range, acquire missing exact UID checkpoints before refreshing
+previously committed metadata. Do not use the largest saved UID as a resume cursor:
+parallel interruption can leave gaps. Repartitioning workers and UIDVALIDITY
+changes must retain the existing identity checks. Label refresh still runs after
+acquisition, and interruption can defer that refresh to the next invocation.
 
 Newly archived counts increment in the current UTC hourly bucket as each message
 commits. Duplicate downloads, exclusions and message-ingest errors are recorded

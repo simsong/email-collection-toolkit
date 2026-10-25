@@ -47,6 +47,21 @@ WSL/Linux results do not establish Windows compatibility. The Windows writer and
 embedded scanner are implemented (see [Shared Python Windows desktop](DESKTOP.md#shared-python-windows-desktop));
 PST/OST converters are not yet packaged for Windows.
 
+## Build identity
+
+Each user-visible fix handed back for another test run advances the canonical
+version in `pyproject.toml` and `uv.lock`, without implicitly publishing a tag.
+About displays the launch/build Git commit and identifies uncommitted local changes.
+The macOS development launcher must seal and verify its bundle after writing its
+identity, keep the active venv available to scanner workers, and retain access to
+credentials stored by the original interpreter. Do not modify Keychain policies
+or copy secrets into files, environment variables or command arguments.
+Running development processes retain their original version/commit even if the
+checkout or installed metadata changes. Packaged builds retain embedded provenance
+without Git or a checkout; unavailable provenance must be explicit. The macOS
+development launch through `make gui` must have a native product identity in
+Command-Tab instead of Python, preserving terminal output and arguments.
+
 ## macOS desktop delivery
 
 ### Application updates (issue #91)

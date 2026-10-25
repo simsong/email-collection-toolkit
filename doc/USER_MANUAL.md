@@ -52,15 +52,36 @@ The code has inactive integration points for Gmail API, Microsoft Exchange,
 and standard input containing NUL-separated messages; these are not CLI ingest
 modes yet.
 
+## Downloading and processing progress
+
+The Ingests window distinguishes downloading/importing source mail from processing
+saved messages and MIME parts. **Processing saved mail** finishes queued metadata,
+body extraction and search-index work before source downloads resume. During that
+stage the cards show finished processing tasks and average tasks/second. A single
+email can require several tasks. Source-message and file counters apply to source
+import; IMAP containers are labeled download partitions.
+
+Each worker row identifies its operation, current task/source, download/import
+progress and its own finished processing-task total. An em dash means source
+progress does not apply; Unavailable means an older run did not record a reliable
+per-worker total. Worker counts remain visible while a worker is idle.
+
 ## Continuing an interrupted import
 
 When reopening an archive with unfinished work, review the source, import start,
 latest interruption and saved imported/duplicate counts. An unclean stop shows
 its last saved progress time because the exact interruption time is unknown.
-Choose **Continue Import** to use the saved settings, **Ask me later** to defer until
-another opening, or **Abort import** to cancel saved work while keeping archived
+Choose **Continue Import** to resume ingest and content processing using the saved
+settings, **Leave import suspended** to keep work paused, or **Stop import** to
+cancel remaining work while keeping archived
 messages and history. A new explicit import can read the source again; use
 explicit reprocessing to regenerate previously cancelled derived work.
+Returning focus or opening a name/count search does not repeat this prompt.
+Use **Continue Processing** to reopen it while the archive remains open.
+Import counters describe the current run; the search window's message count
+includes earlier runs. IMAP uses saved per-message checkpoints to avoid downloading
+archived bodies again. Each worker acquires missing messages before refreshing
+saved metadata and Gmail labels; metadata refresh does not add download counts.
 
 ## Before you begin
 
@@ -389,12 +410,29 @@ every search and Ingests window. During Import, the search window that started
 the run cannot be closed from **File → Close** or its close box; other windows
 remain searchable and independently closeable.
 
+In About, **Show processor graph…** opens a separate window showing registered
+MIME types, their processors and possible output types, grouped by processing
+stage. Dashed arrows show MIME extraction's possible outputs; **Other MIME types**
+includes document types without a registered consumer. Hover over nodes or expand
+**Connections and processor details** for rank, scope and version. Use **Fit width**,
+**100%** or zoom controls for larger graphs. **Refresh** reads the currently active
+archive's registry. The graph works offline and does not run processors.
+
 The status line at the bottom shows a running ingest, or summarizes the most
 recent run. Click it to open the independent Ingests window. You can also use
 **Window → Ingests**. The window lists all retained runs and shows the selected
 run's sources, totals, failures, and every configured worker thread. It has its
 own close box; opening it again while it is visible brings the same window to
 the front.
+
+Use **Suspend Import** in this window to finish current work, save its checkpoint
+and release the archive for manual identity edits without quitting. The window
+shows that suspension is pending until the worker finishes. **Continue Import**
+resumes the saved work, including after reopening the archive. A download already
+in progress may finish before suspension completes. Name and institution
+pickers show a loading message while reading or refreshing identities; they keep
+existing rows during refresh and report errors with a retry action. Automatic
+authoritative matching remains unconnected.
 
 Type ordinary words to search indexed headers and message text. The result
 list is on the left and the selected message is on the right. The message view

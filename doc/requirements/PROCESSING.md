@@ -161,12 +161,32 @@ messages return directly to message processing without another antivirus scan,
 retaining parent scan provenance and using shared deduplication/publication
 services for the child record and content reference.
 
+### Registered processor graph
+
+About's registered-processor list offers **Show processor graph…**, opening a
+separate reusable, read-only window. Draw MIME-type nodes with arrows to each
+subscribing processor, and processor arrows to possible output MIME types. Use
+the active archive's saved trusted plugin roots, or built-ins without an archive.
+Never invoke processors or inspect messages to draw the registry.
+
+Show ingest, message and content as separate DAGs: the same MIME type can occur
+in different stages without implying an execution cycle. Graph edges describe
+possible content flow; rank, scope and version remain available as node details.
+The existing `emits_mime_parts` declaration includes every registered external
+MIME type, with an additional **Other MIME types** terminal for the unbounded
+document vocabulary. Internal ECT types are excluded from this dynamic output.
+Use a bundled graph-layout package offline, selectable labels, distinguishable
+node shapes, zoom/fit controls and text connections. Display loading/errors and
+allow refresh after transient archive locks without discarding a previous graph.
+
 ### Desktop processor integration
 
 Opening an archive with pending, failed, or interrupted processing shall show
-**Incomplete work**, with **Continue ingest** and **Continue content processing**
-checked. Later, or clearing both choices, opens it without starting work; the
-prompt returns on the next opening until work finishes. Source traversal resumes
+**Incomplete work**, with **Continue Import**, **Leave import suspended** and
+**Stop import**. Continue Import enables ingest and content processing together;
+there are no phase checkboxes. Leaving suspended or closing opens it without
+starting work; the prompt returns on the next opening until work finishes.
+Stop cancels pending work while retaining archived messages. Source traversal resumes
 from its original roots; rootless content runs must not hide interrupted imports.
 Content-only processing must work without the source being available. Missing
 saved policy requires an explicit File → Import instead of guessing scan settings.

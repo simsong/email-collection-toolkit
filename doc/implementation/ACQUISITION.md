@@ -7,6 +7,15 @@ live in [plans](../plans/README.md); historical evidence does not validate this 
 
 ## Provider implementation boundaries
 
+`imap_credentials` uses the native vault directly for CLI and packaged apps.
+The named macOS development bundle reads through its original venv interpreter's
+explicit native keyring CLI, retaining existing Keychain trust. Its isolated,
+owned child returns password-only JSON over captured pipes, with timeout/owner-exit
+cleanup shared with definition updates. Errors retain a
+native status code without private backend output or exception context; no
+credential or permission is changed. Native GUI acceptance checks a synthetic
+missing item, while IMAP fixtures inject only the native-store boundary.
+
 The Google authorization prototype, mailarchiver-auth entry point, client
 registration workflow, and its Google/Requests/keyring/DNS dependencies were
 removed. The standalone IMAP CLI reintroduces keyring solely for native password
@@ -395,6 +404,17 @@ bytes. Old archived messages/checkpoints and local-file imports are unchanged;
 refetched legacy CRLF messages can therefore create a distinct LF variant. Gmail selects only the
 special-use `\\All` mailbox; X-GM-MSGID and X-GM-LABELS replace header-based matching.
 INTERNALDATE is an explicit source-date fallback, not a rewrite of RFC 5322 headers.
+
+Each worker snapshots its account/mailbox/UIDVALIDITY/range's committed UID set in
+a temporary SQL table, committing that copy before yielding so it releases the
+catalog read lock. Bounded SEARCH windows first select UIDs absent from the saved
+set, then revisit saved UIDs for metadata/label refresh. New commits cannot enter
+that invocation's refresh pass. Exact membership preserves holes and changed
+partitions; no maximum-UID cursor or permanent schema change is introduced. A
+fresh range has no second pass. Progress distinguishes finding unarchived messages
+from refreshing saved metadata. `make test-imap` verifies a real TLS mailbox with
+a missing checkpoint below a saved UID, newly arrived mail, source flag
+preservation and reruns with a different worker count.
 
 Additive operational tables in `archive.sqlite3` retain `imap_seen` UID/Gmail-ID
 checkpoints, `imap_hourly` UTC counts, and the observed `imap_mailboxes` hierarchy.

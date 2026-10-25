@@ -1,7 +1,10 @@
 /* Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved. */
 "use strict";
 
+let processingInitialized = false;
 window.addEventListener("pywebviewready", async () => {
+  if (processingInitialized) return;
+  processingInitialized = true;
   const api = window.pywebview.api;
   const capabilities = await api.status();
   if (capabilities.write_available === false) {
@@ -40,8 +43,6 @@ window.addEventListener("pywebviewready", async () => {
         imports.append(section);
       }
       error.textContent = "";
-      document.getElementById("continue-ingest").checked = true;
-      document.getElementById("continue-content").checked = true;
       if (!dialog.open) dialog.showModal();
     } catch (failure) { showError(`Could not read processing status: ${failure.message || failure}`); }
   }
@@ -50,20 +51,16 @@ window.addEventListener("pywebviewready", async () => {
   document.getElementById("processing-abort").addEventListener("click", async event => {
     event.target.disabled = true;
     try {
-      if (!api.abort_processing || !await api.abort_processing(statusIds)) throw new Error("Saved work could not be aborted.");
+      if (!api.abort_processing || !await api.abort_processing(statusIds)) throw new Error("Saved import could not be stopped.");
       dialog.close();
     } catch (failure) { error.textContent = failure.message || String(failure); }
     finally { event.target.disabled = false; }
   });
   document.getElementById("processing-continue").addEventListener("click", async event => {
-    if (!document.getElementById("continue-ingest").checked && !document.getElementById("continue-content").checked) {
-      dialog.close(); return;
-    }
     event.target.disabled = true;
     window.mailArchiverProcessingStarting(true);
     try {
-      if (!await api.resume_processing(document.getElementById("continue-ingest").checked,
-        document.getElementById("continue-content").checked)) throw new Error("Processing could not start. Check About for details; another writer may be active.");
+      if (!await api.resume_processing(true, true)) throw new Error("Processing could not start. Check About for details; another writer may be active.");
       dialog.close();
     } catch (failure) { error.textContent = failure.message || String(failure); }
     finally {
@@ -75,5 +72,6 @@ window.addEventListener("pywebviewready", async () => {
     try { await api.open_picker(kind); }
     catch (failure) { showError(failure.message || String(failure)); }
   });
-  if (!new URLSearchParams(window.__rustWindowParameters || location.search).has("message")) void showWork();
+  const parameters = new URLSearchParams(window.__rustWindowParameters || location.search);
+  if (!["message", "query", "identity-messages"].some(key => parameters.has(key))) void showWork();
 });

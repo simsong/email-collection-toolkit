@@ -13,7 +13,10 @@
     <main class="ingest-browser">
       <aside class="ingest-history">
         <header><h1>Ingests</h1><span id="history-count"></span></header>
-        <div class="ingest-actions"><button id="import-directory" type="button" disabled>Import Directory…</button></div>
+        <div class="ingest-actions"><button id="import-directory" type="button" disabled>Import Directory…</button>
+          <button id="suspend-import" type="button" disabled>Suspend Import</button>
+          <button id="resume-import" type="button" disabled>Continue Import</button>
+          <p id="import-control-status" role="status" hidden></p></div>
         <div id="starting-import" role="status" hidden><span class="state-dot running" aria-hidden="true">✓</span><span>Starting — preparing archive…</span></div>
         <div id="history-list" role="listbox" aria-label="Ingest history"></div>
         <div id="history-errors" class="history-errors" hidden></div>

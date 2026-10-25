@@ -1,0 +1,38 @@
+<!doctype html>
+<!-- Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved. -->
+<!-- Display the active registry's possible processor dataflow in its own window.
+     The native bridge supplies manifest-derived pipeline graphs, without running plugins.
+     Vendored Dagre computes directed layouts locally; SVG keeps labels selectable.
+     Separate panels preserve the dispatcher's pipeline-scoped acyclic semantics.
+     Refresh, zoom and an accessible relationship list support larger custom registries.
+     Assets and layout stay offline; no archive content is requested. -->
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-eval'; style-src 'self'; object-src 'none'; connect-src 'self'">
+    <title>Processor graph</title>
+    <link rel="stylesheet" href="processor-graph.css">
+  </head>
+  <body>
+    <header>
+      <h1>Processor graph</h1>
+      <p id="context">Reading registered processors…</p>
+      <p>Arrows show MIME type → processor → possible output. Each panel is one processing stage.
+        Rank orders processors sharing an input. Hover over a node or expand its panel’s connection list for details.</p>
+      <div class="toolbar" aria-label="Graph controls">
+        <button id="refresh" type="button" disabled>Refresh</button>
+        <button id="fit" type="button">Fit width</button>
+        <button id="actual-size" type="button">100%</button>
+        <button id="zoom-out" type="button" aria-label="Zoom out">−</button>
+        <button id="zoom-in" type="button" aria-label="Zoom in">+</button>
+        <span class="legend"><span class="mime-key">MIME type</span><span class="processor-key">Processor</span><span>Dashed arrow: possible extracted MIME part</span></span>
+      </div>
+      <p id="status" role="status" aria-live="polite">Waiting for the application bridge…</p>
+      <p id="error" role="alert" hidden></p>
+    </header>
+    <main id="graphs" aria-busy="true"></main>
+    <script src="vendor/dagre/dagre.min.js"></script>
+    <script src="processor-graph.js"></script>
+  </body>
+</html>

@@ -16,6 +16,7 @@ Fundamental dependents:
 from pathlib import Path
 
 APPLICATION_NAME = "Email Collection Toolkit"
+DEVELOPMENT_BUNDLE_IDENTIFIER = "net.simson.mailarchiver.development"
 # Preserve access to settings created under the former two-word product name.
 LEGACY_DIRECTORY_NAME = " ".join(("Mail", "Archiver"))
 

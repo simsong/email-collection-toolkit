@@ -57,11 +57,19 @@ function archivePicker(Base) {
       const request = ++this.request;
       const [mailbox, domain, start, end, name] = this.queries();
       this.get("date-error").hidden = !(start && end && start > end);
-      if (start && end && start > end) { this.model = new MatcherModel([]); this.render(); return; }
+      if (start && end && start > end) {
+        this.loading = false; this.loadError = ""; this.loaded = true;
+        this.model = new MatcherModel([]); this.render(); return;
+      }
+      this.loading = true;
+      this.loadError = "";
+      this.render();
+      this.announce("Loading archive identities… Please wait.");
       try {
         const page = await window.pywebview.api.query({mailbox, domain, name, start: start || null, end: end || null,
           include_non_people: this.get("show-non-people").checked});
         if (request !== this.request) return;
+        this.loaded = true;
         this.model = new MatcherModel(page.groups.map(row => new ArchiveGroup(row)));
         this.expanded = new Set(this.model.groups.map(group => group.id));
         this.selection = null;
@@ -70,10 +78,27 @@ function archivePicker(Base) {
         this.get("summary").textContent = `${page.groups.length} canonical entries · ${visible} of ${page.total_addresses} addresses`;
         if (page.excluded_addresses) this.get("summary").textContent += ` · ${page.excluded_addresses} non-person addresses hidden`;
         this.announce("Loaded archive identities. Select a canonical entry to rename it; edits save immediately.");
-      } catch (error) { this.announce(`Could not load identities: ${error.message || error}`); }
+      } catch (error) {
+        if (request !== this.request) return;
+        this.loadError = `Could not load identities: ${error.message || error}. Use Refresh to retry.`;
+        this.announce(this.loadError);
+      } finally {
+        if (request === this.request) { this.loading = false; this.renderLoading(); }
+      }
     }
+    renderLoading() {
+      const message = this.openingSearch || this.searchError || (this.loading ? "Loading archive identities… Please wait." : this.loadError || "");
+      this.get("identity-loading").textContent = message;
+      this.get("identity-loading").hidden = !message;
+      this.root.querySelector(".matrix").setAttribute("aria-busy", String(Boolean(this.loading || this.openingSearch)));
+      this.get("refresh").disabled = Boolean(this.loading);
+      this.get("empty").hidden = Boolean(this.loading || this.loadError) || !this.loaded || this.model.groups.length > 0;
+      if (!this.loaded) this.get("summary").textContent = this.loading ? "Loading identities…" : "Identities unavailable";
+      this.renderSelection();
+    }
+    render() { super.render(); this.renderLoading(); }
     async persist(decision) {
-      if (this.busy) return;
+      if (this.busy || this.loading) return;
       this.busy = true;
       this.render();
       try {
@@ -94,13 +119,26 @@ function archivePicker(Base) {
       });
     }
     async search(group, address, action) {
+      if (this.openingSearch) return;
       const [mailbox, domain, start, end, name] = this.queries();
+      const target = address || group;
+      const label = address ? address.email : group.label;
+      const count = target[action === "header" ? "messages" : "signatureMessages"];
+      const description = action === "name" ? `search for ${label}` :
+        `${count} ${action === "header" ? "header" : "signature"} message${count === 1 ? "" : "s"} for ${label}`;
+      this.openingSearch = `Opening ${description}… Please wait.`;
+      this.searchError = "";
+      this.announce(this.openingSearch);
+      this.renderLoading();
       try {
         await window.pywebview.api.search({group_id: Number(group.id), address_id: address ? Number(address.id) : null,
           action, filters: {mailbox, domain, name, start: start || null, end: end || null,
             include_non_people: this.get("show-non-people").checked}});
         this.announce("Opened search in a new window.");
-      } catch (error) { this.announce(`Could not open search: ${error.message || error}`); }
+      } catch (error) {
+        this.searchError = `Could not open search: ${error.message || error}. Click the name or count to retry.`;
+        this.announce(this.searchError);
+      } finally { this.openingSearch = ""; this.renderLoading(); }
     }
     row(group, address = null) {
       const row = super.row(group, address);
@@ -144,7 +182,10 @@ function archivePicker(Base) {
       super.renderSelection();
       const name = this.selection && this.model.find(this.selection.groupId)?.label;
       this.get("canonical-name").value = name || "";
-      this.get("rename").disabled = this.busy || !name;
+      this.get("rename").disabled = this.busy || this.loading || !name;
+      if (this.loading) {
+        for (const id of ["destination", "move", "separate"]) this.get(id).disabled = true;
+      }
       if (this.kind === "institution") {
         this.get("destination").disabled = true;
         this.get("move").disabled = true;

@@ -215,6 +215,29 @@ they do not assert interrupt latency for I/O that never returns.
 
 ## Desktop processing and synthetic matcher
 
+### Registered processor graph
+
+`processor_graph.py` builds typed MIME/processor nodes and edges from manifests.
+The graph and registry cycle validation share `registry.emitted_types`, including
+registered output-only types in MIME-part expansion. Arbitrary additional MIME
+types terminate at **Other MIME types**; pipeline-specific panels preserve the
+dispatcher's acyclic type semantics. The view depicts subscriptions/emissions;
+rank dependencies, persistence and stage handoffs remain in processor details
+and the architecture documentation.
+
+About's graph command opens/focuses one native window listed in the Window menu.
+Its narrow read-only bridge reads the current About registry with the same
+bounded plugin-settings lock wait. Refresh retains previous graphs on errors
+and discards obsolete replies. Vendored Dagre 3.1.1 (including Graphlib) lays out
+the DAGs locally; SVG and a text connection list use safe DOM text APIs for
+custom plugin names. Fit/zoom controls and scrollable panels support large graphs.
+No CDN, graph server, plugin execution or message access is involved.
+`make test-processor-graph` exercises real built-in/custom registries, DAG edges,
+offline browser rendering, safe custom labels, busy retry, and archive switching.
+`make test-native-application` opens the graph from About through the native bridge.
+
+### Processing services
+
 [The proposed processor graphs](../PLUGINS.md#processing-graph-design-and-deferred-capabilities)
 and website plugin page describe the agreed direction, including resumable work
 selection, handoff plugins, first-class attached messages and durable tags.
@@ -238,8 +261,9 @@ Run history preserves unfinished source roots across later rootless content runs
 Content-only work reuses archived objects, and read-only access never creates a
 missing processing database. Unsupported/missing saved policy reports an error.
 
-`processing.js` shows the two checked resume options on opening and provides an
-explicit **Continue Processing** action. The action starts disabled until status
+`processing.js` offers **Continue Import** for both phases, **Leave import suspended**,
+and **Stop import**, without phase checkboxes. It provides an explicit
+**Continue Processing** action to reopen the dialog. The action starts disabled until status
 is known, stays disabled during the resume bridge request, and follows the shared
 ingest-overview poll afterward. The overview includes the document's accepted
 job before a status file exists. Resume generations reject replies started before

@@ -475,8 +475,20 @@ verify:
 summary-smoke:
 	@printf '%s\n' 'During verification, the archiver reads every canonical MBOX file without changing it. It checks BagIt payload and tag manifests, Mailbag metadata, and every declared complete-MBOX, raw-message, and semantic-message digest. Derived SQLite search data can be regenerated from canonical MBOX files. A failure is reported for investigation rather than repaired automatically.' | uv run summarize
 
+# __PYVENV_LAUNCHER__ is set internally for the signed macOS development bundle;
+# PYTHONEXECUTABLE is removed from that child environment to preserve the active venv.
 gui:
-	uv run mailsearch-gui $(ARGS)
+	uv run python scripts/run_gui.py $(ARGS)
+
+.PHONY: test-build-identity
+test-build-identity: ruff
+	uv run --locked pytest -q tests/test_build_info.py
+	uv run --locked pytest -q --browser chromium e2e_tests/test_ingest_verify.py::test_about_window_displays_version_disk_and_warnings
+
+.PHONY: test-processor-graph
+test-processor-graph: ruff
+	uv run --locked pytest -q tests/test_processor_graph.py tests/test_processing.py
+	uv run --locked pytest -q --browser chromium e2e_tests/test_ingest_verify.py::test_processor_graph_renders_registry_and_retries_busy_archive e2e_tests/test_ingest_verify.py::test_about_window_displays_version_disk_and_warnings
 
 .PHONY: matcher-prototype test-matcher-prototype
 matcher-prototype:
@@ -646,6 +658,12 @@ test-headers:
 
 test-progress:
 	uv run pytest -q tests/test_progress.py tests/test_sources.py
+
+# Source versus saved-mail progress, unequal worker totals, and actual browser rendering.
+.PHONY: test-ingest-progress
+test-ingest-progress: ruff
+	$(MAKE) test-progress
+	uv run --locked pytest -q --browser chromium e2e_tests/test_gui_processing.py::test_processing_history_shows_jobs_instead_of_zero_source_progress
 
 .PHONY: test-interrupt
 test-interrupt:

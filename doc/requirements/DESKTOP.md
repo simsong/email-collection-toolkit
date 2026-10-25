@@ -17,6 +17,14 @@ text labels. Accepted GUI imports show startup immediately while archive
 preparation precedes the first saved run snapshot; old failures retain their state.
 Explain that finished processing jobs are work for messages or MIME parts,
 potentially several per email, rather than newly imported message counts.
+Label saved work **Processing saved mail**. During processing stages, including
+intervals between jobs, show finished tasks and average tasks/second instead of
+zero source-message/file/rate cards. History summaries use processing counts too.
+The worker table separates operation, current task/source, download/import
+progress and that worker's finished processing tasks. Preserve each worker's
+count across tasks and idle periods; never copy the global total into its row.
+Old snapshots without worker totals display unavailable rather than invented
+counts. Describe IMAP source containers as download partitions, not files.
 
 Ingest history Sources shows IMAP username, hostname and port instead of internal
 account IDs and locator query options. Local paths remain readable. Missing or
@@ -29,11 +37,15 @@ interruption, messages imported and duplicates ignored. Sum saved attempt counts
 since the preceding completion or explicit abort; these are saved progress totals,
 not a fresh count from the server. If a process died without a final status, show
 its last saved progress time and state that the interruption time is unknown.
-Offer **Abort import**, **Ask me later**, and **Continue Import**. Later and closing the
-dialog preserve work and ask again on reopening; Continue Import uses the selected
-phases and saved policy. Abort cancels all displayed saved traversal and pending,
+Offer **Stop import**, **Leave import suspended**, and **Continue Import**, without
+phase checkboxes. Leaving suspended and closing the dialog preserve work and ask
+again on reopening; Continue Import resumes both ingest and content processing
+using saved policy. Initially focus Leave import suspended so Enter preserves
+the checkpoint. Focus changes and count/name/message navigation must not
+repeat the automatic prompt; Continue Processing remains an explicit way to open it.
+Stop import cancels all displayed saved traversal and pending,
 running or failed jobs under the archive writer lease, retaining archived mail,
-source checkpoints and run history. A changed source history blocks a stale abort.
+source checkpoints and run history. A changed source history blocks a stale stop request.
 A later explicit import can begin a new continuation; cancelled derived work may
 be regenerated with explicit reprocessing.
 
@@ -235,6 +247,8 @@ Its script policy must permit pywebview's dynamic bridge functions, as the searc
 and ingest pages do. A delayed bridge retries and clears its warning on recovery.
 Only explicitly selected window methods are exposed to JavaScript; application
 controllers, documents, and native window objects must not be recursively exposed.
+About's **Show processor graph…** opens the read-only registry DAG in a separate
+window; see [processing](PROCESSING.md#registered-processor-graph).
 
 **File → New** asks for a new or empty permanent `.mailarchive` destination
 before creating its blank search window. It initializes BagIt, both databases,
@@ -255,6 +269,12 @@ The Ingests window provides **Import Directory…**, bound to its own archive ev
 when another archive is active. It opens the source picker directly, then
 uses the same owner-names setup, confirmation, and writer lease as File Import.
 The button is disabled during an import or while its dialogs are pending.
+The same window offers **Suspend Import** for its own active archive and
+**Continue Import** for interrupted or failed work. Suspension is cooperative:
+show that current work is finishing until its checkpoints are saved and the
+writer lease is released. Do not quit or cancel saved jobs. Retain accepted
+settings even if suspension precedes processing initialization, so reopening
+the archive can continue. Resume must preserve bytes and source idempotence.
 On macOS, one source picker accepts files and directories together with an
 **Import** action, without a preliminary source-type question. Its title names
 the destination archive and its message shows the full destination path.
@@ -644,6 +664,12 @@ and its indexing action/progress remain planned; no fabricated progress is shown
 
 ## Identity picker navigation
 
+Initial loads, refreshes and filter queries visibly report loading and hide the
+empty-result message until a query succeeds. Retain displayed rows while
+refreshing; stale responses must not replace newer results or clear their busy
+indicator. Errors offer Refresh to retry. Identity queries remain read-only
+during import; manual writes require suspending the import's writer first.
+
 Double-click a canonical name or address (or press Enter on its label) to open
 an Any-address search in a new window bound to the picker archive. Name searches
 expand original header names, canonical names and merged aliases across every
@@ -660,6 +686,8 @@ verified ownership. Institution rows do not show this column.
 
 Click a nonzero Messages or Signatures count to open its distinct message set,
 using the displayed member addresses, inclusive date bounds and evidence channel.
+The clicked row determines the target independently of the selected row. Report
+opening progress immediately; show navigation errors with a retry action.
 Email-labelled groups retain those filters and the non-person visibility choice
 when their name action falls back to header evidence. Provider-domain settings
 exclude those domains from institution members and institution-name search aliases;

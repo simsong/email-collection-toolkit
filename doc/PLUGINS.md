@@ -264,17 +264,19 @@ paths. The attachment tag means also observed as an attachment, not exclusively
 attached. Child-byte recovery and resource-limit behavior are specified below.
 The viewer shows origin paths; the attachment tag initially has a 5% gray background.
 
-On archive opening, unfinished work prompts **Incomplete work**, with checked
-**Continue ingest** and **Continue content processing** choices. The desktop bridge
+On archive opening, unfinished work prompts **Incomplete work**, with **Continue
+Import** to resume both ingest and content processing, **Leave import suspended**
+to preserve the checkpoint without starting work, and **Stop import** to cancel
+remaining work while retaining archived mail. The desktop bridge
 uses the shared `IngestRequest` service, saved owner/scanner/plugin settings and
 writer lease. The **Names and addresses** and **Institutions** controls query the
 processor database; manual name/address decisions commit immediately and survive
 replay. Institution membership is domain-based. About lists processor manifests
 by subscribed MIME type. Authoritative matching is not yet connected. No persistent
-“do not ask again” option suppresses unfinished work. Selecting only content processing runs eligible already-ingested messages even
-when ingest remains incomplete; required message-metadata processing precedes
-their content jobs. Selecting both completes ingest before deferred content
-processing. Unchecking both opens the archive without starting work. Extraction
+“do not ask again” option suppresses unfinished work. The dialog has no phase
+checkboxes. Required message-metadata processing precedes its content jobs;
+saved archived-content work is recovered before remaining source traversal.
+The CLI and shared service retain independent phase controls. Extraction
 checkpoints distinguish plugin versions and completed, failed, and pending work;
 manual identity decisions survive all extraction and matcher runs.
 
@@ -284,6 +286,13 @@ and font; presentation fields permit NULL for no change. Definitions and
 assignments are durable, not disposable search-index data.
 
 ### Registration and manifest contract
+
+About's **Show processor graph…** draws the currently registered manifests in a
+separate offline window. This is the subscription/emission view of each pipeline,
+including custom plugins from saved trusted roots. `emits_mime_parts = true`
+already declares open-ended document outputs; the graph expands registered MIME
+types and shows an **Other MIME types** terminal for the rest. The architecture
+graphic above also describes persistence and handoffs beyond these type edges.
 
 The implemented processor API is a versioned extension of the existing trusted
 Python plugin system, not a new package installer. Existing source/file API v1

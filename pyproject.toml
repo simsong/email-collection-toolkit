@@ -2,7 +2,7 @@
 
 [project]
 name = "mailarchiver"
-version = "1.0.0a19"
+version = "1.0.0a25"
 description = "Personal MBOX archive normalizer"
 requires-python = ">=3.12"
 license = "GPL-2.0-only"
@@ -11,6 +11,8 @@ license-files = [
     "COPYRIGHT",
     "THIRD_PARTY_NOTICES.md",
     "gui/vendor/tabulator/LICENSE",
+    "gui/vendor/dagre/LICENSE",
+    "gui/vendor/dagre/dagre.min.js.LEGAL.txt",
     "licenses/proxy_tools-BSD.txt",
     "licenses/publicsuffix-MPL-2.0.txt",
     "website/themes/envelope-rainbow/LICENSE",

@@ -9,6 +9,7 @@ death.
 Fundamental dependents:
 
 - ``clamav_update``: definition refresh depends on FreshClam cleanup during cancellation or Quit.
+- ``imap_credentials``: private native-reader output and lifetime stay inside the owning run.
 """
 from __future__ import annotations
 

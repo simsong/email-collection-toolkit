@@ -71,6 +71,7 @@ from .ingest_status import (
 )
 from .ingest_status import (
     IngestWorkerStatus as WorkerProgress,
+    WorkerOperation,
 )
 from .layout import mbox_directory, mbox_path
 from .mbox import (
@@ -144,9 +145,10 @@ class _ClosableIterator(Protocol):
 
 
 class IngestOutcome(BaseModel):
-    """Publication evidence retained even when an ingest raises."""
+    """Publication evidence and accepted settings retained even when ingest raises."""
 
     published: bool = False
+    accepted_request: IngestRequest | None = None
 
 
 class ContactInputError(ValueError):
@@ -248,6 +250,7 @@ class ProgressUpdate(BaseModel):
     processing_finished: bool = False
     processing_job_id: int | None = None
     processing_processor: str | None = None
+    operation: WorkerOperation | None = None
 
 
 class ProgressState(BaseModel):
@@ -488,7 +491,7 @@ class ProgressReporter:
         self.state = ProgressState(
             started_at=started_at or datetime.now(UTC),
             started_monotonic=time.monotonic(),
-            workers=[WorkerProgress(worker=worker) for worker in range(1, worker_count + 1)],
+            workers=[WorkerProgress(worker=worker, processing_jobs_completed=0) for worker in range(1, worker_count + 1)],
         )
         self.updates: queue.SimpleQueue[ProgressUpdate] = queue.SimpleQueue()
         self.processing_workers: list[ProgressUpdate | None] = [None] * worker_count
@@ -511,6 +514,7 @@ class ProgressReporter:
         self.last_status_monotonic: float | None = None
         self.scan_policy: Literal["clamav", "not-scanned", "unknown"] = "unknown"
         self.interrupt_announced = False
+        self.activity_kind: Literal["source", "processing"] = "source"
 
     def start(self) -> None:
         self.display(self.phase)
@@ -527,8 +531,9 @@ class ProgressReporter:
         if self.output is not None:
             print("\n**Interrupted. Shutting down…**", file=self.output, flush=True)
 
-    def set_phase(self, phase: str) -> None:
+    def set_phase(self, phase: str, *, activity_kind: Literal["source", "processing"] = "source") -> None:
         self._assert_driver_thread()
+        self.activity_kind = activity_kind
         self.base_phase = phase
         self.phase = phase
         self.phase_started_monotonic = time.monotonic()
@@ -549,6 +554,7 @@ class ProgressReporter:
                 source.completed_bytes or 0,
                 source.total_bytes or 0,
                 message_date=message_date,
+                operation="downloading" if source.source.plugin_kind == "imap" else "importing",
             )
             return
         self._send_activity(
@@ -558,6 +564,7 @@ class ProgressReporter:
             source.total_messages,
             "messages",
             message_date=message_date,
+            operation="downloading" if source.source.plugin_kind == "imap" else "importing",
         )
 
     def record_file(self, path: Path | str, bytes_done: int, bytes_total: int) -> None:
@@ -570,15 +577,17 @@ class ProgressReporter:
         bytes_done: int,
         bytes_total: int,
     ) -> None:
-        self._send(phase, path, bytes_done, bytes_total)
+        self._send(phase, path, bytes_done, bytes_total,
+                   operation="processing" if phase in ("processing", "scanning", "waiting to publish", "publishing", "checkpointing") else "importing")
 
-    def record_plugin_event(self, event: ProgressEvent, path: Path | str) -> None:
+    def record_plugin_event(self, event: ProgressEvent, path: Path | str, *, source_kind: str | None = None) -> None:
         """Render a typed plug-in event without letting plug-ins print directly."""
         phase = safe_status_text(event.phase)
         if event.unit == "bytes" and event.completed is not None and event.total is not None:
-            self._send(phase, path, event.completed, event.total)
+            self._send(phase, path, event.completed, event.total, operation="downloading" if source_kind == "imap" else "importing")
             return
-        self._send_activity(phase, path, event.completed, event.total, event.unit)
+        self._send_activity(phase, path, event.completed, event.total, event.unit,
+                            operation="downloading" if source_kind == "imap" else "importing")
 
     def record_inventory(self, file_count: int, byte_count: int) -> None:
         self._assert_driver_thread()
@@ -652,6 +661,7 @@ class ProgressReporter:
         *,
         message_date: datetime | None = None,
         file_complete: bool = False,
+        operation: WorkerOperation = "importing",
     ) -> None:
         self.updates.put(
             ProgressUpdate(
@@ -662,6 +672,7 @@ class ProgressReporter:
                 bytes_total=bytes_total,
                 message_date=message_date,
                 file_complete=file_complete,
+                operation=operation,
             )
         )
 
@@ -674,6 +685,7 @@ class ProgressReporter:
         unit: str | None,
         *,
         message_date: datetime | None = None,
+        operation: WorkerOperation = "importing",
     ) -> None:
         self.updates.put(
             ProgressUpdate(
@@ -684,6 +696,7 @@ class ProgressReporter:
                 activity_total=total,
                 activity_unit=unit,
                 message_date=message_date,
+                operation=operation,
             )
         )
 
@@ -717,6 +730,11 @@ class ProgressReporter:
                 self.state.processing_processor = current.processing_processor if current else None
             if update.processing_finished:
                 self.state.processing_jobs_completed += 1
+                worker.processing_jobs_completed = (worker.processing_jobs_completed or 0) + 1
+            if update.operation is not None and not (update.processing_active is None and self.state.processing_active):
+                worker.operation = update.operation
+            if update.processing_active:
+                worker.operation = "processing"
             if update.file_complete:
                 self.state.files_processed += 1
                 self.state.source_bytes_completed += update.bytes_total or 0
@@ -766,7 +784,7 @@ class ProgressReporter:
                 if update.activity_unit is not None:
                     worker.activity_unit = update.activity_unit
                 if update.processing_active:
-                    worker.activity_done = self.state.processing_jobs_completed
+                    worker.activity_done = worker.processing_jobs_completed
             if update.message_date is not None:
                 self._record_message(update.message_date)
                 worker.messages_processed += 1
@@ -988,6 +1006,7 @@ class ProgressReporter:
             processing_jobs_completed=state.processing_jobs_completed,
             processing_job_id=state.processing_job_id,
             processing_processor=state.processing_processor,
+            activity_kind=self.activity_kind,
         )
         try:
             self.status_file.write(status)
@@ -1108,6 +1127,25 @@ def run_file_workers[WorkerItem](
     finally:
         pool.shutdown(wait=True, cancel_futures=True)
         status_driver()
+
+
+def start_ingest_scanner(status_driver: Callable[[], None], workers: int, *,
+                         on_interrupt: Callable[[], None] | None = None) -> ClamScanner:
+    """Keep the owner heartbeat alive throughout blocking scanner preflight."""
+    coordinator = FutureCoordinator()
+    scanner = ClamScanner(lambda: coordinator.call(status_driver), workers=workers)
+    def start(_item: int) -> None:
+        scanner.__enter__()
+    try:
+        run_file_workers([0], 1, start, threading.Event(),
+                         status_driver, on_interrupt=on_interrupt, coordinator=coordinator)
+    except BaseException:
+        scanner.__exit__()
+        raise
+    finally:
+        # Scan requests do not need the startup-only owner-thread callback.
+        scanner.status_callback = None
+    return scanner
 
 
 def open_ingest_search(
@@ -1246,6 +1284,10 @@ def _run_ingest(request: IngestRequest, writer_lease: WriterLease, outcome: Inge
         owners = OwnerRules(include=read_owner_names(request.owner_names_file), exclude=owners.exclude)
     if not owners.include:
         raise ValueError("Set owner include rules in config.yaml or supply --owner-names-file before importing.")
+    saved_request = request.model_copy(update={"owner_rules": owners, "owner_names_file": None,
+        "plugin_dir": [path.resolve() for path in request.plugin_dir],
+        "installation_config": request.installation_config.resolve() if request.installation_config else None})
+    outcome.accepted_request = saved_request
     plugins = load_plugins(request.plugin_dir, archive=request.archive, installation_config=request.installation_config, scan_policy=request.scan_policy)
     source_specs = [SourceSpec(locator=str(Path(root).resolve())
                               if "://" not in root and Path(root).exists() else root) for root in request.roots]
@@ -1871,7 +1913,7 @@ def _run_ingest(request: IngestRequest, writer_lease: WriterLease, outcome: Inge
                 except StopIteration:
                     break
                 if isinstance(item, ProgressEvent):
-                    progress.record_plugin_event(item, display_path)
+                    progress.record_plugin_event(item, display_path, source_kind=work.container.source.plugin_kind)
                     continue
                 if not isinstance(item, (MailObject, SourceObservation)):
                     raise TypeError(
@@ -2061,9 +2103,9 @@ def _run_ingest(request: IngestRequest, writer_lease: WriterLease, outcome: Inge
         check_interrupted()
         if request.scan_policy == "clamav" and request.continue_ingest:
             progress.set_phase(CLAMAV_START_PHASE)
-            scanner = ClamScanner(refresh_import, workers=request.workers)
             try:
-                scanner.__enter__()
+                scanner = start_ingest_scanner(refresh_import, request.workers,
+                                               on_interrupt=progress.announce_interrupt)
             except ClamScannerStartupError as error:
                 scanner_failure = ScanEvidence(status="scanner-error", detail=f"ClamAV startup failed: {error}")
                 print(f"{scanner_failure.detail}; retaining mail and recording scanner errors.", file=sys.stderr)
@@ -2077,9 +2119,6 @@ def _run_ingest(request: IngestRequest, writer_lease: WriterLease, outcome: Inge
             publish_processed, plugin_dirs=tuple(request.plugin_dir), installation_config=request.installation_config,
             cancelled=check_processor_cancelled, heartbeat=progress.refresh)
         with pipeline.database:
-            saved_request = request.model_copy(update={"owner_rules": owners, "owner_names_file": None,
-                "plugin_dir": [path.resolve() for path in request.plugin_dir],
-                "installation_config": request.installation_config.resolve() if request.installation_config else None})
             pipeline.database.execute("INSERT OR REPLACE INTO processing_settings VALUES('request',?)",
                                       (saved_request.model_dump_json(),))
             pipeline.database.execute("INSERT OR REPLACE INTO processing_settings VALUES('policy',?)",
@@ -2097,11 +2136,11 @@ def _run_ingest(request: IngestRequest, writer_lease: WriterLease, outcome: Inge
         if request.continue_ingest and request.continue_content and request.max_content_jobs is None:
             # Restore searchable archived mail before retrying unpublished ingest
             # roots; a new source/scanner failure must not starve this work.
-            progress.set_phase("recovering archived content")
+            progress.set_phase("Processing saved mail", activity_kind="processing")
             run_file_workers([0], 1, partial(process_content, fail_on_error=False), stop, refresh_import,
                              on_interrupt=progress.announce_interrupt, coordinator=coordinator)
         if request.continue_ingest:
-            progress.set_phase("recovering pending imports")
+            progress.set_phase("Finishing saved imports", activity_kind="processing")
             def resume_ingest(_unused: int) -> None:
                 assert pipeline is not None
                 try:
@@ -2125,7 +2164,7 @@ def _run_ingest(request: IngestRequest, writer_lease: WriterLease, outcome: Inge
         )
         check_interrupted()
         if request.continue_content:
-            progress.set_phase("processing content")
+            progress.set_phase("Processing message bodies and attachments", activity_kind="processing")
             run_file_workers([0], 1, process_content, stop, refresh_import, on_interrupt=progress.announce_interrupt, coordinator=coordinator)
         catalog.commit()
         search.commit()

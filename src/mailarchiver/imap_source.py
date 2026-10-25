@@ -5,8 +5,8 @@
 Purpose: Adapt generic IMAP and Gmail All Mail to the shared source contract.
 
 How it works:
-Freeze UID ranges and emit LF-normalized message bytes with original wire hashes, or refresh
-known-message metadata without another body transfer.
+Freeze UID ranges, prioritize missing checkpoints and emit LF-normalized message bytes with
+wire hashes, then refresh saved-message metadata without another body transfer.
 
 Fundamental dependents:
 
@@ -59,6 +59,17 @@ class ImapWork(BaseModel):
 
 def imap_locator(archive: Path, account: ImapAccount, workers: int) -> str:
     return f"imap://{account.id}?" + urlencode({"archive": str(archive.resolve()), "workers": workers})
+
+
+def _uid_batches(database: sqlite3.Connection, session: ImapSession, work: ImapWork,
+                 refresh: bool) -> Iterator[list[int]]:
+    """Find missing exact checkpoints first; a maximum UID would skip interrupted holes."""
+    for start in range(work.first_uid, work.last_uid + 1, UID_SEARCH_WINDOW):
+        end = min(start + UID_SEARCH_WINDOW - 1, work.last_uid)
+        prior = {row[0] for row in database.execute("SELECT uid FROM prior_imap_uids WHERE uid BETWEEN ? AND ?", (start, end))}
+        uids = [uid for uid in session.uids(start, end) if (uid in prior) == refresh]
+        for offset in range(0, len(uids), UID_BATCH_SIZE):
+            yield uids[offset:offset + UID_BATCH_SIZE]
 
 
 class ImapIntegrityControls(SourceIntegrityControls):
@@ -137,10 +148,19 @@ class ImapSourcePlugin(SourcePlugin):
             if selected.uid_validity != work.mailbox.uid_validity or session.gmail != work.gmail:
                 raise RuntimeError("IMAP mailbox epoch or capabilities changed; retry synchronization")
             with closing(sqlite3.connect(sqlite_uri(work.archive / "archive.sqlite3"), uri=True)) as database:
-                for start in range(work.first_uid, work.last_uid + 1, UID_SEARCH_WINDOW):
-                    uids = session.uids(start, min(start + UID_SEARCH_WINDOW - 1, work.last_uid))
-                    for offset in range(0, len(uids), UID_BATCH_SIZE):
-                        for metadata in session.metadata(selected, uids[offset:offset + UID_BATCH_SIZE]):
+                # Snapshot only UID membership in temporary SQL storage. New commits must
+                # not enter the refresh pass, and this read must not hold the writer lock.
+                database.execute("CREATE TEMP TABLE prior_imap_uids(uid INTEGER PRIMARY KEY)")
+                prior_count = database.execute("INSERT INTO prior_imap_uids SELECT uid FROM imap_seen "
+                    "WHERE source_id=? AND mailbox=? AND uid_validity=? AND uid BETWEEN ? AND ?",
+                    (work.account.id, selected.name, selected.uid_validity, work.first_uid, work.last_uid)).rowcount
+                database.commit()
+                for refresh in ((False, True) if prior_count else (False,)):
+                    phase = "refreshing saved IMAP metadata" if refresh else "finding unarchived IMAP messages"
+                    yield ProgressEvent(work_id=container.work_id, phase=phase)
+                    completed = 0
+                    for batch in _uid_batches(database, session, work, refresh):
+                        for metadata in session.metadata(selected, batch):
                             cursor = f"{metadata.uid_validity}:{metadata.uid}"
                             payload = metadata.model_dump_json()
                             if known_observation(database, container.source, metadata) is not None:
@@ -151,3 +171,6 @@ class ImapSourcePlugin(SourcePlugin):
                                 yield MailObject(work_id=container.work_id, source=container.source, cursor=cursor,
                                     raw=normalized, provider_metadata_json=metadata.model_dump_json(),
                                     source_date_utc=metadata.internal_date)
+                        if refresh:
+                            completed += len(batch)
+                            yield ProgressEvent(work_id=container.work_id, phase=phase, completed=completed, unit="messages")

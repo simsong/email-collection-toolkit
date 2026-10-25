@@ -311,12 +311,32 @@ under **Release only** or **Alpha / beta / development and release**. The releas
 only canonical `MAJOR.MINOR.PATCH`, `MAJOR.MINOR.PATCHaN`, or
 `MAJOR.MINOR.PATCHbN` versions and rejects all other forms. Sparkle uses a
 separate increasing internal build number solely to order updates.
+Each user-visible fix handed back for testing advances the canonical version and
+`uv.lock`; alpha/beta fixes advance their prerelease number. This does not publish
+a release. About captures the version and Git commit at launch, marking local
+changes explicitly. Platform builders embed the build commit before sealing the
+app; a package without Git provenance reports Unavailable rather than guessing.
+On macOS, `make gui` creates a separate development `.app` under `.tmp/`, reusing
+the active virtual environment. Its native bundle gives Command-Tab the product
+name instead of Python; no app installation or machine setting is required.
+The development bundle is ad-hoc signed after its identity is written.
+It internally sets CPython's `__PYVENV_LAUNCHER__` to the active interpreter and
+removes `PYTHONEXECUTABLE` in the child environment, keeping the venv outside the
+sealed bundle. Development IMAP credential reads use that original interpreter's
+native Keychain backend through a bounded, isolated child and captured pipe.
+Passwords never enter command arguments, environment variables or files; packaged
+apps retain their own native-vault identity. No Keychain access policy is changed.
+About's **Show processor graph…** opens an offline DAG of registered MIME types,
+processors and possible outputs, including custom plugins and MIME extraction.
 Historical-feed native trust checks discard inherited `DEVELOPER_DIR`,
 `TOOLCHAINS`, `SDKROOT`, and `CODESIGN_ALLOCATE` because those variables can
 select Apple toolchain components. Release jobs use their configured toolchain
 outside that historical verification boundary.
 
 ## Test
+
+`make test-ingest-progress` checks source versus saved-mail progress, independent
+worker task totals, and the actual browser display using synthetic archives.
 
 The full test architecture and its explicit browser/Cocoa coverage boundary are
 documented in [`doc/END_TO_END_TESTING.md`](doc/END_TO_END_TESTING.md).

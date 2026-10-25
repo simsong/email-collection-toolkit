@@ -25,6 +25,7 @@ from pathlib import Path
 from typing import Literal
 
 from mailarchiver.self_test import SelfTestReport
+from mailarchiver.build_info import BUILD_INFO_FILENAME, write_build_info
 from mailarchiver.plugin_loader import discover_manifests
 from mailarchiver.clamav_definitions import DEVELOPMENT_DATABASE, certificates_path, library_path, read_definitions, updater_path
 from packaging.requirements import Requirement
@@ -456,6 +457,8 @@ def build(signing_identity: str, *, gui: bool = False, log_contents: bool = Fals
     work_root.mkdir(exist_ok=True)
     with tempfile.TemporaryDirectory(prefix="dmg-build-", dir=work_root) as temporary:
         work = Path(temporary)
+        build_info = work / BUILD_INFO_FILENAME
+        write_build_info(build_info, ROOT)
         bundle_output = work / "bundle"
         # Collect runtime notices, not development-only tools such as Pylint.
         notices = work / "Third Party Notices"
@@ -497,6 +500,7 @@ def build(signing_identity: str, *, gui: bool = False, log_contents: bool = Fals
                    "--hidden-import", "mailarchiver.processing.builtin",
                    "--add-data", f"{plugins}:mailarchiver/plugins",
                    "--add-data", f"{ROOT / 'gui'}:gui",
+                   "--add-data", f"{build_info}:mailarchiver",
                    "--add-data", f"{ROOT / 'LICENSE'}:gui",
                    "--add-data", f"{ROOT / 'src/mailarchiver/standalone_verify.py'}:mailarchiver",
                    "--add-data", f"{notices}:Third Party Notices",

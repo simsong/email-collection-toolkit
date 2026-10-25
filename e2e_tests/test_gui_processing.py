@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from threading import Barrier, Event
 from datetime import UTC, datetime
 from urllib.parse import urlencode
 from pathlib import Path
@@ -12,7 +13,7 @@ from playwright.sync_api import Page, expect
 from mailarchiver.__main__ import IngestRequest, run_ingest
 from mailarchiver.application import IngestJob
 from mailarchiver.gui_app import AboutApi, GUI_DIRECTORY, SEARCH_BRIDGE_METHODS, GuiApi, IdentityPickerApi, IngestWindowApi
-from mailarchiver.gui_processing import PickerPage, resume_request, unfinished_work
+from mailarchiver.gui_processing import PickerPage, connection, resume_request, unfinished_work
 from mailarchiver.ingest_status import IngestStatusFile, read_ingest_history
 from mailarchiver.owner_rules import OwnerRules
 from mailarchiver.writer_lock import WriterLease
@@ -44,8 +45,80 @@ def expose(page: Page, api: object, names: tuple[str, ...]) -> None:
         window.addEventListener('DOMContentLoaded', () => window.dispatchEvent(new Event('pywebviewready')));""")
 
 
+def test_picker_loading_keeps_rows_and_ignores_obsolete_responses(tmp_path: Path, page: Page) -> None:
+    """Desktop: pending bridge requests show progress, preserve rows, and never look empty."""
+    api = IdentityPickerApi(build_deferred_archive(tmp_path), "name")
+    page.expose_function("real_identity_query", api.query)
+    page.add_init_script("""window.identityQueries = [];
+        window.pywebview = {api: {query: async filters => {
+          await new Promise(resolve => window.identityQueries.push(resolve));
+          return window.real_identity_query(filters);
+        }}};
+        window.addEventListener('DOMContentLoaded', () => window.dispatchEvent(new Event('pywebviewready')));""")
+    page.goto((GUI_DIRECTORY / "identity.html").as_uri())
+    expect(page.locator("#identity-loading")).to_contain_text("Loading archive identities")
+    expect(page.locator("#empty")).to_be_hidden()
+    expect(page.locator("#refresh")).to_be_disabled()
+    previews = GUI_DIRECTORY.parent / ".tmp/gui-previews"
+    previews.mkdir(parents=True, exist_ok=True)
+    page.screenshot(path=str(previews / "identity-loading.png"), full_page=True)
+    page.evaluate("window.identityQueries.shift()()")
+    expect(page.locator("tr.group")).to_have_count(2)
+    expect(page.locator("#identity-loading")).to_be_hidden()
+    page.locator("#refresh").click()
+    expect(page.locator("#identity-loading")).to_be_visible()
+    expect(page.locator("tr.group")).to_have_count(2)
+    page.locator("#name-filter").fill("no such identity")
+    page.wait_for_function("window.identityQueries.length === 2")
+    page.evaluate("window.identityQueries.shift()()")
+    expect(page.locator(".matrix")).to_have_attribute("aria-busy", "true")
+    page.evaluate("window.identityQueries.shift()()")
+    expect(page.locator("#identity-loading")).to_be_hidden()
+    expect(page.locator("#empty")).to_be_visible()
+    expect(page.locator("#refresh")).to_be_enabled()
+
+
+def test_ingest_suspend_and_continue_controls_keep_application_open(tmp_path: Path, page: Page) -> None:
+    """Desktop: suspend checkpoints a queued run, then Continue resumes the saved work."""
+    archive = build_deferred_archive(tmp_path)
+    app, api = open_headless(archive, tmp_path / "preferences.json")
+    occupied, release = Barrier(9), Event()
+    assert IngestWindowApi(archive, application=app, document=api.document).history()["can_resume"]
+
+    def block() -> None:
+        occupied.wait(timeout=5)
+        release.wait(10)
+
+    try:
+        for _ in range(8):
+            assert app._submit_task("suspend control fixture", block) is not None
+        occupied.wait(timeout=5)
+        assert api.resume_processing(False, True)
+        assert api.document is not None
+        controls = IngestWindowApi(archive, application=app, document=api.document)
+        expose(page, controls, ("history", "suspend_import", "resume_import"))
+        page.goto((GUI_DIRECTORY / "ingests.html").as_uri())
+        page.get_by_role("button", name="Suspend Import", exact=True).click()
+        expect(page.locator("#import-control-status")).to_contain_text("Suspending import")
+        expect(page.locator("#suspend-import")).to_be_disabled()
+        expect(page.locator("#resume-import")).to_be_disabled()
+        previews = GUI_DIRECTORY.parent / ".tmp/gui-previews"
+        previews.mkdir(parents=True, exist_ok=True)
+        page.screenshot(path=str(previews / "import-suspending.png"), full_page=True)
+        release.set()
+        expect(page.locator("#resume-import")).to_be_enabled()
+        page.locator("#resume-import").click()
+        expect(page.locator(".state-badge")).to_have_text("completed", timeout=15000)
+        assert not unfinished_work(archive).incomplete
+        expect(page.locator("#suspend-import")).to_be_disabled()
+    finally:
+        release.set()
+        app.shutdown()
+        api.close()
+
+
 def test_incomplete_dialog_resumes_content_without_sources(tmp_path: Path, page: Page) -> None:
-    """Open asks again after Later; independent checked phases drive the actual background service."""
+    """Recovery: leave work suspended unchanged; Continue enables both phases even with no remaining source."""
     archive = build_deferred_archive(tmp_path)
     (tmp_path / "input.eml").unlink()
     app, api = open_headless(archive, tmp_path / "preferences.json")
@@ -56,19 +129,39 @@ def test_incomplete_dialog_resumes_content_without_sources(tmp_path: Path, page:
         page.goto((GUI_DIRECTORY / "index.html").as_uri())
         dialog = page.locator("#processing-dialog")
         expect(dialog).to_be_visible()
-        expect(page.locator("#continue-ingest")).to_be_checked()
-        expect(page.locator("#continue-content")).to_be_checked()
-        page.get_by_role("button", name="Ask me later", exact=True).click()
+        expect(dialog.get_by_role("checkbox")).to_have_count(0)
+        suspended = unfinished_work(archive)
+        expect(page.get_by_role("button", name="Leave import suspended", exact=True)).to_be_focused()
+        page.keyboard.press("Enter")
         expect(dialog).not_to_be_visible()
-        assert unfinished_work(archive).content > 0
-        page.reload()
+        assert unfinished_work(archive) == suspended and suspended.content > 0
+        # A repeated bridge-ready/focus notification must not reinstall the automatic prompt.
+        page.evaluate("""async () => {
+            window.dispatchEvent(new Event('pywebviewready'));
+            window.dispatchEvent(new Event('focus'));
+            await window.pywebview.api.status();
+        }""")
+        expect(dialog).not_to_be_visible()
+        page.locator("#processing-open").click()
         expect(dialog).to_be_visible()
-        page.locator("#continue-ingest").uncheck()
+        page.get_by_role("button", name="Leave import suspended", exact=True).click()
+        # A count/name navigation window opens results without interrupting for suspended work.
+        page.goto((GUI_DIRECTORY / "index.html").as_uri() + "?query=")
+        expect(page.locator("#processing-open")).to_be_enabled()
+        expect(dialog).not_to_be_visible()
+        page.reload()
+        expect(dialog).not_to_be_visible()
+        page.goto((GUI_DIRECTORY / "index.html").as_uri())
+        expect(dialog).to_be_visible()
         page.get_by_role("button", name="Continue Import", exact=True).click()
         expect(dialog).not_to_be_visible()
         if api.document and api.document.ingest_job:
             wait_for_import(api)
         assert not unfinished_work(archive).incomplete
+        with connection(archive) as database:
+            saved = IngestRequest.model_validate_json(database.execute(
+                "SELECT value FROM processing_settings WHERE name='request'").fetchone()[0])
+        assert saved.continue_ingest and saved.continue_content
         recovered = read_ingest_history(archive).statuses[0]
         assert recovered.processing_jobs_completed > 0 and not recovered.processing_active
         assert not any(notice.severity == "error" for notice in app.notices())
@@ -109,10 +202,9 @@ def test_continue_processing_disabled_until_background_work_finishes(tmp_path: P
         expose(observer, observer_api, SEARCH_BRIDGE_METHODS)
         for window in (page, observer):
             window.goto((GUI_DIRECTORY / "index.html").as_uri())
-            window.get_by_role("button", name="Ask me later", exact=True).click()
+            window.get_by_role("button", name="Leave import suspended", exact=True).click()
             expect(window.locator("#processing-open")).to_be_enabled()
         page.locator("#processing-open").click()
-        page.locator("#continue-ingest").uncheck()
         with WriterLease.acquire(archive, api.document.descriptor.identity, "button fixture busy", "button-busy", "test"):
             page.locator("#processing-continue").click()
             expect(page.locator("#processing-error")).to_contain_text("Processing could not start")
@@ -127,7 +219,7 @@ def test_continue_processing_disabled_until_background_work_finishes(tmp_path: P
         expect(observer.locator("#processing-open")).to_be_disabled()
         page.reload()
         expect(page.locator("#processing-open")).to_be_disabled()
-        expect(page.locator("#ingest-status-line")).to_contain_text("processing jobs finished")
+        expect(page.locator("#ingest-status-line")).to_contain_text("processing tasks finished")
         assert (archive / "processor-entered").exists()
         previews = GUI_DIRECTORY.parent / ".tmp/gui-previews"
         previews.mkdir(parents=True, exist_ok=True)
@@ -182,37 +274,74 @@ def test_processing_history_shows_jobs_instead_of_zero_source_progress(tmp_path:
     template = read_ingest_history(archive).statuses[0]
     now = datetime.now(UTC)
     worker = template.workers[0].model_copy(update={"phase": "processing mime", "path": "content job 42",
-        "activity_done": 1665, "activity_total": None, "activity_unit": "jobs"})
+        "activity_done": 1665, "activity_total": None, "activity_unit": "jobs", "processing_jobs_completed": 1200})
+    second = worker.model_copy(update={"worker": 2, "phase": "processing headers", "path": "message job 43",
+                                       "processing_jobs_completed": 465})
     status = template.model_copy(update={"status_id": "ingest-processing-fixture", "state": "running",
         "started_at": now, "updated_at": now, "completed_at": None, "phase": "recovering archived content",
         "processing_active": True, "processing_job_id": 42, "processing_processor": "mime",
-        "processing_jobs_completed": 1665, "active_workers": 1, "workers": [worker], "percent": 0, "eta": "finalizing"})
+        "processing_jobs_completed": 1665, "active_workers": 2, "peak_workers": 2, "configured_workers": 2,
+        "elapsed_seconds": 120, "workers": [worker, second], "percent": 0, "eta": "finalizing"})
     status_file = IngestStatusFile(archive, status.status_id)
     status_file.write(status)
     expose(page, IngestWindowApi(archive), ("history", "antivirus", "can_import_directory"))
     page.goto((GUI_DIRECTORY / "ingests.html").as_uri() + f"?status={status.status_id}")
-    expect(page.locator(".progress-caption")).to_contain_text("1,665 jobs finished · mime")
+    expect(page.locator(".progress-caption")).to_contain_text("Processing saved mail")
+    expect(page.locator(".progress-caption")).to_contain_text("1,665 tasks finished · Extracting message bodies and attachments")
     expect(page.locator(".progress-caption")).not_to_contain_text("finalizing")
-    expect(page.locator(".worker-table")).to_contain_text("processing mime")
-    expect(page.locator(".worker-table")).to_contain_text("1,665 jobs")
+    expect(page.locator(".statistics")).not_to_contain_text("Messages")
+    expect(page.locator(".statistics")).not_to_contain_text("Files")
+    rows = page.locator(".worker-table tbody tr")
+    expect(rows.nth(0)).to_contain_text("Processing saved mail")
+    expect(rows.nth(0)).to_contain_text("Extracting message bodies and attachments")
+    expect(rows.nth(0).locator("td").last).to_have_text("1,200")
+    expect(rows.nth(1).locator("td").last).to_have_text("465")
+    expect(page.locator(".worker-table")).not_to_contain_text("1,665")
+    expect(page.locator(".history-row.selected .history-summary")).to_contain_text("1,665 processing tasks finished")
     bar = page.get_by_role("progressbar", name="Processing jobs")
     assert bar.get_attribute("aria-valuenow") is None
     expect(page.locator(".progress-fill.indeterminate")).to_be_visible()
     previews = GUI_DIRECTORY.parent / ".tmp/gui-previews"
     previews.mkdir(parents=True, exist_ok=True)
     page.screenshot(path=str(previews / "processing-progress.png"))
+    # A processing stage stays meaningful between jobs; older rows have no reliable worker total.
+    status_file.write(status.model_copy(update={"updated_at": datetime.now(UTC), "processing_active": False,
+        "activity_kind": "processing", "workers": [worker.model_copy(update={"phase": "idle", "processing_jobs_completed": None})]}))
+    page.evaluate("window.refreshHistory()")
+    expect(page.locator(".statistics")).to_contain_text("Processing tasks finished")
+    expect(page.locator(".statistics")).not_to_contain_text("Source messages")
+    expect(page.locator(".worker-table tbody tr td").last).to_have_text("Unavailable")
+    downloading = worker.model_copy(update={"phase": "fetching messages", "operation": "downloading",
+        "path": "Inbox", "activity_done": 25, "activity_total": 100, "activity_unit": "messages"})
+    scanning = second.model_copy(update={"phase": "scanning", "operation": "processing", "activity_unit": None})
+    status_file.write(status.model_copy(update={"updated_at": datetime.now(UTC), "phase": "ingesting",
+        "activity_kind": "source", "processing_active": False, "source_roots": ["imap://unavailable-account"],
+        "workers": [downloading, scanning], "processed_messages": 25}))
+    page.evaluate("window.refreshHistory()")
+    expect(rows.nth(0).locator("td").nth(1)).to_have_text("Downloading")
+    expect(rows.nth(0)).to_contain_text("25 / 100 messages")
+    expect(rows.nth(1).locator("td").nth(1)).to_have_text("Processing imported mail")
+    expect(page.locator(".statistics")).to_contain_text("Source messages downloaded")
+    expect(page.locator(".statistics")).to_contain_text("Download partitions finished")
+    status_file.write(status.model_copy(update={"state": "completed", "updated_at": datetime.now(UTC),
+        "activity_kind": "processing", "source_roots": ["imap://unavailable-account"],
+        "processed_messages": 25, "files_processed": 8, "files_total": 8}))
+    page.evaluate("window.refreshHistory()")
+    expect(page.locator(".statistics")).to_contain_text("Source messages downloaded")
+    expect(page.locator(".statistics")).to_contain_text("Processing tasks finished")
+    expect(page.locator(".history-row.selected .history-summary")).to_contain_text("25 source messages")
     app, api = open_headless(archive, tmp_path / "preferences.json")
     search_page, about_page = page.context.new_page(), page.context.new_page()
     try:
         status_file.write(status.model_copy(update={"updated_at": datetime.now(UTC)}))
         expose(search_page, api, SEARCH_BRIDGE_METHODS)
         search_page.goto((GUI_DIRECTORY / "index.html").as_uri())
-        expect(search_page.locator("#ingest-status-line")).to_contain_text("1,665 processing jobs finished · mime")
+        expect(search_page.locator("#ingest-status-line")).to_contain_text("1,665 processing tasks finished · mime")
         expect(search_page.locator("#ingest-status-line")).not_to_contain_text("0.0%")
         status_file.write(status.model_copy(update={"updated_at": datetime.now(UTC)}))
         expose(about_page, AboutApi(app), ("status",))
         about_page.goto((GUI_DIRECTORY / "about.html").as_uri())
-        expect(about_page.locator(".activity")).to_contain_text("1,665 processing jobs finished · mime")
+        expect(about_page.locator(".activity")).to_contain_text("1,665 processing tasks finished · mime")
         expect(about_page.locator(".activity")).not_to_contain_text("0.0%")
     finally:
         search_page.close()
@@ -241,7 +370,7 @@ def test_history_startup_and_status_symbols(tmp_path: Path, page: Page) -> None:
     try:
         assert api.ingest_overview()["active"]
         page.goto((GUI_DIRECTORY / "ingests.html").as_uri())
-        expect(page.get_by_role("status")).to_contain_text("Starting — preparing archive…")
+        expect(page.locator("#starting-import")).to_contain_text("Starting — preparing archive…")
         expect(page.locator("#starting-import .state-dot")).to_have_text("✓")
         for state, symbol in (("failed", "X"), ("disk-full", "X"), ("stale", "X"),
                               ("interrupted", "Ⅱ"), ("completed", "✓"), ("running", "✓")):
@@ -299,7 +428,7 @@ def test_history_startup_and_status_symbols(tmp_path: Path, page: Page) -> None:
         api.close()
 
 
-def test_resume_summary_later_abort_and_retained_notices(tmp_path: Path, page: Page) -> None:
+def test_resume_summary_suspended_stop_and_retained_notices(tmp_path: Path, page: Page) -> None:
     """Recovery requirement: informed decisions never auto-start; collapsed errors stay readable."""
     archive = build_interrupted_archive(tmp_path)
     app, api = open_headless(archive, tmp_path / "preferences.json")
@@ -317,7 +446,9 @@ def test_resume_summary_later_abort_and_retained_notices(tmp_path: Path, page: P
         previews = GUI_DIRECTORY.parent / ".tmp/gui-previews"
         previews.mkdir(parents=True, exist_ok=True)
         page.screenshot(path=str(previews / "import-resume.png"))
-        page.get_by_role("button", name="Ask me later", exact=True).click()
+        expect(dialog.get_by_role("checkbox")).to_have_count(0)
+        expect(dialog).to_contain_text("keeps messages already archived")
+        page.get_by_role("button", name="Leave import suspended", exact=True).click()
         expect(dialog).not_to_be_visible()
         expect(page.locator("#notice-pill")).to_be_visible(timeout=9000)
         page.screenshot(path=str(previews / "notice-pill.png"))
@@ -333,9 +464,10 @@ def test_resume_summary_later_abort_and_retained_notices(tmp_path: Path, page: P
         page.screenshot(path=str(previews / "notice-expanded.png"))
         page.reload()
         expect(dialog).to_be_visible()
-        page.get_by_role("button", name="Abort import", exact=True).click()
+        page.get_by_role("button", name="Stop import", exact=True).click()
         expect(dialog).not_to_be_visible()
         assert not unfinished_work(archive).incomplete
+        assert not IngestWindowApi(archive, application=app, document=api.document).history()["can_resume"]
         page.reload()
         expect(dialog).not_to_be_visible()
         assert api.document.ingest_job is None
@@ -512,8 +644,21 @@ def test_picker_double_click_and_count_navigation(tmp_path: Path, page: Page) ->
     page.locator("#start-date").fill("2024-01-02")
     page.locator("#end-date").fill("2024-01-02")
     expect(page.locator("tr.group .message-count").first).to_have_text("1")
+    # Hold the real bridge response to verify pending feedback and duplicate-click handling.
+    page.evaluate("""() => { window.realCountSearch = window.pywebview.api.search;
+        window.pywebview.api.search = async (...args) => {
+          await new Promise(resolve => window.finishCountSearch = resolve);
+          return window.realCountSearch(...args);
+        }; }""")
     page.locator("tr.group .message-count").first.click()
+    expect(page.locator("#identity-loading")).to_contain_text("Opening 1 header message for Sender")
+    expect(page.locator(".matrix")).to_have_attribute("aria-busy", "true")
+    page.locator("tr.group .message-count").first.click()
+    before = len(opened)
+    page.evaluate("window.finishCountSearch()")
     expect(page.locator("#status")).to_have_text("Opened search in a new window.")
+    expect(page.locator("#identity-loading")).to_be_hidden()
+    assert len(opened) == before + 1
     result = opened[-1]
     scope = result["identity_messages"]
     assert isinstance(scope, dict) and scope["kind"] == "header"

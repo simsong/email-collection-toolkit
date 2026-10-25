@@ -8,6 +8,21 @@ live in [plans](../plans/README.md); historical evidence does not validate this 
 ## Saved import recovery and notices
 
 Optional processing fields in ingest snapshots default safely for old history.
+`activity_kind` persists the source/processing stage independently of momentary
+worker activity. Processing cards and history show finished tasks and average
+tasks/second; source cards label IMAP containers as download partitions.
+`ProgressReporter` initializes each worker's `processing_jobs_completed` to zero
+and increments it only on that worker's job-finished event. It persists across
+idle/task changes; the global count remains separate. Missing legacy totals
+remain null and render Unavailable. Typed worker operations distinguish provider
+fetches from imported-message processing. Source-style publication callbacks
+cannot overwrite active processing lanes. The worker table separates operation,
+readable task/source, source progress and finished processing tasks, omitting
+inapplicable zero source counters during saved-mail work. Legacy recovery phase
+labels render as Processing saved mail. Real gated jobs exercise unequal worker
+counts and idle transitions; browser cases cover stage gaps, old snapshots and
+mixed downloading/processing rows. Run these checks with `make test-ingest-progress`.
+Completed source runs retain their source totals alongside processing totals.
 `ingests.js` renders running processing activity with a striped indeterminate bar,
 finished-job count, processor name and the worker's job activity. Source-file and
 imported-message counters keep their original meaning; terminal/stale snapshots
@@ -33,9 +48,17 @@ source recovery. The bridge returns nonsecret source labels, first start, latest
 final/heartbeat timestamp, interruption uncertainty and saved archived/duplicate
 counts. IMAP labels read configuration without keyring access or a connection.
 `processing.js` shows these details before the existing explicit resume call,
-triggered by the **Continue Import** button in `index.html`.
-Later and Escape close the dialog without a write. The abort bridge reserves
+triggered by the **Continue Import** button in `index.html`. That button always
+calls `resume_processing(true, true)`; the dialog has no phase checkboxes.
+**Leave import suspended** and Escape close the dialog without a write.
+The suspended action receives initial keyboard focus instead of Stop import.
+**Stop import** uses the existing `abort_processing` bridge, retaining archived
+messages and history. The bridge reserves
 application writer activity so Quit waits for it and rejects later writes.
+Processing controls initialize once per loaded window; the automatic recovery
+check skips windows with startup query, identity-message or message parameters.
+Focus/duplicate bridge-ready events do not prompt again; the explicit button still
+opens saved work, and reopening the archive without navigation parameters asks again.
 `abort_processing` holds the
 writer lease, rejects changed source status IDs, atomically stores typed aborted
 IDs in `processing_settings` and changes outstanding jobs to the existing
@@ -814,12 +837,34 @@ and its indexing action/progress remain planned; no fabricated progress is shown
 
 ## Identity picker search navigation
 
+`identity.js` marks its matrix busy before awaiting the native query, disables
+duplicate Refresh clicks and editing, and preserves existing rows. A request
+generation guards success, errors and cleanup so obsolete queries cannot clear
+newer loading state. A failed initial query reports its error instead of claiming
+there are no addresses. Group dates and distinct header/signature counts use one
+JSON membership join, replacing one count query per canonical entry.
+
+Ingest-window Suspend/Continue controls bind to the window's archive, independently
+of native focus. Suspend signals the existing job's cooperative stop event and
+shows a checkpointing message until the job releases its lease. Interrupted GUI
+runs save the ingest outcome's normalized accepted request under that same lease,
+retaining resolved owners and absolute plugin/configuration paths rather than
+depending on an owner file or changed defaults. This initializes the normal
+processing database if preflight had not yet done so. Continue reconstructs the
+saved request and acquires a new writer lease; it does not quit or abort jobs.
+Availability follows actual unfinished source/content work, including deferred
+work after a completed latest run, and remains disabled for an active writer.
+
 Native Close callbacks from pywebview's worker threads dispatch Cocoa focus lookup
 and closure to the main thread, with a bounded result wait. This includes personal
 default-list editors that are not attached to an archive document.
 
 `IdentityPickerApi.search` validates a typed selection against `picker_page`,
 opens a search session for the picker archive and passes startup query parameters.
+The picker displays pending navigation before awaiting this bridge, suppresses
+duplicate clicks until completion, and retains errors visibly for retry. The native
+lifecycle probe verifies ten exact results from group and address counts while
+another person is selected, without a recovery dialog obscuring the results.
 Name labels produce shell-quoted Any selectors; unnamed groups labeled with an
 email address use a full-group header scope to distinguish them from individual
 address searches. Counts produce `IdentityMessages`

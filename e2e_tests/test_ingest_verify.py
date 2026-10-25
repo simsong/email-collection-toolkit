@@ -40,6 +40,7 @@ from mailarchiver.gui_app import (
     NativeSmokeController,
     NativeSmokeReport,
     PyWebViewApplication,
+    ProcessorGraphApi,
 )
 from mailarchiver.gui_service import MessageView, PartContent, SearchPage, write_message
 from mailarchiver.reader_fixture import inventory
@@ -322,10 +323,20 @@ def test_about_window_displays_version_disk_and_warnings(tmp_path: Path, page: P
     page.goto((GUI_DIRECTORY / "about.html").as_uri())
 
     page.wait_for_function("document.getElementById('version').textContent.startsWith('Version ')")
+    metadata = application.about_status().metadata
+    expect(page.locator("#version")).to_have_text(f"Version {metadata.version}")
+    assert metadata.build.git_commit is not None
+    expect(page.locator("#git-commit")).to_contain_text(metadata.build.git_commit)
+    if metadata.build.dirty:
+        expect(page.locator("#git-commit")).to_contain_text("local changes")
+    previews = GUI_DIRECTORY.parent / ".tmp/gui-previews"
+    previews.mkdir(parents=True, exist_ok=True)
+    page.screenshot(path=str(previews / "about-build.png"), full_page=True)
     assert "available on" in page.locator("#disk").inner_text()
     assert "invalid" in page.locator("#notices").inner_text()
     expect(page.locator("#processors")).to_contain_text("clamav")
     expect(page.locator("#processors")).to_contain_text("text/plain")
+    expect(page.get_by_role("button", name="Show processor graph…")).to_be_enabled()
     inventory = application.about_status()
     for processor in inventory.processors:
         expect(page.locator("#processors")).to_contain_text(f"{processor.name} ({processor.kind}) version {processor.implementation_version}")
@@ -344,6 +355,79 @@ def test_about_window_displays_version_disk_and_warnings(tmp_path: Path, page: P
     expect(page.locator("#plugin-inventory-error")).to_be_hidden()
     expect(page.locator("#processors")).to_contain_text("clamav")
     expect(page.locator("#acquisition-plugins")).to_contain_text(inventory.acquisition_plugins[0].name)
+
+
+def test_processor_graph_renders_registry_and_retries_busy_archive(tmp_path: Path, page: Page) -> None:
+    """Processing requirement: offline DAGs include custom outputs, safe labels and busy-state retry."""
+    from mailarchiver.__main__ import IngestRequest
+    controller = ApplicationController(ApplicationPreferencesStore(tmp_path / "preferences.json"))
+    document = controller.create_document(tmp_path / "graph.mailarchive")
+    assert document.path is not None
+    session = controller.new_search_window(document)
+    root = tmp_path / "custom"
+    plugin = root / "processors/pdf-text"
+    plugin.mkdir(parents=True)
+    name = "PDF <img src=x onerror=alert(1)>"
+    (plugin / "plugin.toml").write_text(
+        'api_version=2\nplugin_type="processor"\nkind="pdf-text"\n'
+        f'name={json.dumps(name)}\nimplementation_version="1"\nentrypoint="plugin:create_plugin"\n'
+        'pipeline="content"\nrank=1\nsubscribes=["application/pdf"]\nemits=["text/plain"]\n', encoding="utf-8")
+    (plugin / "plugin.py").write_text("raise AssertionError('Graph must not execute plugin code')\n", encoding="utf-8")
+    request = IngestRequest(archive=document.path, plugin_dir=[root])
+    with closing(connect_processing(document.path, create=True, production=True)) as database, database:
+        database.execute("INSERT OR REPLACE INTO processing_settings VALUES('request',?)", (request.model_dump_json(),))
+    application = PyWebViewApplication(controller)
+    api = ProcessorGraphApi(application)
+    page.expose_function("processor_graph_status", api.status)
+    page.add_init_script(
+        "window.pywebview = {api: {status: () => window.processor_graph_status()}}; "
+        "window.addEventListener('DOMContentLoaded', () => window.dispatchEvent(new Event('pywebviewready')));"
+    )
+    errors = []
+    page.on("pageerror", lambda error: errors.append(str(error)))
+    page.set_viewport_size({"width": 1280, "height": 900})
+    page.goto((GUI_DIRECTORY / "processor-graph.html").as_uri())
+    expect(page.locator("#status")).to_contain_text("11 registered processors")
+    expect(page.locator("#context")).to_have_text(str(document.path))
+    assert page.locator("svg").count() == 3
+    content = page.locator('[data-pipeline="content"]')
+    expect(content.locator('[data-node="processor:pdf-text"] title')).to_contain_text(name)
+    assert content.locator("img").count() == 0
+    assert content.locator('[data-source="processor:mime"][data-target="mime:application/pdf"].dynamic').count() == 1
+    assert content.locator('[data-source="mime:application/pdf"][data-target="processor:pdf-text"]').count() == 1
+    assert content.locator('[data-source="processor:pdf-text"][data-target="mime:text/plain"]').count() == 1
+    assert content.locator('[data-node="other:mime"]').count() == 1
+    assert page.evaluate("[...document.querySelectorAll('svg path.edge')].every(path => path.getAttribute('d').startsWith('M ') && !path.getAttribute('d').includes('NaN'))")
+    before = content.locator("svg").get_attribute("width")
+    page.get_by_role("button", name="100%", exact=True).click()
+    natural = content.locator("svg").get_attribute("width")
+    assert natural is not None and before is not None and float(natural) >= float(before)
+    page.get_by_role("button", name="Zoom in", exact=True).click()
+    enlarged = content.locator("svg").get_attribute("width")
+    assert enlarged is not None and float(enlarged) > float(natural)
+    page.get_by_role("button", name="Fit width", exact=True).click()
+    with closing(connect_processing(document.path)) as writer:
+        writer.execute("BEGIN EXCLUSIVE")
+        page.get_by_role("button", name="Refresh", exact=True).click()
+        expect(page.locator("#error")).to_contain_text("archive is busy")
+        expect(page.locator("#status")).to_have_text("Showing the previous graph.")
+        assert page.locator("svg").count() == 3
+        writer.rollback()
+    page.get_by_role("button", name="Refresh", exact=True).click()
+    expect(page.locator("#error")).to_be_hidden()
+    other = controller.create_document(tmp_path / "other.mailarchive")
+    controller.new_search_window(other)
+    page.get_by_role("button", name="Refresh", exact=True).click()
+    expect(page.locator("#context")).to_have_text(str(other.path))
+    expect(page.locator("#status")).to_contain_text("10 registered processors")
+    assert page.locator('[data-node="processor:pdf-text"]').count() == 0
+    controller.activate_window(session.window_id)
+    page.get_by_role("button", name="Refresh", exact=True).click()
+    expect(page.locator("#status")).to_contain_text("11 registered processors")
+    previews = GUI_DIRECTORY.parent / ".tmp/gui-previews"
+    previews.mkdir(parents=True, exist_ok=True)
+    page.screenshot(path=str(previews / "processor-graph.png"), full_page=True)
+    assert not errors
 
 
 def test_gui_import_uses_typed_ingest_service_without_a_subprocess(tmp_path: Path) -> None:
@@ -574,12 +658,14 @@ def test_native_search_ui_smoke(native_smoke_archive: Path, tmp_path: Path) -> N
 )
 def test_native_application_lifecycle(native_smoke_archive: Path, tmp_path: Path) -> None:
     """About must populate through its real bridge; extensionless Open and menus must work."""
+    from scripts.run_gui import development_bundle, development_environment
+    executable = development_bundle(tmp_path / "launcher")
     try:
         result = subprocess.run(
-            [sys.executable, str(Path(__file__).with_name("native_application_probe.py"))],
+            [str(executable), str(Path(__file__).with_name("native_application_probe.py"))],
             # Cocoa treats positional filesystem paths as document-open requests.
             # Pass fixtures out of band so the probe can first test About alone.
-            env=os.environ | {
+            env=development_environment() | {
                 PROBE_ARCHIVE_ENV: str(native_smoke_archive),
                 PROBE_PREFERENCES_ENV: str(tmp_path / "preferences.json"),
             },

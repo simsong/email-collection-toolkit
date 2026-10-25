@@ -4,6 +4,13 @@
 
 ## Release invariants
 
+Bump the canonical version in `pyproject.toml` and refresh `uv.lock` for each
+user-visible fix handed back for another test run. Advance the current alpha or
+beta number while on that prerelease line. Commit each version bump with its fix
+before handing it back for testing; push when requested. A version bump does not authorize
+publishing a tag or release. About must identify the launch/build Git commit and
+disclose local changes rather than implying an uncommitted checkout is that commit.
+
 Never hard-code the current project version, candidate release tag, or expected
 Sparkle build number in release code, workflow steps, or tests. Derive these
 values from `pyproject.toml` through the shared release-version mapper. A named,

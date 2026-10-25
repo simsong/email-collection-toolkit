@@ -33,6 +33,7 @@ STATUS_PREFIX = "ingest-"
 STALE_AFTER_SECONDS = 5
 STATUS_REFRESH_SECONDS = 1
 IngestState = Literal["running", "completed", "interrupted", "disk-full", "failed", "stale"]
+WorkerOperation = Literal["downloading", "importing", "processing"]
 
 
 class YearProgress(BaseModel):
@@ -62,6 +63,8 @@ class IngestWorkerStatus(BaseModel):
     last_path: str | None = None
     files_processed: int = 0
     messages_processed: int = 0
+    operation: WorkerOperation | None = None
+    processing_jobs_completed: int | None = None
 
 
 class IngestStatus(BaseModel):
@@ -105,6 +108,7 @@ class IngestStatus(BaseModel):
     processing_jobs_completed: int = 0
     processing_job_id: int | None = None
     processing_processor: str | None = None
+    activity_kind: Literal["source", "processing"] | None = None
 
     @field_validator("started_at", "updated_at", "completed_at")
     @classmethod

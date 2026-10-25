@@ -19,6 +19,27 @@ platform or release gate has passed. [Future work](plans/README.md) is separate.
 
 ## Shared boundaries
 
+- Progress separates downloads/imports from saved-mail processing, with independent
+  worker task totals. See [desktop](requirements/DESKTOP.md).
+
+- Scanner preflight keeps publishing import heartbeats even during blocking
+  definition checks and updates. See [scanning](requirements/SCANNING.md).
+
+- The macOS development launcher seals its bundle identity and preserves the
+  original interpreter's native credential access. See [delivery](requirements/DELIVERY.md).
+
+- About opens an offline processor DAG from the active registry, including
+  open-ended MIME extraction outputs. See [processing](requirements/PROCESSING.md#registered-processor-graph).
+
+- Fixes handed back for testing advance the version; About retains launch/build
+  Git provenance and discloses local changes. See [delivery](requirements/DELIVERY.md).
+
+- IMAP workers prioritize missing per-message checkpoints before refreshing saved
+  metadata; interrupted UID gaps remain eligible. See [acquisition](requirements/ACQUISITION.md).
+
+- Imports can suspend and resume without quitting; identity pickers display
+  loading and retry feedback. See [desktop](requirements/DESKTOP.md).
+
 - About status remains available during import writer locks; plugin inventory
   retries separately. See [desktop](requirements/DESKTOP.md).
 
@@ -72,6 +93,8 @@ platform or release gate has passed. [Future work](plans/README.md) is separate.
   non-person flags independently of identity-link judgments; see [processing research](requirements/PROCESSING.md#local-name-linkage-research).
 
 - Identity picker labels open name searches; count buttons open filtered evidence messages.
+  Navigation shows pending/error feedback and targets the clicked row independently of selection.
+  Count/name navigation and focus changes do not repeat the initial recovery prompt.
   Native Close targets the focused window, including standalone list editors.
   Navigation retains the displayed visibility and date filters; provider domains
   are excluded from derived institution membership and search aliases.
@@ -84,7 +107,8 @@ platform or release gate has passed. [Future work](plans/README.md) is separate.
   see [desktop](requirements/DESKTOP.md) and the [threading audit](THREADING.md).
 - Confirmed Quit offers **Suspend import and quit** and dims loaded windows with
   a Shutting down notice; see [desktop shutdown](requirements/DESKTOP.md#shutdown-feedback).
-- Desktop recovery requires an informed Continue Import/defer/abort choice, and collapsed
+- Desktop recovery offers Continue Import for both phases, Leave import suspended,
+  or Stop import while retaining archived messages; collapsed
   warnings remain readable; see [desktop recovery](requirements/DESKTOP.md#saved-import-recovery-and-notices).
   Ingest history displays IMAP accounts and servers instead of internal locators.
   Startup is visible before the first run snapshot; enlarged status circles use

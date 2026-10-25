@@ -32,12 +32,10 @@
         <h2 id="processing-heading">Incomplete work</h2>
         <p id="processing-detail"></p>
         <div id="processing-imports"></div>
-        <p>Saved counts cover these import attempts. Abort cancels all saved work shown here and keeps messages already archived.</p>
-        <p><label><input id="continue-ingest" type="checkbox" checked> Continue ingest</label></p>
-        <p><label><input id="continue-content" type="checkbox" checked> Continue content processing</label></p>
+        <p>Saved counts cover these import attempts. Stop import cancels the remaining work shown here and keeps messages already archived. Continue Import resumes ingest and content processing using the saved settings.</p>
         <p id="processing-error" role="alert"></p>
-        <button id="processing-abort" type="button">Abort import</button>
-        <button id="processing-later" type="button">Ask me later</button>
+        <button id="processing-abort" type="button">Stop import</button>
+        <button id="processing-later" type="button" autofocus>Leave import suspended</button>
         <button id="processing-continue" type="button">Continue Import</button>
       </dialog>
       <section class="workspace">

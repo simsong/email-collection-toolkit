@@ -19,6 +19,29 @@ platform or release gate has passed. [Future work](plans/README.md) is separate.
 
 ## Shared boundaries
 
+- Typed stage/worker activity selects meaningful progress cards and independent
+  per-worker task totals. See [desktop](implementation/DESKTOP.md).
+
+- Scanner startup runs in a tracked future while its owner refreshes status;
+  see [scanning](implementation/SCANNING.md).
+
+- The development app is signed after metadata creation; CPython retains its
+  original venv and native credential reader. See [delivery](implementation/DELIVERY.md).
+
+- The processor graph shares manifest output expansion with registry validation;
+  offline Dagre lays out a dedicated native window. See [processing](implementation/PROCESSING.md#registered-processor-graph).
+
+- About snapshots package version and typed Git provenance; platform builders
+  embed that provenance. The macOS development launcher has its own native bundle.
+  See [delivery](implementation/DELIVERY.md).
+
+- IMAP workers snapshot prior UID membership in temporary SQL storage, acquire
+  missing UIDs first, then refresh saved metadata. See [acquisition](implementation/ACQUISITION.md).
+
+- Ingest-window controls reuse checkpoint interruption and saved requests;
+  picker counts aggregate in one query with visible pending states.
+  See [desktop](implementation/DESKTOP.md).
+
 - About shares one bounded plugin-settings read and defers only busy inventories;
   see [desktop](implementation/DESKTOP.md).
 
@@ -69,6 +92,8 @@ platform or release gate has passed. [Future work](plans/README.md) is separate.
   Stable review labels retain independent non-person flags and unlabeled notes.
 
 - Identity picker navigation uses typed selections and read-only evidence scopes.
+  Count/name clicks show pending feedback and suppress duplicate requests until completion.
+  Recovery controls initialize once and skip automatic prompting in navigation windows.
   Native Close marshals Cocoa focus lookup and closure to the main thread.
   Email-labelled group fallbacks retain their filters; institution projections
   exclude provider domains without deleting durable organization records.
@@ -81,7 +106,8 @@ platform or release gate has passed. [Future work](plans/README.md) is separate.
   see [desktop](implementation/DESKTOP.md) and the [threading audit](THREADING.md).
 - Confirmed Quit injects a shared modal shutdown overlay independently of its
   five-second watchdog; see [desktop shutdown](implementation/DESKTOP.md#cooperative-shutdown-and-writer-fencing).
-- Desktop recovery summarizes saved attempts with a Continue Import action and records lease-protected aborts;
+- Desktop recovery summarizes saved attempts with Continue Import for both phases,
+  Leave import suspended, and lease-protected Stop import;
   warning history collapses to a reopenable pill. See
   [desktop recovery](implementation/DESKTOP.md#saved-import-recovery-and-notices).
   History source labels resolve account/server names without changing saved locators.

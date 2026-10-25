@@ -24,6 +24,7 @@ import logging
 import os
 import shutil
 import signal
+import sqlite3
 import sys
 import tempfile
 import time
@@ -47,6 +48,8 @@ from webview.menu import Menu, MenuAction, MenuSeparator
 from .file_drag import FILE_DRAGS, install_file_drag
 from .desktop_platform import copy_windows_text, open_export, open_external_url, refresh_windows_menu, startup_error, windows_webview
 from .identity import APPLICATION_NAME
+from .build_info import BUILD_INFO, BuildInfo
+from .processor_graph import ProcessorGraphStatus, processor_graph
 from .updates import UpdateService, UpdateStatus, default_channel
 from .release_versions import release_metadata
 from .sparkle import SparkleBackend, show_preferences, start_installed_updater
@@ -69,7 +72,7 @@ from .archive_config import (
     remember_import_directory,
 )
 from .plugin_api import PluginManifest
-from .gui_processing import abort_processing, picker_page, picker_search, PickerSearchRequest, plugin_inventory, resume_request, save_identity, source_label, unfinished_work
+from .gui_processing import abort_processing, picker_page, picker_search, PickerSearchRequest, plugin_inventory, remember_interrupted_request, resume_request, save_identity, source_label, unfinished_work
 from .processing.api import ProcessorManifest
 from .processing.identities import IdentityFilter, IdentityMessages, ManualDecision
 from .gui_service import (
@@ -107,6 +110,7 @@ GUI_DIRECTORY = (Path(getattr(sys, "_MEIPASS")) if getattr(sys, "frozen", False)
 E2E_DRIVER = Path(__file__).parents[2] / "e2e_tests" / "gui_driver.js"
 DEFAULT_PAGE_SIZE = 100
 APPLICATION_ICON = GUI_DIRECTORY / "icons" / "rainbow-post-192.png"
+APPLICATION_VERSION = version("mailarchiver")
 EXTERNAL_LINK_SCHEMES = frozenset({"http", "https", "mailto"})
 INTERNET_CHECK_URL = "https://www.example.com/"
 INTERNET_CHECK_INTERVAL_SECONDS = 30.0
@@ -158,6 +162,7 @@ class ApplicationMetadata(BaseModel):
     name: str
     version: str
     copyright: str
+    build: BuildInfo = BUILD_INFO
 
 
 class ApplicationNotice(BaseModel):
@@ -202,6 +207,9 @@ class GuiIngestHistory(BaseModel):
     statuses: list[GuiIngestStatus]
     errors: list[IngestStatusReadError]
     starting: bool = False
+    active: bool = False
+    suspending: bool = False
+    can_resume: bool = False
 
 
 class DragExport(BaseModel):
@@ -612,7 +620,22 @@ class IngestWindowApi:
         job = self._document.ingest_job if self._document is not None else None
         starting = bool(job is not None and not job.finished.is_set()
                         and not any(status.started_at >= job.started_at for status in statuses))
-        return GuiIngestHistory(statuses=statuses, errors=history.errors, starting=starting).model_dump(mode="json")
+        resumable = bool(job is None and self._application is not None
+                         and not (statuses and statuses[0].state == "running")
+                         and unfinished_work(self.archive).incomplete)
+        return GuiIngestHistory(statuses=statuses, errors=history.errors, starting=starting,
+                                active=job is not None, suspending=bool(job and job.stop.is_set()),
+                                can_resume=job is None and resumable and self._application is not None).model_dump(mode="json")
+
+    def suspend_import(self) -> bool:
+        if self._application is None or self._document is None:
+            return False
+        return self._application.suspend_import(self._document)
+
+    def resume_import(self) -> bool:
+        if self._application is None or self._document is None:
+            return False
+        return self._application.resume_import(self._document)
 
     def antivirus(self) -> dict[str, object]:
         return scanner_availability().model_dump(mode="json")
@@ -674,12 +697,29 @@ class AboutApi:
     def status(self) -> dict[str, Any]:
         return self._application.about_status().model_dump(mode="json")
 
+    def show_processor_graph(self) -> bool:
+        return self._application.show_processor_graph()
+
     def update_definitions(self) -> dict[str, Any]:
         from .clamav_update import refresh_definitions
         with self._application.definitions_activity():
             result = refresh_definitions()
         self._application.add_notice("information", f"Virus definitions updated: {result.versions}")
         return result.model_dump(mode="json")
+
+
+class ProcessorGraphApi:
+    """Read the same active-archive registry as About, without executing plugins."""
+
+    def __init__(self, application: "PyWebViewApplication") -> None:
+        self._application = application
+
+    def status(self) -> dict[str, Any]:
+        active = self._application.controller.active_document
+        archive = active.path if active else None
+        inventory = plugin_inventory(archive)
+        return ProcessorGraphStatus(context=str(archive) if archive else "Built-in processors",
+            pipelines=processor_graph(tuple(inventory.processors)), error=inventory.error).model_dump(mode="json")
 
 
 
@@ -1493,6 +1533,7 @@ class PyWebViewApplication:
         self._about_api = AboutApi(self)
         self._about_window: Any = None
         self._license_window: Any = None
+        self._processor_graph_window: Any = None
         self._reader_window: Any = None
         self._setup_api: SetupApi | None = None
         self._setup_visible = False
@@ -1668,7 +1709,7 @@ class PyWebViewApplication:
         window = webview.create_window(
             f"About {APPLICATION_NAME}",
             self.asset_url("about.html"),
-            js_api=WindowBridge(self._about_api, ("status", "update_definitions")),
+            js_api=WindowBridge(self._about_api, ("status", "update_definitions", "show_processor_graph")),
             width=620,
             height=620,
             hidden=hidden,
@@ -1700,6 +1741,34 @@ class PyWebViewApplication:
         window.events.closing += closing
         window.events.closed += closed
         self._refresh_menus()
+
+    def show_processor_graph(self) -> bool:
+        """Open or focus one read-only graph window using the current About registry."""
+        with self._lock:
+            if self._quitting:
+                return False
+            if self._processor_graph_window is not None:
+                self._processor_graph_window.restore()
+                self._processor_graph_window.show()
+                self._processor_graph_window.run_js("window.refreshProcessorGraph?.();")
+                return True
+            window = webview.create_window(
+                f"{APPLICATION_NAME} — Processor graph", self.asset_url("processor-graph.html"),
+                js_api=WindowBridge(ProcessorGraphApi(self), ("status",)),
+                width=1150, height=820, min_size=(640, 480), text_select=True, menu=self.menu(),
+            )
+            if window is None:
+                raise RuntimeError("Could not open processor graph")
+            self._processor_graph_window = window
+
+            def closed(*_args: object) -> None:
+                with self._lock:
+                    self._processor_graph_window = None
+                self._refresh_menus()
+
+            window.events.closed += closed
+        self._refresh_menus()
+        return True
 
     def add_notice(self, severity: Literal["information", "warning", "error"], message: str) -> None:
         notice = ApplicationNotice(severity=severity, message=message)
@@ -2104,6 +2173,26 @@ class PyWebViewApplication:
                 raise
         return True
 
+    def suspend_import(self, document: ArchiveDocument) -> bool:
+        """Checkpoint this archive's work without closing any windows or quitting."""
+        with self._lock:
+            job = document.ingest_job
+            if job is None or self._quitting or self._updating:
+                return False
+            job.stop.set()
+        return True
+
+    def resume_import(self, document: ArchiveDocument) -> bool:
+        """Resume with the original request, including suspension during preflight."""
+        if document.path is None or document.ingest_job is not None:
+            return False
+        request = resume_request(document.path, True, True)
+        session = next((window for window in self.controller.windows()
+                        if window.document_id == document.descriptor.document_id), None)
+        api = (GuiApi(document.path, application=self, document=document, search_window=session) if session else
+               self.create_search_window(self.controller.new_search_window(document)))
+        return self.start_import(api, [], processing_request=request)
+
     def stop_imports_for_quit(self) -> tuple[IngestJob, ...]:
         """Called only after confirmation; prevent new imports and stop all existing jobs."""
         with self._lock:
@@ -2135,6 +2224,13 @@ class PyWebViewApplication:
         except BaseException as caught:  # pylint: disable=broad-exception-caught
             logging.getLogger(__name__).debug("Best-effort operation failed", exc_info=True)
             error = caught
+            if isinstance(caught, IngestInterrupted):
+                try:
+                    if outcome.accepted_request is None:
+                        raise ValueError("Import stopped before its settings were accepted.")
+                    remember_interrupted_request(outcome.accepted_request)
+                except (OSError, sqlite3.Error, ValueError) as save_error:
+                    self.add_notice("error", f"Could not save suspended import settings: {save_error}")
         finally:
             try:
                 refresh = self.controller.finish_ingest(
@@ -2148,7 +2244,7 @@ class PyWebViewApplication:
                 self._refresh_search_windows(refresh)
                 self._refresh_menus()
         if isinstance(error, IngestInterrupted):
-            self.add_notice("information", f"Import stopped for {document.display_path}; import the same source again to continue.")
+            self.add_notice("information", f"Import suspended for {document.display_path}; use Continue Import in Ingests to resume.")
         elif error is None:
             self.add_notice("information", f"Import completed for {document.display_path}")
         else:
@@ -2381,7 +2477,8 @@ class PyWebViewApplication:
                     "ingests.html",
                     [("status", status_id)] if status_id is not None else None,
                 ),
-                js_api=WindowBridge(api, ("history", "can_import_directory", "import_directory", "antivirus", "install_antivirus")),
+                js_api=WindowBridge(api, ("history", "can_import_directory", "import_directory", "antivirus", "install_antivirus",
+                                          "suspend_import", "resume_import")),
                 width=1050,
                 height=700,
                 min_size=(720, 440),
@@ -2430,6 +2527,7 @@ class PyWebViewApplication:
         windows.extend(api.window for api in self._default_lists_apis.values())
         windows.append(self._about_window)
         windows.append(self._license_window)
+        windows.append(self._processor_graph_window)
         if self._setup_api is not None:
             windows.append(self._setup_api.window)
         window = next((candidate for candidate in windows if candidate is not None and candidate.uid == uid), None)
@@ -2450,6 +2548,8 @@ class PyWebViewApplication:
             items.append(MenuAction(f"About {APPLICATION_NAME}", lambda: self.focus_window(self._about_window.uid)))
         if self._license_window is not None:
             items.append(MenuAction("License", lambda: self.focus_window(self._license_window.uid)))
+        if self._processor_graph_window is not None:
+            items.append(MenuAction("Processor graph", lambda: self.focus_window(self._processor_graph_window.uid)))
         for index, api in enumerate(self._search_apis(), 1):
             if api.window is None:
                 continue
@@ -2666,6 +2766,7 @@ class PyWebViewApplication:
         windows.append(self._about_window)
         windows.append(self._reader_window)
         windows.append(self._license_window)
+        windows.append(self._processor_graph_window)
         if self._setup_api is not None:
             windows.append(self._setup_api.window)
         for window in windows:
@@ -2759,7 +2860,7 @@ class PyWebViewApplication:
                 setup = self._setup_api
                 busy = setup is not None and setup._lock.locked()
                 list_editor = any(editor.window is active for editor in self._default_lists_apis.values())
-                enabled = child or list_editor or active is self._license_window or (setup is not None and active is setup.window) or (
+                enabled = child or list_editor or active in (self._license_window, self._processor_graph_window) or (setup is not None and active is setup.window) or (
                     search_id is not None and self.controller.can_close_window(search_id)
                 )
                 close_item.setEnabled_(enabled and not busy)
@@ -2802,7 +2903,7 @@ def application_metadata() -> ApplicationMetadata:
     """Return the identity shown by the native application menu and About panel."""
     return ApplicationMetadata(
         name=APPLICATION_NAME,
-        version=version("mailarchiver"),
+        version=APPLICATION_VERSION,
         copyright="Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved.",
     )
 

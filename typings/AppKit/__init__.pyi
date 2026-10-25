@@ -55,6 +55,12 @@ class NSApplication:
     def activateIgnoringOtherApps_(self, flag: bool) -> None: ...
 
 
+class NSRunningApplication:
+    @classmethod
+    def currentApplication(cls) -> Self: ...
+    def localizedName(self) -> str | None: ...
+
+
 NSTerminateCancel: int
 NSTerminateNow: int
 

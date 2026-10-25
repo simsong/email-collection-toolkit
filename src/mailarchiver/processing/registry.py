@@ -22,6 +22,15 @@ from pathlib import Path
 from .api import PluginSpec, ProcessingObject, ProcessorManifest
 
 
+def emitted_types(manifest: ProcessorManifest, manifests: tuple[ProcessorManifest, ...]) -> tuple[str, ...]:
+    """Expand open-ended MIME-part outputs to the finite registered type vocabulary."""
+    targets = set(manifest.emits)
+    if manifest.emits_mime_parts:
+        targets.update(value for candidate in manifests for value in (*candidate.subscribes, *candidate.emits)
+                       if not value.startswith("application/x-mailarchiver-"))
+    return tuple(sorted(targets))
+
+
 def load_processors(roots: tuple[Path, ...]) -> tuple[PluginSpec, ...]:
     plugins: list[PluginSpec] = []
     for root in sorted({p.resolve() for p in roots}):
@@ -54,17 +63,14 @@ def load_processors(roots: tuple[Path, ...]) -> tuple[PluginSpec, ...]:
             if not set(spec.subscribes) <= set(required.subscribes) or required.scope not in ("both", spec.scope):
                 raise ValueError("dependencies must cover all input types and scopes of their consumer")
     # Type publication must be acyclic independently for each pipeline.
+    manifests = tuple(plugin.manifest for plugin in ordered)
     def visit(phase: str, content_type: str, ancestors: frozenset[str]) -> None:
         if content_type in ancestors:
             raise ValueError(f"cyclic content graph: {content_type}")
         for plugin in ordered:
             spec = plugin.manifest
             if spec.pipeline == phase and content_type in spec.subscribes:
-                targets = set(spec.emits)
-                if spec.emits_mime_parts:
-                    targets.update(value for candidate in ordered for value in candidate.manifest.subscribes
-                                   if not value.startswith("application/x-mailarchiver-"))
-                for emitted in targets:
+                for emitted in emitted_types(spec, manifests):
                     visit(phase, emitted, ancestors | {content_type})
     for plugin in ordered:
         for content_type in plugin.manifest.subscribes:

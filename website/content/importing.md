@@ -39,6 +39,12 @@ window's archive. If antivirus scanning is unavailable, the application warns
 you and records scanner-error evidence while importing continues automatically.
 Incomplete scans and encrypted attachments are recorded without a manual-review gate.
 
+Use **Suspend Import** to checkpoint the current work without quitting. Wait for
+the suspension to finish, then use **Continue Import** to resume the saved
+settings, including after reopening the archive. Suspension also frees the
+archive for manual name edits. A message already being downloaded may finish
+before suspension completes.
+
 ![The import history window showing a completed synthetic collection import](../images/importing-interface.png)
 
 *The working import-history interface after importing synthetic messages.*
@@ -47,8 +53,9 @@ Incomplete scans and encrypted attachments are recorded without a manual-review 
 When reopening an archive with unfinished work, review the source, import start,
 latest interruption and saved imported/duplicate counts. An unclean stop shows
 its last saved progress time because the exact interruption time is unknown.
-Choose **Continue Import** to use the saved settings, **Ask me later** to defer until
-another opening, or **Abort import** to cancel saved work while keeping archived
+Choose **Continue Import** to resume ingest and content processing using the saved
+settings, **Leave import suspended** to keep work paused, or **Stop import** to
+cancel remaining work while keeping archived
 messages and history. A new explicit import can read the source again; use
 explicit reprocessing to regenerate previously cancelled derived work.
 
@@ -138,3 +145,10 @@ archive and replaces only the disposable search index.
 
 See [Advanced → Command Line](@/advanced.md#command-line) for terminal commands
 and the full command reference.
+
+While **Processing saved mail** is displayed, ECT is finishing metadata, body and
+attachment extraction, and search indexing for mail already stored locally.
+The cards show finished processing tasks and their average rate. Each worker row
+separates downloading/importing from processing and reports its own finished-task
+count. Several processing tasks can belong to one email. IMAP source progress is
+reported as download partitions rather than files.

@@ -19,6 +19,7 @@ async function initialize() {
   initialized = true;
   window.clearInterval(bridgeTimer);
   byId("update-definitions").addEventListener("click", updateDefinitions);
+  byId("show-processor-graph").addEventListener("click", showProcessorGraph);
   await refresh();
   window.setInterval(refresh, 1000);
 }
@@ -35,6 +36,9 @@ async function refresh() {
 function render(status) {
   byId("name").textContent = status.metadata.name;
   byId("version").textContent = `Version ${status.metadata.version}`;
+  const build = status.metadata.build;
+  byId("git-commit").textContent = build?.git_commit
+    ? `${build.git_commit}${build.dirty ? " (local changes)" : ""}` : "Unavailable";
   byId("copyright").textContent = status.metadata.copyright;
   byId("disk").textContent = `${formatBytes(status.disk_free_bytes)} available on ${status.disk_path}`;
   byId("internet").textContent = status.internet.detail;
@@ -48,6 +52,7 @@ function render(status) {
   byId("plugin-inventory-error").hidden = !status.plugin_inventory_error;
   byId("plugin-inventory-error").textContent = status.plugin_inventory_error || "";
   const types = [...new Set((status.processors || []).flatMap(plugin => plugin.subscribes))].sort();
+  byId("show-processor-graph").disabled = Boolean(status.plugin_inventory_error) || !types.length;
   byId("processors").replaceChildren(...types.map(type => {
     const group = document.createElement("div");
     const heading = document.createElement("strong"); heading.textContent = type;
@@ -78,10 +83,11 @@ function activityCard(activity) {
   const detail = document.createElement("p");
   detail.className = "detail";
   const status = activity.status;
+  const phase = status?.phase === "recovering archived content" ? "Processing saved mail" : status?.phase;
   if (activity.operation_id && !status) detail.textContent = "Import starting…";
   else if (!status) detail.textContent = "No ingest history.";
-  else if (status.state === "running" && status.processing_active) {
-    detail.textContent = `${status.phase} · ${Number(status.processing_jobs_completed).toLocaleString()} processing jobs finished · ${status.processing_processor || "preparing"}`;
+  else if (status.state === "running" && (status.processing_active || status.activity_kind === "processing")) {
+    detail.textContent = `${phase} · ${Number(status.processing_jobs_completed).toLocaleString()} processing tasks finished · ${status.processing_processor || "preparing"}`;
   } else if (status.state === "running") {
     detail.textContent = `${status.phase} · ${Number(status.percent).toFixed(1)}% · ${Number(status.processed_messages).toLocaleString()} messages · ETA ${status.eta}`;
   } else {
@@ -122,6 +128,14 @@ function showError(message) {
   const error = byId("error");
   error.textContent = message;
   error.hidden = false;
+}
+
+async function showProcessorGraph() {
+  try {
+    if (!await window.pywebview.api.show_processor_graph()) throw new Error("Application is shutting down");
+  } catch (error) {
+    showError(`Could not open processor graph: ${String(error?.message || error)}`);
+  }
 }
 
 async function updateDefinitions() {

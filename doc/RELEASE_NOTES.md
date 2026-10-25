@@ -6,6 +6,76 @@ Entries describe their recorded revisions. For current behavior use the
 [user manual](USER_MANUAL.md) and [CLI reference](CLI_REFERENCE.md). Retired
 Rust delivery plans and historical package checks are not current acceptance.
 
+## Distinct source and processing progress
+
+Fix worker task counters so each row reports its own completed work. Processing
+saved mail shows task totals and tasks/second, including between jobs, instead of
+zero source-message/file counters. Separate downloading/importing and processing
+operations in the worker table, explain active processors and label IMAP work as
+download partitions. Retain an explicit unavailable total for older snapshots.
+Advance the development alpha for this fix.
+
+## Live status during antivirus startup
+
+Keep import heartbeats current throughout definition checks, refresh and native
+engine startup by supervising preflight as a tracked future. A normal startup
+wait no longer produces a temporary stale-run X. Definition freshness policy and
+real scanner-error recording remain unchanged. Advance the development alpha.
+
+## Development launcher credential access
+
+Seal and verify the named macOS development bundle after writing its metadata.
+Retain the active venv through CPython's launcher environment and read saved IMAP
+passwords through the original interpreter's native Keychain identity. Passwords
+cross only a captured pipe; no vault policy or credential is changed. Failures
+show the native status without private backend text. Advance the alpha checkpoint.
+
+## Simpler import recovery
+
+Incomplete work now offers **Continue Import**, **Leave import suspended** and
+**Stop import**. Continue always resumes ingest and content processing together;
+the phase checkboxes are removed. Stop cancels remaining work while keeping
+archived messages. Advance the development alpha for this fix checkpoint.
+
+## Registered processor graph
+
+About now offers **Show processor graph…** in a separate native window. Bundled
+Dagre draws MIME types, subscribing processors and potential outputs offline,
+with pipeline-specific DAGs, fit/zoom and text connection details. MIME extraction
+fans out to registered document types and an open-ended Other MIME types node.
+Custom saved registries and transient writer-lock retry share About's read path.
+Advance the development alpha for this feature checkpoint.
+
+## Version and build identity
+
+Advance the development version for this fix checkpoint and require a bump for
+each subsequent user-visible fix handed back for testing. About now retains the
+launch/build Git commit, identifies local changes and reports missing provenance.
+macOS/Windows builders embed the commit in their artifacts. macOS `make gui` uses
+a real development app bundle so Command-Tab identifies Email Collection Toolkit.
+
+## Resume IMAP downloads before metadata refresh
+
+IMAP workers now acquire missing UID checkpoints before refreshing saved message
+metadata and Gmail labels. Exact checkpoint membership preserves interrupted gaps
+and changed worker partitions; saved bodies are not downloaded again. Status names
+the metadata refresh separately, and import counters remain per-run totals.
+
+## Suspend imports and show identity loading
+
+Name/count navigation now shows opening progress and retryable errors. Native
+navigation checks cover ten messages for the clicked identity while another
+identity is selected.
+Suspended work no longer interrupts count/name searches with another recovery
+dialog; returning focus also leaves the dismissed dialog closed. Explicit Continue
+Processing and reopening the archive retain recovery access.
+
+Ingests now offers Suspend Import and Continue Import without quitting. Saved
+settings survive an early preflight suspension and reopening the archive.
+Name and institution pickers show loading/retry feedback, retain rows during
+refresh, and aggregate group counts together. Authoritative matching remains
+unconnected; manual edits require suspending an active import first.
+
 ## About status during imports
 
 An import writer's database lock no longer aborts the entire About status poll.
@@ -181,7 +251,7 @@ non-person choices migrate to checked flags without assuming a link decision.
 
 The desktop asks before continuing saved imports, showing source/account,
 first start, latest interruption (or last saved progress), imported messages and
-duplicates ignored. Choose Abort import, Ask me later, or Continue Import. Abort keeps
+duplicates ignored. Choose Stop import, Leave import suspended, or Continue Import. Stop keeps
 archived mail and history while cancelling saved traversal and outstanding jobs.
 Search-window warnings collapse to a message pill that reopens their full text
 and earlier messages for the lifetime of the window.

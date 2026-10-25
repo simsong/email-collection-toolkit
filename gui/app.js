@@ -507,9 +507,10 @@ async function refreshIngestOverview() {
   }
   const messages = Number(status.processed_messages).toLocaleString();
   const percent = Number(status.percent).toFixed(1);
-  if (status.state === "running" && status.processing_active) {
+  const phase = status.phase === "recovering archived content" ? "Processing saved mail" : status.phase;
+  if (status.state === "running" && (status.processing_active || status.activity_kind === "processing")) {
     const jobs = Number(status.processing_jobs_completed).toLocaleString();
-    setIngestStatusText(`${status.phase} · ${jobs} processing jobs finished · ${status.processing_processor || "preparing"} · ${status.active_workers}/${status.configured_workers} workers`);
+    setIngestStatusText(`${phase} · ${jobs} processing tasks finished · ${status.processing_processor || "preparing"} · ${status.active_workers}/${status.configured_workers} workers`);
   } else if (status.state === "running") {
     setIngestStatusText(`Ingesting ${percent}% · ${messages} messages · ${status.active_workers}/${status.configured_workers} workers · ETA ${status.eta}`);
   } else if (status.state === "completed") {

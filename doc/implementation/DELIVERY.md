@@ -5,6 +5,42 @@
 Current implementation and validation boundaries. Deferred feature designs
 live in [plans](../plans/README.md); historical evidence does not validate this revision.
 
+## Build identity
+
+`build_info` captures typed commit/dirty metadata from the owning Git checkout
+once at import. It ignores inherited Git overrides and unrelated parent repos.
+Embedded `build-info.json` takes precedence; missing/invalid provenance reports
+Unavailable. About also captures the package version once, avoiding a later
+editable install changing the identity of an already running process.
+macOS staging and Windows private-runtime assembly write the metadata into the
+package before signing. Ordinary unstamped wheels without Git cannot identify a
+commit. `make test-build-identity` exercises disposable Git trees and the About UI.
+
+`make gui` runs `scripts/run_gui.py`. On macOS it copies the small framework
+Python executable into a fresh `.tmp/gui-launch-*/Email Collection Toolkit.app`,
+with real bundle metadata. Ad-hoc signing and strict signature verification follow
+metadata creation; an invalid bundle fails before launch. CPython's internal
+`__PYVENV_LAUNCHER__` points to the active interpreter, with `PYTHONEXECUTABLE`
+removed from the child environment. This preserves the original venv and worker
+interpreter without placing unsealable venv files inside the app.
+Exec preserves arguments and terminal streams;
+unique bundles avoid overwriting a running executable. These development bundles
+are disposable build artifacts, not standalone installers. The native lifecycle
+test runs through that same bundle constructor and checks LaunchServices' actual
+process name plus the About commit before exercising GUI behavior.
+It also reads a randomly identified missing native credential. A separate
+regression verifies the venv paths and rejects Info.plist tampering after sealing.
+
+The development bundle has a different Keychain identity from the original
+framework Python. Its IMAP password reads therefore invoke that existing
+interpreter with `-I -m keyring`, explicitly selecting the macOS native backend
+and password-only JSON output. Only account identifiers enter arguments; secrets
+cross captured pipes, never a file or environment. The existing owned-command
+supervisor bounds reads to 15 seconds and reaps children on timeout or owner exit;
+subprocess failures and malformed private output produce sanitized errors without
+retaining private validation exception chains. Original CLI and packaged apps
+use their native backend directly. No vault ACL, password or default is changed.
+
 ## macOS packaging
 
 `make dmg` builds the Python application described in

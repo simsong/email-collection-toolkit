@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import sqlite3
 import shlex
+import json
 from collections.abc import Iterator
 from contextlib import closing, contextmanager
 from pathlib import Path
@@ -43,6 +44,7 @@ from .processing.contracts import ProcessingPolicy
 from .processing.identities import AddressRow, IdentityFilter, IdentityMessages, ManualDecision, addresses, edit, organizations
 from .processing.registry import load_processors
 from .processing.store import DATABASE, USER_CANCELLED
+from .processing.store import connect as processing_connection
 from .writer_lock import WriterLease
 
 
@@ -164,6 +166,12 @@ def abort_processing(archive: Path, status_ids: list[str]) -> None:
                              "WHERE status IN ('pending','running','failed')", (USER_CANCELLED,))
 
 
+def remember_interrupted_request(request: IngestRequest) -> None:
+    """Retain accepted GUI settings even when suspended before processing preflight."""
+    with closing(processing_connection(request.archive, create=not (request.archive / DATABASE).exists(), production=True)) as database, database:
+        database.execute("INSERT OR REPLACE INTO processing_settings VALUES('request',?)", (request.model_dump_json(),))
+
+
 def resume_request(archive: Path, ingest: bool, content: bool) -> IngestRequest:
     if not (ingest or content):
         raise ValueError("Select at least one processing phase.")
@@ -263,16 +271,19 @@ def picker_page(archive: Path, kind: Literal["name", "institution"], filters: Id
         for group in page.groups:
             unique_phones = {phone.normalized: phone for row in group.addresses for phone in row.phone_numbers}
             group.phone_numbers = [unique_phones[key] for key in sorted(unique_phones)]
-            ids = [row.address_id for row in group.addresses]
-            if not ids:
-                continue
-            start = filters.start.isoformat() if filters.start else None
-            end = filters.end.isoformat() if filters.end else None
-            group.first_use, group.last_use, group.messages, group.signature_messages = database.execute(f"""SELECT min(seen_at),max(seen_at),
-                count(DISTINCT CASE WHEN kind='header' THEN message_id END),
-                count(DISTINCT CASE WHEN kind='signature' THEN message_id END)
-                FROM message_addresses WHERE address_id IN ({','.join('?' for _ in ids)})
-                AND (? IS NULL OR date(seen_at)>=?) AND (? IS NULL OR date(seen_at)<=?)""", (*ids, start, start, end, end)).fetchone()
+        start = filters.start.isoformat() if filters.start else None
+        end = filters.end.isoformat() if filters.end else None
+        memberships = json.dumps([[row.address_id for row in group.addresses] for group in page.groups])
+        for index, first, last, messages, signatures in database.execute("""SELECT groups.key,min(m.seen_at),max(m.seen_at),
+            count(DISTINCT CASE WHEN m.kind='header' THEN m.message_id END),
+            count(DISTINCT CASE WHEN m.kind='signature' THEN m.message_id END)
+            FROM json_each(?) groups JOIN json_each(groups.value) ids
+            JOIN message_addresses m ON m.address_id=ids.value
+            WHERE (? IS NULL OR date(m.seen_at)>=?) AND (? IS NULL OR date(m.seen_at)<=?)
+            GROUP BY groups.key""", (memberships, start, start, end, end)):
+            group = page.groups[index]
+            group.first_use, group.last_use = first, last
+            group.messages, group.signature_messages = messages, signatures
     return page
 
 

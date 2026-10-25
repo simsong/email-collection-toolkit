@@ -69,6 +69,8 @@ Get-ChildItem (Join-Path $PythonEnvironment 'Lib/site-packages') | Where-Object 
     Copy-Item -LiteralPath $_.FullName -Destination $site -Recurse -Force
 }
 Copy-Item -LiteralPath (Join-Path $root 'src/mailarchiver') -Destination $site -Recurse
+& $python -m mailarchiver.build_info --root $root --output (Join-Path $site 'mailarchiver/build-info.json')
+if ($LASTEXITCODE) { throw 'Build provenance capture failed' }
 [IO.File]::WriteAllText((Join-Path $privatePython 'python312._pth'), ".`nLib`nDLLs`nLib/site-packages`n", [Text.UTF8Encoding]::new($false))
 Copy-Item -LiteralPath (Join-Path $root 'gui') -Destination (Join-Path $privatePython 'Lib/gui') -Recurse
 Copy-Item -LiteralPath (Join-Path $root 'LICENSE') -Destination (Join-Path $privatePython 'Lib/gui/LICENSE')

@@ -10,7 +10,7 @@ import json
 import traceback
 from importlib import import_module
 from pathlib import Path
-from threading import Event
+from threading import Event, enumerate as active_threads
 from time import monotonic, sleep
 
 import webview
@@ -18,13 +18,17 @@ import webview
 from mailarchiver.application import ApplicationController, ApplicationPreferencesStore, IngestJob
 from mailarchiver.gui_app import GUI_DIRECTORY, PyWebViewApplication, configure_macos_application, install_macos_document_events, macos_import_picker, macos_owner_rules
 from mailarchiver.loopback import LoopbackAssetServer
+from mailarchiver.identity import APPLICATION_NAME
 from mailarchiver.owner_rules import OwnerRules
 from mailarchiver.document_options import DocumentOptions
 from mailarchiver.writer_lock import WriterLease
+from mailarchiver.imap_credentials import password_for
+from mailarchiver.imap_models import ImapAccount
 from mailarchiver.__main__ import IngestRequest, run_ingest
 
 AppHelper = import_module("PyObjCTools.AppHelper")
 NSApplication = import_module("AppKit").NSApplication
+NSRunningApplication = import_module("AppKit").NSRunningApplication
 NSModalPanelRunLoopMode = import_module("AppKit").NSModalPanelRunLoopMode
 NSTextView = import_module("AppKit").NSTextView
 NSRunLoop = import_module("Foundation").NSRunLoop
@@ -47,9 +51,39 @@ def evaluate_async(window: webview.Window, expression: str):
     return results[0]
 
 
+def drain_bridge_calls() -> bool:
+    """Keep Cocoa alive until fixture requests and their chained JS returns settle."""
+    deadline, idle = monotonic() + 5, False
+    while monotonic() < deadline:
+        calls = [thread for thread in active_threads() if thread.name.endswith(" (_call)")]
+        if not calls and idle:
+            return True
+        idle = not calls
+        for thread in calls:
+            thread.join(timeout=max(0, deadline - monotonic()))
+        sleep(0.02)
+    return False
+
+
+def close_window(window: webview.Window) -> None:
+    """Finish bridge replies before destroying the WKWebView that receives them."""
+    assert drain_bridge_calls(), "Native bridge callback did not finish before window closure"
+    window.destroy()
+    assert window.events.closed.wait(5)
+
+
 def main() -> None:
     """Open a real extensionless fixture after About, inspect native menus, then quit."""
     configure_macos_application()
+    assert NSRunningApplication.currentApplication().localizedName() == APPLICATION_NAME, "macOS still identifies the GUI as Python"
+    # Query only a synthetic missing item: no personal credential or vault write.
+    missing_account = ImapAccount(server="native-fixture.example.test", username="missing-keychain-fixture")
+    try:
+        password_for(missing_account)
+    except ValueError as error:
+        assert "No saved password" in str(error), str(error)
+    else:
+        raise AssertionError("Unexpected credential for randomly identified native fixture")
     archive = Path(os.environ[PROBE_ARCHIVE_ENV])
     server = LoopbackAssetServer(GUI_DIRECTORY)
     controller = ApplicationController(ApplicationPreferencesStore(Path(os.environ[PROBE_PREFERENCES_ENV])))
@@ -82,13 +116,35 @@ def main() -> None:
             assert about.events.loaded.wait(10), "About bridge failed to load"
             status = evaluate_async(about, "window.pywebview.api.status()")
             assert status["metadata"]["version"], status
+            assert status["metadata"]["build"]["git_commit"], status
             assert status["disk_free_bytes"] > 0, status
             assert not [notice for notice in status["notices"] if notice["severity"] == "error"], status
-            assert about.evaluate_js("Object.keys(window.pywebview.api)") == ["status", "update_definitions"]
+            assert about.evaluate_js("Object.keys(window.pywebview.api)") == ["show_processor_graph", "status", "update_definitions"]
             application.add_notice("warning", "Native About regression check")
             evaluate_async(about, "refresh().then(() => true)")
+            assert status["metadata"]["build"]["git_commit"] in about.evaluate_js("document.getElementById('git-commit').textContent")
             assert "Native About regression check" in about.evaluate_js("document.getElementById('notices').textContent")
             assert about.evaluate_js("document.getElementById('error').hidden")
+            # Processing requirement: About opens a separate offline DAG window.
+            about.evaluate_js("document.getElementById('show-processor-graph').click()")
+            deadline = monotonic() + 5
+            while len(webview.windows) < 2 and monotonic() < deadline:
+                sleep(0.02)
+            graph = next(window for window in webview.windows if window is not about)
+            assert graph.events.loaded.wait(10), "Processor graph window failed to load"
+            assert evaluate_async(graph, """(async () => {
+                const deadline = Date.now() + 5000;
+                while (!document.querySelector('svg .node') && Date.now() < deadline)
+                    await new Promise(resolve => setTimeout(resolve, 20));
+                if (document.querySelectorAll('svg').length !== 3 || !document.getElementById('error').hidden)
+                    throw new Error('Native DAG did not render all three stages');
+                return true;
+            })()""") is True
+            assert any(item.title == "Processor graph" for item in application.window_menu_items())
+            assert evaluate_async(about, "window.pywebview.api.show_processor_graph()") is True
+            assert len(webview.windows) == 2, "Graph command created duplicate windows"
+            close_window(graph)
+            assert not any(item.title == "Processor graph" for item in application.window_menu_items())
             check_new_search(False)
             # Closing the sole visible window must keep menus alive, without
             # status polling or Dock activation reopening About.
@@ -151,13 +207,24 @@ def main() -> None:
             # Picker navigation must create a real search window bound to its archive.
             picker_root = Path(os.environ[PROBE_PREFERENCES_ENV]).parent / "picker-fixture"
             picker_root.mkdir()
-            picker_source = picker_root / "message.eml"
-            picker_source.write_bytes(b"From: Native Picker <picker@example.test>\nTo: owner@example.test\n"
-                b"Date: Tue, 02 Jan 2024 10:00:00 +0000\nMessage-ID: <native-picker@example.test>\n"
-                b"Subject: Picker navigation\n\nSynthetic navigation fixture.\n-- \nNative Picker\n+1 (617) 555-0102\n+44 20 7946 0958\n")
+            picker_source = picker_root / "messages"
+            picker_source.mkdir()
+            for index in range(11):
+                sender = "Native Picker <picker@example.test>" if index < 10 else "Other Person <other@example.test>"
+                subject = f"Picker navigation {index}" if index < 10 else "Unrelated message"
+                (picker_source / f"{index}.eml").write_bytes((f"From: {sender}\nTo: owner@example.test\n"
+                    f"Date: Tue, 02 Jan 2024 10:00:00 +0000\nMessage-ID: <native-picker-{index}@example.test>\n"
+                    f"Subject: {subject}\n\nSynthetic navigation fixture.\n-- \nNative Picker\n"
+                    "+1 (617) 555-0102\n+44 20 7946 0958\n").encode())
             picker_archive = picker_root / "archive"
             run_ingest(IngestRequest(archive=picker_archive, roots=[str(picker_source)], scan_policy="not-scanned",
                 owner_rules=OwnerRules(include=["owner@example.test"]), continue_content=True), terminal=False)
+            pending_source = picker_root / "pending.eml"
+            pending_source.write_bytes(b"From: Other Person <other@example.test>\nTo: owner@example.test\n"
+                b"Date: Tue, 02 Jan 2024 10:00:00 +0000\nMessage-ID: <deferred-native@example.test>\n"
+                b"Subject: Deferred content\n\nPending fixture.\n")
+            run_ingest(IngestRequest(archive=picker_archive, roots=[str(pending_source)], scan_policy="not-scanned",
+                owner_rules=OwnerRules(include=["owner@example.test"]), continue_content=False), terminal=False)
             picker_document = controller.open_document(picker_archive)
             assert application.open_picker(picker_document, "name")
             picker = next(window for window in webview.windows if " — Name matcher — " in window.title)
@@ -169,29 +236,37 @@ def main() -> None:
                 if (!window.archivePicker?.model.groups.length) throw new Error('No picker identities');
                 return true;
             })()""")
-            assert picker.evaluate_js("document.querySelector('tr.group .phone-numbers summary').textContent") == "2 phone numbers"
-            picker.evaluate_js("document.querySelector('tr.group .phone-numbers summary').click()")
-            assert picker.evaluate_js("document.querySelector('tr.group .phone-numbers').open")
-            for selector, event in (("tr.group .row-label", "dblclick"), ("tr.group .message-count", "click")):
+            picker.evaluate_js("""window.targetGroup = [...document.querySelectorAll('tr.group')].find(
+                row => row.querySelector('.row-label').textContent === 'Native Picker');
+                window.otherGroup = [...document.querySelectorAll('tr.group')].find(
+                row => row.querySelector('.row-label').textContent === 'Other Person');""")
+            assert picker.evaluate_js("window.targetGroup.querySelector('.phone-numbers summary').textContent") == "2 phone numbers"
+            picker.evaluate_js("window.targetGroup.querySelector('.phone-numbers summary').click()")
+            assert picker.evaluate_js("window.targetGroup.querySelector('.phone-numbers').open")
+            # Desktop requirement: a count targets its own person/address, not the selected row.
+            for selector, event in ((".row-label", "dblclick"), (".message-count", "click"), ("address", "click")):
+                picker.evaluate_js("window.otherGroup.querySelector('.row-label').click()")
                 before = {window.uid for window in webview.windows}
-                picker.evaluate_js(f"document.querySelector('{selector}').dispatchEvent(new MouseEvent('{event}', {{bubbles:true}}))")
+                target = "window.targetGroup.nextElementSibling.querySelector('.message-count')" if selector == "address" else f"window.targetGroup.querySelector('{selector}')"
+                picker.evaluate_js(f"{target}.dispatchEvent(new MouseEvent('{event}', {{bubbles:true}}))")
                 deadline = monotonic() + 10
                 while not any(window.uid not in before for window in webview.windows) and monotonic() < deadline:
                     sleep(0.02)
                 opened = next(window for window in webview.windows if window.uid not in before)
                 assert opened.events.loaded.wait(10), "Picker search failed to load"
                 assert evaluate_async(opened, "window.pywebview.api.status()")['document_id'] == picker_document.descriptor.document_id
-                evaluate_async(opened, """(async () => {
+                assert evaluate_async(opened, """(async () => {
                     const deadline = Date.now() + 5000;
-                    while (!document.querySelector('.result-subject') && Date.now() < deadline)
+                    while (document.getElementById('result-status').textContent !== '10 messages' && Date.now() < deadline)
                         await new Promise(resolve => setTimeout(resolve, 20));
-                    if (!document.querySelector('.result-subject')) throw new Error('Picker search returned no messages');
+                    const subjects = [...document.querySelectorAll('.result-subject')];
+                    if (subjects.length !== 10 || subjects.some(row => !row.textContent.startsWith('Picker navigation ')))
+                        throw new Error('Picker search did not return exactly the clicked identity’s ten messages');
                     return true;
-                })()""")
-                opened.destroy()
-                assert opened.events.closed.wait(5)
-            picker.destroy()
-            assert picker.events.closed.wait(5)
+                })()""") is True
+                assert not opened.evaluate_js("document.getElementById('processing-dialog').open"), "Recovery interrupted count navigation"
+                close_window(opened)
+            close_window(picker)
             application._refresh_menus()  # pylint: disable=protected-access
             done = Event()
 
@@ -308,11 +383,18 @@ def main() -> None:
             native_lists = lists.native
             assert native_lists is not None
             focused_list = Event()
+            focus_deadline = monotonic() + 3
+
+            def wait_for_list_focus() -> None:
+                if webview.active_window() == lists:
+                    focused_list.set()
+                elif monotonic() < focus_deadline:
+                    AppHelper.callLater(0.02, wait_for_list_focus)
 
             def focus_list() -> None:
                 NSApplication.sharedApplication().activateIgnoringOtherApps_(True)
                 native_lists.makeKeyAndOrderFront_(None)
-                focused_list.set()
+                wait_for_list_focus()
 
             AppHelper.callAfter(focus_list)
             assert focused_list.wait(5)
@@ -322,6 +404,10 @@ def main() -> None:
                 try:
                     item = NSApplication.sharedApplication().mainMenu().itemWithTitle_("File").submenu().itemWithTitle_("Close")
                     assert item.isEnabled() and item.keyEquivalent() == "w"
+                    assert webview.active_window() == lists, (
+                        "List editor lost native focus", webview.active_window(),
+                        [(window.uid, window.title) for window in webview.windows],
+                    )
                 except Exception as error:  # pylint: disable=broad-exception-caught
                     failures.append(str(error))
                 finally:
@@ -330,6 +416,7 @@ def main() -> None:
             application._refresh_menus()  # pylint: disable=protected-access
             AppHelper.callAfter(check_list_close)
             assert closed_menu.wait(5)
+            assert drain_bridge_calls()
             assert application.close_active_window()
             assert lists.events.closed.wait(5)
             assert application.open_default_lists(api.document)
@@ -343,8 +430,7 @@ def main() -> None:
             evaluate_async(lists, "save(false).then(() => true)")
             assert lists.evaluate_js("document.getElementById('status').textContent") == "Saved.", lists.evaluate_js("document.getElementById('error').textContent")
             assert lists.evaluate_js("document.getElementById('origin').textContent").startswith("Source: archive database")
-            lists.destroy()
-            assert lists.events.closed.wait(5)
+            close_window(lists)
             assert application.open_document_options(api.document)
             options = next(window for window in webview.windows if " — Document Options — " in window.title)
             assert options.events.loaded.wait(10), "Options bridge failed to load"
@@ -364,8 +450,7 @@ def main() -> None:
             assert not options.evaluate_js("document.getElementById('changed').hidden")
             assert store.state().include == ["slg"]
             assert store.state().exclude == ["*david*"]
-            options.destroy()
-            assert options.events.closed.wait(5)
+            close_window(options)
             assert application.open_document_options(api.document)
             options = next(window for window in webview.windows if " — Document Options — " in window.title)
             assert options.events.loaded.wait(10)
@@ -396,8 +481,14 @@ def main() -> None:
             application.stop_imports_for_quit()
             for window in list(webview.windows):
                 if window is not about:
+                    if not drain_bridge_calls():
+                        failures.append("Native bridge callback did not finish before teardown")
                     window.destroy()
                     window.events.closed.wait(3)
+            # pywebview returns bridge results synchronously through Cocoa. Let those
+            # callbacks finish before closing its last window and stopping the loop.
+            if not drain_bridge_calls():
+                failures.append("Native bridge callback did not finish before teardown")
             about.destroy()
 
     try:

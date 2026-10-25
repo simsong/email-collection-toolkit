@@ -10,7 +10,22 @@ let importing = false;
 let starting = false;
 const byId = id => document.getElementById(id);
 const integer = value => Number(value || 0).toLocaleString();
-const processingActive = status => status.processing_active && status.state === "running";
+const processingMode = status => !(status.state !== "running" && (status.processed_messages || status.files_processed))
+  && (status.activity_kind === "processing" || status.processing_active
+    || ["recovering archived content", "recovering pending imports", "processing content"].includes(status.phase));
+const processingActive = status => processingMode(status) && status.state === "running";
+const phaseLabel = status => ({
+  "recovering archived content": "Processing saved mail",
+  "recovering pending imports": "Finishing saved imports",
+  "processing content": "Processing message bodies and attachments",
+})[status.phase] || status.phase;
+const processorLabel = processor => ({
+  headers: "Reading message headers", "queue-content": "Scheduling body and attachment processing",
+  mime: "Extracting message bodies and attachments", "html-text": "Extracting readable HTML text",
+  "text-index": "Updating search index", "identity-evidence": "Extracting names and addresses",
+  "attached-message": "Processing attached messages", "rtf-text": "Extracting readable document text",
+  preparing: "Preparing saved message",
+})[processor] || processor;
 
 window.addEventListener("pywebviewready", initialize);
 window.setTimeout(() => {
@@ -22,6 +37,8 @@ async function initialize() {
   if (initialized) return;
   initialized = true;
   byId("import-directory").addEventListener("click", importDirectory);
+  byId("suspend-import").addEventListener("click", () => controlImport("suspend_import"));
+  byId("resume-import").addEventListener("click", () => controlImport("resume_import"));
   byId("install-antivirus").addEventListener("click", () => window.pywebview.api.install_antivirus());
   await refreshHistory();
   window.setInterval(refreshHistory, 1000);
@@ -46,6 +63,12 @@ async function refreshHistory() {
       selectedStatusId = statuses[0]?.status_id || null;
     }
     starting = Boolean(history.starting);
+    byId("suspend-import").disabled = importing || !history.active || history.suspending;
+    byId("resume-import").disabled = importing || !history.can_resume;
+    byId("import-control-status").textContent = history.suspending
+      ? "Suspending import… waiting for current work to finish and save its checkpoint."
+      : history.can_resume ? "Import is suspended or unfinished. Continue Import resumes saved work." : "";
+    byId("import-control-status").hidden = !byId("import-control-status").textContent;
     byId("starting-import").hidden = !starting;
     render(history.errors || []);
     const canImport = await window.pywebview.api.can_import_directory?.();
@@ -68,6 +91,20 @@ async function importDirectory() {
     importing = false;
     await refreshHistory();
   }
+}
+
+async function controlImport(method) {
+  if (importing) return;
+  importing = true;
+  byId("suspend-import").disabled = true;
+  byId("resume-import").disabled = true;
+  byId("error").hidden = true;
+  byId("import-control-status").textContent = method === "suspend_import" ? "Suspending import…" : "Continuing import…";
+  byId("import-control-status").hidden = false;
+  try {
+    if (!await window.pywebview.api[method]()) throw new Error("The import state changed. Please try again.");
+  } catch (error) { showError(String(error?.message || error)); }
+  finally { importing = false; await refreshHistory(); }
 }
 
 function render(errors = []) {
@@ -107,7 +144,8 @@ function historyRow(status) {
   time.textContent = new Date(status.started_at).toLocaleString();
   const summary = document.createElement("span");
   summary.className = "history-summary";
-  summary.textContent = `${integer(status.processed_messages)} messages · ${formatDuration(status.elapsed_seconds)}`;
+  summary.textContent = `${processingMode(status) ? `${integer(status.processing_jobs_completed)} processing tasks finished`
+    : `${integer(status.processed_messages)} source messages`} · ${formatDuration(status.elapsed_seconds)}`;
   main.append(title, time, summary);
   row.append(dot, main);
   row.addEventListener("click", () => { selectedStatusId = status.status_id; render(); });
@@ -153,14 +191,23 @@ function renderDetail(status) {
   caption.className = "progress-caption";
   track.setAttribute("role", "progressbar");
   track.setAttribute("aria-label", processingNow ? "Processing jobs" : "Source import progress");
-  const processing = `${integer(status.processing_jobs_completed)} jobs finished · ${status.processing_processor || "preparing"}`;
+  const processing = `${integer(status.processing_jobs_completed)} tasks finished · ${processorLabel(status.processing_processor || "preparing")}`;
   track.setAttribute("aria-valuetext", processingNow ? processing : `${Number(status.percent).toFixed(1)}%`);
   if (!processingNow) track.setAttribute("aria-valuenow", Number(status.percent));
-  caption.append(textSpan(status.phase), textSpan(processingNow ? processing : `${Number(status.percent).toFixed(1)}% · ETA ${status.eta}`));
+  caption.append(textSpan(phaseLabel(status)), textSpan(processingNow ? processing : `${Number(status.percent).toFixed(1)}% · ETA ${status.eta}`));
 
   detail.append(heading, track, caption, statistics(status));
+  if (processingMode(status)) {
+    const explanation = document.createElement("p");
+    explanation.className = "processing-explanation";
+    explanation.textContent = "Processing messages and MIME parts already saved in this archive. One email can require several tasks.";
+    if (phaseLabel(status) === "Processing saved mail" && status.state === "running" && status.source_roots.length) {
+      explanation.textContent += " Source downloading/importing resumes after this saved work finishes.";
+    }
+    detail.append(explanation);
+  }
   if (status.failure_detail) detail.append(section("Failure", textBlock(status.failure_detail, "failure")));
-  detail.append(section("Threads", workerTable(status.workers)));
+  detail.append(section("Workers", workerTable(status.workers)));
   if (status.source_roots.length) {
     const sources = document.createElement("ul");
     sources.className = "source-list";
@@ -174,27 +221,33 @@ function renderDetail(status) {
 }
 
 function statistics(status) {
-  const values = [
-    ["Messages", integer(status.processed_messages)],
-    ["Files", `${integer(status.files_processed)} / ${integer(status.files_total)}`],
+  const processing = processingMode(status);
+  const imap = status.source_roots.length > 0 && status.source_roots.every(root => root.startsWith("imap://"));
+  const values = processing ? [
+    ["Processing tasks finished", integer(status.processing_jobs_completed)],
+    ["Average processing rate", `${(Number(status.processing_jobs_completed) / Math.max(Number(status.elapsed_seconds), 1)).toFixed(2)} tasks/s`],
     ["Elapsed", formatDuration(status.elapsed_seconds)],
-    ["Rate", `${Number(status.message_rate).toFixed(2)} messages/s`],
+  ] : [
+    [imap ? "Source messages downloaded" : "Source messages imported", integer(status.processed_messages)],
+    [imap ? "Download partitions finished" : "Source files finished", `${integer(status.files_processed)} / ${integer(status.files_total)}`],
+    ["Elapsed", formatDuration(status.elapsed_seconds)],
+    [imap ? "Average download rate" : "Average import rate", `${Number(status.message_rate).toFixed(2)} messages/s`],
     ["Archived", integer(status.counts.archived)],
     ["Previously seen", integer(status.counts.duplicates)],
     ["Autosaved", integer(status.counts.autosaves)],
     ["Metadata", integer(status.counts.metadata_excluded)],
     ["Infected", integer(status.counts.infected)],
     ["Unchanged", integer(status.counts.unchanged_sources)],
-    ["Workers", `${integer(status.active_workers)} active / ${integer(status.configured_workers)}`],
-    ["Peak workers", integer(status.peak_workers)],
   ];
+  values.push(["Workers", `${integer(status.active_workers)} active / ${integer(status.configured_workers)}`],
+    ["Peak workers", integer(status.peak_workers)]);
   const grid = document.createElement("div");
-  if (status.processing_active || status.processing_jobs_completed) values.splice(2, 0, ["Processing jobs finished", integer(status.processing_jobs_completed)]);
+  if (!processing && status.processing_jobs_completed) values.push(["Processing tasks finished", integer(status.processing_jobs_completed)]);
   grid.className = "statistics";
   for (const [label, value] of values) {
     const cell = document.createElement("div");
     cell.className = "stat";
-    if (label === "Processing jobs finished") cell.title = "Saved processing work for messages or MIME parts, including metadata extraction and search indexing. Several jobs can belong to one email; this is not a count of newly imported messages.";
+    if (label === "Processing tasks finished") cell.title = "Completed tasks for messages or MIME parts, including metadata extraction and search indexing. Several tasks can belong to one email.";
     cell.append(textSpan(label), textBlock(value, "strong"));
     grid.append(cell);
   }
@@ -205,7 +258,7 @@ function workerTable(workers) {
   const table = document.createElement("table");
   table.className = "worker-table";
   const headings = document.createElement("tr");
-  for (const label of ["Thread", "Phase / source", "Files", "Messages", "Progress"]) {
+  for (const label of ["Thread", "Operation", "Current task / source", "Download / import progress", "Processing tasks finished"]) {
     const heading = document.createElement("th");
     heading.textContent = label;
     headings.append(heading);
@@ -216,12 +269,16 @@ function workerTable(workers) {
   for (const worker of workers) {
     const row = document.createElement("tr");
     const source = worker.path || worker.last_path || "—";
-    const progress = worker.activity_unit
+    const savedTask = worker.phase.startsWith("processing ") || worker.activity_unit === "jobs";
+    const operation = worker.phase === "idle" ? "Idle" : savedTask ? "Processing saved mail"
+      : ({downloading: "Downloading", processing: "Processing imported mail", importing: "Importing"})[worker.operation] || "Importing";
+    const task = worker.phase.startsWith("processing ") ? processorLabel(worker.phase.slice("processing ".length)) : worker.phase;
+    const progress = savedTask ? "—" : worker.activity_unit
       ? `${integer(worker.activity_done)}${worker.activity_total === null ? "" : ` / ${integer(worker.activity_total)}`} ${worker.activity_unit}`
       : worker.bytes_total ? `${formatBytes(worker.bytes_done)} / ${formatBytes(worker.bytes_total)}` : "—";
     for (const [value, className] of [
-      [worker.worker, ""], [`${worker.phase}\n${source}`, "worker-path"], [worker.files_processed, ""],
-      [worker.messages_processed, ""], [progress, ""],
+      [worker.worker, ""], [operation, ""], [`${task}\n${source}`, "worker-path"], [progress, ""],
+      [worker.processing_jobs_completed == null ? "Unavailable" : integer(worker.processing_jobs_completed), ""],
     ]) {
       const cell = document.createElement("td");
       cell.className = className;

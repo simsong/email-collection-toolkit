@@ -128,6 +128,15 @@ log a warning and retain the selected immutable baseline. Successful updates
 reselect definitions before loading the engine. Native startup retains its separate
 120-second deadline after this refresh.
 
+Ingest runs the complete scanner preflight in one tracked `run_file_workers`
+future. The owner refreshes status every 250 milliseconds even when resource
+selection, the network probe or definition copying emits no callback. Startup
+callbacks reach the owner through `FutureCoordinator`; cancellation drains the
+future and closes any initialized scanner before propagating. Saved abandoned
+run snapshots still become stale after five seconds. `make test-progress`
+exercises a six-second callback-free resource delay followed by real clean/EICAR
+scans, checking that status stays running throughout.
+
 Updater polling and validation forward the scanner status callback, retaining
 progress refresh and cooperative Stop/Quit checks. Cancelled native startup reaps
 its candidate worker and temporary files before propagating cancellation. Explicit definition sets skip

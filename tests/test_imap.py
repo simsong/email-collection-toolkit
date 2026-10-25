@@ -14,6 +14,7 @@ from contextlib import closing
 from datetime import UTC, datetime
 from email.parser import BytesParser
 import hashlib
+import json
 from pathlib import Path
 import sqlite3
 import os
@@ -21,6 +22,7 @@ import signal
 import subprocess
 import sys
 import time
+from threading import Barrier, Event
 
 import pytest
 
@@ -29,21 +31,73 @@ from mailarchiver.application import create_empty_archive
 from mailarchiver.archive_config import load_archive_config, save_archive_config
 from mailarchiver.imap_cli import SyncReporter, parser, synchronize
 from mailarchiver.imap_credentials import save_password
-from mailarchiver.imap_models import ImapDownload, ImapMailbox, ImapMessageMetadata
+from mailarchiver.imap_credentials import PASSWORD_KEY, password_for, _development_password
+from keyring.errors import KeyringError
+from mailarchiver.imap_models import ImapAccount, ImapDownload, ImapMailbox, ImapMessageMetadata
 from mailarchiver.imap_cli import prompt_account
 from mailarchiver.imap_protocol import ImapSession, body_literal, decode_mailbox, message_metadata, response_tokens, selected_mailboxes
 from mailarchiver.imap_state import initialize_state, known_observation, record_download, refresh_observation, totals
-from mailarchiver.gui_processing import unfinished_work
+from mailarchiver.gui_processing import resume_request, unfinished_work
+from mailarchiver.gui_app import IngestWindowApi
+from mailarchiver.writer_lock import WriterLease
 from mailarchiver.gui_service import SearchPage, search_page
 from mailarchiver.ingest_status import read_ingest_history
-from mailarchiver.imap_source import imap_locator
+from mailarchiver.imap_source import ImapSourcePlugin, imap_locator
 from mailarchiver.standalone_verify import verify_archive
 from tests.test_gui_processing import open_headless, wait_for_import
 from mailarchiver.mbox import MboxLocation, read_verified_location
 from mailarchiver.owner_rules import OwnerRules
-from mailarchiver.plugin_api import MailObject, SourceObservation, SourceReference
+from mailarchiver.plugin_api import MailContainer, MailObject, SourceObservation, SourceReference, SourceSpec
 
 from imap_fixture import DisposableImap, FixtureKeyring
+
+
+@pytest.mark.parametrize("status", [-25293, -25308, None])
+def test_credential_errors_keep_native_status_without_private_exception_text(status: int | None,
+        monkeypatch: pytest.MonkeyPatch) -> None:
+    """Native-vault boundary errors must distinguish status codes without exposing backend data."""
+    marker = "synthetic-private-backend-value"
+
+    class DeniedVault(FixtureKeyring):
+        def get_password(self, service: str, username: str) -> str | None:
+            if status is not None:
+                raise KeyringError(marker) from OSError(status, marker)
+            raise KeyringError(marker)
+
+    monkeypatch.setattr("mailarchiver.imap_credentials.native_keyring", lambda: DeniedVault())
+    with pytest.raises(RuntimeError) as failure:
+        password_for(ImapAccount(server="fixture.example.test", username="fixture"))
+    if status is not None:
+        assert f"native status {status}" in str(failure.value)
+    assert marker not in str(failure.value)
+    assert failure.value.__context__ is None and failure.value.__cause__ is None
+
+
+@pytest.mark.skipif(os.name == "nt", reason="Synthetic executable credential boundary uses a POSIX shebang")
+@pytest.mark.parametrize("response", ["valid", "malformed", "denied"])
+def test_development_credential_pipe_preserves_password_and_sanitizes_failures(tmp_path: Path, response: str) -> None:
+    """Only the vault reader boundary is substituted; real child pipes must not leak error inputs."""
+    marker = "synthetic-private-password-λ\n"
+    output = json.dumps({PASSWORD_KEY: marker if response == "valid" else [marker]})
+    error = f"KeyringError: {marker!r} (-25293, 'Access denied')" if response == "denied" else ""
+    reader = tmp_path / "native-reader"
+    reader.write_text(f"#!{sys.executable}\n"
+        "# Synthetic OS-credential reader, used only inside this disposable test.\n"
+        "# Emit recorded native-boundary responses without opening any vault.\n"
+        "# The production reader still launches and captures a real child process.\n"
+        "# Valid output checks Unicode/newline fidelity across JSON and pipes.\n"
+        "# Invalid and denied output exercise secret-safe error handling.\n"
+        f"import sys\nsys.stdout.write({output!r})\nsys.stderr.write({error!r})\n"
+        f"sys.exit({1 if response == 'denied' else 0})\n", encoding="utf-8")
+    reader.chmod(0o700)
+    account = ImapAccount(server="fixture.example.test", username="fixture")
+    if response == "valid":
+        assert _development_password(str(reader), account) == marker
+    else:
+        with pytest.raises(RuntimeError) as failure:
+            _development_password(str(reader), account)
+        assert "synthetic-private-password" not in str(failure.value)
+        assert failure.value.__context__ is None and failure.value.__cause__ is None
 
 ROOT = Path(__file__).resolve().parents[1]
 # Keep the actual CLI entry point and replace only native keychain access in children.
@@ -228,9 +282,50 @@ def test_gui_background_ingests_three_inbox_messages_and_indexes_them(imap_archi
         assert client.select("INBOX", readonly=True)[1] == [b"3"]
         before = client.uid("FETCH", "1:*", "(UID FLAGS RFC822.SIZE BODY.PEEK[])")[1]
     app, api = open_headless(imap_archive, tmp_path / "preferences.json")
+    owners_file = tmp_path / "accepted-owners.txt"
+    owners_file.write_text("demouser\n", encoding="utf-8")
     request = IngestRequest(archive=imap_archive, roots=[imap_locator(imap_archive, account, 8)],
-                            workers=8, index_attachments=True)
+                            workers=8, index_attachments=True, owner_names_file=owners_file)
+    release = Event()
+    occupied = Barrier(9)
+
+    def block() -> None:
+        occupied.wait(timeout=5)
+        release.wait(10)
+
     try:
+        # Suspend before preflight has saved processing settings, then resume the
+        # exact accepted request. This also proves suspension does not quit.
+        for _ in range(8):
+            assert app._submit_task("pause fixture", block) is not None
+        occupied.wait(timeout=5)
+        assert app.start_import(api, [], processing_request=request)
+        assert api.document is not None and api.document.ingest_job is not None
+        job = api.document.ingest_job
+        controls = IngestWindowApi(imap_archive, application=app, document=api.document)
+        assert controls.suspend_import()
+        assert controls.history()["suspending"]
+        assert not controls.resume_import()
+        release.set()
+        assert job.finished.wait(20)
+        assert api.document.ingest_job is None
+        assert controls.history()["can_resume"]
+        with WriterLease.acquire(imap_archive, api.document.descriptor.identity, "pause fixture", "paused", "test"):
+            pass
+        owners_file.unlink()
+        config = load_archive_config(imap_archive)
+        config.owner = OwnerRules(include=["later-owner"])
+        save_archive_config(imap_archive, config)
+        request = resume_request(imap_archive, True, True)
+        assert request.owner_names_file is None and request.owner_rules == OwnerRules(include=["demouser"])
+        assert request.index_attachments and request.workers == 8
+        app.shutdown()
+        api.close()
+        app, api = open_headless(imap_archive, tmp_path / "preferences.json")
+        controls = IngestWindowApi(imap_archive, application=app, document=api.document)
+        assert controls.history()["can_resume"]
+        assert controls.resume_import()
+        wait_for_import(api)
         for _attempt in range(2):
             assert app.start_import(api, [], processing_request=request)
             wait_for_import(api)
@@ -251,8 +346,47 @@ def test_gui_background_ingests_three_inbox_messages_and_indexes_them(imap_archi
             assert client.select("INBOX", readonly=True)[1] == [b"3"]
             assert client.uid("FETCH", "1:*", "(UID FLAGS RFC822.SIZE BODY.PEEK[])")[1] == before
     finally:
+        release.set()
         app.shutdown()
         api.close()
+
+
+def test_resume_downloads_checkpoint_gaps_before_saved_metadata(imap_archive: Path,
+        imap_inbox: DisposableImap) -> None:
+    """IMAP resume: missing UIDs take priority without skipping holes or mutable-label refresh."""
+    archive, server = imap_archive, imap_inbox
+    account = server.account
+    assert account is not None
+    args = parser().parse_args(["--archive", str(archive), "--no-scan", "--workers", "1"])
+    assert synchronize(args) == 0
+    # Simulate a missing durable per-message checkpoint between two committed UIDs.
+    with sqlite3.connect(archive / "archive.sqlite3") as database:
+        prior_uids = [row[0] for row in database.execute("SELECT uid FROM imap_seen ORDER BY uid")]
+        assert len(prior_uids) == 3
+        database.execute("DELETE FROM imap_seen WHERE uid=?", (prior_uids[1],))
+    with server.connect() as client:
+        assert client.append("INBOX", None, None,
+            b"From: other@example.org\r\nSubject: newly arrived\r\n\r\nnew body\r\n")[0] == "OK"
+        client.select("INBOX", readonly=True)
+        before = client.uid("FETCH", "1:*", "(UID FLAGS RFC822.SIZE)")[1]
+        new_uid = max(int(uid) for uid in client.uid("SEARCH", "ALL")[1][0].split())
+    adapter = ImapSourcePlugin()
+    containers = [item for item in adapter.discover(SourceSpec(kind="imap", locator=imap_locator(archive, account, 1)))
+                  if isinstance(item, MailContainer)]
+    assert len(containers) == 1
+    events = [item for item in adapter.messages(containers[0], None) if isinstance(item, (MailObject, SourceObservation))]
+    assert [(type(item), int(item.cursor.split(":")[-1])) for item in events] == [
+        (MailObject, prior_uids[1]), (MailObject, new_uid), (SourceObservation, prior_uids[0]), (SourceObservation, prior_uids[2])]
+    assert synchronize(args) == 0
+    saved = totals(archive)
+    assert saved.archived == 4 and saved.duplicates == 1 and saved.errors == 0
+    # Worker repartitioning must not turn a missing-checkpoint priority pass into a cursor skip.
+    args.workers = 3
+    assert synchronize(args) == 0 and totals(archive) == saved
+    assert len(search_page(archive, "").results) == 4
+    with server.connect() as client:
+        client.select("INBOX", readonly=True)
+        assert client.uid("FETCH", "1:*", "(UID FLAGS RFC822.SIZE)")[1] == before
 
 
 def test_gmail_metadata_literals_and_modified_utf7() -> None:

@@ -53,14 +53,13 @@ for layer reads, paths, conflict handling and failure semantics.
 
 ## Incomplete work
 
-Opening an archive with unfinished work shows **Incomplete work** with two
-initially checked choices: **Continue ingest** and **Continue content
-processing**. Confirmed work resumes from durable checkpoints. Unchecking both
-opens the archive without starting either job. The dialog returns on the next
-opening while work remains. When both are selected, ingest finishes before deferred content processing.
-Selecting only content processing handles eligible already-ingested messages,
-even while other ingest work remains unfinished. Required message-metadata
-jobs precede their content jobs.
+Opening an archive with unfinished work shows **Incomplete work**. **Continue
+Import** resumes ingest and content processing together from durable checkpoints.
+**Leave import suspended** keeps the checkpoint without starting work. **Stop
+import** cancels remaining work while retaining archived mail. There are no phase
+checkboxes. The dialog returns on the next opening while suspended work remains.
+Saved archived-content work is recovered before remaining source traversal;
+required message-metadata jobs precede their content jobs.
 
 ## Synthetic content and attached messages
 
