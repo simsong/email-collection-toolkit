@@ -92,6 +92,7 @@ from .message import ParsedMessage
 from .processing.api import PluginStatistics, ProcessingObject
 from .processing.contracts import MailboxReference, ProcessingPolicy, SourceMetadata
 from .processing.production import ProductionPipeline
+from .processing_progress import saved_messages_remaining
 from .plugin_api import (
     ArchiveReference,
     IntegrityDecision,
@@ -276,6 +277,7 @@ class ProgressState(BaseModel):
     processing_jobs_completed: int = 0
     processing_job_id: int | None = None
     processing_processor: str | None = None
+    saved_messages_remaining: int | None = None
 
 
 class OverallProgress(BaseModel):
@@ -515,6 +517,8 @@ class ProgressReporter:
         self.scan_policy: Literal["clamav", "not-scanned", "unknown"] = "unknown"
         self.interrupt_announced = False
         self.activity_kind: Literal["source", "processing"] = "source"
+        self.saved_message_counter: Callable[[], int] | None = None
+        self.last_remaining_monotonic: float | None = None
 
     def start(self) -> None:
         self.display(self.phase)
@@ -533,6 +537,8 @@ class ProgressReporter:
 
     def set_phase(self, phase: str, *, activity_kind: Literal["source", "processing"] = "source") -> None:
         self._assert_driver_thread()
+        self.state.saved_messages_remaining = None
+        self.last_remaining_monotonic = None
         self.activity_kind = activity_kind
         self.base_phase = phase
         self.phase = phase
@@ -651,6 +657,12 @@ class ProgressReporter:
 
     def finish_processing(self) -> None:
         self.updates.put(ProgressUpdate(worker=self._worker_number(), phase="idle", processing_active=False))
+
+    def track_saved_messages(self, counter: Callable[[], int]) -> None:
+        """Bind a read-only queue counter owned by this status driver."""
+        self._assert_driver_thread()
+        self.saved_message_counter = counter
+        self.last_remaining_monotonic = None
 
     def _send(
         self,
@@ -879,6 +891,12 @@ class ProgressReporter:
     ) -> None:
         self._drain_updates()
         now = time.monotonic()
+        if self.activity_kind == "processing" and self.saved_message_counter is not None and (
+            ingest_state != "running" or self.last_remaining_monotonic is None
+            or now - self.last_remaining_monotonic >= STATUS_REFRESH_SECONDS
+        ):
+            self.state.saved_messages_remaining = self.saved_message_counter()
+            self.last_remaining_monotonic = time.monotonic()
         self.last_display_monotonic = now
         display_label = label or self._worker_phase()
         if display_label != self.phase:
@@ -1007,6 +1025,7 @@ class ProgressReporter:
             processing_job_id=state.processing_job_id,
             processing_processor=state.processing_processor,
             activity_kind=self.activity_kind,
+            saved_messages_remaining=state.saved_messages_remaining,
         )
         try:
             self.status_file.write(status)
@@ -2118,6 +2137,7 @@ def _run_ingest(request: IngestRequest, writer_lease: WriterLease, outcome: Inge
             scanner_session=scanner.session if scanner is not None else None, scanner_failure=scanner_failure),
             publish_processed, plugin_dirs=tuple(request.plugin_dir), installation_config=request.installation_config,
             cancelled=check_processor_cancelled, heartbeat=progress.refresh)
+        progress.track_saved_messages(partial(saved_messages_remaining, pipeline.database))
         with pipeline.database:
             pipeline.database.execute("INSERT OR REPLACE INTO processing_settings VALUES('request',?)",
                                       (saved_request.model_dump_json(),))
@@ -2221,6 +2241,9 @@ def _run_ingest(request: IngestRequest, writer_lease: WriterLease, outcome: Inge
             )
             catalog.commit()
         if pipeline is not None:
+            if progress.saved_message_counter is not None and progress.activity_kind == "processing":
+                progress.state.saved_messages_remaining = progress.saved_message_counter()
+            progress.saved_message_counter = None
             print(processor_statistics_table(pipeline.statistics().statistics), file=sys.stderr)
             pipeline.close()
         catalog.close()

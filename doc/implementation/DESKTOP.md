@@ -7,6 +7,18 @@ live in [plans](../plans/README.md); historical evidence does not validate this 
 
 ## Saved import recovery and notices
 
+`processing_progress.saved_messages_remaining` joins unfinished jobs to
+`message_state` and counts distinct non-null catalog message IDs. The existing
+status/job index limits work to pending/running/failed queues; blocked jobs
+remain included. `ProgressReporter` samples this read-only query on its owner
+connection at most once per second during processing stages, resets between
+stages and forces the final sample. Optional `saved_messages_remaining` is
+persisted with each snapshot and renders Unavailable for old history. Reporting
+lives outside the processor package so its fingerprint does not invalidate
+completed work. `make test-ingest-progress` covers duplicate part/identity counts,
+failures/blocked jobs, unpublished inputs, countdown snapshots, CLI completion
+and browser rendering.
+
 Optional processing fields in ingest snapshots default safely for old history.
 `activity_kind` persists the source/processing stage independently of momentary
 worker activity. Processing cards and history show finished tasks and average

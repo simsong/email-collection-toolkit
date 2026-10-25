@@ -50,7 +50,8 @@ from mailarchiver.sources import SourceInventory
 from mailarchiver.processing.api import ProcessingObject
 from mailarchiver.processing.registry import fingerprint, load_processors
 from mailarchiver.processing.runtime import run
-from mailarchiver.processing.store import connect, submit
+from mailarchiver.processing.store import connect, enqueue, submit
+from mailarchiver.processing_progress import saved_messages_remaining
 from tests.test_processing import MESSAGE, plugin
 
 
@@ -566,6 +567,57 @@ def test_processor_recovery_publishes_live_activity_and_finished_jobs(tmp_path: 
     assert final.active_workers == 0 and final.workers[0].phase == "idle"
     assert [worker.processing_jobs_completed for worker in final.workers] == [2, 1]
     assert final.processed_messages == final.files_processed == final.counts.archived == 0
+
+
+def test_saved_message_backlog_deduplicates_parts_and_tracks_unfinished_work(tmp_path: Path) -> None:
+    """Desktop progress: count archived emails, including failed/blocked work, without counting future imports."""
+    archive = tmp_path / "archive"
+    with connect(archive, create=True) as database:
+        items: list[ProcessingObject] = []
+        for number, catalog_pk in enumerate((1, 2, None, 2)):
+            source = tmp_path / f"message-{number}.eml"
+            source.write_bytes(f"Subject: fixture {number}\n\nbody {number}\n".encode())
+            message_id = submit(database, archive, source, "fixture")
+            payload, = database.execute("SELECT item_json FROM jobs WHERE json_extract(item_json,'$.message_id')=?",
+                                        (message_id,)).fetchone()
+            item = ProcessingObject.model_validate_json(payload)
+            items.append(item)
+            with database:
+                database.execute("INSERT INTO message_state(message_id,root_item_json,catalog_message_pk) VALUES(?,?,?)",
+                                 (message_id, payload, catalog_pk))
+        with database:
+            database.execute("UPDATE jobs SET status='completed' WHERE json_extract(item_json,'$.message_id')<>?", (items[2].message_id,))
+            enqueue(database, items[0].model_copy(update={"pipeline": "message"}), "fixture")
+            parent, = database.execute("SELECT max(job_id) FROM jobs").fetchone()
+            for part in (1, 2):
+                enqueue(database, items[0].model_copy(update={"pipeline": "content", "part_path": (part,)}), "fixture", parent)
+            database.execute("UPDATE jobs SET status='failed' WHERE job_id=?", (parent,))
+            for item in (items[1], items[3]):
+                enqueue(database, item.model_copy(update={"pipeline": "content"}), "fixture")
+        assert saved_messages_remaining(database) == 2
+        reporter = ProgressReporter(status_file=IngestStatusFile(archive, "ingest-remaining"),
+                                    archive=archive, run_pk=1, terminal=False)
+        reporter.track_saved_messages(lambda: saved_messages_remaining(database))
+        reporter.set_phase("Processing saved mail", activity_kind="processing")
+        assert read_ingest_history(archive).statuses[0].saved_messages_remaining == 2
+        with database:
+            database.execute("UPDATE jobs SET status='completed' WHERE json_extract(item_json,'$.message_id')=?",
+                             (items[1].message_id,))
+        assert saved_messages_remaining(database) == 2  # A second processing identity names the same archived email.
+        with database:
+            database.execute("UPDATE jobs SET status='completed' WHERE json_extract(item_json,'$.message_id')=?",
+                             (items[3].message_id,))
+        assert saved_messages_remaining(database) == 1
+        time.sleep(1.01)
+        reporter.refresh()
+        assert read_ingest_history(archive).statuses[0].saved_messages_remaining == 1
+        with database:
+            database.execute("UPDATE jobs SET status='aborted' WHERE json_extract(item_json,'$.message_id')=?",
+                             (items[0].message_id,))
+        assert saved_messages_remaining(database) == 0
+        reporter.finish("completed")  # Completion forces a final sample, without waiting another second.
+        assert read_ingest_history(archive).statuses[0].saved_messages_remaining == 0
+        assert database.execute("SELECT count(*) FROM jobs WHERE status='pending'").fetchone()[0] == 1
 
 
 def test_progress_status_file_preserves_final_run_statistics(tmp_path: Path) -> None:

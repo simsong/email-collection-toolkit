@@ -66,6 +66,13 @@ progress and its own finished processing-task total. An em dash means source
 progress does not apply; Unavailable means an older run did not record a reliable
 per-worker total. Worker counts remain visible while a worker is idle.
 
+
+**Saved messages remaining** counts archived emails with unfinished work, once
+per email even when several body or attachment tasks remain. Pending, running,
+failed and blocked work is included; mail still on the server is excluded.
+The count refreshes during processing and can increase if more saved-message
+work is discovered. Older runs may show Unavailable.
+
 ## Continuing an interrupted import
 
 When reopening an archive with unfinished work, review the source, import start,

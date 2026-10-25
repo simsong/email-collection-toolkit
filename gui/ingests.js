@@ -224,6 +224,7 @@ function statistics(status) {
   const processing = processingMode(status);
   const imap = status.source_roots.length > 0 && status.source_roots.every(root => root.startsWith("imap://"));
   const values = processing ? [
+    ["Saved messages remaining", status.saved_messages_remaining == null ? "Unavailable" : integer(status.saved_messages_remaining)],
     ["Processing tasks finished", integer(status.processing_jobs_completed)],
     ["Average processing rate", `${(Number(status.processing_jobs_completed) / Math.max(Number(status.elapsed_seconds), 1)).toFixed(2)} tasks/s`],
     ["Elapsed", formatDuration(status.elapsed_seconds)],
@@ -243,11 +244,13 @@ function statistics(status) {
     ["Peak workers", integer(status.peak_workers)]);
   const grid = document.createElement("div");
   if (!processing && status.processing_jobs_completed) values.push(["Processing tasks finished", integer(status.processing_jobs_completed)]);
+  if (!processing && status.saved_messages_remaining != null) values.push(["Saved messages remaining", integer(status.saved_messages_remaining)]);
   grid.className = "statistics";
   for (const [label, value] of values) {
     const cell = document.createElement("div");
     cell.className = "stat";
     if (label === "Processing tasks finished") cell.title = "Completed tasks for messages or MIME parts, including metadata extraction and search indexing. Several tasks can belong to one email.";
+    if (label === "Saved messages remaining") cell.title = "Distinct archived emails with pending, running or failed work, including body and attachment tasks and blocked prerequisites. Excludes future downloads. Older runs may not report this count.";
     cell.append(textSpan(label), textBlock(value, "strong"));
     grid.append(cell);
   }

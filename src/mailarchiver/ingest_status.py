@@ -109,6 +109,7 @@ class IngestStatus(BaseModel):
     processing_job_id: int | None = None
     processing_processor: str | None = None
     activity_kind: Literal["source", "processing"] | None = None
+    saved_messages_remaining: int | None = Field(default=None, ge=0)
 
     @field_validator("started_at", "updated_at", "completed_at")
     @classmethod

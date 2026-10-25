@@ -6,6 +6,15 @@ Entries describe their recorded revisions. For current behavior use the
 [user manual](USER_MANUAL.md) and [CLI reference](CLI_REFERENCE.md). Retired
 Rust delivery plans and historical package checks are not current acceptance.
 
+## Saved messages remaining
+
+Add a distinct archived-email backlog counter alongside finished processing tasks.
+Include pending, running and failed work across message bodies and attachments,
+without counting one email several times. Sample on the database owner once per
+second and at completion; older history reports Unavailable. Keep the metric
+outside processor fingerprinting so adding it does not restart completed work.
+Advance the development alpha.
+
 ## Distinct source and processing progress
 
 Fix worker task counters so each row reports its own completed work. Processing

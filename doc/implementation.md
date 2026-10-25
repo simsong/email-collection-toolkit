@@ -19,6 +19,9 @@ platform or release gate has passed. [Future work](plans/README.md) is separate.
 
 ## Shared boundaries
 
+- The owner status driver samples distinct saved-message backlog counts through
+  an indexed read-only queue query. See [desktop](implementation/DESKTOP.md).
+
 - Typed stage/worker activity selects meaningful progress cards and independent
   per-worker task totals. See [desktop](implementation/DESKTOP.md).
 

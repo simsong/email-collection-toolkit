@@ -152,3 +152,10 @@ The cards show finished processing tasks and their average rate. Each worker row
 separates downloading/importing from processing and reports its own finished-task
 count. Several processing tasks can belong to one email. IMAP source progress is
 reported as download partitions rather than files.
+
+
+**Saved messages remaining** counts archived emails with unfinished work, once
+per email even when several body or attachment tasks remain. Pending, running,
+failed and blocked work is included; mail still on the server is excluded.
+The count refreshes during processing and can increase if more saved-message
+work is discovered. Older runs may show Unavailable.

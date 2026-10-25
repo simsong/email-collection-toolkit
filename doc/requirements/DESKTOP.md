@@ -7,6 +7,14 @@ platform/release acceptance. Deferred features live in [plans](../plans/README.m
 
 ## Saved import recovery and notices
 
+During saved-mail processing, show **Saved messages remaining**. Count each
+canonical archived email once across its pending, running or failed jobs,
+including body/attachment work and blocked dependencies. Exclude unpublished
+inputs and future downloads. Refresh about once per second and at completion;
+zero means no known unfinished saved-message work, not that future downloads
+are complete. Old snapshots without the counter show Unavailable. This reporting
+must not change the processor configuration or trigger reprocessing.
+
 During archived-content and pending-ingest recovery, show the active processor,
 job activity and finished-job count. Use an indeterminate progress bar while the
 job total is unknown; do not display an idle-worker dashboard or finalizing ETA

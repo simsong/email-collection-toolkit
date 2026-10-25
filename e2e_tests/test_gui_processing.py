@@ -281,7 +281,7 @@ def test_processing_history_shows_jobs_instead_of_zero_source_progress(tmp_path:
         "started_at": now, "updated_at": now, "completed_at": None, "phase": "recovering archived content",
         "processing_active": True, "processing_job_id": 42, "processing_processor": "mime",
         "processing_jobs_completed": 1665, "active_workers": 2, "peak_workers": 2, "configured_workers": 2,
-        "elapsed_seconds": 120, "workers": [worker, second], "percent": 0, "eta": "finalizing"})
+        "elapsed_seconds": 120, "workers": [worker, second], "percent": 0, "eta": "finalizing", "saved_messages_remaining": 37})
     status_file = IngestStatusFile(archive, status.status_id)
     status_file.write(status)
     expose(page, IngestWindowApi(archive), ("history", "antivirus", "can_import_directory"))
@@ -291,6 +291,11 @@ def test_processing_history_shows_jobs_instead_of_zero_source_progress(tmp_path:
     expect(page.locator(".progress-caption")).not_to_contain_text("finalizing")
     expect(page.locator(".statistics")).not_to_contain_text("Messages")
     expect(page.locator(".statistics")).not_to_contain_text("Files")
+    remaining = page.locator(".stat").filter(has_text="Saved messages remaining").locator("strong")
+    expect(remaining).to_have_text("37")
+    status_file.write(status.model_copy(update={"updated_at": datetime.now(UTC), "saved_messages_remaining": 36}))
+    page.evaluate("window.refreshHistory()")
+    expect(remaining).to_have_text("36")
     rows = page.locator(".worker-table tbody tr")
     expect(rows.nth(0)).to_contain_text("Processing saved mail")
     expect(rows.nth(0)).to_contain_text("Extracting message bodies and attachments")
@@ -306,17 +311,19 @@ def test_processing_history_shows_jobs_instead_of_zero_source_progress(tmp_path:
     page.screenshot(path=str(previews / "processing-progress.png"))
     # A processing stage stays meaningful between jobs; older rows have no reliable worker total.
     status_file.write(status.model_copy(update={"updated_at": datetime.now(UTC), "processing_active": False,
-        "activity_kind": "processing", "workers": [worker.model_copy(update={"phase": "idle", "processing_jobs_completed": None})]}))
+        "activity_kind": "processing", "saved_messages_remaining": None,
+        "workers": [worker.model_copy(update={"phase": "idle", "processing_jobs_completed": None})]}))
     page.evaluate("window.refreshHistory()")
     expect(page.locator(".statistics")).to_contain_text("Processing tasks finished")
     expect(page.locator(".statistics")).not_to_contain_text("Source messages")
+    expect(remaining).to_have_text("Unavailable")
     expect(page.locator(".worker-table tbody tr td").last).to_have_text("Unavailable")
     downloading = worker.model_copy(update={"phase": "fetching messages", "operation": "downloading",
         "path": "Inbox", "activity_done": 25, "activity_total": 100, "activity_unit": "messages"})
     scanning = second.model_copy(update={"phase": "scanning", "operation": "processing", "activity_unit": None})
     status_file.write(status.model_copy(update={"updated_at": datetime.now(UTC), "phase": "ingesting",
         "activity_kind": "source", "processing_active": False, "source_roots": ["imap://unavailable-account"],
-        "workers": [downloading, scanning], "processed_messages": 25}))
+        "workers": [downloading, scanning], "processed_messages": 25, "saved_messages_remaining": None}))
     page.evaluate("window.refreshHistory()")
     expect(rows.nth(0).locator("td").nth(1)).to_have_text("Downloading")
     expect(rows.nth(0)).to_contain_text("25 / 100 messages")
@@ -325,10 +332,11 @@ def test_processing_history_shows_jobs_instead_of_zero_source_progress(tmp_path:
     expect(page.locator(".statistics")).to_contain_text("Download partitions finished")
     status_file.write(status.model_copy(update={"state": "completed", "updated_at": datetime.now(UTC),
         "activity_kind": "processing", "source_roots": ["imap://unavailable-account"],
-        "processed_messages": 25, "files_processed": 8, "files_total": 8}))
+        "processed_messages": 25, "files_processed": 8, "files_total": 8, "saved_messages_remaining": 0}))
     page.evaluate("window.refreshHistory()")
     expect(page.locator(".statistics")).to_contain_text("Source messages downloaded")
     expect(page.locator(".statistics")).to_contain_text("Processing tasks finished")
+    expect(remaining).to_have_text("0")
     expect(page.locator(".history-row.selected .history-summary")).to_contain_text("25 source messages")
     app, api = open_headless(archive, tmp_path / "preferences.json")
     search_page, about_page = page.context.new_page(), page.context.new_page()

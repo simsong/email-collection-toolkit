@@ -663,6 +663,7 @@ test-progress:
 .PHONY: test-ingest-progress
 test-ingest-progress: ruff
 	$(MAKE) test-progress
+	uv run --locked pytest -q tests/test_ingest_recovery.py::test_cli_saved_content_uses_worker_pool_and_preserves_search_and_bytes
 	uv run --locked pytest -q --browser chromium e2e_tests/test_gui_processing.py::test_processing_history_shows_jobs_instead_of_zero_source_progress
 
 .PHONY: test-interrupt

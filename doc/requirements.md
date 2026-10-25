@@ -19,6 +19,9 @@ platform or release gate has passed. [Future work](plans/README.md) is separate.
 
 ## Shared boundaries
 
+- Processing progress reports distinct archived messages still needing work,
+  independent of task counts. See [desktop](requirements/DESKTOP.md).
+
 - Progress separates downloads/imports from saved-mail processing, with independent
   worker task totals. See [desktop](requirements/DESKTOP.md).
 

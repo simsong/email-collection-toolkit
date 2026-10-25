@@ -81,7 +81,7 @@ checkpoint rather than rescanning after canonical publication; old failures
 without an accepted decision still retry normally.
 Other processor failures retain their existing dependency barriers.
 After scanner startup, progress switches to `preparing processing`, then
-`recovering archived content` and `recovering pending imports`. With ingestion
+`Processing saved mail` and `Finishing saved imports`. With ingestion
 and unlimited content work enabled, the host drains eligible message/content
 jobs before replaying unpublished ingest roots or traversing sources, then runs
 content processing again for newly admitted mail. Deferred or explicitly bounded

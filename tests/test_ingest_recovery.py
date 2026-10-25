@@ -485,6 +485,9 @@ def test_cli_saved_content_uses_worker_pool_and_preserves_search_and_bytes(tmp_p
     owners.write_text("owner@example.test\n")
     archive = tmp_path / "archive"
     cli(archive, "ingest", "--no-scan", "--defer-content", "--workers", "2", "--owner-names-file", str(owners), str(source))
+    from mailarchiver.processing_progress import saved_messages_remaining
+    with connect(archive) as database:
+        assert saved_messages_remaining(database) == 3
     canonical = [(path, hashlib.sha256(path.read_bytes()).hexdigest()) for path in mbox_directory(archive).glob("*.mbox")]
     plugin(tmp_path, "parallel-gate", '(item.archive.path / ("entered-" + item.message_id)).touch()\n'
            'while len(list(item.archive.path.glob("entered-*"))) < 2:\n'
@@ -494,6 +497,7 @@ def test_cli_saved_content_uses_worker_pool_and_preserves_search_and_bytes(tmp_p
     cli(archive, "process", "--phase", "all", "--plugin-dir", str(tmp_path))
     status = read_ingest_history(archive).statuses[0]
     assert status.peak_workers == 2 and status.processing_jobs_completed > 0
+    assert status.saved_messages_remaining == 0
     assert status.active_workers == 0 and not status.processing_active
     with sqlite3.connect(archive / "search.sqlite3") as search:
         for number in range(3):
