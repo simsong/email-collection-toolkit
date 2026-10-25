@@ -250,7 +250,7 @@ def test_saved_unsuccessful_scans_are_retried_with_the_current_engine(
     assert path.read_bytes() == raw
 
 
-def seed_failed_ingest(archive: Path, pending: Path, status: ScanStatus = "scanner-error") -> str:
+def seed_failed_ingest(archive: Path, pending: Path, status: ScanStatus = "scanner-error", *, reprocess_saved: bool = False) -> str:
     """Create the typed, retained failure state of a prior run, without publishing mail."""
     catalog = create_catalog(archive / "archive.sqlite3")
     search = create_search(archive / "search.sqlite3")
@@ -265,6 +265,8 @@ def seed_failed_ingest(archive: Path, pending: Path, status: ScanStatus = "scann
         raise AssertionError("seeding durable work must not publish canonical mail")
     pipeline = ProductionPipeline(archive, catalog, search, policy.model_copy(update={"scan_policy": "clamav"}), no_publication)
     try:
+        if reprocess_saved:
+            pipeline.reprocess()  # Reproduce an explicitly requested rebuild interrupted before completion.
         reference = snapshot(archive, pending)
         with pipeline.database:
             item = pipeline._admit(reference, metadata)
@@ -344,7 +346,7 @@ def test_cli_recovers_failed_ingest_and_rebuilds_archived_search(tmp_path: Path,
     pending_raw = pending_raw.replace(b"<parent@example.test>", b"<pending@example.test>")
     pending = tmp_path / "pending.eml"
     pending.write_bytes(pending_raw)
-    message_id = seed_failed_ingest(archive, pending, status="unscannable" if content == "encrypted" else "scanner-error")
+    message_id = seed_failed_ingest(archive, pending, status="unscannable" if content == "encrypted" else "scanner-error", reprocess_saved=True)
     with sqlite3.connect(archive / "search.sqlite3") as search:
         assert search.execute("SELECT count(*) FROM message_metadata").fetchone()[0] == 0
     for _ in range(2):
@@ -366,13 +368,74 @@ def test_cli_recovers_failed_ingest_and_rebuilds_archived_search(tmp_path: Path,
     assert source.read_bytes() == archived_raw and pending.read_bytes() == pending_raw
 
 
+def test_promotion_retry_after_registry_change_reuses_queued_child(tmp_path: Path) -> None:
+    """Saved attachment promotion must retain its child job across manifest changes."""
+    child = HEADER.replace(b"<parent@example.test>", b"<promoted@example.test>") + b"\r\npromotedtoken\r\n"
+    parent = HEADER + (b'Content-Type: multipart/mixed; boundary="mix"\r\n\r\n'
+        b'--mix\r\nContent-Type: message/rfc822\r\nContent-Disposition: attachment\r\n\r\n'
+        + child + b'\r\n--mix--\r\n')
+    custom = tmp_path / "custom"
+    plugin(custom, "promotion-gate", 'if not (item.archive.path / "ready").exists():\n    raise ValueError("not ready")\nreturn ProcessingResult()',
+           rank=2, subscribes="message/rfc822")
+    manifest = custom / "processors/promotion-gate/plugin.toml"
+    manifest.write_text(manifest.read_text().replace('pipeline="ingest"', 'pipeline="content"'))
+    archive, source = ingest(tmp_path, parent, "--defer-content", "--plugin-dir", str(custom))
+    result = subprocess.run([sys.executable, "-m", "mailarchiver", "--archive", str(archive), "process", "--phase", "content"],
+                            capture_output=True, text=True, check=False, timeout=60)
+    assert result.returncode != 0
+    digest = hashlib.sha256(child).hexdigest()
+    with sqlite3.connect(archive / "processing.sqlite3") as database:
+        queued = database.execute("SELECT job_id FROM jobs WHERE json_extract(item_json,'$.message_id')=? "
+                                  "AND json_extract(item_json,'$.pipeline')='message'", (digest,)).fetchall()
+        assert len(queued) == 1
+    manifest.write_text(manifest.read_text().replace('implementation_version="1"', 'implementation_version="2"'))
+    (archive / "ready").touch()
+    (tmp_path / "owners.txt").write_text("new-owner@example.test\n")
+    cli(archive, "ingest", "--no-scan", "--owner-names-file", str(tmp_path / "owners.txt"),
+        "--plugin-dir", str(custom), str(source))
+    with sqlite3.connect(archive / "processing.sqlite3") as database:
+        assert database.execute("SELECT job_id FROM jobs WHERE json_extract(item_json,'$.message_id')=? "
+                                "AND json_extract(item_json,'$.pipeline')='message'", (digest,)).fetchall() == queued
+        assert database.execute("SELECT count(*) FROM invocations i JOIN jobs j USING(job_id) WHERE i.kind='headers' "
+                                "AND json_extract(j.item_json,'$.message_id')=?", (digest,)).fetchone() == (1,)
+    assert {read_message_bytes(archive, number) for number in (1, 2)} == {parent, child}
+    assert source.read_bytes() == parent
+    assert not verify_archive(archive)
+
+
+def test_mime_retry_after_policy_change_reuses_queued_emission(tmp_path: Path) -> None:
+    """Ordinary recovery with changed owner rules must not duplicate a saved MIME result."""
+    custom = tmp_path / "custom"
+    plugin(custom, "mime-gate", 'if not (item.archive.path / "ready").exists():\n    raise ValueError("not ready")\nreturn ProcessingResult()',
+           rank=2, subscribes="application/x-mailarchiver-raw-message")
+    manifest = custom / "processors/mime-gate/plugin.toml"
+    manifest.write_text(manifest.read_text().replace('pipeline="ingest"', 'pipeline="content"'))
+    raw = HEADER + b"Content-Type: text/plain\r\n\r\nordinarysavedtoken\r\n"
+    archive, source = ingest(tmp_path, raw, "--defer-content", "--plugin-dir", str(custom))
+    result = subprocess.run([sys.executable, "-m", "mailarchiver", "--archive", str(archive), "process", "--phase", "content"],
+                            capture_output=True, text=True, check=False, timeout=60)
+    assert result.returncode != 0
+    with sqlite3.connect(archive / "processing.sqlite3") as database:
+        queued = database.execute("SELECT job_id FROM jobs WHERE json_extract(item_json,'$.producer')='mime:1'").fetchall()
+        assert len(queued) == 1
+    (archive / "ready").touch()
+    (tmp_path / "owners.txt").write_text("new-owner@example.test\n")
+    cli(archive, "ingest", "--no-scan", "--owner-names-file", str(tmp_path / "owners.txt"),
+        "--plugin-dir", str(custom), str(source))
+    with sqlite3.connect(archive / "processing.sqlite3") as database:
+        assert database.execute("SELECT job_id FROM jobs WHERE json_extract(item_json,'$.producer')='mime:1'").fetchall() == queued
+        assert database.execute("SELECT count(*) FROM invocations WHERE kind='text-index'").fetchone() == (1,)
+    assert read_message_bytes(archive, 1) == raw
+    assert not verify_archive(archive)
+
+
 def test_pending_ingest_failure_does_not_starve_archived_search_recovery(tmp_path: Path) -> None:
     """SEARCH: rebuild eligible archived content before an unrelated pending ingest fails."""
     raw = HEADER + b"\r\narchivedsurvivortoken\r\n"
     archive, _source = ingest(tmp_path, raw)
     pending = tmp_path / "pending.eml"
     pending.write_bytes(HEADER + b"\r\npending content\r\n")
-    message_id = seed_failed_ingest(archive, pending)
+    message_id = seed_failed_ingest(archive, pending, reprocess_saved=True)
     (archive / "objects" / message_id).write_bytes(b"damaged retained input")
     result = subprocess.run([sys.executable, "-m", "mailarchiver", "--archive", str(archive), "process", "--phase", "all"],
                             capture_output=True, text=True, check=False, timeout=60)
@@ -390,7 +453,7 @@ def test_index_repair_does_not_resume_pending_ingest(tmp_path: Path) -> None:
     archive, _source = ingest(tmp_path, raw)
     pending = tmp_path / "pending.eml"
     pending.write_bytes(HEADER + b"\r\nnot yet archived\r\n")
-    seed_failed_ingest(archive, pending)
+    seed_failed_ingest(archive, pending, reprocess_saved=True)
     processing = (archive / "processing.sqlite3").read_bytes()
     mailbox = next(mbox_directory(archive).glob("*.mbox"))
     digest = hashlib.sha256(mailbox.read_bytes()).hexdigest()
@@ -494,7 +557,7 @@ def test_cli_saved_content_uses_worker_pool_and_preserves_search_and_bytes(tmp_p
            '    item.check_cancelled()\n    time.sleep(0.01)\nreturn ProcessingResult()', timeout=5)
     manifest = tmp_path / "processors/parallel-gate/plugin.toml"
     manifest.write_text(manifest.read_text().replace('pipeline="ingest"', 'pipeline="message"'))
-    cli(archive, "process", "--phase", "all", "--plugin-dir", str(tmp_path))
+    cli(archive, "process", "--reprocess", "--phase", "all", "--plugin-dir", str(tmp_path))
     status = read_ingest_history(archive).statuses[0]
     assert status.peak_workers == 2 and status.processing_jobs_completed > 0
     assert status.saved_messages_remaining == 0

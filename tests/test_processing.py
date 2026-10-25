@@ -92,7 +92,8 @@ def test_plugin_local_models_and_relative_imports_run_in_host(tmp_path: Path) ->
         original = fingerprint(plugins)
         helper = tmp_path / "processors/models/helper.py"
         helper.write_text(helper.read_text().replace("pid: int", "pid: str"))
-        assert fingerprint(plugins) != original
+        assert fingerprint(plugins) == original
+        assert run(database, plugins).statistics[0].invocations == 1
         from mailarchiver.processing.store import reprocess
         reprocess(database, tmp_path / "archive", fingerprint(plugins))
         assert run(database, plugins).failed == 1  # The edited helper, not an old module, ran.
@@ -202,7 +203,7 @@ def test_explicit_reprocess_retains_manual_edits(tmp_path: Path) -> None:
 
 
 def test_interrupted_rank_replays_without_reinvoking_completed_plugin(tmp_path: Path) -> None:
-    """Persist one success and an abandoned invocation as an interrupted worker would."""
+    """Code/manifest changes and legacy file hashes must retain successful checkpoints."""
     plugin(tmp_path, "first", 'return ProcessingResult()')
     plugin(tmp_path, "second", 'return ProcessingResult()', rank=2)
     plugins = load_processors((tmp_path,))
@@ -210,15 +211,42 @@ def test_interrupted_rank_replays_without_reinvoking_completed_plugin(tmp_path: 
     with connect(archive, create=True) as database:
         submit(database, archive, MESSAGE, fingerprint(plugins))
         database.execute("UPDATE jobs SET status='running'")
+        database.execute("UPDATE jobs SET registry_hash='legacy-source-file-hash'")
         database.execute("INSERT INTO invocations(job_id,kind,version,rank,status,result_json) VALUES(1,'first','1',1,'completed','{}')")
         database.execute("INSERT INTO invocations(job_id,kind,version,rank,status) VALUES(1,'second','1',2,'running')")
         database.commit()
+    entrypoint = tmp_path / "processors/first/plugin.py"
+    entrypoint.write_text(entrypoint.read_text().replace('return ProcessingResult()', 'raise AssertionError("completed work repeated")'))
+    manifest = tmp_path / "processors/first/plugin.toml"
+    manifest.write_text(manifest.read_text().replace('implementation_version="1"', 'implementation_version="2"'))
+    plugins = load_processors((tmp_path,))
     with connect(archive) as reopened:
         result = run(reopened, plugins)
         assert result.completed == 1
         assert result.statistics[0].invocations == 1
         assert result.statistics[1].invocations == 2
         assert result.statistics[1].errors == 1
+
+
+def test_legacy_checkpoint_republication_does_not_duplicate_child_jobs(tmp_path: Path) -> None:
+    """Resuming old registry metadata preserves the identity of already queued emissions."""
+    plugin(tmp_path, "emit", 'return ProcessingResult(emissions=(Emission(content_ref=item.content_ref, content_type="text/plain"),))',
+           emits='"text/plain"')
+    plugin(tmp_path, "gate", 'if not (item.archive.path / "ready").exists():\n    raise ValueError("not ready")\nreturn ProcessingResult()', rank=2)
+    plugin(tmp_path, "child", 'return ProcessingResult()', subscribes="text/plain")
+    archive = tmp_path / "archive"
+    with connect(archive, create=True) as database:
+        submit(database, archive, MESSAGE, "legacy-file-hash")
+        assert run(database, load_processors((tmp_path,))).failed == 1
+        assert database.execute("SELECT count(*) FROM jobs").fetchone() == (2,)
+        for kind in ("emit", "gate"):
+            manifest = tmp_path / "processors" / kind / "plugin.toml"
+            manifest.write_text(manifest.read_text().replace('implementation_version="1"', 'implementation_version="2"'))
+        (archive / "ready").touch()
+        assert run(database, load_processors((tmp_path,)), retry=True).completed == 2
+        assert database.execute("SELECT count(*) FROM jobs").fetchone() == (2,)
+        assert database.execute("SELECT count(*) FROM invocations WHERE kind='emit'").fetchone() == (1,)
+        assert database.execute("SELECT json_extract(item_json,'$.producer') FROM jobs WHERE parent_job_id IS NOT NULL").fetchall() == [("emit:1",)]
 
 
 def test_dependency_and_entrypoint_validation_before_execution(tmp_path: Path) -> None:
@@ -442,7 +470,7 @@ def test_dispatch_uses_indexed_pending_queue_with_large_completed_history(tmp_pa
         database.set_trace_callback(statements.append)
         assert run(database, plugins).pending == 0
         database.set_trace_callback(None)
-        selection = next(sql for sql in statements if sql.startswith("SELECT job_id,item_json FROM jobs WHERE status='pending'"))
+        selection = next(sql for sql in statements if sql.startswith("SELECT ") and "FROM jobs WHERE status='pending'" in sql)
         plan = "\n".join(row[3] for row in database.execute("EXPLAIN QUERY PLAN " + selection))
         assert "SEARCH jobs USING INDEX jobs_status_order" in plan
         assert "SEARCH parent USING INTEGER PRIMARY KEY" in plan

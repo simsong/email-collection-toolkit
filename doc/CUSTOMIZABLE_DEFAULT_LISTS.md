@@ -61,8 +61,9 @@ Display and local-source settings are application-wide because they are used
 before an archive is selected. Quoted-date patterns also apply application-wide.
 Reopen affected windows for display edits; use new processing/imports for parsing
 and source discovery edits. Existing source bytes and filed messages remain intact.
-Archive processing-policy changes are detected on the next processing run and
-invalidate derived processor results; saving alone does not run processing.
+Archive processing-policy changes affect future tasks without invalidating completed
+results. Choose **File → Reprocess Saved Mail…** and confirm to apply them throughout
+saved mail; this may take a very long time. Saving alone does not run processing.
 Owner edits affect future imports and do not reclassify previously filed messages.
 
 The owner template deliberately starts empty. On startup that needs a new archive,

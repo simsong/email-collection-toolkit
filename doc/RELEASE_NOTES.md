@@ -6,6 +6,15 @@ Entries describe their recorded revisions. For current behavior use the
 [user manual](USER_MANUAL.md) and [CLI reference](CLI_REFERENCE.md). Retired
 Rust delivery plans and historical package checks are not current acceptance.
 
+## Curator-controlled reprocessing
+
+Remove Python source-file hashing and automatic reprocessing after code,
+registry, policy or settings changes. Resume accepts old registry metadata and
+retains completed checkpoints and existing search results. Add **File → Reprocess
+Saved Mail…** with an explicit warning that replay may take a very long time.
+Confirmed replay uses saved mail without downloading again, retaining canonical
+bytes, curator edits and source-import settings. Advance the development alpha.
+
 ## Close search windows during import
 
 Fix a Cocoa main-thread deadlock when closing an importing search window.

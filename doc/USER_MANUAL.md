@@ -73,6 +73,16 @@ failed and blocked work is included; mail still on the server is excluded.
 The count refreshes during processing and can increase if more saved-message
 work is discovered. Older runs may show Unavailable.
 
+## Reprocessing saved mail
+
+Choose **File → Reprocess Saved Mail…** to rebuild extracted content, search
+indexes and automatic identity evidence for the selected archive. Confirm only
+when ready: this may take a very long time, and search can be incomplete while
+it runs. Cancel leaves everything unchanged. Suspend active work first.
+Original archived messages, curator edits and saved import settings are retained;
+no mail is downloaded again. Ingests shows progress and provides Suspend Import.
+Code or settings changes never start this rebuild automatically.
+
 ## Continuing an interrupted import
 
 When reopening an archive with unfinished work, review the source, import start,

@@ -2202,6 +2202,34 @@ class PyWebViewApplication:
                self.create_search_window(self.controller.new_search_window(document)))
         return self.start_import(api, [], processing_request=request)
 
+    def reprocess_active_document(self) -> bool:
+        """Confirm a curator-requested replay, targeting the archive selected at invocation."""
+        api = self.active_api()
+        if api is None or api.document is None or api.document.path is None or api.window is None:
+            return False
+        document = api.document
+        archive = document.path
+        assert archive is not None
+        if document.ingest_job is not None:
+            self.add_notice("warning", "Suspend the active import or processing before reprocessing saved mail.")
+            return False
+
+        def reprocess() -> None:
+            request = resume_request(archive, False, True).model_copy(update={"reprocess": True})
+            title = "Reprocess saved mail?"
+            message = (
+                f"Archive: {document.display_path}\n\n"
+                "Rebuild extracted content, search indexes and automatic identity evidence from all saved mail. "
+                "This may take a very long time. Search results may be incomplete until it finishes.\n\n"
+                "Original archived messages and curator edits are preserved. No mail will be downloaded."
+            )
+            confirmed = (macos_alert(title, message, ("Reprocess", "Cancel")) == 0 if sys.platform == "darwin"
+                         else api.window.create_confirmation_dialog(title, message))
+            if confirmed and self.start_import(api, [], processing_request=request):
+                self.open_ingest_window(document)
+
+        return self._submit_task("Reprocess saved mail", reprocess) is not None
+
     def stop_imports_for_quit(self) -> tuple[IngestJob, ...]:
         """Called only after confirmation; prevent new imports and stop all existing jobs."""
         with self._lock:
@@ -2933,6 +2961,7 @@ def application_menu(application: PyWebViewApplication) -> list[Menu]:
     if sys.platform == "win32":
         return [
             Menu("File", [*file_items, MenuAction("Import…", application.import_active_document),
+                          MenuAction("Reprocess Saved Mail…", application.reprocess_active_document),
                           MenuAction("Document Options…", application.open_document_options),
                           MenuAction("Customizable Default Lists…", application.open_default_lists),
                           MenuAction("Close", application.close_active_window),
@@ -2947,6 +2976,7 @@ def application_menu(application: PyWebViewApplication) -> list[Menu]:
     file_items.extend(
         (
             MenuAction("Import…", application.import_active_document),
+            MenuAction("Reprocess Saved Mail…", application.reprocess_active_document),
             MenuAction("Document Options…", application.open_document_options),
                           MenuAction("Customizable Default Lists…", application.open_default_lists),
             MenuAction("Close", application.close_active_window),

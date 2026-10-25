@@ -25,7 +25,8 @@ from mailarchiver.gui_service import describe_message, search_page
 from mailarchiver.owner_rules import OwnerRules
 from mailarchiver.standalone_verify import verify_archive
 from mailarchiver.writer_lock import ArchiveBusyError, WriterLease
-from tests.test_cli_processing import HEADER
+from tests.test_cli_processing import HEADER, cli
+from tests.test_processing import plugin
 
 CHILD = (b"From: Child <child@sub.example.ac.uk>\r\nTo: owner@example.test\r\n"
          b"Message-ID: <gui-child@example.test>\r\nDate: Wed, 03 Jan 2024 12:00:00 +0000\r\n"
@@ -85,6 +86,102 @@ def test_gui_resumes_cli_content_and_displays_attached_provenance(tmp_path: Path
         assert not verify_archive(archive)
     finally:
         api.close()
+
+
+@pytest.mark.parametrize("ingest", [False, True])
+def test_rootless_replay_resume_retains_processing_overrides_and_source_settings(tmp_path: Path, ingest: bool) -> None:
+    """Curator replay keeps source acquisition settings and resumes its selected plugins/config."""
+    archive = build_deferred_archive(tmp_path)
+    with sqlite3.connect(archive / "processing.sqlite3") as database:
+        source_request = database.execute("SELECT value FROM processing_settings WHERE name='request'").fetchone()[0]
+    custom = tmp_path / "custom"
+    plugin(custom, "sentinel", '(item.archive.path / "custom-ran").write_text(str(item.get_my_config()["marker"]))\nreturn ProcessingResult()',
+           subscribes="text/plain")
+    manifest = custom / "processors/sentinel/plugin.toml"
+    manifest.write_text(manifest.read_text().replace('pipeline="ingest"', 'pipeline="content"'))
+    installation = tmp_path / "installation.yaml"
+    installation.write_text("plugins:\n  sentinel:\n    marker: retained-override\n")
+    cli(archive, "process", "--reprocess", "--phase", "content", "--max-jobs", "1",
+        "--plugin-dir", str(custom), "--installation-config", str(installation))
+    assert not (archive / "custom-ran").exists()
+    request = resume_request(archive, ingest, True)
+    assert request.plugin_dir == [custom] and request.installation_config == installation
+    assert not request.reprocess and not request.roots
+    assert "sentinel" in {item.kind for item in registered_processors(archive)}
+    run_ingest(request, terminal=False)
+    assert (archive / "custom-ran").read_text() == "retained-override"
+    with sqlite3.connect(archive / "processing.sqlite3") as database:
+        assert database.execute("SELECT value FROM processing_settings WHERE name='request'").fetchone()[0] == source_request
+    assert not unfinished_work(archive).incomplete
+    assert not verify_archive(archive)
+
+
+def test_source_resume_after_replay_uses_saved_acquisition_plugins(tmp_path: Path) -> None:
+    """Curator processing overrides must not break continuation of an earlier source import."""
+    acquisition = tmp_path / "acquisition"
+    provider = acquisition / "sources/custom-local"
+    provider.mkdir(parents=True)
+    (provider / "plugin.toml").write_text('''api_version=1
+plugin_type="source"
+kind="custom-local"
+name="Synthetic URI source"
+implementation_version="1"
+priority=1
+entrypoint="source:Source"
+''')
+    (provider / "source.py").write_text('''# Synthetic source proving acquisition configuration survives replay.
+# Recognizes a local fixture through a custom URI prefix.
+# Delegates byte reading and integrity checks to the local source.
+# Rewrites only the derived source reference to select this provider.
+# No fixture bytes or external mailboxes are modified.
+from mailarchiver.sources import LocalSourcePlugin
+from mailarchiver.plugin_api import MailContainer
+
+class Source(LocalSourcePlugin):
+    kind = "custom-local"
+
+    def recognizes(self, source):
+        return source.locator.startswith("custom://")
+
+    def discover(self, source):
+        local = source.model_copy(update={"locator": source.locator.removeprefix("custom://")})
+        for event in super().discover(local):
+            if isinstance(event, MailContainer):
+                event = event.model_copy(update={"source": event.source.model_copy(update={"plugin_kind": "custom-local"})})
+            yield event
+''')
+    source = tmp_path / "source.eml"
+    raw = HEADER + b"\r\nacquisitionsettingstoken\r\n"
+    source.write_bytes(raw)
+    archive = tmp_path / "archive"
+    installation = tmp_path / "source-settings.yaml"
+    installation.write_text("plugins: {}\n")
+    run_ingest(IngestRequest(archive=archive, roots=[f"custom://{source}"], plugin_dir=[acquisition],
+                            installation_config=installation, scan_policy="not-scanned",
+                            owner_rules=OwnerRules(include=["owner@example.test"])), terminal=False)
+    status = read_ingest_history(archive).statuses[0]
+    suspended = status.model_copy(update={"status_id": "ingest-source-suspended", "state": "interrupted", "started_at": datetime.now(UTC)})
+    IngestStatusFile(archive, suspended.status_id).write(suspended)
+    processing = tmp_path / "processing"
+    plugin(processing, "sentinel", '(item.archive.path / "processing-proof").write_text(str(item.get_my_config()["marker"]))\nreturn ProcessingResult()',
+           subscribes="text/plain")
+    manifest = processing / "processors/sentinel/plugin.toml"
+    manifest.write_text(manifest.read_text().replace('pipeline="ingest"', 'pipeline="content"'))
+    processing_installation = tmp_path / "processing-settings.yaml"
+    processing_installation.write_text("plugins:\n  sentinel:\n    marker: processing-configuration\n")
+    cli(archive, "process", "--reprocess", "--phase", "content", "--max-jobs", "1", "--plugin-dir", str(processing),
+        "--installation-config", str(processing_installation))
+    assert not (archive / "processing-proof").exists()
+    request = resume_request(archive, True, True)
+    assert request.roots == [f"custom://{source}"]
+    assert request.plugin_dir == [acquisition] and request.installation_config == installation
+    assert request.effective_processors.plugin_dir == [processing]
+    assert request.effective_processors.installation_config == processing_installation
+    run_ingest(request, terminal=False)
+    assert (archive / "processing-proof").read_text() == "processing-configuration"
+    assert source.read_bytes() == raw
+    assert not unfinished_work(archive).incomplete
+    assert not verify_archive(archive)
 
 
 def test_picker_edits_filters_unique_counts_and_replay(tmp_path: Path) -> None:

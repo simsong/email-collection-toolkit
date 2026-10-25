@@ -41,7 +41,7 @@ from .api import (
     ApplicationContext, InvocationResponse, Pipeline, PluginSpec, ProcessingObject,
     MIME_TYPE, ProcessingResult, RAW_MESSAGE, RunReport,
 )
-from .registry import fingerprint, subscribers
+from .registry import subscribers
 from .store import content_reference, enqueue, report, snapshot
 from .objects import collect_objects, index_outputs
 
@@ -53,6 +53,12 @@ class InvocationRequest(BaseModel):
     plugin: PluginSpec
     item: ProcessingObject
     configuration: PluginConfiguration
+
+
+class CheckpointResult(BaseModel):
+    """Accepted output retains its actual producer version across manifest edits."""
+    plugin: PluginSpec
+    result: ProcessingResult
 
 
 class ActiveJob(BaseModel):
@@ -75,7 +81,7 @@ class ProcessorServices(Protocol):
 
 class CurrentSourceLoader(SourceFileLoader):
     def get_code(self, fullname: str) -> CodeType:
-        # Content fingerprints must not dispatch stale same-size/same-second pyc files.
+        # Explicit replay must load edited helpers rather than stale cached bytecode.
         path = self.get_filename(fullname)
         return compile(self.get_data(path), path, "exec", dont_inherit=True)
 
@@ -189,15 +195,16 @@ def validate_result(plugin: PluginSpec, item: ProcessingObject, result: Processi
 
 def _checkpoint(database: sqlite3.Connection, job_id: int, plugin: PluginSpec, item: ProcessingObject,
                 installation_config: Path | None, failures: list[Exception],
-                services: ProcessorServices | None) -> Generator[InvocationRequest, InvocationResponse, ProcessingResult | None]:
+                services: ProcessorServices | None) -> Generator[InvocationRequest, InvocationResponse, CheckpointResult | None]:
     previous = database.execute(
-        "SELECT coalesce(a.result_json,i.result_json) FROM invocations i "
+        "SELECT coalesce(a.result_json,i.result_json),i.version FROM invocations i "
         "LEFT JOIN accepted_invocations a USING(invocation_id) "
         "WHERE i.job_id=? AND i.kind=? AND (i.status='completed' OR a.invocation_id IS NOT NULL) "
         "ORDER BY i.invocation_id DESC LIMIT 1",
         (job_id, plugin.manifest.kind)).fetchone()
     if previous:
-        return ProcessingResult.model_validate_json(previous[0])
+        recorded = plugin.model_copy(update={"manifest": plugin.manifest.model_copy(update={"implementation_version": previous[1]})})
+        return CheckpointResult(plugin=recorded, result=ProcessingResult.model_validate_json(previous[0]))
     with database:
         cursor = database.execute("INSERT INTO invocations(job_id,kind,version,rank,status) VALUES(?,?,?,?,'running')",
                                   (job_id, plugin.manifest.kind, plugin.manifest.implementation_version, plugin.manifest.rank))
@@ -238,9 +245,8 @@ def _checkpoint(database: sqlite3.Connection, job_id: int, plugin: PluginSpec, i
             database.execute("INSERT INTO accepted_invocations VALUES(?,?)", (invocation_id, accepted.model_dump_json()))
         if not success and response.result is not None and response.result.scan is not None and services is not None:
             services.publish(database, job_id, item, plugin, ProcessingResult(scan=response.result.scan))
-    if not success:
-        return accepted
-    return response.result if success else None
+    result = response.result if success else accepted
+    return CheckpointResult(plugin=plugin, result=result) if result is not None else None
 
 
 def _publish(database: sqlite3.Connection, item: ProcessingObject, plugin: PluginSpec,
@@ -283,7 +289,7 @@ def run(database: sqlite3.Connection, plugins: tuple[PluginSpec, ...], *, retry:
     """Caller holds the archive writer lease. Atomic output release follows each barrier."""
     if workers < 1:
         raise ValueError("processing workers must be positive")
-    prepare_run(database, plugins, retry=retry)
+    prepare_run(database, retry=retry)
     try:
         dispatch(database, plugins, max_jobs=max_jobs, installation_config=installation_config,
                  pipelines=pipelines, services=services, cancelled=cancelled, failures=failures, message_id=message_id,
@@ -297,12 +303,8 @@ def run(database: sqlite3.Connection, plugins: tuple[PluginSpec, ...], *, retry:
     return report(database, tuple(p.manifest.kind for p in plugins))
 
 
-def prepare_run(database: sqlite3.Connection, plugins: tuple[PluginSpec, ...], *, retry: bool = False) -> None:
+def prepare_run(database: sqlite3.Connection, *, retry: bool = False) -> None:
     """Recover interrupted invocations once at the start of a writer-owned run."""
-    registry_hash = fingerprint(plugins)
-    incompatible = database.execute("SELECT 1 FROM jobs WHERE registry_hash<>? AND status IN ('pending','running','failed') LIMIT 1", (registry_hash,)).fetchone()
-    if incompatible:
-        raise ValueError("registry changed; use the explicit reprocess command")
     with database:
         database.execute("UPDATE invocations SET status='failed',error='interrupted worker' WHERE status='running'")
         database.execute("UPDATE jobs SET status='pending' WHERE status='running'")
@@ -320,7 +322,6 @@ def dispatch(database: sqlite3.Connection, plugins: tuple[PluginSpec, ...], *,
     """Workers return results; this coordinator alone advances jobs and commits SQL."""
     if workers < 1:
         raise ValueError("processing workers must be positive")
-    registry_hash = fingerprint(plugins)
     failures = failures if failures is not None else []
     active: list[ActiveJob] = []
     processed = 0
@@ -370,7 +371,7 @@ def dispatch(database: sqlite3.Connection, plugins: tuple[PluginSpec, ...], *,
                         message_filter = "" if message_id is None else "AND json_extract(item_json,'$.message_id')=? "
                         busy_filter = ("AND json_extract(item_json,'$.message_id') NOT IN ("
                                        + ",".join("?" for _ in active) + ") ") if active else ""
-                        row = database.execute("SELECT job_id,item_json FROM jobs WHERE status='pending' "
+                        row = database.execute("SELECT job_id,item_json,registry_hash FROM jobs WHERE status='pending' "
                             f"AND json_extract(item_json,'$.pipeline') IN ({placeholders}) {message_filter}{busy_filter}"
                             "AND (parent_job_id IS NULL OR EXISTS (SELECT 1 FROM jobs parent "
                             "WHERE parent.job_id=jobs.parent_job_id AND parent.status='completed')) ORDER BY job_id LIMIT 1",
@@ -379,9 +380,9 @@ def dispatch(database: sqlite3.Connection, plugins: tuple[PluginSpec, ...], *,
                             break
                         worker = next(number for number in range(1, workers + 1) if all(job.worker != number for job in active))
                         job = ActiveJob(message_id=ProcessingObject.model_validate_json(row[1]).message_id, worker=worker,
-                            steps=_job(database, plugins, *row, installation_config=installation_config, services=services,
+                            steps=_job(database, plugins, row[0], row[1], installation_config=installation_config, services=services,
                                 failures=failures, continue_after_failure=continue_after_failure, progress=progress,
-                                worker=worker, registry_hash=registry_hash))
+                                worker=worker, registry_hash=row[2]))
                         active.append(job)
                         processed += 1
                         advance(job)
@@ -444,12 +445,12 @@ def _job(database: sqlite3.Connection, plugins: tuple[PluginSpec, ...], job_id: 
             for plugin in (p for p in selected if p.manifest.rank == rank):
                 if progress is not None:
                     progress(item, plugin.manifest.kind, False, worker)
-                result = yield from _checkpoint(database, job_id, plugin, item, installation_config, failures, services)
-                if result is None:
+                checkpoint = yield from _checkpoint(database, job_id, plugin, item, installation_config, failures, services)
+                if checkpoint is None:
                     failed = True
                 else:
-                    results.append((plugin, result))
-                    if result.outcome == "fail-import":
+                    results.append((checkpoint.plugin, checkpoint.result))
+                    if checkpoint.result.outcome == "fail-import":
                         break
             outcomes = [result.outcome for _, result in results]
             with database:

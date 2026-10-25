@@ -368,6 +368,10 @@ CI runs `make check-static` and `make check-tests` in parallel jobs; local
 static checks alone. On macOS,
 `make test-quit` checks real immediate/bounded process exit, message-boundary
 stopping for local and loopback API sources, and interrupted archive recovery.
+`make test-native-reprocessing` uses the same `MAILARCHIVER_NATIVE_APPLICATION_E2E=1`
+opt-in as the application lifecycle check. It tests real menu confirmation and
+Cancel against disposable canonical mail; it never uses a personal archive.
+
 `make test-native-quit` uses `MAILARCHIVER_NATIVE_GUI_E2E=1` to exercise Quit
 during status polling in a real macOS Cocoa window; it requires a GUI session.
 Idle Quit exits after bounded private-export cleanup. Active imports finish their

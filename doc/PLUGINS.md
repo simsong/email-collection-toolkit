@@ -17,10 +17,10 @@ The plugins command prints manifests; status and run print typed JSON reports
 with persistent invocation counts and timings. A failed run exits 1.
 Ctrl-C stops CLI processing, retains unfinished jobs, prints statistics and exits 130.
 Run with --retry to retry failed jobs while retaining successful checkpoints.
-After changing manifests or entrypoint code, use reprocess explicitly:
-old unfinished jobs are superseded, original inputs are queued under the new
-registry fingerprint, and manual identity/tag data and invocation history remain.
-An unchanged registry makes repeated submissions/reprocessing idempotent.
+Code or manifest edits never trigger reprocessing. Use reprocess explicitly to
+supersede unfinished jobs and queue originals in a fresh generation, even when
+the registry is unchanged. Manual identity/tag data and invocation history remain.
+Ordinary resume reuses completed invocations and accepts legacy registry hashes.
 
 The registry validates local module:factory entrypoints without importing code,
 normalized exact MIME types, required lower-rank subscribers covering the same
@@ -75,8 +75,9 @@ leaves content pending. `process --phase ingest|content|all` resumes stored jobs
 without needing source files; continuing an unfinished source traversal still
 requires repeating `ingest` with that source. `--max-jobs` bounds a content pass.
 Failed work is retried; successful invocations are reused. Registry, processor
-code, policy or effective settings changes queue a new generation automatically;
-`process --reprocess` does so explicitly. Reprocessing filed messages starts at
+code, policy and effective settings changes never queue an automatic generation.
+`process --reprocess` or confirmed **File → Reprocess Saved Mail…** explicitly
+requests one. Reprocessing filed messages starts at
 message processing, retaining their original antivirus provenance. It never
 unquarantines infected messages. Original source bytes, canonical MBOX files and
 manual decisions are retained. Working `objects/` files, including synthetic
@@ -190,9 +191,10 @@ I/O failure after journaling retains completed invocations for publication retry
 Earlier successful ranks retain their committed writes if a later rank fails.
 
 The configuration service is available to processors and source/file adapters.
-Settings changes affect subsequent invocations; the production host fingerprints
-effective settings, processing code and policy to invalidate completed derived
-work. The registry fingerprint covers manifests and local Python code, including helpers.
+Settings changes affect subsequent unfinished invocations and new mail. Completed
+results remain until an explicit replay. Registry fingerprints record manifests
+for provenance and never read Python source; saved registry values are not a
+compatibility gate. Input/output content SHA-256 verification remains mandatory.
 
 
 ## Processing graph design and deferred capabilities
@@ -497,14 +499,15 @@ MIME depth (default 40, `plugins.mime.max_depth`), attached-message depth
 offers continuation for these failures; increasing the configured limit and
 resuming reprocesses the retained source. Limits never mark truncated work complete.
 
-Persist job phase, message/part identity, plugin kind/version, relevant
-configuration fingerprint, input digest, attempts, status and diagnostics.
+Persist job phase, message/part identity, plugin kind/version, manifest provenance,
+input digest, attempts, status and diagnostics.
 Job statuses are pending, running, completed, aborted and failed. Cancellation
 records an interrupted invocation and leaves the job resumable; it is not a
 separate terminal job state.
-On restart, abandoned running jobs become retryable; successful unchanged work
-is skipped. A plugin/version/configuration change invalidates its derived work
-and dependent outputs without rewriting canonical messages or manual decisions.
+On restart, abandoned running jobs become retryable; successful work is skipped.
+Plugin/version/configuration changes do not invalidate completed work. Only an
+explicit reprocessing request rebuilds derived outputs, preserving canonical
+messages and manual decisions.
 Synthetic content can be regenerated from its producer and original reference.
 
 The archive-open prompt covers incomplete message jobs as prerequisites of

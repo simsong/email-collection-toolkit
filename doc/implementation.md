@@ -19,6 +19,10 @@ platform or release gate has passed. [Future work](plans/README.md) is separate.
 
 ## Shared boundaries
 
+- Source-file/configuration hashing and automatic replay are removed. Saved jobs
+  retain their checkpoints; confirmed File-menu replay uses a new generation.
+  See [processing](implementation/PROCESSING.md) and [desktop](implementation/DESKTOP.md).
+
 - Native Close reserves logical closure and transfers shared ingest ownership
   before delayed closed callbacks; status polls deliver queued last-window notices. See [desktop](implementation/DESKTOP.md).
 

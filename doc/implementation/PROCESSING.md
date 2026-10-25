@@ -152,8 +152,15 @@ identity and attached-message plugins. Canonical publication keeps its existing
 journal and deduplication key. `processing.sqlite3` records raw references,
 occurrences, jobs, evidence and picker state beside the catalog/search databases.
 `process` resumes saved jobs without rereading sources; incomplete source
-traversals are continued by repeating ingest. Configuration/code changes and
-explicit replay rebuild automatic evidence while retaining manual decisions.
+traversals are continued by repeating ingest. No source-file or configuration
+fingerprint invalidates completed work. Registry hashes describe manifests only;
+old hashes remain accepted metadata. Dispatch republishes checkpoint outputs with
+the saved job registry value and accepted invocation version; promotions also use
+the parent job registry value. An indexed parent lookup reuses existing child
+descriptors despite runtime policy changes, including rows created by older builds.
+Recovery therefore does not duplicate already queued child work.
+Only explicit replay rebuilds automatic evidence while retaining manual decisions;
+both production and the standalone harness allocate a fresh UUID generation.
 The default registry is packaged under `plugins/processors`; `processors` lists
 it. The independent `make processor` fixture harness remains available.
 

@@ -28,6 +28,7 @@ from pydantic import BaseModel
 from e2e_tests.eicar_fixture import write_eicar_emlx
 from e2e_tests.generate_corpus import RICH_MESSAGE
 from mailarchiver.application import ApplicationController, ApplicationPreferencesStore
+from mailarchiver.__main__ import IngestRequest, run_ingest
 from mailarchiver.catalog import address_pk, create_catalog, create_search
 from mailarchiver.gui_app import (
     E2E_DRIVER,
@@ -46,6 +47,7 @@ from mailarchiver.gui_service import MessageView, PartContent, SearchPage, write
 from mailarchiver.reader_fixture import inventory
 from mailarchiver.processing.store import connect as connect_processing
 from mailarchiver.search import index_message
+from mailarchiver.owner_rules import OwnerRules
 from mailarchiver.standalone_verify import INSTALLED_NAME
 
 DATA = Path(__file__).parent / "data"
@@ -684,3 +686,27 @@ def test_native_application_lifecycle(native_smoke_archive: Path, tmp_path: Path
 def test_native_html_find_smoke(native_smoke_archive: Path, tmp_path: Path) -> None:
     """Requirement: WKWebView paints the active HTML finder match after a header transition."""
     run_native_smoke(native_smoke_archive, tmp_path, html_find=True)
+
+
+@pytest.mark.skipif(
+    sys.platform != "darwin" or os.environ.get("MAILARCHIVER_NATIVE_APPLICATION_E2E") != "1",
+    reason="set MAILARCHIVER_NATIVE_APPLICATION_E2E=1 for real curator menu acceptance",
+)
+def test_native_curator_reprocessing(tmp_path: Path) -> None:
+    """Real menu Cancel preserves work; confirmation replays canonical mail without downloading."""
+    from scripts.run_gui import development_bundle, development_environment
+    source = tmp_path / "fixture.eml"
+    source.write_bytes(NATIVE_SMOKE_MESSAGE)
+    archive = tmp_path / "fixture.mailarchive"
+    run_ingest(IngestRequest(archive=archive, roots=[str(source)], scan_policy="not-scanned",
+                            owner_rules=OwnerRules(include=["owner@example.test"])), terminal=False)
+    source.unlink()
+    executable = development_bundle(tmp_path / "launcher")
+    result = subprocess.run(
+        [str(executable), str(Path(__file__).with_name("native_application_probe.py")), "--reprocess-only"],
+        env=development_environment() | {PROBE_ARCHIVE_ENV: str(archive),
+                                        PROBE_PREFERENCES_ENV: str(tmp_path / "preferences.json")},
+        capture_output=True, text=True, timeout=40, check=False,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "Curator reprocessing menu passed" in result.stdout

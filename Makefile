@@ -506,6 +506,11 @@ gui-smoke: test-native-gui
 test-native-application: ruff
 	MAILARCHIVER_NATIVE_APPLICATION_E2E=1 uv run pytest -q e2e_tests/test_ingest_verify.py::test_native_application_lifecycle
 
+# Reuse the native opt-in for menu/confirmation replay against actual synthetic canonical mail.
+.PHONY: test-native-reprocessing
+test-native-reprocessing: ruff
+	MAILARCHIVER_NATIVE_APPLICATION_E2E=1 uv run --locked pytest -q e2e_tests/test_ingest_verify.py::test_native_curator_reprocessing
+
 .PHONY: check-archive-open
 check-archive-open:
 	@test -n "$(ARCHIVE)" || { echo 'usage: make check-archive-open ARCHIVE=/path/to/archive'; exit 2; }

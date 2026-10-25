@@ -7,6 +7,9 @@ Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved.
 
 import os
 import json
+import hashlib
+import sqlite3
+import sys
 import traceback
 from importlib import import_module
 from pathlib import Path
@@ -25,6 +28,7 @@ from mailarchiver.writer_lock import WriterLease
 from mailarchiver.imap_credentials import password_for
 from mailarchiver.imap_models import ImapAccount
 from mailarchiver.__main__ import IngestRequest, run_ingest
+from mailarchiver.ingest_status import read_ingest_history
 
 AppHelper = import_module("PyObjCTools.AppHelper")
 NSApplication = import_module("AppKit").NSApplication
@@ -72,6 +76,92 @@ def close_window(window: webview.Window) -> None:
     assert window.events.closed.wait(5)
 
 
+def check_reprocess_menu(application: PyWebViewApplication, api) -> None:
+    """Curator confirmation alone starts replay; Cancel preserves jobs and search data."""
+    document = api.document
+    assert document is not None and document.path is not None
+    archive = document.path
+    canonical = {}
+    for path in archive.rglob("*.mbox"):
+        with path.open("rb") as source:
+            canonical[path] = hashlib.file_digest(source, "sha256").hexdigest()
+    with sqlite3.connect(archive / "processing.sqlite3") as database:
+        jobs = database.execute("SELECT * FROM jobs ORDER BY job_id").fetchall()
+        invocations = database.execute("SELECT kind,count(*) FROM invocations GROUP BY kind ORDER BY kind").fetchall()
+        saved_request = database.execute("SELECT value FROM processing_settings WHERE name='request'").fetchone()[0]
+    with sqlite3.connect(archive / "search.sqlite3") as database:
+        indexed = database.execute("SELECT * FROM message_fts").fetchall()
+    for accepted in (False, True):
+        handled, triggered = Event(), Event()
+        errors = []
+        before = len(read_ingest_history(archive).statuses)
+
+        def answer(timer) -> None:
+            modal = NSApplication.sharedApplication().modalWindow()
+            if modal is None:
+                return
+            timer.invalidate()
+            try:
+                assert modal.title() == "Reprocess saved mail?"
+                views, texts = [modal.contentView()], []
+                while views:
+                    view = views.pop()
+                    views.extend(view.subviews())
+                    if hasattr(view, "stringValue"):
+                        texts.append(str(view.stringValue()))
+                assert "very long time" in "\n".join(texts)
+                assert "No mail will be downloaded" in "\n".join(texts)
+            except Exception:  # pylint: disable=broad-exception-caught
+                errors.append(traceback.format_exc())
+            finally:
+                NSApplication.sharedApplication().stopModalWithCode_(1000 if accepted else 1001)
+                handled.set()
+
+        def invoke() -> None:
+            try:
+                native = NSApplication.sharedApplication()
+                native.activateIgnoringOtherApps_(True)
+                api.window.native.makeKeyAndOrderFront_(None)
+                timer = NSTimer.timerWithTimeInterval_repeats_block_(0.05, True, answer)
+                NSRunLoop.mainRunLoop().addTimer_forMode_(timer, NSModalPanelRunLoopMode)
+                item = native.mainMenu().itemWithTitle_("File").submenu().itemWithTitle_("Reprocess Saved Mail…")
+                assert item is not None and item.isEnabled(), "Reprocessing menu is missing"
+                assert native.sendAction_to_from_(item.action(), item.target(), item)
+            except Exception:  # pylint: disable=broad-exception-caught
+                errors.append(traceback.format_exc())
+            finally:
+                triggered.set()
+
+        AppHelper.callAfter(invoke)
+        assert triggered.wait(3) and not errors, errors
+        assert handled.wait(5) and not errors, errors
+        if accepted:
+            deadline = monotonic() + 10
+            history = read_ingest_history(archive).statuses
+            while monotonic() < deadline:
+                history = read_ingest_history(archive).statuses
+                if len(history) > before and history[0].state == "completed":
+                    break
+                sleep(0.02)
+            assert len(history) == before + 1 and history[0].state == "completed", history
+            assert not history[0].source_roots, "Replay must not download mail"
+        else:
+            assert document.ingest_job is None
+            with sqlite3.connect(archive / "processing.sqlite3") as database:
+                assert database.execute("SELECT * FROM jobs ORDER BY job_id").fetchall() == jobs
+            with sqlite3.connect(archive / "search.sqlite3") as database:
+                assert database.execute("SELECT * FROM message_fts").fetchall() == indexed
+    with sqlite3.connect(archive / "processing.sqlite3") as database:
+        after = database.execute("SELECT kind,count(*) FROM invocations GROUP BY kind ORDER BY kind").fetchall()
+        assert dict(after)["headers"] > dict(invocations)["headers"]
+        assert dict(after)["clamav"] == dict(invocations)["clamav"]
+        assert dict(after)["file-message"] == dict(invocations)["file-message"]
+        assert database.execute("SELECT value FROM processing_settings WHERE name='request'").fetchone()[0] == saved_request
+    for path, digest in canonical.items():
+        with path.open("rb") as source:
+            assert hashlib.file_digest(source, "sha256").hexdigest() == digest
+
+
 def main() -> None:
     """Open a real extensionless fixture after About, inspect native menus, then quit."""
     configure_macos_application()
@@ -114,6 +204,13 @@ def main() -> None:
     def probe() -> None:
         try:
             assert about.events.loaded.wait(10), "About bridge failed to load"
+            if "--reprocess-only" in sys.argv:
+                document = controller.open_document(archive)
+                api = application.create_search_window(controller.new_search_window(document))
+                assert api.window.events.loaded.wait(10), "Reprocess search failed to load"
+                check_reprocess_menu(application, api)
+                print("Curator reprocessing menu passed")
+                return
             status = evaluate_async(about, "window.pywebview.api.status()")
             assert status["metadata"]["version"], status
             assert status["metadata"]["build"]["git_commit"], status

@@ -134,7 +134,7 @@ def test_real_ingest_records_routing_evidence_without_alias_merges(tmp_path: Pat
 
 
 def test_provider_add_remove_rebuilds_automatic_affiliations(tmp_path: Path) -> None:
-    """A provider edit is reversible without removing durable manual institution data."""
+    """Explicit replay applies provider edits, preserving durable manual institution data."""
     from mailarchiver.list_catalog import PROVIDER_DOMAINS
     from mailarchiver.list_models import ProviderDomains
     archive=tmp_path/'archive'
@@ -146,8 +146,8 @@ def test_provider_add_remove_rebuilds_automatic_affiliations(tmp_path: Path) -> 
         with WriterLease.acquire(archive,str(archive),'test','provider','test') as lease:
             PROVIDER_DOMAINS.save_archive(archive,safe_dump(ProviderDomains(domains=domains).model_dump(mode='json')),
                 revision(PROVIDER_DOMAINS.read(archive)),lease)
-    def ingest() -> None:
-        run_ingest(IngestRequest(archive=archive,roots=[str(source)],scan_policy='not-scanned',
+    def ingest(*, reprocess: bool = False) -> None:
+        run_ingest(IngestRequest(archive=archive,roots=[] if reprocess else [str(source)],scan_policy='not-scanned',reprocess=reprocess,
             owner_rules=OwnerRules(include=['owner@example.test'])),terminal=False)
     policy(('example.test',))
     ingest()
@@ -156,22 +156,26 @@ def test_provider_add_remove_rebuilds_automatic_affiliations(tmp_path: Path) -> 
         assert database.execute('SELECT count(*) FROM affiliations WHERE manual=0').fetchone()==(0,)
     policy(())
     ingest()
+    with closing(connect(archive)) as database:
+        assert database.execute("SELECT provider FROM organization_domains WHERE domain='example.test'").fetchone()==(1,)
+        assert database.execute('SELECT count(*) FROM affiliations WHERE manual=0').fetchone()==(0,)
+    ingest(reprocess=True)
     with closing(connect(archive)) as database, database:
         assert database.execute("SELECT provider FROM organization_domains WHERE domain='example.test'").fetchone()==(0,)
         assert database.execute('SELECT count(*) FROM affiliations WHERE manual=0').fetchone()[0]>=2
     assert sum(len(group.addresses) for group in PickerPage.model_validate(
         IdentityPickerApi(archive,'institution').query({})).groups)==2
     policy(('example.test',))
-    ingest()
+    ingest(reprocess=True)
     assert not any(group.addresses for group in PickerPage.model_validate(
         IdentityPickerApi(archive,'institution').query({})).groups)
     policy(())
-    ingest()
+    ingest(reprocess=True)
     with closing(connect(archive)) as database, database:
         database.execute("UPDATE organizations SET name='Manual institution',manual=1 WHERE name='example.test'")
     assert len(search_page(archive,'any:"Manual institution"').results)==1
     policy(('example.test',))
-    ingest()
+    ingest(reprocess=True)
     with closing(connect(archive)) as database:
         assert database.execute('SELECT count(*) FROM affiliations WHERE manual=0').fetchone()==(0,)
         assert database.execute("SELECT count(*) FROM organizations WHERE name='Manual institution' AND manual=1").fetchone()==(1,)
@@ -179,7 +183,7 @@ def test_provider_add_remove_rebuilds_automatic_affiliations(tmp_path: Path) -> 
         IdentityPickerApi(archive,'institution').query({})).groups)
     assert not search_page(archive,'any:"Manual institution"').results
     policy(())
-    ingest()
+    ingest(reprocess=True)
     with closing(connect(archive)) as database:
         assert database.execute("SELECT count(*) FROM organizations WHERE name='Manual institution' AND manual=1").fetchone()==(1,)
         assert database.execute('SELECT count(*) FROM affiliations WHERE manual=0').fetchone()[0]>=2

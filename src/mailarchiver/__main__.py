@@ -171,6 +171,13 @@ def contact_list(args: argparse.Namespace) -> None:
     print_contacts(rows, args.format)
 
 
+class ProcessorConfiguration(BaseModel):
+    """Processing overrides retained independently of source acquisition settings."""
+
+    plugin_dir: list[Path] = Field(default_factory=list)
+    installation_config: Path | None = None
+
+
 class IngestRequest(BaseModel):
     """Typed ingest service request shared by command-line and GUI callers."""
 
@@ -188,7 +195,36 @@ class IngestRequest(BaseModel):
     continue_content: bool = True
     max_content_jobs: int | None = Field(default=None, ge=1)
     installation_config: Path | None = None
+    processor_configuration: ProcessorConfiguration | None = None
     reprocess: bool = False
+
+    @property
+    def effective_processors(self) -> ProcessorConfiguration:
+        return self.processor_configuration or ProcessorConfiguration(
+            plugin_dir=self.plugin_dir, installation_config=self.installation_config)
+
+
+SOURCE_REQUEST = "request"
+PROCESSING_REQUEST = "processing_request"
+
+
+def save_processing_request(database: sqlite3.Connection, request: IngestRequest) -> None:
+    """Save rootless overrides separately, retaining sources and clearing the one-shot replay flag."""
+    payload = request.model_copy(update={"reprocess": False}).model_dump_json()
+    database.execute("INSERT OR REPLACE INTO processing_settings VALUES(?,?)",
+                     (SOURCE_REQUEST if request.roots else PROCESSING_REQUEST, payload))
+    if request.roots:
+        database.execute("DELETE FROM processing_settings WHERE name=?", (PROCESSING_REQUEST,))
+    else:
+        database.execute("INSERT OR IGNORE INTO processing_settings VALUES(?,?)", (SOURCE_REQUEST, payload))
+
+
+def load_processing_request(database: sqlite3.Connection, *, source: bool = False) -> IngestRequest | None:
+    """Resume acquisition with its source settings, or processing with its latest overrides."""
+    row = database.execute("SELECT value FROM processing_settings WHERE name IN (?,?) "
+                           "ORDER BY CASE name WHEN ? THEN 0 ELSE 1 END LIMIT 1",
+                           (SOURCE_REQUEST, PROCESSING_REQUEST, SOURCE_REQUEST if source else PROCESSING_REQUEST)).fetchone()
+    return IngestRequest.model_validate_json(row[0]) if row else None
 
 
 def positive_integer(value: str) -> int:
@@ -1219,16 +1255,16 @@ def process_archive(args: argparse.Namespace) -> None:
     archive = Path(args.archive)
     with sqlite3.connect(sqlite_uri(archive / "processing.sqlite3"), uri=True) as database:
         row = database.execute("SELECT value FROM processing_settings WHERE name='policy'").fetchone()
-        request_row = database.execute("SELECT value FROM processing_settings WHERE name='request'").fetchone()
+        saved_request = load_processing_request(database) or IngestRequest(archive=archive)
     if row is None:
         raise ValueError("archive has no saved processor policy; ingest a source first")
     policy = ProcessingPolicy.model_validate_json(row[0])
-    saved_request = IngestRequest.model_validate_json(request_row[0]) if request_row else IngestRequest(archive=archive)
     run_ingest(IngestRequest(archive=archive, owner_rules=policy.owners, save_owner_defaults=False,
         earliest_year=policy.earliest_year, index_attachments=policy.index_attachments, workers=saved_request.workers,
         scan_policy=policy.scan_policy, continue_ingest=args.phase in ("ingest", "all"),
         continue_content=args.phase in ("content", "all"), max_content_jobs=args.max_jobs,
-        plugin_dir=args.plugin_dir, installation_config=args.installation_config, reprocess=args.reprocess))
+        plugin_dir=args.plugin_dir or saved_request.effective_processors.plugin_dir,
+        installation_config=args.installation_config or saved_request.effective_processors.installation_config, reprocess=args.reprocess))
 
 
 def processing_status_report(args: argparse.Namespace) -> None:
@@ -2135,12 +2171,12 @@ def _run_ingest(request: IngestRequest, writer_lease: WriterLease, outcome: Inge
             owners=owners, earliest_year=request.earliest_year, index_attachments=request.index_attachments,
             scan_policy=request.scan_policy,
             scanner_session=scanner.session if scanner is not None else None, scanner_failure=scanner_failure),
-            publish_processed, plugin_dirs=tuple(request.plugin_dir), installation_config=request.installation_config,
+            publish_processed, plugin_dirs=tuple(request.effective_processors.plugin_dir),
+            installation_config=request.effective_processors.installation_config,
             cancelled=check_processor_cancelled, heartbeat=progress.refresh)
         progress.track_saved_messages(partial(saved_messages_remaining, pipeline.database))
         with pipeline.database:
-            pipeline.database.execute("INSERT OR REPLACE INTO processing_settings VALUES('request',?)",
-                                      (saved_request.model_dump_json(),))
+            save_processing_request(pipeline.database, saved_request)
             pipeline.database.execute("INSERT OR REPLACE INTO processing_settings VALUES('policy',?)",
                                       (pipeline.policy.model_dump_json(exclude={"scanner_configuration"}),))
         if request.reprocess:

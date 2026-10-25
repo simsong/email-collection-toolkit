@@ -114,6 +114,32 @@ def test_cli_reprocess_preserves_new_owner_defaults_and_old_processing_policy(tm
     assert not verify_archive(archive)
 
 
+def test_normal_processing_ignores_old_file_hashes_and_changed_settings(tmp_path: Path) -> None:
+    """Only explicit replay may invalidate completed jobs, identity edits or searchable content."""
+    archive, source = ingest(tmp_path, HEADER + b"\r\nsavedsearchtoken\r\n")
+    with sqlite3.connect(archive / "processing.sqlite3") as database:
+        database.execute("INSERT OR REPLACE INTO processing_settings VALUES('configuration','old-source-fingerprint')")
+        database.execute("UPDATE jobs SET registry_hash='old-file-hash'")
+        database.execute("UPDATE persons SET canonical_name='Curator name',manual=1 WHERE person_id=(SELECT min(person_id) FROM persons)")
+        jobs = database.execute("SELECT * FROM jobs ORDER BY job_id").fetchall()
+        invocations = database.execute("SELECT * FROM invocations ORDER BY invocation_id").fetchall()
+        people = database.execute("SELECT * FROM persons ORDER BY person_id").fetchall()
+        request = database.execute("SELECT value FROM processing_settings WHERE name='request'").fetchone()[0]
+    with sqlite3.connect(archive / "search.sqlite3") as database:
+        searchable = database.execute("SELECT * FROM message_fts").fetchall()
+    configure(archive, "text-index", {"max_text_bytes": 1024})
+    source.unlink()
+    cli(archive, "process")
+    with sqlite3.connect(archive / "processing.sqlite3") as database:
+        assert database.execute("SELECT * FROM jobs ORDER BY job_id").fetchall() == jobs
+        assert database.execute("SELECT * FROM invocations ORDER BY invocation_id").fetchall() == invocations
+        assert database.execute("SELECT * FROM persons ORDER BY person_id").fetchall() == people
+        assert database.execute("SELECT value FROM processing_settings WHERE name='request'").fetchone()[0] == request
+    with sqlite3.connect(archive / "search.sqlite3") as database:
+        assert database.execute("SELECT * FROM message_fts").fetchall() == searchable
+    assert not verify_archive(archive)
+
+
 def test_cli_deferred_content_resume_and_manual_evidence(tmp_path: Path) -> None:
     """Headers are available after ingest; resumable signatures merge subdomains and preserve edits."""
     raw = HEADER + b"Content-Type: text/plain; charset=utf-8\r\n\r\nHello\r\n-- \r\nother@dept.example.ac.uk\r\n"
@@ -287,7 +313,7 @@ def test_cli_attachment_text_bound_preserves_bytes(tmp_path: Path, content_type:
 
 
 def test_cli_failed_reprocessing_removes_stale_search_content(tmp_path: Path) -> None:
-    """An invalidated generation cannot continue serving stale FTS body or attachment results."""
+    """Explicit replay must clear stale FTS data even if a new extraction setting fails."""
     raw = HEADER + (b'Content-Type: multipart/mixed; boundary="mix"\r\n\r\n'
         b'--mix\r\nContent-Type: text/plain\r\n\r\nstalebodytoken\r\n'
         b'--mix\r\nContent-Type: text/plain\r\nContent-Disposition: attachment\r\n\r\nstaleattachmenttoken\r\n--mix--\r\n')
@@ -296,7 +322,7 @@ def test_cli_failed_reprocessing_removes_stale_search_content(tmp_path: Path) ->
         assert "stalebodytoken" in db.execute("SELECT content FROM message_fts").fetchone()[0]
         assert "staleattachmenttoken" in db.execute("SELECT content FROM attachment_fts").fetchone()[0]
     configure(archive, "text-index", {"max_text_bytes": 0})
-    result = subprocess.run([sys.executable, "-m", "mailarchiver", "--archive", str(archive), "process"],
+    result = subprocess.run([sys.executable, "-m", "mailarchiver", "--archive", str(archive), "process", "--reprocess"],
                             capture_output=True, text=True, check=False, timeout=60)
     assert result.returncode != 0 and "max_text_bytes must be a positive integer" in result.stderr
     with sqlite3.connect(archive / "search.sqlite3") as db:

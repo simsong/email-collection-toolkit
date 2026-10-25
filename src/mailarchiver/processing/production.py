@@ -15,7 +15,6 @@ Fundamental dependents:
 """
 from __future__ import annotations
 
-import hashlib
 import json
 import sqlite3
 import tempfile
@@ -81,38 +80,14 @@ class ProductionPipeline:
                 if definition.archive_supported:
                     definition.snapshot(self.database,self.archive)
         self.reply_rules=REPLY_ADDRESSES.read(self.archive)
-        self.configuration_hash = self._configuration_hash()
         supplied = read_plugin_configuration(self.archive, "identity-evidence", installation_config).get_my_config().get(PROVIDER_DOMAINS, [])
         if not isinstance(supplied, list) or any(not isinstance(domain, str) or not domain for domain in supplied):
             raise ValueError("provider_domains must be a list of domain names")
         self.provider_domains = set(PROVIDER_LIST.read(self.archive).domains) | {str(domain).lower() for domain in supplied}
-        previous = self.database.execute("SELECT value FROM processing_settings WHERE name='configuration'").fetchone()
-        if previous and previous[0] != self.configuration_hash:
-            self.reprocess()
-        prepare_run(self.database, self.plugins, retry=True)
-
-    def _configuration_hash(self) -> str:
-        digest = hashlib.sha256(self.registry_hash.encode())
-        digest.update(self.policy.model_dump_json(exclude={"scanner_configuration", "scanner_executable"}).encode())
-        for path in sorted(Path(__file__).parent.glob("*.py")):
-            digest.update(path.read_bytes())
-        for plugin in self.plugins:
-            settings = read_plugin_configuration(self.archive, plugin.manifest.kind, self.installation_config)
-            digest.update(json.dumps(settings.get_my_config(), sort_keys=True).encode())
-        for definition in registered_lists():
-            if definition.archive_supported:
-                digest.update(definition.read(self.archive).model_dump_json().encode())
-        # Frozen builds carry modules as bytecode; header plugin versions cover
-        # implementation changes there, while source checkouts also hash helpers.
-        routing_source=Path(__file__).parents[1]/'reply_addresses.py'
-        if routing_source.is_file():
-            digest.update(routing_source.read_bytes())
-        return digest.hexdigest()
+        prepare_run(self.database, retry=True)
 
     def close(self) -> None:
-        # Plugin-owned settings written in this run are part of its accepted state.
         with self.database:
-            self.database.execute("INSERT OR REPLACE INTO processing_settings VALUES('configuration',?)", (self._configuration_hash(),))
             self.database.execute("INSERT OR REPLACE INTO processing_settings VALUES('policy',?)",
                 (self.policy.model_dump_json(exclude={"scanner_configuration"}),))
         try:
@@ -279,7 +254,7 @@ class ProductionPipeline:
 
     def _invalidate(self, generation: str) -> None:
         with self.database:
-            self.database.execute("UPDATE jobs SET status='aborted',detail='superseded processing configuration' WHERE status IN ('pending','running','failed')")
+            self.database.execute("UPDATE jobs SET status='aborted',detail='explicit reprocessing' WHERE status IN ('pending','running','failed')")
             self.database.execute("DELETE FROM content_parts")
             self.database.execute("DELETE FROM evidence")
             self.database.execute("DELETE FROM message_addresses")
@@ -352,6 +327,7 @@ class ProductionPipeline:
                 self.catalog.executemany("INSERT OR IGNORE INTO metadata_defects(message_pk,field,detail) VALUES(?,?,?)",
                     ((message_pk, plugin.manifest.kind, detail) for detail in result.diagnostics))
         for child in result.promotions:
+            registry_hash = database.execute("SELECT registry_hash FROM jobs WHERE job_id=?", (job_id,)).fetchone()[0]
             if item.source_metadata is None:
                 raise ValueError("child message has no source provenance")
             metadata = item.source_metadata.model_copy(update={
@@ -364,7 +340,7 @@ class ProductionPipeline:
             mailbox = child_item.archive.mailbox(datetime.fromisoformat(parsed.date_utc).year, "Sender" if self.policy.owners.matches(parsed.sender) else "Archive")
             self._file(child_item, parsed, mailbox)
             database.execute("INSERT OR IGNORE INTO message_tags SELECT ?,tagid FROM tags WHERE name='attachment'", (child_item.message_id,))
-            enqueue(database, child_item, self.registry_hash, job_id)
+            enqueue(database, child_item, registry_hash, job_id)
 
     def _evidence(self, item: ProcessingObject, plugin: PluginSpec, evidence: tuple[AddressEvidence, ...], phones: tuple[PhoneNumber, ...]) -> None:
         row = self.database.execute("SELECT parsed_json FROM message_state WHERE message_id=?", (item.message_id,)).fetchone()

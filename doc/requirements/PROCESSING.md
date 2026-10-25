@@ -80,8 +80,12 @@ Failed prerequisites must block queued downstream work across restarts.
 Python processors shall run in process. Plugins must honor cooperative deadlines
 and bound blocking I/O; timed-out results must not be committed. The Rust PST
 importer is the external plugin executable.
-Input content hashes shall be verified before dispatch. Explicit reprocessing
-after registry changes shall retain manual identity decisions and audit history.
+Input content hashes shall be verified before dispatch. Source-code files shall
+not be fingerprinted for checkpoint invalidation. Code, manifest, policy and
+settings changes must not automatically reprocess saved mail or clear its index.
+Ordinary resume retains completed invocations, including legacy registry metadata.
+Only an explicit curator replay creates a fresh generation, retaining manual
+identity decisions, original scan provenance, canonical bytes and audit history.
 
 This redesign may change all generated on-disk formats; no compatibility
 migration is required. A fresh schema shall include authoritative persons and

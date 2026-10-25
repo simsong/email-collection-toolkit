@@ -332,6 +332,14 @@ CLI processing, Continue Processing and explicit reprocessing replay their saved
 ingest policy without overwriting later owner defaults in `config.yaml`.
 Only an explicitly requested import saves its owner rules as document defaults.
 
+**File → Reprocess Saved Mail…** targets the selected archive. Before changing
+anything, confirm that rebuilding derived content, search and automatic identity
+evidence may take a very long time and leave search temporarily incomplete.
+Cancel preserves all work. Replay retains canonical messages and curator edits,
+uses the normal background processing/status/suspension path, does not download
+source mail, and preserves saved source-import settings. Active work must finish
+or suspend before replay starts.
+
 Only a saved document holding the matching cross-process writer lease may
 start ingest. The process-local document registry prevents duplicate UI jobs
 but is not the operating-system lock. Different documents may ingest

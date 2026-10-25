@@ -14,8 +14,7 @@ remain included. `ProgressReporter` samples this read-only query on its owner
 connection at most once per second during processing stages, resets between
 stages and forces the final sample. Optional `saved_messages_remaining` is
 persisted with each snapshot and renders Unavailable for old history. Reporting
-lives outside the processor package so its fingerprint does not invalidate
-completed work. `make test-ingest-progress` covers duplicate part/identity counts,
+is a read-only helper independent of processing execution. `make test-ingest-progress` covers duplicate part/identity counts,
 failures/blocked jobs, unpublished inputs, countdown snapshots, CLI completion
 and browser rendering.
 
@@ -150,6 +149,21 @@ when the controller would refuse it. `handle_open_documents` and
 `reopen` are stable host entry points for the extension/activation work in
 issue 76. Windows shell work and frozen application/installers remain owned by
 issues 73, 72, 74, and 75 respectively.
+
+**File → Reprocess Saved Mail…** captures the active search/document and runs
+its confirmation as a tracked command. Accepting launches the existing writer-
+leased service with reprocess enabled, content processing enabled and no source
+roots or ingest traversal; the Ingests window shows progress. Cancellation does
+not write. Rootless runs and interruption saves retain the preceding source
+request and separately store current processing overrides. Processing-only CLI/GUI
+continuation and inventory discovery prefer those overrides. Continue Import selects
+acquisition settings only when source roots remain. If both traversal and processing
+are suspended, the typed request retains separate processor configuration so acquisition
+uses its original plugins/installation settings and saved work uses its processing
+overrides. A new source request
+replaces them; the one-shot replay flag is never persisted. Native menu tests exercise
+Cancel and Reprocess, verify the warning and unchanged canonical bytes, and check
+that replay does not scan/file/download saved messages again.
 
 The CLI and GUI construct the same Pydantic `IngestRequest` and call
 `run_ingest()`. The GUI acquires and publishes the per-document writer lease,

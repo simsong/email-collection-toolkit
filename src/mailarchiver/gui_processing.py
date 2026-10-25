@@ -33,7 +33,7 @@ from .name_entities import classify_name
 from .list_catalog import ENTITY_RULES
 from .search_selectors import is_address_fragment
 
-from .__main__ import IngestRequest
+from .__main__ import IngestRequest, load_processing_request, save_processing_request
 from .archive_config import load_archive_config
 from .ingest_status import read_ingest_history
 from .plugin_api import PluginManifest
@@ -169,7 +169,7 @@ def abort_processing(archive: Path, status_ids: list[str]) -> None:
 def remember_interrupted_request(request: IngestRequest) -> None:
     """Retain accepted GUI settings even when suspended before processing preflight."""
     with closing(processing_connection(request.archive, create=not (request.archive / DATABASE).exists(), production=True)) as database, database:
-        database.execute("INSERT OR REPLACE INTO processing_settings VALUES('request',?)", (request.model_dump_json(),))
+        save_processing_request(database, request)
 
 
 def resume_request(archive: Path, ingest: bool, content: bool) -> IngestRequest:
@@ -177,18 +177,21 @@ def resume_request(archive: Path, ingest: bool, content: bool) -> IngestRequest:
         raise ValueError("Select at least one processing phase.")
     if not (archive / DATABASE).is_file():
         raise ValueError("No saved import policy. Use File → Import to continue the source import.")
+    work = unfinished_work(archive)
+    roots = work.source_roots if ingest else []
     with connection(archive) as database:
-        row = database.execute("SELECT value FROM processing_settings WHERE name='request'").fetchone()
+        request = load_processing_request(database, source=bool(roots))
+        processing_request = load_processing_request(database)
         policy_row = database.execute("SELECT value FROM processing_settings WHERE name='policy'").fetchone()
-    if row:
-        request = IngestRequest.model_validate_json(row[0])
-    elif policy_row:
+    if request is None and policy_row:
         policy = ProcessingPolicy.model_validate_json(policy_row[0])
         request = IngestRequest(archive=archive, owner_rules=policy.owners, earliest_year=policy.earliest_year,
                                index_attachments=policy.index_attachments, scan_policy=policy.scan_policy)
-    else:
+    elif request is None:
         raise ValueError("No saved import policy. Use File → Import to continue the source import.")
-    return request.model_copy(update={"archive": archive, "roots": unfinished_work(archive).source_roots if ingest else [],
+    if roots and content and work.content and processing_request is not None and not processing_request.roots:
+        request = request.model_copy(update={"processor_configuration": processing_request.effective_processors})
+    return request.model_copy(update={"archive": archive, "roots": roots,
                                       "save_owner_defaults": False,
                                       "continue_ingest": ingest, "continue_content": content,
                                       "max_content_jobs": None, "reprocess": False})
@@ -198,9 +201,10 @@ def _plugin_roots(archive: Path | None, *, timeout: float = 5.0) -> list[Path]:
     roots = [builtin_plugin_directory()]
     if archive is not None and (archive / DATABASE).is_file():
         with connection(archive, timeout=timeout) as database:
-            row = database.execute("SELECT value FROM processing_settings WHERE name='request'").fetchone()
-        if row:
-            roots.extend(IngestRequest.model_validate_json(row[0]).plugin_dir)
+            request = load_processing_request(database)
+        if request:
+            roots.extend(request.plugin_dir)
+            roots.extend(path for path in request.effective_processors.plugin_dir if path not in roots)
     return roots
 
 

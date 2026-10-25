@@ -5,13 +5,13 @@
 Purpose: Validate trusted processor manifests and graph structure before execution.
 
 How it works:
-Resolve ranked subscriptions and fingerprint manifests/local code without importing processor
+Resolve ranked subscriptions and describe manifests without importing processor
 factories.
 
 Fundamental dependents:
 
 - ``processing.runtime``: dispatch needs valid dependency ordering and subscribers.
-- ``processing.production``: replay generations must reflect the selected registry fingerprint.
+- ``processing.production``: new jobs record the selected manifests as provenance.
 """
 from __future__ import annotations
 
@@ -85,11 +85,8 @@ def subscribers(plugins: tuple[PluginSpec, ...], item: ProcessingObject) -> tupl
 
 
 def fingerprint(plugins: tuple[PluginSpec, ...]) -> str:
-    """Changing manifests or local Python helpers cannot reuse stale checkpoints."""
+    """Record manifest provenance; file edits never invalidate saved work."""
     digest = hashlib.sha256()
     for plugin in plugins:
         digest.update(plugin.manifest.model_dump_json().encode())
-        for source in sorted(plugin.directory.rglob("*.py")):
-            digest.update(source.relative_to(plugin.directory).as_posix().encode())
-            digest.update(source.read_bytes())
     return digest.hexdigest()

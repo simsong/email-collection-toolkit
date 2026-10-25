@@ -19,6 +19,10 @@ platform or release gate has passed. [Future work](plans/README.md) is separate.
 
 ## Shared boundaries
 
+- Reprocessing is curator-invoked, with a long-duration confirmation; code and
+  settings changes never invalidate completed work. See [processing](requirements/PROCESSING.md)
+  and [desktop](requirements/DESKTOP.md).
+
 - Closing an import owner transfers its operation to another same-archive search;
   the last-window veto must never block the native event loop. See [desktop](requirements/DESKTOP.md).
 
