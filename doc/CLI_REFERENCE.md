@@ -49,7 +49,7 @@ archive option before the subcommand. Every parser supports `-h` / `--help`.
 | `refresh-index [--index-attachments] [--workers N]` | Verify canonical messages and atomically replace the search index |
 | `processors [--plugin-dir DIR ...]` | List registered production processors |
 | `processing-status` | Show persisted jobs and invocation statistics |
-| `process [--phase ingest|content|all] [--max-jobs N] [--reprocess]` | Resume saved work; `--reprocess` requests a fresh generation |
+| `process [--phase ingest|content|all] [--max-jobs N] [--workers N] [--reprocess]` | Resume saved work; `--reprocess` requests a fresh generation |
 | `identities ACTION [OPTIONS]` | Read identity evidence or commit a manual decision |
 | `human-contacts [OPTIONS]` | Read likely human direct correspondents |
 
@@ -64,7 +64,7 @@ There is no resident daemon. Positive detections are retained in numbered
 | --- | --- |
 | `--owner-names-file FILE` | Legacy owner include rules; otherwise use archive `config.yaml` |
 | `--earliest-year N` | First plausible routing year; default 1900 |
-| `--workers N` | Concurrent source and deferred-processing workers; default CPU count capped at 8 |
+| `--workers N` | Override saved worker preferences; default half the logical CPUs, maximum twice that count |
 | `--index-attachments` | Index supported text attachments; does not add PDF/Office extraction |
 | `--defer-content` | File messages now, leave content processing pending |
 | `--plugin-dir DIR` | Repeatable trusted Python plugin root; code executes locally |
@@ -73,10 +73,9 @@ There is no resident daemon. Positive detections are retained in numbered
 Ctrl-C requests checkpointing and exits 130. Repeat ingest with the same source
 to resume traversal; `process` alone cannot discover unread source messages.
 `process` also accepts repeatable `--plugin-dir` and `--installation-config`.
-It uses the saved import worker count; older archives without a saved request
-use the CPU-count default capped at 8.
+It uses the current application worker preference unless `--workers N` overrides it.
 Content-only processing defaults to phase `content`; already successful work is
-reused. `refresh-index` defaults to detected CPU count (or 2) and leaves the old
+reused. `refresh-index` uses the same worker preference and leaves the old
 index intact if interrupted before publication.
 
 ### Identities and Contacts
@@ -111,7 +110,7 @@ options:
   --source SOURCE    synchronize only this saved source ID
   --configure        prompt for settings and update saved credentials
   --add-source       prompt for another account
-  --workers WORKERS  concurrent download threads (default: 8)
+  --workers WORKERS  override worker preferences (default: half CPUs; maximum: twice CPUs)
   --show-messages    print each completed message download and disposition
   --no-scan          explicitly import without antivirus; retain not-scanned
                      evidence
@@ -124,7 +123,9 @@ selects one saved account. `--configure` updates it; `--add-source` adds another
 Do not combine `--source` with `--new` or `--add-source`.
 
 One invocation scans once and exits; there is no scheduler or background agent.
-Eight workers are the default. Status prints at startup, every five minutes and
+The saved worker preference defaults to half the logical CPUs (at least one).
+Explicit `--workers` values must be positive whole numbers and cannot exceed twice
+the logical CPU count; unavailable CPU detection counts as one. Status prints at startup, every five minutes and
 on exit; `--show-messages` adds disposition and subject for each download.
 Ctrl-C checkpoints and exits 130; a blocked network operation has a 30-second
 socket timeout. Rerunning resumes committed progress.

@@ -28,8 +28,9 @@ from threading import Event, Thread
 import time
 from uuid import uuid4
 
-from .__main__ import IngestRequest, positive_integer, run_ingest, safe_status_text
-from .application import ArchiveDocument, create_empty_archive
+from .__main__ import IngestRequest, run_ingest, safe_status_text
+from .application import ArchiveDocument, configured_workers, create_empty_archive
+from .worker_preferences import worker_argument
 from .archive_config import load_archive_config, save_archive_config
 from .imap_credentials import password_for, save_password
 from .imap_models import ImapAccount, ImapTotals
@@ -131,13 +132,14 @@ def parser() -> argparse.ArgumentParser:
     setup = result.add_mutually_exclusive_group()
     setup.add_argument("--configure", action="store_true", help="prompt for settings and update saved credentials")
     setup.add_argument("--add-source", action="store_true", help="prompt for another account")
-    result.add_argument("--workers", type=positive_integer, default=8, help="concurrent download threads (default: 8)")
+    result.add_argument("--workers", type=worker_argument, help="override worker preferences (default: half CPUs; maximum: twice CPUs)")
     result.add_argument("--show-messages", action="store_true", help="print each completed message download and disposition")
     result.add_argument("--no-scan", action="store_true", help="explicitly import without antivirus; retain not-scanned evidence")
     return result
 
 
 def synchronize(args: argparse.Namespace) -> int:
+    workers = configured_workers(args.workers)
     if args.source and (args.new or args.add_source):
         raise ValueError("--source selects an existing account; omit it with --new or --add-source")
     path: Path = (args.new or args.archive).expanduser().absolute()
@@ -182,8 +184,8 @@ def synchronize(args: argparse.Namespace) -> int:
         signal.signal(signal.SIGINT, lambda _signal, _frame: stop.set())
         reporter = SyncReporter(path, args.show_messages)
         reporter.start()
-        request = IngestRequest(archive=path, roots=[imap_locator(path, source, args.workers) for source in selected],
-            workers=args.workers, index_attachments=True,
+        request = IngestRequest(archive=path, roots=[imap_locator(path, source, workers) for source in selected],
+            workers=workers, index_attachments=True,
             scan_policy="not-scanned" if args.no_scan else "clamav")
         run_ingest(request, writer_lease=lease, terminal=False, stop_event=stop)
         result = "completed"

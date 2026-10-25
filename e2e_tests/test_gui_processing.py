@@ -10,7 +10,7 @@ from pathlib import Path
 
 from playwright.sync_api import Page, expect
 
-from mailarchiver.__main__ import IngestRequest, run_ingest
+from mailarchiver.__main__ import IngestRequest, load_processing_request, run_ingest
 from mailarchiver.application import IngestJob
 from mailarchiver.gui_app import AboutApi, GUI_DIRECTORY, SEARCH_BRIDGE_METHODS, GuiApi, IdentityPickerApi, IngestWindowApi
 from mailarchiver.gui_processing import PickerPage, connection, resume_request, unfinished_work
@@ -159,9 +159,10 @@ def test_incomplete_dialog_resumes_content_without_sources(tmp_path: Path, page:
             wait_for_import(api)
         assert not unfinished_work(archive).incomplete
         with connection(archive) as database:
-            saved = IngestRequest.model_validate_json(database.execute(
-                "SELECT value FROM processing_settings WHERE name='request'").fetchone()[0])
-        assert saved.continue_ingest and saved.continue_content
+            saved = load_processing_request(database)
+            original = load_processing_request(database, source=True)
+        assert saved is not None and saved.continue_ingest and saved.continue_content
+        assert original is not None and not original.continue_content
         recovered = read_ingest_history(archive).statuses[0]
         assert recovered.processing_jobs_completed > 0 and not recovered.processing_active
         assert not any(notice.severity == "error" for notice in app.notices())

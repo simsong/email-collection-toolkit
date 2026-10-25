@@ -40,7 +40,7 @@ from importlib.metadata import version
 from pathlib import Path
 from types import TracebackType
 from typing import Literal, Protocol, TextIO, TypeVar, runtime_checkable
-from urllib.parse import quote
+from urllib.parse import parse_qsl, quote, urlencode, urlsplit, urlunsplit
 from uuid import uuid4
 
 from pydantic import BaseModel, Field
@@ -48,6 +48,8 @@ from tabulate import tabulate
 
 from .scan_evidence import ScanEvidence, ScanFailure
 from .future_coordinator import FutureCoordinator, WORKER_NUMBER
+from .application import configured_workers
+from .worker_preferences import half_cpus, worker_argument
 from .archive_integrity import MailbagArchiveIntegrityControls
 from .archive_path import add_archive_argument, require_archive
 from .contacts import contacts, load_owner_addresses, print_contacts
@@ -129,7 +131,7 @@ from .imap_state import initialize_state, record_download, refresh_observation
 
 DEFAULT_REPORT_TOP = 10
 PROGRESS_REFRESH_SECONDS = 0.25
-REFRESH_INDEX_DEFAULT_WORKERS = os.cpu_count() or 2
+REFRESH_INDEX_DEFAULT_WORKERS = half_cpus()
 REFRESH_INDEX_MAX_IN_FLIGHT_BYTES = 256 * 1024 * 1024
 CLAMAV_START_PHASE = "waiting for ClamAV startup"
 DISCOVERY_PHASE = "discovering sources"
@@ -187,7 +189,7 @@ class IngestRequest(BaseModel):
     save_owner_defaults: bool = True
     roots: list[str] = Field(default_factory=list)
     earliest_year: int = Field(default=1900, ge=1)
-    workers: int = Field(default_factory=lambda: min(os.cpu_count() or 1, 8), ge=1)
+    workers: int = Field(default_factory=half_cpus, ge=1)
     plugin_dir: list[Path] = Field(default_factory=list)
     index_attachments: bool = False
     scan_policy: Literal["clamav", "not-scanned"] = "clamav"
@@ -1208,6 +1210,7 @@ def open_ingest_search(
     catalog: sqlite3.Connection,
     index_attachments: bool,
     writer_lease: WriterLease,
+    workers: int,
 ) -> tuple[sqlite3.Connection, PublicationRecovery]:
     """Open the disposable index, rebuilding an obsolete layout before ingest."""
     path = archive / "search.sqlite3"
@@ -1223,7 +1226,7 @@ def open_ingest_search(
         finally:
             recovery_search.close()
             recovery_path.unlink(missing_ok=True)
-        rebuild_search_index(archive, index_attachments, writer_lease=writer_lease)
+        rebuild_search_index(archive, index_attachments, workers, writer_lease=writer_lease)
         return create_search(path, check_same_thread=True), recovery
     try:
         return search, recover_publication(archive, catalog, search)
@@ -1240,7 +1243,7 @@ def ingest(args: argparse.Namespace) -> None:
             owner_names_file=Path(args.owner_names_file) if args.owner_names_file else None,
             roots=list(args.roots),
             earliest_year=args.earliest_year,
-            workers=args.workers,
+            workers=configured_workers(args.workers),
             plugin_dir=list(args.plugin_dir),
             index_attachments=args.index_attachments,
             scan_policy="not-scanned" if args.no_scan else "clamav",
@@ -1260,7 +1263,7 @@ def process_archive(args: argparse.Namespace) -> None:
         raise ValueError("archive has no saved processor policy; ingest a source first")
     policy = ProcessingPolicy.model_validate_json(row[0])
     run_ingest(IngestRequest(archive=archive, owner_rules=policy.owners, save_owner_defaults=False,
-        earliest_year=policy.earliest_year, index_attachments=policy.index_attachments, workers=saved_request.workers,
+        earliest_year=policy.earliest_year, index_attachments=policy.index_attachments, workers=configured_workers(args.workers),
         scan_policy=policy.scan_policy, continue_ingest=args.phase in ("ingest", "all"),
         continue_content=args.phase in ("content", "all"), max_content_jobs=args.max_jobs,
         plugin_dir=args.plugin_dir or saved_request.effective_processors.plugin_dir,
@@ -1309,6 +1312,14 @@ def run_ingest(
     request: IngestRequest, writer_lease: WriterLease | None = None, *, outcome: IngestOutcome | None = None, terminal: bool = True, stop_event: threading.Event | None = None,
 ) -> None:
     """Run ingest under the archive's OS writer lock."""
+    roots = []
+    for root in request.roots:
+        if root.startswith("imap://"):
+            source = urlsplit(root)
+            query = [(name, value) for name, value in parse_qsl(source.query) if name != "workers"]
+            root = urlunsplit(source._replace(query=urlencode([*query, ("workers", str(request.workers))])))
+        roots.append(root)
+    request = request.model_copy(update={"roots": roots})
     identity = os.path.normcase(str(request.archive.resolve()))
     owned = writer_lease is None
     lease = writer_lease or WriterLease.acquire(
@@ -1403,7 +1414,7 @@ def _run_ingest(request: IngestRequest, writer_lease: WriterLease, outcome: Inge
 
     try:
         search, recovery = open_ingest_search(
-            archive, catalog, request.index_attachments, writer_lease
+            archive, catalog, request.index_attachments, writer_lease, request.workers
         )
     except BaseException:
         catalog.close()
@@ -2569,7 +2580,7 @@ def refresh_index(args: argparse.Namespace) -> None:
         file=sys.stderr,
         flush=True,
     )
-    rebuild_search_index(Path(args.archive), args.index_attachments, args.workers)
+    rebuild_search_index(Path(args.archive), args.index_attachments, configured_workers(args.workers))
 
 
 def main() -> int:
@@ -2587,7 +2598,7 @@ def main() -> int:
     scanning = ingest_parser.add_mutually_exclusive_group(required=True)
     scanning.add_argument("--clamav", action="store_true", help="scan new messages with on-demand ClamAV")
     scanning.add_argument("--no-scan", action="store_true", help="explicitly import without antivirus; record messages as not scanned")
-    ingest_parser.add_argument("--workers", type=positive_integer, default=min(os.cpu_count() or 1, 8), help="concurrent source and deferred-processing workers (default: cores, capped at 8)")
+    ingest_parser.add_argument("--workers", type=worker_argument, help="override worker preferences (default: half CPUs; maximum: twice CPUs)")
     ingest_parser.add_argument(
         "--plugin-dir",
         action="append",
@@ -2604,6 +2615,7 @@ def main() -> int:
     processing.add_argument("--phase", choices=("ingest", "content", "all"), default="content")
     processing.add_argument("--max-jobs", type=positive_integer, help="stop after this many content/message jobs")
     processing.add_argument("--reprocess", action="store_true", help="queue a fresh processing generation, preserving manual identity decisions")
+    processing.add_argument("--workers", type=worker_argument, help="override worker preferences (maximum: twice CPUs)")
     processing.add_argument("--plugin-dir", type=Path, action="append", default=[])
     processing.add_argument("--installation-config", type=Path)
     processing.set_defaults(function=process_archive)
@@ -2639,9 +2651,8 @@ def main() -> int:
     refresh_parser.add_argument("--index-attachments", action="store_true", help="include text attachments; non-text attachments require the planned Tika extractor")
     refresh_parser.add_argument(
         "--workers",
-        type=positive_integer,
-        default=REFRESH_INDEX_DEFAULT_WORKERS,
-        help="verified-message read/hash/MIME workers (default: detected cores, or 2)",
+        type=worker_argument,
+        help="verified-message workers; override preferences (default: half CPUs; maximum: twice CPUs)",
     )
     refresh_parser.set_defaults(function=refresh_index)
     args = parser.parse_args()

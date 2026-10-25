@@ -19,6 +19,11 @@ platform or release gate has passed. [Future work](plans/README.md) is separate.
 
 ## Shared boundaries
 
+- Preferences persist half-CPU, all-CPU or custom worker limits, defaulting to
+  half the logical CPUs and never exceeding twice that count. Explicit CLI
+  workers override and disable the desktop choice for that launch.
+  See [desktop](requirements/DESKTOP.md).
+
 - Reprocessing is curator-invoked, with a long-duration confirmation; code and
   settings changes never invalidate completed work. See [processing](requirements/PROCESSING.md)
   and [desktop](requirements/DESKTOP.md).

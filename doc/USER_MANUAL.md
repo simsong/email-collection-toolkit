@@ -52,6 +52,19 @@ The code has inactive integration points for Gmail API, Microsoft Exchange,
 and standard input containing NUL-separated messages; these are not CLI ingest
 modes yet.
 
+## Worker preferences
+
+Open **Preferences… → Maximum number of workers**. Choose **Half the CPUs**
+(the default), **All CPUs**, or **Custom** and enter a whole number. The maximum
+is twice the computer's logical CPU count. The choice is saved for this computer
+and applies when starting or continuing importing and saved-mail processing.
+Suspend and continue existing work to use a new limit.
+
+`mailsearch-gui --workers N` overrides the choice for that launch. The worker
+controls are greyed out with `# workers set to N on command line`; your saved
+choice is retained. CLI ingest, process, refresh-index and standalone IMAP also
+accept `--workers N` and otherwise use the saved choice.
+
 ## Downloading and processing progress
 
 The Ingests window distinguishes downloading/importing source mail from processing

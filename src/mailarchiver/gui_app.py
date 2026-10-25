@@ -50,8 +50,9 @@ from .file_drag import FILE_DRAGS, install_file_drag
 from .desktop_platform import copy_windows_text, open_export, open_external_url, refresh_windows_menu, startup_error, windows_webview
 from .identity import APPLICATION_NAME
 from .build_info import BUILD_INFO, BuildInfo
+from .worker_preferences import WorkerPreferences, WorkerSettings, worker_argument
 from .processor_graph import ProcessorGraphStatus, processor_graph
-from .updates import UpdateService, UpdateStatus, default_channel
+from .updates import UpdateChannel, UpdateService, UpdateStatus, default_channel
 from .release_versions import release_metadata
 from .sparkle import SparkleBackend, show_preferences, start_installed_updater
 from .winsparkle import WinSparkleBackend
@@ -1521,8 +1522,11 @@ class PyWebViewApplication:
         asset_server: LoopbackAssetServer | None = None,
         *,
         exit_process: Callable[[int], object] = os._exit,
+        workers_override: int | None = None,
     ) -> None:
         self.controller = controller
+        self._workers_override = workers_override
+        self.worker_settings()  # Reject an invalid launch override before opening windows or starting tasks.
         self.asset_server = asset_server
         self._exit_process = exit_process
         self._apis: dict[str, GuiApi] = {}
@@ -1664,14 +1668,27 @@ class PyWebViewApplication:
             self.add_notice("warning", f"Updates unavailable: {error}")
 
     def show_update_preferences(self) -> None:
-        if sys.platform == "win32":
-            from .windows_update_preferences import show_windows_update_preferences
-            show_windows_update_preferences(self.updates,
-                lambda channel, automatic: self.controller.configure_updates(channel, automatic, strict=True))
-        else:
-            show_preferences(self.updates, self.controller.configure_updates)
+        try:
+            if sys.platform == "win32":
+                from .windows_update_preferences import show_windows_update_preferences
+                show_windows_update_preferences(self.updates,
+                    lambda channel, automatic: self.controller.configure_updates(channel, automatic, strict=True),
+                    self.worker_settings, self.save_preferences)
+            else:
+                show_preferences(self.updates, self.save_preferences, self.worker_settings())
+        except (OSError, ValueError) as error:
+            self.add_notice("warning", f"Could not save preferences: {error}")
+            return
         if self.controller.preference_error:
             self.add_notice("warning", self.controller.preference_error)
+
+    def worker_settings(self) -> WorkerSettings:
+        return WorkerSettings(preferences=self.controller.preferences.workers, command_line=self._workers_override)
+
+    def save_preferences(self, channel: UpdateChannel, automatic: bool, workers: WorkerPreferences | None) -> None:
+        if workers is not None and self._workers_override is not None:
+            raise ValueError(self.worker_settings().override_note)
+        self.controller.configure_preferences(channel, automatic, workers, strict=True)
 
     def asset_url(
         self, asset: str, parameters: list[tuple[str, str]] | None = None
@@ -2122,6 +2139,7 @@ class PyWebViewApplication:
             archive=document.path, owner_names_file=owner_names, owner_rules=owner_rules,
             roots=[str(root) for root in roots], scan_policy=scan_policy,
         )
+        request = request.model_copy(update={"workers": self.worker_settings().effective_count})
         ingesting = bool(request.roots or (request.continue_ingest and unfinished_work(document.path).ingest))
         operation_id = uuid4().hex
         lease: WriterLease | None = None
@@ -2971,7 +2989,7 @@ def application_menu(application: PyWebViewApplication) -> list[Menu]:
                             *application.window_menu_items()]),
             Menu("Help", [*help_items, MenuSeparator(), MenuAction("About", application.create_about_window),
                           MenuAction("Check for Updates…", application.updates.check),
-                          MenuAction("Update Settings…", application.show_update_preferences)]),
+                          MenuAction("Preferences…", application.show_update_preferences)]),
         ]
     file_items.extend(
         (
@@ -3093,6 +3111,7 @@ def build_parser() -> argparse.ArgumentParser:
     launch = parser.add_mutually_exclusive_group()
     launch.add_argument("--archive", type=Path, help="directory containing archive.sqlite3 and search.sqlite3")
     launch.add_argument("--new", action="store_true", help="show the three-step setup without reopening the last archive")
+    parser.add_argument("--workers", type=worker_argument, help="override worker preferences for this launch (maximum: twice CPUs)")
     parser.add_argument("--smoke-test", action="store_true", help=argparse.SUPPRESS)
     parser.add_argument("--smoke-html-find", action="store_true", help=argparse.SUPPRESS)
     parser.add_argument("--smoke-report", type=Path, help=argparse.SUPPRESS)
@@ -3154,7 +3173,7 @@ def main() -> int:
         window.events.loaded += lambda *_args: smoke.page_loaded()
     else:
         controller = ApplicationController()
-        application = PyWebViewApplication(controller, asset_server)
+        application = PyWebViewApplication(controller, asset_server, workers_override=args.workers)
         install_macos_document_events(application)
         startup = controller.startup((archive,) if archive is not None else (), new=new_setup)
         prompt_for_archive = any(

@@ -110,6 +110,18 @@ are written explicitly as UTF-8 and atomically replaced in the platform
 application-data directory; their randomly generated temporary filename has no
 user-derived component. They are treated as optional, discardable state.
 
+Version-three application preferences store `WorkerPreferences` (half/all/custom
+mode and remembered custom count). `worker_preferences.py` shares CPU detection,
+positive-integer validation, the twice-CPU cap and typed UI snapshots. The Cocoa
+Preferences alert uses a radio matrix and numeric text field; Windows' Preferences
+HTML uses equivalent controls. The document controller atomically persists worker
+and update choices together. CLI overrides disable only worker controls and omit
+worker changes on Save. New/continued GUI requests and CLI adapters resolve the
+current setting; IMAP root partition counts follow the resolved worker limit.
+Active pools keep their current size. `make test-worker-preferences` exercises
+real saved-queue dispatch, CLI precedence and HTML controls; the opt-in
+`make test-native-worker-preferences` operates Cocoa controls on the leftmost screen.
+
 `application_menu` adds the shared Help destinations using the system browser
 adapter, with Windows' existing About/update actions retained. `show_license`
 reuses a selectable local window containing escaped, complete GPL text, without

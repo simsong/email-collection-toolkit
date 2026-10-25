@@ -259,7 +259,7 @@ def test_ingest_routes_preserves_and_indexes_messages(
         rebuilt.close()
 
     refreshed = subprocess.run(
-        [sys.executable, "-m", "mailarchiver", "--archive", str(archive), "refresh-index"],
+        [sys.executable, "-m", "mailarchiver", "--archive", str(archive), "refresh-index", "--workers", str(REFRESH_INDEX_DEFAULT_WORKERS)],
         check=False,
         capture_output=True,
         text=True,

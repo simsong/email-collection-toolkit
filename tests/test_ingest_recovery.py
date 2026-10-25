@@ -563,7 +563,7 @@ def test_saved_message_count_waits_for_body_and_attachment_tasks(tmp_path: Path)
 
 
 def test_cli_saved_content_uses_worker_pool_and_preserves_search_and_bytes(tmp_path: Path) -> None:
-    """PROCESSING: saved worker count drives real concurrent recovery through canonical publication/search."""
+    """PROCESSING: explicit worker limits drive concurrent recovery through canonical publication/search."""
     from mailarchiver.ingest_status import read_ingest_history
     source = tmp_path / "incoming"
     source.mkdir()
@@ -586,7 +586,7 @@ def test_cli_saved_content_uses_worker_pool_and_preserves_search_and_bytes(tmp_p
            '    item.check_cancelled()\n    time.sleep(0.01)\nreturn ProcessingResult()', timeout=5)
     manifest = tmp_path / "processors/parallel-gate/plugin.toml"
     manifest.write_text(manifest.read_text().replace('pipeline="ingest"', 'pipeline="message"'))
-    cli(archive, "process", "--reprocess", "--phase", "all", "--plugin-dir", str(tmp_path))
+    cli(archive, "process", "--reprocess", "--workers", "2", "--phase", "all", "--plugin-dir", str(tmp_path))
     status = read_ingest_history(archive).statuses[0]
     assert status.peak_workers == 2 and status.processing_jobs_completed > 0
     assert status.saved_messages_remaining == 0

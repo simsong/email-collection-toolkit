@@ -169,6 +169,17 @@ the platform-appropriate per-user application directory. They contain the
 last archive and at most ten recent archive paths, but no archive content or
 credentials.
 
+Preferences include **Maximum number of workers**: Half the CPUs (default,
+rounded down to at least one), All CPUs, or a custom positive whole number.
+Detect logical CPUs and cap the effective limit at twice that count; when CPU
+detection is unavailable, use one CPU. Reject invalid user input. Resolve saved
+CPU ratios on the current machine and bound a migrated custom value to its cap.
+Apply choices to newly started or continued importing and saved-mail processing;
+do not resize an active pool. CLI `--workers N` takes precedence, leaves the saved
+choice unchanged and disables all worker preference controls, with the note
+`# workers set to {number} on command line`. Generic ingest, process, refresh-index
+and standalone IMAP use the preference when their flag is omitted.
+
 An `ArchiveDocument` represents one archive. Opening validates the directory
 and the versioned layout and SQLite readable state of both databases read-only,
 except for lease-protected recovery of hot rollback journals left by a crashed

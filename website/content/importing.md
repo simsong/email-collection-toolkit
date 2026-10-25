@@ -64,7 +64,8 @@ explicit reprocessing to regenerate previously cancelled derived work.
 The Python `mailarchiver-imap` command runs without the desktop on macOS and
 Windows. `--new ARCHIVE` creates an archive and prompts for connection settings
 and a hidden password/app password, saved in the native OS keyring. Later use
-`--archive ARCHIVE` to synchronize once and exit. `--workers` defaults to 8;
+`--archive ARCHIVE` to synchronize once and exit. `--workers` overrides the saved
+worker preference, which defaults to half the logical CPUs (maximum twice the CPU count);
 `--show-messages` adds per-download output to five-minute status. Ctrl-C saves
 completed progress for the next run.
 

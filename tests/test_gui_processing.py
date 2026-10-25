@@ -46,9 +46,10 @@ def build_deferred_archive(root: Path) -> Path:
     return archive
 
 
-def open_headless(archive: Path, preferences: Path, *, exit_process: Callable[[int], object] = os._exit) -> tuple[PyWebViewApplication, GuiApi]:
+def open_headless(archive: Path, preferences: Path, *, exit_process: Callable[[int], object] = os._exit,
+                  workers_override: int | None = None) -> tuple[PyWebViewApplication, GuiApi]:
     controller = ApplicationController(ApplicationPreferencesStore(preferences))
-    app = PyWebViewApplication(controller, exit_process=exit_process)
+    app = PyWebViewApplication(controller, exit_process=exit_process, workers_override=workers_override)
     document = controller.open_document(archive)
     session = controller.new_search_window(document)
     return app, GuiApi(archive, application=app, document=document, search_window=session)

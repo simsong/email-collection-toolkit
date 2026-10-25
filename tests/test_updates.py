@@ -7,7 +7,7 @@ from threading import enumerate as running_threads
 
 import pytest
 
-from mailarchiver.application import ApplicationController, ApplicationPreferencesStore, IngestJob
+from mailarchiver.application import APPLICATION_PREFERENCES_VERSION, ApplicationController, ApplicationPreferencesStore, IngestJob
 from mailarchiver.gui_app import PyWebViewApplication
 from mailarchiver.release_versions import release_metadata
 from mailarchiver.updates import UpdateService, UpdateStatus, allowed_channels, default_channel
@@ -22,7 +22,7 @@ def test_migration_retains_explicit_choice_across_upgrade(tmp_path: Path, instal
     controller = ApplicationController(store)
     assert controller.initialize_updates(installed) == expected
     migrated = store.read()
-    assert migrated.version == 2
+    assert migrated.version == APPLICATION_PREFERENCES_VERSION
     assert migrated.last_archive == Path("/fixture/日本語")
     assert migrated.recent_archives == [Path("/fixture/日本語")]
     assert default_channel(installed) == expected

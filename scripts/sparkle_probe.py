@@ -86,7 +86,9 @@ def exercise_preferences(service: UpdateService) -> None:
 
     timer = foundation.NSTimer.timerWithTimeInterval_repeats_block_(0.3, False, inspect)
     foundation.NSRunLoop.mainRunLoop().addTimer_forMode_(timer, appkit.NSModalPanelRunLoopMode)
-    show_preferences(service, lambda channel, automatic: saved.append((channel, automatic)))
+    from mailarchiver.worker_preferences import WorkerPreferences, WorkerSettings
+    show_preferences(service, lambda channel, automatic, _workers: saved.append((channel, automatic)),
+                     WorkerSettings(preferences=WorkerPreferences()))
     if failures or saved != [("preview", False)] or service.status.channel != "preview":
         raise AssertionError(f"Native preference choices failed: {failures}; {saved}")
 

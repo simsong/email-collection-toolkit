@@ -19,6 +19,11 @@ platform or release gate has passed. [Future work](plans/README.md) is separate.
 
 ## Shared boundaries
 
+- Shared typed worker preferences resolve CPU ratios and validate launch overrides.
+  New/continued GUI and CLI work uses the current effective limit; native and HTML
+  panels preserve the saved choice under a CLI override.
+  See [desktop](implementation/DESKTOP.md).
+
 - Source-file/configuration hashing and automatic replay are removed. Saved jobs
   retain their checkpoints; confirmed File-menu replay uses a new generation.
   See [processing](implementation/PROCESSING.md) and [desktop](implementation/DESKTOP.md).

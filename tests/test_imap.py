@@ -217,7 +217,7 @@ def test_cli_real_server_normalizes_crlf_skips_spam_and_resumes(imap_archive: Pa
     if tls == "starttls":
         arguments.append("--no-scan")
     args = parser().parse_args(arguments)
-    assert args.workers == 8
+    assert args.workers is None  # An omitted CLI value delegates to application preferences.
     assert synchronize(args) == 0
     summary = totals(archive)
     assert summary.archived == 3
@@ -318,7 +318,7 @@ def test_gui_background_ingests_three_inbox_messages_and_indexes_them(imap_archi
         save_archive_config(imap_archive, config)
         request = resume_request(imap_archive, True, True)
         assert request.owner_names_file is None and request.owner_rules == OwnerRules(include=["demouser"])
-        assert request.index_attachments and request.workers == 8
+        assert request.index_attachments and request.workers == app.worker_settings().effective_count
         app.shutdown()
         api.close()
         app, api = open_headless(imap_archive, tmp_path / "preferences.json")
@@ -381,7 +381,7 @@ def test_resume_downloads_checkpoint_gaps_before_saved_metadata(imap_archive: Pa
     saved = totals(archive)
     assert saved.archived == 4 and saved.duplicates == 1 and saved.errors == 0
     # Worker repartitioning must not turn a missing-checkpoint priority pass into a cursor skip.
-    args.workers = 3
+    args.workers = min(3, 2 * (os.cpu_count() or 1))
     assert synchronize(args) == 0 and totals(archive) == saved
     assert len(search_page(archive, "").results) == 4
     with server.connect() as client:
@@ -510,7 +510,7 @@ def test_cli_ctrl_c_checkpoints_and_next_invocation_resumes(tmp_path: Path, imap
     save_archive_config(archive, config)
     environment = os.environ.copy()
     environment["SSL_CERT_FILE"] = str(server.certificate)
-    command = [sys.executable, "-c", CLI_DRIVER, "--archive", str(archive), "--workers", "8"]
+    command = [sys.executable, "-c", CLI_DRIVER, "--archive", str(archive), "--workers", str(min(8, 2 * (os.cpu_count() or 1)))]
     if not scan:
         command.append("--no-scan")
     process: subprocess.Popen[bytes] | None = None
