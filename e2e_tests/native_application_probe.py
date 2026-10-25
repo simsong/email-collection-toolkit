@@ -614,10 +614,11 @@ def main() -> None:
                 assert not sibling.window.events.closed.is_set()
                 evaluate_async(sibling.window, """(async () => {
                     const deadline = Date.now() + 3000;
-                    while (!document.body.textContent.includes('Keep this last search window open') && Date.now() < deadline)
+                    const message = 'Cannot close window when import is running. Use Quit (⌘ Q) to suspend import and exit program.';
+                    while (!document.body.textContent.includes(message) && Date.now() < deadline)
                         await new Promise(resolve => setTimeout(resolve, 20));
-                    if (!document.body.textContent.includes('Keep this last search window open'))
-                        throw new Error('Last-window Close did not explain Suspend Import');
+                    if (!document.body.textContent.includes(message))
+                        throw new Error('Last-window Close did not explain Quit');
                     return true;
                 })()""")
             finally:

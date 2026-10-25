@@ -2640,8 +2640,9 @@ class PyWebViewApplication:
             self.controller.close_window(window_id)
         except ArchiveBusyError:
             # The next status poll delivers this without a UI lock or import worker.
+            shortcut = " (⌘ Q)" if sys.platform == "darwin" else ""
             self._pending_notices.put(ApplicationNotice(severity="warning", message=
-                "Import is running. Keep this last search window open, use Suspend Import in Ingests, or Quit to suspend and exit."))
+                f"Cannot close window when import is running. Use Quit{shortcut} to suspend import and exit program."))
             return False
         except ValueError:
             pass  # A repeated native callback may refer to an already reserved close.

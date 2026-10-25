@@ -6,6 +6,11 @@ Entries describe their recorded revisions. For current behavior use the
 [user manual](USER_MANUAL.md) and [CLI reference](CLI_REFERENCE.md). Retired
 Rust delivery plans and historical package checks are not current acceptance.
 
+## Closing a window during import
+
+Clarify the last-window warning: use Quit to suspend import and exit the program,
+including the ⌘ Q shortcut on macOS. Advance the development alpha.
+
 ## Worker preferences
 
 Add half-CPU, all-CPU and custom worker choices to both Preferences panels. Default

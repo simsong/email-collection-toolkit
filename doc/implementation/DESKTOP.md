@@ -152,6 +152,7 @@ back to a disappearing window; the later closed event removes the native API.
 A last-window veto enqueues a typed notice without acquiring the application
 lock; normal search ingest-overview polling delivers it independently of import
 worker capacity or the presence of About.
+The notice directs the user to Quit to suspend import and exit, with ⌘ Q on macOS.
 It returns without a synchronous dialog or waiting for import futures on Cocoa's
 main thread. Controller tests cover lease/signal preservation. Native lifecycle
 tests close the original search, query its sibling and verify a responsive
