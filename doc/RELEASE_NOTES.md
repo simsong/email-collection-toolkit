@@ -6,6 +6,13 @@ Entries describe their recorded revisions. For current behavior use the
 [user manual](USER_MANUAL.md) and [CLI reference](CLI_REFERENCE.md). Retired
 Rust delivery plans and historical package checks are not current acceptance.
 
+## Installer acceptance diagnostics
+
+Retain Windows native acceptance phases, stack traces and failure reports in CI.
+Allow its existing import and Preferences checks time to complete, and increase
+the ordinary suite job budget while reporting slow tests. These diagnostics do
+not replace a passing native or signed-installer check. Advance the alpha.
+
 ## Windows Preferences parity
 
 Windows Preferences now saves valid changes automatically, retains active text

@@ -41,6 +41,14 @@ repeated listener setup/teardown, without dropping distinct failure-mode tests.
 
 ## CI and release validation
 
+The ordinary Python/browser job allows 60 minutes. Pytest and the focused Windows
+writer target report their 20 slowest cases. The native desktop child allows 300
+seconds, including its existing 120-second import check; it writes phase JSON and
+45-second repeating stack dumps. On subprocess failure its parent prints retained
+JSON/log tails. Windows CI retains synthetic native-reader logs, JSON and screenshot
+under `dist/native-reader`, including failed runs. All reader, preservation,
+Preferences and signing assertions remain required.
+
 Ordinary runner jobs use macos-15. Continuous integration runs `make check-static`
 and `make check-tests` in parallel jobs on non-`main` branch pushes that change
 files outside `README.md` and `doc/RELEASE_NOTES.md`; local `make check` retains

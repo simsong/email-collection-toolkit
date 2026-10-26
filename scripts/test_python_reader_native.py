@@ -8,6 +8,8 @@
 from __future__ import annotations
 
 import argparse
+from collections.abc import Callable
+import faulthandler
 from importlib import import_module
 import json
 from pathlib import Path
@@ -21,14 +23,18 @@ from pydantic import BaseModel
 
 from mailarchiver.reader_fixture import RAW_MESSAGE, check_reader, inventory
 
+DESKTOP_TIMEOUT = 300
+
 
 class DesktopResult(BaseModel):
     passed: bool
     error: str | None = None
+    phase: str = "startup"
 
 
-def check_windows_preferences(application, evaluate) -> None:
+def check_windows_preferences(application, evaluate, progress: Callable[[str], None]) -> None:
     """Native Close flushes active edits, and reopening restores the saved settings."""
+    progress("Preferences loading")
     application.show_update_preferences()
     window = application._windows_preferences_window
     if not window.events.loaded.wait(25):
@@ -46,11 +52,13 @@ def check_windows_preferences(application, evaluate) -> None:
                       "automatic: document.getElementById('automatic').checked}; })()", window)
     if not answer["saveAbsent"] or answer["automatic"] != application.updates.status.automatic_checks:
         raise AssertionError("Preferences did not display accepted update settings without a Save button")
+    progress("Preferences Close")
     window.destroy()
     if not window.events.closed.wait(20):
         raise TimeoutError("Preferences Close did not finish")
     if application.controller.preferences.workers.custom_count != 2:
         raise AssertionError("Native Close lost the unfinished worker edit")
+    progress("Preferences reopening")
     application.show_update_preferences()
     reopened = application._windows_preferences_window
     if not reopened.events.loaded.wait(25):
@@ -60,6 +68,7 @@ def check_windows_preferences(application, evaluate) -> None:
                       "return document.getElementById('worker-count').value; })()", reopened)
     if answer != "2":
         raise AssertionError("Reopened Preferences lost the saved worker count")
+    progress("Reopened Preferences Close")
     reopened.destroy()
     if not reopened.events.closed.wait(20):
         raise TimeoutError("Reopened Preferences did not close")
@@ -103,6 +112,16 @@ def desktop_check(output: Path) -> None:
     from mailarchiver.gui_app import GUI_DIRECTORY, PyWebViewApplication, configure_macos_application
     from mailarchiver.loopback import LoopbackAssetServer
 
+    faulthandler.enable()
+    faulthandler.dump_traceback_later(45, repeat=True)
+    result = DesktopResult(passed=False)
+
+    def progress(phase: str) -> None:
+        result.phase = phase
+        (output / "desktop.json").write_text(result.model_dump_json(indent=2), encoding="utf-8")
+        print(f"Native desktop acceptance: {phase}", flush=True)
+
+    progress("Platform initialization")
     if sys.platform == "win32":
         windows_webview()
     configure_macos_application()
@@ -111,13 +130,14 @@ def desktop_check(output: Path) -> None:
     controller = ApplicationController(ApplicationPreferencesStore(output / "preferences.json"))
     application = PyWebViewApplication(controller, LoopbackAssetServer(GUI_DIRECTORY))
     if sys.platform == "win32":
+        progress("Updater initialization")
         application.start_updates()
         if not application.updates.status.available:
             raise AssertionError(application.updates.status.detail)
+    progress("Opening synthetic archive")
     application.create_about_window(hidden=True)
     # Requirement: a file chosen inside a collection opens the enclosing document.
     api = application.open_document(archive / "archive.sqlite3")
-    result = DesktopResult(passed=False)
 
     def evaluate(script: str, window=None):
         finished = Event()
@@ -132,8 +152,10 @@ def desktop_check(output: Path) -> None:
 
     def exercise() -> None:
         try:
+            progress("Search loading")
             if not api.window.events.loaded.wait(25):
                 raise TimeoutError("Search window did not load")
+            progress("Search and message rendering")
             answer = evaluate("(async () => { while (!document.title.includes('synthetic.mailarchive')) "
                               "await new Promise(resolve => setTimeout(resolve, 25)); elements.search.value='observatory'; "
                               "await runSearch(); await selectMessage(state.results[0].message_pk); "
@@ -142,10 +164,12 @@ def desktop_check(output: Path) -> None:
                 raise AssertionError(f"Rendered search/message failed: {answer}")
             for sort in ("date", "subject", "sender"):
                 for direction in ("ascending", "descending"):
+                    progress(f"Sorting {sort} {direction}")
                     answer = evaluate(f"window.pywebview.api.search('observatory',0,'{sort}','{direction}')")
                     if len(answer["results"]) != 1:
                         raise AssertionError("Native sort failed")
             if sys.platform == "win32":
+                progress("Windows menus")
                 system = import_module("System")
                 forms = import_module("System.Windows.Forms")
                 menus = []
@@ -157,7 +181,8 @@ def desktop_check(output: Path) -> None:
                 if not {"New", "Import…", "Document Options…", "Check for Updates…", "Preferences…",
                         "Reprocess Saved Mail…"}.issubset(labels):
                     raise AssertionError("Native Windows creation/import actions are missing")
-                check_windows_preferences(application, evaluate)
+                check_windows_preferences(application, evaluate, progress)
+                progress("Windows clipboard")
                 # Save and restore clipboard contents within the UI thread, never log them.
                 saved = []
                 api.window.native.Invoke(system.Action(lambda: saved.append(forms.Clipboard.GetDataObject())))
@@ -170,6 +195,7 @@ def desktop_check(output: Path) -> None:
                 finally:
                     api.window.native.Invoke(system.Action(lambda: forms.Clipboard.SetDataObject(saved[0], True)
                                                            if saved[0] is not None else forms.Clipboard.Clear()))
+                progress("Windows screenshot")
                 core = import_module("Microsoft.Web.WebView2.Core")
                 stream = system.IO.MemoryStream()
                 tasks = []
@@ -181,21 +207,25 @@ def desktop_check(output: Path) -> None:
                 stream.Dispose()
             if inventory(archive) != before:
                 raise AssertionError("Desktop interaction changed archive files")
+            progress("Native import with preservation and scanning")
             check_native_import(application, output)
             if sys.platform == "win32":
                 from mailarchiver.scanner import scanner_availability
                 if not scanner_availability().configured:
                     raise AssertionError("ClamAV is unavailable after native import")
             result.passed = True
+            progress("Checks complete")
         except Exception as error:
             result.error = f"{type(error).__name__}: {error}"
         finally:
             (output / "desktop.json").write_text(result.model_dump_json(indent=2), encoding="utf-8")
+            print("Native desktop acceptance: Quit", flush=True)
             application.request_quit(confirm_ingest=False)
 
     webview.start(exercise, gui="edgechromium" if sys.platform == "win32" else None,
                   http_server=False, private_mode=True, menu=application.menu())
     application.shutdown()
+    faulthandler.cancel_dump_traceback_later()
 
 
 def main() -> None:
@@ -220,8 +250,17 @@ def main() -> None:
     if inventory(archive) != before:
         raise AssertionError("Native reader changed collection bytes")
     with (output / "desktop.log").open("w", encoding="utf-8") as log:
-        subprocess.run([sys.executable, __file__, "--desktop-check", str(output.resolve())],
-                       stdout=log, stderr=subprocess.STDOUT, check=True, timeout=90)
+        try:
+            subprocess.run([sys.executable, __file__, "--desktop-check", str(output.resolve())],
+                           stdout=log, stderr=subprocess.STDOUT, check=True, timeout=DESKTOP_TIMEOUT)
+        except subprocess.SubprocessError:
+            log.flush()
+            for name in ("desktop.json", "desktop.log"):
+                evidence = output / name
+                if evidence.is_file():
+                    print(f"Native desktop evidence: {name}\n{evidence.read_text(encoding='utf-8', errors='replace')[-32000:]}",
+                          file=sys.stderr, flush=True)
+            raise
     if not DesktopResult.model_validate_json((output / "desktop.json").read_text(encoding="utf-8")).passed:
         raise AssertionError((output / "desktop.json").read_text(encoding="utf-8"))
     print(f"Native reader passed: {output}")

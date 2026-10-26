@@ -7,6 +7,11 @@ platform/release acceptance. Deferred features live in [plans](../plans/README.m
 
 ## Shared acceptance coverage
 
+Native desktop acceptance must retain a phase report and diagnostics after a
+parent timeout. Its overall deadline must permit the existing import deadline and
+Preferences Close/reopen checks without dropping their assertions. CI must allow
+the complete ordinary suite to finish; timeout changes do not establish success.
+
 Reader acceptance must retain search, Unicode rendering, exact export and source
 immutability under URI-reserved archive paths. Shared scanner checks must cover
 direct and registered APIs, raw and MIME EICAR, concurrency and startup cleanup on

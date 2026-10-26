@@ -45,7 +45,7 @@ test-definition-refresh:
 	uv run --locked pytest -q tests/test_clamav_refresh.py
 
 test-python-writer:
-	uv run --locked pytest -q tests/test_application.py tests/test_writer_lock.py tests/test_plugin_configuration.py tests/test_portable_writer.py $(PYTEST_ARGS)
+	uv run --locked pytest -q --durations=20 tests/test_application.py tests/test_writer_lock.py tests/test_plugin_configuration.py tests/test_portable_writer.py $(PYTEST_ARGS)
 
 .PHONY: test-python-preservation
 test-python-preservation:
@@ -555,7 +555,7 @@ test-workflow-gates:
 	uv run --locked pytest -q tests/test_website_scripts.py tests/test_macos_signing.py
 
 test: pst-importer mcti-scan pff-converter test-pff-converter
-	uv run pytest -q
+	uv run pytest -q --durations=20
 
 .PHONY: archive-verifier verify-database test-import-e2e test-corpus-import update-corpus-expectations
 # ARCHIVE selects the quiescent archive; verification never repairs it.
