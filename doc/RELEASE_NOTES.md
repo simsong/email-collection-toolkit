@@ -6,6 +6,13 @@ Entries describe their recorded revisions. For current behavior use the
 [user manual](USER_MANUAL.md) and [CLI reference](CLI_REFERENCE.md). Retired
 Rust delivery plans and historical package checks are not current acceptance.
 
+## Relocated Windows acceptance deadline
+
+Use the same bounded native desktop deadline for source and relocated MSIX
+acceptance, and retain relocated phase reports, logs and screenshots on failure.
+The original 90-second relocated parent remained shorter than its import check.
+Advance the alpha for the next installer candidate.
+
 ## Installer acceptance diagnostics
 
 Retain Windows native acceptance phases, stack traces and failure reports in CI.

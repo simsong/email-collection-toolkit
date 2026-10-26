@@ -83,6 +83,9 @@ jobs:
             dist/native-reader/*.log
             dist/native-reader/*.json
             dist/native-reader/reader.png
+            dist/relocated/*.log
+            dist/relocated/reader/*.json
+            dist/relocated/reader/reader.png
           retention-days: 7
   bundle:
     needs: payload

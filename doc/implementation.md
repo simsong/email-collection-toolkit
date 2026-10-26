@@ -24,7 +24,7 @@ platform or release gate has passed. [Future work](plans/README.md) is separate.
 
 ## Shared boundaries
 
-- Windows native acceptance retains phase reports, stack dumps and failure logs
+- Windows source and relocated native acceptance retain phase reports, stack dumps and failure logs
   in branch CI. See [validation](implementation/VALIDATION.md).
 
 - Shared typed worker preferences resolve CPU ratios and validate launch overrides.

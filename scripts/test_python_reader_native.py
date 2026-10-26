@@ -21,9 +21,7 @@ from time import monotonic
 
 from pydantic import BaseModel
 
-from mailarchiver.reader_fixture import RAW_MESSAGE, check_reader, inventory
-
-DESKTOP_TIMEOUT = 300
+from mailarchiver.reader_fixture import NATIVE_DESKTOP_TIMEOUT, RAW_MESSAGE, check_reader, inventory
 
 
 class DesktopResult(BaseModel):
@@ -252,7 +250,7 @@ def main() -> None:
     with (output / "desktop.log").open("w", encoding="utf-8") as log:
         try:
             subprocess.run([sys.executable, __file__, "--desktop-check", str(output.resolve())],
-                           stdout=log, stderr=subprocess.STDOUT, check=True, timeout=DESKTOP_TIMEOUT)
+                           stdout=log, stderr=subprocess.STDOUT, check=True, timeout=NATIVE_DESKTOP_TIMEOUT)
         except subprocess.SubprocessError:
             log.flush()
             for name in ("desktop.json", "desktop.log"):

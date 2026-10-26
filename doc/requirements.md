@@ -19,7 +19,7 @@ platform or release gate has passed. [Future work](plans/README.md) is separate.
 
 ## Shared boundaries
 
-- Native acceptance retains its current phase and timeout diagnostics; bounded
+- Source and relocated native acceptance retain current phase and timeout diagnostics; bounded
   deadlines must allow the component checks to run. See [validation](requirements/VALIDATION.md).
 
 - Preferences persist half-CPU, all-CPU or custom worker limits, defaulting to

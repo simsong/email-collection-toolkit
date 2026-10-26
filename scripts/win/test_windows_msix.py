@@ -14,6 +14,8 @@ from pathlib import Path
 import subprocess
 import zipfile
 
+from mailarchiver.reader_fixture import NATIVE_DESKTOP_TIMEOUT
+
 
 def main() -> None:
     parser = argparse.ArgumentParser()
@@ -50,7 +52,7 @@ def main() -> None:
         raise AssertionError("Native reader changed collection files")
     with (output / "desktop.log").open("w", encoding="utf-8") as log:
         subprocess.run([python, "-I", unpacked / "test_python_reader_native.py", "--desktop-check", check],
-                       check=True, timeout=90, cwd=output, env=environment, stdout=log, stderr=subprocess.STDOUT)
+                       check=True, timeout=NATIVE_DESKTOP_TIMEOUT, cwd=output, env=environment, stdout=log, stderr=subprocess.STDOUT)
     if not json.loads((check / "desktop.json").read_text(encoding="utf-8"))["passed"]:
         raise AssertionError((check / "desktop.json").read_text(encoding="utf-8"))
     if inventory() != before:

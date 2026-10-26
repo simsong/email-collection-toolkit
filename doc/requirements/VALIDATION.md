@@ -8,7 +8,8 @@ platform/release acceptance. Deferred features live in [plans](../plans/README.m
 ## Shared acceptance coverage
 
 Native desktop acceptance must retain a phase report and diagnostics after a
-parent timeout. Its overall deadline must permit the existing import deadline and
+parent timeout, for source and relocated package runs. Both use the same overall
+deadline, which must permit the existing import deadline and
 Preferences Close/reopen checks without dropping their assertions. CI must allow
 the complete ordinary suite to finish; timeout changes do not establish success.
 
