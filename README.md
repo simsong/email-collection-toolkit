@@ -371,6 +371,9 @@ stopping for local and loopback API sources, and interrupted archive recovery.
 `make test-native-reprocessing` uses the same `MAILARCHIVER_NATIVE_APPLICATION_E2E=1`
 opt-in as the application lifecycle check. It tests real menu confirmation and
 Cancel against disposable canonical mail; it never uses a personal archive.
+`make test-native-worker-preferences` uses that same opt-in for the real modeless
+Preferences window, traffic-light Close, saved edits and CLI-locked worker controls.
+Its windows appear on the leftmost attached display.
 
 `make test-native-quit` uses `MAILARCHIVER_NATIVE_GUI_E2E=1` to exercise Quit
 during status polling in a real macOS Cocoa window; it requires a GUI session.

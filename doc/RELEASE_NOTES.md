@@ -6,6 +6,13 @@ Entries describe their recorded revisions. For current behavior use the
 [user manual](USER_MANUAL.md) and [CLI reference](CLI_REFERENCE.md). Retired
 Rust delivery plans and historical package checks are not current acceptance.
 
+## Standard macOS Preferences window
+
+Replace the modal Preferences alert with a reusable native window and traffic-light
+controls. Remove Done, save valid edits automatically and commit unfinished text
+edits on Close. Retain validation, CLI worker overrides and update preferences;
+explain why source launches cannot use in-app updates. Advance the development alpha.
+
 ## Closing a window during import
 
 Clarify the last-window warning: use Quit to suspend import and exit the program,

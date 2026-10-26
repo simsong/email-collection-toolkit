@@ -80,11 +80,11 @@ def test_worker_preferences_controls_persist_and_respect_cli(tmp_path: Path, pag
 @pytest.mark.skipif(sys.platform != "darwin" or os.environ.get("MAILARCHIVER_NATIVE_APPLICATION_E2E") != "1",
                     reason="opt in to visible macOS preference acceptance")
 def test_native_worker_preferences(tmp_path: Path, override: bool) -> None:
-    """Actual Cocoa preferences validate edits and lock worker controls for a CLI override."""
+    """Modeless Cocoa traffic-light Close saves edits and preserves CLI-locked worker choices."""
     from scripts.run_gui import development_bundle, development_environment
     executable = development_bundle(tmp_path / "launcher")
     result = subprocess.run([str(executable), str(Path(__file__).with_name("native_worker_preferences_probe.py")),
                              str(tmp_path / "preferences.json"), *(["--workers", "2"] if override else [])],
                             env=development_environment(), capture_output=True, text=True, timeout=40, check=False)
     assert result.returncode == 0, result.stdout + result.stderr
-    assert "Native worker preferences passed" in result.stdout
+    assert "Native worker preferences passed" in result.stdout, result.stdout + result.stderr

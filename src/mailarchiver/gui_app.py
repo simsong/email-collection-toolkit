@@ -54,7 +54,8 @@ from .worker_preferences import WorkerPreferences, WorkerSettings, worker_argume
 from .processor_graph import ProcessorGraphStatus, processor_graph
 from .updates import UpdateChannel, UpdateService, UpdateStatus, default_channel
 from .release_versions import release_metadata
-from .sparkle import SparkleBackend, show_preferences, start_installed_updater
+from .sparkle import SparkleBackend, start_installed_updater
+from .macos_preferences import MacOSPreferences
 from .winsparkle import WinSparkleBackend
 from .__main__ import IngestInterrupted, IngestOutcome, IngestRequest, run_ingest
 from .application import (
@@ -1558,6 +1559,7 @@ class PyWebViewApplication:
         self._updating = False
         self._definition_updates = 0
         self._sparkle: SparkleBackend | WinSparkleBackend | None = None
+        self._preferences_window: MacOSPreferences | None = None
         installed_version = application_metadata().version
         self.updates = UpdateService(
             UpdateStatus(version=installed_version, channel=controller.preferences.update_channel or default_channel(installed_version),
@@ -1675,7 +1677,9 @@ class PyWebViewApplication:
                     lambda channel, automatic: self.controller.configure_updates(channel, automatic, strict=True),
                     self.worker_settings, self.save_preferences)
             else:
-                show_preferences(self.updates, self.save_preferences, self.worker_settings())
+                if self._preferences_window is None:
+                    self._preferences_window = MacOSPreferences(self.updates, self.save_preferences)
+                self._preferences_window.show(self.worker_settings())
         except (OSError, ValueError) as error:
             self.add_notice("warning", f"Could not save preferences: {error}")
             return
@@ -2393,6 +2397,11 @@ class PyWebViewApplication:
             return finished.wait(5) and closed.is_set()
         if self._setup_api is not None and self._setup_api._lock.locked():
             return False
+        if self._preferences_window is not None:
+            focused = import_module("AppKit").NSApplication.sharedApplication().keyWindow()
+            if focused == self._preferences_window.window:
+                focused.performClose_(None)
+                return not focused.isVisible()
         native = webview.active_window()
         if native is None or native is self._about_window:
             return False
@@ -2786,6 +2795,8 @@ class PyWebViewApplication:
             self._menu_observer = None
         if self._sparkle is not None:
             self._sparkle.close()
+        if self._preferences_window is not None:
+            self._preferences_window.window.close()
         # Keep the OS guard until process exit once Sparkle has begun relaunch.
         if self.updates.status.phase != "installing":
             self.cancel_update_install()
@@ -2915,7 +2926,9 @@ class PyWebViewApplication:
                 enabled = child or list_editor or active in (self._license_window, self._processor_graph_window) or (setup is not None and active is setup.window) or (
                     search_id is not None and self.controller.can_close_window(search_id)
                 )
-                close_item.setEnabled_(enabled and not busy)
+                preferences_focused = self._preferences_window is not None and (
+                    appkit.NSApplication.sharedApplication().keyWindow() == self._preferences_window.window)
+                close_item.setEnabled_((enabled or preferences_focused) and not busy)
 
         AppHelper.callAfter(refresh)
 

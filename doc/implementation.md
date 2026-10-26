@@ -22,6 +22,8 @@ platform or release gate has passed. [Future work](plans/README.md) is separate.
 - Shared typed worker preferences resolve CPU ratios and validate launch overrides.
   New/continued GUI and CLI work uses the current effective limit; native and HTML
   panels preserve the saved choice under a CLI override.
+  A retained Cocoa preferences window replaces the modal alert, commits edits via
+  native actions and Close, and explains unavailable source-run updates.
   See [desktop](implementation/DESKTOP.md).
 
 - Source-file/configuration hashing and automatic replay are removed. Saved jobs

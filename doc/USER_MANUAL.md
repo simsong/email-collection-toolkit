@@ -59,6 +59,12 @@ Open **Preferences… → Maximum number of workers**. Choose **Half the CPUs**
 is twice the computer's logical CPU count. The choice is saved for this computer
 and applies when starting or continuing importing and saved-mail processing.
 Suspend and continue existing work to use a new limit.
+On macOS, changes save automatically. Close Preferences using the red window
+control or **File → Close**; no Done button is needed. Invalid worker counts show
+an explanation and retain the previously saved setting.
+
+**Check for Updates…** requires the installed application. A `make gui` source
+launch has no in-app updater, so this button is disabled with an explanation.
 
 `mailsearch-gui --workers N` overrides the choice for that launch. The worker
 controls are greyed out with `# workers set to N on command line`; your saved

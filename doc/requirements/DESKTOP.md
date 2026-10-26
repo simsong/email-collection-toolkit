@@ -180,6 +180,13 @@ choice unchanged and disables all worker preference controls, with the note
 `# workers set to {number} on command line`. Generic ingest, process, refresh-index
 and standalone IMAP use the preference when their flag is omitted.
 
+On macOS, Preferences is a reusable, nonmodal native window with traffic-light
+controls and no Done button. Valid control changes save immediately; closing with
+the red control or File Close commits an active text edit. Invalid worker input
+leaves the prior saved preference intact and displays an explanation. Reopening
+shows the current saved choices. Source checkouts explain that in-app updates
+require the installed application; do not enable a check without a real backend.
+
 An `ArchiveDocument` represents one archive. Opening validates the directory
 and the versioned layout and SQLite readable state of both databases read-only,
 except for lease-protected recovery of hot rollback journals left by a crashed

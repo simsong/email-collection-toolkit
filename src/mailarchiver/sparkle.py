@@ -22,11 +22,8 @@ from importlib import import_module
 from pathlib import Path
 from typing import Any
 from types import new_class
-from collections.abc import Callable
 
-from .updates import (PREVIEW_STREAM_LABEL, RELEASE_STREAM_LABEL, UPDATE_STREAM_HELP,
-                      UpdateChannel, UpdateService, allowed_channels)
-from .worker_preferences import WORKER_MODES, WorkerPreferences, WorkerSettings
+from .updates import UpdateChannel, UpdateService, allowed_channels
 
 NO_UPDATE_ERROR = 1001
 ARGUMENTS = "arguments"
@@ -146,79 +143,3 @@ def start_installed_updater(service: UpdateService) -> SparkleBackend | None:
     service.attach(backend, str(info[BUILD_KEY]))
     backend.configure(service.status.channel, service.status.automatic_checks)
     return backend
-
-
-def show_preferences(service: UpdateService, save: Callable[[UpdateChannel, bool, WorkerPreferences | None], None],
-                     workers: WorkerSettings) -> None:
-    """Native application preferences; explicit CLI worker settings remain launch-only."""
-    appkit = import_module("AppKit")
-    status = service.status
-    alert = appkit.NSAlert.alloc().init()
-    alert.setMessageText_("Preferences")
-    alert.setInformativeText_(f"You are running {status.version} (build {status.build or 'source checkout'}).")
-    view = appkit.NSView.alloc().initWithFrame_(((0, 0), (470, 460)))
-    heading = appkit.NSTextField.labelWithString_("Maximum number of workers")
-    heading.setFrame_(((0, 426), (470, 24)))
-    view.addSubview_(heading)
-    prototype = appkit.NSButtonCell.alloc().init()
-    prototype.setButtonType_(appkit.NSRadioButton)
-    choices = appkit.NSMatrix.alloc().initWithFrame_mode_prototype_numberOfRows_numberOfColumns_(
-        ((0, 318), (300, 96)), appkit.NSRadioModeMatrix, prototype, 3, 1)
-    choices.setCellSize_((300, 28))
-    choices.setIntercellSpacing_((0, 4))
-    choices.setAccessibilityIdentifier_("worker-mode")
-    for index, title in enumerate((f"Half the CPUs ({workers.half})", f"All CPUs ({workers.cpus})", "Custom")):
-        choices.cellAtRow_column_(index, 0).setTitle_(title)
-    choices.selectCellAtRow_column_(WORKER_MODES.index(workers.preferences.mode), 0)
-    choices.setEnabled_(workers.command_line is None)
-    view.addSubview_(choices)
-    count = appkit.NSTextField.alloc().initWithFrame_(((310, 318), (140, 28)))
-    count.setAccessibilityIdentifier_("worker-count")
-    count.setStringValue_(str(min(workers.preferences.custom_count, workers.maximum)))
-    count.setEnabled_(workers.command_line is None)
-    view.addSubview_(count)
-    note = appkit.NSTextField.wrappingLabelWithString_(workers.override_note or
-        f"1–{workers.maximum} workers (at most twice {workers.cpus} CPUs).\nApplies when starting or continuing work.")
-    note.setAccessibilityIdentifier_("worker-note")
-    note.setFrame_(((0, 244), (470, 64)))
-    view.addSubview_(note)
-    channel = appkit.NSPopUpButton.alloc().initWithFrame_pullsDown_(((0, 172), (470, 28)), False)
-    channel.addItemsWithTitles_([RELEASE_STREAM_LABEL, PREVIEW_STREAM_LABEL])
-    channel.selectItemAtIndex_(int(status.channel == "preview"))
-    view.addSubview_(channel)
-    automatic = appkit.NSButton.checkboxWithTitle_target_action_("Check for updates automatically (daily)", None, None)
-    automatic.setFrame_(((0, 135), (470, 28)))
-    automatic.setState_(int(status.automatic_checks))
-    view.addSubview_(automatic)
-    checked = status.last_checked.astimezone().strftime("%Y-%m-%d %H:%M %Z") if status.last_checked else "Not yet"
-    text = appkit.NSTextField.wrappingLabelWithString_(
-        "Downloading and installation always require confirmation.\n"
-        f"{UPDATE_STREAM_HELP}\n\n"
-        f"Last checked: {checked}\n{status.detail}",
-    )
-    text.setFrame_(((0, 0), (470, 126)))
-    view.addSubview_(text)
-    alert.setAccessoryView_(view)
-    alert.addButtonWithTitle_("Done")
-    check = alert.addButtonWithTitle_("Check for Updates…")
-    check.setEnabled_(status.available)
-    parent = appkit.NSApplication.sharedApplication().keyWindow()
-    if parent is not None:
-        alert.layout()
-        area, size = parent.screen().visibleFrame(), alert.window().frame().size
-        alert.window().setFrameOrigin_((area.origin.x + (area.size.width - size.width) / 2,
-                                       area.origin.y + (area.size.height - size.height) / 2))
-    while True:
-        choice = alert.runModal() - 1000
-        try:
-            selection = (WorkerPreferences.from_input(WORKER_MODES[choices.selectedRow()], int(count.stringValue()), workers.cpus)
-                         if workers.command_line is None else None)
-        except ValueError:
-            note.setStringValue_(f"Enter a whole number from 1 to {workers.maximum}.")
-            continue
-        selected: UpdateChannel = "preview" if channel.indexOfSelectedItem() == 1 else "release"
-        save(selected, bool(automatic.state()), selection)
-        break
-    service.configure(selected, bool(automatic.state()))
-    if choice == 1:
-        service.check()

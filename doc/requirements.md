@@ -22,7 +22,8 @@ platform or release gate has passed. [Future work](plans/README.md) is separate.
 - Preferences persist half-CPU, all-CPU or custom worker limits, defaulting to
   half the logical CPUs and never exceeding twice that count. Explicit CLI
   workers override and disable the desktop choice for that launch.
-  See [desktop](requirements/DESKTOP.md).
+  macOS Preferences is a nonmodal window with traffic-light controls and no Done
+  button; valid edits persist automatically and on Close. See [desktop](requirements/DESKTOP.md).
 
 - Reprocessing is curator-invoked, with a long-duration confirmation; code and
   settings changes never invalidate completed work. See [processing](requirements/PROCESSING.md)
