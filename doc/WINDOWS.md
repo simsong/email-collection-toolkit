@@ -34,3 +34,10 @@ physical interaction and updater-driven replacement are separate gates. Old
 Rust or unsigned Python artifacts do not establish current-head acceptance.
 See [testing](END_TO_END_TESTING.md), [antivirus](EMBEDDED_CLAMAV.md),
 [updates](SPARKLE_UPDATES.md) and [public signing](WINDOWS_PUBLIC_SIGNING.md).
+
+The recent suspend/resume, processing progress, identity navigation, processor DAG,
+explicit reprocessing and worker-preference features use the shared desktop code.
+Windows Preferences uses native title-bar controls and automatic saving, including
+uncommitted valid text edits on Close. See the [installer test checklist](WINDOWS_RELEASE_TESTING.md)
+for the acceptance checks to perform on the candidate; source parity alone does not
+establish installed Windows correctness.

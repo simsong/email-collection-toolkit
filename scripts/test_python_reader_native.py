@@ -27,6 +27,44 @@ class DesktopResult(BaseModel):
     error: str | None = None
 
 
+def check_windows_preferences(application, evaluate) -> None:
+    """Native Close flushes active edits, and reopening restores the saved settings."""
+    application.show_update_preferences()
+    window = application._windows_preferences_window
+    if not window.events.loaded.wait(25):
+        raise TimeoutError("Preferences did not load")
+    evaluate("(async () => { while (document.body.dataset.ready !== 'true') "
+             "await new Promise(resolve => setTimeout(resolve, 25)); return true; })()", window)
+    application.show_update_preferences()
+    if application._windows_preferences_window is not window:
+        raise AssertionError("Preferences created a duplicate native window")
+    answer = evaluate("(async () => { document.querySelector('input[value=custom]').checked=true; "
+                      "document.getElementById('worker-count').value='1'; "
+                      "document.getElementById('automatic').checked=true; await savePreferences(); "
+                      "document.getElementById('worker-count').value='2'; "
+                      "return {saveAbsent: document.getElementById('save') === null, "
+                      "automatic: document.getElementById('automatic').checked}; })()", window)
+    if not answer["saveAbsent"] or answer["automatic"] != application.updates.status.automatic_checks:
+        raise AssertionError("Preferences did not display accepted update settings without a Save button")
+    window.destroy()
+    if not window.events.closed.wait(20):
+        raise TimeoutError("Preferences Close did not finish")
+    if application.controller.preferences.workers.custom_count != 2:
+        raise AssertionError("Native Close lost the unfinished worker edit")
+    application.show_update_preferences()
+    reopened = application._windows_preferences_window
+    if not reopened.events.loaded.wait(25):
+        raise TimeoutError("Preferences did not reopen")
+    answer = evaluate("(async () => { while (document.body.dataset.ready !== 'true') "
+                      "await new Promise(resolve => setTimeout(resolve, 25)); "
+                      "return document.getElementById('worker-count').value; })()", reopened)
+    if answer != "2":
+        raise AssertionError("Reopened Preferences lost the saved worker count")
+    reopened.destroy()
+    if not reopened.events.closed.wait(20):
+        raise TimeoutError("Reopened Preferences did not close")
+
+
 def check_native_import(application, output: Path) -> None:
     """Run the shared desktop create/import service with real windows and mail."""
     from mailarchiver.owner_rules import OwnerRules
@@ -81,13 +119,13 @@ def desktop_check(output: Path) -> None:
     api = application.open_document(archive / "archive.sqlite3")
     result = DesktopResult(passed=False)
 
-    def evaluate(script: str):
+    def evaluate(script: str, window=None):
         finished = Event()
         values = []
         def receive(value):
             values.append(value)
             finished.set()
-        api.window.evaluate_js(script, callback=receive)
+        (window or api.window).evaluate_js(script, callback=receive)
         if not finished.wait(20):
             raise TimeoutError("Native UI operation timed out")
         return values[0]
@@ -116,8 +154,10 @@ def desktop_check(output: Path) -> None:
                 if len(menus) != 1:
                     raise AssertionError("Reader accumulated native menu strips")
                 labels = [str(item.Text) for heading in menus[0].Items for item in heading.DropDownItems]
-                if not {"New", "Import…", "Document Options…", "Check for Updates…", "Update Settings…"}.issubset(labels):
+                if not {"New", "Import…", "Document Options…", "Check for Updates…", "Preferences…",
+                        "Reprocess Saved Mail…"}.issubset(labels):
                     raise AssertionError("Native Windows creation/import actions are missing")
+                check_windows_preferences(application, evaluate)
                 # Save and restore clipboard contents within the UI thread, never log them.
                 saved = []
                 api.window.native.Invoke(system.Action(lambda: saved.append(forms.Clipboard.GetDataObject())))

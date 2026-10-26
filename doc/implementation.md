@@ -2,6 +2,11 @@
 
 # Mail archive normalizer implementation
 
+Windows Preferences uses the shared worker/update policy, serializes automatic
+saves, and asynchronously flushes active edits before native Close. See
+[desktop implementation](implementation/DESKTOP.md) and the
+[Windows installer checklist](WINDOWS_RELEASE_TESTING.md).
+
 Implementation is organized by subsystem. These files describe current contracts and
 source behavior, including explicit limits; they do not assert that every native
 platform or release gate has passed. [Future work](plans/README.md) is separate.

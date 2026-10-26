@@ -6,6 +6,13 @@ Entries describe their recorded revisions. For current behavior use the
 [user manual](USER_MANUAL.md) and [CLI reference](CLI_REFERENCE.md). Retired
 Rust delivery plans and historical package checks are not current acceptance.
 
+## Windows Preferences parity
+
+Windows Preferences now saves valid changes automatically, retains active text
+edits when closed, and reuses its existing window. Its update button follows
+backend availability. Extend the native Windows acceptance gate to close and
+reopen Preferences and verify current menu actions. Advance the development alpha.
+
 ## Standard macOS Preferences window
 
 Replace the modal Preferences alert with a reusable native window and traffic-light

@@ -180,6 +180,12 @@ choice unchanged and disables all worker preference controls, with the note
 `# workers set to {number} on command line`. Generic ingest, process, refresh-index
 and standalone IMAP use the preference when their flag is omitted.
 
+Both platform Preferences windows save valid edits automatically without Done or
+Save buttons. Windows reuses its modeless window, flushes the active text edit
+before title-bar Close, and keeps invalid input open with feedback. Close must
+not block the native event loop; application Quit retains previously saved choices.
+Update checking follows actual backend availability, with an explanation when unavailable.
+
 On macOS, Preferences is a reusable, nonmodal native window with traffic-light
 controls and no Done button. Valid control changes save immediately; closing with
 the red control or File Close commits an active text edit. Invalid worker input

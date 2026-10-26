@@ -32,9 +32,12 @@ def test_worker_preferences_controls_persist_and_respect_cli(tmp_path: Path, pag
     controller = ApplicationController(store)
     app = PyWebViewApplication(controller, workers_override=override)
     api = UpdatePreferencesApi(app.updates, controller.configure_updates, app.worker_settings, app.save_preferences)
-    expose(page, api, ("state", "save", "check"))
+    expose(page, api, ("state", "save", "check", "close_saved"))
     try:
         page.goto("data:text/html," + quote(PAGE))
+        page.wait_for_function("document.body.dataset.ready === 'true'")
+        expect(page.get_by_role("button", name="Save settings")).to_have_count(0)
+        expect(page.locator("#check")).to_be_disabled()
         half = page.locator('input[value="half"]')
         count = page.get_by_label("Custom worker count")
         expect(half).to_be_checked()
@@ -43,29 +46,97 @@ def test_worker_preferences_controls_persist_and_respect_cli(tmp_path: Path, pag
         if override is None:
             expect(half).to_be_enabled()
             page.locator('input[value="all"]').check()
-            page.get_by_role("button", name="Save settings").click()
+            page.evaluate("savePreferences()")
             expect(page.locator("#status")).to_contain_text("Settings saved.")
             assert store.read().workers.mode == "all"
-            page.locator('input[value="custom"]').check()
             count.fill(str(2 * logical_cpus() + 1))
-            page.get_by_role("button", name="Save settings").click()
+            page.locator('input[value="custom"]').check()
+            expect(page.locator("#status")).to_contain_text("Enter a whole number")
             assert store.read().workers.mode == "all"
             count.fill("2.5")
-            page.get_by_role("button", name="Save settings").click()
+            count.dispatch_event("change")
+            expect(page.locator("#status")).to_contain_text("Enter a whole number")
+            assert store.read().workers.mode == "all"
+            page.evaluate("window.savePreferencesAndClose()")
+            assert not api._close_ready
+            expect(count).to_be_enabled()
             assert store.read().workers.mode == "all"
             count.fill("1")
-            page.get_by_role("button", name="Save settings").click()
-            page.wait_for_function("document.getElementById('status').textContent.startsWith('Settings saved.')")
+            page.evaluate("savePreferences()")
             assert store.read().workers == WorkerPreferences(mode="custom", custom_count=1)
             page.reload()
             expect(page.locator('input[value="custom"]')).to_be_checked()
             expect(count).to_have_value("1")
+            # Delay only delivery of a real saved result to exercise newer invalid edits.
+            page.evaluate("""() => {
+              window.originalPreferenceSave=pywebview.api.save;
+              pywebview.api.save=async(...args)=>{
+                const accepted=await window.originalPreferenceSave(...args);
+                await new Promise(resolve=>{window.releasePreferenceResponse=resolve;});
+                return accepted;
+              };
+              document.getElementById('channel').dispatchEvent(new Event('change'));
+              window.pendingPreferenceSave=saveQueue;
+            }""")
+            page.wait_for_function("typeof window.releasePreferenceResponse === 'function'")
+            count.fill(str(2 * logical_cpus() + 1))
+            page.locator("#automatic").uncheck()
+            expect(page.locator("#status")).to_contain_text("Enter a whole number")
+            page.evaluate("async()=>{window.releasePreferenceResponse();await window.pendingPreferenceSave;}")
+            expect(page.locator("#automatic")).not_to_be_checked()
+            expect(page.locator("#status")).to_contain_text("Enter a whole number")
+            page.evaluate("refresh()")
+            expect(page.locator("#status")).to_contain_text("Enter a whole number")
+            assert store.read().automatic_update_checks
+            page.evaluate("()=>{pywebview.api.save=window.originalPreferenceSave;}")
+            # Hold a genuine persistence failure so an old Check action cannot hide a newer error.
+            store.path.unlink()
+            store.path.mkdir()
+            count.fill("1")
+            page.evaluate("""()=>{
+              window.releasePreferenceResponse=null;
+              pywebview.api.save=async(...args)=>{
+                try{return await window.originalPreferenceSave(...args);}
+                finally{await new Promise(resolve=>{window.releasePreferenceResponse=resolve;});}
+              };
+              window.pendingCheck=document.getElementById('check').onclick();
+            }""")
+            page.wait_for_function("typeof window.releasePreferenceResponse === 'function'")
+            count.fill(str(2 * logical_cpus() + 1))
+            page.locator("#automatic").check()
+            expect(page.locator("#status")).to_contain_text("Enter a whole number")
+            page.evaluate("async()=>{window.releasePreferenceResponse();await window.pendingCheck;}")
+            expect(page.locator("#status")).to_contain_text("Enter a whole number")
+            store.path.rmdir()
+            store.write(controller.preferences)
+            page.evaluate("()=>{pywebview.api.save=window.originalPreferenceSave;}")
+            count.fill("2")
+            page.evaluate("""()=>{
+              window.releasePreferenceResponse=null;
+              pywebview.api.save=async(...args)=>{
+                const accepted=await window.originalPreferenceSave(...args);
+                await new Promise(resolve=>{window.releasePreferenceResponse=resolve;});
+                return accepted;
+              };
+              window.pendingClose=window.savePreferencesAndClose();
+            }""")
+            page.wait_for_function("typeof window.releasePreferenceResponse === 'function'")
+            expect(count).to_be_disabled()
+            expect(page.locator("#automatic")).to_be_disabled()
+            expect(page.locator("#channel")).to_be_disabled()
+            assert not api._close_ready
+            page.evaluate("refresh()")
+            expect(page.locator("#check")).to_be_disabled()
+            page.evaluate("async()=>{window.releasePreferenceResponse();await window.pendingClose;}")
+            assert api._close_ready
+            assert store.read().workers == WorkerPreferences(mode="custom", custom_count=2)
         else:
             expect(half).to_be_disabled()
             expect(count).to_be_disabled()
             expect(page.locator("#workers-note")).to_have_text("# workers set to 2 on command line")
-            page.get_by_role("button", name="Save settings").click()
-            expect(page.locator("#status")).to_contain_text("Settings saved.")
+            page.locator("#automatic").uncheck()
+            page.evaluate("savePreferences()")
+            assert not store.read().automatic_update_checks
             assert store.read().workers.mode == "half"
             with pytest.raises(ValueError, match="on command line"):
                 api.save("release", True, "custom", 1)

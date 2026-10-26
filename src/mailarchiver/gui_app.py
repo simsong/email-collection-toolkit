@@ -1560,6 +1560,7 @@ class PyWebViewApplication:
         self._definition_updates = 0
         self._sparkle: SparkleBackend | WinSparkleBackend | None = None
         self._preferences_window: MacOSPreferences | None = None
+        self._windows_preferences_window: Any = None
         installed_version = application_metadata().version
         self.updates = UpdateService(
             UpdateStatus(version=installed_version, channel=controller.preferences.update_channel or default_channel(installed_version),
@@ -1673,9 +1674,21 @@ class PyWebViewApplication:
         try:
             if sys.platform == "win32":
                 from .windows_update_preferences import show_windows_update_preferences
-                show_windows_update_preferences(self.updates,
+                previous = self._windows_preferences_window
+                if previous is not None and not previous.events.closed.is_set():
+                    previous.restore()
+                    previous.show()
+                    return
+                window = show_windows_update_preferences(self.updates,
                     lambda channel, automatic: self.controller.configure_updates(channel, automatic, strict=True),
-                    self.worker_settings, self.save_preferences)
+                    self.worker_settings, self.save_preferences, lambda: self._quitting)
+                self._windows_preferences_window = window
+
+                def closed(*_args: object) -> None:
+                    if self._windows_preferences_window is window:
+                        self._windows_preferences_window = None
+
+                window.events.closed += closed
             else:
                 if self._preferences_window is None:
                     self._preferences_window = MacOSPreferences(self.updates, self.save_preferences)

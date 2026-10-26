@@ -116,7 +116,7 @@ positive-integer validation, the twice-CPU cap and typed UI snapshots. The Cocoa
 Preferences window uses a radio matrix and numeric text field; Windows' Preferences
 HTML uses equivalent controls. The document controller atomically persists worker
 and update choices together. CLI overrides disable only worker controls and omit
-worker changes on Save. New/continued GUI requests and CLI adapters resolve the
+worker changes when saving. New/continued GUI requests and CLI adapters resolve the
 current setting; IMAP root partition counts follow the resolved worker limit.
 Active pools keep their current size. `make test-worker-preferences` exercises
 real saved-queue dispatch, CLI precedence and HTML controls; the opt-in
@@ -127,6 +127,16 @@ editor before saving. Invalid values veto that close with feedback; Quit retains
 previously saved choices. File Close recognizes the focused native preferences
 window. A visibility-scoped timer refreshes update status and stops on Close.
 The update button follows actual backend availability and explains source launches.
+Windows Preferences serializes bridge saves and reuses its existing WebView2
+window. Close temporarily disables editing while the current settings are saved;
+save responses and errors update feedback only for the newest request. Updater
+polling has a separate status field. Its closing handler vetoes the first Close,
+schedules JavaScript through
+WinForms BeginInvoke, and destroys the window only after saving the active edit.
+It never synchronously waits for JavaScript on the native UI thread. Quit bypasses
+this edit-validation veto. Browser acceptance checks auto-save and close flushing;
+`make test-python-reader-native` exercises the actual Windows title-bar Close and
+reopen path during package CI.
 
 `application_menu` adds the shared Help destinations using the system browser
 adapter, with Windows' existing About/update actions retained. `show_license`
