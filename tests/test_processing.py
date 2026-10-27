@@ -517,6 +517,19 @@ def test_signature_phones_preserve_spelling_and_exclude_dates_and_quoted_replies
         ('+16175550102','+1 (617) 555-0102'),('+442079460958','+44 20 7946 0958')]
 
 
+@pytest.mark.parametrize("separator", [" / ", "/", " /", "/ "])
+def test_signature_phone_lists_keep_both_numbers_and_internal_slashes(separator: str) -> None:
+    """Separate complete phone observations without breaking area-code slashes or dates."""
+    from mailarchiver.processing.phones import signature_phone_numbers
+
+    phones = signature_phone_numbers(f"Phone: 212-555-0100{separator}212-555-0101\n"
+        "Local: 5550102 / 5550103\nOffice: 030 / 1234567\nDate: 2024/01/02\n"
+        "On Tuesday, Person wrote:\n> 212-555-0199 / 212-555-0198")
+    assert [(phone.normalized, phone.display) for phone in phones] == [
+        ("2125550100", "212-555-0100"), ("2125550101", "212-555-0101"),
+        ("5550102", "5550102"), ("5550103", "5550103"), ("0301234567", "030 / 1234567")]
+
+
 def test_parallel_dispatch_drains_independent_messages_with_one_global_budget(tmp_path: Path) -> None:
     """PROCESSING: concurrent consumers preserve message barriers, exactly-once claims and global limits."""
     plugin(tmp_path, "gate", 'marker = item.archive.path / ("entered-" + item.message_id)\n'

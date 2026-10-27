@@ -624,6 +624,15 @@ imap:
 # The fixture sets FQDN=localhost so server greetings never query host DNS.
 test-imap:
 	uv run --locked pytest -q tests/test_imap.py
+
+# Regression acceptance for Macroscope's Unicode folder, report and phone findings.
+.PHONY: test-macroscope-fixes
+MACROSCOPE_FIX_SOURCES = src/mailarchiver/imap_protocol.py src/mailarchiver/processing/phones.py scripts/name_matcher/evaluate.py tests/imap_fixture.py tests/test_imap.py tests/test_processing.py tests/test_name_linkage_experiments.py
+test-macroscope-fixes: ruff
+	PYTHONPATH="$(CURDIR):$(CURDIR)/tests" uv run --locked pylint --source-roots="$(CURDIR)" $(MACROSCOPE_FIX_SOURCES)
+	uv run --locked ty check $(MACROSCOPE_FIX_SOURCES) --error-on-warning
+	uv run --locked pyright $(MACROSCOPE_FIX_SOURCES) --warnings
+	uv run --locked pytest -q tests/test_imap.py tests/test_processing.py tests/test_name_linkage_experiments.py $(PYTEST_ARGS)
 .PHONY: test-natural-search
 test-natural-search:
 	uv run --locked pytest -q tests/test_search_text.py tests/test_mailsearch.py tests/test_search.py tests/test_search_completion.py tests/test_gui_service.py

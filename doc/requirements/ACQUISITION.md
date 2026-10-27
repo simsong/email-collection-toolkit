@@ -132,6 +132,9 @@ may substitute only the OS keyring boundary to avoid editing personal credential
 * IMAP ingest supports TLS and authenticated account configuration, records
   account/folder/UID provenance, and retrieves RFC 5322 bytes without marking
   messages read or modifying the remote mailbox.
+  Negotiate advertised UTF8=ACCEPT/UTF8=ONLY before discovering UTF-8 folders;
+  preserve literal ampersands and quoted wire names. Servers without the extension
+  retain modified UTF-7 selection. Failed negotiation must not continue discovery.
 * Outlook `.pst` and `.ost` ingest does not require Outlook to modify or export
   the source. The adapter records the parser/converter and version, enumerates
   every encountered store item, preserves folder and item identifiers as

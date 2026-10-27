@@ -391,7 +391,14 @@ an existing password against a different host, port or TLS mode.
 
 `imap_source` replaces the reserved IMAP manifest. Discovery uses authenticated
 LIST and read-only EXAMINE, freezes UIDVALIDITY/UIDNEXT, and snapshots bounded worker
-ranges through the existing discovery database. Each worker owns a TLS session,
+ranges through the existing discovery database. After authentication, refreshed
+capabilities drive ENABLE UTF8=ACCEPT for either UTF8=ACCEPT or UTF8=ONLY servers.
+Require its ENABLED acknowledgement before LIST, decode names in the negotiated
+mode, and send escaped EXAMINE names through imaplib's negotiated encoding.
+Legacy servers retain their LIST-provided modified UTF-7 spelling. Disposable TLS
+protocol fixtures cover both extensions, rejection/missing acknowledgement and
+literal ampersands/quotes; the pymap fixture covers legacy Unicode selection.
+Each worker owns a TLS session,
 enumerates at most 65,536 UID numbers per SEARCH, fetches metadata in batches of
 256 messages, and streams complete BODY.PEEK literals through ordinary ingest.
 BODY size and UID identity must match the original wire literal before

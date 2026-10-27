@@ -376,8 +376,10 @@ rules cannot remain hidden behind earlier matches or an empty catalog.
 The production identity processor also emits typed `PhoneNumber` candidates from
 its detected signature text. `phones.py` retains optional `+` and 7–15 digits as
 the comparison key, keeps the observed display form, excludes date-shaped tokens,
-and trims the complete text at reply boundaries before selecting a signature or
-last-line window. The host stores these as generic `phone` evidence
+and splits slash lists only when every segment is independently phone-shaped
+with 7–15 digits. Otherwise an internal slash remains part of the observed number.
+This Python regex recognizer trims the complete text at reply boundaries before
+selecting a signature or last-line window. The host stores these as generic `phone` evidence
 on the sender address without inserting email-address observations. Identity
 queries deduplicate numbers within the visible date range. Processor version 2
 collects these observations during content processing; previously processed
@@ -427,6 +429,8 @@ and performs two rounds of equivalence-projected correspondent inference.
 correspondents into a separate SQLite database, times engines, retains complete
 scores and emits a private HTML owner-review report. Optional packages are
 locked under `research/name-matcher`; normal application dependencies are unchanged.
+The owner evaluator validates distinct HTML/JSON destinations in both its CLI
+preflight and report writer; `.json` HTML destinations fail before any write.
 The report stores and exports a boolean `not_person` independently of its
 `match`/`non-match`/`insufficient` label; notes identify whether A, B or both are
 non-person identities. Legacy `not-person` labels become checked flags with an

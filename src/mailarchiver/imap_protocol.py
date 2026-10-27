@@ -40,7 +40,7 @@ class ImapBody(BaseModel):
     raw: bytes
 
 
-def decode_mailbox(value: bytes) -> str:
+def decode_mailbox(value: bytes, *, utf8: bool = False) -> str:
     """Decode modified UTF-7 mailbox names, accepting native UTF-8 servers too."""
     def decode(match: re.Match[bytes]) -> str:
         encoded = match[1]
@@ -48,7 +48,7 @@ def decode_mailbox(value: bytes) -> str:
             return "&"
         return base64.b64decode(encoded.replace(b",", b"/") + b"=" * (-len(encoded) % 4),
                                 validate=True).decode("utf-16-be")
-    if any(character > 127 for character in value):
+    if utf8 or any(character > 127 for character in value):
         return value.decode("utf-8")
     pieces: list[str] = []
     offset = 0
@@ -207,6 +207,7 @@ class ImapSession:
         self.context = context or ssl.create_default_context()
         self.client: imaplib.IMAP4 | None = None
         self.gmail = False
+        self.utf8 = False
 
     def __enter__(self) -> ImapSession:
         if not self.context.check_hostname or self.context.verify_mode != ssl.CERT_REQUIRED:
@@ -234,7 +235,17 @@ class ImapSession:
                 raise ValueError("IMAP authentication failed; check the password or app password") from None
             status, capabilities = client.capability()
             self._ok(status, "CAPABILITY")
-            self.gmail = b"X-GM-EXT-1" in b" ".join(item for item in capabilities if item).upper().split()
+            advertised = b" ".join(item for item in capabilities if item).upper().split()
+            self.gmail = b"X-GM-EXT-1" in advertised
+            if {b"UTF8=ACCEPT", b"UTF8=ONLY"}.intersection(advertised):
+                # ENABLE checks imaplib's cached, potentially pre-login capabilities.
+                client.capabilities = tuple(item.decode("ascii") for item in advertised)
+                status, _data = client.enable("UTF8=ACCEPT")
+                self._ok(status, "ENABLE UTF8=ACCEPT")
+                enabled = client.response("ENABLED")[1]
+                if b"UTF8=ACCEPT" not in b" ".join(item for item in enabled if item).upper().split():
+                    raise RuntimeError("IMAP server did not enable UTF8=ACCEPT")
+                self.utf8 = True
             return self
         except BaseException:
             self.__exit__(None, None, None)
@@ -275,9 +286,9 @@ class ImapSession:
             attributes = tuple((item.value or b"").decode("ascii").casefold() for item in flags.children)
             if "\\noselect" in attributes:
                 continue
-            mailboxes.append(ImapMailbox(name=decode_mailbox(name.value),
+            mailboxes.append(ImapMailbox(name=decode_mailbox(name.value, utf8=self.utf8),
                 wire_name=name.value.decode("utf-8"), flags=attributes,
-                delimiter=None if delimiter.value.upper() == b"NIL" else decode_mailbox(delimiter.value)))
+                delimiter=None if delimiter.value.upper() == b"NIL" else decode_mailbox(delimiter.value, utf8=self.utf8)))
         return selected_mailboxes(mailboxes, self.gmail)
 
     def select(self, mailbox: ImapMailbox) -> ImapMailbox:

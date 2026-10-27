@@ -92,6 +92,7 @@ def evaluate(database: Path, labels: Path) -> OwnerEvaluation:
 
 
 def write_report(result: OwnerEvaluation, output: Path) -> None:
+    json_output = report_json_path(output)
     def table(values: list[Assessment]) -> str:
         rows=[]
         for row in values:
@@ -99,12 +100,19 @@ def write_report(result: OwnerEvaluation, output: Path) -> None:
             recall='—' if row.recall is None else f'{row.recall:.1%}'
             rows.append(f'<tr><td>{html.escape(row.engine)}</td><td>{row.threshold:g}</td><td>{row.judged}</td><td>{precision}</td><td>{recall}</td><td>{row.false_positive}</td><td>{row.false_negative}</td></tr>')
         return '<table><tr><th>Engine</th><th>Cutoff</th><th>Judged pairs</th><th>Precision</th><th>Recall</th><th>False links</th><th>Missed links</th></tr>'+''.join(rows)+'</table>'
-    output.with_suffix('.json').write_text(result.model_dump_json(indent=2))
+    json_output.write_text(result.model_dump_json(indent=2))
     output.write_text('<!doctype html><meta charset="utf-8"><title>Owner review evaluation</title><style>body{font:16px system-ui;max-width:1100px;margin:40px auto;padding:20px}table{border-collapse:collapse;width:100%}td,th{padding:8px;border-bottom:1px solid #ccc;text-align:left}</style>'
         '<h1>Your 50-case review: selected-sample diagnostics</h1><p>These pairs were selected as illustrative matcher proposals. Results are descriptive for this review set; they do not establish archive-wide precision, recall or entity-classification accuracy. Unknown and insufficient decisions are excluded. No labels were used to fit these models.</p>'
         f'<p>Rows: {result.rows}; labels: {html.escape(json.dumps(result.label_counts))}; explicitly non-person: {result.explicit_non_person}.</p>'
         '<h2>All adjudicated identity links, including services/organizations</h2>'+table(result.all_identity_results)+
         '<h2>Excluding owner-annotated non-person cases</h2><p>Excludes checkbox flags, legacy not-person choices and notes explicitly saying “not a person”. Remaining rows are not independently confirmed to be people; automated predictions were not used as ground truth. A same-organization comment alone is not converted into a same-identity label.</p>'+table(result.owner_person_subset_results))
+
+
+def report_json_path(output: Path) -> Path:
+    json_output = output.with_suffix('.json')
+    if output.suffix.casefold() == '.json':
+        raise ValueError('HTML and JSON report destinations must be distinct; use --output with an .html suffix')
+    return json_output
 
 
 def main() -> None:
@@ -114,7 +122,7 @@ def main() -> None:
     parser.add_argument('--output',type=Path,required=True)
     args=parser.parse_args()
     database,labels,output=args.database.resolve(),args.labels.resolve(),args.output.resolve()
-    destinations=(output,output.with_suffix('.json'))
+    destinations=(output,report_json_path(output))
     if any(path in (database,labels) or path.exists() for path in destinations):
         raise ValueError('Report outputs must be new files distinct from inputs')
     if any((parent/'archive.sqlite3').exists() for parent in output.parents):

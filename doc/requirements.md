@@ -56,7 +56,8 @@ platform or release gate has passed. [Future work](plans/README.md) is separate.
   Git provenance and discloses local changes. See [delivery](requirements/DELIVERY.md).
 
 - IMAP workers prioritize missing per-message checkpoints before refreshing saved
-  metadata; interrupted UID gaps remain eligible. See [acquisition](requirements/ACQUISITION.md).
+  metadata; interrupted UID gaps remain eligible. Unicode folders retain their
+  negotiated UTF-8 or legacy modified UTF-7 wire names. See [acquisition](requirements/ACQUISITION.md).
 
 - Imports can suspend and resume without quitting; identity pickers display
   loading and retry feedback. See [desktop](requirements/DESKTOP.md).
@@ -111,7 +112,9 @@ platform or release gate has passed. [Future work](plans/README.md) is separate.
 
 - Optional local name-linkage comparisons retain private evidence and distinguish
   synthetic accuracy from unlabeled archive scores. Owner review distinguishes
-  non-person flags independently of identity-link judgments; see [processing research](requirements/PROCESSING.md#local-name-linkage-research).
+  non-person flags independently of identity-link judgments; HTML and JSON reports
+  require distinct destinations. Signature phone lists retain separate complete
+  numbers. See [processing research](requirements/PROCESSING.md#local-name-linkage-research).
 
 - Identity picker labels open name searches; count buttons open filtered evidence messages.
   Navigation shows pending/error feedback and targets the clicked row independently of selection.

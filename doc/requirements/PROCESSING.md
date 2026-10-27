@@ -214,7 +214,8 @@ addresses, date-filtered statistics, and distinct message counts per group. Name
 moves and phone display retain their separate evidence semantics: signature phone
 candidates are associated with the sender and never increase email signature
 counts. Extraction shall exclude date-shaped strings and quoted replies, preserve
-observed formatting and avoid inferred country or ownership. Name
+observed formatting and avoid inferred country or ownership. Slash-separated
+complete numbers remain separate candidates; area-code slashes remain intact. Name
 moves, separation and renames save immediately under the writer lease. Institution
 membership follows parent domains; institution names can be edited. The synthetic
 prototype retains its session-only undo; live edits are durable and do not expose
@@ -356,5 +357,8 @@ evidence, with an independent not-a-person flag and optional notes. The same
 organization can be both a match and a non-person identity. Neither that flag
 nor insufficient evidence implies a pair negative. Existing decisions and
 unlabeled notes survive page reload, including legacy non-person classifications.
+HTML and JSON evaluation reports must have distinct paths; reject a `.json`
+HTML destination before evaluating or writing either output, including `.JSON`
+on case-insensitive filesystems.
 No experiment applies groups to the source archive. The focused Makefile target
 exercises these contracts with miniature archives and real optional engines.

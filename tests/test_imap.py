@@ -49,7 +49,7 @@ from mailarchiver.mbox import MboxLocation, read_verified_location
 from mailarchiver.owner_rules import OwnerRules
 from mailarchiver.plugin_api import MailContainer, MailObject, SourceObservation, SourceReference, SourceSpec
 
-from imap_fixture import DisposableImap, FixtureKeyring
+from imap_fixture import DisposableImap, FixtureKeyring, Utf8Imap
 
 
 @pytest.mark.parametrize("status", [-25293, -25308, None])
@@ -136,6 +136,61 @@ def imap_server(tmp_path: Path, request: pytest.FixtureRequest) -> Iterator[Disp
         yield server
     finally:
         server.close()
+
+
+@pytest.mark.parametrize("capability", ["UTF8=ACCEPT", "UTF8=ONLY"])
+def test_utf8_mailbox_negotiation_and_read_only_wire_names(tmp_path: Path, capability: str) -> None:
+    """RFC 6855 folders round-trip UTF-8, literal ampersands and quotes over verified TLS."""
+    server = Utf8Imap(tmp_path, capability)
+    try:
+        account = server.start()
+        with ImapSession(account, "demopass", server.context) as session:
+            folders = session.mailboxes()
+            assert [folder.name for folder in folders] == list(server.names)
+            for folder in folders:
+                selected = session.select(folder)
+                assert (selected.uid_validity, selected.uid_next) == (42, 2)
+                assert session.uids(1, 1) == [1]
+        commands = [line.split(b" ", 1)[1].rstrip(b"\r\n") for line in server.commands]
+        assert commands.index(b"ENABLE UTF8=ACCEPT") < commands.index(b'LIST "" "*"')
+        assert [command for command in commands if command.startswith(b"EXAMINE ")] == [
+            b'EXAMINE "\xe6\x97\x85\xe8\xa1\x8c"', b'EXAMINE "literal &AMk- &-"',
+            b'EXAMINE "Quote \\" and \\\\ box"']
+        assert not any(command.startswith(b"SELECT ") for command in commands)
+    finally:
+        server.close()
+
+
+@pytest.mark.parametrize("response", ["NO", "MISSING"])
+def test_utf8_negotiation_failure_never_uses_utf8_folders(tmp_path: Path, response: str) -> None:
+    """Advertised UTF-8 must actually be enabled before discovering or selecting folders."""
+    server = Utf8Imap(tmp_path, enable=response)
+    try:
+        account = server.start()
+        with pytest.raises(RuntimeError, match="UTF8=ACCEPT"):
+            with ImapSession(account, "demopass", server.context):
+                pytest.fail("Unacknowledged UTF-8 negotiation must fail")
+        assert not any(b" LIST " in line or b" EXAMINE " in line for line in server.commands)
+    finally:
+        server.close()
+
+
+def test_legacy_unicode_folder_read_only_selection(imap_server: DisposableImap) -> None:
+    """Servers without UTF8=ACCEPT retain their modified UTF-7 LIST/EXAMINE spelling."""
+    wire_name = '"&AMk-tudes &- More"'
+    raw = b"Subject: legacy\r\n\r\nbody\r\n"
+    with imap_server.connect() as client:
+        assert client.create(wire_name)[0] == "OK"
+        assert client.append(wire_name, "(\\Flagged)", None, raw)[0] == "OK"
+    assert imap_server.account is not None
+    with ImapSession(imap_server.account, "demopass", imap_server.context) as session:
+        folder = next(folder for folder in session.mailboxes() if folder.name == "Études & More")
+        assert not session.utf8 and folder.wire_name == wire_name[1:-1]
+        selected = session.select(folder)
+        uids = session.uids(1, selected.uid_next - 1)
+        assert selected.uid_validity and len(uids) == 1
+        message, = session.metadata(selected, uids)
+        assert session.body(message) == raw
 
 
 @pytest.fixture

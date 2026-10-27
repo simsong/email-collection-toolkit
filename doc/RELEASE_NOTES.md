@@ -6,6 +6,15 @@ Entries describe their recorded revisions. For current behavior use the
 [user manual](USER_MANUAL.md) and [CLI reference](CLI_REFERENCE.md). Retired
 Rust delivery plans and historical package checks are not current acceptance.
 
+## Unicode folders, report destinations and phone lists
+
+Negotiate IMAP UTF-8 folders before discovery and preserve exact folder names
+when selecting them read-only; retain legacy modified UTF-7 support. Reject
+colliding HTML/JSON owner-evaluation destinations before writing. Retain both
+phone candidates in slash-separated signature lists without splitting area-code
+slashes. Existing saved mail requires explicit reprocessing to update derived
+phone observations. Advance the alpha for the next test run.
+
 ## Consolidated certificate-bundle update
 
 Include the certifi trust-store update from the dependency PR in the consolidated

@@ -11,6 +11,8 @@ from __future__ import annotations
 import hashlib
 import importlib.util
 import sqlite3
+import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -21,7 +23,7 @@ from scripts.name_matcher.linkage import Pair, Profile, candidates, fit_mixture,
 from scripts.name_matcher.build_observations import build_database
 from tests.test_name_matcher_research import _one_message_archive
 from mailarchiver.name_entities import classify_name, word_rules
-from scripts.name_matcher.evaluate import evaluate
+from scripts.name_matcher.evaluate import OwnerEvaluation, evaluate, write_report
 from scripts.name_matcher.experiments import save_pairs
 
 
@@ -73,9 +75,31 @@ def test_owner_evaluation_validates_pair_mapping_and_separates_non_person_labels
     assert result.explicit_non_person==2
     assert result.all_identity_results[0].judged==1 and result.all_identity_results[0].true_positive==1
     assert result.owner_person_subset_results[0].judged==0
+    output = tmp_path/'evaluation.html'
+    write_report(result, output)
+    assert OwnerEvaluation.model_validate_json(output.with_suffix('.json').read_text()) == result
+    assert output.read_text().startswith('<!doctype html>')
     labels.write_text(labels.read_text().replace('a4@test','wrong@test'))
     with pytest.raises(ValueError,match='address mapping'):
         evaluate(database,labels)
+
+
+@pytest.mark.parametrize('suffix', ['.json', '.JSON'])
+def test_owner_report_rejects_colliding_destinations_before_writing(tmp_path: Path, suffix: str) -> None:
+    """The public writer and CLI reject JSON/HTML aliasing without touching input or output."""
+    output = tmp_path/f'evaluation{suffix}'
+    result = OwnerEvaluation(rows=0, label_counts={}, explicit_non_person=0,
+        all_identity_results=[], owner_person_subset_results=[])
+    with pytest.raises(ValueError, match='destinations must be distinct'):
+        write_report(result, output)
+    assert not output.exists()
+    output.write_text('existing private report')
+    completed = subprocess.run([sys.executable, '-m', 'scripts.name_matcher.evaluate',
+        '--database', str(tmp_path/'missing.sqlite3'), '--labels', str(tmp_path/'missing.json'),
+        '--output', str(output)], capture_output=True, text=True, check=False)
+    assert completed.returncode != 0 and 'destinations must be distinct' in completed.stderr
+    assert output.read_text() == 'existing private report'
+    assert sorted(path.name for path in tmp_path.iterdir()) == [output.name]
 
 
 def test_name_normalization_and_disjoint_synthetic_entities() -> None:

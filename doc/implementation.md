@@ -64,7 +64,9 @@ platform or release gate has passed. [Future work](plans/README.md) is separate.
   See [delivery](implementation/DELIVERY.md).
 
 - IMAP workers snapshot prior UID membership in temporary SQL storage, acquire
-  missing UIDs first, then refresh saved metadata. See [acquisition](implementation/ACQUISITION.md).
+  missing UIDs first, then refresh saved metadata. Sessions enable advertised
+  UTF8=ACCEPT before LIST and retain exact quoted wire spelling for EXAMINE.
+  See [acquisition](implementation/ACQUISITION.md).
 
 - Ingest-window controls reuse checkpoint interruption and saved requests;
   picker counts aggregate in one query with visible pending states.
@@ -118,6 +120,8 @@ platform or release gate has passed. [Future work](plans/README.md) is separate.
 - Optional linkage engines share frozen candidates and private reports; see
   [comparison implementation](implementation/PROCESSING.md#optional-name-linkage-comparison).
   Stable review labels retain independent non-person flags and unlabeled notes.
+  The evaluator rejects coincident HTML/JSON paths before writing either report.
+  Signature phone extraction separates slash lists of complete number candidates.
 
 - Identity picker navigation uses typed selections and read-only evidence scopes.
   Count/name clicks show pending feedback and suppress duplicate requests until completion.
