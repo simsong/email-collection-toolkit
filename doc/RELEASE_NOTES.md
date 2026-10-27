@@ -6,6 +6,11 @@ Entries describe their recorded revisions. For current behavior use the
 [user manual](USER_MANUAL.md) and [CLI reference](CLI_REFERENCE.md). Retired
 Rust delivery plans and historical package checks are not current acceptance.
 
+## Consolidated certificate-bundle update
+
+Include the certifi trust-store update from the dependency PR in the consolidated
+installer candidate, and advance the alpha for fresh platform release checks.
+
 ## Responsive Windows Preferences reopening
 
 Restrict the Preferences JavaScript bridge to its four settings methods. Native
