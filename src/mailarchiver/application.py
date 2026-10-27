@@ -1,6 +1,18 @@
 # Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved.
 
-"""Document and window ownership for the cross-platform desktop application."""
+"""Document and window ownership for the cross-platform desktop application.
+
+Purpose: Own archive documents, logical windows and desktop lifecycle state.
+
+How it works:
+Validate/create archives and coordinate documents, preferences and import ownership
+independently of native widgets.
+
+Fundamental dependents:
+
+- ``gui_app``: native windows and menus follow this document controller.
+- ``imap_cli``: archive creation and validation share these document rules.
+"""
 
 from __future__ import annotations
 
@@ -9,6 +21,7 @@ import sqlite3
 import stat
 import sys
 import tempfile
+from datetime import UTC, datetime
 from hashlib import sha256
 from importlib.metadata import version
 from pathlib import Path
@@ -27,8 +40,9 @@ from .bagit import initialize_bag
 from .catalog import PROCESSING_DATABASE, create_catalog, create_search, validate_catalog, validate_search, validate_processing
 from .writer_lock import ArchiveBusyError, WriterLease
 from .updates import UpdateChannel, default_channel
+from .worker_preferences import WorkerPreferences, validate_workers
 
-APPLICATION_PREFERENCES_VERSION = 2
+APPLICATION_PREFERENCES_VERSION = 3
 RECENT_ARCHIVE_LIMIT = 10
 
 
@@ -39,11 +53,12 @@ class InvalidArchiveError(ValueError):
 class ApplicationPreferences(BaseModel):
     """Discardable, versioned state stored outside every archive."""
 
-    version: Literal[1, 2] = APPLICATION_PREFERENCES_VERSION
+    version: Literal[1, 2, 3] = APPLICATION_PREFERENCES_VERSION
     last_archive: Path | None = None
     recent_archives: list[Path] = Field(default_factory=list, max_length=RECENT_ARCHIVE_LIMIT)
     update_channel: UpdateChannel | None = None
     automatic_update_checks: bool = True
+    workers: WorkerPreferences = Field(default_factory=WorkerPreferences)
 
 
 class ApplicationPreferencesStore:
@@ -76,6 +91,17 @@ class ApplicationPreferencesStore:
         finally:
             if temporary is not None:
                 Path(temporary).unlink(missing_ok=True)
+
+
+def configured_workers(command_line: int | None = None, store: ApplicationPreferencesStore | None = None) -> int:
+    """An explicit launch value wins; missing/invalid discardable settings use half CPUs."""
+    if command_line is not None:
+        return validate_workers(command_line)
+    try:
+        preferences = (store or ApplicationPreferencesStore()).read().workers
+    except (OSError, ValueError):
+        preferences = WorkerPreferences()
+    return preferences.resolve()
 
 
 class SetupSelection(BaseModel):
@@ -118,6 +144,7 @@ class IngestJob(BaseModel):
 
     operation_id: str
     owner_window_id: str
+    started_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     kind: Literal["ingest", "content"] = "ingest"
     stop: Event = Field(default_factory=Event, exclude=True)
     finished: Event = Field(default_factory=Event, exclude=True)
@@ -336,6 +363,12 @@ class ArchiveDocument:
 
     def detach_window(self, window_id: str) -> None:
         with self._lock:
+            job = self._ingest_job
+            if job is not None and job.owner_window_id == window_id:
+                replacement = next((item for item in self._window_ids if item != window_id), None)
+                if replacement is None:
+                    raise ArchiveBusyError("the last window running Import cannot close until Import finishes")
+                self._ingest_job = job.model_copy(update={"owner_window_id": replacement})
             self._window_ids.discard(window_id)
 
     def attach_child_window(self, window_id: str) -> None:
@@ -395,18 +428,29 @@ class ApplicationController:
 
     @property
     def preferences(self) -> ApplicationPreferences:
-        return self._preferences.model_copy(deep=True)
+        with self._lock:
+            return self._preferences.model_copy(deep=True)
 
     def configure_updates(self, channel: UpdateChannel, automatic_checks: bool, *, strict: bool = False) -> None:
         """Persist update choices outside archives without resetting document preferences."""
-        previous = self._preferences.model_copy(deep=True)
-        self._preferences.update_channel = channel
-        self._preferences.automatic_update_checks = automatic_checks
-        self._preferences.version = APPLICATION_PREFERENCES_VERSION
-        self._write_preferences()
-        if strict and self.preference_error:
-            self._preferences = previous
-            raise OSError(self.preference_error)
+        self.configure_preferences(channel, automatic_checks, strict=strict)
+
+    def configure_preferences(self, channel: UpdateChannel | None, automatic_checks: bool,
+                              workers: WorkerPreferences | None = None, *, strict: bool = False) -> None:
+        """Commit panel choices together; a CLI override supplies no replacement worker choice."""
+        if workers is not None:
+            workers.validate_limit()
+        with self._lock:
+            previous = self._preferences.model_copy(deep=True)
+            self._preferences.update_channel = channel
+            self._preferences.automatic_update_checks = automatic_checks
+            if workers is not None:
+                self._preferences.workers = workers.model_copy(deep=True)
+            self._preferences.version = APPLICATION_PREFERENCES_VERSION
+            self._write_preferences()
+            if strict and self.preference_error:
+                self._preferences = previous
+                raise OSError(self.preference_error)
 
     def initialize_updates(self, installed_version: str) -> UpdateChannel:
         """Migrate an unset choice once, using the installed release's track."""
@@ -491,23 +535,22 @@ class ApplicationController:
             except KeyError as error:
                 raise ValueError(f"unknown search window {window_id}") from error
             document = self._documents[window.document_id]
-            if document.ingest_job is not None and document.ingest_job.owner_window_id == window_id:
-                raise ArchiveBusyError("the window running Import cannot close until Import finishes")
-            self._windows.pop(window_id)
             document.detach_window(window_id)
+            self._windows.pop(window_id)
             if self._active_window_id == window_id:
                 self._active_window_id = next(reversed(self._windows), None)
             self._release_if_unused(document)
             return document
 
     def can_close_window(self, window_id: str) -> bool:
-        """Return false only for the search window that owns the active ingest."""
+        """Keep an active ingest's last search window open; siblings may close."""
         with self._lock:
             window = self._windows.get(window_id)
             if window is None:
                 return False
             document = self._documents[window.document_id]
-            return document.ingest_job is None or document.ingest_job.owner_window_id != window_id
+            job = document.ingest_job
+            return job is None or job.owner_window_id != window_id or len(document.window_ids) > 1
 
     def windows(self) -> tuple[SearchWindow, ...]:
         """Return logical search windows in stable creation order."""

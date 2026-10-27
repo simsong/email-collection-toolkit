@@ -54,7 +54,7 @@ jobs:
           $env:PATH = "C:/Program Files/Git/usr/bin;" + $env:PATH
           make MAKE=make 'SHELL=C:/Program Files/Git/usr/bin/bash.exe' prepare-windows-clamav prepare-windows-updater freshclam test-windows-scanner test-windows-updater test-definition-state
           if ($LASTEXITCODE) { throw 'Windows antivirus preparation or acceptance failed' }
-          make MAKE=make 'SHELL=C:/Program Files/Git/usr/bin/bash.exe' check-python-reader-static test-python-reader test-windows-package-entry test-python-writer test-python-reader-native
+          make MAKE=make 'SHELL=C:/Program Files/Git/usr/bin/bash.exe' check-python-reader-static test-python-reader test-windows-package-entry test-python-writer test-python-reader-native 'ARGS=--output dist/native-reader'
           if ($LASTEXITCODE) { throw 'Reader checks failed' }
           $arguments = '-CreateUpgradeTest'
           if ($env:PUBLIC_SIGNING -eq 'true') {
@@ -78,7 +78,15 @@ jobs:
         if: always()
         with:
           name: msix-build-logs-${{ matrix.arch }}
-          path: dist/windows-msix-test/*.log
+          path: |
+            dist/windows-msix-test/*.log
+            dist/native-reader/*.log
+            dist/native-reader/*.json
+            dist/native-reader/reader.png
+            dist/relocated/*.log
+            dist/relocated/*.json
+            dist/relocated/reader/*.json
+            dist/relocated/reader/reader.png
           retention-days: 7
   bundle:
     needs: payload

@@ -87,9 +87,7 @@ complete. They cannot prove that Apple Mail downloaded every server message.
 
 The read-only comparison command answers three different questions:
 
-```console
-make compare-apple-mail
-```
+See [CLI_REFERENCE.md](CLI_REFERENCE.md#apple-mail-comparison) for invocation.
 
 It defaults to `~/Library/Mail` and `~/mail-archive`. Pass alternate paths with
 `ARGS='--apple-mail /path/to/Mail --archive /path/to/archive'`. The command
@@ -97,13 +95,8 @@ never writes either source. It builds a temporary SQLite index containing only
 relative cache paths and hashes, excludes `.partial.emlx`, and reports header
 names and aggregate counts without printing header values or message content.
 
-The comparison uses the archive's **h3 semantic-message v1 SHA-256**. This is
-not a header-only hash: it applies DKIM-relaxed normalization to a selected set
-of stable and delivery headers, combines them with the complete body under
-DKIM-simple-style canonicalization, and hashes the result. It ignores mutable
-or transport-specific fields such as `Status`, `X-Status`, `Received`, and
-`Return-Path`. See [INTEGRITY_CONTROLS.md](INTEGRITY_CONTROLS.md) for the exact
-ordered field list and byte algorithm.
+The comparison uses whole-message h3, not a header-only identity.
+[INTEGRITY_CONTROLS.md](INTEGRITY_CONTROLS.md) owns the field list and byte algorithm.
 
 The September 6, 2026 comparison on this computer found:
 

@@ -1,6 +1,18 @@
 # Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved.
 
-"""Provide typed, read-only search, MIME rendering, and safe export services."""
+"""Provide typed, read-only search, MIME rendering, and safe export services.
+
+Purpose: Provide typed archive search, verified MIME views and explicit exports.
+
+How it works:
+Read indexed/catalog state, verify message bytes and derive sanitized display/export
+responses.
+
+Fundamental dependents:
+
+- ``gui_app``: desktop bridges rely on these reader and export semantics.
+- ``reader_fixture``: package acceptance uses this production reader boundary.
+"""
 
 from __future__ import annotations
 
@@ -40,6 +52,7 @@ from .mailsearch import (
 )
 from .message import decoded_message_header
 from .plugin_api import SourceContainerMetadata
+from .processing.identities import IdentityMessages
 from .search import SEARCH_CATEGORIES, decoded_part, is_attachment
 
 _EXPORT_PUBLICATION_LOCK = Lock()
@@ -176,6 +189,7 @@ def search_page(
     direction: SortDirection | str = SortDirection.DESCENDING,
     search_attachments: bool = False,
     mailbox_selections: list[str] | None = None,
+    identity_messages: IdentityMessages | None = None,
 ) -> SearchPage:
     """Return exact GUI results using the CLI query language."""
     if offset < 0 or limit < 0:
@@ -183,6 +197,7 @@ def search_page(
     selections = [MailboxSelection.from_token(token) for token in mailbox_selections or []]
     try:
         terms = parse_query(query)
+        terms.identity_messages = identity_messages
     except ValueError as error:
         return SearchPage(results=[], offset=offset, has_more=False, error=str(error))
     fetch_limit = limit + 1 if limit else 0
@@ -209,13 +224,16 @@ def search_count(
     search_attachments: bool = False,
     mailbox_selections: list[str] | None = None,
     immediate_limit: int = IMMEDIATE_SEARCH_LIMIT,
+    identity_messages: IdentityMessages | None = None,
 ) -> SearchCount:
     """Count a complete GUI search before materializing and sorting its headers."""
     if immediate_limit < 1:
         raise ValueError("immediate search limit must be positive")
     selections = [MailboxSelection.from_token(token) for token in mailbox_selections or []]
+    terms = parse_query(query)
+    terms.identity_messages = identity_messages
     observed = search_result_count(
-        archive, parse_query(query), search_attachments, selections,
+        archive, terms, search_attachments, selections,
         maximum=immediate_limit + 1,
     )
     return SearchCount(

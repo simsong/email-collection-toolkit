@@ -1,5 +1,18 @@
 # Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved.
-"""Offline ICANN public-suffix matching for organization-domain evidence."""
+
+"""Offline ICANN public-suffix matching for organization-domain evidence.
+
+Purpose: Resolve institutional parent domains without a network service.
+
+How it works:
+Apply packaged ICANN suffix rules, wildcard exceptions and IDNA normalization to observed
+domains.
+
+Fundamental dependents:
+
+- ``processing.production``: identity evidence groups organizational domains using this policy.
+- ``processing.identities``: organization queries must use the same domain boundary.
+"""
 from functools import lru_cache
 from importlib.resources import files
 

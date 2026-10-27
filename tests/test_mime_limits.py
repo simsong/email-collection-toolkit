@@ -77,15 +77,17 @@ def test_invalid_attached_transfer_never_promoted(tmp_path: Path, encoding: str,
     assert source.read_bytes() == raw and not verify_archive(archive)
 
 
-@pytest.mark.parametrize("code,status", [
+@pytest.mark.parametrize("code,status,failed", [
     ('from mailarchiver.processing.builtin import ClamAVProcessor\n'
      'policy = item.application.policy.model_copy(update={"scan_policy": "clamav", "scanner_executable": "/no-such-clamdscan", "scanner_configuration": item.content_ref.path})\n'
-     'return ClamAVProcessor().process(item.model_copy(update={"application": item.application.model_copy(update={"policy": policy})}))', "scanner-error"),
+     'return ClamAVProcessor().process(item.model_copy(update={"application": item.application.model_copy(update={"policy": policy})}))', "scanner-error", False),
     ('from mailarchiver.processing.contracts import ScanFailure, ScanEvidence\n'
-     'raise ScanFailure(ScanEvidence(status="unscannable", detail="recorded scanner size-limit response", engine_version="1.4", signature_version="42"))', "unscannable"),
+     'raise ScanFailure(ScanEvidence(status="unscannable", detail="recorded scanner size-limit response", engine_version="1.4", signature_version="42"))', "unscannable", True),
 ])
-def test_scan_failure_evidence_blocks_filing(tmp_path: Path, code: str, status: str) -> None:
-    """Typed failure publication retains evidence and raw input, never releasing filing."""
+def test_scan_evidence_continues_but_unhandled_custom_plugin_errors_remain_failed(
+    tmp_path: Path, code: str, status: str, failed: bool,
+) -> None:
+    """PLUGINS: accepted scanner evidence files mail; unhandled extension errors retain retry inputs."""
     from tests.test_processing import plugin
     plugin(tmp_path / "plugins", "test-scan", code, rank=1)
     source = tmp_path / "message.eml"
@@ -97,12 +99,15 @@ def test_scan_failure_evidence_blocks_filing(tmp_path: Path, code: str, status: 
     result = subprocess.run([sys.executable, "-m", "mailarchiver", "--archive", str(archive), "ingest",
         "--no-scan", "--owner-names-file", str(owners), "--plugin-dir", str(tmp_path / "plugins"), str(source)],
         capture_output=True, text=True, check=False, timeout=30)
-    assert result.returncode != 0
+    assert (result.returncode != 0) == failed, result.stdout + result.stderr
     with sqlite3.connect(archive / "processing.sqlite3") as database:
         assert database.execute("SELECT scan_status FROM message_state").fetchone() == (status,)
-        assert database.execute("SELECT count(*) FROM invocations WHERE kind='file-message'").fetchone() == (0,)
-        assert database.execute("SELECT json_extract(result_json,'$.result.scan.status') FROM invocations WHERE status='failed'").fetchone() == (status,)
-        assert Path(database.execute("SELECT content_path FROM messages").fetchone()[0]).read_bytes() == raw
+        assert database.execute("SELECT count(*) FROM invocations WHERE kind='file-message'").fetchone() == (0 if failed else 1,)
+        if failed:
+            assert database.execute("SELECT json_extract(result_json,'$.result.scan.status') FROM invocations WHERE status='failed'").fetchone() == (status,)
+            assert Path(database.execute("SELECT content_path FROM messages").fetchone()[0]).read_bytes() == raw
+    if not failed:
+        assert not verify_archive(archive)
     assert source.read_bytes() == raw
 
 

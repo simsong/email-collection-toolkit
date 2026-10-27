@@ -1,5 +1,18 @@
 # Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved.
-"""Fresh framework storage and atomic queue/checkpoint operations."""
+
+"""Fresh framework storage and atomic queue/checkpoint operations.
+
+Purpose: Persist processor objects, queues, invocations and replay generations.
+
+How it works:
+Snapshot verified content and atomically track job completion, handoffs and reprocessing
+without losing manual state.
+
+Fundamental dependents:
+
+- ``processing.runtime``: interruption-safe dispatch relies on these durable checkpoints.
+- ``processing.production``: deferred content work and replay need the same saved objects.
+"""
 from __future__ import annotations
 
 import hashlib
@@ -9,7 +22,9 @@ import sqlite3
 import tempfile
 from importlib.resources import files
 from pathlib import Path
+from uuid import uuid4
 
+from .objects import ensure_object_index, index_inputs
 from .api import ArchiveContext, ContentReference, PluginStatistics, ProcessingObject, RAW_MESSAGE, RunReport
 from ..catalog import PROCESSING_DATABASE as DATABASE
 from ..catalog import require_processing_schema
@@ -45,10 +60,16 @@ def connect(archive: Path, *, create: bool = False, production: bool = False) ->
             replace_file(temporary, path)
         finally:
             temporary.unlink(missing_ok=True)
-    database = sqlite3.connect(path, check_same_thread=not production)
+    database = sqlite3.connect(path)
     try:
         database.execute("PRAGMA foreign_keys=ON")
         require_processing_schema(database)
+        ensure_object_index(database)
+        with database:
+            database.execute("CREATE INDEX IF NOT EXISTS jobs_status_order ON jobs(status,job_id)")
+            database.execute("CREATE INDEX IF NOT EXISTS jobs_parent ON jobs(parent_job_id)")
+            database.execute("CREATE TABLE IF NOT EXISTS accepted_invocations ("
+                             "invocation_id INTEGER PRIMARY KEY REFERENCES invocations, result_json TEXT NOT NULL)")
     except BaseException:
         database.close()
         raise
@@ -65,7 +86,7 @@ def snapshot(archive: Path, path: Path) -> ContentReference:
     """Copy once into content-addressed storage before committing a DB reference."""
     destination = archive / "objects"
     destination.mkdir(exist_ok=True)
-    with tempfile.NamedTemporaryFile(dir=destination, delete=False) as target:
+    with tempfile.NamedTemporaryFile(dir=destination, prefix=".object-", delete=False) as target:
         temporary = Path(target.name)
         try:
             with path.open("rb") as source:
@@ -83,11 +104,22 @@ def snapshot(archive: Path, path: Path) -> ContentReference:
     return ContentReference(path=final.resolve(), sha256=reference.sha256)
 
 
+USER_CANCELLED = "Cancelled by user"
+
+
 def enqueue(database: sqlite3.Connection, item: ProcessingObject, registry_hash: str, parent_job_id: int | None = None) -> None:
     payload = item.model_copy(update={"job_id": None}).model_dump_json()
+    # Reuse legacy child rows too: runtime policy is not a new processing result.
+    if parent_job_id is not None and database.execute(
+            "SELECT 1 FROM jobs WHERE parent_job_id=? AND registry_hash=? AND "
+            "json_remove(item_json,'$.application.policy')=json_remove(?,'$.application.policy') LIMIT 1",
+            (parent_job_id, registry_hash, payload)).fetchone():
+        return
     identity = hashlib.sha256((registry_hash + payload + str(parent_job_id)).encode()).hexdigest()
-    database.execute("INSERT OR IGNORE INTO jobs(identity,item_json,registry_hash,parent_job_id,status) VALUES(?,?,?,?,'pending')",
-                     (identity, payload, registry_hash, parent_job_id))
+    row = database.execute("INSERT OR IGNORE INTO jobs(identity,item_json,registry_hash,parent_job_id,status) "
+                           "VALUES(?,?,?,?,'pending') RETURNING job_id", (identity, payload, registry_hash, parent_job_id)).fetchone()
+    if row is not None:
+        index_inputs(database, int(row[0]), item)
 
 
 def submit(database: sqlite3.Connection, archive: Path, source: Path, registry_hash: str) -> str:
@@ -122,12 +154,13 @@ def report(database: sqlite3.Connection, kinds: tuple[str, ...]) -> RunReport:
 
 def reprocess(database: sqlite3.Connection, archive: Path, registry_hash: str) -> None:
     """Explicitly supersede old pending work, retaining identity edits and audit history."""
+    generation = str(uuid4())
     with database:
-        database.execute("UPDATE jobs SET status='aborted',detail='superseded registry' "
-                         "WHERE registry_hash<>? AND status IN ('pending','running','failed')", (registry_hash,))
+        database.execute("UPDATE jobs SET status='aborted',detail='explicit reprocessing' "
+                         "WHERE status IN ('pending','running','failed')")
         for message_id, digest, path in database.execute("SELECT message_id,sha256,content_path FROM messages").fetchall():
             reference = ContentReference(path=Path(path), sha256=digest)
             item = ProcessingObject(archive=ArchiveContext(path=archive), message_id=message_id,
                                     message_ref=reference, content_ref=reference,
-                                    content_type=RAW_MESSAGE, pipeline="ingest")
+                                    content_type=RAW_MESSAGE, pipeline="ingest", generation=generation)
             enqueue(database, item, registry_hash)

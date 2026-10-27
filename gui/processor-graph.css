@@ -1,0 +1,38 @@
+/* Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved. */
+/* Style offline processor graphs with readable, selectable SVG labels.
+   MIME types and processors differ by shape, label and color.
+   Dashed paths distinguish open-ended MIME extraction from declared outputs.
+   Scrollable panels retain natural-size detail when the user zooms in.
+   Canvas colors support native light and dark appearance.
+   The relationship list provides the same connections as accessible text. */
+:root { color-scheme: light dark; font: 14px -apple-system, BlinkMacSystemFont, sans-serif; --border: color-mix(in srgb, CanvasText 22%, transparent); --muted: color-mix(in srgb, CanvasText 65%, transparent); }
+* { box-sizing: border-box; }
+body { margin: 0; color: CanvasText; background: Canvas; }
+header { padding: 22px 26px 12px; border-bottom: 1px solid var(--border); }
+h1 { font-size: 26px; margin: 0 0 8px; }
+p { margin: 8px 0; line-height: 1.45; }
+#context { overflow-wrap: anywhere; font-weight: 600; }
+.toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 16px; }
+button { font: inherit; padding: 6px 10px; }
+.legend { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; font-size: 12px; }
+.mime-key, .processor-key { border: 1px solid var(--border); padding: 5px 8px; }
+.mime-key { border-radius: 14px; }
+.processor-key { background: color-mix(in srgb, #438ddb 15%, Canvas); }
+#status { color: var(--muted); }
+#error { border-left: 4px solid #c43b35; padding: 10px; background: color-mix(in srgb, #c43b35 10%, Canvas); }
+main { padding: 18px 26px 30px; }
+section { margin: 0 0 22px; border: 1px solid var(--border); border-radius: 10px; overflow: hidden; }
+h2 { font-size: 18px; margin: 0; padding: 14px 18px; border-bottom: 1px solid var(--border); }
+.diagram { overflow: auto; padding: 12px; }
+svg { display: block; }
+.edge { fill: none; stroke: var(--muted); stroke-width: 1.5; }
+.edge.dynamic { stroke-dasharray: 6 4; }
+marker path { fill: var(--muted); }
+.node rect { fill: Canvas; stroke: var(--muted); stroke-width: 1.5; }
+.node.processor rect { fill: color-mix(in srgb, #438ddb 15%, Canvas); stroke-width: 2; }
+.node.other rect { stroke-dasharray: 6 4; }
+.node text { fill: CanvasText; font: 13px -apple-system, BlinkMacSystemFont, sans-serif; text-anchor: middle; }
+.node .node-kind { fill: var(--muted); font-size: 11px; }
+details { padding: 12px 18px; border-top: 1px solid var(--border); }
+summary { cursor: pointer; }
+li { margin: 6px 0; overflow-wrap: anywhere; }

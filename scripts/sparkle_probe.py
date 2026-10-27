@@ -12,11 +12,11 @@ import time
 from importlib import import_module
 from pathlib import Path
 from uuid import uuid4
-from typing import Any
 
 from pydantic import BaseModel
 
-from mailarchiver.sparkle import show_preferences, start_installed_updater
+from mailarchiver.sparkle import start_installed_updater
+from mailarchiver.macos_preferences import MacOSPreferences
 from mailarchiver.update_metadata import SPARKLE_FEED_URL, SPARKLE_PUBLIC_KEY, SPARKLE_VERSION
 from mailarchiver.updates import UpdateService, UpdateStatus
 
@@ -56,39 +56,20 @@ def exercise_preferences(service: UpdateService) -> None:
     """Operate actual Cocoa controls and apply the user choice through the production pane."""
     appkit = import_module("AppKit")
     foundation = import_module("Foundation")
-    failures: list[str] = []
     saved: list[tuple[str, bool]] = []
-
-    def descendants(view: Any) -> list[Any]:
-        result = [view]
-        for child in view.subviews():
-            result.extend(descendants(child))
-        return result
-
-    def inspect(timer: Any) -> None:
-        timer.invalidate()
-        application = appkit.NSApplication.sharedApplication()
-        try:
-            window = application.modalWindow()
-            controls = descendants(window.contentView())
-            popup = next(control for control in controls if control.respondsToSelector_("indexOfSelectedItem"))
-            assert popup.itemTitles() == ["Release updates", "Preview updates — alpha, beta, and release"]
-            popup.selectItemAtIndex_(1)
-            checkbox = next(control for control in controls if control.respondsToSelector_("title") and
-                            control.title() == "Check for updates automatically (daily)")
-            checkbox.setState_(0)
-            assert window.frame().size.width >= 470
-            done = next(control for control in controls if control.respondsToSelector_("title") and control.title() == "Done")
-            done.performClick_(None)
-        except Exception as error:  # pylint: disable=broad-exception-caught
-            failures.append(str(error))
-            application.stopModalWithCode_(0)
-
-    timer = foundation.NSTimer.timerWithTimeInterval_repeats_block_(0.3, False, inspect)
-    foundation.NSRunLoop.mainRunLoop().addTimer_forMode_(timer, appkit.NSModalPanelRunLoopMode)
-    show_preferences(service, lambda channel, automatic: saved.append((channel, automatic)))
-    if failures or saved != [("preview", False)] or service.status.channel != "preview":
-        raise AssertionError(f"Native preference choices failed: {failures}; {saved}")
+    from mailarchiver.worker_preferences import WorkerPreferences, WorkerSettings
+    pane = MacOSPreferences(service, lambda channel, automatic, _workers: saved.append((channel, automatic)))
+    pane.screen = min(appkit.NSScreen.screens(), key=lambda screen: screen.frame().origin.x)
+    pane.show(WorkerSettings(preferences=WorkerPreferences()))
+    foundation.NSRunLoop.currentRunLoop().runUntilDate_(foundation.NSDate.dateWithTimeIntervalSinceNow_(0.1))
+    assert appkit.NSApplication.sharedApplication().modalWindow() is None
+    assert pane.check.isEnabled(), "Installed Sparkle backend did not enable manual checks"
+    assert pane.channel.itemTitles() == ["Release only", "Alpha / beta / development and release"]
+    pane.channel.selectItemAtIndex_(1)
+    pane.automatic.setState_(0)
+    pane.window.standardWindowButton_(appkit.NSWindowCloseButton).performClick_(None)
+    if pane.window.isVisible() or saved != [("preview", False)] or service.status.channel != "preview":
+        raise AssertionError(f"Native preference choices failed: {saved}")
 
 
 def exercise(feed_check: bool) -> None:

@@ -15,6 +15,8 @@
 
 * { box-sizing: border-box; }
 html, body, #app { width: 100%; height: 100%; margin: 0; overflow: hidden; background: var(--background); color: CanvasText; }
+#app { display: flex; flex-direction: column; }
+#app > .toolbar, #app > .archive-tools { flex-shrink: 0; }
 * { scrollbar-color: var(--scrollbar-thumb) var(--scrollbar-track); }
 ::-webkit-scrollbar { width: 14px; height: 14px; }
 ::-webkit-scrollbar-track { background: var(--scrollbar-track); }
@@ -52,7 +54,7 @@ button { min-height: 28px; }
 .suggestion-empty { padding: 10px 8px; color: var(--muted); }
 .attachment-search { display: flex; align-items: center; gap: 5px; white-space: nowrap; }
 
-.workspace { display: grid; grid-template-columns: minmax(0, var(--results-width, 38%)) 7px minmax(0, 1fr); height: calc(100% - 114px); }
+.workspace { display: grid; grid-template-columns: minmax(0, var(--results-width, 38%)) 7px minmax(0, 1fr); flex: 1; min-height: 0; }
 .workspace.tree-visible { grid-template-columns: min(30%, max(235px, 20%)) minmax(0, var(--results-width, 31%)) 7px minmax(0, 1fr); }
 .message-splitter { cursor: col-resize; touch-action: none; background: var(--surface); border-inline: 1px solid var(--border); }
 .message-splitter:hover, .message-splitter:focus-visible { background: var(--selection); }
@@ -159,6 +161,10 @@ mark.message-find-current { outline: 2px solid AccentColor; outline-offset: 1px;
 #attachment-preview img { max-width: 100%; max-height: 600px; object-fit: contain; }
 #attachment-preview iframe { width: 100%; height: 650px; border: 1px solid var(--border); border-radius: 5px; }
 #error { position: fixed; left: 50%; bottom: 20px; transform: translateX(-50%); max-width: 80%; padding: 10px 14px; border-radius: 7px; color: white; background: #a22; box-shadow: 0 4px 20px #0006; }
+#error { z-index: 10; overflow-wrap: anywhere; }
+.notice-history { max-height: 35vh; overflow-y: auto; white-space: pre-wrap; }
+.notice-history p { margin: 0 0 12px; }
+#notice-pill { position: fixed; right: 16px; bottom: 38px; z-index: 10; border: 0; border-radius: 20px; padding: 7px 14px; color: white; background: #a22; box-shadow: 0 2px 10px #0004; }
 .ingest-status-line { display: block; width: 100%; height: 30px; min-height: 30px; padding: 4px 12px; overflow: hidden; border: 0; border-top: 1px solid var(--border); color: var(--muted); background: var(--surface); text-align: left; text-overflow: ellipsis; white-space: nowrap; }
 .ingest-status-line[hidden] { display: none; }
 .ingest-status-line:hover { color: CanvasText; background: var(--selection); }
@@ -166,6 +172,9 @@ mark.message-find-current { outline: 2px solid AccentColor; outline-offset: 1px;
 .ingest-status-line.running::before { content: "●"; margin-right: 7px; color: #2a9d4b; }
 .ingest-status-line.failed::before, .ingest-status-line.disk-full::before, .ingest-status-line.stale::before { content: "●"; margin-right: 7px; color: #c43b35; }
 .ingest-status-line.interrupted::before { content: "●"; margin-right: 7px; color: #d89024; }
+.archive-status-banner { flex: none; max-height: 40%; overflow: auto; border-top: 1px solid var(--border); background: var(--surface); color: var(--muted); }
+.archive-status-banner[hidden] { display: none; }
+#archive-status-messages p { margin: 0; padding: 5px 12px; line-height: 20px; overflow-wrap: anywhere; }
 dialog { min-width: 340px; max-width: 620px; border: 1px solid var(--border); border-radius: 9px; color: CanvasText; background: Canvas; box-shadow: 0 12px 50px #0008; }
 dialog::backdrop { background: #0005; }
 dialog h2 { margin: 0 0 16px; font-size: 18px; }
@@ -175,7 +184,7 @@ dialog h2 { margin: 0 0 16px; font-size: 18px; }
 .filter-set-row { display: grid; grid-template-columns: 1fr auto auto; gap: 6px; margin: 7px 0; }
 .link-destination { max-height: 12em; overflow: auto; overflow-wrap: anywhere; color: var(--muted); font: 12px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace; }
 
-body.standalone .archive-tools, body.standalone .toolbar, body.standalone .results, body.standalone .mailbox-browser, body.standalone .message-splitter, body.standalone .ingest-status-line { display: none; }
+body.standalone .archive-tools, body.standalone .toolbar, body.standalone .results, body.standalone .mailbox-browser, body.standalone .message-splitter, body.standalone .archive-status-banner { display: none; }
 body.standalone .workspace { display: block; height: 100%; }
 body.standalone .message { height: 100%; overflow: auto; }
 
@@ -189,7 +198,10 @@ body.standalone .message { height: 100%; overflow: auto; }
 }
 
 .archive-tools { height: 36px; display: flex; gap: 8px; padding: 4px 12px; }
-#processing-dialog { max-width: 540px; }
+#processing-dialog { max-width: 620px; max-height: 85vh; overflow: auto; }
+#processing-imports section { border-top: 1px solid var(--border); overflow-wrap: anywhere; }
+#processing-imports h3 { font-size: 14px; }
+#processing-imports p { white-space: pre-line; }
 #processing-error { color: #b00020; }
 
 .result.attached-message, .attachment-tag { background-color: #f2f2f2; }

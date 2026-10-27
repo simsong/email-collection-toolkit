@@ -21,7 +21,7 @@ test-windows-package-entry:
 .PHONY: test-updater-supervisor
 .PHONY: test-windows-scanner
 test-windows-scanner:
-	uv run --locked pytest -q tests/test_windows_scanner.py
+	uv run --locked pytest -q tests/test_windows_scanner.py tests/test_scanner.py::test_startup_deadline_reaps_worker
 
 .PHONY: test-windows-updater
 test-windows-updater:
@@ -38,8 +38,14 @@ test-updater-supervisor:
 test-definition-state:
 	uv run --locked pytest -q tests/test_clamav_definitions.py
 
+# Automatic refresh tests use local connectivity fixtures, never a public CDN.
+# MAILARCHIVER_CLAMAV_DATABASE pins explicit test/development definitions.
+.PHONY: test-definition-refresh
+test-definition-refresh:
+	uv run --locked pytest -q tests/test_clamav_refresh.py
+
 test-python-writer:
-	uv run --locked pytest -q tests/test_application.py tests/test_writer_lock.py tests/test_plugin_configuration.py tests/test_portable_writer.py $(PYTEST_ARGS)
+	uv run --locked pytest -q --durations=20 tests/test_application.py tests/test_writer_lock.py tests/test_plugin_configuration.py tests/test_portable_writer.py $(PYTEST_ARGS)
 
 .PHONY: test-python-preservation
 test-python-preservation:
@@ -348,18 +354,6 @@ dmg: python-dmg
 python-dmg: ruff syntax-check sparkle-tools pst-importer mcti-scan pff-converter-bundle
 	uv run --group packaging python scripts/build_macos.py $(if $(SIGNING_IDENTITY),--signing-identity "$(SIGNING_IDENTITY)") $(ARGS)
 
-# Rust is the primary desktop app; SIGNING_IDENTITY selects Developer ID
-# (default ad-hoc), RUST_TARGET_DIR selects its release binary build directory.
-# Mounted acceptance is headless; interaction testing belongs to the user.
-.PHONY: rust-dmg
-rust-dmg: ruff syntax-check sparkle-tools pst-importer mcti-scan pff-converter-bundle
-	uv run --locked python scripts/rust_release_metadata.py --build-command $(CARGO_RUN) build --locked --release -p mailsearch-rust --bin mailsearch-webview
-	uv run --locked --group packaging python scripts/build_macos.py --rust-binary "$(RUST_TARGET_DIR)/release/mailsearch-webview" $(if $(SIGNING_IDENTITY),--signing-identity "$(SIGNING_IDENTITY)") $(ARGS)
-
-.PHONY: test-rust-dmg
-test-rust-dmg: ruff
-	uv run --locked --group packaging pytest -q tests/test_packaging.py -k frozen_entry_dispatches_private_rust_service
-
 # APPLE_CERTIFICATE_P12_BASE64 and APPLE_CERTIFICATE_PASSWORD import the
 # Developer ID identity on hosted release runners; local builds use Keychain.
 # Use the first valid Developer ID Application identity in the Keychain search list.
@@ -425,11 +419,6 @@ test-signing: ruff
 test-sparkle-signing: sparkle-tools ruff
 	uv run --locked --group packaging pytest -q tests/test_sparkle_signing.py
 
-.PHONY: test-rust-updates
-test-rust-updates: ruff
-	$(CARGO_RUN) build --locked -p mailsearch-rust --bin mailsearch-webview
-	RUST_WEBVIEW_BINARY="$(RUST_TARGET_DIR)/debug/mailsearch-webview$(RUST_EXE_SUFFIX)" uv run --locked pytest -q tests/test_rust_updates.py
-
 .PHONY: sparkle-probe test-updates
 sparkle-probe: sparkle-tools ruff
 	uv run --locked --group packaging python scripts/sparkle_probe.py $(ARGS)
@@ -470,7 +459,7 @@ extract-pdf-mail:
 	uv run extract-pdf-mail $(ARGS)
 
 pylint:
-	uv run --locked pylint src tests e2e_tests scripts
+	uv run --locked pylint src tests e2e_tests scripts conftest.py
 	uv run --locked --project converters/pff pylint --rcfile=pyproject.toml converters/pff/src converters/pff/tests converters/pff/entry.py
 
 run:
@@ -486,8 +475,20 @@ verify:
 summary-smoke:
 	@printf '%s\n' 'During verification, the archiver reads every canonical MBOX file without changing it. It checks BagIt payload and tag manifests, Mailbag metadata, and every declared complete-MBOX, raw-message, and semantic-message digest. Derived SQLite search data can be regenerated from canonical MBOX files. A failure is reported for investigation rather than repaired automatically.' | uv run summarize
 
+# __PYVENV_LAUNCHER__ is set internally for the signed macOS development bundle;
+# PYTHONEXECUTABLE is removed from that child environment to preserve the active venv.
 gui:
-	uv run mailsearch-gui $(ARGS)
+	uv run python scripts/run_gui.py $(ARGS)
+
+.PHONY: test-build-identity
+test-build-identity: ruff
+	uv run --locked pytest -q tests/test_build_info.py
+	uv run --locked pytest -q --browser chromium e2e_tests/test_ingest_verify.py::test_about_window_displays_version_disk_and_warnings
+
+.PHONY: test-processor-graph
+test-processor-graph: ruff
+	uv run --locked pytest -q tests/test_processor_graph.py tests/test_processing.py
+	uv run --locked pytest -q --browser chromium e2e_tests/test_ingest_verify.py::test_processor_graph_renders_registry_and_retries_busy_archive e2e_tests/test_ingest_verify.py::test_about_window_displays_version_disk_and_warnings
 
 .PHONY: matcher-prototype test-matcher-prototype
 matcher-prototype:
@@ -502,8 +503,13 @@ test-matcher-prototype: ruff
 gui-smoke: test-native-gui
 
 .PHONY: test-native-application
-test-native-application:
+test-native-application: ruff
 	MAILARCHIVER_NATIVE_APPLICATION_E2E=1 uv run pytest -q e2e_tests/test_ingest_verify.py::test_native_application_lifecycle
+
+# Reuse the native opt-in for menu/confirmation replay against actual synthetic canonical mail.
+.PHONY: test-native-reprocessing
+test-native-reprocessing: ruff
+	MAILARCHIVER_NATIVE_APPLICATION_E2E=1 uv run --locked pytest -q e2e_tests/test_ingest_verify.py::test_native_curator_reprocessing
 
 .PHONY: check-archive-open
 check-archive-open:
@@ -525,11 +531,11 @@ WEBSITE_PREVIEW_PORT ?= 1111
 website-preview:
 	zola --root website serve --interface 127.0.0.1 --port $(WEBSITE_PREVIEW_PORT) --output-dir "$(CURDIR)/.tmp/website-preview" --force
 
-# Run rendered release-metadata cases after CI provisions Zola.
+# Run rendered manual links and release-metadata cases after CI provisions Zola.
 .PHONY: website-download-check
 website-download-check:
 	@command -v zola >/dev/null || { echo 'Zola is required for rendered download validation'; exit 2; }
-	uv run --locked pytest -q tests/test_website_scripts.py::test_static_platform_downloads_render_without_javascript
+	uv run --locked pytest -q tests/test_website_scripts.py::test_manual_index_links_to_built_guides tests/test_website_scripts.py::test_static_platform_downloads_render_without_javascript
 	uv run --locked pytest -q --browser chromium e2e_tests/test_website_downloads.py
 
 website-build-check: website-check
@@ -549,7 +555,7 @@ test-workflow-gates:
 	uv run --locked pytest -q tests/test_website_scripts.py tests/test_macos_signing.py
 
 test: pst-importer mcti-scan pff-converter test-pff-converter
-	uv run pytest -q
+	uv run pytest -q --durations=20
 
 .PHONY: archive-verifier verify-database test-import-e2e test-corpus-import update-corpus-expectations
 # ARCHIVE selects the quiescent archive; verification never repairs it.
@@ -609,11 +615,28 @@ test-data-quality:
 test-mailsearch:
 	uv run pytest -q tests/test_mailsearch.py
 
+# IMAP_ARGS supplies standalone CLI arguments; no password environment variable is supported.
+.PHONY: imap test-imap
+imap:
+	uv run --locked mailarchiver-imap $(IMAP_ARGS)
+
+# Pytest starts/stops loopback TLS IMAP, seeds three INBOX messages, and checks CLI/GUI search.
+# The fixture sets FQDN=localhost so server greetings never query host DNS.
+test-imap:
+	uv run --locked pytest -q tests/test_imap.py
+.PHONY: test-natural-search
+test-natural-search:
+	uv run --locked pytest -q tests/test_search_text.py tests/test_mailsearch.py tests/test_search.py tests/test_search_completion.py tests/test_gui_service.py
+
 test-name-resolution:
 	uv run pytest -q tests/test_name_resolution_benchmark.py tests/test_name_matcher_research.py
 
 test-gui:
 	uv run pytest -q tests/test_gui_service.py tests/test_search_completion.py
+
+.PHONY: test-archive-status
+test-archive-status:
+	uv run --locked pytest -q --browser chromium e2e_tests/test_archive_status.py
 
 test-provenance:
 	uv run pytest -q tests/test_catalog.py tests/test_sources.py
@@ -621,11 +644,32 @@ test-provenance:
 test-refresh-index:
 	uv run pytest -q tests/test_end_to_end.py::test_refresh_index_excludes_quarantine_mailboxes tests/test_end_to_end.py::test_refresh_index_interrupt_retains_prior_search_index
 
+.PHONY: test-ingest-recovery
+test-ingest-recovery:
+	uv run --locked pytest -q tests/test_ingest_recovery.py tests/test_end_to_end.py::test_clamav_startup_failure_records_error_and_continues
+
+.PHONY: test-source-coordination
+SOURCE_COORDINATION_CHECK_FILES = src/mailarchiver/future_coordinator.py src/mailarchiver/__main__.py \
+	src/mailarchiver/processing/runtime.py src/mailarchiver/processing/production.py src/mailarchiver/processing/store.py tests/test_future_coordinator.py
+SOURCE_COORDINATION_TESTS ?= tests/test_future_coordinator.py tests/test_progress.py tests/test_end_to_end.py tests/test_ingest_recovery.py tests/test_sources.py tests/test_source_integrity.py tests/test_imap.py tests/test_quit_import.py
+test-source-coordination: ruff
+	uv run --locked pylint $(SOURCE_COORDINATION_CHECK_FILES)
+	uv run --locked ty check $(SOURCE_COORDINATION_CHECK_FILES) --error-on-warning
+	uv run --locked pyright $(SOURCE_COORDINATION_CHECK_FILES) --warnings
+	uv run --locked pytest -q $(SOURCE_COORDINATION_TESTS)
+
 test-headers:
 	uv run pytest -q tests/test_message.py tests/test_search.py
 
 test-progress:
 	uv run pytest -q tests/test_progress.py tests/test_sources.py
+
+# Source versus saved-mail progress, unequal worker totals, and actual browser rendering.
+.PHONY: test-ingest-progress
+test-ingest-progress: ruff
+	$(MAKE) test-progress
+	uv run --locked pytest -q tests/test_ingest_recovery.py::test_cli_saved_content_uses_worker_pool_and_preserves_search_and_bytes tests/test_ingest_recovery.py::test_saved_message_count_waits_for_body_and_attachment_tasks
+	uv run --locked pytest -q --browser chromium e2e_tests/test_gui_processing.py::test_processing_history_shows_jobs_instead_of_zero_source_progress
 
 .PHONY: test-interrupt
 test-interrupt:
@@ -816,8 +860,24 @@ test-pff: pst-importer mcti-scan pff-converter test-pff-converter
 	uv run --locked pytest -q tests/test_pff_source.py tests/test_cli_processing.py tests/test_plugin_loader.py tests/test_source_integrity.py
 
 .PHONY: test-gui-processing
+.PHONY: test-worker-preferences test-native-worker-preferences
+test-worker-preferences: ruff
+	uv run --locked pytest -q tests/test_worker_preferences.py tests/test_updates.py
+	uv run --locked pytest -q --browser chromium e2e_tests/test_worker_preferences.py
+
+# MAILARCHIVER_NATIVE_APPLICATION_E2E enables disposable, visible macOS preference acceptance.
+test-native-worker-preferences: ruff
+	MAILARCHIVER_NATIVE_APPLICATION_E2E=1 uv run --locked pytest -q e2e_tests/test_worker_preferences.py -k native
+
+IDENTITY_SEARCH_CHECK_FILES = src/mailarchiver/name_entities.py src/mailarchiver/gui_processing.py src/mailarchiver/gui_app.py \
+	src/mailarchiver/gui_service.py src/mailarchiver/mailsearch.py src/mailarchiver/search_selectors.py \
+	src/mailarchiver/processing/identities.py src/mailarchiver/processing/phones.py tests/test_gui_processing.py tests/test_search_completion.py \
+	e2e_tests/test_gui_processing.py e2e_tests/native_application_probe.py
 test-gui-processing: ruff
-	uv run --locked pytest -q tests/test_gui_processing.py
+	uv run --locked pylint $(IDENTITY_SEARCH_CHECK_FILES)
+	uv run --locked ty check $(IDENTITY_SEARCH_CHECK_FILES) --error-on-warning
+	uv run --locked pyright $(IDENTITY_SEARCH_CHECK_FILES) --warnings
+	uv run --locked pytest -q tests/test_gui_processing.py tests/test_search_completion.py tests/test_mailsearch.py
 	uv run --locked pytest -q --browser chromium e2e_tests/test_gui_processing.py
 
 .PHONY: website-preview-screenshots
@@ -864,121 +924,8 @@ pff-converter-bundle: pff-converter
 test-pff-converter: pff-converter
 	uv run --locked --project converters/pff pytest -q converters/pff/tests
 
-# Rust GUI experiment: ARCHIVE is an existing archive directory; QUERY is literal search text.
-# RUST_GUI_DEMO selects a new synthetic fixture directory; no real mail is imported.
-# ECT_RUST_WEBVIEW_DIAGNOSTICS enables native navigation/IPC URL diagnostics.
-# ECT_RUST_PREFERENCES_TEST_ROOT/EDIT coordinate isolated child-process fixtures only.
-# ECT_RUST_ENGINE_PYTHON selects the prepared Python archive-service interpreter;
-# default: this checkout .venv/bin/python (Windows .venv/Scripts/python.exe).
-RUST_GUI_DEMO ?= $(CURDIR)/.tmp/rust-gui-demo
-.PHONY: rust-gui-build rust-gui rust-gui-demo rust-gui-smoke test-rust-gui
-rust-gui-build:
-	$(CARGO_RUN) reader-build
-
-rust-gui: rust-gui-build
-	$(CARGO_RUN) run-ect $(if $(ARCHIVE),--archive "$(ARCHIVE)")
-
-rust-gui-demo: rust-gui-build
-	$(CARGO_RUN) reader-demo "$(RUST_GUI_DEMO)"
-
-rust-gui-smoke: rust-gui-build
-	@test -n "$(ARCHIVE)" || { echo 'usage: make rust-gui-smoke ARCHIVE=/path/to/archive QUERY=words'; exit 2; }
-	$(CARGO_RUN) reader-smoke "$(ARCHIVE)" "$(QUERY)"
-
-# ECT_RUST_RECENT_TEST_ROOT/NAME are internal child-process fixture paths set by Rust tests.
-test-rust-gui:
-	$(CARGO_RUN) reader-check
-
-.PHONY: test-rust-gui-interop
-
-# RUST_GUI_BINARY tells the Python interoperability test which freshly built executable to use.
-test-rust-gui-interop: rust-gui-build
-	RUST_GUI_BINARY="$(RUST_TARGET_DIR)/debug/mailsearch-rust$(RUST_EXE_SUFFIX)" uv run --locked pytest -q tests/test_rust_gui.py
-
-# The original native-widget prototype remains available for comparison.
-.PHONY: rust-gui-egui
-rust-gui-egui: rust-gui-build
-	$(CARGO_RUN) run --locked -p mailsearch-rust --bin mailsearch-rust -- $(if $(ARCHIVE),--archive "$(ARCHIVE)")
-
-# RUST_WEBVIEW_BINARY selects the built Rust dispatcher for real headless browser tests.
-.PHONY: test-rust-webview
-test-rust-webview: rust-gui-build
-	RUST_WEBVIEW_BINARY="$(RUST_TARGET_DIR)/debug/mailsearch-webview$(RUST_EXE_SUFFIX)" uv run --locked pytest -q tests/test_rust_webview.py --browser chromium
-
-# Check startup button-to-IPC wiring without native windows or simulated archive replies.
-.PHONY: test-rust-startup
-test-rust-startup:
-	uv run --locked pytest -q tests/test_rust_webview.py -k startup_buttons --browser chromium
-
-# Real hot-journal recovery, foreground timer, >30-second wait and owner Abort.
-# Also exercises worker-owned startup initialization with an OS-stopped real helper.
-# RUST_WEBVIEW_BINARY selects the same native opening worker's diagnostic pipe.
-.PHONY: test-rust-recovery
-test-rust-recovery: rust-gui-build
-	RUST_WEBVIEW_BINARY="$(RUST_TARGET_DIR)/debug/mailsearch-webview$(RUST_EXE_SUFFIX)" uv run --locked pytest -q tests/test_rust_recovery.py --browser chromium
-
-# Read-only timing probe: prints counts/timings only, never message contents.
-.PHONY: rust-webview-probe
-rust-webview-probe: rust-gui-build
-	@test -n "$(ARCHIVE)" || { echo 'usage: make rust-webview-probe ARCHIVE=/path QUERY=words'; exit 2; }
-	$(CARGO_RUN) reader-probe "$(ARCHIVE)" "$(QUERY)"
-
-# RUST_GUI_ARTIFACT_DIR retains the synthetic .mailarchive, native PNG, hashes and logs.
-# Requires a logged-in macOS GUI session; uses explicitly unscanned synthetic EML only.
-# Exercises real owner/identity edits and processor-rerun persistence on that fixture.
-RUST_GUI_ARTIFACT_DIR ?= $(CURDIR)/.tmp/rust-gui-native
-.PHONY: test-rust-gui-native
-# Windows CI's Cargo native target also checks Ctrl-comma through the menu hook.
-test-rust-gui-native:
-	@test "$$(uname -s)" = Darwin || { echo 'native Rust GUI smoke currently requires macOS'; exit 2; }
-	$(CARGO_RUN) fmt -p mailsearch-rust -- --check
-	$(CARGO_RUN) clippy --locked -p mailsearch-rust --features native-smoke --all-targets -- -D warnings
-	RUST_GUI_ARTIFACT_DIR="$(RUST_GUI_ARTIFACT_DIR)" $(CARGO_RUN) reader-native-check
-
-# Compile native acceptance without claiming an unlocked desktop runtime check.
-.PHONY: check-rust-gui-native-build
-check-rust-gui-native-build:
-	$(CARGO_RUN) fmt -p mailsearch-rust -- --check
-	$(CARGO_RUN) clippy --locked -p mailsearch-rust --features native-smoke --all-targets -- -D warnings
-	$(CARGO_RUN) test --locked -p mailsearch-rust --features native-smoke --test native_smoke --test native_windows --no-run
-
-# ECT_WINSPARKLE_TEST_DLL points to the staged checksum-verified native SDK DLL.
-# APPDATA locates legacy Python update preferences on Windows; LOCALAPPDATA
-# continues to store Rust reader preferences separately from archives.
-# ECT_RELEASE_VERSION/BUILD/CHANNEL come from the shared release mapper.
-# ECT_UPDATE_FEED_URL/PUBLIC_KEY and ECT_RELEASE_* are common public build inputs.
-# ECT_RUST_NATIVE_CLOSE_SMOKE is used only by feature-gated lifecycle tests.
-.PHONY: test-rust-updater
-test-rust-updater:
-	$(CARGO_RUN) reader-updater-check
-
-# The transitional Rust engine test uses only synthetic archives and no GUI windows.
-.PHONY: test-rust-engine
-test-rust-engine:
-	uv run --locked pytest -q tests/test_rust_engine.py
-
-# RUST_WEBVIEW_BINARY selects the real dispatcher; tests never launch native windows.
-.PHONY: test-search-parity
-test-search-parity: rust-gui-build
-	RUST_WEBVIEW_BINARY="$(RUST_TARGET_DIR)/debug/mailsearch-webview$(RUST_EXE_SUFFIX)" uv run --locked pytest -q tests/test_mailsearch.py tests/test_search_parity.py
-
-# ARCHIVE/QUERY use the same read-only diagnostic contract as rust-webview-probe.
-.PHONY: rust-webview-release-probe
-rust-webview-release-probe:
-	@test -n "$(ARCHIVE)" || { echo 'usage: make rust-webview-release-probe ARCHIVE=/path QUERY=words'; exit 2; }
-	$(CARGO_RUN) build --locked --release -p mailsearch-rust --bin mailsearch-webview
-	"$(RUST_TARGET_DIR)/release/mailsearch-webview$(RUST_EXE_SUFFIX)" --probe "$(ARCHIVE)" "$(QUERY)"
-
-# The desktop experiment is retained for study, outside the supported workspace.
-# These historical targets fail explicitly rather than launching stale binaries.
-.PHONY: rust-gui-retired
-rust-gui-retired:
-	@echo 'Rust GUI retired: see rust/README.md. Use make gui or make dmg for Python.' >&2
-	@exit 2
-rust-dmg rust-gui-build test-rust-gui test-rust-startup test-rust-gui-native check-rust-gui-native-build test-rust-updater test-rust-updates rust-webview-release-probe: rust-gui-retired
-
 .PHONY: test-python-desktop-package
-test-python-desktop-package:
+test-python-desktop-package: ruff
 	uv run --locked --group packaging pytest -q tests/test_python_desktop_package.py tests/test_packaging.py tests/test_macos_signing.py tests/test_website_scripts.py
 .PHONY: prepare-windows-updater
 prepare-windows-updater:
@@ -989,3 +936,52 @@ prepare-windows-updater:
 clamav-seed:
 	@test -n "$(SEED_DIRECTORY)" || { echo 'Specify SEED_DIRECTORY containing existing ClamAV definitions'; exit 2; }
 	uv run --locked python -m mailarchiver.clamav_update --seed "$(SEED_DIRECTORY)"
+
+# Disposable archives exercise object cleanup, recovery and canonical replay.
+.PHONY: test-processing-cleanup
+test-processing-cleanup:
+	uv run --locked pytest -q tests/test_processing_objects.py $(PYTEST_ARGS)
+
+# Build a disposable frozen CLI and exercise manifest-loaded sources with synthetic mail.
+.PHONY: test-frozen-source-plugins
+test-frozen-source-plugins: ruff
+	uv run --locked --group packaging python scripts/check_frozen_source_plugins.py
+
+# NAME_RESEARCH_ENV selects the isolated, locked optional matcher dependencies.
+# ARCHIVE is read-only; EVIDENCE is a verified extraction; OUTPUT is a private derivative directory.
+NAME_RESEARCH_ENV ?= research/name-matcher
+.PHONY: name-matcher-experiments test-name-matcher-experiments
+name-matcher-experiments:
+	uv run --project "$(NAME_RESEARCH_ENV)" --locked python -m scripts.name_matcher.experiments --archive "$(ARCHIVE)" --evidence "$(EVIDENCE)" --output "$(OUTPUT)" $(ARGS)
+
+test-name-matcher-experiments: ruff
+	uv run --locked python -m pylint --source-roots="$(CURDIR)" scripts/name_matcher/linkage.py scripts/name_matcher/engines.py scripts/name_matcher/experiments.py scripts/name_matcher/evaluate.py tests/test_name_linkage_experiments.py
+	uv run --locked ty check scripts/name_matcher/linkage.py scripts/name_matcher/engines.py scripts/name_matcher/experiments.py scripts/name_matcher/evaluate.py tests/test_name_linkage_experiments.py --error-on-warning
+	uv run --locked pyright scripts/name_matcher/linkage.py scripts/name_matcher/engines.py scripts/name_matcher/experiments.py scripts/name_matcher/evaluate.py tests/test_name_linkage_experiments.py --warnings
+	uv run --project "$(NAME_RESEARCH_ENV)" --locked python -m pytest -q tests/test_name_linkage_experiments.py
+
+# DATABASE is a frozen experimental comparison; LABELS is an exported owner review.
+.PHONY: name-matcher-owner-review
+name-matcher-owner-review:
+	uv run --project "$(NAME_RESEARCH_ENV)" --locked python -m scripts.name_matcher.evaluate --database "$(DATABASE)" --labels "$(LABELS)" --output "$(OUTPUT)"
+
+.PHONY: test-name-matcher-report
+test-name-matcher-report: ruff
+	uv run --locked python -m pylint --source-roots="$(CURDIR)" e2e_tests/test_name_experiment_report.py
+	uv run --locked ty check e2e_tests/test_name_experiment_report.py --error-on-warning
+	uv run --locked pyright e2e_tests/test_name_experiment_report.py --warnings
+	uv run --locked pytest -q --browser chromium e2e_tests/test_name_experiment_report.py
+
+# Isolated fixtures only; no real archive or user preference files are edited.
+CUSTOM_LIST_SOURCES = e2e_tests/native_application_probe.py tests/test_gui_service.py src/mailarchiver/custom_lists.py src/mailarchiver/list_catalog.py src/mailarchiver/list_models.py src/mailarchiver/reply_addresses.py src/mailarchiver/gui_default_lists.py
+.PHONY: test-customizable-lists
+test-customizable-lists: ruff
+	uv run --locked pylint $(CUSTOM_LIST_SOURCES) src/mailarchiver/configuration.py src/mailarchiver/contact_filtering.py src/mailarchiver/document_options.py src/mailarchiver/message.py src/mailarchiver/sources.py src/mailarchiver/gui_app.py src/mailarchiver/gui_processing.py src/mailarchiver/processing tests/test_custom_lists.py e2e_tests/test_default_lists.py
+	uv run --locked ty check $(CUSTOM_LIST_SOURCES) src/mailarchiver/gui_app.py src/mailarchiver/processing tests/test_custom_lists.py e2e_tests/test_default_lists.py --error-on-warning
+	uv run --locked pyright $(CUSTOM_LIST_SOURCES) src/mailarchiver/gui_app.py src/mailarchiver/processing tests/test_custom_lists.py e2e_tests/test_default_lists.py --warnings
+	uv run --locked pytest -q tests/test_custom_lists.py tests/test_owner_rules.py tests/test_sources.py tests/test_message.py tests/test_contact_filtering.py
+	$(MAKE) test-customizable-lists-browser
+
+.PHONY: test-customizable-lists-browser
+test-customizable-lists-browser:
+	uv run --locked pytest -q --browser chromium e2e_tests/test_default_lists.py

@@ -1,6 +1,17 @@
 # Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved.
 
-"""Reversible MBOXRD storage quoting; inputs exclude the record separator."""
+"""Reversible MBOXRD storage quoting; inputs exclude the record separator.
+
+Purpose: Encode and decode exactly one level of reversible MBOX payload quoting.
+
+How it works:
+Add/remove a greater-than sign only on From-like payload lines, separately from the envelope.
+
+Fundamental dependents:
+
+- ``mbox``: canonical storage must round-trip arbitrary original quote depth.
+- ``sources``: declared mboxrd inputs need the inverse decoding rule.
+"""
 
 import re
 

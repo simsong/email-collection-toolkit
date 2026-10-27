@@ -1,17 +1,24 @@
 # Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved.
-# Run a bounded external command whose lifetime belongs to its caller.
-# A spawned supervisor creates a private POSIX process group for the command.
-# Its parent-sentinel watcher kills that group if the caller exits abruptly.
-# This closes the startup race between launching a child and recording its PID.
-# Ordinary completion returns captured output; failures retain diagnostic text.
-# Definition updates use this path so forced GUI Quit cannot orphan FreshClam.
 
+"""Purpose: Contain the lifetime and output of an explicitly launched external command.
+
+How it works:
+Use a private supervisor/process group or Windows job and reap descendants on timeout or owner
+death.
+
+Fundamental dependents:
+
+- ``clamav_update``: definition refresh depends on FreshClam cleanup during cancellation or Quit.
+- ``imap_credentials``: private native-reader output and lifetime stay inside the owning run.
+"""
 from __future__ import annotations
 
 import multiprocessing
 import os
 import signal
 import subprocess
+import time
+from collections.abc import Callable
 from multiprocessing.connection import Connection, wait
 from threading import Thread
 
@@ -59,7 +66,8 @@ def _terminate_group() -> None:
         os.killpg(os.getpid(), signal.SIGKILL)
 
 
-def run_owned_command(command: list[str], *, timeout: float) -> CommandResult:
+def run_owned_command(command: list[str], *, timeout: float,
+                      status_callback: Callable[[], None] | None = None) -> CommandResult:
     """Run a one-shot POSIX utility, including cleanup if its supervisor fails."""
     context = multiprocessing.get_context("spawn")
     receiver, sender = context.Pipe(duplex=False)
@@ -67,8 +75,12 @@ def run_owned_command(command: list[str], *, timeout: float) -> CommandResult:
     try:
         worker.start()
         sender.close()
-        if not receiver.poll(timeout + 5):
-            raise TimeoutError("command supervisor timed out")
+        deadline = time.monotonic() + timeout + 5
+        while not receiver.poll(min(0.25, max(0, deadline - time.monotonic()))):
+            if time.monotonic() >= deadline:
+                raise TimeoutError("command supervisor timed out")
+            if status_callback is not None:
+                status_callback()
         result = receiver.recv()
         if not isinstance(result, CommandResult):
             raise RuntimeError("invalid command supervisor response")

@@ -2,7 +2,7 @@
 # Run ordered developer checks through Cargo on Windows, macOS and Linux.
 # This package uses only the standard library and spawns Cargo directly.
 # It does not require Make, Bash, Python or an installed task runner.
-# Workspace configuration supplies convenient reader and workspace aliases.
+# Workspace configuration supplies supported workspace and MSIX aliases.
 # Failures stop the sequence and propagate to callers and CI.
 [package]
 name = "xtask"

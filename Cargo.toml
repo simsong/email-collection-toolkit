@@ -2,5 +2,4 @@
 
 [workspace]
 members = ["rust/mct-importer", "rust/archive-verifier", "pst", "rust/xtask", "rust/mime-transfer"]
-exclude = ["rust/mailsearch-gui"]
 resolver = "2"

@@ -10,6 +10,10 @@ use std::{
     path::{Path, PathBuf},
 };
 
+const CL_DB_PHISHING: c_uint = 0x2;
+const CL_DB_BYTECODE: c_uint = 0x2000;
+const CL_DB_OFFICIAL_ONLY: c_uint = 0x1000;
+
 #[repr(C)]
 struct ScanOptions {
     general: u32,
@@ -112,7 +116,9 @@ impl Scanner {
                     path.as_ptr(),
                     engine,
                     &mut count,
-                    0x300a,
+                    // Match Python: retain signatures and bytecode, omitting
+                    // CL_DB_PHISHING_URLS and its suspicious-link heuristics.
+                    CL_DB_PHISHING | CL_DB_BYTECODE | CL_DB_OFFICIAL_ONLY,
                 )
             };
             scanner.check(status)?;
@@ -289,6 +295,49 @@ mod tests {
                 assert_eq!(&output[body_start..], [body, b"\r\n\n"].concat());
                 assert!(output.starts_with(prefix));
             }
+        }
+        Ok(())
+    }
+
+    #[test]
+    #[ignore = "requires libclamav and definitions; run make test-clamav-rust"]
+    fn native_scan_ignores_link_mismatches_but_detects_attachments() -> Result<()> {
+        // SCANNING: URL mismatches must not quarantine mail or bypass attachment scanning.
+        use base64::Engine;
+        use mailparse::MailHeaderMap;
+        let scanner = Scanner::from_environment()?.context("scanning is not enabled")?;
+        let prefix = b"From pst-importer Thu Jan  1 00:00:00 1970\nX-Imported-URI: pst:///fixture\r\nX-Importer-Name: pst-importer\r\nX-Importer-Version: 1\r\n";
+        for infected in [false, true] {
+            let mut original = prefix.to_vec();
+            original.extend_from_slice(b"From: sender@example.test\r\nMIME-Version: 1.0\r\nContent-Type: multipart/mixed; boundary=fixture\r\n\r\n--fixture\r\nContent-Type: text/html\r\n\r\n<html><body><a href=\"http://go.amex/fixture\">https://cdaas.americanexpress.com</a><a href=\"http://m.amex/fixture\">americanexpress.com</a><a href=\"http://unrelated.example/fixture\">https://www.paypal.com</a></body></html>\r\n");
+            if infected {
+                original.extend_from_slice(b"--fixture\r\nContent-Type: application/octet-stream\r\nContent-Transfer-Encoding: base64\r\n\r\n");
+                let encoded = base64::engine::general_purpose::STANDARD.encode(
+                    b"X5O!P%@AP[4\\PZX54(P^)7CC)7}$EICAR-STANDARD-ANTIVIRUS-TEST-FILE!$H+H*",
+                );
+                original.extend_from_slice(encoded.as_bytes());
+                original.extend_from_slice(b"\r\n");
+            }
+            original.extend_from_slice(b"--fixture--\r\n\n");
+            let mut spool = tempfile::tempfile()?;
+            spool.write_all(&original)?;
+            let mut output = Vec::new();
+            scanner.write_record(&mut spool, &mut output)?;
+            let mail = mailparse::parse_mail(&output[prefix.len()..])?;
+            let detection = mail.headers.get_first_value("X-ClamAV-Detection");
+            if infected {
+                assert!(detection.unwrap().to_lowercase().contains("eicar"));
+                let original_body =
+                    mailparse::parse_mail(&original[prefix.len()..])?.get_body_raw()?;
+                assert_eq!(mail.get_body_raw()?, original_body);
+            } else {
+                assert!(detection.is_none());
+                assert_eq!(output, original);
+            }
+            spool.rewind()?;
+            let mut retained = Vec::new();
+            spool.read_to_end(&mut retained)?;
+            assert_eq!(retained, original);
         }
         Ok(())
     }

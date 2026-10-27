@@ -13,6 +13,10 @@ or phrase, then narrow the collection by person, date, subject, or source folder
 
 *The working interface with a synthetic collection. No private email is shown.*
 
+Warnings and errors collapse to a **Messages** pill near the bottom. Click it
+to read the full text and earlier messages from the same window; **Collapse
+messages** returns to the pill. Native application notices are also in About.
+
 ## Words, phrases, and selectors
 
 Enter words to search indexed headers and message text. Put a phrase in double
@@ -60,6 +64,12 @@ Quote multiword values in a typed query: `date:"January 5, 2020"`.
 Click **×** to remove a filter, or press Delete in an empty input field.
 
 ## Sort and read results
+
+Search ignores case and accents and treats `ß`/`ẞ` as `ss`, without stemming.
+Existing indexes need no rebuild. Quoted symbols remain significant: `"CACM-"`
+requires the hyphen and `"Ham+Sandwhich"` requires the plus. Word boundaries apply.
+
+The footer shows archive notices above the separate ingest-history line.
 
 Sort the complete matching set by **date**, **subject**, or **sender**, in either
 direction. Large searches show an initial group of 2,000 results and retrieve
@@ -118,16 +128,9 @@ Use **Filter set → Save...** to name a folder selection. Select its name to
 restore it, or **None** for no folder filter. The **...** manager renames and
 deletes saved sets. These are local preferences, not changes to the archive.
 
-## Independent windows and command-line search
+## Independent windows
 
 **Window → New Search Window** gives the same collection another independent
-query and selection. You can also search from a terminal:
-
-```console
-make search ARGS='--archive "/path/to/collection" subject:"annual report" after:2024-01-01'
-```
-
-See the [user manual](https://github.com/simsong/email-collection-toolkit/blob/main/doc/USER_MANUAL.md)
-for command-line options, search-index rebuilding, keyboard controls, and the
-full message-viewing workflow. Semantic search and live provider ingestion are
-planned work, not features of the current search interface.
+query and selection. See [Advanced → Command Line](@/advanced.md#command-line)
+for terminal commands and the [user manual](https://github.com/simsong/email-collection-toolkit/blob/main/doc/USER_MANUAL.md)
+for keyboard controls and the message-viewing workflow.

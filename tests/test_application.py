@@ -317,7 +317,7 @@ def test_one_ingest_is_shared_per_document_and_requires_a_writer_lease(tmp_path:
     )
 
     application.begin_ingest(first_document.descriptor.document_id, first_job, first_lease)
-    assert not application.can_close_window(first_window.window_id)
+    assert application.can_close_window(first_window.window_id)
     assert application.can_close_window(second_window.window_id)
     assert application.activate_window(second_window.window_id).document_id == first_document.descriptor.document_id
     with pytest.raises(ArchiveBusyError, match="first-ingest"):
@@ -343,6 +343,40 @@ def test_one_ingest_is_shared_per_document_and_requires_a_writer_lease(tmp_path:
     assert second_document.ingest_job == second_job
     assert application.finish_ingest(second_document.descriptor.document_id, "second-ingest", published=False) == ()
     assert second_document.generation == 0
+
+
+def test_closing_ingest_owner_transfers_shared_job_without_releasing_lease(tmp_path: Path) -> None:
+    """Requirement: closing one search transfers an active import to its surviving sibling."""
+    application = controller(tmp_path)
+    archive = make_archive(tmp_path / "archive")
+    document = application.open_document(archive)
+    original = application.new_search_window(document)
+    sibling = application.new_search_window(document)
+    unrelated = application.new_search_window(application.open_document(make_archive(tmp_path / "other")))
+    job = IngestJob(operation_id="shared-import", owner_window_id=original.window_id)
+    lease = WriterLease.acquire(archive, document.descriptor.identity, "test", job.operation_id, "test")
+    application.begin_ingest(document.descriptor.document_id, job, lease)
+    try:
+        assert application.close_window(original.window_id) is document
+        transferred = document.ingest_job
+        assert transferred is not None
+        assert transferred.owner_window_id == sibling.window_id
+        assert transferred.operation_id == job.operation_id
+        assert transferred.stop is job.stop and transferred.finished is job.finished
+        assert not job.stop.is_set() and not job.finished.is_set()
+        assert lease.acquired
+        with pytest.raises(ArchiveBusyError):
+            WriterLease.acquire(archive, document.descriptor.identity, "test", "another-import", "test")
+        assert not application.can_close_window(sibling.window_id)
+        with pytest.raises(ArchiveBusyError, match="last window"):
+            application.close_window(sibling.window_id)
+        assert {window.window_id for window in application.windows()} == {sibling.window_id, unrelated.window_id}
+    finally:
+        refreshed = application.finish_ingest(document.descriptor.document_id, job.operation_id, published=True)
+    assert refreshed == (sibling.window_id,)
+    assert not lease.acquired
+    assert application.can_close_window(sibling.window_id)
+    application.close_window(sibling.window_id)
 
 
 def test_child_windows_and_ingest_keep_a_document_alive(tmp_path: Path) -> None:

@@ -1,6 +1,18 @@
 # Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved.
 
-"""Typed, append-by-run ingest status files shared by the CLI and GUI."""
+"""Typed, append-by-run ingest status files shared by the CLI and GUI.
+
+Purpose: Persist typed progress and history independently for each ingest run.
+
+How it works:
+Atomically publish snapshots and read current/stale/completed status for concurrent UI
+consumers.
+
+Fundamental dependents:
+
+- ``__main__``: workers publish progress through this shared run format.
+- ``gui_app``: status lines and ingest-history windows interpret that same format.
+"""
 
 from __future__ import annotations
 
@@ -21,6 +33,7 @@ STATUS_PREFIX = "ingest-"
 STALE_AFTER_SECONDS = 5
 STATUS_REFRESH_SECONDS = 1
 IngestState = Literal["running", "completed", "interrupted", "disk-full", "failed", "stale"]
+WorkerOperation = Literal["downloading", "importing", "processing"]
 
 
 class YearProgress(BaseModel):
@@ -50,6 +63,8 @@ class IngestWorkerStatus(BaseModel):
     last_path: str | None = None
     files_processed: int = 0
     messages_processed: int = 0
+    operation: WorkerOperation | None = None
+    processing_jobs_completed: int | None = None
 
 
 class IngestStatus(BaseModel):
@@ -89,6 +104,12 @@ class IngestStatus(BaseModel):
     years: list[YearProgress]
     failure_detail: str | None = None
     scan_policy: Literal["clamav", "not-scanned", "unknown"] = "unknown"
+    processing_active: bool = False
+    processing_jobs_completed: int = 0
+    processing_job_id: int | None = None
+    processing_processor: str | None = None
+    activity_kind: Literal["source", "processing"] | None = None
+    saved_messages_remaining: int | None = Field(default=None, ge=0)
 
     @field_validator("started_at", "updated_at", "completed_at")
     @classmethod

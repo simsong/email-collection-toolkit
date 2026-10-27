@@ -1,6 +1,17 @@
 # Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved.
 
-"""Acquire public validation corpora and build independently verified Mailbags."""
+"""Acquire public validation corpora and build independently verified Mailbags.
+
+Purpose: Acquire and test public validation corpora reproducibly.
+
+How it works:
+Verify downloads/extraction, run real ingest and portable verification, and retain typed
+comparison evidence.
+
+Fundamental dependents:
+
+- ``validation/aws/launcher``: cloud corpus runs depend on this standalone CLI contract.
+"""
 
 from __future__ import annotations
 

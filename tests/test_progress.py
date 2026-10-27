@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 import queue
+import multiprocessing
 import os
 import re
 import select
@@ -16,7 +17,7 @@ import threading
 import time
 import traceback
 from collections import Counter
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime
 from pathlib import Path
@@ -26,6 +27,7 @@ import pytest
 from mailarchiver.__main__ import (
     ANSI_RESET,
     CLAMAV_START_PHASE,
+    IngestInterrupted,
     PROGRESS_REFRESH_SECONDS,
     TOP_LINE_STYLE,
     ProgressReporter,
@@ -36,6 +38,7 @@ from mailarchiver.__main__ import (
     overall_progress,
     refresh_index_line,
     run_file_workers,
+    start_ingest_scanner,
 )
 from mailarchiver.ingest_status import (
     IngestStatusFile,
@@ -44,6 +47,12 @@ from mailarchiver.ingest_status import (
 )
 from mailarchiver.plugin_api import ProgressEvent
 from mailarchiver.sources import SourceInventory
+from mailarchiver.processing.api import ProcessingObject
+from mailarchiver.processing.registry import fingerprint, load_processors
+from mailarchiver.processing.runtime import run
+from mailarchiver.processing.store import connect, enqueue, submit
+from mailarchiver.processing_progress import saved_messages_remaining
+from tests.test_processing import MESSAGE, plugin
 
 
 def test_overall_progress_uses_concurrent_source_bytes_for_percentage_and_eta() -> None:
@@ -228,6 +237,7 @@ def test_framework_renders_provider_phase_and_message_progress() -> None:
         name="mailfile_0",
         target=progress.record_plugin_event,
         args=(event, Path("Provider Inbox")),
+        kwargs={"source_kind": "imap"},
     )
     producer.start()
     producer.join()
@@ -235,6 +245,7 @@ def test_framework_renders_provider_phase_and_message_progress() -> None:
 
     worker = progress.state.workers[0]
     assert worker.phase == "fetching provider messages"
+    assert worker.operation == "downloading"
     assert (worker.activity_done, worker.activity_total, worker.activity_unit) == (25, 100, "messages")
     assert "25/100 messages" in progress._worker_line(worker, 120)
 
@@ -256,6 +267,66 @@ def test_clamav_preflight_is_repeated_before_workers_start(capsys: pytest.Captur
     assert len(lines) >= 2
     assert all("processed=0 active_workers=0 peak_workers=0" in line for line in lines)
     assert all("workers=1:idle:- 2:idle:-" in line for line in lines)
+
+
+def test_blocking_clamav_preflight_keeps_live_status(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """SCANNING: blocking preflight longer than the stale threshold retains a live heartbeat."""
+    from mailarchiver import clamav_update
+    from mailarchiver.clamav_definitions import DefinitionSet
+    from mailarchiver.ingest_status import STALE_AFTER_SECONDS
+
+    original = clamav_update.definitions_for_scan
+    preparing = threading.Event()
+    started = time.monotonic()
+    def delayed_definitions(definitions: DefinitionSet, *, now: datetime | None = None,
+                            status_callback: Callable[[], None] | None = None) -> DefinitionSet:
+        # The external resource boundary can block without issuing callbacks.
+        preparing.set()
+        try:
+            time.sleep(STALE_AFTER_SECONDS + 1)
+            return original(definitions, now=now, status_callback=status_callback)
+        finally:
+            preparing.clear()
+    monkeypatch.setattr(clamav_update, "definitions_for_scan", delayed_definitions)
+    archive = tmp_path / "archive"
+    reporter = ProgressReporter(status_file=IngestStatusFile(archive, "ingest-blocking-startup"),
+                                archive=archive, run_pk=1, terminal=False)
+    reporter.set_phase(CLAMAV_START_PHASE)
+    owner = threading.get_ident()
+    observed: list[datetime] = []
+    def refresh() -> None:
+        assert threading.get_ident() == owner
+        assert read_ingest_history(archive).statuses[0].state == "running"
+        reporter.refresh()
+        snapshot = read_ingest_history(archive).statuses[0]
+        assert snapshot.state == "running"
+        assert snapshot.phase.startswith(CLAMAV_START_PHASE)
+        if preparing.is_set() and time.monotonic() - started > STALE_AFTER_SECONDS:
+            observed.append(snapshot.updated_at)
+    scanner = start_ingest_scanner(refresh, 2)
+    try:
+        assert observed
+        assert scanner.scan_sample(b"From: fixture@example.test\n\nClean fixture.\n").status == "clean"
+        assert scanner.scan_sample(clamav_update.EICAR).status == "infected"
+    finally:
+        scanner.__exit__()
+    assert scanner.process is None and scanner.runtime is None
+    reporter.finish("completed")
+
+
+def test_cancelled_ingest_scanner_startup_reaps_native_worker() -> None:
+    """SCANNING: cancelling the startup future releases its real owned scanner process."""
+    prior = {child.pid for child in multiprocessing.active_children()}
+    cancelled: list[int | None] = []
+    def cancel() -> None:
+        children = [child.pid for child in multiprocessing.active_children() if child.pid not in prior]
+        if children:
+            cancelled.extend(children)
+            raise IngestInterrupted("suspend during scanner startup")
+    with pytest.raises(IngestInterrupted, match="suspend during scanner startup"):
+        start_ingest_scanner(cancel, 2)
+    assert cancelled
+    assert not {child.pid for child in multiprocessing.active_children()} - prior
 
 
 def test_file_worker_pool_runs_no_more_than_requested_mailfiles() -> None:
@@ -430,6 +501,123 @@ def test_numbered_worker_rows_are_main_rendered_without_wrapping(capsys: pytest.
     rendered = [part.split("\n", 1)[0] for part in output.split("\r\x1b[2K")[1:]]
     plain = [re.sub(r"\x1b\[[0-9;]*m", "", line) for line in rendered]
     assert plain and all(len(line) <= progress.terminal_columns for line in plain)
+
+
+def test_processor_recovery_publishes_live_activity_and_finished_jobs(tmp_path: Path) -> None:
+    """Recovery progress: real processor work appears before completion, without inventing imported mail."""
+    plugin(tmp_path, "gate", 'while not (item.archive.path / f"release-{item.job_id}").exists():\n'
+           '    item.check_cancelled()\n    time.sleep(0.01)\nreturn ProcessingResult()', timeout=5)
+    plugins = load_processors((tmp_path,))
+    archive = tmp_path / "archive"
+    with connect(archive, create=True) as database:
+        submit(database, archive, MESSAGE, fingerprint(plugins))
+        second = tmp_path / "second.eml"
+        second.write_bytes(b"Subject: second\n\nother body")
+        submit(database, archive, second, fingerprint(plugins))
+        third = tmp_path / "third.eml"
+        third.write_bytes(b"Subject: third\n\nthird body")
+        submit(database, archive, third, fingerprint(plugins))
+    (archive / "release-3").touch()
+    started = datetime.now(UTC)
+    status_file = IngestStatusFile(archive, new_status_id(started, 1, os.getpid()))
+    progress = ProgressReporter(worker_count=2, status_file=status_file, archive=archive, run_pk=1, terminal=False)
+    progress.set_phase("Processing saved mail", activity_kind="processing")
+    snapshots = []
+    partial_snapshots = []
+
+    def record(item: ProcessingObject, processor: str, finished: bool, worker: int) -> None:
+        progress.record_processing(item, processor, finished, worker)
+        if (processor == "gate" and not finished) or (finished and worker == 1):
+            progress.record_worker("ingesting", Path("derived-message"), 0, 0)
+
+    def recover(_unused: int) -> None:
+        try:
+            with connect(archive) as database:
+                run(database, plugins, workers=2, progress=record)
+        finally:
+            progress.finish_processing()
+
+    def display() -> None:
+        progress.display(None)
+        status = read_ingest_history(archive).statuses[0]
+        if status.processing_active and status.active_workers == 2 and all(worker.phase == "processing gate" for worker in status.workers):
+            snapshots.append(status)
+            (archive / "release-1").touch()
+        elif status.processing_jobs_completed == 2 and status.active_workers == 1:
+            partial_snapshots.append(status)
+            (archive / "release-2").touch()
+
+    run_file_workers([0], 1, recover, threading.Event(), display)
+    progress.finish("completed")
+    assert snapshots
+    active = snapshots[0]
+    assert active.phase == "Processing saved mail"
+    assert active.processing_job_id in (1, 2) and active.processing_jobs_completed == 0
+    assert active.active_workers == 2 and active.workers[0].phase == "processing gate"
+    assert active.workers[0].activity_unit == "jobs" and active.eta == "calculating"
+    assert active.activity_kind == "processing"
+    assert [worker.processing_jobs_completed for worker in active.workers] == [0, 0]
+    assert all(worker.operation == "processing" for worker in active.workers)
+    assert partial_snapshots and partial_snapshots[0].processing_active
+    assert partial_snapshots[0].processing_job_id == 2 and partial_snapshots[0].processing_processor == "gate"
+    assert [worker.processing_jobs_completed for worker in partial_snapshots[0].workers] == [2, 0]
+    final = read_ingest_history(archive).statuses[0]
+    assert final.processing_jobs_completed == 3 and not final.processing_active
+    assert final.processing_job_id is final.processing_processor is None
+    assert final.active_workers == 0 and final.workers[0].phase == "idle"
+    assert [worker.processing_jobs_completed for worker in final.workers] == [2, 1]
+    assert final.processed_messages == final.files_processed == final.counts.archived == 0
+
+
+def test_saved_message_backlog_deduplicates_parts_and_tracks_unfinished_work(tmp_path: Path) -> None:
+    """Desktop progress: count archived emails, including failed/blocked work, without counting future imports."""
+    archive = tmp_path / "archive"
+    with connect(archive, create=True) as database:
+        items: list[ProcessingObject] = []
+        for number, catalog_pk in enumerate((1, 2, None, 2)):
+            source = tmp_path / f"message-{number}.eml"
+            source.write_bytes(f"Subject: fixture {number}\n\nbody {number}\n".encode())
+            message_id = submit(database, archive, source, "fixture")
+            payload, = database.execute("SELECT item_json FROM jobs WHERE json_extract(item_json,'$.message_id')=?",
+                                        (message_id,)).fetchone()
+            item = ProcessingObject.model_validate_json(payload)
+            items.append(item)
+            with database:
+                database.execute("INSERT INTO message_state(message_id,root_item_json,catalog_message_pk) VALUES(?,?,?)",
+                                 (message_id, payload, catalog_pk))
+        with database:
+            database.execute("UPDATE jobs SET status='completed' WHERE json_extract(item_json,'$.message_id')<>?", (items[2].message_id,))
+            enqueue(database, items[0].model_copy(update={"pipeline": "message"}), "fixture")
+            parent, = database.execute("SELECT max(job_id) FROM jobs").fetchone()
+            for part in (1, 2):
+                enqueue(database, items[0].model_copy(update={"pipeline": "content", "part_path": (part,)}), "fixture", parent)
+            database.execute("UPDATE jobs SET status='failed' WHERE job_id=?", (parent,))
+            for item in (items[1], items[3]):
+                enqueue(database, item.model_copy(update={"pipeline": "content"}), "fixture")
+        assert saved_messages_remaining(database) == 2
+        reporter = ProgressReporter(status_file=IngestStatusFile(archive, "ingest-remaining"),
+                                    archive=archive, run_pk=1, terminal=False)
+        reporter.track_saved_messages(lambda: saved_messages_remaining(database))
+        reporter.set_phase("Processing saved mail", activity_kind="processing")
+        assert read_ingest_history(archive).statuses[0].saved_messages_remaining == 2
+        with database:
+            database.execute("UPDATE jobs SET status='completed' WHERE json_extract(item_json,'$.message_id')=?",
+                             (items[1].message_id,))
+        assert saved_messages_remaining(database) == 2  # A second processing identity names the same archived email.
+        with database:
+            database.execute("UPDATE jobs SET status='completed' WHERE json_extract(item_json,'$.message_id')=?",
+                             (items[3].message_id,))
+        assert saved_messages_remaining(database) == 1
+        time.sleep(1.01)
+        reporter.refresh()
+        assert read_ingest_history(archive).statuses[0].saved_messages_remaining == 1
+        with database:
+            database.execute("UPDATE jobs SET status='aborted' WHERE json_extract(item_json,'$.message_id')=?",
+                             (items[0].message_id,))
+        assert saved_messages_remaining(database) == 0
+        reporter.finish("completed")  # Completion forces a final sample, without waiting another second.
+        assert read_ingest_history(archive).statuses[0].saved_messages_remaining == 0
+        assert database.execute("SELECT count(*) FROM jobs WHERE status='pending'").fetchone()[0] == 1
 
 
 def test_progress_status_file_preserves_final_run_statistics(tmp_path: Path) -> None:

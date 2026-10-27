@@ -1,26 +1,41 @@
 # Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved.
 
-"""Expose the read-only archive services through a macOS-first pywebview shell."""
+"""Host archive documents, ingest workflows, search, and reading in pywebview.
+
+Purpose: Host archive documents, importing, search and viewing in pywebview.
+
+How it works:
+Bind native windows and menus to shared archive services, typed bridges and cooperative job
+shutdown.
+
+Fundamental dependents:
+
+- ``desktop_entry``: packaged Windows startup uses this desktop lifecycle.
+- ``self_test``: native application acceptance exercises its real windows and bridges.
+"""
 
 from __future__ import annotations
 
 
 import argparse
+from html import escape
 import json
 import logging
 import os
 import shutil
 import signal
+import sqlite3
 import sys
 import tempfile
 import time
-from concurrent.futures import Future, ThreadPoolExecutor
+from concurrent.futures import CancelledError, Future, ThreadPoolExecutor
 from contextlib import contextmanager, nullcontext
 from collections.abc import Callable, Iterator
 from datetime import UTC, datetime
 from importlib import import_module
 from importlib.metadata import version
 from pathlib import Path
+from queue import Empty, SimpleQueue
 from threading import Event, Lock, RLock, Thread
 from typing import Any, Literal
 from urllib.parse import urlencode, urlsplit
@@ -34,9 +49,13 @@ from webview.menu import Menu, MenuAction, MenuSeparator
 from .file_drag import FILE_DRAGS, install_file_drag
 from .desktop_platform import copy_windows_text, open_export, open_external_url, refresh_windows_menu, startup_error, windows_webview
 from .identity import APPLICATION_NAME
-from .updates import UpdateService, UpdateStatus, default_channel
+from .build_info import BUILD_INFO, BuildInfo
+from .worker_preferences import WorkerPreferences, WorkerSettings, worker_argument
+from .processor_graph import ProcessorGraphStatus, processor_graph
+from .updates import UpdateChannel, UpdateService, UpdateStatus, default_channel
 from .release_versions import release_metadata
-from .sparkle import SparkleBackend, show_preferences, start_installed_updater
+from .sparkle import SparkleBackend, start_installed_updater
+from .macos_preferences import MacOSPreferences
 from .winsparkle import WinSparkleBackend
 from .__main__ import IngestInterrupted, IngestOutcome, IngestRequest, run_ingest
 from .application import (
@@ -48,6 +67,7 @@ from .application import (
 )
 from .scanner import CLAMAV_DOWNLOAD_URL, UNSCANNED_WARNING, ScannerAvailability, scanner_availability
 from .configuration import GuiConfiguration, application_configuration
+from .gui_default_lists import DefaultListsApi
 from .document_options import DocumentOptions, OwnerRulesState
 from .owner_rules import OwnerRules
 from .archive_config import (
@@ -55,9 +75,9 @@ from .archive_config import (
     remember_import_directory,
 )
 from .plugin_api import PluginManifest
-from .gui_processing import picker_page, registered_acquisition_plugins, registered_processors, resume_request, save_identity, unfinished_work
+from .gui_processing import abort_processing, picker_page, picker_search, PickerSearchRequest, plugin_inventory, remember_interrupted_request, resume_request, save_identity, source_label, unfinished_work
 from .processing.api import ProcessorManifest
-from .processing.identities import IdentityFilter, ManualDecision
+from .processing.identities import IdentityFilter, IdentityMessages, ManualDecision
 from .gui_service import (
     MessagePreview,
     MessageView,
@@ -80,8 +100,8 @@ from .gui_service import (
     write_messages_zip,
 )
 from .ingest_status import (
-    IngestHistory,
     IngestStatus,
+    IngestStatusReadError,
     latest_ingest_status,
     read_ingest_history,
 )
@@ -93,10 +113,30 @@ GUI_DIRECTORY = (Path(getattr(sys, "_MEIPASS")) if getattr(sys, "frozen", False)
 E2E_DRIVER = Path(__file__).parents[2] / "e2e_tests" / "gui_driver.js"
 DEFAULT_PAGE_SIZE = 100
 APPLICATION_ICON = GUI_DIRECTORY / "icons" / "rainbow-post-192.png"
+APPLICATION_VERSION = version("mailarchiver")
 EXTERNAL_LINK_SCHEMES = frozenset({"http", "https", "mailto"})
 INTERNET_CHECK_URL = "https://www.example.com/"
 INTERNET_CHECK_INTERVAL_SECONDS = 30.0
 QUIT_TIMEOUT_SECONDS = 5.0
+HELP_LINKS = (
+    ("Community Forum", "https://github.com/simsong/email-collection-toolkit/discussions"),
+    ("Contact Support", "https://github.com/simsong/email-collection-toolkit/issues"),
+    ("User Manual", "https://simsong.github.io/email-collection-toolkit/manual/"),
+    ("Source Code", "https://github.com/simsong/email-collection-toolkit"),
+)
+
+
+def license_html() -> str:
+    """Display the packaged project license, falling back to the source checkout."""
+    path = GUI_DIRECTORY / "LICENSE"
+    if not path.is_file():
+        path = GUI_DIRECTORY.parent / "LICENSE"
+    text = escape(path.read_text(encoding="utf-8"))
+    return ('<!doctype html><html lang="en"><meta charset="utf-8">'
+            '<meta name="viewport" content="width=device-width, initial-scale=1">'
+            '<title>License</title><body style="margin:24px">'
+            '<h1>License</h1><pre style="white-space:pre-wrap;overflow-wrap:anywhere">'
+            f'{text}</pre></body></html>')
 
 
 def owner_rules_text(include: str, exclude: str) -> OwnerRules:
@@ -125,6 +165,7 @@ class ApplicationMetadata(BaseModel):
     name: str
     version: str
     copyright: str
+    build: BuildInfo = BUILD_INFO
 
 
 class ApplicationNotice(BaseModel):
@@ -147,10 +188,31 @@ class GuiStatus(BaseModel):
     write_available: bool = True
     configuration: GuiConfiguration
     notices: list[ApplicationNotice] = Field(default_factory=list)
+    archive_status_messages: list[str] = Field(default_factory=list)
+
+
+class PreviewRequest(BaseModel):
+    archive: Path
+    generation: int
+    message_pks: list[int]
 
 
 class GuiIngestOverview(BaseModel):
     status: IngestStatus | None = None
+    active: bool = False
+
+
+class GuiIngestStatus(IngestStatus):
+    source_labels: list[str]
+
+
+class GuiIngestHistory(BaseModel):
+    statuses: list[GuiIngestStatus]
+    errors: list[IngestStatusReadError]
+    starting: bool = False
+    active: bool = False
+    suspending: bool = False
+    can_resume: bool = False
 
 
 class DragExport(BaseModel):
@@ -186,6 +248,7 @@ class AboutIngestStatus(BaseModel):
 class AboutStatus(BaseModel):
     acquisition_plugins: list[PluginManifest] = Field(default_factory=list)
     processors: list[ProcessorManifest] = Field(default_factory=list)
+    plugin_inventory_error: str | None = None
     metadata: ApplicationMetadata
     disk_path: str
     disk_free_bytes: int
@@ -367,9 +430,9 @@ def application_icon_path() -> Path:
 
 IMPORT_CONFIRMATION_WIDTH = 560
 QUIT_IMPORT_MESSAGE = (
-    "Quitting will stop active ingest and content processing. Reopen the archive and use "
+    "Quitting will suspend active ingest and content processing. Reopen the archive and use "
     "Continue Processing to resume. Messages already archived will not be imported twice.\n\n"
-    "Each import will stop after its current message. The application will quit within five seconds; "
+    "Each import will pause after its current message. The application will quit within five seconds; "
     "unfinished work will be recovered when you resume."
 )
 
@@ -553,8 +616,29 @@ class IngestWindowApi:
 
     def history(self) -> dict[str, Any]:
         if self.archive is None:
-            return IngestHistory(statuses=[], errors=[]).model_dump(mode="json")
-        return read_ingest_history(self.archive).model_dump(mode="json")
+            return GuiIngestHistory(statuses=[], errors=[]).model_dump(mode="json")
+        history = read_ingest_history(self.archive)
+        statuses = [GuiIngestStatus(**status.model_dump(), source_labels=[source_label(self.archive, root)
+                    for root in status.source_roots]) for status in history.statuses]
+        job = self._document.ingest_job if self._document is not None else None
+        starting = bool(job is not None and not job.finished.is_set()
+                        and not any(status.started_at >= job.started_at for status in statuses))
+        resumable = bool(job is None and self._application is not None
+                         and not (statuses and statuses[0].state == "running")
+                         and unfinished_work(self.archive).incomplete)
+        return GuiIngestHistory(statuses=statuses, errors=history.errors, starting=starting,
+                                active=job is not None, suspending=bool(job and job.stop.is_set()),
+                                can_resume=job is None and resumable and self._application is not None).model_dump(mode="json")
+
+    def suspend_import(self) -> bool:
+        if self._application is None or self._document is None:
+            return False
+        return self._application.suspend_import(self._document)
+
+    def resume_import(self) -> bool:
+        if self._application is None or self._document is None:
+            return False
+        return self._application.resume_import(self._document)
 
     def antivirus(self) -> dict[str, object]:
         return scanner_availability().model_dump(mode="json")
@@ -596,6 +680,16 @@ class IdentityPickerApi:
             save_identity(self.archive, ManualDecision.model_validate(decision))
         return True
 
+    def search(self, selection: dict[str, Any]) -> dict[str, Any]:
+        result = picker_search(self.archive, self.kind, PickerSearchRequest.model_validate(selection))
+        parameters = [("query", result.query)]
+        if result.identity_messages is not None:
+            parameters.append(("identity-messages", result.identity_messages.model_dump_json()))
+        if self.application is not None:
+            document = next(document for document in self.application.controller.documents() if document.path == self.archive)
+            self.application.create_search_window(self.application.controller.new_search_window(document), parameters=parameters)
+        return result.model_dump(mode="json")
+
 
 class AboutApi:
     """Application health and explicitly requested definition refresh."""
@@ -606,12 +700,29 @@ class AboutApi:
     def status(self) -> dict[str, Any]:
         return self._application.about_status().model_dump(mode="json")
 
+    def show_processor_graph(self) -> bool:
+        return self._application.show_processor_graph()
+
     def update_definitions(self) -> dict[str, Any]:
         from .clamav_update import refresh_definitions
         with self._application.definitions_activity():
             result = refresh_definitions()
         self._application.add_notice("information", f"Virus definitions updated: {result.versions}")
         return result.model_dump(mode="json")
+
+
+class ProcessorGraphApi:
+    """Read the same active-archive registry as About, without executing plugins."""
+
+    def __init__(self, application: "PyWebViewApplication") -> None:
+        self._application = application
+
+    def status(self) -> dict[str, Any]:
+        active = self._application.controller.active_document
+        archive = active.path if active else None
+        inventory = plugin_inventory(archive)
+        return ProcessorGraphStatus(context=str(archive) if archive else "Built-in processors",
+            pipelines=processor_graph(tuple(inventory.processors)), error=inventory.error).model_dump(mode="json")
 
 
 
@@ -686,7 +797,7 @@ class WindowBridge:
 
 
 SEARCH_BRIDGE_METHODS = (
-    "processing_work", "resume_processing", "open_picker",
+    "processing_work", "resume_processing", "abort_processing", "open_picker",
     "status", "activate", "search", "suggestions", "ingest_overview", "open_ingest_window",
     "mailbox_tree", "saved_filter_sets", "save_filter_set", "rename_filter_set", "delete_filter_set",
     "open_message_window", "request_previews", "take_previews", "message", "part", "attachment",
@@ -735,6 +846,8 @@ class GuiApi:
         self._preview_pending: set[int] = set()
         self._preview_error: str | None = None
         self._preview_generation = 0
+        self._preview_futures: dict[Future[list[MessagePreview]], PreviewRequest] = {}
+        self._preview_closed = False
         self._tree_cache: dict[bool, list[dict[str, Any]]] = {}
         self._message_count: int | None = None
         self._ingest_window_lock = Lock()
@@ -747,6 +860,8 @@ class GuiApi:
         """Discard derived view caches after a writer may have published."""
         with self._preview_lock:
             self._preview_generation += 1
+            for future in self._preview_futures:
+                future.cancel()
             self._preview_cache.clear()
             self._preview_pending.clear()
             self._preview_error = None
@@ -775,6 +890,7 @@ class GuiApi:
             opened_in_new_window=opened_in_new_window,
             configuration=application_configuration().gui,
             notices=self.application.notices() if self.application else [],
+            archive_status_messages=["Currently only .txt email attachments are indexed"] if ready else [],
         ).model_dump(mode="json")
 
     def activate(self) -> bool:
@@ -796,6 +912,11 @@ class GuiApi:
         request = resume_request(self._archive(), ingest, content)
         return self.application.start_import(self, [], processing_request=request)
 
+    def abort_processing(self, status_ids: list[str]) -> bool:
+        with self.application.writer_activity() if self.application else nullcontext():
+            abort_processing(self._archive(), status_ids)
+        return True
+
     def open_picker(self, kind: str) -> bool:
         if kind not in ("name", "institution"):
             raise ValueError("Unknown picker")
@@ -804,8 +925,11 @@ class GuiApi:
         return self.application.open_picker(self.document, kind)
 
     def ingest_overview(self) -> dict[str, Any]:
+        if self.application is not None:
+            self.application._reap_tasks()
         status = latest_ingest_status(self._archive()) if self.archive and _is_archive(self.archive) else None
-        return GuiIngestOverview(status=status).model_dump(mode="json")
+        active = bool(self.document and self.document.ingest_job) or bool(status and status.state == "running")
+        return GuiIngestOverview(status=status, active=active).model_dump(mode="json")
 
     def open_ingest_window(self, status_id: str | None = None) -> bool:
         """Open or focus the ingest browser shared by this archive document."""
@@ -883,10 +1007,12 @@ class GuiApi:
         search_attachments: bool = False,
         mailbox_selections: list[str] | None = None,
         limit: int = DEFAULT_PAGE_SIZE,
+        identity_messages: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         page = search_page(
             self._archive(), query, offset, limit, sort_by, direction,
             search_attachments, mailbox_selections,
+            IdentityMessages.model_validate(identity_messages) if identity_messages is not None else None,
         )
         if page.error is not None:
             return page.model_dump(mode="json")
@@ -904,9 +1030,11 @@ class GuiApi:
         query: str,
         search_attachments: bool = False,
         mailbox_selections: list[str] | None = None,
+        identity_messages: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         return search_count(
-            self._archive(), query, search_attachments, mailbox_selections
+            self._archive(), query, search_attachments, mailbox_selections,
+            identity_messages=IdentityMessages.model_validate(identity_messages) if identity_messages is not None else None,
         ).model_dump(mode="json")
 
     def suggestions(self, query: str, limit: int = 20) -> dict[str, Any]:
@@ -942,42 +1070,45 @@ class GuiApi:
         if not message_pks or len(message_pks) > DEFAULT_PAGE_SIZE:
             raise ValueError(f"request between 1 and {DEFAULT_PAGE_SIZE} message previews")
         with self._preview_lock:
-            requested = set(message_pks)
-            missing = requested - self._preview_cache.keys() - self._preview_pending
-            self._preview_pending.update(missing)
+            if self._preview_closed:
+                raise ValueError("The preview window is closed.")
+            self._collect_previews()
+            missing = set(message_pks) - self._preview_cache.keys() - self._preview_pending
             self._preview_error = None
-        if missing:
-            archive = self._archive()
-            generation = self._preview_generation
-            self._preview_executor.submit(self._load_previews, archive, sorted(missing), generation)
+            if missing:
+                request = PreviewRequest(archive=self._archive(), generation=self._preview_generation,
+                                         message_pks=sorted(missing))
+                future = self._preview_executor.submit(message_previews, request.archive, request.message_pks)
+                self._preview_futures[future] = request
+                self._preview_pending.update(missing)
         return True
 
     def take_previews(self, message_pks: list[int]) -> dict[str, Any]:
         requested = set(message_pks)
         with self._preview_lock:
+            self._collect_previews()
             previews = [self._preview_cache[message_pk] for message_pk in message_pks if message_pk in self._preview_cache]
-            batch = PreviewBatch(
-                previews=previews,
-                pending=bool(requested & self._preview_pending),
-                error=self._preview_error,
-            )
+            batch = PreviewBatch(previews=previews, pending=bool(requested & self._preview_pending),
+                                 error=self._preview_error)
         return batch.model_dump(mode="json")
 
-    def _load_previews(self, archive: Path, message_pks: list[int], generation: int) -> None:
-        try:
-            previews = message_previews(archive, message_pks)
-            with self._preview_lock:
-                if generation == self._preview_generation and archive == self.archive:
+    def _collect_previews(self) -> None:
+        """Called with the preview lock; workers never mutate window state."""
+        for future, request in tuple(self._preview_futures.items()):
+            if not future.done():
+                continue
+            del self._preview_futures[future]
+            current = request.generation == self._preview_generation and request.archive == self.archive
+            try:
+                previews = future.result()
+                if current:
                     self._preview_cache.update((preview.message_pk, preview) for preview in previews)
-        except Exception as error:  # pylint: disable=broad-exception-caught
-            logging.getLogger(__name__).debug("Best-effort operation failed", exc_info=True)
-            with self._preview_lock:
-                if generation == self._preview_generation:
+            except Exception as error:  # pylint: disable=broad-exception-caught
+                if current:
                     self._preview_error = f"{type(error).__name__}: {error}"
-        finally:
-            with self._preview_lock:
-                if generation == self._preview_generation:
-                    self._preview_pending.difference_update(message_pks)
+            finally:
+                if current:
+                    self._preview_pending.difference_update(request.message_pks)
 
     def message(self, message_pk: int) -> dict[str, Any]:
         message = describe_message(self._archive(), message_pk)
@@ -1195,6 +1326,12 @@ class GuiApi:
         return True
 
     def close(self, *_args: object) -> None:
+        with self._preview_lock:
+            self._preview_closed = True
+            for future in self._preview_futures:
+                future.cancel()
+            self._preview_futures.clear()
+            self._preview_pending.clear()
         self._preview_executor.shutdown(wait=False, cancel_futures=True)
         if self.application is None or self.document is None:
             with self._ingest_window_lock:
@@ -1386,40 +1523,80 @@ class PyWebViewApplication:
         asset_server: LoopbackAssetServer | None = None,
         *,
         exit_process: Callable[[int], object] = os._exit,
+        workers_override: int | None = None,
     ) -> None:
         self.controller = controller
+        self._workers_override = workers_override
+        self.worker_settings()  # Reject an invalid launch override before opening windows or starting tasks.
         self.asset_server = asset_server
         self._exit_process = exit_process
-        Thread(target=cleanup_stale_exports, name="mailarchiver-stale-exports", daemon=True).start()
         self._apis: dict[str, GuiApi] = {}
         self._ingest_apis: dict[str, IngestWindowApi] = {}
         self._options_apis: dict[str, DocumentOptionsApi] = {}
+        self._default_lists_apis: dict[str, DefaultListsApi] = {}
         self._native_search_ids: dict[str, str] = {}
         self._native_child_ids: dict[str, str] = {}
         self._about_api = AboutApi(self)
         self._about_window: Any = None
+        self._license_window: Any = None
+        self._processor_graph_window: Any = None
         self._reader_window: Any = None
         self._setup_api: SetupApi | None = None
         self._setup_visible = False
         self._about_visible = False
         self._notices: list[ApplicationNotice] = []
+        self._pending_notices: SimpleQueue[ApplicationNotice] = SimpleQueue()
         self._connectivity: ConnectivityMonitor | None = None
         self._menu_observer: Any = None
         self._lock = RLock()
         self._quitting = False
         self._quit_done = Event()
-        self._import_threads: list[Thread] = []
+        self._task_executor = ThreadPoolExecutor(max_workers=8, thread_name_prefix="mailarchiver-command")
+        self._tasks: dict[Future[None], str] = {}
+        self._import_futures: set[Future[None]] = set()
         self._writers: set[Event] = set()
         self._updates_started = False
         self._updating = False
         self._definition_updates = 0
         self._sparkle: SparkleBackend | WinSparkleBackend | None = None
+        self._preferences_window: MacOSPreferences | None = None
+        self._windows_preferences_window: Any = None
         installed_version = application_metadata().version
         self.updates = UpdateService(
             UpdateStatus(version=installed_version, channel=controller.preferences.update_channel or default_channel(installed_version),
                          automatic_checks=controller.preferences.automatic_update_checks),
             self.reserve_update_install, self.cancel_update_install, self.notify_update_deferred,
         )
+
+        self._submit_task("stale export cleanup", cleanup_stale_exports)
+
+    def _submit_task(self, name: str, operation: Callable[[], None]) -> Future[None] | None:
+        """Retain finite command futures; deadline/owner monitors remain independent."""
+        with self._lock:
+            if self._quitting:
+                return None
+            future = self._task_executor.submit(operation)
+            self._tasks[future] = name
+            return future
+
+    def _reap_tasks(self) -> None:
+        with self._lock:
+            completed = [(future, self._tasks.pop(future)) for future in tuple(self._tasks) if future.done()]
+            self._import_futures.difference_update(future for future, _name in completed)
+        for future, name in completed:
+            try:
+                future.result()
+            except CancelledError:
+                pass
+            except BaseException as error:  # pylint: disable=broad-exception-caught
+                self.add_notice("error", f"{name} failed: {type(error).__name__}: {error}")
+        # Search ingest_overview polls this too, even when no About window exists.
+        while True:
+            try:
+                notice = self._pending_notices.get_nowait()
+            except Empty:
+                break
+            self.add_notice(notice.severity, notice.message)
 
     @contextmanager
     def writer_activity(self) -> Iterator[None]:
@@ -1443,7 +1620,7 @@ class PyWebViewApplication:
                 return False
             if any(document.ingest_job for document in self.controller.documents()):
                 return False
-            if any(worker.is_alive() for worker in self._import_threads):
+            if any(not future.done() for future in self._import_futures):
                 return False
             if not WriterLease.reserve_update():
                 return False
@@ -1474,7 +1651,7 @@ class PyWebViewApplication:
         if self._sparkle is not None:
             self.add_notice("information", detail)
             if (self._definition_updates or any(document.ingest_job for document in self.controller.documents())
-                    or any(worker.is_alive() for worker in self._import_threads) or WriterLease.writers_active()):
+                    or any(not future.done() for future in self._import_futures) or WriterLease.writers_active()):
                 macos_alert("Update ready — archive work is active", detail, ("Wait for work to finish",))
 
     def start_updates(self) -> None:
@@ -1494,14 +1671,41 @@ class PyWebViewApplication:
             self.add_notice("warning", f"Updates unavailable: {error}")
 
     def show_update_preferences(self) -> None:
-        if sys.platform == "win32":
-            from .windows_update_preferences import show_windows_update_preferences
-            show_windows_update_preferences(self.updates,
-                lambda channel, automatic: self.controller.configure_updates(channel, automatic, strict=True))
-        else:
-            show_preferences(self.updates, self.controller.configure_updates)
+        try:
+            if sys.platform == "win32":
+                from .windows_update_preferences import show_windows_update_preferences
+                previous = self._windows_preferences_window
+                if previous is not None and not previous.events.closed.is_set():
+                    previous.restore()
+                    previous.show()
+                    return
+                window = show_windows_update_preferences(self.updates,
+                    lambda channel, automatic: self.controller.configure_updates(channel, automatic, strict=True),
+                    self.worker_settings, self.save_preferences, lambda: self._quitting)
+                self._windows_preferences_window = window
+
+                def closed(*_args: object) -> None:
+                    if self._windows_preferences_window is window:
+                        self._windows_preferences_window = None
+
+                window.events.closed += closed
+            else:
+                if self._preferences_window is None:
+                    self._preferences_window = MacOSPreferences(self.updates, self.save_preferences)
+                self._preferences_window.show(self.worker_settings())
+        except (OSError, ValueError) as error:
+            self.add_notice("warning", f"Could not save preferences: {error}")
+            return
         if self.controller.preference_error:
             self.add_notice("warning", self.controller.preference_error)
+
+    def worker_settings(self) -> WorkerSettings:
+        return WorkerSettings(preferences=self.controller.preferences.workers, command_line=self._workers_override)
+
+    def save_preferences(self, channel: UpdateChannel, automatic: bool, workers: WorkerPreferences | None) -> None:
+        if workers is not None and self._workers_override is not None:
+            raise ValueError(self.worker_settings().override_note)
+        self.controller.configure_preferences(channel, automatic, workers, strict=True)
 
     def asset_url(
         self, asset: str, parameters: list[tuple[str, str]] | None = None
@@ -1510,6 +1714,30 @@ class PyWebViewApplication:
             return self.asset_server.url(asset, parameters)
         suffix = f"?{urlencode(parameters)}" if parameters else ""
         return f"{GUI_DIRECTORY / asset}{suffix}"
+
+    def show_license(self) -> None:
+        """Open a selectable offline license; reuse it until its window closes."""
+        with self._lock:
+            if self._license_window is not None:
+                self._license_window.restore()
+                self._license_window.show()
+                return
+            window = webview.create_window(
+                f"License — {APPLICATION_NAME}", html=license_html(),
+                width=760, height=640, min_size=(400, 300),
+                text_select=True, menu=self.menu(),
+            )
+            if window is None:
+                raise RuntimeError("pywebview failed to create a license window")
+            self._license_window = window
+
+            def closed(*_args: object) -> None:
+                with self._lock:
+                    self._license_window = None
+                self._refresh_menus()
+
+            window.events.closed += closed
+        self._refresh_menus()
 
     def create_about_window(self, *, hidden: bool = False) -> None:
         """Retain the application anchor; show health on an explicit About request."""
@@ -1524,7 +1752,7 @@ class PyWebViewApplication:
         window = webview.create_window(
             f"About {APPLICATION_NAME}",
             self.asset_url("about.html"),
-            js_api=WindowBridge(self._about_api, ("status", "update_definitions")),
+            js_api=WindowBridge(self._about_api, ("status", "update_definitions", "show_processor_graph")),
             width=620,
             height=620,
             hidden=hidden,
@@ -1557,6 +1785,34 @@ class PyWebViewApplication:
         window.events.closed += closed
         self._refresh_menus()
 
+    def show_processor_graph(self) -> bool:
+        """Open or focus one read-only graph window using the current About registry."""
+        with self._lock:
+            if self._quitting:
+                return False
+            if self._processor_graph_window is not None:
+                self._processor_graph_window.restore()
+                self._processor_graph_window.show()
+                self._processor_graph_window.run_js("window.refreshProcessorGraph?.();")
+                return True
+            window = webview.create_window(
+                f"{APPLICATION_NAME} — Processor graph", self.asset_url("processor-graph.html"),
+                js_api=WindowBridge(ProcessorGraphApi(self), ("status",)),
+                width=1150, height=820, min_size=(640, 480), text_select=True, menu=self.menu(),
+            )
+            if window is None:
+                raise RuntimeError("Could not open processor graph")
+            self._processor_graph_window = window
+
+            def closed(*_args: object) -> None:
+                with self._lock:
+                    self._processor_graph_window = None
+                self._refresh_menus()
+
+            window.events.closed += closed
+        self._refresh_menus()
+        return True
+
     def add_notice(self, severity: Literal["information", "warning", "error"], message: str) -> None:
         notice = ApplicationNotice(severity=severity, message=message)
         with self._lock:
@@ -1570,6 +1826,7 @@ class PyWebViewApplication:
                     api.window.run_js(f"window.mailArchiverNotice?.({json.dumps(message)});")
 
     def notices(self) -> list[ApplicationNotice]:
+        self._reap_tasks()
         with self._lock:
             return [notice.model_copy(deep=True) for notice in self._notices]
 
@@ -1598,6 +1855,7 @@ class PyWebViewApplication:
                     status=latest_ingest_status(document.path),
                 )
             )
+        inventory = plugin_inventory(active.path if active else None)
         return AboutStatus(
             metadata=application_metadata(),
             disk_path=str(disk_path),
@@ -1606,11 +1864,12 @@ class PyWebViewApplication:
             notices=self.notices(),
             ingests=ingests,
             antivirus=scanner_availability(),
-            processors=registered_processors(active.path if active else None),
-            acquisition_plugins=registered_acquisition_plugins(active.path if active else None),
+            processors=inventory.processors,
+            acquisition_plugins=inventory.acquisition_plugins,
+            plugin_inventory_error=inventory.error,
         )
 
-    def create_search_window(self, session: SearchWindow) -> GuiApi:
+    def create_search_window(self, session: SearchWindow, *, parameters: list[tuple[str, str]] | None = None) -> GuiApi:
         document = self.controller.document(session.document_id)
         api = GuiApi(
             document.path,
@@ -1621,7 +1880,7 @@ class PyWebViewApplication:
         status = api.status()
         window = webview.create_window(
             _window_title(document, int(status["message_count"])),
-            self.asset_url("index.html"),
+            self.asset_url("index.html", parameters),
             js_api=WindowBridge(api, SEARCH_BRIDGE_METHODS),
             width=session.geometry.width,
             height=session.geometry.height,
@@ -1640,7 +1899,7 @@ class PyWebViewApplication:
             self._native_search_ids[window.uid] = session.window_id
         window.events.shown += lambda *_args: self.activate_window(session.window_id)
         window.events.restored += lambda *_args: self.activate_window(session.window_id)
-        window.events.closing += lambda *_args: self._can_close_search_window(session.window_id, window)
+        window.events.closing += lambda *_args: self._can_close_search_window(session.window_id)
         window.events.closed += lambda *_args: self._close_window(session.window_id)
         self._refresh_menus()
         return api
@@ -1871,19 +2130,7 @@ class PyWebViewApplication:
             f"Exclude: {', '.join(owner_rules.exclude) or '(none)'}\n\n{antivirus.detail}"
         )
         if not antivirus.configured:
-            choice = (
-                macos_alert(title, confirmation, ("Cancel", "Import Without Scanning", "Install ClamAV…"),
-                            body_width=IMPORT_CONFIRMATION_WIDTH)
-                if sys.platform == "darwin" else
-                (1 if anchor.create_confirmation_dialog(title, confirmation + "\n\nImport WITHOUT antivirus scanning?") else 0)
-            )
-            if choice == 2:
-                import webbrowser  # pylint: disable=import-outside-toplevel
-                webbrowser.open(CLAMAV_DOWNLOAD_URL)
-                return False
-            if choice != 1:
-                return False
-            return self.start_import(api, roots, owner_rules=owner_rules, owner_revision=owner_revision, scan_policy="not-scanned")
+            self.add_notice("warning", f"{destination}: antivirus unavailable; scanner errors will be recorded while importing continues.")
         confirmed = (
             macos_alert(title, confirmation, ("Import", "Cancel"), body_width=IMPORT_CONFIRMATION_WIDTH) == 0
             if sys.platform == "darwin" else anchor.create_confirmation_dialog(title, confirmation)
@@ -1909,6 +2156,7 @@ class PyWebViewApplication:
             archive=document.path, owner_names_file=owner_names, owner_rules=owner_rules,
             roots=[str(root) for root in roots], scan_policy=scan_policy,
         )
+        request = request.model_copy(update={"workers": self.worker_settings().effective_count})
         ingesting = bool(request.roots or (request.continue_ingest and unfinished_work(document.path).ingest))
         operation_id = uuid4().hex
         lease: WriterLease | None = None
@@ -1944,16 +2192,78 @@ class PyWebViewApplication:
             finally:
                 job.finished.set()
 
-        worker = Thread(
-            target=import_worker,
-            name=f"mailarchiver-import-{operation_id[:8]}",
-            daemon=False,
-        )
+        def cancelled(future: Future[None]) -> None:
+            if future.cancelled():
+                try:
+                    self.controller.finish_ingest(document.descriptor.document_id, operation_id, published=False)
+                except ValueError:
+                    pass
+                finally:
+                    lease.release()
+                    job.finished.set()
+
         with self._lock:
-            self._import_threads = [thread for thread in self._import_threads if thread.is_alive()]
-            self._import_threads.append(worker)
-            worker.start()
+            try:
+                future = self._submit_task(f"Import for {document.display_path}", import_worker)
+                if future is None:
+                    self.controller.finish_ingest(document.descriptor.document_id, operation_id, published=False)
+                    job.finished.set()
+                    return False
+                self._import_futures.add(future)
+                future.add_done_callback(cancelled)
+            except BaseException:
+                self.controller.finish_ingest(document.descriptor.document_id, operation_id, published=False)
+                job.finished.set()
+                raise
         return True
+
+    def suspend_import(self, document: ArchiveDocument) -> bool:
+        """Checkpoint this archive's work without closing any windows or quitting."""
+        with self._lock:
+            job = document.ingest_job
+            if job is None or self._quitting or self._updating:
+                return False
+            job.stop.set()
+        return True
+
+    def resume_import(self, document: ArchiveDocument) -> bool:
+        """Resume with the original request, including suspension during preflight."""
+        if document.path is None or document.ingest_job is not None:
+            return False
+        request = resume_request(document.path, True, True)
+        session = next((window for window in self.controller.windows()
+                        if window.document_id == document.descriptor.document_id), None)
+        api = (GuiApi(document.path, application=self, document=document, search_window=session) if session else
+               self.create_search_window(self.controller.new_search_window(document)))
+        return self.start_import(api, [], processing_request=request)
+
+    def reprocess_active_document(self) -> bool:
+        """Confirm a curator-requested replay, targeting the archive selected at invocation."""
+        api = self.active_api()
+        if api is None or api.document is None or api.document.path is None or api.window is None:
+            return False
+        document = api.document
+        archive = document.path
+        assert archive is not None
+        if document.ingest_job is not None:
+            self.add_notice("warning", "Suspend the active import or processing before reprocessing saved mail.")
+            return False
+
+        def reprocess() -> None:
+            request = resume_request(archive, False, True).model_copy(update={"reprocess": True})
+            title = "Reprocess saved mail?"
+            message = (
+                f"Archive: {document.display_path}\n\n"
+                "Rebuild extracted content, search indexes and automatic identity evidence from all saved mail. "
+                "This may take a very long time. Search results may be incomplete until it finishes.\n\n"
+                "Original archived messages and curator edits are preserved. No mail will be downloaded."
+            )
+            confirmed = (macos_alert(title, message, ("Reprocess", "Cancel")) == 0 if sys.platform == "darwin"
+                         else api.window.create_confirmation_dialog(title, message))
+            if confirmed and self.start_import(api, [], processing_request=request):
+                self.open_ingest_window(document)
+
+        return self._submit_task("Reprocess saved mail", reprocess) is not None
 
     def stop_imports_for_quit(self) -> tuple[IngestJob, ...]:
         """Called only after confirmation; prevent new imports and stop all existing jobs."""
@@ -1962,6 +2272,8 @@ class PyWebViewApplication:
             jobs = tuple(job for document in self.controller.documents() if (job := document.ingest_job) is not None)
             for job in jobs:
                 job.stop.set()
+            for future in tuple(self._import_futures):
+                future.cancel()
             return jobs
 
     def _run_import(
@@ -1984,6 +2296,13 @@ class PyWebViewApplication:
         except BaseException as caught:  # pylint: disable=broad-exception-caught
             logging.getLogger(__name__).debug("Best-effort operation failed", exc_info=True)
             error = caught
+            if isinstance(caught, IngestInterrupted):
+                try:
+                    if outcome.accepted_request is None:
+                        raise ValueError("Import stopped before its settings were accepted.")
+                    remember_interrupted_request(outcome.accepted_request)
+                except (OSError, sqlite3.Error, ValueError) as save_error:
+                    self.add_notice("error", f"Could not save suspended import settings: {save_error}")
         finally:
             try:
                 refresh = self.controller.finish_ingest(
@@ -1997,7 +2316,7 @@ class PyWebViewApplication:
                 self._refresh_search_windows(refresh)
                 self._refresh_menus()
         if isinstance(error, IngestInterrupted):
-            self.add_notice("information", f"Import stopped for {document.display_path}; import the same source again to continue.")
+            self.add_notice("information", f"Import suspended for {document.display_path}; use Continue Import in Ingests to resume.")
         elif error is None:
             self.add_notice("information", f"Import completed for {document.display_path}")
         else:
@@ -2077,14 +2396,31 @@ class PyWebViewApplication:
         return result.errors
 
     def close_active_window(self) -> bool:
+        if sys.platform == "darwin" and not import_module("Foundation").NSThread.isMainThread():
+            finished, closed = Event(), Event()
+
+            def close() -> None:
+                try:
+                    if self.close_active_window():
+                        closed.set()
+                finally:
+                    finished.set()
+
+            import_module("PyObjCTools.AppHelper").callAfter(close)
+            return finished.wait(5) and closed.is_set()
         if self._setup_api is not None and self._setup_api._lock.locked():
             return False
+        if self._preferences_window is not None:
+            focused = import_module("AppKit").NSApplication.sharedApplication().keyWindow()
+            if focused == self._preferences_window.window:
+                focused.performClose_(None)
+                return not focused.isVisible()
         native = webview.active_window()
         if native is None or native is self._about_window:
             return False
         with self._lock:
             search_id = self._native_search_ids.get(native.uid)
-        if search_id is not None and not self.controller.can_close_window(search_id):
+        if search_id is not None and not self._can_close_search_window(search_id):
             return False
         native.destroy()
         return True
@@ -2092,6 +2428,47 @@ class PyWebViewApplication:
     def open_active_ingest_window(self) -> bool:
         document = self.active_document()
         return self.open_ingest_window(document) if document is not None else False
+
+    def open_default_lists(self, document: ArchiveDocument | None = None, *, personal: bool = False) -> bool:
+        api = None if personal or document else self.active_api()
+        document = None if personal else (document or (api.document if api else None))
+        native = webview.active_window() if not personal and document is None else None
+        child_id = self._native_child_ids.get(native.uid) if native else None
+        if child_id:
+            document = self.controller.document(child_id)
+        archive = document.path if document else None
+        document_id = document.descriptor.document_id if document and archive else 'personal'
+        with self._lock:
+            editor = self._default_lists_apis.get(document_id)
+            if editor is not None:
+                editor.window.restore()
+                editor.window.show()
+                return True
+            editor = DefaultListsApi(archive, identity=document.descriptor.identity if document and archive else '',
+                version=application_metadata().version, writer_activity=self.writer_activity)
+            window = webview.create_window(
+                f"{APPLICATION_NAME} — Customizable Default Lists" + (f" — {archive}" if archive else ""),
+                self.asset_url("default-lists.html"), js_api=WindowBridge(editor, ("catalog", "load", "update")),
+                width=800, height=820, min_size=(600, 560), menu=self.menu())
+            if window is None:
+                raise RuntimeError("pywebview failed to create a window")
+            editor.window = window
+            self._default_lists_apis[document_id] = editor
+            if archive:
+                self._native_child_ids[window.uid] = document_id
+                self.controller.attach_child_window(document_id, window.uid)
+
+            def closed(*_args: object) -> None:
+                with self._lock:
+                    self._default_lists_apis.pop(document_id, None)
+                    self._native_child_ids.pop(window.uid, None)
+                if archive:
+                    self.controller.close_child_window(document_id, window.uid)
+                self._refresh_menus()
+
+            window.events.closed += closed
+        self._refresh_menus()
+        return True
 
     def open_document_options(self, document: ArchiveDocument | None = None) -> bool:
         if document is None:
@@ -2140,7 +2517,7 @@ class PyWebViewApplication:
         window = webview.create_window(
             f"{APPLICATION_NAME} — {kind.title()} matcher — {document.display_path}",
             self.asset_url("identity.html", [("kind", kind)]),
-            js_api=WindowBridge(api, ("query", "update")),
+            js_api=WindowBridge(api, ("query", "update", "search")),
             width=1100, height=750, min_size=(900, 560), menu=self.menu(),
         )
         if window is None:
@@ -2177,7 +2554,8 @@ class PyWebViewApplication:
                     "ingests.html",
                     [("status", status_id)] if status_id is not None else None,
                 ),
-                js_api=WindowBridge(api, ("history", "can_import_directory", "import_directory", "antivirus", "install_antivirus")),
+                js_api=WindowBridge(api, ("history", "can_import_directory", "import_directory", "antivirus", "install_antivirus",
+                                          "suspend_import", "resume_import")),
                 width=1050,
                 height=700,
                 min_size=(720, 440),
@@ -2223,7 +2601,10 @@ class PyWebViewApplication:
         windows = [api.window for api in self._search_apis()]
         windows.extend(api.window for api in self._ingest_apis.values())
         windows.extend(api.window for api in self._options_apis.values())
+        windows.extend(api.window for api in self._default_lists_apis.values())
         windows.append(self._about_window)
+        windows.append(self._license_window)
+        windows.append(self._processor_graph_window)
         if self._setup_api is not None:
             windows.append(self._setup_api.window)
         window = next((candidate for candidate in windows if candidate is not None and candidate.uid == uid), None)
@@ -2242,6 +2623,10 @@ class PyWebViewApplication:
             items.append(MenuAction("Get started", self.show_setup))
         if self._about_window is not None and self._about_visible:
             items.append(MenuAction(f"About {APPLICATION_NAME}", lambda: self.focus_window(self._about_window.uid)))
+        if self._license_window is not None:
+            items.append(MenuAction("License", lambda: self.focus_window(self._license_window.uid)))
+        if self._processor_graph_window is not None:
+            items.append(MenuAction("Processor graph", lambda: self.focus_window(self._processor_graph_window.uid)))
         for index, api in enumerate(self._search_apis(), 1):
             if api.window is None:
                 continue
@@ -2266,21 +2651,24 @@ class PyWebViewApplication:
             )
         for api in tuple(self._options_apis.values()):
             items.append(MenuAction(api.window.title, lambda uid=api.window.uid: self.focus_window(uid)))
+        for editor in tuple(self._default_lists_apis.values()):
+            items.append(MenuAction(editor.window.title, lambda uid=editor.window.uid: self.focus_window(uid)))
         return items
 
-    def _can_close_search_window(self, window_id: str, window: Any) -> bool:
-        if self.controller.can_close_window(window_id):
-            return True
-        if not window.create_confirmation_dialog(
-            "Import is running",
-            "Wait for the import to finish before closing? Cancel keeps this window open.",
-        ):
+    def _can_close_search_window(self, window_id: str) -> bool:
+        # Reserve closure now: native closed callbacks run later on worker threads.
+        # A second Close must not transfer ownership back to a disappearing window.
+        try:
+            self.controller.close_window(window_id)
+        except ArchiveBusyError:
+            # The next status poll delivers this without a UI lock or import worker.
+            shortcut = " (⌘ Q)" if sys.platform == "darwin" else ""
+            self._pending_notices.put(ApplicationNotice(severity="warning", message=
+                f"Cannot close window when import is running. Use Quit{shortcut} to suspend import and exit program."))
             return False
-        with self._lock:
-            workers = tuple(self._import_threads)
-        for worker in workers:
-            worker.join()
-        return self.controller.can_close_window(window_id)
+        except ValueError:
+            pass  # A repeated native callback may refer to an already reserved close.
+        return True
 
     def has_active_ingest(self) -> bool:
         # Unknown state still requires confirmation, but never a pre-watchdog wait.
@@ -2302,12 +2690,12 @@ class PyWebViewApplication:
             return
         if not self.prepare_quit() and confirm_ingest and self.has_active_ingest():
             if sys.platform == "darwin":
-                confirmed = macos_alert("Stop importing and quit?", QUIT_IMPORT_MESSAGE,
-                    ("Cancel", "Stop Import and Quit"), body_width=IMPORT_CONFIRMATION_WIDTH) == 1
+                confirmed = macos_alert("Suspend import and quit?", QUIT_IMPORT_MESSAGE,
+                    ("Cancel", "Suspend import and quit"), body_width=IMPORT_CONFIRMATION_WIDTH) == 1
             else:
                 # Do not route through _dialog_window's application-lock fallback.
                 anchor = webview.active_window() or self._about_window
-                confirmed = bool(anchor and anchor.create_confirmation_dialog("Stop importing and quit?", QUIT_IMPORT_MESSAGE))
+                confirmed = bool(anchor and anchor.create_confirmation_dialog("Suspend import and quit?", QUIT_IMPORT_MESSAGE))
             if not confirmed:
                 return
         deadline = time.monotonic() + QUIT_TIMEOUT_SECONDS
@@ -2326,15 +2714,18 @@ class PyWebViewApplication:
 
         # Arm independently before any snapshot/stop lock can wait on Cocoa.
         Thread(target=enforce_deadline, name="mailarchiver-quit-deadline", daemon=True).start()
+        if update_install or self.updates.status.phase not in {"deferred", "installing"}:
+            Thread(target=self._show_shutdown, name="mailarchiver-shutdown-display", daemon=True).start()
         jobs = self.stop_imports_for_quit()
         with self._lock:
-            workers = tuple(self._import_threads)
+            workers = tuple(self._tasks)
             writers = tuple(self._writers)
             apis = tuple(self._apis.values())
         if not update_install and self.updates.status.phase in {"deferred", "installing"}:
             # Sparkle owns termination/relaunch and may still cancel installation.
             return
-        if not jobs and not writers and not apis and not any(worker.is_alive() for worker in workers):
+        self._task_executor.shutdown(wait=False, cancel_futures=True)
+        if not jobs and not writers and not apis and all(worker.done() for worker in workers):
             exit_if_allowed()
             return
 
@@ -2355,13 +2746,37 @@ class PyWebViewApplication:
             for job in jobs:
                 job.finished.wait(max(0.0, deadline - time.monotonic()))
             for worker in workers:
-                worker.join(max(0.0, deadline - time.monotonic()))
+                try:
+                    worker.result(timeout=max(0.0, deadline - time.monotonic()))
+                except BaseException:  # pylint: disable=broad-exception-caught
+                    logging.getLogger(__name__).debug("Background command ended during Quit", exc_info=True)
             cleaned.wait(max(0.0, deadline - time.monotonic()))
             # Do not acquire application/UI locks or enter interpreter finalization:
             # a stuck callback must not defeat the single shared quit deadline.
             exit_if_allowed()
 
         Thread(target=finish_quit, name="mailarchiver-quit", daemon=True).start()
+
+    def _show_shutdown(self) -> None:
+        """Paint every loaded window without making Quit wait for a webview reply."""
+        windows = tuple(window for window in webview.windows if window.events.loaded.is_set())
+        if not windows:
+            return
+        try:
+            script = (GUI_DIRECTORY / "shutdown.js").read_text(encoding="utf-8")
+
+            def paint(window: Any) -> None:
+                try:
+                    # Each webview needs its own one-use loopback bootstrap URL.
+                    window.run_js(f"window.mailArchiverShutdownStylesheet = {json.dumps(self.asset_url('shutdown.css'))};\n" + script)
+                except Exception:  # pylint: disable=broad-exception-caught
+                    logging.getLogger(__name__).debug("Shutdown overlay unavailable", exc_info=True)
+
+            with ThreadPoolExecutor(max_workers=min(8, len(windows)), thread_name_prefix="shutdown-display") as executor:
+                for _result in executor.map(paint, windows):
+                    pass
+        except OSError:
+            logging.getLogger(__name__).debug("Shutdown overlay asset unavailable", exc_info=True)
 
     def prepare_quit(self) -> bool:
         """Reserve a known job-free Quit without waiting on application state."""
@@ -2379,15 +2794,22 @@ class PyWebViewApplication:
         """Release non-document resources after the native event loop exits."""
         self.stop_imports_for_quit()
         with self._lock:
-            workers = tuple(self._import_threads)
+            workers = tuple(self._import_futures)
+        self._task_executor.shutdown(wait=False, cancel_futures=True)
         for worker in workers:
-            worker.join()
+            try:
+                worker.result()
+            except BaseException:  # pylint: disable=broad-exception-caught
+                logging.getLogger(__name__).debug("Background import ended during shutdown", exc_info=True)
+        self._reap_tasks()
         if sys.platform == "darwin" and self._menu_observer is not None:
             from Foundation import NSNotificationCenter  # pylint: disable=import-outside-toplevel,no-name-in-module,import-error
             NSNotificationCenter.defaultCenter().removeObserver_(self._menu_observer)
             self._menu_observer = None
         if self._sparkle is not None:
             self._sparkle.close()
+        if self._preferences_window is not None:
+            self._preferences_window.window.close()
         # Keep the OS guard until process exit once Sparkle has begun relaunch.
         if self.updates.status.phase != "installing":
             self.cancel_update_install()
@@ -2419,6 +2841,8 @@ class PyWebViewApplication:
         windows.extend(api.window for api in self._ingest_apis.values())
         windows.append(self._about_window)
         windows.append(self._reader_window)
+        windows.append(self._license_window)
+        windows.append(self._processor_graph_window)
         if self._setup_api is not None:
             windows.append(self._setup_api.window)
         for window in windows:
@@ -2511,10 +2935,13 @@ class PyWebViewApplication:
                     child = active.uid in self._native_child_ids
                 setup = self._setup_api
                 busy = setup is not None and setup._lock.locked()
-                enabled = child or (setup is not None and active is setup.window) or (
+                list_editor = any(editor.window is active for editor in self._default_lists_apis.values())
+                enabled = child or list_editor or active in (self._license_window, self._processor_graph_window) or (setup is not None and active is setup.window) or (
                     search_id is not None and self.controller.can_close_window(search_id)
                 )
-                close_item.setEnabled_(enabled and not busy)
+                preferences_focused = self._preferences_window is not None and (
+                    appkit.NSApplication.sharedApplication().keyWindow() == self._preferences_window.window)
+                close_item.setEnabled_((enabled or preferences_focused) and not busy)
 
         AppHelper.callAfter(refresh)
 
@@ -2554,7 +2981,7 @@ def application_metadata() -> ApplicationMetadata:
     """Return the identity shown by the native application menu and About panel."""
     return ApplicationMetadata(
         name=APPLICATION_NAME,
-        version=version("mailarchiver"),
+        version=APPLICATION_VERSION,
         copyright="Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved.",
     )
 
@@ -2571,23 +2998,32 @@ def application_menu(application: PyWebViewApplication) -> list[Menu]:
     ]
     if recent:
         file_items.append(Menu("Open Recent", recent))
+    help_items: list[Menu | MenuAction | MenuSeparator] = [
+        MenuAction(title, lambda destination=url: open_external_url(destination))
+        for title, url in HELP_LINKS
+    ]
+    help_items.append(MenuAction("License", application.show_license))
     if sys.platform == "win32":
         return [
             Menu("File", [*file_items, MenuAction("Import…", application.import_active_document),
+                          MenuAction("Reprocess Saved Mail…", application.reprocess_active_document),
                           MenuAction("Document Options…", application.open_document_options),
+                          MenuAction("Customizable Default Lists…", application.open_default_lists),
                           MenuAction("Close", application.close_active_window),
                           MenuSeparator(), MenuAction("Quit", application.request_quit)]),
             Menu("Window", [MenuAction("New Search Window", application.new_search_window),
                             MenuAction("Ingests", application.open_active_ingest_window),
                             *application.window_menu_items()]),
-            Menu("Help", [MenuAction("About", application.create_about_window),
+            Menu("Help", [*help_items, MenuSeparator(), MenuAction("About", application.create_about_window),
                           MenuAction("Check for Updates…", application.updates.check),
-                          MenuAction("Update Settings…", application.show_update_preferences)]),
+                          MenuAction("Preferences…", application.show_update_preferences)]),
         ]
     file_items.extend(
         (
             MenuAction("Import…", application.import_active_document),
+            MenuAction("Reprocess Saved Mail…", application.reprocess_active_document),
             MenuAction("Document Options…", application.open_document_options),
+                          MenuAction("Customizable Default Lists…", application.open_default_lists),
             MenuAction("Close", application.close_active_window),
         )
     )
@@ -2598,6 +3034,7 @@ def application_menu(application: PyWebViewApplication) -> list[Menu]:
             [MenuAction("New Search Window", application.new_search_window),
              MenuAction("Ingests", application.open_active_ingest_window), *application.window_menu_items()],
         ),
+        Menu("Help", help_items),
     ]
 
 
@@ -2669,7 +3106,7 @@ def install_macos_document_events(application: PyWebViewApplication) -> None:
                     application.add_notice("error", f"Could not open archive: {error}")
                     AppHelper.callAfter(sender.replyToOpenOrPrint_, 1)
 
-            Thread(target=open_documents, name="mailarchiver-open-documents", daemon=True).start()
+            application._submit_task("Open archives", open_documents)
 
         def showUpdatePreferences_(self, _sender):
             application.show_update_preferences()
@@ -2678,11 +3115,11 @@ def install_macos_document_events(application: PyWebViewApplication) -> None:
             application.updates.check()
 
         def showMailArchiverAbout_(self, _sender):
-            Thread(target=application.create_about_window, name="mailarchiver-about", daemon=True).start()
+            application._submit_task("About window", application.create_about_window)
 
         def applicationShouldHandleReopen_hasVisibleWindows_(self, _sender, _visible):
             if macos_option_pressed():
-                Thread(target=application.show_setup, name="mailarchiver-setup", daemon=True).start()
+                application._submit_task("Setup window", application.show_setup)
             return True
 
     setattr(BrowserView, "AppDelegate", MailArchiverDelegate)
@@ -2701,6 +3138,7 @@ def build_parser() -> argparse.ArgumentParser:
     launch = parser.add_mutually_exclusive_group()
     launch.add_argument("--archive", type=Path, help="directory containing archive.sqlite3 and search.sqlite3")
     launch.add_argument("--new", action="store_true", help="show the three-step setup without reopening the last archive")
+    parser.add_argument("--workers", type=worker_argument, help="override worker preferences for this launch (maximum: twice CPUs)")
     parser.add_argument("--smoke-test", action="store_true", help=argparse.SUPPRESS)
     parser.add_argument("--smoke-html-find", action="store_true", help=argparse.SUPPRESS)
     parser.add_argument("--smoke-report", type=Path, help=argparse.SUPPRESS)
@@ -2762,7 +3200,7 @@ def main() -> int:
         window.events.loaded += lambda *_args: smoke.page_loaded()
     else:
         controller = ApplicationController()
-        application = PyWebViewApplication(controller, asset_server)
+        application = PyWebViewApplication(controller, asset_server, workers_override=args.workers)
         install_macos_document_events(application)
         startup = controller.startup((archive,) if archive is not None else (), new=new_setup)
         prompt_for_archive = any(
@@ -2777,6 +3215,9 @@ def main() -> int:
             application.create_about_window(hidden=True)
         if prompt_for_archive:
             application.show_setup()
+            from .list_catalog import OWNERS
+            if not OWNERS.template().include:
+                application.open_default_lists(personal=True)
         for session in startup.windows:
             if controller.document(session.document_id).descriptor.untitled:
                 controller.close_window(session.window_id)

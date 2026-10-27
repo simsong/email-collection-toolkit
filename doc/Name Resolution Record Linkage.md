@@ -32,12 +32,13 @@ The resolver will produce a reviewable match list. A librarian will be able to:
 * record a short reason or source for the decision.
 
 The original email address, original display-name observations, source
-provenance, and raw messages remain unchanged. Match decisions and canonical
-names are rebuildable analysis metadata. An accepted match is therefore a
+provenance, and raw messages remain unchanged. Manual match decisions and canonical
+names are durable analysis assertions that require backup. An accepted match is therefore a
 reviewed assertion about identity, not a rewrite of the preserved email.
 
-As of 2026-09-03, the repository has an experimental, read-only observation and
-signature extractor but no selected production matcher or match-review editor.
+The evidence extractor is experimental and no production matcher has been
+selected. Manual identity editing exists separately in the current desktop and
+CLI; this proposed matching/review workflow is not implemented.
 
 ## Do librarians need to edit configuration files?
 
@@ -319,12 +320,17 @@ Current repository support:
 * a YAML synthetic benchmark with expected person groups; and
 * Makefile extraction and test commands.
 
-Not yet implemented:
+The desktop separately supports immediate manual person merges, address moves,
+separation and canonical-name edits. Name selectors expand observed human names
+across manually grouped addresses. These facilities do not run a research matcher;
+the authoritative matcher button remains disabled.
+
+Not yet implemented in the automatic-matching research prototype:
 
 * repeated-tail and supervised signature extractors;
 * interchangeable matcher adapters and calibrated scores;
 * labeled match/non-match training data beyond the synthetic benchmark;
-* candidate scoring and persistent person groups;
+* automatic candidate scoring and research-produced person groups;
 * match-list export and review persistence; and
 * production UX, which is intentionally excluded from the research branch.
 

@@ -1,6 +1,18 @@
 # Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved.
 
-"""Publish canonical MBOX bytes and recover or verify their direct locations."""
+"""Publish canonical MBOX bytes and recover or verify their direct locations.
+
+Purpose: Publish canonical message records and recover their verified byte locations.
+
+How it works:
+Journal appends, preserve framing, apply rollover and select only hash-matching read
+candidates.
+
+Fundamental dependents:
+
+- ``__main__``: ingest durability and interruption recovery depend on this writer.
+- ``mailsearch``: message display requires verified retrieval from recorded locations.
+"""
 
 from __future__ import annotations
 

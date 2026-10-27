@@ -1,10 +1,22 @@
 # Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved.
 
-"""Public application identity and read-only discovery of existing settings."""
+"""Public application identity and read-only discovery of existing settings.
+
+Purpose: Define public application names and per-user data locations.
+
+How it works:
+Centralize current and legacy identity conventions used to find settings outside archives.
+
+Fundamental dependents:
+
+- ``application``: document preferences need stable application identity.
+- ``clamav_definitions``: antivirus updates use the same per-user identity boundary.
+"""
 
 from pathlib import Path
 
 APPLICATION_NAME = "Email Collection Toolkit"
+DEVELOPMENT_BUNDLE_IDENTIFIER = "net.simson.mailarchiver.development"
 # Preserve access to settings created under the former two-word product name.
 LEGACY_DIRECTORY_NAME = " ".join(("Mail", "Archiver"))
 

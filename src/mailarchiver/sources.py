@@ -1,6 +1,18 @@
 # Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved.
 
-"""Discover and stream MBOX, Babyl, EMLX, EML, and Maildir messages read-only."""
+"""Discover and stream MBOX, Babyl, EMLX, EML, and Maildir messages read-only.
+
+Purpose: Discover supported local mail containers and stream their message bytes.
+
+How it works:
+Use format/hierarchy parsers and source integrity controls while keeping input stores read-
+only.
+
+Fundamental dependents:
+
+- ``__main__``: local ingest requires these source containers and raw messages.
+- ``apple_mail_compare``: cache reconciliation reuses complete EMLX acquisition rules.
+"""
 
 from __future__ import annotations
 
@@ -15,12 +27,10 @@ from collections.abc import Callable, Iterable, Iterator
 from email import policy
 from email.parser import BytesParser
 from fnmatch import fnmatchcase
-from functools import lru_cache
 from pathlib import Path
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
-from yaml import safe_load
 
 from .plugin_api import (
     FileProbe,
@@ -87,10 +97,9 @@ class LocalSourceRules(BaseModel):
     mbox: MboxRules
 
 
-@lru_cache(maxsize=1)
 def local_source_rules() -> LocalSourceRules:
-    with Path(__file__).with_name("local_source_rules.yaml").open(encoding="utf-8") as source:
-        return LocalSourceRules.model_validate(safe_load(source))
+    from .list_catalog import LOCAL_SOURCES
+    return LOCAL_SOURCES.template()
 
 
 class SourceMessage(BaseModel):

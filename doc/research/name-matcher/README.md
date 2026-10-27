@@ -15,15 +15,13 @@ experiments to compare. The system is precision-first: a false merge is more
 damaging than a missed merge, and every automatic merge must be explainable and
 reversible.
 
-Development lives on the long-running `research-name-matching` branch. The
-branch contains research documentation, extraction and evaluation code, fixtures,
-and reproducible result formats; it does not contain production UX work. Keep it
-current by merging `main` into it, preserving an explicit merge history rather
-than rebasing the shared research record.
+The notebook originated on `research-name-matching`; its extractor and documents
+are now present in this checkout. Research plans below do not establish a
+production matcher or current results. Record new experiments in the run log.
 
 ## Development data and validity
 
-The current private archive has 1,200,791 catalogued messages, 219,074 email
+The September 2026 development snapshot had 1,200,791 catalogued messages, 219,074 email
 addresses, 102,322 distinct sending addresses, and 154,915 distinct recipient
 addresses. Its canonical MBOX payload is about 39.7 GB across 81 generations.
 The disposable search database contains 214,926 address suggestions, but about
@@ -44,12 +42,7 @@ an explicit, separately authorized run and a documented disclosure policy.
 
 The current prototype performs read-only evidence extraction:
 
-```shell
-make name-matcher-observations \
-  ARCHIVE=/Users/simsong/mail-archive \
-  OUTPUT=build/name-evidence.sqlite3 \
-  ARGS='--limit 10000 --workers 4'
-```
+See the [CLI reference](../../CLI_REFERENCE.md#research-and-diagnostic-commands) for invocation.
 
 It writes a private SQLite database plus a YAML summary and refuses to overwrite
 an existing output. It extracts all display-name/address observations from
@@ -90,3 +83,44 @@ stronger evidence than a single heuristic result.
 Run focused validation with `make test-name-resolution`. All generated databases,
 signature text, review files, and provider request files are private derivatives
 and belong under ignored `build/` storage at the checkout root.
+
+## Local comparison harness
+
+Person-focused views reuse the pinned MIT-licensed SBook5 lexical sources, with
+conservative whole-word translation and explicit unknown/conflict handling.
+They hide recognized non-person identities reversibly, without changing the
+frozen comparison or owner labels. The runner also offers native Splink full-name
+frequency adjustment as a separate ablation. Original reports do not acquire new
+scores merely because their review UI is regenerated.
+
+`make name-matcher-experiments ARCHIVE=/path/to/archive EVIDENCE=/private/evidence.sqlite3 OUTPUT=/private/run`
+uses the locked, isolated `research/name-matcher` environment. Obtain evidence
+with `make name-matcher-observations` first. The runner refuses to overwrite an
+experiment database or write inside the source archive. Keep outputs outside
+tracked documentation: names, signatures and review examples are private.
+
+The common candidate set feeds fixed precision rules, signature/repetition
+ablations, a collective correspondent pass, an unsupervised Fellegi–Sunter
+mixture, Dedupe and Splink/DuckDB. Dedupe uses synthetic training identities until
+owner labels exist. Splink and the mixture fit unlabeled archive evidence;
+model scores are not measured real-world probabilities. The HTML report includes
+fit/scoring wall and CPU time, threshold curves, independently generated
+synthetic-test cluster/pair metrics, and fifty stratified owner-review proposals.
+Real-archive precision and recall remain unmeasured without independent labels.
+The selected fifty examples cannot estimate population accuracy.
+Owner review has **Same identity**, **Different identities** and **Insufficient
+evidence**, plus an independent **Not a person** checkbox for organizations,
+lists, services or role accounts; notes identify A, B or both. A single
+organization can be both a match and a non-person identity. The flag does not
+imply a link rejection. Previous decisions, non-person labels and notes survive
+the update, with legacy non-person labels migrated to flags.
+
+`make test-name-matcher-experiments` checks normalization, frozen blocking,
+transitive false merges, missed blocks, byte-preserving profile preparation and
+the real optional engine APIs. The general repeated-tail detector, supervised
+signature extraction, handoff classification, active labeling study and LLM
+rerankers remain outside this executable slice.
+
+The optional environment pins `BTrees<6.5` because Dedupe uses the `byValue()`
+API removed in BTrees 6.5. The Splink adapter uses its version-5 registered-input
+and frozen-blocked-pair interfaces.

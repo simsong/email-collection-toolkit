@@ -1,6 +1,17 @@
 # Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved.
 
-"""Framework-owned integrity controls for the canonical Mailbag archive."""
+"""Framework-owned integrity controls for the canonical Mailbag archive.
+
+Purpose: Enforce framework-owned integrity checks around canonical publication.
+
+How it works:
+Inspect archive controls and record evidence against the portable Mailbag verification
+contract.
+
+Fundamental dependents:
+
+- ``__main__``: ingest preflight and publication rely on these integrity decisions.
+"""
 
 from __future__ import annotations
 

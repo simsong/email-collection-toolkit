@@ -153,6 +153,9 @@ def test_quit_reservation_rejects_new_document_options_write(tmp_path: Path) -> 
 
 @pytest.mark.skipif(sys.platform != "darwin" or os.environ.get("MAILARCHIVER_NATIVE_GUI_E2E") != "1",
                     reason="requires the opt-in macOS GUI session")
-def test_native_quit_during_status_polling(tmp_path: Path) -> None:
+@pytest.mark.parametrize("mode", ["native", "native-overlay"])
+def test_native_quit_during_status_polling(tmp_path: Path, mode: str) -> None:
     """Issue #150: the real Cocoa event loop and shipped bridge cannot block idle Quit."""
-    assert run_quit_probe(tmp_path, "native") < 2
+    assert run_quit_probe(tmp_path, mode) < 2
+    if mode == "native-overlay":
+        assert (tmp_path / "overlay-verified").exists()

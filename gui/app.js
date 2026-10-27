@@ -41,6 +41,10 @@ const state = {
   dragEpoch: 0,
   previewUrl: null,
   ingestStatusText: "",
+  processingStarting: false,
+  ingestOverviewGeneration: 0,
+  ingestOverviewRequest: 0,
+  ingestOverviewApplied: 0,
   linkDestination: "",
   pendingLink: "",
   showTree: false,
@@ -51,6 +55,7 @@ const state = {
   activeFilterSet: "",
   treeRequest: 0,
   searchFilters: [],
+  identityMessages: null,
   suggestionRequest: 0,
   suggestionTimer: null,
   suggestionItems: [],
@@ -59,6 +64,12 @@ const state = {
 
 const elements = {};
 const byId = id => document.getElementById(id);
+window.mailArchiverProcessingStarting = starting => {
+  state.processingStarting = starting;
+  state.ingestOverviewGeneration += 1;
+  if (starting) byId("processing-open").disabled = true;
+  else void refreshIngestOverview();
+};
 let initialized = false;
 let previewQueue = Promise.resolve();
 const SUGGESTION_MINIMUM = 3;
@@ -83,7 +94,7 @@ window.archiveDidChange = async () => {
   state.mailboxTree = [];
   applyStatus(status);
   await refreshIngestOverview();
-  if (state.query.trim() || (state.showTree && state.mailboxSelections.size)) await runSearch();
+  if (state.query.trim() || state.identityMessages || (state.showTree && state.mailboxSelections.size)) await runSearch();
 };
 window.setTimeout(() => {
   if (window.pywebview?.api?.status) initialize();
@@ -103,7 +114,7 @@ async function initialize() {
     "sort-by", "sort-direction", "search-attachments", "show-original-folders", "mailbox-browser", "mailbox-tree", "show-source-volumes", "filter-set", "manage-filter-sets",
     "save-filter-dialog", "save-filter-form", "filter-set-name", "cancel-save-filter", "manage-filter-dialog", "filter-set-list", "close-filter-manager",
     "message-pane", "message-content", "message-well", "computed-date-banner", "message-selection-summary", "message-file-well", "message-file-name", "message-subject", "message-headers", "part-select", "message-find", "message-find-query", "message-find-status", "message-find-previous", "message-find-next", "message-find-close", "remote-content",
-    "copy-message-text", "save-message", "print-message", "body-view", "attachment-section", "attachment-list", "attachment-preview", "provenance-section", "message-locations", "ingest-status-line", "link-dialog", "link-destination", "link-ignore", "link-copy", "link-open", "error"]) {
+    "copy-message-text", "save-message", "print-message", "body-view", "attachment-section", "attachment-list", "attachment-preview", "provenance-section", "message-locations", "archive-status-banner", "archive-status-messages", "ingest-status-line", "link-dialog", "link-destination", "link-ignore", "link-copy", "link-open", "error"]) {
     elements[id] = byId(id);
   }
   await initializeResultTable();
@@ -159,6 +170,14 @@ async function initialize() {
   applyStatus(status);
   await refreshIngestOverview();
   window.setInterval(refreshIngestOverview, INGEST_REFRESH_MS);
+  if (parameters.has("identity-messages")) {
+    state.identityMessages = JSON.parse(parameters.get("identity-messages"));
+    renderSearchFilters();
+  }
+  if (parameters.has("query") || state.identityMessages) {
+    elements.search.value = parameters.get("query") || "";
+    await runSearch();
+  }
   const message = Number(parameters.get("message"));
   if (message) await selectMessage(message);
 }
@@ -401,9 +420,7 @@ async function verifyNativeHtmlFindHighlight() {
 }
 
 function showBridgeFailure() {
-  const error = byId("error");
-  error.textContent = "The native application bridge did not start. Restart mailsearch-gui and check its terminal output.";
-  error.hidden = false;
+  showError("The native application bridge did not start. Restart mailsearch-gui and check its terminal output.");
 }
 
 async function chooseArchive() {
@@ -423,6 +440,7 @@ function resetArchiveView() {
   state.view = null;
   state.mailboxTree = [];
   state.searchFilters = [];
+  state.identityMessages = null;
   state.highlightTerms = [];
   state.messageFindQuery = "";
   state.messageFindTargets = [];
@@ -455,16 +473,31 @@ function applyStatus(status) {
     : status.untitled ? "Untitled — Email Collection Toolkit" : "Email Collection Toolkit";
   elements.search.disabled = !status.ready;
   elements["result-status"].textContent = status.ready ? "Enter a search." : "Use File → New or Open to begin.";
+  elements["archive-status-banner"].hidden = !status.ready;
+  renderArchiveStatus(status.ready ? status.archive_status_messages || [] : []);
   const notice = status.notices?.at(-1);
   if (notice && notice.severity !== "information") showError(notice.message);
   if (status.ready) elements.search.focus();
 }
 
+function renderArchiveStatus(messages) {
+  const lines = messages.map(message => {
+    const line = document.createElement("p");
+    line.textContent = message;
+    return line;
+  });
+  elements["archive-status-messages"].replaceChildren(...lines);
+}
+
 async function refreshIngestOverview() {
+  const generation = state.ingestOverviewGeneration;
+  const request = ++state.ingestOverviewRequest;
   const overview = await call(() => window.pywebview.api.ingest_overview());
-  if (!overview) return;
+  if (!overview || generation !== state.ingestOverviewGeneration || request < state.ingestOverviewApplied) return;
+  state.ingestOverviewApplied = request;
   const line = elements["ingest-status-line"];
   const status = overview.status;
+  byId("processing-open").disabled = state.processingStarting || overview.active || status?.state === "running";
   line.hidden = elements.search.disabled;
   line.className = `ingest-status-line no-print${status ? ` ${status.state}` : ""}`;
   line.dataset.statusId = status?.status_id || "";
@@ -474,7 +507,11 @@ async function refreshIngestOverview() {
   }
   const messages = Number(status.processed_messages).toLocaleString();
   const percent = Number(status.percent).toFixed(1);
-  if (status.state === "running") {
+  const phase = status.phase === "recovering archived content" ? "Processing saved mail" : status.phase;
+  if (status.state === "running" && (status.processing_active || status.activity_kind === "processing")) {
+    const jobs = Number(status.processing_jobs_completed).toLocaleString();
+    setIngestStatusText(`${phase} · ${jobs} processing tasks finished · ${status.processing_processor || "preparing"} · ${status.active_workers}/${status.configured_workers} workers`);
+  } else if (status.state === "running") {
     setIngestStatusText(`Ingesting ${percent}% · ${messages} messages · ${status.active_workers}/${status.configured_workers} workers · ETA ${status.eta}`);
   } else if (status.state === "completed") {
     setIngestStatusText(`Last ingest completed · ${messages} messages · ${formatElapsed(status.elapsed_seconds)} · Click for history`);
@@ -915,6 +952,18 @@ function renderSearchFilters() {
     chip.append(label, remove);
     return chip;
   });
+  if (state.identityMessages) {
+    const scope = state.identityMessages;
+    const chip = document.createElement("span"); chip.className = "search-chip";
+    const label = document.createElement("span"); label.className = "search-chip-label";
+    label.textContent = scope.label + (scope.start || scope.end ? ` · ${scope.start || "Any date"} – ${scope.end || "Any date"}` : "");
+    label.title = label.textContent;
+    const remove = document.createElement("button"); remove.type = "button";
+    remove.className = "search-chip-remove"; remove.textContent = "×";
+    remove.setAttribute("aria-label", "Remove identity messages filter");
+    remove.addEventListener("click", () => { state.identityMessages = null; renderSearchFilters(); runSearch(); });
+    chip.append(label, remove); chips.unshift(chip);
+  }
   elements["search-filters"]?.replaceChildren(...chips);
 }
 
@@ -971,26 +1020,26 @@ async function runSearch() {
   elements["message-content"].hidden = true;
   elements["result-status"].classList.remove("background-search");
   const mailboxSelections = state.showTree ? [...state.mailboxSelections] : [];
-  if (!query.trim() && !mailboxSelections.length) {
+  if (!query.trim() && !mailboxSelections.length && !state.identityMessages) {
     Object.assign(state, {query, sortBy, sortDirection, searchAttachments, offset: 0});
     renderSearchHelp();
     elements["result-status"].textContent = "Enter a search.";
     return;
   }
   elements["result-status"].textContent = "Searching…";
-  await runCompleteSearch({query, sortBy, sortDirection, searchAttachments, mailboxSelections, request});
+  await runCompleteSearch({query, sortBy, sortDirection, searchAttachments, mailboxSelections, request, identityMessages: state.identityMessages});
 }
 
 async function runCompleteSearch(context) {
-  const {query, sortBy, sortDirection, searchAttachments, mailboxSelections, request} = context;
+  const {query, sortBy, sortDirection, searchAttachments, mailboxSelections, request, identityMessages} = context;
   Object.assign(state, {query, sortBy, sortDirection, searchAttachments, offset: 0});
   clearResultViewport();
-  if (window.pywebview.api.search_start) {
+  if (window.pywebview.api.search_start && !identityMessages) {
     await runIncrementalSearch(context);
     return;
   }
   const first = await call(() => window.pywebview.api.search(
-    query, 0, sortBy, sortDirection, searchAttachments, mailboxSelections, RESULT_INITIAL_LIMIT,
+    query, 0, sortBy, sortDirection, searchAttachments, mailboxSelections, RESULT_INITIAL_LIMIT, ...(identityMessages ? [identityMessages] : []),
   ));
   if (request !== state.searchRequest) return;
   if (!first) { updateResultStatus(); return; }
@@ -1005,7 +1054,7 @@ async function runCompleteSearch(context) {
   elements["result-status"].classList.add("background-search");
   elements["result-status"].textContent = `Searching in background… ${state.offset.toLocaleString()} messages shown`;
   const remainder = await call(() => window.pywebview.api.search(
-    query, state.offset, sortBy, sortDirection, searchAttachments, mailboxSelections, 0,
+    query, state.offset, sortBy, sortDirection, searchAttachments, mailboxSelections, 0, ...(identityMessages ? [identityMessages] : []),
   ));
   if (request !== state.searchRequest) return;
   elements["result-status"].classList.remove("background-search");
@@ -2152,10 +2201,44 @@ async function call(operation) {
 }
 
 function showError(message) {
-  elements.error.textContent = message;
-  elements.error.hidden = false;
+  const panel = byId("error");
+  const pill = byId("notice-pill");
+  if (!showError.messages) showError.messages = [];
+  if (showError.messages.at(-1) === message) return;
+  showError.messages.push(message);
+  panel.replaceChildren();
+  const history = document.createElement("div");
+  history.className = "notice-history";
+  for (const text of showError.messages) {
+    const item = document.createElement("p");
+    item.textContent = text;
+    history.append(item);
+  }
+  const collapse = document.createElement("button");
+  collapse.type = "button";
+  collapse.textContent = "Collapse messages";
+  const hide = () => {
+    panel.hidden = true;
+    pill.hidden = false;
+    pill.setAttribute("aria-expanded", "false");
+  };
+  collapse.addEventListener("click", () => { clearTimeout(showError.timer); hide(); pill.focus(); });
+  panel.append(history, collapse);
+  panel.hidden = false;
+  pill.hidden = true;
+  pill.textContent = `Messages (${showError.messages.length})`;
+  pill.setAttribute("aria-expanded", "true");
+  pill.onclick = () => {
+    clearTimeout(showError.timer);
+    panel.hidden = false;
+    pill.hidden = true;
+    pill.setAttribute("aria-expanded", "true");
+    collapse.focus();
+  };
   clearTimeout(showError.timer);
-  showError.timer = setTimeout(() => { elements.error.hidden = true; }, 6000);
+  showError.timer = setTimeout(() => {
+    if (!panel.contains(document.activeElement) && !panel.matches(":hover")) hide();
+  }, 6000);
 }
 
 function formatDate(value) {

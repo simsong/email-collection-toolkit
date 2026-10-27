@@ -25,20 +25,22 @@
       <label>End date<span class="date-control"><input id="end-date" type="date" aria-label="End date"><span class="date-placeholder" aria-hidden="true">Any date</span></span></label>
       <button id="clear-filters" type="button">Clear</button>
     </div>
-    <p class="filter-hint">Mailbox and domain must both match. Dates are inclusive; blank dates are unrestricted. Messages counts header appearances; Signatures counts messages mentioning an address in a signature. Both reflect the selected period.</p>
+    <p class="filter-hint">Mailbox and domain must both match. Dates are inclusive; blank dates are unrestricted. Messages counts header appearances; Signatures counts messages mentioning an address in a signature. Both reflect the selected period. Double-click a name to search it; click a count to open its messages.</p>
     <p id="date-error" role="alert" hidden>Start date must be on or before end date.</p>
   </header>
   <section class="toolbar" aria-label="Matcher actions">
     <button id="run-matcher" class="primary" type="button">Run authoritative matcher</button>
     <span class="demo-note">Authoritative matching is not yet connected.</span>
     <div class="spacer"></div>
+    <label class="people-filter"><input id="show-non-people" type="checkbox"> Show non-person identities</label>
     <button id="undo" type="button" disabled hidden>Undo</button>
     <button id="reset" type="button" hidden>Reset demo</button><button id="refresh" type="button">Refresh</button>
   </section>
   <section class="matrix" aria-label="Canonical names and alternative email addresses" tabindex="0">
+    <p id="identity-loading" role="status">Loading archive identities…</p>
     <table>
-      <colgroup><col class="identity-column"><col><col><col class="count-column"><col class="count-column"></colgroup>
-      <thead><tr><th scope="col"><button id="identity-heading" data-sort="identity" type="button">Canonical name / email address</button></th><th scope="col"><button data-sort="firstUse" type="button">First use</button></th><th scope="col"><button data-sort="lastUse" type="button">Last use</button></th><th scope="col" class="number"><button data-sort="messages" type="button">Messages</button></th><th scope="col" class="number"><button data-sort="signatureMessages" type="button">Signatures</button></th></tr></thead>
+      <colgroup><col class="identity-column"><col><col><col class="count-column"><col class="count-column"><col class="phone-column"></colgroup>
+      <thead><tr><th scope="col"><button id="identity-heading" data-sort="identity" type="button">Canonical name / email address</button></th><th scope="col"><button data-sort="firstUse" type="button">First use</button></th><th scope="col"><button data-sort="lastUse" type="button">Last use</button></th><th scope="col" class="number"><button data-sort="messages" type="button">Messages</button></th><th scope="col" class="number"><button data-sort="signatureMessages" type="button">Signatures</button></th><th scope="col" class="phone-column">Phone numbers</th></tr></thead>
       <tbody id="matcher-rows"></tbody>
     </table>
     <div id="empty" hidden><strong>No matching addresses</strong><p>Try a shorter search or clear the filters.</p></div>

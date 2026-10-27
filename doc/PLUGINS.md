@@ -10,32 +10,25 @@ are created. The Rust PST importer remains an external executable. Use a fresh d
 there is no requirement to migrate or preserve existing generated archive
 formats. Source mail remains immutable.
 
-Run these commands through the Makefile from the repository checkout root.
-`build/` is ignored and holds only disposable example archives:
-
-~~~sh
-make processor ARGS="--archive build/processor-demo --plugin-dir tests/processing_plugins init"
-make processor ARGS="--archive build/processor-demo --plugin-dir tests/processing_plugins plugins"
-make processor ARGS="--archive build/processor-demo --plugin-dir tests/processing_plugins submit tests/data/credible_date_with_quoted_body.eml"
-make processor ARGS="--archive build/processor-demo --plugin-dir tests/processing_plugins run --max-jobs 1"
-make processor ARGS="--archive build/processor-demo --plugin-dir tests/processing_plugins run"
-make processor ARGS="--archive build/processor-demo --plugin-dir tests/processing_plugins status"
-make test-processors
-~~~
+The [processor harness reference](CLI_REFERENCE.md#processor-harness) documents
+disposable fixtures and execution. Production uses the local archive commands.
 
 The plugins command prints manifests; status and run print typed JSON reports
 with persistent invocation counts and timings. A failed run exits 1.
 Ctrl-C stops CLI processing, retains unfinished jobs, prints statistics and exits 130.
 Run with --retry to retry failed jobs while retaining successful checkpoints.
-After changing manifests or entrypoint code, use reprocess explicitly:
-old unfinished jobs are superseded, original inputs are queued under the new
-registry fingerprint, and manual identity/tag data and invocation history remain.
-An unchanged registry makes repeated submissions/reprocessing idempotent.
+Code or manifest edits never trigger reprocessing. Use reprocess explicitly to
+supersede unfinished jobs and queue originals in a fresh generation, even when
+the registry is unchanged. Manual identity/tag data and invocation history remain.
+Ordinary resume reuses completed invocations and accepts legacy registry hashes.
 
 The registry validates local module:factory entrypoints without importing code,
 normalized exact MIME types, required lower-rank subscribers covering the same
-inputs, and acyclic type emissions. This initial serial dispatcher is a valid
-rank-barrier implementation; concurrency is deferred. It releases typed
+inputs, and acyclic type emissions. Production deferred processing uses a bounded thread pool: independent messages
+execute concurrently while each message retains serial rank/parent ordering.
+One coordinator consumes worker futures and commits queue/checkpoint/publication
+transactions; workers execute processors and return typed results.
+The standalone harness defaults to one consumer. The dispatcher releases typed
 emissions/handoffs transactionally and blocks them until the parent job completes.
 Part aborts retain sibling work; message aborts stop that message; import failure
 leaves other jobs pending. Unsubscribed objects complete without discarding bytes.
@@ -75,27 +68,25 @@ selection, attached messages and the real Rust PST adapter.
 
 ### Production CLI
 
-~~~sh
-make run ARGS="--archive build/demo ingest --owner-names-file tests/fixtures/owner-names.txt --clamav --defer-content tests/data/three_messages.mbox"
-make run ARGS="--archive build/demo processors"
-make run ARGS="--archive build/demo processing-status"
-make run ARGS="--archive build/demo process --phase content"
-make run ARGS="--archive build/demo identities addresses --mailbox sender --start 2024-01-01"
-make run ARGS="--archive build/demo identities organizations --domain example.net"
-make test-cli-processors
-~~~
+See [CLI_REFERENCE.md](CLI_REFERENCE.md#local-archive-commands) for execution recipes.
 
 `ingest` finishes ingest/message jobs before running content. `--defer-content`
 leaves content pending. `process --phase ingest|content|all` resumes stored jobs
 without needing source files; continuing an unfinished source traversal still
 requires repeating `ingest` with that source. `--max-jobs` bounds a content pass.
 Failed work is retried; successful invocations are reused. Registry, processor
-code, policy or effective settings changes queue a new generation automatically;
-`process --reprocess` does so explicitly. Reprocessing filed messages starts at
+code, policy and effective settings changes never queue an automatic generation.
+`process --reprocess` or confirmed **File → Reprocess Saved Mail…** explicitly
+requests one. Reprocessing filed messages starts at
 message processing, retaining their original antivirus provenance. It never
 unquarantines infected messages. Original source bytes, canonical MBOX files and
 manual decisions are retained. Working `objects/` files, including synthetic
-parts, are outside the canonical BagIt payload.
+parts, are outside the canonical BagIt payload. Completed working files are
+collected after each message publication and SQL commit, then after completed
+processing jobs. Live jobs retain derived inputs and retry checkpoints; raw
+inputs are reconstructed from verified canonical MBOX records when needed.
+New production generations regenerate derived parts.
+The standalone harness retains its original input snapshots for replay.
 
 `identities` returns JSON address rows with canonical names, first/last use and
 distinct message counts, or organization rows grouped by parent domain using an
@@ -200,12 +191,13 @@ I/O failure after journaling retains completed invocations for publication retry
 Earlier successful ranks retain their committed writes if a later rank fails.
 
 The configuration service is available to processors and source/file adapters.
-Settings changes affect subsequent invocations; the production host fingerprints
-effective settings, processing code and policy to invalidate completed derived
-work. The registry fingerprint covers manifests and local Python code, including helpers.
+Settings changes affect subsequent unfinished invocations and new mail. Completed
+results remain until an explicit replay. Registry fingerprints record manifests
+for provenance and never read Python source; saved registry values are not a
+compatibility gate. Input/output content SHA-256 verification remains mandatory.
 
 
-## Proposed ranked processing graphs
+## Processing graph design and deferred capabilities
 
 ![Proposed container, message and content processor DAGs](../website/static/images/processor-dag.svg)
 
@@ -274,17 +266,19 @@ paths. The attachment tag means also observed as an attachment, not exclusively
 attached. Child-byte recovery and resource-limit behavior are specified below.
 The viewer shows origin paths; the attachment tag initially has a 5% gray background.
 
-On archive opening, unfinished work prompts **Incomplete work**, with checked
-**Continue ingest** and **Continue content processing** choices. The desktop bridge
+On archive opening, unfinished work prompts **Incomplete work**, with **Continue
+Import** to resume both ingest and content processing, **Leave import suspended**
+to preserve the checkpoint without starting work, and **Stop import** to cancel
+remaining work while retaining archived mail. The desktop bridge
 uses the shared `IngestRequest` service, saved owner/scanner/plugin settings and
 writer lease. The **Names and addresses** and **Institutions** controls query the
 processor database; manual name/address decisions commit immediately and survive
 replay. Institution membership is domain-based. About lists processor manifests
 by subscribed MIME type. Authoritative matching is not yet connected. No persistent
-“do not ask again” option suppresses unfinished work. Selecting only content processing runs eligible already-ingested messages even
-when ingest remains incomplete; required message-metadata processing precedes
-their content jobs. Selecting both completes ingest before deferred content
-processing. Unchecking both opens the archive without starting work. Extraction
+“do not ask again” option suppresses unfinished work. The dialog has no phase
+checkboxes. Required message-metadata processing precedes its content jobs;
+saved archived-content work is recovered before remaining source traversal.
+The CLI and shared service retain independent phase controls. Extraction
 checkpoints distinguish plugin versions and completed, failed, and pending work;
 manual identity decisions survive all extraction and matcher runs.
 
@@ -294,6 +288,13 @@ and font; presentation fields permit NULL for no change. Definitions and
 assignments are durable, not disposable search-index data.
 
 ### Registration and manifest contract
+
+About's **Show processor graph…** draws the currently registered manifests in a
+separate offline window. This is the subscription/emission view of each pipeline,
+including custom plugins from saved trusted roots. `emits_mime_parts = true`
+already declares open-ended document outputs; the graph expands registered MIME
+types and shows an **Other MIME types** terminal for the rest. The architecture
+graphic above also describes persistence and handoffs beyond these type edges.
 
 The implemented processor API is a versioned extension of the existing trusted
 Python plugin system, not a new package installer. Existing source/file API v1
@@ -367,6 +368,11 @@ emitted framework types. Actual parts retain their MIME types, including
 `message/rfc822`. These framework labels are internal types,
 not headers added to canonical messages.
 
+`ProcessingResult.phone_numbers` carries typed normalized/display phone candidates
+from detected signatures. The host attaches them to the message sender as `phone`
+evidence; they do not add email-address observations or signature-email counts.
+The picker displays observed candidates without asserting ownership.
+
 A result contains emitted processing objects, typed diagnostics, and one
 control outcome: continue, abort part, abort message, or fail import. Publications,
 catalog changes and handoff requests use application services rather than
@@ -375,7 +381,9 @@ uncoordinated file/database writes. Plugins do not own threads or print reports.
 ### Dispatch, aborts and failure handling
 
 For each input object/type, finish all subscribers at a rank before releasing
-higher-ranked subscribers. Buffer emitted objects until the rank barrier has
+higher-ranked subscribers. An explicit `fail-import`, the strongest outcome,
+ends the rank immediately without starting remaining subscribers. Buffer emitted
+objects until the rank barrier has
 resolved; downstream consumers cannot outrun a scanner or another aborting
 subscriber. Cross-type required outputs and explicit dependencies also gate
 dispatch. The strongest outcome wins: import failure, message abort, part
@@ -390,8 +398,8 @@ Separate child-message jobs have their own abort scope once durably submitted.
 
 A positive antivirus result is a handled message abort: commit quarantine and
 its observation before stopping downstream work. A scanner error or timeout
-is never a clean verdict. Record the failure, retain recoverable input and leave
-the work retryable; stop normal filing of that input. Malformed MIME, decoding
+is never a clean verdict. Record the failure, preserve the original message and
+continue importing automatically; no manual-review gate is permitted. Malformed MIME, decoding
 failures and unscannable content must never silently discard original bytes.
 
 In-process plugins must honor cancellation and pass their remaining timeout to
@@ -466,10 +474,17 @@ channel across all visible member addresses.
 
 Scanner invocations persist typed clean/infected/not-scanned/unscannable/scanner-error
 results with diagnostics and engine/signature versions (NULL if unavailable).
-Errors and reported encryption/size-limit heuristics block filing and retain
-raw input for retry. Version queries are cached per daemon configuration;
-which unscannable conditions are reported depends on the daemon configuration.
-Failed invocations may publish scan evidence only, never content or filing.
+Python host ingestion archives originals unchanged for `unscannable` and
+`scanner-error` outcomes, including encryption, size limits, deadlines and engine
+failures. It records an antivirus metadata defect and continues automatically.
+Incomplete/error scans never become clean verdicts. The scan
+diagnostic and engine/signature versions remain in the invocation record.
+Engine and definition versions are read once per scanner
+session; which unscannable conditions are reported depends on libclamav's scan options.
+Only scan evidence is retained from failed processor output, never its content
+or filing requests. The host's accepted outcome permits normal filing or
+synthesizes automatic quarantine for a known positive. Failed attempt/timeout
+counters remain in audit history.
 
 
 Attached-message promotion requires valid transfer decoding. Invalid base64
@@ -484,14 +499,15 @@ MIME depth (default 40, `plugins.mime.max_depth`), attached-message depth
 offers continuation for these failures; increasing the configured limit and
 resuming reprocesses the retained source. Limits never mark truncated work complete.
 
-Persist job phase, message/part identity, plugin kind/version, relevant
-configuration fingerprint, input digest, attempts, status and diagnostics.
+Persist job phase, message/part identity, plugin kind/version, manifest provenance,
+input digest, attempts, status and diagnostics.
 Job statuses are pending, running, completed, aborted and failed. Cancellation
 records an interrupted invocation and leaves the job resumable; it is not a
 separate terminal job state.
-On restart, abandoned running jobs become retryable; successful unchanged work
-is skipped. A plugin/version/configuration change invalidates its derived work
-and dependent outputs without rewriting canonical messages or manual decisions.
+On restart, abandoned running jobs become retryable; successful work is skipped.
+Plugin/version/configuration changes do not invalidate completed work. Only an
+explicit reprocessing request rebuilds derived outputs, preserving canonical
+messages and manual decisions.
 Synthetic content can be regenerated from its producer and original reference.
 
 The archive-open prompt covers incomplete message jobs as prerequisites of
@@ -636,6 +652,14 @@ source account; the framework scopes it by plug-in kind and source ID.
 containing non-secret provider provenance. The framework stores it with the
 source container; access tokens and credentials are forbidden.
 
+The built-in IMAP source may also yield `SourceObservation` to refresh already
+committed message metadata without retrieving a body. Its work/source identity
+must match the container; the host updates the committed IMAP checkpoint without
+incrementing download counts. This metadata-only handler is currently IMAP-specific.
+Optional `MailObject.provider_metadata_json` carries typed provider metadata through
+durable ingest retries; attached-message promotions clear their parent's remote
+identity metadata. Existing source plugins need not emit either addition.
+
 `MailObject` is one streamed message. `raw` is the provider's original RFC 5322
 representation. `work_id` binds it to its container, while `cursor` is an
 opaque source-native record locator. Optional message and byte fields report
@@ -672,7 +696,7 @@ class SourcePlugin(ABC):
 
     def messages(
         self, container: MailContainer, resume_cursor: str | None
-    ) -> Iterator[MailObject | ProgressEvent]: ...
+    ) -> Iterator[MailObject | SourceObservation | ProgressEvent]: ...
 ```
 
 The framework requires exactly one source plug-in to recognize each command-line
@@ -780,10 +804,10 @@ checkpoint. Evidence is stored in `source_integrity_checks` and
 while provider version tokens, immutable identifiers, cursors, and metadata
 must not claim a hash algorithm.
 
-The framework consumes `complete()` outside the publication lock, forwarding
+The source worker consumes `complete()` before owner-thread publication, forwarding
 each `ProgressEvent` as it is yielded. This permits source hashing or provider
 I/O to proceed independently across workers. After the generator finishes and
-its evidence is validated, the framework acquires the publication lock only to
+its evidence is validated, a tracked future asks the owner thread to
 persist the final evidence and completed checkpoint atomically.
 
 The local source control calculates complete and prefix SHA-256 evidence. A
@@ -869,7 +893,7 @@ The completed source and file registries are immutable.
 |---|---|
 | `file-folder` | production |
 | `gmail` | reserved stub; no account access |
-| `imap` | reserved stub; no server access |
+| `imap` | standalone read-only password/app-password CLI; Gmail uses All Mail IDs and labels |
 | `o365` | reserved stub; no Microsoft Graph access |
 | `microsoft-exchange` | reserved stub; no Exchange access |
 | `stdin` | reserved stub; intended for NUL-delimited records |
@@ -955,3 +979,10 @@ message hashing and deduplication. Errors are reported for operator action;
 re-import the stream and let ordinary deduplication handle repeated messages.
 There is no automatic API restart. Explicit `--no-scan` bypasses scan handling.
 Ordinary file imports continue to use host scanning.
+
+## Shared customizable lists
+
+Provider domains and routing/name extraction use the [Customizable Default Lists](CUSTOMIZABLE_DEFAULT_LISTS.md)
+service. Existing identity-evidence `provider_domains` plugin additions remain additive.
+Header processor version 2 adds role-preserving routing candidates. The host records
+matching candidates as typed `routing-address` evidence, retaining the policy revision.

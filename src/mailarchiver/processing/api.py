@@ -1,5 +1,18 @@
 # Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved.
-"""Typed API v2 processor boundary, independent of GUI and production ingest."""
+
+"""Typed API v2 processor boundary, independent of GUI and production ingest.
+
+Purpose: Define the typed processor invocation, content and result boundary.
+
+How it works:
+Validate manifests, immutable content references, emissions, handoffs and statistics
+independently of the host UI.
+
+Fundamental dependents:
+
+- ``processing.runtime``: dispatch and publication require these result contracts.
+- ``processing.store``: persisted jobs must reconstruct the same typed processing objects.
+"""
 from __future__ import annotations
 
 from pathlib import Path
@@ -17,7 +30,7 @@ from ..plugin_configuration import ConfigScope, ConfigValues, ConfigWrite, Plugi
 from ..layout import mbox_path
 from .contracts import (
     AddressEvidence, ContentMetadata, Filing, HeaderMetadata, MailboxReference,
-    MimeInventory, ProcessingPolicy, ScanEvidence, ScanFailure, SourceMetadata, TextContent,
+    MimeInventory, PhoneNumber, ProcessingPolicy, ScanEvidence, ScanFailure, SourceMetadata, TextContent,
 )
 
 Pipeline = Literal["ingest", "message", "content"]
@@ -178,6 +191,7 @@ class ProcessingResult(Model):
     headers: HeaderMetadata | None = None
     text: TextContent | None = None
     evidence: tuple[AddressEvidence, ...] = ()
+    phone_numbers: tuple[PhoneNumber, ...] = ()
     mime: MimeInventory | None = None
     promotions: tuple[PromotedMessage, ...] = ()
 

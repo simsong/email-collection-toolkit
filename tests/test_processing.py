@@ -6,11 +6,12 @@ import json
 import sqlite3
 import subprocess
 import sys
+import threading
 from pathlib import Path
 
 import pytest
 
-from mailarchiver.processing.api import RAW_MESSAGE
+from mailarchiver.processing.api import RAW_MESSAGE, ProcessingObject
 from mailarchiver.processing.registry import fingerprint, load_processors
 from mailarchiver.processing.runtime import run
 from mailarchiver.processing.store import connect, report, submit
@@ -91,7 +92,8 @@ def test_plugin_local_models_and_relative_imports_run_in_host(tmp_path: Path) ->
         original = fingerprint(plugins)
         helper = tmp_path / "processors/models/helper.py"
         helper.write_text(helper.read_text().replace("pid: int", "pid: str"))
-        assert fingerprint(plugins) != original
+        assert fingerprint(plugins) == original
+        assert run(database, plugins).statistics[0].invocations == 1
         from mailarchiver.processing.store import reprocess
         reprocess(database, tmp_path / "archive", fingerprint(plugins))
         assert run(database, plugins).failed == 1  # The edited helper, not an old module, ran.
@@ -201,7 +203,7 @@ def test_explicit_reprocess_retains_manual_edits(tmp_path: Path) -> None:
 
 
 def test_interrupted_rank_replays_without_reinvoking_completed_plugin(tmp_path: Path) -> None:
-    """Persist one success and an abandoned invocation as an interrupted worker would."""
+    """Code/manifest changes and legacy file hashes must retain successful checkpoints."""
     plugin(tmp_path, "first", 'return ProcessingResult()')
     plugin(tmp_path, "second", 'return ProcessingResult()', rank=2)
     plugins = load_processors((tmp_path,))
@@ -209,15 +211,42 @@ def test_interrupted_rank_replays_without_reinvoking_completed_plugin(tmp_path: 
     with connect(archive, create=True) as database:
         submit(database, archive, MESSAGE, fingerprint(plugins))
         database.execute("UPDATE jobs SET status='running'")
+        database.execute("UPDATE jobs SET registry_hash='legacy-source-file-hash'")
         database.execute("INSERT INTO invocations(job_id,kind,version,rank,status,result_json) VALUES(1,'first','1',1,'completed','{}')")
         database.execute("INSERT INTO invocations(job_id,kind,version,rank,status) VALUES(1,'second','1',2,'running')")
         database.commit()
+    entrypoint = tmp_path / "processors/first/plugin.py"
+    entrypoint.write_text(entrypoint.read_text().replace('return ProcessingResult()', 'raise AssertionError("completed work repeated")'))
+    manifest = tmp_path / "processors/first/plugin.toml"
+    manifest.write_text(manifest.read_text().replace('implementation_version="1"', 'implementation_version="2"'))
+    plugins = load_processors((tmp_path,))
     with connect(archive) as reopened:
         result = run(reopened, plugins)
         assert result.completed == 1
         assert result.statistics[0].invocations == 1
         assert result.statistics[1].invocations == 2
         assert result.statistics[1].errors == 1
+
+
+def test_legacy_checkpoint_republication_does_not_duplicate_child_jobs(tmp_path: Path) -> None:
+    """Resuming old registry metadata preserves the identity of already queued emissions."""
+    plugin(tmp_path, "emit", 'return ProcessingResult(emissions=(Emission(content_ref=item.content_ref, content_type="text/plain"),))',
+           emits='"text/plain"')
+    plugin(tmp_path, "gate", 'if not (item.archive.path / "ready").exists():\n    raise ValueError("not ready")\nreturn ProcessingResult()', rank=2)
+    plugin(tmp_path, "child", 'return ProcessingResult()', subscribes="text/plain")
+    archive = tmp_path / "archive"
+    with connect(archive, create=True) as database:
+        submit(database, archive, MESSAGE, "legacy-file-hash")
+        assert run(database, load_processors((tmp_path,))).failed == 1
+        assert database.execute("SELECT count(*) FROM jobs").fetchone() == (2,)
+        for kind in ("emit", "gate"):
+            manifest = tmp_path / "processors" / kind / "plugin.toml"
+            manifest.write_text(manifest.read_text().replace('implementation_version="1"', 'implementation_version="2"'))
+        (archive / "ready").touch()
+        assert run(database, load_processors((tmp_path,)), retry=True).completed == 2
+        assert database.execute("SELECT count(*) FROM jobs").fetchone() == (2,)
+        assert database.execute("SELECT count(*) FROM invocations WHERE kind='emit'").fetchone() == (1,)
+        assert database.execute("SELECT json_extract(item_json,'$.producer') FROM jobs WHERE parent_job_id IS NOT NULL").fetchall() == [("emit:1",)]
 
 
 def test_dependency_and_entrypoint_validation_before_execution(tmp_path: Path) -> None:
@@ -421,6 +450,38 @@ def test_error_text_is_not_a_timeout_and_empty_samples_are_unavailable(tmp_path:
         assert report(database, ("unreached",)).statistics[0].invocations == 0
 
 
+def test_dispatch_uses_indexed_pending_queue_with_large_completed_history(tmp_path: Path) -> None:
+    """PROCESSING: next-job selection must not scan completed history or rebuild all parent IDs."""
+    plugin(tmp_path, "simple", 'return ProcessingResult()')
+    plugins = load_processors((tmp_path,))
+    archive = tmp_path / "archive"
+    with connect(archive, create=True) as database:
+        submit(database, archive, MESSAGE, fingerprint(plugins))
+        payload = database.execute("SELECT item_json FROM jobs").fetchone()[0]
+        template = ProcessingObject.model_validate_json(payload)
+        database.execute("UPDATE jobs SET status='completed'")
+        database.executemany("INSERT INTO jobs(identity,item_json,registry_hash,status) VALUES(?,?,?,'completed')",
+            ((f"history-{number}", template.model_copy(update={"message_id": f"{number:064x}"}).model_dump_json(), fingerprint(plugins))
+             for number in range(5000)))
+        database.execute("INSERT INTO jobs(identity,parent_job_id,item_json,registry_hash,status) VALUES('live',1,?,?,'pending')",
+                         (payload, fingerprint(plugins)))
+        database.commit()
+        statements: list[str] = []
+        database.set_trace_callback(statements.append)
+        assert run(database, plugins).pending == 0
+        database.set_trace_callback(None)
+        selection = next(sql for sql in statements if sql.startswith("SELECT ") and "FROM jobs WHERE status='pending'" in sql)
+        plan = "\n".join(row[3] for row in database.execute("EXPLAIN QUERY PLAN " + selection))
+        assert "SEARCH jobs USING INDEX jobs_status_order" in plan
+        assert "SEARCH parent USING INTEGER PRIMARY KEY" in plan
+        assert "SCAN jobs" not in plan
+        database.execute("DROP INDEX jobs_status_order")
+        database.commit()
+    with connect(archive) as database:
+        assert database.execute("SELECT count(*) FROM jobs WHERE status='completed'").fetchone()[0] == 5002
+        assert database.execute("SELECT 1 FROM sqlite_master WHERE name='jobs_status_order'").fetchone()
+
+
 def test_job_identity_survives_retry_and_new_submission_gets_its_own(tmp_path: Path) -> None:
     """Public job IDs identify durable jobs, not attempts or parent invocations."""
     plugin(tmp_path, "identity", 'if not (item.archive.path / "allow").exists():\n'
@@ -443,3 +504,140 @@ def test_job_identity_survives_retry_and_new_submission_gets_its_own(tmp_path: P
         for stored_id, result in database.execute("SELECT job_id,result_json FROM invocations WHERE status='completed'"):
             assert json.loads(result)["diagnostics"] == [str(stored_id)]
         assert database.execute("SELECT count(DISTINCT job_id) FROM invocations").fetchone() == (2,)
+
+
+def test_signature_phones_preserve_spelling_and_exclude_dates_and_quoted_replies() -> None:
+    """Phone observations are candidates, deduplicated without country inference or quoted mail."""
+    from mailarchiver.processing.phones import signature_phone_numbers
+
+    phones=signature_phone_numbers('Phone: +1 (617) 555-0102\nOffice: +1 617 555 0102\n'
+        'Mobile: +44 20 7946 0958\nDate: 2024-01-02\nOn Tuesday, Person wrote:\n'
+        '> Telephone: +1 212 555 0199\n')
+    assert [(phone.normalized,phone.display) for phone in phones]==[
+        ('+16175550102','+1 (617) 555-0102'),('+442079460958','+44 20 7946 0958')]
+
+
+def test_parallel_dispatch_drains_independent_messages_with_one_global_budget(tmp_path: Path) -> None:
+    """PROCESSING: concurrent consumers preserve message barriers, exactly-once claims and global limits."""
+    plugin(tmp_path, "gate", 'marker = item.archive.path / ("entered-" + item.message_id)\n'
+           'marker.touch()\n'
+           'while len(list(item.archive.path.glob("entered-*"))) < 2:\n'
+           '    item.check_cancelled()\n    time.sleep(0.01)\n'
+           'return ProcessingResult(emissions=tuple(Emission(content_ref=item.content_ref, '
+           'content_type="text/plain", part_path=(part,)) for part in (1, 2)))', emits='"text/plain"', timeout=5)
+    plugin(tmp_path, "child", 'active = item.archive.path / ("active-" + item.message_id)\n'
+           'with active.open("x"):\n    time.sleep(0.01)\n'
+           'active.unlink()\nreturn ProcessingResult()', subscribes="text/plain")
+    plugins = load_processors((tmp_path,))
+    archive = tmp_path / "archive"
+    active: set[int] = set()
+    finished: list[int] = []
+    peak = 0
+    owner_thread = threading.get_ident()
+    with connect(archive, create=True) as database:
+        for number in range(3):
+            source = tmp_path / f"{number}.eml"
+            source.write_bytes(f"Subject: message {number}\n\nbody {number}".encode())
+            submit(database, archive, source, fingerprint(plugins))
+
+        def progress(item: ProcessingObject, _processor: str, done: bool, _worker: int) -> None:
+            nonlocal peak
+            assert threading.get_ident() == owner_thread
+            assert item.job_id is not None
+            if done:
+                assert item.job_id not in finished
+                finished.append(item.job_id)
+                active.remove(item.job_id)
+            else:
+                active.add(item.job_id)
+                peak = max(peak, len(active))
+                assert database.execute("SELECT count(*) FROM jobs child JOIN jobs parent "
+                    "ON parent.job_id=child.parent_job_id WHERE child.job_id=? AND parent.status<>'completed'",
+                    (item.job_id,)).fetchone() == (0,)
+
+        limited = run(database, plugins, workers=2, max_jobs=2, progress=progress)
+        assert (limited.completed, limited.pending, limited.failed) == (2, 5, 0)
+        assert len(finished) == 2 and peak == 2 and not active
+        result = run(database, plugins, workers=2, progress=progress)
+        assert (result.completed, result.pending, result.failed) == (9, 0, 0)
+        assert len(finished) == 9 and not active
+        assert [(stat.kind, stat.invocations) for stat in result.statistics] == [("child", 6), ("gate", 3)]
+        assert database.execute("SELECT count(*) FROM invocations WHERE status<>'completed'").fetchone() == (0,)
+        assert database.execute("PRAGMA foreign_key_check").fetchall() == []
+
+
+
+def test_parallel_cancellation_retains_checkpoints_and_clears_each_worker(tmp_path: Path) -> None:
+    """PROCESSING: cancelling concurrent invocations leaves retries without repeating completed ranks."""
+    plugin(tmp_path, "first", 'return ProcessingResult()')
+    plugin(tmp_path, "gate", 'while not (item.archive.path / "resume").exists():\n'
+           '    item.check_cancelled()\n    time.sleep(0.01)\nreturn ProcessingResult()', rank=2, timeout=5)
+    plugins = load_processors((tmp_path,))
+    archive = tmp_path / "archive"
+    stop = threading.Event()
+    entered: set[str] = set()
+    active: set[int] = set()
+    def cancelled() -> None:
+        if stop.is_set():
+            raise KeyboardInterrupt
+    def progress(item: ProcessingObject, processor: str, finished: bool, _worker: int) -> None:
+        assert item.job_id is not None
+        if finished:
+            active.remove(item.job_id)
+        else:
+            active.add(item.job_id)
+        if processor == "gate" and not finished:
+            entered.add(item.message_id)
+            if len(entered) == 2:
+                stop.set()
+    with connect(archive, create=True) as database:
+        for number in range(2):
+            source = tmp_path / f"{number}.eml"
+            source.write_bytes(f"Subject: message {number}\n\nbody".encode())
+            submit(database, archive, source, fingerprint(plugins))
+        with pytest.raises(KeyboardInterrupt):
+            run(database, plugins, workers=2, cancelled=cancelled, progress=progress)
+        assert len(entered) == 2 and not active
+        assert database.execute("SELECT count(*) FROM invocations WHERE status='running'").fetchone() == (0,)
+        (archive / "resume").touch()
+        result = run(database, plugins, workers=2, retry=True)
+        assert result.completed == 2 and result.pending == result.failed == 0
+        assert next(stat for stat in result.statistics if stat.kind == "first").invocations == 2
+
+
+@pytest.mark.parametrize("continue_after_failure", [False, True])
+@pytest.mark.parametrize("later_rank", [1, 2])
+def test_parallel_import_stop_preserves_inflight_checkpoints_and_blocks_remaining_subscribers(
+    tmp_path: Path, continue_after_failure: bool, later_rank: int,
+) -> None:
+    """PROCESSING: fail-import stops new invocations while preserving another worker's completed checkpoint."""
+    plugin(tmp_path, "gate", 'if item.content_ref.path.read_bytes().startswith(b"blocked"):\n'
+           '    while not (item.archive.path / "healthy-entered").exists():\n'
+           '        item.check_cancelled()\n        time.sleep(0.01)\n'
+           '    return ProcessingResult(outcome="fail-import")\n'
+           '(item.archive.path / "healthy-entered").touch()\n'
+           'while not (item.archive.path / "release-healthy").exists():\n'
+           '    item.check_cancelled()\n    time.sleep(0.01)\nreturn ProcessingResult()', timeout=5)
+    plugin(tmp_path, "later", 'with (item.archive.path / ("later-" + item.message_id)).open("x"):\n'
+           '    pass\nreturn ProcessingResult()', rank=later_rank)
+    plugins = load_processors((tmp_path,))
+    archive = tmp_path / "archive"
+    def progress(_item: ProcessingObject, processor: str, finished: bool, _worker: int) -> None:
+        if finished and processor == "failed":
+            (archive / "release-healthy").touch()
+    with connect(archive, create=True) as database:
+        for name in ("blocked", "healthy"):
+            source = tmp_path / name
+            source.write_bytes(name.encode())
+            message_id = submit(database, archive, source, fingerprint(plugins))
+        if continue_after_failure:
+            with pytest.raises(RuntimeError, match="processor requested fail-import"):
+                run(database, plugins, workers=2, continue_after_failure=True, progress=progress)
+        else:
+            assert run(database, plugins, workers=2, progress=progress).failed == 1
+        assert not list(archive.glob("later-*"))
+        assert database.execute("SELECT count(*) FROM invocations WHERE kind='gate' AND status='completed'").fetchone() == (2,)
+        result = run(database, plugins, workers=2, message_id=message_id)
+        assert result.completed == 1 and result.failed == 1 and result.pending == 0
+        assert len(list(archive.glob("later-*"))) == 1
+        assert next(stat for stat in result.statistics if stat.kind == "gate").invocations == 2

@@ -1,12 +1,17 @@
 # Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved.
-# Build folder selections from derived source observations, without changing mail.
-# Versioned tokens identify logical folders and optionally their source volume.
-# Saved filters share one per-user JSON format with the Rust desktop reader.
-# Mutations hold a stable companion-file OS lock before loading preferences.
-# Synced temporary-file replacement publishes complete snapshots to readers.
-# Closing the lock handle releases ownership after success, failure or a crash.
 
-"""Build original-mailbox trees and persist per-user filter sets."""
+"""Build original-mailbox trees and persist per-user filter sets.
+
+Purpose: Build logical source-mailbox trees and saved folder selections.
+
+How it works:
+Aggregate source hierarchy/provenance and persist per-user filter sets outside the archive.
+
+Fundamental dependents:
+
+- ``gui_app``: the original-folder explorer needs these nodes and saved selections.
+- ``mailsearch``: folder constraints must use the same selection model.
+"""
 
 from __future__ import annotations
 
@@ -22,6 +27,7 @@ from contextlib import contextmanager
 from itertools import groupby
 from pathlib import Path, PurePosixPath
 from typing import Literal
+from urllib.parse import unquote
 
 from pydantic import BaseModel, Field, field_validator
 
@@ -253,7 +259,7 @@ def _nodes(
             MailboxTreeNode(
                 selection=selection.token(),
                 logical_selection=MailboxSelection(path=path).token(),
-                label=label,
+                label=unquote(label) if all(row.source_kind == "imap" for row in branch_rows) else label,
                 count=_count(database, selection),
                 kind=kind,
                 children=children,

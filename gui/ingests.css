@@ -20,16 +20,20 @@ body { display: flex; flex-direction: column; }
 .ingest-history header { position: sticky; top: 0; z-index: 2; display: flex; align-items: baseline; justify-content: space-between; padding: 14px 15px 10px; border-bottom: 1px solid var(--border); background: var(--surface); }
 .ingest-history h1 { margin: 0; font-size: 18px; }
 #history-count { color: var(--muted); }
-.ingest-actions { padding: 10px 15px; border-bottom: 1px solid var(--border); }
-#import-directory { padding: 5px 10px; border: 1px solid var(--border); border-radius: 6px; background: var(--background); color: CanvasText; }
-#import-directory:disabled { opacity: 0.5; }
-.history-row { display: grid; grid-template-columns: 10px 1fr; gap: 8px; width: 100%; padding: 10px 12px; border: 0; border-bottom: 1px solid var(--border); text-align: left; background: transparent; }
+.ingest-actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; padding: 10px 15px; border-bottom: 1px solid var(--border); }
+.ingest-actions button { padding: 5px 10px; border: 1px solid var(--border); border-radius: 6px; background: var(--background); color: CanvasText; }
+.ingest-actions button:disabled { opacity: 0.5; }
+#import-directory { grid-column: 1 / -1; justify-self: start; }
+#import-control-status { grid-column: 1 / -1; margin: 0; font-size: 12px; }
+.history-row { display: grid; grid-template-columns: 22px 1fr; gap: 8px; width: 100%; padding: 10px 12px; border: 0; border-bottom: 1px solid var(--border); text-align: left; background: transparent; }
 .history-row:hover { background: color-mix(in srgb, AccentColor 10%, transparent); }
 .history-row.selected { background: var(--selection); }
-.state-dot { width: 9px; height: 9px; margin-top: 3px; border-radius: 50%; background: #888; }
-.state-dot.running { background: #2a9d4b; box-shadow: 0 0 0 3px color-mix(in srgb, #2a9d4b 20%, transparent); }
+.state-dot { display: inline-flex; align-items: center; justify-content: center; flex: 0 0 22px; width: 22px; height: 22px; border-radius: 50%; background: #666; color: white; font-size: 16px; font-weight: 800; line-height: 1; }
+.state-dot.running, .state-dot.completed { background: #207a3a; }
+.state-dot.running { box-shadow: 0 0 0 3px color-mix(in srgb, #207a3a 20%, transparent); }
 .state-dot.failed, .state-dot.disk-full, .state-dot.stale { background: #c43b35; }
-.state-dot.interrupted { background: #d89024; }
+.state-dot.interrupted { background: #946010; }
+#starting-import:not([hidden]) { display: flex; align-items: center; gap: 8px; padding: 12px; font-weight: 650; border-bottom: 1px solid var(--border); }
 .history-main { min-width: 0; }
 .history-title { display: flex; justify-content: space-between; gap: 6px; font-weight: 650; }
 .history-state { text-transform: capitalize; }
@@ -41,6 +45,7 @@ body { display: flex; flex-direction: column; }
 .state-badge { padding: 5px 9px; border-radius: 999px; background: var(--surface); font-weight: 650; text-transform: capitalize; }
 .progress-track { height: 10px; margin: 22px 0 7px; overflow: hidden; border-radius: 999px; background: var(--surface); }
 .progress-fill { height: 100%; background: AccentColor; }
+.progress-fill.indeterminate { width: 100% !important; opacity: .6; background: repeating-linear-gradient(135deg, AccentColor 0 8px, transparent 8px 16px); }
 .progress-caption { display: flex; justify-content: space-between; color: var(--muted); }
 .statistics { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 8px; margin: 22px 0; }
 .stat { padding: 10px 12px; border: 1px solid var(--border); border-radius: 7px; background: var(--surface); }
@@ -50,8 +55,8 @@ body { display: flex; flex-direction: column; }
 .worker-table { width: 100%; border-collapse: collapse; }
 .worker-table th, .worker-table td { padding: 7px 8px; border-bottom: 1px solid var(--border); text-align: left; vertical-align: top; }
 .worker-table th { color: var(--muted); font-weight: 500; }
-.worker-table td:first-child, .worker-table td:nth-child(3), .worker-table td:nth-child(4) { white-space: nowrap; }
-.worker-path { max-width: 440px; overflow-wrap: anywhere; }
+.worker-table td:first-child, .worker-table td:last-child { white-space: nowrap; font-variant-numeric: tabular-nums; }
+.worker-path { max-width: 300px; overflow-wrap: anywhere; white-space: pre-line; }
 .source-list { margin: 0; padding-left: 20px; }
 .source-list li { margin: 4px 0; overflow-wrap: anywhere; }
 .failure { padding: 10px 12px; border: 1px solid color-mix(in srgb, #c33 50%, var(--border)); border-radius: 7px; background: color-mix(in srgb, #c33 10%, Canvas); white-space: pre-wrap; overflow-wrap: anywhere; }

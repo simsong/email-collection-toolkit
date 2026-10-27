@@ -1,5 +1,18 @@
 # Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved.
-"""In-process rank-barrier dispatcher with durable checkpoints and deadlines."""
+
+"""In-process rank-barrier dispatcher with durable checkpoints and deadlines.
+
+Purpose: Dispatch processor jobs with durable rank barriers and cooperative deadlines.
+
+How it works:
+Stream independent job generators through bounded future workers. The coordinator
+validates returned results and commits successful rank outcomes/checkpoints.
+
+Fundamental dependents:
+
+- ``processing.production``: archive pipelines rely on this dispatcher.
+- ``processing.__main__``: the standalone harness exercises the same retry/cancellation rules.
+"""
 from __future__ import annotations
 
 import importlib.util
@@ -7,25 +20,54 @@ from importlib.abc import MetaPathFinder
 from importlib.machinery import PathFinder, SourceFileLoader
 import signal
 import sqlite3
+import shutil
 import tempfile
 import time
 import threading
 import sys
 from uuid import uuid4
-from contextlib import contextmanager
-from collections.abc import Callable
+from contextlib import contextmanager, nullcontext
+from collections.abc import Callable, Generator
+from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
 from pathlib import Path
 from typing import Protocol
 from types import CodeType
 
-from ..plugin_configuration import NamespaceWrites, apply_config_batch, read_plugin_configuration, recover_config_transaction
+from pydantic import BaseModel, ConfigDict, InstanceOf
+
+from ..plugin_configuration import PluginConfiguration, NamespaceWrites, apply_config_batch, read_plugin_configuration, recover_config_transaction
 
 from .api import (
-    ApplicationContext, Emission, InvocationResponse, Pipeline, PluginSpec, ProcessingObject,
-    MIME_TYPE, ProcessingResult, PromotedMessage, RAW_MESSAGE, RunReport,
+    ApplicationContext, InvocationResponse, Pipeline, PluginSpec, ProcessingObject,
+    MIME_TYPE, ProcessingResult, RAW_MESSAGE, RunReport,
 )
-from .registry import fingerprint, subscribers
+from .registry import subscribers
 from .store import content_reference, enqueue, report, snapshot
+from .objects import collect_objects, index_outputs
+
+RANK_FAILURE = "rank failed; inspect invocations"
+ProcessingProgress = Callable[[ProcessingObject, str, bool, int], None]
+
+
+class InvocationRequest(BaseModel):
+    plugin: PluginSpec
+    item: ProcessingObject
+    configuration: PluginConfiguration
+
+
+class CheckpointResult(BaseModel):
+    """Accepted output retains its actual producer version across manifest edits."""
+    plugin: PluginSpec
+    result: ProcessingResult
+
+
+class ActiveJob(BaseModel):
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+    message_id: str
+    worker: int
+    steps: InstanceOf[Generator[InvocationRequest, InvocationResponse, bool]]
+    future: Future[InvocationResponse] | None = None
+    workspace: Path | None = None
 
 
 class ProcessorServices(Protocol):
@@ -33,11 +75,13 @@ class ProcessorServices(Protocol):
     def publish(self, database: sqlite3.Connection, job_id: int, item: ProcessingObject,
                 plugin: PluginSpec, result: ProcessingResult) -> None: ...
     def complete(self, item: ProcessingObject) -> None: ...
+    def release(self, message_id: str) -> None: ...
+    def failed(self, item: ProcessingObject, plugin: PluginSpec, response: InvocationResponse) -> ProcessingResult | None: ...
 
 
 class CurrentSourceLoader(SourceFileLoader):
     def get_code(self, fullname: str) -> CodeType:
-        # Content fingerprints must not dispatch stale same-size/same-second pyc files.
+        # Explicit replay must load edited helpers rather than stale cached bytecode.
         path = self.get_filename(fullname)
         return compile(self.get_data(path), path, "exec", dont_inherit=True)
 
@@ -79,34 +123,29 @@ def loaded_plugin(plugin: PluginSpec):
                 sys.modules.pop(name, None)
 
 
-def invoke(plugin: PluginSpec, item: ProcessingObject, installation_config: Path | None = None,
+def invoke(request: InvocationRequest, workspace: Path,
            cancelled: Callable[[], None] | None = None) -> InvocationResponse:
-    """Invoke trusted Python code in this interpreter; only accepted results publish."""
-    configuration = read_plugin_configuration(item.archive.path, plugin.manifest.kind, installation_config)
-    with tempfile.TemporaryDirectory(prefix="processor-") as directory:
-        item = item.model_copy(update={"application": ApplicationContext(policy=item.application.policy, workspace=Path(directory))})
-        item.bind_configuration(configuration)
-        item.bind_deadline(time.monotonic() + plugin.manifest.timeout_seconds, cancelled)
-        try:
-            factory_name = plugin.manifest.entrypoint.split(":")[1]
-            with invocation_deadline(item), loaded_plugin(plugin) as module:
-                processor = getattr(module, factory_name)()
-                result = processor.process(item)
-                item.check_cancelled()
-            if not isinstance(result, ProcessingResult):
-                raise TypeError("processor must return ProcessingResult")
-            validate_result(plugin, item, result)
-            # Retain outputs before releasing this invocation's workspace.
-            return InvocationResponse(result=result.model_copy(update={
-                "config_writes": configuration.pending_writes(),
-                "emissions": tuple(Emission(content_ref=snapshot(item.archive.path, emitted.content_ref.path),
-                    content_type=emitted.content_type, part_path=emitted.part_path, scope=emitted.scope,
-                    synthetic=emitted.synthetic, metadata=emitted.metadata) for emitted in result.emissions),
-                "promotions": tuple(PromotedMessage(content_ref=snapshot(item.archive.path, child.content_ref.path),
-                    part_path=child.part_path) for child in result.promotions),
-            }))
-        except Exception as error:
-            return InvocationResponse.failure(error)
+    """Run trusted code in an isolated workspace; the coordinator publishes returned results."""
+    plugin, configuration = request.plugin, request.configuration
+    item = request.item.model_copy(update={"application": ApplicationContext(policy=request.item.application.policy, workspace=workspace)})
+    item.bind_configuration(configuration)
+    item.bind_deadline(time.monotonic() + plugin.manifest.timeout_seconds, cancelled)
+    result = None
+    try:
+        factory_name = plugin.manifest.entrypoint.split(":")[1]
+        with invocation_deadline(item), loaded_plugin(plugin) as module:
+            processor = getattr(module, factory_name)()
+            result = processor.process(item)
+            item.check_cancelled()
+        if not isinstance(result, ProcessingResult):
+            raise TypeError("processor must return ProcessingResult")
+        validate_result(plugin, item, result)
+        return InvocationResponse(result=result.model_copy(update={"config_writes": configuration.pending_writes()}))
+    except Exception as error:
+        response = InvocationResponse.failure(error)
+        if isinstance(result, ProcessingResult) and result.scan is not None:
+            response = response.model_copy(update={"result": ProcessingResult(scan=result.scan)})
+        return response
 
 
 @contextmanager
@@ -155,23 +194,35 @@ def validate_result(plugin: PluginSpec, item: ProcessingObject, result: Processi
 
 
 def _checkpoint(database: sqlite3.Connection, job_id: int, plugin: PluginSpec, item: ProcessingObject,
-                installation_config: Path | None, cancelled: Callable[[], None] | None,
-                failures: list[Exception], services: ProcessorServices | None) -> ProcessingResult | None:
+                installation_config: Path | None, failures: list[Exception],
+                services: ProcessorServices | None) -> Generator[InvocationRequest, InvocationResponse, CheckpointResult | None]:
     previous = database.execute(
-        "SELECT result_json FROM invocations WHERE job_id=? AND kind=? AND status='completed' ORDER BY invocation_id DESC LIMIT 1",
+        "SELECT coalesce(a.result_json,i.result_json),i.version FROM invocations i "
+        "LEFT JOIN accepted_invocations a USING(invocation_id) "
+        "WHERE i.job_id=? AND i.kind=? AND (i.status='completed' OR a.invocation_id IS NOT NULL) "
+        "ORDER BY i.invocation_id DESC LIMIT 1",
         (job_id, plugin.manifest.kind)).fetchone()
     if previous:
-        return ProcessingResult.model_validate_json(previous[0])
+        recorded = plugin.model_copy(update={"manifest": plugin.manifest.model_copy(update={"implementation_version": previous[1]})})
+        return CheckpointResult(plugin=recorded, result=ProcessingResult.model_validate_json(previous[0]))
     with database:
         cursor = database.execute("INSERT INTO invocations(job_id,kind,version,rank,status) VALUES(?,?,?,?,'running')",
                                   (job_id, plugin.manifest.kind, plugin.manifest.implementation_version, plugin.manifest.rank))
         invocation_id = cursor.lastrowid
     started = time.monotonic()
     try:
-        response = invoke(plugin, item, installation_config, cancelled)
+        response = yield InvocationRequest(plugin=plugin, item=item,
+            configuration=read_plugin_configuration(item.archive.path, plugin.manifest.kind, installation_config))
         if response.result is not None:
             validate_result(plugin, item, response.result)
-    except KeyboardInterrupt:
+            # Retain outputs on the coordinator before indexing them or releasing the workspace.
+            response = response.model_copy(update={"result": response.result.model_copy(update={
+                "emissions": tuple(emitted.model_copy(update={"content_ref": snapshot(item.archive.path, emitted.content_ref.path)})
+                                   for emitted in response.result.emissions),
+                "promotions": tuple(child.model_copy(update={"content_ref": snapshot(item.archive.path, child.content_ref.path)})
+                                    for child in response.result.promotions),
+            })})
+    except (KeyboardInterrupt, GeneratorExit):
         with database:
             database.execute("UPDATE invocations SET status='failed',elapsed=?,error='cancelled' WHERE invocation_id=?",
                              (time.monotonic() - started, invocation_id))
@@ -182,14 +233,20 @@ def _checkpoint(database: sqlite3.Connection, job_id: int, plugin: PluginSpec, i
         failures.append(response.cause)
     elapsed = time.monotonic() - started
     success = response.result is not None and response.error is None
+    accepted = services.failed(item, plugin, response) if not success and services is not None else None
     with database:
         database.execute("UPDATE invocations SET status=?,elapsed=?,result_json=?,error=? WHERE invocation_id=?",
                          ("completed" if success else "failed", elapsed,
                           response.result.model_dump_json() if success and response.result else response.model_dump_json(),
                           response.error, invocation_id))
+        if success and response.result is not None:
+            index_outputs(database, job_id, item.message_ref.sha256, response.result)
+        if accepted is not None:
+            database.execute("INSERT INTO accepted_invocations VALUES(?,?)", (invocation_id, accepted.model_dump_json()))
         if not success and response.result is not None and response.result.scan is not None and services is not None:
             services.publish(database, job_id, item, plugin, ProcessingResult(scan=response.result.scan))
-    return response.result if success else None
+    result = response.result if success else accepted
+    return CheckpointResult(plugin=plugin, result=result) if result is not None else None
 
 
 def _publish(database: sqlite3.Connection, item: ProcessingObject, plugin: PluginSpec,
@@ -226,20 +283,28 @@ def run(database: sqlite3.Connection, plugins: tuple[PluginSpec, ...], *, retry:
         max_jobs: int | None = None, installation_config: Path | None = None,
         pipelines: tuple[Pipeline, ...] = ("ingest", "message", "content"),
         services: ProcessorServices | None = None, cancelled: Callable[[], None] | None = None,
-        failures: list[Exception] | None = None, message_id: str | None = None) -> RunReport:
+        failures: list[Exception] | None = None, message_id: str | None = None,
+        continue_after_failure: bool = False, progress: ProcessingProgress | None = None, workers: int = 1,
+        heartbeat: Callable[[], None] | None = None) -> RunReport:
     """Caller holds the archive writer lease. Atomic output release follows each barrier."""
-    prepare_run(database, plugins, retry=retry)
-    dispatch(database, plugins, max_jobs=max_jobs, installation_config=installation_config,
-             pipelines=pipelines, services=services, cancelled=cancelled, failures=failures, message_id=message_id)
+    if workers < 1:
+        raise ValueError("processing workers must be positive")
+    prepare_run(database, retry=retry)
+    try:
+        dispatch(database, plugins, max_jobs=max_jobs, installation_config=installation_config,
+                 pipelines=pipelines, services=services, cancelled=cancelled, failures=failures, message_id=message_id,
+                 continue_after_failure=continue_after_failure, progress=progress, workers=workers, heartbeat=heartbeat)
+    finally:
+        if services is None:
+            # Production owns cleanup after canonical publication/checkpointing;
+            # the harness has only source snapshots and must preserve those.
+            archive = Path(database.execute("PRAGMA database_list").fetchone()[2]).parent
+            collect_objects(database, archive)
     return report(database, tuple(p.manifest.kind for p in plugins))
 
 
-def prepare_run(database: sqlite3.Connection, plugins: tuple[PluginSpec, ...], *, retry: bool = False) -> None:
+def prepare_run(database: sqlite3.Connection, *, retry: bool = False) -> None:
     """Recover interrupted invocations once at the start of a writer-owned run."""
-    registry_hash = fingerprint(plugins)
-    incompatible = database.execute("SELECT 1 FROM jobs WHERE registry_hash<>? AND status IN ('pending','running','failed') LIMIT 1", (registry_hash,)).fetchone()
-    if incompatible:
-        raise ValueError("registry changed; use the explicit reprocess command")
     with database:
         database.execute("UPDATE invocations SET status='failed',error='interrupted worker' WHERE status='running'")
         database.execute("UPDATE jobs SET status='pending' WHERE status='running'")
@@ -251,38 +316,126 @@ def dispatch(database: sqlite3.Connection, plugins: tuple[PluginSpec, ...], *,
         max_jobs: int | None = None, installation_config: Path | None = None,
         pipelines: tuple[Pipeline, ...] = ("ingest", "message", "content"),
         services: ProcessorServices | None = None, cancelled: Callable[[], None] | None = None,
-        failures: list[Exception] | None = None, message_id: str | None = None) -> None:
-    """Dispatch prepared work without rescanning history or computing an aggregate report."""
-    registry_hash = fingerprint(plugins)
+        failures: list[Exception] | None = None, message_id: str | None = None,
+        continue_after_failure: bool = False, progress: ProcessingProgress | None = None, workers: int = 1,
+        heartbeat: Callable[[], None] | None = None) -> None:
+    """Workers return results; this coordinator alone advances jobs and commits SQL."""
+    if workers < 1:
+        raise ValueError("processing workers must be positive")
     failures = failures if failures is not None else []
+    active: list[ActiveJob] = []
     processed = 0
-    while max_jobs is None or processed < max_jobs:
-        placeholders = ",".join("?" for _ in pipelines)
-        row = database.execute("SELECT job_id,item_json FROM jobs WHERE status='pending' "
-            f"AND json_extract(item_json,'$.pipeline') IN ({placeholders}) "
-            "AND (? IS NULL OR json_extract(item_json,'$.message_id')=?) "
-            "AND (parent_job_id IS NULL OR parent_job_id IN (SELECT job_id FROM jobs WHERE status='completed')) ORDER BY job_id LIMIT 1",
-            (*pipelines, message_id, message_id)).fetchone()
-        if row is None:
-            break
-        job_id, payload = row
-        item = ProcessingObject.model_validate_json(payload).model_copy(update={"job_id": job_id})
-        if services is not None:
-            item = services.prepare(item)
-        recover_config_transaction(item.archive.path)
+    stopped = False
+    failure: BaseException | None = None
+    with tempfile.TemporaryDirectory(prefix="processing-") as directory:
         try:
+            with ThreadPoolExecutor(max_workers=workers) if workers > 1 or heartbeat is not None else nullcontext() as pool:
+                def advance(job: ActiveJob, response: InvocationResponse | None = None,
+                            error: BaseException | None = None) -> None:
+                    nonlocal stopped, failure
+                    try:
+                        if error is not None:
+                            request = job.steps.throw(error)
+                        else:
+                            request = next(job.steps) if response is None else job.steps.send(response)
+                    except StopIteration as done:
+                        stopped |= not done.value
+                        active.remove(job)
+                        return
+                    except BaseException as caught:
+                        failure = failure or caught
+                        stopped = True
+                        active.remove(job)
+                        return
+                    finally:
+                        if job.workspace is not None:
+                            shutil.rmtree(job.workspace)
+                            job.workspace = None
+                    if stopped:
+                        job.steps.close()
+                        active.remove(job)
+                        return
+                    job.workspace = Path(tempfile.mkdtemp(dir=directory))
+                    if pool is not None:
+                        job.future = pool.submit(invoke, request, job.workspace, cancelled)
+                    else:
+                        job.future = Future()
+                        try:
+                            job.future.set_result(invoke(request, job.workspace, cancelled))
+                        except BaseException as caught:
+                            job.future.set_exception(caught)
+
+                while True:
+                    while not stopped and len(active) < workers and (max_jobs is None or processed < max_jobs):
+                        placeholders = ",".join("?" for _ in pipelines)
+                        message_filter = "" if message_id is None else "AND json_extract(item_json,'$.message_id')=? "
+                        busy_filter = ("AND json_extract(item_json,'$.message_id') NOT IN ("
+                                       + ",".join("?" for _ in active) + ") ") if active else ""
+                        row = database.execute("SELECT job_id,item_json,registry_hash FROM jobs WHERE status='pending' "
+                            f"AND json_extract(item_json,'$.pipeline') IN ({placeholders}) {message_filter}{busy_filter}"
+                            "AND (parent_job_id IS NULL OR EXISTS (SELECT 1 FROM jobs parent "
+                            "WHERE parent.job_id=jobs.parent_job_id AND parent.status='completed')) ORDER BY job_id LIMIT 1",
+                            (*pipelines, *((message_id,) if message_id is not None else ()), *(job.message_id for job in active))).fetchone()
+                        if row is None:
+                            break
+                        worker = next(number for number in range(1, workers + 1) if all(job.worker != number for job in active))
+                        job = ActiveJob(message_id=ProcessingObject.model_validate_json(row[1]).message_id, worker=worker,
+                            steps=_job(database, plugins, row[0], row[1], installation_config=installation_config, services=services,
+                                failures=failures, continue_after_failure=continue_after_failure, progress=progress,
+                                worker=worker, registry_hash=row[2]))
+                        active.append(job)
+                        processed += 1
+                        advance(job)
+                    if not active:
+                        break
+                    completed, _pending = wait([job.future for job in active if job.future is not None],
+                                               timeout=0.25 if heartbeat is not None else None, return_when=FIRST_COMPLETED)
+                    if heartbeat is not None:
+                        heartbeat()
+                    for job in tuple(active):
+                        if job.future is None or job.future not in completed:
+                            continue
+                        try:
+                            response = job.future.result()
+                        except BaseException as caught:
+                            advance(job, error=caught)
+                        else:
+                            advance(job, response)
+        finally:
+            for job in active:
+                job.steps.close()
+        if failure is not None:
+            raise failure
+
+
+def _job(database: sqlite3.Connection, plugins: tuple[PluginSpec, ...], job_id: int, payload: str, *,
+         installation_config: Path | None, services: ProcessorServices | None, failures: list[Exception],
+         continue_after_failure: bool, progress: ProcessingProgress | None, worker: int,
+         registry_hash: str) -> Generator[InvocationRequest, InvocationResponse, bool]:
+    item = ProcessingObject.model_validate_json(payload).model_copy(update={"job_id": job_id})
+    ending = "interrupted"
+    try:
+        if progress is not None:
+            progress(item, "preparing", False, worker)
+        try:
+            if services is not None:
+                item = services.prepare(item)
+            recover_config_transaction(item.archive.path)
             input_error = "input digest mismatch" if any(
                 content_reference(ref.path).sha256 != ref.sha256 for ref in (item.message_ref, item.content_ref)) else None
-        except OSError as error:
+        except (OSError, ValueError) as error:
             input_error = f"input unreadable: {error}"
+            failures.append(error)
         if input_error:
             with database:
                 database.execute("UPDATE jobs SET status='failed',detail=? WHERE job_id=?", (input_error, job_id))
-            break
+            ending = "failed"
+            return continue_after_failure
         selected = subscribers(plugins, item)
         with database:
             database.execute("UPDATE jobs SET status='running' WHERE job_id=?", (job_id,))
         stop_import = False
+        explicit_stop = False
         aborted = False
         for rank in sorted({p.manifest.rank for p in selected}):
             if services is not None:
@@ -290,16 +443,21 @@ def dispatch(database: sqlite3.Connection, plugins: tuple[PluginSpec, ...], *,
             results: list[tuple[PluginSpec, ProcessingResult]] = []
             failed = False
             for plugin in (p for p in selected if p.manifest.rank == rank):
-                result = _checkpoint(database, job_id, plugin, item, installation_config, cancelled, failures, services)
-                if result is None:
+                if progress is not None:
+                    progress(item, plugin.manifest.kind, False, worker)
+                checkpoint = yield from _checkpoint(database, job_id, plugin, item, installation_config, failures, services)
+                if checkpoint is None:
                     failed = True
                 else:
-                    results.append((plugin, result))
+                    results.append((checkpoint.plugin, checkpoint.result))
+                    if checkpoint.result.outcome == "fail-import":
+                        break
             outcomes = [result.outcome for _, result in results]
             with database:
                 if failed or "fail-import" in outcomes:
-                    database.execute("UPDATE jobs SET status='failed',detail='rank failed; inspect invocations' WHERE job_id=?", (job_id,))
+                    database.execute("UPDATE jobs SET status='failed',detail=? WHERE job_id=?", (RANK_FAILURE, job_id))
                     stop_import = True
+                    explicit_stop = "fail-import" in outcomes
                 elif "abort-message" in outcomes or "abort-part" in outcomes:
                     if services is not None:
                         for plugin, result in results:
@@ -323,10 +481,21 @@ def dispatch(database: sqlite3.Connection, plugins: tuple[PluginSpec, ...], *,
             if stop_import or aborted:
                 break
         if stop_import:
-            break
+            ending = "failed"
+            if continue_after_failure and explicit_stop:
+                raise RuntimeError("processor requested fail-import")
+            return continue_after_failure
         if not aborted:
             if services is not None:
                 services.complete(item)
             with database:
                 database.execute("UPDATE jobs SET status='completed' WHERE job_id=?", (job_id,))
-        processed += 1
+        if services is not None:
+            services.release(item.message_id)
+        else:
+            collect_objects(database, item.archive.path, message_id=item.message_id)
+        ending = "aborted" if aborted else "completed"
+        return True
+    finally:
+        if progress is not None:
+            progress(item, ending, True, worker)

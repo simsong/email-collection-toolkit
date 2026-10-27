@@ -51,6 +51,18 @@ RESULTS
   the original mail sources. Keep independent backups and integrity records.
 
 Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved.
+
+
+Purpose: Verify canonical Mailbag integrity independently of application databases.
+
+How it works:
+Use only the standard library to check manifests, framing and declared message hashes; ship
+the script with archives.
+
+Fundamental dependents:
+
+- ``bagit``: checkpoint generation uses this independent integrity representation.
+- ``archive_integrity``: publication checks depend on its portable verification contract.
 """
 
 from __future__ import annotations

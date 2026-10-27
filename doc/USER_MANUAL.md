@@ -2,13 +2,12 @@
 
 # Email Collection Toolkit User Manual
 
-This manual describes the current application. The planned compiled desktop
-experience will evaluate [Dioxus and Tauri](DIOXUS.md) with the existing Python
-archive engine; Windows delivery must include full ingest. This decision does
-not introduce an available Windows release or change the current macOS installer.
-
-Plan comparable trial implementations in Dioxus and Tauri before choosing a
-framework. Either approach retains the Python archive engine.
+This reference manual describes the Python/pywebview desktop and command-line
+tools. The earlier Rust GUI experiment is retired; independent Rust tools
+remain supported. See the [desktop retrospective](RUST_GUI_EXPERIMENTS.md) for the
+architecture history. The [website User Manual](https://simsong.github.io/email-collection-toolkit/manual/)
+indexes the operating guides; the website homepage lists available installers
+and their platform requirements.
 
 This manual explains how an archivist creates and searches a mail archive.
 Email Collection Toolkit reads source mail without changing it. It stores deduplicated
@@ -19,13 +18,15 @@ Each archive directory uses BagIt 1.0 and Mailbag 1.0 as its native storage
 format. Messages live in MBOX files under `data/mbox/`, alongside archive
 metadata and SHA-256 integrity information elsewhere in the archive directory.
 This is the archive the application uses, not a separate export; no conversion
-step is needed to obtain a BagIt/Mailbag archive. SQLite catalogs and search
-indexes are derived data.
+step is needed to obtain a BagIt/Mailbag archive. Search indexes can be rebuilt;
+manual identity and tag decisions in `processing.sqlite3` cannot. Back up the
+entire archive, including its databases and configuration.
 
 On macOS, open the supplied DMG and drag **Email Collection Toolkit.app** to its
 **Applications** shortcut. Eject the disk and open the installed app.
-Python is included. Development builds are ad-hoc signed, not notarized;
-see [installation and signing notes](MACOS_DISTRIBUTION.md).
+Python and the ClamAV engine are included. Published releases are Developer ID
+signed and notarized; local development builds are ad-hoc signed unless a
+signing identity is selected. See [installation and signing notes](MACOS_DISTRIBUTION.md).
 
 Email Collection Toolkit currently reads:
 
@@ -42,22 +43,95 @@ old record has no original-header block, its visible headers are used instead.
 RMAIL labels and redundant visible headers remain only in the source Babyl
 container and are not email content.
 
-This checkout also imports PST using the Rust helper and OST through the external
-libpff converter; see [PST_IMPORTER.md](PST_IMPORTER.md) for build requirements, qualified
+Email Collection Toolkit also imports PST using the Rust helper and OST through the external
+libpff converter; the macOS application bundles both. See [PST_IMPORTER.md](PST_IMPORTER.md) for build requirements, qualified
 formats, and reconstruction/cache limits. Direct Gmail, Microsoft 365, and live
-IMAP connections remain planned. Complete local Apple Mail
+OAuth provider connections remain planned; standalone password-based IMAP is available. Complete local Apple Mail
 cache records from those providers can be imported now.
-The code has inactive integration points for Gmail, IMAP, Microsoft Exchange,
+The code has inactive integration points for Gmail API, Microsoft Exchange,
 and standard input containing NUL-separated messages; these are not CLI ingest
 modes yet.
+
+## Worker preferences
+
+Open **Preferences… → Maximum number of workers**. Choose **Half the CPUs**
+(the default), **All CPUs**, or **Custom** and enter a whole number. The maximum
+is twice the computer's logical CPU count. The choice is saved for this computer
+and applies when starting or continuing importing and saved-mail processing.
+Suspend and continue existing work to use a new limit.
+On macOS, changes save automatically. Close Preferences using the red window
+control or **File → Close**; no Done button is needed. Invalid worker counts show
+an explanation and retain the previously saved setting.
+
+**Check for Updates…** requires the installed application. A `make gui` source
+launch has no in-app updater, so this button is disabled with an explanation.
+
+`mailsearch-gui --workers N` overrides the choice for that launch. The worker
+controls are greyed out with `# workers set to N on command line`; your saved
+choice is retained. CLI ingest, process, refresh-index and standalone IMAP also
+accept `--workers N` and otherwise use the saved choice.
+
+## Downloading and processing progress
+
+The Ingests window distinguishes downloading/importing source mail from processing
+saved messages and MIME parts. **Processing saved mail** finishes queued metadata,
+body extraction and search-index work before source downloads resume. During that
+stage the cards show finished processing tasks and average tasks/second. A single
+email can require several tasks. Source-message and file counters apply to source
+import; IMAP containers are labeled download partitions.
+
+Each worker row identifies its operation, current task/source, download/import
+progress and its own finished processing-task total. An em dash means source
+progress does not apply; Unavailable means an older run did not record a reliable
+per-worker total. Each row retains its task total while idle. Worker activity is
+shown in the table; there are no Workers or Peak workers summary cards.
+
+
+**Messages requiring processing** counts archived emails with unfinished work, once
+per email even when several body or attachment tasks remain. Pending, running,
+failed and blocked work is included; mail still on the server is excluded.
+The count refreshes during processing and can increase if more saved-message
+work is discovered. An email leaves the count only after all its tasks finish.
+The count can stay level while earlier stages extract bodies and attachments;
+those emails still need their later processing tasks. Older runs may show Unavailable.
+
+## Reprocessing saved mail
+
+Choose **File → Reprocess Saved Mail…** to rebuild extracted content, search
+indexes and automatic identity evidence for the selected archive. Confirm only
+when ready: this may take a very long time, and search can be incomplete while
+it runs. Cancel leaves everything unchanged. Suspend active work first.
+Original archived messages, curator edits and saved import settings are retained;
+no mail is downloaded again. Ingests shows progress and provides Suspend Import.
+Code or settings changes never start this rebuild automatically.
+
+## Continuing an interrupted import
+
+When reopening an archive with unfinished work, review the source, import start,
+latest interruption and saved imported/duplicate counts. An unclean stop shows
+its last saved progress time because the exact interruption time is unknown.
+Choose **Continue Import** to resume ingest and content processing using the saved
+settings, **Leave import suspended** to keep work paused, or **Stop import** to
+cancel remaining work while keeping archived
+messages and history. A new explicit import can read the source again; use
+explicit reprocessing to regenerate previously cancelled derived work.
+Returning focus or opening a name/count search does not repeat this prompt.
+Use **Continue Processing** to reopen it while the archive remains open.
+Import counters describe the current run; the search window's message count
+includes earlier runs. IMAP uses saved per-message checkpoints to avoid downloading
+archived bodies again. Each worker acquires missing messages before refreshing
+saved metadata and Gmail labels; metadata refresh does not add download counts.
 
 ## Before you begin
 
 Ask the person who installed Email Collection Toolkit to confirm that:
 
-1. `uv` and ClamAV are installed;
-2. ClamAV has a current signature database; and
+1. `uv` and a ClamAV installation providing `libclamav` are installed;
+2. `make freshclam` has prepared current virus definitions; and
 3. this checkout has been prepared with `uv sync`.
+
+The installed macOS application needs none of these: it bundles Python, the
+ClamAV engine and baseline definitions.
 
 Choose two locations:
 
@@ -71,68 +145,21 @@ Disk Access for the terminal application.
 
 ## Configure archive sources
 
-The planned archive-wide import interface stores an ordered source list in
-`archive.yaml` at the top of the archive. This workflow is not implemented in
-the current release; current imports still use the explicit source paths shown
-under [Create or add to an archive](#create-or-add-to-an-archive).
+Local imports currently take explicit selected paths. The standalone IMAP CLI
+saves typed accounts in archive `config.yaml`. A general source panel with
+FILE / LOCAL FOLDER / IMAP entries and Refresh/Rebuild controls is planned,
+not available. Its requirements live in
+[requirements.md](plans/ACQUISITION.md#per-archive-sources-and-import-modes).
+Passwords never belong in archive YAML or databases.
 
-An archive can contain three kinds of source:
+## Standalone IMAP downloads
 
-| Source kind | What it identifies |
-| --- | --- |
-| **FILE** | One local MBOX, EML, Babyl, EMLX, or other supported mail file |
-| **LOCAL FOLDER** | A local directory recursively searched for supported mail files |
-| **IMAP** | A remote account identified by server, port, and username |
-
-Each source has a permanent ID so its observations and last successful check
-remain associated with the same source after later imports. For example:
-
-```yaml
-version: 1
-sources:
-  - id: takeout-2026
-    kind: file
-    path: /Users/your.name/Downloads/takeout-mail.mbox
-  - id: historical-mail
-    kind: local-folder
-    path: /Volumes/Archive/Old Mail
-  - id: personal-imap
-    kind: imap
-    server: imap.example.org
-    port: 993
-    username: your.name@example.org
-    tls: implicit
-    authentication: password
-    credential_ref: keyring://mail-archiver/personal-imap
-    folders: all
-```
-
-`archive.yaml` contains no password or OAuth token. `credential_ref` is only
-the name of an item in the operating-system keychain or configured secrets
-provider. When a password is missing, an interactive import asks for it without
-echoing it and stores it in that credential system. An OAuth IMAP source opens
-the provider's browser authorization instead. A noninteractive import with a
-missing credential stops without printing or saving the secret elsewhere.
-
-### Import/Refresh and Import/Rebuild
-
-Both actions visit every enabled FILE, LOCAL FOLDER, and IMAP source and are
-safe to repeat. Neither action deletes or recreates archived messages.
-
-| Action | Local files | IMAP accounts |
-| --- | --- | --- |
-| **Import/Refresh** | Walk folders to find new paths. Do not open or hash a known file when its modification time has not changed since its last completed import. | Use saved folder and UID checkpoints to retrieve new or changed messages. |
-| **Import/Rebuild** | Ignore modification-time shortcuts and recompute the complete SHA-256 of every file. A matching hash can then skip parsing; changed files are processed again. | Perform a complete folder and UID reconciliation rather than relying only on the incremental cursor. |
-
-Refresh intentionally trusts local modification times. If another program
-changes a file but preserves its old modification time, Refresh will not find
-that change; use Rebuild when that is possible or when validating a copied or
-restored source. Directory traversal is still required during Refresh so new
-files can be discovered.
-
-These actions concern acquisition sources. They are different from
-`refresh-index`, which reads mail already in the archive and rebuilds only the
-disposable search database.
+The standalone CLI creates/configures an archive and synchronizes saved accounts
+once, without opening the desktop. Setup stores passwords in the native OS
+secrets manager and nonsecret account settings in archive `config.yaml`.
+See [CLI_REFERENCE.md](CLI_REFERENCE.md#imap-downloads) for all options, defaults,
+Gmail All Mail coverage, counters and interruption behavior. Scheduling, graphs
+and desktop account setup are future work.
 
 ## Import Gmail
 
@@ -226,27 +253,13 @@ not substring matching. Review rules before starting a fresh archive.
 
 ## Create or add to an archive
 
-The following is the currently implemented explicit-path interface. It does
-not yet read the planned `archive.yaml` source registry.
+Use **File → New** to choose an empty destination and **File → Import…** to
+select local source mail. Review owner rules and scanner policy before starting.
+Keep the destination outside the source tree. Imports preserve source stores.
 
-From the Email Collection Toolkit checkout, run:
-
-```console
-make run ARGS='--archive "/path/to/mail-archive" ingest --owner-names-file owner-names.txt --clamav "/path/to/source-mail"'
-```
-
-You may supply more than one source at the end of the command:
-
-```console
-make run ARGS='--archive "/path/to/mail-archive" ingest --owner-names-file owner-names.txt --clamav "/Volumes/Backup1/Mail" "/Volumes/Backup2/Mail"'
-```
-
-You can instead set the archive location once in the terminal session:
-
-```console
-export MAIL_ARCHIVE_DIR="/path/to/mail-archive"
-make run ARGS='ingest --owner-names-file owner-names.txt --clamav "/path/to/source-mail"'
-```
+For unattended/local-source work use the [ingest command](CLI_REFERENCE.md#ingest).
+It accepts multiple roots and resumes safely when rerun. The current explicit-path
+interface does not read the planned general source registry.
 
 ### What happens during ingest
 
@@ -320,83 +333,41 @@ Do not edit files under `data/mbox/` while ingest is running.
 
 ## Compare Apple Mail with the archive
 
-Run the read-only reconciliation before or after another cache ingest:
-
-```console
-make compare-apple-mail
-```
-
-The defaults are `~/Library/Mail` and `~/mail-archive`; use
-`ARGS='--apple-mail /path/to/Mail --archive /path/to/archive'` for other
-locations. The report separates exact raw matches, semantic-only matches,
-cache-only messages, and archive-only messages. It also lists aggregate header
-names that Apple added, removed, or changed, without displaying values or
-message content.
-
-The lookup uses the archive's `h3` semantic-message v1 SHA-256. Despite the
-informal phrase “normalized header hash,” h3 is a **whole-message** identity:
-it applies DKIM-relaxed normalization to the selected stable and delivery
-headers and includes the complete canonicalized body. It deliberately ignores
-mutable transport and mail-client headers. `h3` supports reconciliation; the
-admission/deduplication identity remains normalized `Message-ID` plus the `h2`
-raw-message SHA-256. See [INTEGRITY_CONTROLS.md](INTEGRITY_CONTROLS.md) for the
-exact algorithm and [APPLE_MAIL_CACHE.md](APPLE_MAIL_CACHE.md) for measured
-results from this computer.
+The read-only [comparison command](CLI_REFERENCE.md#apple-mail-comparison)
+reports raw matches, semantic-only matches, cache-only and archive-only messages.
+[APPLE_MAIL_CACHE.md](APPLE_MAIL_CACHE.md) explains completeness limits and how
+to interpret the report; [INTEGRITY_CONTROLS.md](INTEGRITY_CONTROLS.md) defines h3.
+Semantic similarity never replaces exact canonical admission checks.
 
 ## Extract printed email from a standalone PDF
 
-This workflow is for a PDF that is itself the surviving source document after
-email was printed and scanned. It is not for a PDF attachment inside an email.
+This workflow interprets a PDF that is itself the surviving printed/scanned
+email source, rather than a PDF attachment. The [extractor command](CLI_REFERENCE.md#printed-email-pdf-extraction)
+creates a new derived MBOX for human review. It preserves the PDF and records
+its hash, source pages, extraction policy and handwriting flags. Generated
+records are `machine-unreviewed`; after comparison with the PDF, corrected
+derivatives may be marked `human-reviewed`. They are not original RFC 5322 bytes.
 
-The first implementation produces a standard, derived MBOX for human review:
-
-```console
-make extract-pdf-mail ARGS='tests/data/sipbadmin.pdf --output /tmp/sipbadmin.mboxrd --handwritten-page 2'
-```
-
-The command requires Poppler `pdftotext`. It reads and hashes the PDF without
-changing it, classifies every page, extracts at most one printed message from
-each qualifying page, refuses to overwrite the output, and reports non-message
-pages. Repeat `--handwritten-page PAGE` for pages whose useful handwritten
-annotations should be recorded. Their text is not extracted or indexed.
-
-Each output record is labeled `machine-unreviewed` and records the source PDF
-SHA-256, page range, extraction and segmentation policy, and handwriting flag.
-After comparing the generated MBOX to the PDF, a human reviewer may correct the
-derived text and change the status to `human-reviewed`. The reviewed MBOX is
-still a derived interpretation; it is not original RFC 5322 source bytes.
-
-This focused command does not yet copy PDFs into `data/pdf/`, route generated
-records into `data/pdf-mbox/`, add them to search, suppress exact duplicates,
-or connect the viewer to the source page. Those are the next archive-integration
-steps.
+Archive integration, source-page viewing and automatic OCR remain incomplete;
+see [PDF/OCR plan](plans/PDF_OCR.md).
 
 ## Verify the archive
 
-Verify the archive after ingest and after copying it to new storage:
-
-```console
-make verify ARCHIVE="/path/to/mail-archive"
-```
-
-Verification reads the archive without changing it. It checks BagIt and
-Mailbag structure, whole-file hashes, and the recorded hash for every message.
-Investigate any reported failure before continuing to use or copy the archive.
-
-The archive also contains `verify_mail_archive.py`. It can be copied with the
-archive and run on a computer that does not have Email Collection Toolkit installed:
-
-```console
-python3 /path/to/mail-archive/verify_mail_archive.py
-```
+Verify after ingest and after copying to new storage. The
+[portable verification command](CLI_REFERENCE.md#verification) checks
+BagIt/Mailbag structure, file hashes and declared message hashes without changing
+the archive. Its Python script travels with the archive and needs no third-party
+packages. Stop writers first and investigate every failure before continued use.
 
 ## Search with the graphical interface
 
+Search ignores case and accents and treats `ß`/`ẞ` as `ss`, without stemming.
+Existing indexes need no rebuild. Quoted symbols remain significant: `"CACM-"`
+requires the hyphen and `"Ham+Sandwhich"` requires the plus. Word boundaries apply.
+
 Start the graphical search interface with:
 
-```console
-make gui ARGS='--archive "/path/to/mail-archive"'
-```
+See the [CLI reference](CLI_REFERENCE.md#desktop) for invocation.
 
 If no archive was supplied, the application opens the last valid archive or
 shows the three-step setup described below. Use **File → Open…** (Command-O) to
@@ -407,12 +378,15 @@ ignored, removed from recents, and reported in the About window. **File → New*
 asks for a new or empty `.mailarchive` destination before initializing and
 opening it. On macOS, **File → Import…** opens one picker for local files and
 directories, sets up owner names, shows the destination and sources for final
-confirmation, and starts import. When ClamAV is missing or unconfigured, the
-import screen displays an antivirus warning. **Install ClamAV…** opens its
-official download page; it does not install software automatically. You may
-instead explicitly choose **Import Without Scanning**, or Cancel. The unscanned
-warning is retained in import history. Installing ClamAV later does not scan
-previously imported messages automatically.
+confirmation, and starts import. When the embedded ClamAV engine or its
+definitions are missing or unusable, the import screen displays an antivirus
+warning. **Install ClamAV…** opens the Email Collection Toolkit releases page so
+you can download a build with a working engine; it does not install software
+automatically. Missing or failed scanning does not add an approval step: originals
+are archived with recorded scanner-error evidence and antivirus metadata notes.
+Encryption, size limits and scan timeouts also preserve originals and allow later
+mail to continue. No message waits for manual review. Repairing antivirus later
+does not scan previously imported messages automatically.
 The **Import Directory…** button in the Ingests window starts the same workflow
 for that window's archive, opening the same source picker directly.
 In the picker, select files or directories and click **Import**. You can also
@@ -420,7 +394,7 @@ navigate into a directory and import it; directories include supported mail
 files and subdirectories. No separate Files/Folders choice is needed.
 Every import displays both owner fields, prefilled from the archive's YAML.
 Before YAML owner settings exist, `owner-names.txt` in the archive and selected
-source roots can seed the fields. There is no built-in personal owner list.
+source roots can seed the fields. The personal owner template starts empty; customize it through **File → Customizable Default Lists…**.
 After **Continue**, review the destination, sources, and rules, then confirm
 **Import**. Canceling either dialog does not save rules. Source files are
 unchanged. Future imports show the saved rules again; lists are rewritten only
@@ -459,9 +433,7 @@ the normal Stop Import and Quit confirmation protects its checkpoint.
 To show setup again, hold **Option (Alt)** while launching the Mac app until
 setup appears, or Option-click its Dock icon while it is running. From the CLI:
 
-```sh
-make gui ARGS='--new'
-```
+See the [CLI reference](CLI_REFERENCE.md#desktop) for invocation.
 
 This bypasses the last archive for this launch without clearing it from recent
 archives. It also bypasses `MAIL_ARCHIVE_DIR`; do not combine `--new` with
@@ -473,9 +445,18 @@ Command-N creates an archive and Command-W closes an eligible search window.
 The About window remains available for the application run. It shows the
 installed version, free disk space, live Internet reachability, startup errors,
 warnings, and current or latest ingest activity. The Window menu lists it and
-every search and Ingests window. During Import, the search window that started
-the run cannot be closed from **File → Close** or its close box; other windows
-remain searchable and independently closeable.
+every search and Ingests window. During Import, you can close the original search window when another search
+window for that archive is open; the import continues in the remaining window.
+The last search window stays open until you suspend or finish its import. Use
+**Suspend Import** in Ingests, or Quit to suspend and exit.
+
+In About, **Show processor graph…** opens a separate window showing registered
+MIME types, their processors and possible output types, grouped by processing
+stage. Dashed arrows show MIME extraction's possible outputs; **Other MIME types**
+includes document types without a registered consumer. Hover over nodes or expand
+**Connections and processor details** for rank, scope and version. Use **Fit width**,
+**100%** or zoom controls for larger graphs. **Refresh** reads the currently active
+archive's registry. The graph works offline and does not run processors.
 
 The status line at the bottom shows a running ingest, or summarizes the most
 recent run. Click it to open the independent Ingests window. You can also use
@@ -483,6 +464,15 @@ recent run. Click it to open the independent Ingests window. You can also use
 run's sources, totals, failures, and every configured worker thread. It has its
 own close box; opening it again while it is visible brings the same window to
 the front.
+
+Use **Suspend Import** in this window to finish current work, save its checkpoint
+and release the archive for manual identity edits without quitting. The window
+shows that suspension is pending until the worker finishes. **Continue Import**
+resumes the saved work, including after reopening the archive. A download already
+in progress may finish before suspension completes. Name and institution
+pickers show a loading message while reading or refreshing identities; they keep
+existing rows during refresh and report errors with a retry action. Automatic
+authoritative matching remains unconnected.
 
 Type ordinary words to search indexed headers and message text. The result
 list is on the left and the selected message is on the right. The message view
@@ -585,13 +575,15 @@ examples when the program starts and whenever the search is empty.
 Select **Search attachments** to include indexed text attachments. This works
 only after an attachment index has been built:
 
-```console
-make run ARGS='--archive "/path/to/mail-archive" refresh-index --index-attachments'
-```
+See the [CLI reference](CLI_REFERENCE.md#local-archive-commands) for invocation.
 
 PDF and Microsoft Office attachment extraction is not implemented yet.
 
 ## Viewing messages
+
+The archive-status banner displays notices on separate lines, including the
+current text-attachment indexing limitation. The ingest-history line remains
+clickable; a separate Tika indexing action and progress display remain planned.
 
 Select a search result to view it beside the result list, or double-click the
 result to open it in an independent window. That window has its own scrollbar,
@@ -705,40 +697,15 @@ or travel with it unless the preferences are copied separately.
 
 ## Search from the command line
 
-Use command-line search for scripts, remote sessions, or plain-text output:
-
-```console
-make search ARGS='--archive "/path/to/mail-archive" to:alice@example.org budget'
-make search ARGS='--archive "/path/to/mail-archive" subject:"annual report" after:2024-01-01'
-```
-
-The default is ten results. Use `--limit 0` to print every match:
-
-```console
-make search ARGS='--archive "/path/to/mail-archive" --limit 0 budget'
-```
-
-Every result begins with a stable message number. Supply that number by itself
-to display the message:
-
-```console
-make search ARGS='--archive "/path/to/mail-archive" 42'
-```
-
-Add `--headers` for all headers, `--html` for decoded HTML, or `--mime` for the
-complete RFC 5322/MIME source.
+The [CLI reference](CLI_REFERENCE.md#search-and-message-display) documents
+listing, search selectors, result limits and message-number display.
 
 ## Rebuild the search index
 
-The search database is derived data. Rebuild it from the canonical messages if
-it is missing or damaged:
-
-```console
-make run ARGS='--archive "/path/to/mail-archive" refresh-index'
-```
-
-This does not change the canonical MBOX files. Add `--index-attachments` to
-include supported text attachments.
+The [refresh-index command](CLI_REFERENCE.md#local-archive-commands) replaces the
+derived search database after verifying canonical messages. It preserves MBOX
+and retains the old index if interrupted before publication. Text attachments
+can be included; PDF/Office extraction is not added by rebuilding.
 
 ## Advanced
 
@@ -829,28 +796,11 @@ characters, individual notes to 32,768, and the complete failure report to
 
 ## Contacts command
 
-The read-only Contacts command is the first address-level Contacts interface:
-
-```console
-make run ARGS='--archive "/path/to/mail-archive" human-contacts --owner-address-file owner-names.txt --format table'
-```
-
-It reports each likely human direct correspondent's email address, first appearance, last
-appearance, and all-header message count. The owner-address file accepts the
-older identifying address fragments, separated by newlines,
-commas, or semicolons; blank lines and `#` comments are ignored. It resolves
-those aliases only to catalogued **Sent** sender addresses, then uses the
-resulting exact addresses for meaningful-contact tests. Repeat `--owner-address`
-for a temporary exact additional address. The default meaningful selection includes outgoing To/Bcc recipients
-and incoming senders only when an exact owner address is in To; it excludes Cc
-traffic and mailing-list mail addressed only indirectly. Use `--all` to inspect
-all From/To/Cc/Bcc addresses instead, and `--format tsv` or `--format json` for
-scripts. Mailing lists, automated/no-reply services, malformed addresses, and
-local parts longer than 48 characters are excluded by a versioned packaged
-policy. Shared role inboxes such as root, staff, support, and webmaster are
-also excluded. The command only reads archive.sqlite3.
-Exceptional valid human identities are explicit allow rules in that same policy;
-they take precedence over the generic malformed-address checks.
+The read-only [Contacts command](CLI_REFERENCE.md#identities-and-contacts) lists
+likely human direct correspondents with first/last dates and message counts.
+Its default uses exact owner addresses resolved from Sent mail; the broader
+selection still applies the contact-filter policy below. This address-level
+report is available now; a Contacts window and geography remain planned.
 
 ### Contact-filter policy
 
@@ -865,31 +815,10 @@ effect. Invalid policies fail rather than silently falling back.
 
 ## Planned: Contacts window and geography
 
-The forthcoming **Contacts** window will list one email address per contact,
-with first appearance, last appearance, and message count. Its checked-by-
-default **Meaningful** option will show direct correspondents: people you sent
-to in To or Bcc, and people who sent to an owner address directly in To. Cc
-traffic and messages sent only through a mailing list will not qualify.
-The current `config.yaml` include/exclude rules classify sent mail. A future archive
-creation dialog and **File → Properties** will maintain the exact owner
-addresses used by Contacts.
-
-The same window will support US ZCTA input such as `02139`, displaying its city,
-state, and country, and later a rough straight-line radius around a place. A
-contact's **located** evidence (for example, a signature address) is distinct
-from an **affiliated** institution (for example, a university domain); an
-affiliation is not treated as a home location.
-
-The application will ship with a seed US geography database. `make
-geography-data` and **Tools → Update Geo Database** will refresh the shared,
-per-user reference data. It lives outside individual archives: on macOS in
-`~/Library/Application Support/Email Collection Toolkit/geography/`; on Windows in
-`%LOCALAPPDATA%\\Email Collection Toolkit\\geography\\`; and on Linux in
-`$XDG_DATA_HOME/mailarchiver/geography/` (or
-`~/.local/share/mailarchiver/geography/`). A future explicit command will let
-you copy a geography snapshot into an archive or choose that snapshot instead
-of your installed data. These features are documented design commitments and
-are not in the current release.
+The proposed window distinguishes a person's located evidence from institutional
+affiliation and supports place/radius queries against shared reference data.
+It is not implemented. [Contacts/geography plan](plans/CONTACTS.md)
+owns the design, data sources, future refresh workflow and snapshot policy.
 
 ## Configuration
 
@@ -908,29 +837,19 @@ in the operating-system keychain or configured secrets provider. Import
 checkpoints and observations remain in `archive.sqlite3`; successful imports
 do not rewrite checkpoint state into the YAML file.
 
-Email Collection Toolkit's current application-level configuration is the versioned YAML
-file `src/mailarchiver/configuration.yaml` in the source checkout. It currently
-controls the search-highlight background used by the graphical message viewer:
-
-```yaml
-version: 1
-gui:
-  search_highlight_background: "#fff59d"
-```
-
-The color must be a six-digit hexadecimal CSS color beginning with `#`. The
-initial value, `#fff59d`, is yellow. Stop and restart the graphical interface
-after changing the file; configuration is validated and loaded once when the
-application starts. Email Collection Toolkit rejects unknown settings, unsupported
-versions, and invalid color values instead of passing them to the viewer.
+Use **File → Customizable Default Lists…** to edit personal templates or the open
+archive's list settings. The [Customizable Default Lists](CUSTOMIZABLE_DEFAULT_LISTS.md)
+page lists every file, scope, precedence rule and reset behavior, including owner
+rules and reply-address/name extraction. The display-policy list controls the
+six-digit search-highlight background color; reopen affected windows after editing.
 
 This YAML file contains packaged application display policy. It does not
 replace:
 
-* the planned per-archive `archive.yaml` source registry;
-* archive `config.yaml`, which stores owner include/exclude rules and navigation;
+* the planned general source registry;
+* archive `config.yaml`, which stores owner rules, navigation, plugin settings and saved IMAP accounts;
 * `MAIL_ARCHIVE_DIR` or `--archive`, which selects an archive;
-* the installed ClamAV configuration; or
+* the ClamAV definitions, which live in per-user application data; or
 * saved original-mailbox filter sets, which remain per-user preferences.
 
 Changing the highlight color affects only derived display rendering. It does
@@ -941,3 +860,40 @@ root. An archive-local copy takes precedence over the packaged source copy, so
 the archive retains the policy that produced its derived contact results.
 Packaged runtime YAML files declare `mode: replace`; an archive-local policy
 that supports `mode: extend` documents the lists it adds to that default.
+
+## Names and message navigation
+
+The Name matcher hides recognized company/organization and service identities.
+Check **Show non-person identities** to reveal them; uncertain names remain
+visible. This view filter does not delete addresses or change accepted groups.
+
+In the Name matcher, drag a canonical entry onto another to merge all its
+addresses, or move an individual address. Use Make separate to detach an address.
+Edits save immediately and survive processing reruns.
+
+The Phone numbers column shows numbers observed in sender signatures. One number
+appears directly; click the disclosure triangle for multiple numbers to expand
+the row and see them all. Group rows combine their visible addresses' numbers,
+and date filters also apply to phone observations. These are unverified contact
+candidates. Existing archives need content reprocessing to collect phone evidence;
+opening this window does not start it.
+
+Double-click a name to open an Any-address search across its grouped addresses.
+Original header names and merged canonical names also find the group; searching
+an email address stays specific to that address. Merged names remain group aliases
+even when an individual address is later separated.
+
+Click a Messages or Signatures number to open exactly that evidence channel for
+the displayed addresses and dates. A removable filter identifies the selection;
+enter more search terms to narrow it. Zero counts are disabled. The automatic
+authoritative matcher is not connected. The separate local research harness runs
+rules, signature and graph comparisons, Fellegi–Sunter, Dedupe and Splink and
+produces an owner-labeling report; it does not apply proposed groups.
+That report separates **Same identity** / **Different identities** from the
+**Not a person** checkbox. For example, two addresses for one organization can
+be **Same identity** and **Not a person** together. Identify A, B or both in the
+notes. Existing decisions and comments remain saved; previous non-person choices
+become checked boxes without guessing the link decision.
+The report has the same reversible filter. It retains original pair numbers and
+exports all fifty decisions, including hidden rows. Automatic SBook-derived
+classifications are displayed as evidence and are separate from your decisions.

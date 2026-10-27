@@ -1,0 +1,8 @@
+/* Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved. */
+/* Keep the shutdown tint independent of each page's dialog backdrop rules.
+ * The injected shutdown script loads this shared stylesheet before opening.
+ * The dialog itself supplies the translucent gray fill and black text.
+ * Its top-layer backdrop must add no further dimming to underlying content.
+ * This selector takes precedence over ordinary dialog rules on every page.
+ */
+#shutdown-overlay::backdrop { background: transparent; }

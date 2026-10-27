@@ -1,5 +1,18 @@
 # Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved.
-"""Read-only Rust PST adapter into the common Python ingest processor pipeline."""
+
+"""Read-only Rust PST adapter into the common Python ingest processor pipeline.
+
+Purpose: Recover PST messages through the read-only Rust helper.
+
+How it works:
+Check source bytes, supervise the API stream and retain bounded receipts and incomplete-
+extraction evidence.
+
+Fundamental dependents:
+
+- ``sources``: PST file recognition delegates extraction to this parser.
+- ``processing.production``: recovered messages enter its ordinary filing/processing contract.
+"""
 from __future__ import annotations
 
 import hashlib

@@ -53,14 +53,13 @@ for layer reads, paths, conflict handling and failure semantics.
 
 ## Incomplete work
 
-Opening an archive with unfinished work shows **Incomplete work** with two
-initially checked choices: **Continue ingest** and **Continue content
-processing**. Confirmed work resumes from durable checkpoints. Unchecking both
-opens the archive without starting either job. The dialog returns on the next
-opening while work remains. When both are selected, ingest finishes before deferred content processing.
-Selecting only content processing handles eligible already-ingested messages,
-even while other ingest work remains unfinished. Required message-metadata
-jobs precede their content jobs.
+Opening an archive with unfinished work shows **Incomplete work**. **Continue
+Import** resumes ingest and content processing together from durable checkpoints.
+**Leave import suspended** keeps the checkpoint without starting work. **Stop
+import** cancels remaining work while retaining archived mail. There are no phase
+checkboxes. The dialog returns on the next opening while suspended work remains.
+Saved archived-content work is recovered before remaining source traversal;
+required message-metadata jobs precede their content jobs.
 
 ## Synthetic content and attached messages
 
@@ -99,12 +98,11 @@ The [processor contract](https://github.com/simsong/email-collection-toolkit/blo
 specifies the API v2 manifest, one typed processing object and result,
 framework content types, rank barriers, aborts, timeout enforcement, archive
 services and durable handoffs. Existing source/file API v1 plugins remain
-supported before raw-message dispatch. Use `make run ARGS="--archive PATH
-processors"` to inspect the production registry, `processing-status` to inspect
-work, and `process --phase content` to resume content without source files.
-`identities addresses` and `identities organizations` expose picker data through
-the CLI. Plugins use cooperative cancellation and I/O deadlines; late results
-are rejected before publication.
+supported before raw-message dispatch. See
+[Command Line → Processing and identities](@/advanced.md#processing-and-identities)
+to inspect the production registry, saved work, and picker data, or resume
+content processing without source files. Plugins use cooperative cancellation
+and I/O deadlines; late results are rejected before publication.
 
 The complete design checkpoints plugin versions, configuration and input identity so retries
 can skip completed work. Publication and queue handoff share a recovery

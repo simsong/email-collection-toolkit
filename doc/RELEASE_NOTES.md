@@ -1,25 +1,445 @@
 <!-- Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved. -->
 
-Python webview branch: use the standard Windows Open file dialog. Selecting a
-file inside an archive opens the enclosing collection, with normal validation
-and no changes to archived bytes. Fix mapped-drive/UNC SQLite URI handling
-throughout the reader, including search and message rendering. Remove the custom archive browser. Restore New/Import,
-processing and identity controls using native Windows locks, byte-preserving
-MBOX framing and portable temporary-file handling. Add Windows ClamAV discovery
-and bounded updater supervision; require runtime/definitions in new MSIX builds.
-Windows ClamAV now loads in an isolated worker, passes clean/EICAR checks and
-stores validated definitions in application-specific user storage. First-run
-initialization supports downloaded or explicitly copied baselines. A CDN cooldown
-still blocks local download acceptance; package validation remains pending.
-Integrate the pinned WinSparkle SDK, shared update preferences, complete-feed
-verification, Python package filtering and archive-write installation fences.
-Native initialization and signed-feed tests pass; a signed installed upgrade
-still needs acceptance. Preserve source-machine provenance paths when copying
-between platforms and serialize concurrent export replacements.
-Retain completed ingest status across transient Windows reader locks and verify
-the Windows runtime's complete license evidence before MSIX assembly.
-
 # Release notes
+
+Entries describe their recorded revisions. For current behavior use the
+[user manual](USER_MANUAL.md) and [CLI reference](CLI_REFERENCE.md). Retired
+Rust delivery plans and historical package checks are not current acceptance.
+
+## Consolidated certificate-bundle update
+
+Include the certifi trust-store update from the dependency PR in the consolidated
+installer candidate, and advance the alpha for fresh platform release checks.
+
+## Responsive Windows Preferences reopening
+
+Restrict the Preferences JavaScript bridge to its four settings methods. Native
+window state was being recursively inspected during packaged-app startup and
+Preferences reopening, delaying or hanging bridge initialization. Preserve normal
+Close/save behavior and advance the alpha for installer validation.
+
+## Relocated Windows acceptance deadline
+
+Use the same bounded native desktop deadline for source and relocated MSIX
+acceptance, and retain relocated phase reports, logs and screenshots on failure.
+The original 90-second relocated parent remained shorter than its import check.
+Advance the alpha for the next installer candidate.
+
+## Installer acceptance diagnostics
+
+Retain Windows native acceptance phases, stack traces and failure reports in CI.
+Allow its existing import and Preferences checks time to complete, and increase
+the ordinary suite job budget while reporting slow tests. These diagnostics do
+not replace a passing native or signed-installer check. Advance the alpha.
+
+## Windows Preferences parity
+
+Windows Preferences now saves valid changes automatically, retains active text
+edits when closed, and reuses its existing window. Its update button follows
+backend availability. Extend the native Windows acceptance gate to close and
+reopen Preferences and verify current menu actions. Advance the development alpha.
+
+## Standard macOS Preferences window
+
+Replace the modal Preferences alert with a reusable native window and traffic-light
+controls. Remove Done, save valid edits automatically and commit unfinished text
+edits on Close. Retain validation, CLI worker overrides and update preferences;
+explain why source launches cannot use in-app updates. Advance the development alpha.
+
+## Closing a window during import
+
+Clarify the last-window warning: use Quit to suspend import and exit the program,
+including the ⌘ Q shortcut on macOS. Advance the development alpha.
+
+## Worker preferences
+
+Add half-CPU, all-CPU and custom worker choices to both Preferences panels. Default
+to half the logical CPUs and reject values above twice that count. GUI and CLI
+worker overrides take precedence without overwriting preferences; GUI overrides
+grey out worker controls and display the launch value. Newly started/continued
+processing and IMAP download partitions use the current limit. Active pools retain
+their size until suspended and continued. Advance the development alpha.
+
+## Import progress cards
+
+Remove the Workers and Peak workers summary cards. The worker table continues
+to show each worker's activity and finished processing tasks.
+
+## Saved-mail progress wording
+
+Rename the backlog card **Messages requiring processing**. Explain that an email
+leaves the count only after all its body/attachment tasks finish, so finished
+tasks can increase while the message count stays level. Retain the existing
+distinct-message accounting and source/processing separation.
+
+## Curator-controlled reprocessing
+
+Remove Python source-file hashing and automatic reprocessing after code,
+registry, policy or settings changes. Resume accepts old registry metadata and
+retains completed checkpoints and existing search results. Add **File → Reprocess
+Saved Mail…** with an explicit warning that replay may take a very long time.
+Confirmed replay uses saved mail without downloading again, retaining canonical
+bytes, curator edits and source-import settings. Advance the development alpha.
+
+## Close search windows during import
+
+Fix a Cocoa main-thread deadlock when closing an importing search window.
+Transfer its active operation to a surviving search on the same archive without
+restarting work or releasing the writer lease. The last search window refuses
+Close promptly with a Suspend Import notice. Advance the development alpha.
+
+## Saved messages remaining
+
+Add a distinct archived-email backlog counter alongside finished processing tasks.
+Include pending, running and failed work across message bodies and attachments,
+without counting one email several times. Sample on the database owner once per
+second and at completion; older history reports Unavailable. Keep the metric
+outside processor fingerprinting so adding it does not restart completed work.
+Advance the development alpha.
+
+## Distinct source and processing progress
+
+Fix worker task counters so each row reports its own completed work. Processing
+saved mail shows task totals and tasks/second, including between jobs, instead of
+zero source-message/file counters. Separate downloading/importing and processing
+operations in the worker table, explain active processors and label IMAP work as
+download partitions. Retain an explicit unavailable total for older snapshots.
+Advance the development alpha for this fix.
+
+## Live status during antivirus startup
+
+Keep import heartbeats current throughout definition checks, refresh and native
+engine startup by supervising preflight as a tracked future. A normal startup
+wait no longer produces a temporary stale-run X. Definition freshness policy and
+real scanner-error recording remain unchanged. Advance the development alpha.
+
+## Development launcher credential access
+
+Seal and verify the named macOS development bundle after writing its metadata.
+Retain the active venv through CPython's launcher environment and read saved IMAP
+passwords through the original interpreter's native Keychain identity. Passwords
+cross only a captured pipe; no vault policy or credential is changed. Failures
+show the native status without private backend text. Advance the alpha checkpoint.
+
+## Simpler import recovery
+
+Incomplete work now offers **Continue Import**, **Leave import suspended** and
+**Stop import**. Continue always resumes ingest and content processing together;
+the phase checkboxes are removed. Stop cancels remaining work while keeping
+archived messages. Advance the development alpha for this fix checkpoint.
+
+## Registered processor graph
+
+About now offers **Show processor graph…** in a separate native window. Bundled
+Dagre draws MIME types, subscribing processors and potential outputs offline,
+with pipeline-specific DAGs, fit/zoom and text connection details. MIME extraction
+fans out to registered document types and an open-ended Other MIME types node.
+Custom saved registries and transient writer-lock retry share About's read path.
+Advance the development alpha for this feature checkpoint.
+
+## Version and build identity
+
+Advance the development version for this fix checkpoint and require a bump for
+each subsequent user-visible fix handed back for testing. About now retains the
+launch/build Git commit, identifies local changes and reports missing provenance.
+macOS/Windows builders embed the commit in their artifacts. macOS `make gui` uses
+a real development app bundle so Command-Tab identifies Email Collection Toolkit.
+
+## Resume IMAP downloads before metadata refresh
+
+IMAP workers now acquire missing UID checkpoints before refreshing saved message
+metadata and Gmail labels. Exact checkpoint membership preserves interrupted gaps
+and changed worker partitions; saved bodies are not downloaded again. Status names
+the metadata refresh separately, and import counters remain per-run totals.
+
+## Suspend imports and show identity loading
+
+Name/count navigation now shows opening progress and retryable errors. Native
+navigation checks cover ten messages for the clicked identity while another
+identity is selected.
+Suspended work no longer interrupts count/name searches with another recovery
+dialog; returning focus also leaves the dismissed dialog closed. Explicit Continue
+Processing and reopening the archive retain recovery access.
+
+Ingests now offers Suspend Import and Continue Import without quitting. Saved
+settings survive an early preflight suspension and reopening the archive.
+Name and institution pickers show loading/retry feedback, retain rows during
+refresh, and aggregate group counts together. Authoritative matching remains
+unconnected; manual edits require suspending an active import first.
+
+## About status during imports
+
+An import writer's database lock no longer aborts the entire About status poll.
+Plugin inventories show a temporary retry message while other status remains
+available, then reload the archive's saved plugin configuration after the lock clears.
+
+## Experimental Rust UI removed
+
+Preserve the October 10, 2026 retirement snapshot with signed tag
+`experimental-rust-ui` and branch `codex/experimental-rust-ui`. Remove the UI,
+private Python helper, obsolete build/packaging paths and dedicated tests from
+the active checkout. Independent Rust archive/import/MIME tools remain supported.
+Routine analysis excludes the archived UI; see [archive details](RUST_GUI_EXPERIMENTS.md).
+
+## Tracked private-adapter jobs
+
+The retained private archive adapter collects typed import and definition-update outcomes through a
+future on its protocol owner, preserving status generations and warnings.
+
+## Tracked desktop commands
+
+Desktop imports now retain executor futures. Quit cancels
+queued imports, releases their leases and preserves resumable work; unexpected
+command errors become visible application notices.
+
+Cocoa Open, About and Setup commands and startup export cleanup use the same
+tracked executor. Watchdogs, readers and service loops retain independent threads;
+see the [threading audit](THREADING.md).
+
+## Source publication futures
+
+Source workers retain their input handles and request publication through
+tracked futures. One owner now commits catalog/index/MBOX state without a
+publication mutex, preserving per-source ordering and cooperative interruption.
+Single-worker processor waits keep status updates live instead of falsely
+reporting a lost heartbeat.
+
+## Tracked preview results
+
+GUI preview workers return values; request/poll coordination applies current
+results and reports failures without stale workers changing window caches.
+
+## Tracked scanner results
+
+Native scan workers return typed future results. Their coordinator alone sends
+responses and drains accepted scans during shutdown.
+
+## Suspending import on Quit
+
+Quit now offers **Suspend import and quit**. Confirmed shutdown dims the window
+and displays **Shutting down…** while restartable work finishes its checkpoint.
+
+## Original IMAP folder names
+
+The original-folder sidebar shows readable IMAP names such as `[Gmail]` and
+`All Mail`, decoding URL escapes once without changing saved folder selections.
+
+## Processing action state
+
+Continue Processing disables during a resume request, startup and active work,
+including activity started in another window, and re-enables when work ends.
+
+## Parallel archived-content processing
+
+Deferred recovery and final content processing now use the configured worker
+pool across independent messages. Per-message dependencies and retry checkpoints
+remain ordered, global job limits remain bounded, and progress reports concurrent
+workers. Queue/database publication stays serialized while processors execute.
+
+## Consolidated test coverage
+
+Removed repeated reader acceptance, scanner smoke/startup and daemon-independent
+import runs while retaining their assertions in shared tests. Windows scanner
+validation reuses the common startup deadline. Legacy MBOX recovery uses three
+named parameter cases; platform, fault-injection and independent-verifier coverage
+remain separate.
+
+## Automatic handling without manual-review gates
+
+Python ingestion preserves originals for encryption, size limits, scanner
+errors and timeouts, records the actual scan outcome/diagnostic/versions,
+and continues. Scanner startup failure also records errors and continues;
+there is no separate approval prompt for unavailable antivirus. Antivirus
+metadata defects identify incomplete scans. Malware routes to quarantine
+automatically; no item waits for manual review.
+Accepted scan-error and quarantine decisions replay unchanged after an
+interruption, while the original failed invocation remains in audit history.
+
+## Observable, indexed recovery
+
+Ordinary IMAP tests now share pytest-owned TLS servers and three-message INBOX
+fixtures. CLI and GUI background imports must produce searchable body/attachment
+content and preserve source flags across reruns; separate protocol/security and
+interruption tests remain.
+
+Ingest history shows accepted startup while the archive is being prepared.
+Larger status circles include check, X or pause symbols alongside text labels;
+finished-job counts explain that multiple processing jobs can belong to one email.
+
+Recovery now shows the active processor/job and finished-job count, with an
+indeterminate bar while the derived-work total is unknown. Imported-message and
+source-file counts remain separate. Queue lookups use a status index and direct
+parent checks instead of scanning completed history for every job.
+
+## Readable processor statistics
+
+End-of-import console output presents processor counts and timings in an aligned
+table labeled as cumulative archive history, including failures from earlier runs.
+
+## Readable IMAP sources
+
+The Ingests Sources list shows the IMAP account, hostname and port instead of
+internal account IDs and locator options. Saved resume locators remain intact.
+
+## Recoverable scanner failures and search reconstruction
+
+Retry unsuccessful saved host scans with the current engine instead of replaying
+the prior failure. Normal runs with unlimited content processing restore archived
+message/content work before retrying pending ingestion, so another ingest failure
+cannot starve that search rebuild. Progress distinguishes scanner startup,
+processing preparation, archived-content recovery and pending imports. Existing
+`refresh-index` can repair the disposable index without resuming ingestion.
+
+## Automatic virus definition refresh
+
+Before ordinary Python scan sessions, automatically refresh daily definitions
+over 24 hours old when the Internet update site is reachable. Reuse the verified
+one-shot updater and retain existing definitions when offline or an update fails.
+Definition age alone never blocks scanning. Explicit test/development definition
+overrides stay pinned; Stop/Quit remains effective during updates.
+
+## Customizable Default Lists
+
+Native Close resolves the focused window on Cocoa's main thread, including
+standalone personal list editors.
+
+The integrated Name search retains visibility/date filters for email-labelled
+groups. Provider-domain edits remove derived institution memberships and search
+aliases while preserving manual institution records for later restoration.
+
+One editor now manages bundled YAML templates, per-user overrides and revisioned
+archive settings for owners/senders, reply-address patterns, contact filters,
+provider domains, entity rules, display, date patterns and source rules. Empty
+personal owner defaults prompt during new-archive setup. Provider-scoped rules
+extract names from routing addresses or display names and retain attributed evidence
+without accepting identity merges. See [Customizable Default Lists](CUSTOMIZABLE_DEFAULT_LISTS.md).
+
+## Name picker search navigation
+
+Person views now use pinned SBook5 codewords and gazetteers to hide recognized
+company/organization and service entries, with a control to show them. Uncertain
+names remain visible. The private review retains all pair IDs and labels.
+The optional research runner also includes a separate Splink full-name-frequency
+comparison, giving rare-name agreements more weight than common-name agreements.
+
+Double-click a name to search it, or click a message/signature count to open its
+filtered evidence messages. Original header names now expand across manually
+grouped addresses without reindexing. Automatic matching remains disabled.
+Name rows also show available signature phone candidates: one number directly,
+or a disclosure triangle that expands multiple numbers. Existing content needs
+explicit reprocessing to acquire the new phone evidence.
+
+The optional local research harness now compares rules, signature/graph ablations,
+Fellegi–Sunter, Dedupe and Splink on frozen candidates and produces a private report
+with timings, synthetic metrics and 50 proposals for owner labeling. Unlabeled
+archive scores are not reported as measured accuracy.
+Owner review separates **Same identity** / **Different identities** from an
+independent **Not a person** checkbox, allowing a match between addresses for
+one organization. Existing decisions and comments are preserved; previous
+non-person choices migrate to checked flags without assuming a link decision.
+
+## Informed import recovery and retained warnings
+
+The desktop asks before continuing saved imports, showing source/account,
+first start, latest interruption (or last saved progress), imported messages and
+duplicates ignored. Choose Stop import, Leave import suspended, or Continue Import. Stop keeps
+archived mail and history while cancelling saved traversal and outstanding jobs.
+Search-window warnings collapse to a message pill that reopens their full text
+and earlier messages for the lifetime of the window.
+
+## Frozen acquisition adapters
+
+Derive macOS hidden imports from all built-in source/file manifests, including
+IMAP. Validate synthetic local ingest through a disposable frozen executable.
+
+## Natural search and archive status
+
+Match case/accent variants and sharp s without rebuilding existing indexes.
+Preserve quoted symbols before counts, ordering and pagination; CLI `--query`
+retains quoted syntax. Search windows display a separate archive-status banner.
+
+## Incremental cache release and IMAP interruption
+
+Release cached raw messages after each durable MBOX publication and SQL commit,
+including deferred-content imports. Restore raw inputs from verified canonical
+records for later processing; retain live derived inputs and retry checkpoints.
+Ctrl-C closes IMAP iterators on their owning workers and leaves scanner shutdown
+to the parent, avoiding cross-thread SQLite errors and scanner tracebacks.
+
+## Suspicious-link scanning
+
+Disable ClamAV's URL-phishing module in Python and Rust scanners to avoid
+quarantining mail for mismatched marketing links. Malware/phishing signatures,
+bytecode and attachment scanning remain enabled. URL-module detections of genuine
+phishing links are also disabled. Restart an active import to use the new policy;
+existing quarantined messages are not automatically reclassified.
+
+## IMAP integration-test reliability
+
+Pin the disposable IMAP server greeting to `localhost`, avoiding synchronous host
+reverse-DNS lookups on CI runners. Bound setup connections without increasing
+production socket timeouts or weakening TLS, normalization, or recovery checks.
+
+## IMAP line endings
+
+New IMAP downloads convert CRLF to LF before canonical hashing and ingest, retaining
+lone CR and original wire hash/size/count evidence. Metadata-only label refreshes
+preserve that evidence. Existing archives and local imports are not rewritten.
+Unencoded MIME payload line endings follow the same conversion; base64 attachment
+decoding is unchanged.
+
+## Processor working-object cleanup
+
+All production ingestion (including IMAP), resume and reprocess operations now
+release completed working files. Unfinished-job inputs and retry outputs remain;
+reprocessing regenerates inputs from verified canonical MBOX records. The test
+harness retains original snapshots, and unknown/symlinked files are preserved.
+
+## Documentation consolidation
+
+- Split requirements and implementation into paired subsystem guides, retaining
+  short entry-point overviews. Separate future designs under `doc/plans/` and
+  dated audits/scope records under `doc/history/`; migrate incoming links.
+
+- Centralize command syntax in `CLI_REFERENCE.md` and add the documentation index.
+- Consolidate retired Rust GUI architecture, migration, Windows trials and search
+  evidence in `RUST_GUI_EXPERIMENTS.md`; remove superseded setup recipes.
+- Reduce repeated provider, Windows packaging, date and workflow descriptions.
+  Separate implemented behavior, future requirements and dated historical evidence.
+- Integrate documentation corrections and Help/manual work locally with IMAP;
+  branch publication and acceptance remain separate.
+
+## Standalone IMAP CLI
+
+Add `mailarchiver-imap` for single-run, read-only synchronization on macOS and
+Windows, including new archive creation, interactive native-keyring setup, eight
+workers by default, five-minute status and graceful Ctrl-C recovery. Generic IMAP
+excludes spam-named mailboxes; Gmail downloads only All Mail and retains Gmail IDs
+and labels. Per-message checkpoints and separate new/duplicate hourly totals share
+the archive transaction. Complete MIME bytes and attachments use the existing
+ingest pipeline and its current extraction limits. Graphs, scheduling, desktop
+configuration and background agents remain future work. Native Windows/keyring
+and live Gmail acceptance are not established by the local fixture tests.
+
+## Desktop Help and user manual
+
+- Add Help links for the community forum, support issues, user manual and source
+  code on both desktops, plus an offline viewer for the embedded project license.
+- Add a website manual index, replace Documentation with User Manual in navigation,
+  and move Advanced access into the manual. Publish Features at `/features/` while
+  retaining a redirect from `/use-cases/`.
+- Align website product names, manual and support labels, current Features links,
+  desktop architecture guidance, and backup instructions across the public pages.
+- Run built manual/link acceptance after CI installs Zola, alongside installer
+  rendering checks.
+
+## Documentation after 1.0.0a19
+
+- Reconcile documentation with the current source: ClamAV scanning uses the
+  embedded libclamav engine (no daemon); the Windows x64 desktop creates and
+  imports archives; the macOS DMG bundles ClamAV and the PST/OST helpers; the
+  compiled Dioxus/Tauri/Rust desktop plans are retired; no Google OAuth code
+  remains; release CI notarizes the DMG. Historical sections are labeled.
 
 ## Windows public signing preparation
 
@@ -120,7 +540,11 @@ the Windows runtime's complete license evidence before MSIX assembly.
   appcast in explicit branch CI before the immutable release tag. Physical
   interaction testing remains separately recorded human acceptance.
 
-## Unreleased
+## Earlier development (released by 1.0.0a19)
+
+These entries accumulated under "Unreleased" before per-version headings were
+used; all of them were included by the `v1.0.0a19` tag. Rust GUI items describe
+the migration retired on October 10, 2026.
 
 - Run startup Rust archive initialization on its supervised worker so helper
   waits cannot block native Quit/document events. Exempt release tag calls from
@@ -913,84 +1337,14 @@ Contacts/geography GUI, live IMAP sources, and Refresh/Rebuild are documented
 plans, not newly implemented features. No source mailbox or real archive is
 changed by reconciliation or its fixture tests.
 
-## Local Windows MSIX prototype (2026-10-06)
+## Historical Windows delivery work (October 2026)
 
-See [Windows MSIX test packaging](WINDOWS_MSIX_TEST.md) for automated build/sign/test commands,
-private Python helper discovery, external WebView2 detection, native Windows
-evidence and unresolved installation/import/scanner/converter requirements.
-This local prototype is not a released or fully validated Windows application.
-
-## MSIX installation matrix (2026-10-07)
-
-The MSIX decision supersedes the older shared WinSparkle feed/EXE plan.
-`windows-msix.yml` supports explicit dispatch and reusable release calls; ordinary
-pushes do not run it. Two native build jobs produce x64 and ARM64 payloads once.
-One assembly job creates a signed common bundle and a higher-version upgrade
-fixture with identical application bytes. Both installation VMs download that
-same artifact: Windows Server x64 (`windows-latest`) and Windows 11 ARM64
-(`windows-11-arm`). Installation jobs do not rebuild. Private signing keys remain
-outside uploaded artifacts. Test packages are never published as release assets.
-The release caller waits for this gate after tag preflight. Windows 10 testing
-is not required. No GitHub Team or AWS provisioning is needed.
-
-Installed checks exercise private Python discovery, synthetic search/fixity,
-a native window, upgrade and uninstall, removing test packages and added trust
-in cleanup. WebView2 remains external and its absence fails this positive test.
-Its writable user-data directory is outside the immutable package. Hosted
-execution is pending; earlier local prototype results do not validate this head.
-Start-menu activation, missing-runtime UI, Windows imports/scanner/converters,
-and physical interaction remain separate acceptance gaps.
-
-Windows test installer downloads now contain one MSIX bundle and a README
-explaining machine-level test certificate trust, installation, and WebView2.
-The synthetic upgrade bundle is a separate CI-only artifact.
-
-The test installer ZIP includes `Install-Test-Certificate.ps1`: right-click Run
-with PowerShell requests elevation, installs the adjacent public certificate in
-Local Machine/Trusted People, verifies its presence, and displays the outcome.
-The README documents this path and a command fallback without changing the
-machine execution policy. The helper does not install the application.
-
-Windows installation registers the display name **Email Collector Toolkit (ECT)**.
-The installation matrix verifies that Start menu entry and activates its app ID
-using IApplicationActivationManager. The activated Rust executable runs the
-bundled Python self-test in package context, then CI activates the native reader
-on the synthetic archive before testing upgrade and uninstall. Taskbar pinning
-is a user choice, not an installation requirement.
-
-Windows test signing now requires the persistent `MSIX_TEST_CERT_PFX_BASE64`
-Actions secret, passed only to bundle signing (including reusable release calls).
-The signer checks it against `scripts/win/test-signing.cer`, requires a private
-key and current validity, and removes temporary PFX material on success/failure.
-No fallback certificate is generated. This supersedes the ephemeral test-key
-policy; testers trust the public certificate once until expiration (2028-10-07)
-or deliberate rotation. Production trusted signing remains separate.
-
-## Windows consolidation (October 10, 2026)
-
-The Windows Python work is integrated into PR #153 while retaining the Mac restoration and historical Rust GUI. The supported Windows package is x64-only private CPython with ClamAV and WinSparkle. This supersedes earlier frozen-Python/ARM64 and unsupported-import descriptions in the historical sections. The signed feed publisher labels Windows items with the Python package identity and x64 architecture so the updater can select compatible installations. The native install test retains both last-window Close and File/Quit checks.
-
-The installed reader CI regression was a Windows fsync on a read-only file descriptor. Publication now syncs a writable handle, and the package's actual self-test uses the shared byte-preserving MBOX class. Source acceptance covers both script and isolated module entry points, processor discovery, search/completion, and byte hashes. Current-head signed installation still requires hosted CI evidence.
-
-Installed Windows acceptance invokes File/Quit through WinForms' MSAA menu provider. UI Automation can omit MenuStrip items even when they are present. The test still invokes the actual named action and requires the process to exit; it never substitutes a forced close for Quit.
-
-- Preserve CRLF/LF bytes through raw MBOX access on Windows; retain definition
-  activation errors after staging moves; label release installers as x64-only.
-
-- Fix processing/status and identity CLI reads for reserved-character archive
-  paths; make Windows definition-publication tests work across disk volumes.
-
-- Report failed Windows update-setting saves, validate candidate Windows package
-  metadata, and retry transient Windows integrity-sidecar publication conflicts.
-
-- Fix WinSparkle installation shutdown after an accepted update or deferred Quit;
-  avoid duplicate directory flushes and clarify the retired Rust import limit.
-
-- Filter signing secrets from native builds and verify cached ClamAV runtime bytes.
-
-- Correct read-only Rust verifier search database attachment for Windows UNC paths.
-
-- Preserve non-ASCII plugin settings during Windows recovery and validate published
-  Windows update-feed coverage during Pages deployment.
-
-- Pin signing-job setup actions and prevent concurrent welcome-page archive pickers.
+The initial Rust reader/MSIX prototype expanded into shared x64/ARM64 installed
+acceptance, then the October 10 restoration selected the Python desktop. Python
+consolidation added x64 private CPython, ClamAV, WinSparkle, standard Open,
+Windows writer/publication fixes and native Close/Quit acceptance.
+The earlier ARM64 package, Rust updater and frozen-executable recipes are
+superseded. [RUST_GUI_EXPERIMENTS.md](RUST_GUI_EXPERIMENTS.md) retains the
+historical revision/run evidence; [WINDOWS_MSIX_TEST.md](WINDOWS_MSIX_TEST.md)
+owns the current package and acceptance contract. Public signing preparation is
+recorded above; neither these notes nor local tests establish hosted trust.

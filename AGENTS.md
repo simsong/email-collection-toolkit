@@ -4,6 +4,13 @@
 
 ## Release invariants
 
+Bump the canonical version in `pyproject.toml` and refresh `uv.lock` for each
+user-visible fix handed back for another test run. Advance the current alpha or
+beta number while on that prerelease line. Commit each version bump with its fix
+before handing it back for testing; push when requested. A version bump does not authorize
+publishing a tag or release. About must identify the launch/build Git commit and
+disclose local changes rather than implying an uncommitted checkout is that commit.
+
 Never hard-code the current project version, candidate release tag, or expected
 Sparkle build number in release code, workflow steps, or tests. Derive these
 values from `pyproject.toml` through the shared release-version mapper. A named,
@@ -32,18 +39,29 @@ indexes are rebuildable derivatives.
 
 * Never modify, delete, move, label, mark read, or otherwise mutate a source
   mailbox, Gmail account, IMAP account, Apple Mail store, or input archive.
-* Preserve original RFC 5322 bytes. MIME parsing, text extraction, malformed
+* Preserve original RFC 5322 bytes, except the explicitly authorized IMAP
+  acquisition policy: convert CRLF to LF before ingest, retaining lone CR and
+  original wire SHA-256/size in provider provenance. MIME parsing, text extraction, malformed
   MIME handling, and Unicode decoding are best-effort derived operations and
   must never cause a message to be dropped or rewritten.
-* A positive ClamAV result routes a message to `INFECTED.mbox`; it is not a
+* A positive ClamAV result routes a message to `INFECTED1.mbox`; it is not a
   reason to delete or alter the message. Scanner errors and unscannable input
   must be recorded and retained.
 * Do not ingest into a real canonical archive until the user identifies the
   target directory and explicitly authorizes that run. Develop and validate
   against purpose-made fixtures or a copied subset.
 * Do not alter local machine configuration, install software, start a
-  persistent service, or schedule jobs without explicit user approval. The
-  ClamAV daemon is on-demand only; never enable on-access or scheduled scans.
+  persistent service, or schedule jobs without explicit user approval. ClamAV
+  scanning uses the embedded libclamav engine in a run-owned worker process;
+  never add a resident daemon, on-access scanning, or scheduled scans.
+
+## Archived experimental UI
+
+The experimental Rust UI is preserved at tag `experimental-rust-ui` and branch
+`codex/experimental-rust-ui`, outside the active source tree. Do not include it
+in routine codebase/threading analysis or reconstruct it unless the user
+explicitly requests historical UI work. Independent Rust importer, verifier,
+MIME and build tools remain supported.
 
 ## Requirements and documentation
 
@@ -87,8 +105,8 @@ regression. No coverage-only tests and no mocks unless unavoidable.
 Fixtures must cover byte preservation, mboxrd quoting, malformed MIME, invalid
 character encodings, missing dates, duplicate Message-ID with different
 content, autosave exclusion, rollover, interruption recovery, and source
-idempotence. Use EICAR with the locally configured on-demand ClamAV daemon for
-the scanner integration test; use recorded typed scan results only for
+idempotence. Use EICAR with the real embedded libclamav engine and configured
+definitions for the scanner integration test; use recorded typed scan results only for
 unit-level routing tests.
 
 Before reporting a phase complete, review the changed implementation and tests

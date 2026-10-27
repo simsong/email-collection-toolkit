@@ -3,7 +3,7 @@
 api_version = 1
 plugin_type = "source"
 kind = "imap"
-name = "IMAP (reserved)"
-implementation_version = "0"
+name = "IMAP"
+implementation_version = "1"
 priority = 210
-entrypoint = "mailarchiver.source_stubs:ImapSourcePlugin"
+entrypoint = "mailarchiver.imap_source:ImapSourcePlugin"

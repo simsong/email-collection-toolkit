@@ -1,9 +1,9 @@
 # Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved.
 # Dispatch the frozen application without requiring an installed Python runtime.
 # Headless diagnostics and CLI commands run before any GUI imports.
-# The Rust preview uses this executable as its private archive-service helper.
-# Its explicit service flag preserves stdin/stdout for the JSON-line protocol.
-# Ordinary launches use the supported Python GUI; the Rust migration is retired.
+# Installed Windows acceptance and the CLI share this frozen entry point.
+# Normal launches activate the supported Python desktop and native event loop.
+# The retired experimental UI and its private service are archived in Git.
 
 """Frozen application entry point (also usable through make self-test).
 
@@ -20,11 +20,6 @@ def main() -> int:
     if len(sys.argv) > 1 and sys.argv[1] == "--msix-test":
         from mailarchiver.windows_self_test import main as windows_test_main
         return windows_test_main()
-    if len(sys.argv) > 1 and sys.argv[1] == "--rust-engine":
-        sys.argv.pop(1)
-        from mailarchiver.rust_engine import main as engine_main
-        engine_main()
-        return 0
     if "--self-test" in sys.argv or "--self-test-gui" in sys.argv:
         from mailarchiver.self_test import main as test_main
         return test_main()

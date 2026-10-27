@@ -25,6 +25,8 @@ from pathlib import Path
 from typing import Literal
 
 from mailarchiver.self_test import SelfTestReport
+from mailarchiver.build_info import BUILD_INFO_FILENAME, write_build_info
+from mailarchiver.plugin_loader import discover_manifests
 from mailarchiver.clamav_definitions import DEVELOPMENT_DATABASE, certificates_path, library_path, read_definitions, updater_path
 from packaging.requirements import Requirement
 from packaging.utils import canonicalize_name
@@ -69,6 +71,12 @@ PLIST_EXTENSION = "public.filename-extension"
 COPYRIGHT = "Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved."
 MACHO_MAGIC = {bytes.fromhex(value) for value in ("feedface", "cefaedfe", "feedfacf", "cffaedfe", "cafebabe", "bebafeca", "cafebabf", "bfbafeca")}
 HISTORICAL_PRE_SPARKLE_TAG = "v1.0.0a10"
+
+
+def plugin_import_arguments() -> list[str]:
+    """Freeze every manifest-referenced module, including dynamically loaded sources."""
+    modules = sorted({manifest.entrypoint.partition(":")[0] for manifest in discover_manifests()})
+    return [argument for module in modules for argument in ("--hidden-import", module)]
 
 
 class ImageEntry(BaseModel):
@@ -241,13 +249,6 @@ def test_mounted_image(mount: Path, dmg: Path, *, gui: bool = False,
     manifest = manifest_path or ROOT / "dist" / f"{dmg.stem}.contents.json"
     record_image_contents(mount, manifest, log_entries=log_contents)
     app = mount / f"{APP_NAME}.app"
-    from rust_bundle import EXECUTABLE, SERVICE, check as check_rust
-    with (app / "Contents/Info.plist").open("rb") as source:
-        is_rust = plistlib.load(source).get("CFBundleExecutable") == EXECUTABLE
-    if is_rust:
-        # The user owns physical interaction acceptance. Release automation
-        # validates the actual primary bundle, private service and native updater.
-        gui = False
     verify_mounted_notices(app, historical_tag)
     library = app / "Contents/Frameworks/clamav/libclamav.dylib"
     if not library.is_file():
@@ -257,7 +258,7 @@ def test_mounted_image(mount: Path, dmg: Path, *, gui: bool = False,
         raise RuntimeError("DMG is missing its Applications shortcut")
     verify_dependencies(app, environment=environment)
     verify_layout(mount, app.name)
-    executable = app / "Contents/MacOS" / (SERVICE if is_rust else APP_NAME)
+    executable = app / "Contents/MacOS" / APP_NAME
     from mailarchiver.clamav_update import write_freshclam_config
     with tempfile.TemporaryDirectory(prefix="freshclam-mounted-test-") as temporary:
         configuration = Path(temporary) / "freshclam.conf"
@@ -294,12 +295,6 @@ def test_mounted_image(mount: Path, dmg: Path, *, gui: bool = False,
         report = SelfTestReport.model_validate_json(report_path.read_text(encoding="utf-8"))
         if not report.passed or not report.frozen:
             raise RuntimeError(f"mounted {mode} failed: {report}")
-    if is_rust:
-        rust_report_path = dmg.with_suffix(".self-test.json")
-        rust_report = SelfTestReport.model_validate_json(rust_report_path.read_text(encoding="utf-8"))
-        rust_report.checks.extend(check_rust(app, environment))
-        rust_report_path.write_text(rust_report.model_dump_json(indent=2) + "\n", encoding="utf-8")
-        print("Mounted Rust primary app ingest/helper/search/reader/updater/fixity checks passed (no windows).", flush=True)
 
 
 def load_rpaths(commands: str) -> tuple[str, ...]:
@@ -455,16 +450,15 @@ def copy_native_notices(notices: Path) -> None:
         shutil.copyfile(source, notices / name)
 
 
-def build(signing_identity: str, *, gui: bool = False, log_contents: bool = False,
-          rust_binary: Path | None = None) -> Path:
-    if rust_binary is not None:
-        gui = False
+def build(signing_identity: str, *, gui: bool = False, log_contents: bool = False) -> Path:
     output = ROOT / "dist"
     output.mkdir(exist_ok=True)
     work_root = ROOT / ".tmp"
     work_root.mkdir(exist_ok=True)
     with tempfile.TemporaryDirectory(prefix="dmg-build-", dir=work_root) as temporary:
         work = Path(temporary)
+        build_info = work / BUILD_INFO_FILENAME
+        write_build_info(build_info, ROOT)
         bundle_output = work / "bundle"
         # Collect runtime notices, not development-only tools such as Pylint.
         notices = work / "Third Party Notices"
@@ -501,13 +495,13 @@ def build(signing_identity: str, *, gui: bool = False, log_contents: bool = Fals
                    "--workpath", str(work / "work"), "--specpath", str(work),
                    "--copy-metadata", "mailarchiver", "--collect-data", "mailarchiver",
                    "--collect-data", "webview", "--hidden-import", "webview.platforms.cocoa",
-                   "--hidden-import", "mailarchiver.sources", "--hidden-import", "mailarchiver.source_stubs",
-                   "--hidden-import", "mailarchiver.pst_source", "--hidden-import", "mailarchiver.pff_source",
+                   *plugin_import_arguments(),
                    "--exclude-module", "pypff",
                    "--hidden-import", "mailarchiver.processing.builtin",
-                   "--hidden-import", "mailarchiver.rust_engine",
                    "--add-data", f"{plugins}:mailarchiver/plugins",
                    "--add-data", f"{ROOT / 'gui'}:gui",
+                   "--add-data", f"{build_info}:mailarchiver",
+                   "--add-data", f"{ROOT / 'LICENSE'}:gui",
                    "--add-data", f"{ROOT / 'src/mailarchiver/standalone_verify.py'}:mailarchiver",
                    "--add-data", f"{notices}:Third Party Notices",
                    *clamav_bundle_arguments(work),
@@ -522,15 +516,6 @@ def build(signing_identity: str, *, gui: bool = False, log_contents: bool = Fals
         bundle_sparkle(app, ROOT / ".tools/sparkle" / SPARKLE_VERSION, signing_identity)
         configure_bundle(app, signing_identity)
         dmg = output / dmg_filename(version("mailarchiver"), platform.machine(), signing_identity)
-        if rust_binary is not None:
-            from rust_bundle import EXECUTABLE, SERVICE, prepare
-            app = prepare(app, rust_binary.resolve(strict=True), ROOT)
-            options = [] if signing_identity == "-" else ["--options", "runtime", "--timestamp"]
-            for name in (SERVICE, EXECUTABLE):
-                run("/usr/bin/codesign", "--force", "--sign", signing_identity, *options,
-                    app / "Contents/MacOS" / name)
-            run("/usr/bin/codesign", "--force", "--sign", signing_identity, *options, app)
-            run("/usr/bin/codesign", "--verify", "--deep", "--strict", app)
         candidate = work / "candidate.dmg"
         create_image(app, app_icon, candidate, work)
         # Keep a previous artifact until the requested mounted tests have passed.
@@ -548,7 +533,6 @@ def build(signing_identity: str, *, gui: bool = False, log_contents: bool = Fals
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--rust-binary", type=Path, help="unsupported historical Rust experiment; see rust/README.md")
     parser.add_argument("--test-dmg", type=Path, help="mount and retest an existing DMG")
     parser.add_argument("--test-mounted-dmg", type=Path, help="test an existing verified read-only DMG mount")
     parser.add_argument("--source-dmg", type=Path, help="source image for mounted test report names")
@@ -582,7 +566,7 @@ def main() -> None:
     else:
         credentials = SigningSecrets.from_environment(os.environ)
         with signing_identity(credentials, ROOT / ".tmp", args.signing_identity) as identity:
-            print(f"Built and tested: {build(identity, gui=args.check_release, log_contents=args.log_dmg_contents, rust_binary=args.rust_binary)}")
+            print(f"Built and tested: {build(identity, gui=args.check_release, log_contents=args.log_dmg_contents)}")
 
 
 if __name__ == "__main__":

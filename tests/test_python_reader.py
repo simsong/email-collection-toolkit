@@ -15,17 +15,11 @@ import pytest
 
 from mailarchiver.application import ApplicationController, ApplicationPreferencesStore, InvalidArchiveError
 from mailarchiver.gui_app import GuiApi
-from mailarchiver.reader_fixture import RAW_MESSAGE, check_reader, create_fixture, inventory
+from mailarchiver.reader_fixture import RAW_MESSAGE, create_fixture, inventory
 from mailarchiver.mailbox_tree import FilterSet, FilterSetStore
 from mailarchiver.gui_provenance import attached_messages
 from mailarchiver.gui_service import search_page
 from mailarchiver.processing.store import connect
-
-
-def test_reader_export_and_search_preserve_collection(tmp_path: Path) -> None:
-    report = check_reader(tmp_path / "acceptance")
-    assert report.passed
-    assert (tmp_path / "acceptance/export.eml").read_bytes() == RAW_MESSAGE
 
 
 def test_native_bridge_fixture_and_independent_readers(tmp_path: Path) -> None:

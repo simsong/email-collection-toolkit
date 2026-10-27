@@ -1,11 +1,18 @@
 # Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved.
-# Build a purpose-made collection for reader and relocated-package acceptance.
-# This uses low-level catalog and byte-preserving MBOX writers only for fixtures.
-# It never enables Windows production ingestion or touches an existing directory.
-# Raw bytes include Unicode, CRLF, From quoting and a final unterminated line.
-# Reader checks compare every fixture file before and after shared service calls.
-# Packaging can run these checks without a development checkout or pytest.
-"""Synthetic, portable reader acceptance collection and checks."""
+
+"""Synthetic, portable reader acceptance collection and checks.
+
+Purpose: Build synthetic archives for portable reader/package acceptance.
+
+How it works:
+Reserve a new fixture, exercise real reader services and compare before/after file
+inventories. Shared native probe deadlines cover both source and relocated runs.
+
+Fundamental dependents:
+
+- ``scripts.test_python_reader_native``: native reader acceptance uses this collection contract.
+- ``scripts.win.test_windows_msix``: relocated-package checks need the same verified fixture.
+"""
 from __future__ import annotations
 
 from contextlib import closing
@@ -21,6 +28,8 @@ from .layout import mbox_directory
 from .mailsearch import read_message_bytes
 from .mbox import frame_message
 from .search import index_message
+
+NATIVE_DESKTOP_TIMEOUT = 300
 
 RAW_MESSAGE = (b"From: Reader <reader@example.invalid>\r\nTo: Archive <archive@example.invalid>\r\n"
                b"Date: Mon, 07 Sep 2026 10:00:00 +0000\r\nSubject: Portable message viewer\r\n"

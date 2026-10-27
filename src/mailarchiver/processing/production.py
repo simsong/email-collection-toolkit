@@ -1,8 +1,20 @@
 # Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved.
-"""Production CLI host for the durable ingest, message and content processor trees."""
+
+"""Production CLI host for the durable ingest, message and content processor trees.
+
+Purpose: Host durable ingest, message and content pipelines for real archives.
+
+How it works:
+Translate typed processor results into catalog/index publication while retaining provenance
+and replay state.
+
+Fundamental dependents:
+
+- ``__main__``: normal ingest and content resumption delegate to this host.
+- ``gui_processing``: desktop continuation depends on its persisted policy and queues.
+"""
 from __future__ import annotations
 
-import hashlib
 import json
 import sqlite3
 import tempfile
@@ -16,24 +28,27 @@ from ..public_suffix import registrable_domain
 
 from ..catalog import address_pk
 from ..message import ParsedMessage, parse_message
+from ..mbox import MboxLocation, read_verified_location
+from ..layout import mbox_path
 from ..plugin_api import MailObject
 from ..plugin_configuration import read_plugin_configuration
 from ..plugin_loader import builtin_plugin_directory
+from ..list_catalog import PROVIDER_DOMAINS as PROVIDER_LIST, REPLY_ADDRESSES, registered_lists
+from ..reply_addresses import match_reply_address
 from ..search import PreparedSearchMessage, SEARCH_CATEGORIES, body_preview, delete_indexed_message, write_prepared_search_message
+from .contracts import PhoneNumber
 from .api import (
-    ApplicationContext, ArchiveContext, ContentReference, Pipeline, PluginSpec, ProcessingObject,
+    ApplicationContext, ArchiveContext, ContentReference, InvocationResponse, Pipeline, PluginSpec, ProcessingObject,
     ProcessingResult, RAW_MESSAGE, RunReport,
 )
-from .contracts import AddressEvidence, ContentMetadata, HeaderMetadata, MailboxReference, MimeInventory, ProcessingPolicy, SourceMetadata
+from .contracts import AddressEvidence, ContentMetadata, Filing, HeaderMetadata, MailboxReference, MimeInventory, ProcessingPolicy, ScanEvidence, SourceMetadata
+from .objects import collect_objects
 from .registry import fingerprint, load_processors
-from .runtime import dispatch, prepare_run, run
-from .store import DATABASE, connect, enqueue, report, snapshot
+from .runtime import RANK_FAILURE, ProcessingProgress, dispatch, prepare_run, run
+from .store import DATABASE, USER_CANCELLED, connect, enqueue, report, snapshot
 
 Publisher = Callable[[MailObject, ParsedMessage, MailboxReference, int], int]
 PROVIDER_DOMAINS = "provider_domains"
-PUBLIC_PROVIDERS = frozenset({"gmail.com", "googlemail.com", "outlook.com", "hotmail.com", "live.com", "msn.com",
-    "yahoo.com", "yahoo.co.uk", "yahoo.co.jp", "ymail.com", "aol.com", "icloud.com", "me.com", "mac.com",
-    "proton.me", "protonmail.com", "pm.me", "fastmail.com", "hey.com", "mail.com", "gmx.com", "gmx.de"})
 
 
 class IngestedMessage(BaseModel):
@@ -46,7 +61,8 @@ class IngestedMessage(BaseModel):
 class ProductionPipeline:
     def __init__(self, archive: Path, catalog: sqlite3.Connection, search: sqlite3.Connection,
                  policy: ProcessingPolicy, publish: Publisher, *, plugin_dirs: tuple[Path, ...] = (),
-                 installation_config: Path | None = None, cancelled: Callable[[], None] | None = None) -> None:
+                 installation_config: Path | None = None, cancelled: Callable[[], None] | None = None,
+                 heartbeat: Callable[[], None] | None = None) -> None:
         self.archive = archive.resolve()
         self.catalog = catalog
         self.search = search
@@ -54,43 +70,90 @@ class ProductionPipeline:
         self.publisher = publish
         self.installation_config = installation_config
         self.cancelled = cancelled
+        self.heartbeat = heartbeat
+        self._ingesting = False
         self.plugins = load_processors((builtin_plugin_directory(), *plugin_dirs))
         self.registry_hash = fingerprint(self.plugins)
         self.database = connect(self.archive, create=not (self.archive / DATABASE).exists(), production=True)
-        self.configuration_hash = self._configuration_hash()
+        with self.database:
+            for definition in registered_lists():
+                if definition.archive_supported:
+                    definition.snapshot(self.database,self.archive)
+        self.reply_rules=REPLY_ADDRESSES.read(self.archive)
         supplied = read_plugin_configuration(self.archive, "identity-evidence", installation_config).get_my_config().get(PROVIDER_DOMAINS, [])
         if not isinstance(supplied, list) or any(not isinstance(domain, str) or not domain for domain in supplied):
             raise ValueError("provider_domains must be a list of domain names")
-        self.provider_domains = PUBLIC_PROVIDERS | {str(domain).lower() for domain in supplied}
-        previous = self.database.execute("SELECT value FROM processing_settings WHERE name='configuration'").fetchone()
-        if previous and previous[0] != self.configuration_hash:
-            self.reprocess()
-        prepare_run(self.database, self.plugins, retry=True)
-
-    def _configuration_hash(self) -> str:
-        digest = hashlib.sha256(self.registry_hash.encode())
-        digest.update(self.policy.model_dump_json(exclude={"scanner_configuration", "scanner_executable"}).encode())
-        for path in sorted(Path(__file__).parent.glob("*.py")):
-            digest.update(path.read_bytes())
-        for plugin in self.plugins:
-            settings = read_plugin_configuration(self.archive, plugin.manifest.kind, self.installation_config)
-            digest.update(json.dumps(settings.get_my_config(), sort_keys=True).encode())
-        return digest.hexdigest()
+        self.provider_domains = set(PROVIDER_LIST.read(self.archive).domains) | {str(domain).lower() for domain in supplied}
+        prepare_run(self.database, retry=True)
 
     def close(self) -> None:
-        # Plugin-owned settings written in this run are part of its accepted state.
         with self.database:
-            self.database.execute("INSERT OR REPLACE INTO processing_settings VALUES('configuration',?)", (self._configuration_hash(),))
             self.database.execute("INSERT OR REPLACE INTO processing_settings VALUES('policy',?)",
                 (self.policy.model_dump_json(exclude={"scanner_configuration"}),))
-        self.database.close()
+        try:
+            collect_objects(self.database, self.archive, self._canonical_bytes)
+        finally:
+            self.database.close()
+
+    def release(self, message_id: str) -> None:
+        if self._ingesting:
+            return
+        if self.catalog.in_transaction:
+            raise ValueError("object cleanup requires committed catalog records")
+        collect_objects(self.database, self.archive, self._canonical_bytes, message_id=message_id)
+
+    def _canonical_bytes(self, digest: str) -> bytes:
+        row = self.catalog.execute(
+            "SELECT g.filename,l.byte_offset,l.byte_length FROM messages m "
+            "JOIN locations l USING(message_pk) JOIN mbox_generations g USING(generation_pk) "
+            "WHERE m.sha256=?", (digest,)).fetchone()
+        if row is None:
+            raise ValueError("message has no canonical MBOX location")
+        filename, offset, length = row
+        return read_verified_location(mbox_path(self.archive, filename),
+            MboxLocation(byte_offset=offset, byte_length=length), digest)
+
+    def _restore_message(self, item: ProcessingObject) -> ProcessingObject:
+        # Historical roots use logical content identities. New generations need
+        # a current, owned raw snapshot, not a completed job's discarded outputs.
+        directory = self.archive / "objects"
+        if directory.is_symlink():
+            raise ValueError("processor objects directory must not be a symlink")
+        path = directory / item.message_ref.sha256
+        if path.is_symlink():
+            raise ValueError("processor message object must not be a symlink")
+        if not path.exists():
+            raw = self._canonical_bytes(item.message_ref.sha256)
+            with tempfile.NamedTemporaryFile(delete_on_close=False) as temporary:
+                temporary.write(raw)
+                temporary.close()
+                reference = snapshot(self.archive, Path(temporary.name))
+            if reference.sha256 != item.message_ref.sha256:
+                raise ValueError("restored message digest mismatch")
+        else:
+            reference = ContentReference(path=path, sha256=item.message_ref.sha256)
+        content = ContentReference(path=directory / item.content_ref.sha256, sha256=item.content_ref.sha256)
+        return item.model_copy(update={"archive": ArchiveContext(path=self.archive),
+                                       "message_ref": reference, "content_ref": content})
 
     def prepare(self, item: ProcessingObject) -> ProcessingObject:
         if self.cancelled is not None:
             self.cancelled()
+        item = self._restore_message(item)
         row = self.database.execute("SELECT scan_status FROM message_state WHERE message_id=?", (item.message_id,)).fetchone()
         return item.model_copy(update={"application": ApplicationContext(policy=self.policy),
                                       "scan_provenance": row[0] if row and row[0] else item.scan_provenance})
+
+    def failed(self, item: ProcessingObject, plugin: PluginSpec, response: InvocationResponse) -> ProcessingResult | None:
+        """Preserve scanner failures in audit history while automatically retaining mail."""
+        if item.pipeline != "ingest" or plugin.manifest.kind != "clamav":
+            return None
+        evidence = response.result.scan if response.result is not None else None
+        if evidence is not None and evidence.status == "infected":
+            from .builtin import quarantine_metadata
+            return ProcessingResult(outcome="abort-message", scan=evidence,
+                filing=Filing(parsed=quarantine_metadata(item), mailbox=item.archive.mailbox("INFECTED", None)))
+        return ProcessingResult(scan=evidence or ScanEvidence(status="scanner-error", detail=response.error or "Scanner failed"))
 
     def _admit(self, reference: ContentReference, metadata: SourceMetadata, *, pipeline: Pipeline = "ingest",
                parent: str | None = None, part_path: tuple[int, ...] = (), scan: str | None = None, depth: int = 0) -> ProcessingObject:
@@ -115,6 +178,13 @@ class ProductionPipeline:
         existing = self.catalog.execute("SELECT message_pk FROM messages WHERE sha256=?", (reference.sha256,)).fetchone()
         with self.database:
             item = self._admit(reference, metadata)
+            # Retry only unpublished ingest roots. Cancelled derived jobs may
+            # have lost their temporary inputs and require explicit reprocessing.
+            self.database.execute("UPDATE jobs SET status='pending',detail='' WHERE status='aborted' "
+                "AND detail=? AND parent_job_id IS NULL AND json_extract(item_json,'$.pipeline')='ingest' "
+                "AND json_extract(item_json,'$.message_id')=? AND NOT EXISTS "
+                "(SELECT 1 FROM message_state WHERE message_id=? AND parsed_json IS NOT NULL)",
+                (USER_CANCELLED, item.message_id, item.message_id))
             state = self.database.execute("SELECT parsed_json FROM message_state WHERE message_id=?", (item.message_id,)).fetchone()
             if state is None or state[0] is None:
                 enqueue(self.database, item, self.registry_hash)
@@ -124,43 +194,51 @@ class ProductionPipeline:
             raise RuntimeError("ingest processor tree ended without a filing decision")
         return IngestedMessage(parsed=ParsedMessage.model_validate_json(row[0]), message_pk=row[1], duplicate=existing is not None, excluded=bool(row[2]))
 
-    def resume_ingest(self) -> None:
+    def resume_ingest(self, *, progress: ProcessingProgress | None = None) -> None:
         """Replay durable ingest work with cooperative stops between messages."""
         while row := self.database.execute("SELECT json_extract(item_json,'$.message_id') FROM jobs "
                 "WHERE status IN ('pending','running','failed') AND json_extract(item_json,'$.pipeline') "
-                "IN ('ingest','message') AND (parent_job_id IS NULL OR parent_job_id IN "
-                "(SELECT job_id FROM jobs WHERE status='completed')) ORDER BY job_id LIMIT 1").fetchone():
+                "IN ('ingest','message') AND (parent_job_id IS NULL OR EXISTS "
+                "(SELECT 1 FROM jobs parent WHERE parent.job_id=jobs.parent_job_id "
+                "AND parent.status='completed')) ORDER BY job_id LIMIT 1").fetchone():
             if self.cancelled is not None:
                 self.cancelled()
-            self._finish_ingest_message(str(row[0]))
+            self._finish_ingest_message(str(row[0]), progress=progress)
+            self.release(str(row[0]))
 
-    def _finish_ingest_message(self, message_id: str) -> None:
-        # The host serializes ingest calls under its publication lock. Finish
+    def _finish_ingest_message(self, message_id: str, *, progress: ProcessingProgress | None = None) -> None:
+        # The owner-thread coordinator serializes ingest calls. Finish
         # this message before honoring cooperative Quit; processor deadlines
         # still apply, and GUI termination has its own five-second hard limit.
         cancelled, self.cancelled = self.cancelled, None
+        ingesting, self._ingesting = self._ingesting, True
         try:
             failures: list[Exception] = []
             dispatch(self.database, self.plugins, pipelines=("ingest", "message"),
-                     installation_config=self.installation_config, services=self, failures=failures, message_id=message_id)
+                     installation_config=self.installation_config, services=self, failures=failures, message_id=message_id,
+                     progress=progress, heartbeat=self.heartbeat)
             self._raise_failures(("ingest", "message"), failures)
         finally:
             self.cancelled = cancelled
-    def resume(self, pipelines: tuple[Pipeline, ...], *, max_jobs: int | None = None, message_id: str | None = None) -> RunReport:
+            self._ingesting = ingesting
+
+    def resume(self, pipelines: tuple[Pipeline, ...], *, max_jobs: int | None = None, message_id: str | None = None,
+               fail_on_error: bool = True, progress: ProcessingProgress | None = None, workers: int = 1) -> RunReport:
         failures: list[Exception] = []
         result = run(self.database, self.plugins, retry=True, pipelines=pipelines, max_jobs=max_jobs,
                      installation_config=self.installation_config, services=self, cancelled=self.cancelled, failures=failures,
-                     message_id=message_id)
-        self._raise_failures(pipelines, failures)
+                     message_id=message_id, continue_after_failure=not fail_on_error, progress=progress, workers=workers, heartbeat=self.heartbeat)
+        if fail_on_error:
+            self._raise_failures(pipelines, failures)
         return result
 
     def _raise_failures(self, pipelines: tuple[Pipeline, ...], failures: list[Exception]) -> None:
         placeholders = ",".join("?" for _ in pipelines)
-        failed = self.database.execute(f"SELECT detail FROM jobs WHERE status='failed' AND json_extract(item_json,'$.pipeline') IN ({placeholders}) LIMIT 1", pipelines).fetchone()
+        failed = self.database.execute(f"SELECT job_id,detail FROM jobs WHERE status='failed' AND json_extract(item_json,'$.pipeline') IN ({placeholders}) ORDER BY job_id LIMIT 1", pipelines).fetchone()
         if failed:
-            error = self.database.execute("SELECT error,kind FROM invocations WHERE status='failed' ORDER BY invocation_id DESC LIMIT 1").fetchone()
+            error = self.database.execute("SELECT error,kind FROM invocations WHERE job_id=? AND status='failed' ORDER BY invocation_id DESC LIMIT 1", (failed[0],)).fetchone() if failed[1] == RANK_FAILURE else None
             prefix = "failed to parse message" if error and error[1] in ("file-message", "headers") else "processor failed"
-            raise RuntimeError(f"{prefix}: {error[0] if error else failed[0]}") from (failures[-1] if failures else None)
+            raise RuntimeError(f"{prefix}: {error[0] if error else failed[1]}") from (failures[-1] if failures else None)
 
     def reprocess(self) -> None:
         generation = str(uuid4())
@@ -176,7 +254,7 @@ class ProductionPipeline:
 
     def _invalidate(self, generation: str) -> None:
         with self.database:
-            self.database.execute("UPDATE jobs SET status='aborted',detail='superseded processing configuration' WHERE status IN ('pending','running','failed')")
+            self.database.execute("UPDATE jobs SET status='aborted',detail='explicit reprocessing' WHERE status IN ('pending','running','failed')")
             self.database.execute("DELETE FROM content_parts")
             self.database.execute("DELETE FROM evidence")
             self.database.execute("DELETE FROM message_addresses")
@@ -229,17 +307,32 @@ class ProductionPipeline:
         if result.text is not None:
             database.execute("INSERT OR REPLACE INTO content_parts VALUES(?,?,?,?,?,?,?)",
                 (item.message_id, json.dumps(item.part_path), plugin.manifest.kind, item.content_type, item.scope, int(item.synthetic), result.text.text))
-        self._evidence(item, plugin, result.evidence)
+        self._evidence(item, plugin, result.evidence, result.phone_numbers)
+        if result.headers is not None:
+            for candidate in result.headers.routing_candidates:
+                matched=match_reply_address(candidate,self.reply_rules)
+                if matched is None:
+                    continue
+                address=self.database.execute('SELECT address_id FROM addresses WHERE address=?',(candidate.address.lower(),)).fetchone()
+                address_id=address[0] if address else None
+                self.database.execute('INSERT OR IGNORE INTO evidence(message_id,part_path,plugin,version,kind,address_id,value) VALUES(?,?,?,?,?,?,?)',
+                    (item.message_id,json.dumps(item.part_path),plugin.manifest.kind,plugin.manifest.implementation_version,
+                     'routing-address',address_id,matched.model_dump_json()))
+                if address_id is not None and matched.name:
+                    self.database.execute('UPDATE persons SET canonical_name=? WHERE manual=0 AND canonical_name=? '
+                        'AND person_id=(SELECT person_id FROM person_addresses WHERE address_id=?)',
+                        (matched.name,candidate.address.lower(),address_id))
         if message_pk is not None:
             with self.catalog:
                 self.catalog.executemany("INSERT OR IGNORE INTO metadata_defects(message_pk,field,detail) VALUES(?,?,?)",
                     ((message_pk, plugin.manifest.kind, detail) for detail in result.diagnostics))
         for child in result.promotions:
+            registry_hash = database.execute("SELECT registry_hash FROM jobs WHERE job_id=?", (job_id,)).fetchone()[0]
             if item.source_metadata is None:
                 raise ValueError("child message has no source provenance")
             metadata = item.source_metadata.model_copy(update={
                 "cursor": item.source_metadata.cursor + "#mime=" + ".".join(map(str, child.part_path)),
-                "envelope_hex": None, "normalization": None,
+                "envelope_hex": None, "normalization": None, "provider_metadata_json": None,
                 "prior_date": datetime.fromisoformat(ParsedMessage.model_validate_json(row[1]).date_utc) if row and row[1] else item.source_metadata.prior_date})
             child_item = self._admit(child.content_ref, metadata, pipeline="message", parent=item.message_id,
                 part_path=child.part_path, scan=item.scan_provenance, depth=item.content_metadata.depth + 1)
@@ -247,13 +340,14 @@ class ProductionPipeline:
             mailbox = child_item.archive.mailbox(datetime.fromisoformat(parsed.date_utc).year, "Sender" if self.policy.owners.matches(parsed.sender) else "Archive")
             self._file(child_item, parsed, mailbox)
             database.execute("INSERT OR IGNORE INTO message_tags SELECT ?,tagid FROM tags WHERE name='attachment'", (child_item.message_id,))
-            enqueue(database, child_item, self.registry_hash, job_id)
+            enqueue(database, child_item, registry_hash, job_id)
 
-    def _evidence(self, item: ProcessingObject, plugin: PluginSpec, evidence: tuple[AddressEvidence, ...]) -> None:
+    def _evidence(self, item: ProcessingObject, plugin: PluginSpec, evidence: tuple[AddressEvidence, ...], phones: tuple[PhoneNumber, ...]) -> None:
         row = self.database.execute("SELECT parsed_json FROM message_state WHERE message_id=?", (item.message_id,)).fetchone()
         if not row or not row[0]:
             return
-        seen = ParsedMessage.model_validate_json(row[0]).date_utc
+        parsed = ParsedMessage.model_validate_json(row[0])
+        seen = parsed.date_utc
         part_path = json.dumps(item.part_path)
         self.database.execute("DELETE FROM evidence WHERE message_id=? AND part_path=? AND plugin=?", (item.message_id, part_path, plugin.manifest.kind))
         for entry in evidence:
@@ -276,11 +370,13 @@ class ProductionPipeline:
             if parent_domain in self.provider_domains:
                 self.database.execute("INSERT INTO organization_domains VALUES(?,NULL,1) ON CONFLICT(domain) DO UPDATE SET provider=1", (parent_domain,))
             organization = self.database.execute("SELECT organization_id,provider FROM organization_domains WHERE domain=?", (parent_domain,)).fetchone()
-            if organization:
-                organization_id = organization[0] if not organization[1] else None
+            if organization and parent_domain not in self.provider_domains:
+                self.database.execute("UPDATE organization_domains SET provider=0 WHERE domain=?", (parent_domain,))
+            if organization and (organization[0] is not None or parent_domain in self.provider_domains):
+                organization_id = organization[0] if parent_domain not in self.provider_domains else None
             else:
                 organization_id = self.database.execute("INSERT INTO organizations(name) VALUES(?) RETURNING organization_id", (parent_domain,)).fetchone()[0]
-                self.database.execute("INSERT INTO organization_domains VALUES(?,?,0)", (parent_domain, organization_id))
+                self.database.execute("INSERT INTO organization_domains VALUES(?,?,0) ON CONFLICT(domain) DO UPDATE SET organization_id=excluded.organization_id,provider=0", (parent_domain, organization_id))
             affiliation = self.database.execute("SELECT affiliation_id FROM affiliations WHERE person_id=? AND organization_id=? AND manual=0", (person_id, organization_id)).fetchone()
             if affiliation:
                 self.database.execute("UPDATE affiliations SET start_date=min(start_date,?),end_date=max(end_date,?) WHERE affiliation_id=?", (seen, seen, affiliation[0]))
@@ -289,6 +385,12 @@ class ProductionPipeline:
             self.database.execute("INSERT OR IGNORE INTO message_addresses VALUES(?,?,?,?)", (item.message_id, address_id, seen, entry.kind))
             self.database.execute("INSERT OR IGNORE INTO evidence(message_id,part_path,plugin,version,kind,address_id,person_id,organization_id,value) VALUES(?,?,?,?,?,?,?,?,?)",
                 (item.message_id, part_path, plugin.manifest.kind, plugin.manifest.implementation_version, entry.kind, address_id, person_id, organization_id, entry.model_dump_json()))
+
+        if phones:
+            sender = self.database.execute("SELECT a.address_id,p.person_id FROM addresses a JOIN person_addresses p USING(address_id) WHERE a.address=?", (parsed.sender.strip().lower(),)).fetchone()
+            if sender is not None:
+                self.database.executemany("INSERT OR IGNORE INTO evidence(message_id,part_path,plugin,version,kind,address_id,person_id,value) VALUES(?,?,?,?,?,?,?,?)",
+                    ((item.message_id,part_path,plugin.manifest.kind,plugin.manifest.implementation_version,"phone",sender[0],sender[1],phone.model_dump_json()) for phone in phones))
 
     def complete(self, item: ProcessingObject) -> None:
         if item.pipeline != "content":

@@ -2,7 +2,7 @@
 
 [project]
 name = "mailarchiver"
-version = "1.0.0a19"
+version = "1.0.0a38"
 description = "Personal MBOX archive normalizer"
 requires-python = ">=3.12"
 license = "GPL-2.0-only"
@@ -11,6 +11,8 @@ license-files = [
     "COPYRIGHT",
     "THIRD_PARTY_NOTICES.md",
     "gui/vendor/tabulator/LICENSE",
+    "gui/vendor/dagre/LICENSE",
+    "gui/vendor/dagre/dagre.min.js.LEGAL.txt",
     "licenses/proxy_tools-BSD.txt",
     "licenses/publicsuffix-MPL-2.0.txt",
     "website/themes/envelope-rainbow/LICENSE",
@@ -19,6 +21,7 @@ dependencies = [
     "beautifulsoup4>=4.15.0",
     "charset-normalizer>=3.4.0",
     "ftfy>=6.3.0",
+    "keyring>=25.6,<26",
     "packaging>=26.3",
     "py7zr>=1.0.0",
     "pycryptodomex>=3.23.0",
@@ -31,6 +34,7 @@ dependencies = [
 
 [project.scripts]
 mailarchiver = "mailarchiver.__main__:main"
+mailarchiver-imap = "mailarchiver.imap_cli:main"
 mailarchiver-compare-apple-mail = "mailarchiver.apple_mail_compare:main"
 mailarchiver-h3-review = "mailarchiver.h3_review:main"
 mailsearch = "mailarchiver.mailsearch:main"
@@ -51,6 +55,7 @@ where = ["src"]
 mailarchiver = [
     "*.yaml",
     "*.swift",
+    "sbook/*",
     "public_suffix_list.dat",
     "sql/*.sql",
     "processing/sql/*.sql",
@@ -72,6 +77,7 @@ dev = [
     "ty>=0.0.79",
     "types-pyyaml>=6.0.12.20260906",
     "types-tabulate>=0.10.0.20260508",
+    "pymap>=0.36.7",
 ]
 packaging = [
     "dmgbuild>=1.6.7 ; sys_platform == 'darwin'",
@@ -94,7 +100,7 @@ extension-pkg-allow-list = ["pypff"]
 select = ["E4", "E7", "E9", "F"]
 
 [tool.ty.src]
-include = ["src", "scripts", "tests", "e2e_tests", "validation/aws"]
+include = ["src", "scripts", "tests", "e2e_tests", "validation/aws", "conftest.py"]
 
 [tool.ty.environment]
 extra-paths = ["typings", "scripts", "converters/pff/src"]
@@ -102,6 +108,6 @@ extra-paths = ["typings", "scripts", "converters/pff/src"]
 [tool.pyright]
 stubPath = "typings"
 extraPaths = ["scripts", "converters/pff/src"]
-include = ["src", "scripts", "tests", "e2e_tests", "validation/aws"]
+include = ["src", "scripts", "tests", "e2e_tests", "validation/aws", "conftest.py"]
 pythonVersion = "3.12"
 typeCheckingMode = "standard"

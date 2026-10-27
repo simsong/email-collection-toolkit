@@ -1,6 +1,18 @@
 # Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved.
 
-"""PyObjC adapter for the pinned Sparkle framework in an installed macOS app."""
+"""PyObjC adapter for the pinned Sparkle framework in an installed macOS app.
+
+Purpose: Adapt the shared update service to macOS Sparkle.
+
+How it works:
+Load the pinned framework and retain native delegates that honor channel policy and writer-
+fenced installation.
+
+Fundamental dependents:
+
+- ``gui_app``: installed macOS update actions depend on this native adapter.
+- ``updates``: macOS installation uses its backend implementation of shared policy.
+"""
 
 from __future__ import annotations
 
@@ -10,10 +22,8 @@ from importlib import import_module
 from pathlib import Path
 from typing import Any
 from types import new_class
-from collections.abc import Callable
 
-from .updates import (PREVIEW_STREAM_LABEL, RELEASE_STREAM_LABEL, UPDATE_STREAM_HELP,
-                      UpdateChannel, UpdateService, allowed_channels)
+from .updates import UpdateChannel, UpdateService, allowed_channels
 
 NO_UPDATE_ERROR = 1001
 ARGUMENTS = "arguments"
@@ -133,39 +143,3 @@ def start_installed_updater(service: UpdateService) -> SparkleBackend | None:
     service.attach(backend, str(info[BUILD_KEY]))
     backend.configure(service.status.channel, service.status.automatic_checks)
     return backend
-
-
-def show_preferences(service: UpdateService, save: Callable[[UpdateChannel, bool], None]) -> None:
-    """Native Updates pane; Sparkle owns the subsequent download/install dialogs."""
-    appkit = import_module("AppKit")
-    status = service.status
-    alert = appkit.NSAlert.alloc().init()
-    alert.setMessageText_("Preferences — Updates")
-    alert.setInformativeText_(f"You are running {status.version} (build {status.build or 'source checkout'}).")
-    view = appkit.NSView.alloc().initWithFrame_(((0, 0), (470, 220)))
-    channel = appkit.NSPopUpButton.alloc().initWithFrame_pullsDown_(((0, 172), (470, 28)), False)
-    channel.addItemsWithTitles_([RELEASE_STREAM_LABEL, PREVIEW_STREAM_LABEL])
-    channel.selectItemAtIndex_(int(status.channel == "preview"))
-    view.addSubview_(channel)
-    automatic = appkit.NSButton.checkboxWithTitle_target_action_("Check for updates automatically (daily)", None, None)
-    automatic.setFrame_(((0, 135), (470, 28)))
-    automatic.setState_(int(status.automatic_checks))
-    view.addSubview_(automatic)
-    checked = status.last_checked.astimezone().strftime("%Y-%m-%d %H:%M %Z") if status.last_checked else "Not yet"
-    text = appkit.NSTextField.wrappingLabelWithString_(
-        "Downloading and installation always require confirmation.\n"
-        f"{UPDATE_STREAM_HELP}\n\n"
-        f"Last checked: {checked}\n{status.detail}",
-    )
-    text.setFrame_(((0, 0), (470, 126)))
-    view.addSubview_(text)
-    alert.setAccessoryView_(view)
-    alert.addButtonWithTitle_("Done")
-    check = alert.addButtonWithTitle_("Check for Updates…")
-    check.setEnabled_(status.available)
-    choice = alert.runModal() - 1000
-    selected: UpdateChannel = "preview" if channel.indexOfSelectedItem() == 1 else "release"
-    save(selected, bool(automatic.state()))
-    service.configure(selected, bool(automatic.state()))
-    if choice == 1:
-        service.check()

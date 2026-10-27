@@ -31,6 +31,7 @@ from mailarchiver.catalog import address_pk, create_catalog, create_search
 from mailarchiver.gui_service import message_locations
 from mailarchiver.layout import mbox_directory
 from mailarchiver.mailbox_tree import mailbox_tree
+from mailarchiver.mailsearch import read_message_bytes
 from mailarchiver.mbox import MboxLocation, add_message, read_verified_location
 from mailarchiver.source_volume import METADATA_CURRENT_MOUNT_PATH
 from mailarchiver.standalone_verify import semantic_bytes
@@ -141,7 +142,14 @@ def test_ingest_routes_preserves_and_indexes_messages(
     archive = tmp_path / "archive"
     owner_names = Path(__file__).parent / "fixtures" / "owner-names.txt"
 
-    result = run_ingest(source, archive, owner_names)
+    # The real import also proves that obsolete daemon settings are irrelevant.
+    environment = os.environ.copy()
+    environment.update(MAILARCHIVER_CLAMD=str(tmp_path / "missing-daemon"),
+                       MAILARCHIVER_CLAMDSCAN=str(tmp_path / "missing-client"),
+                       MAILARCHIVER_CLAMD_CONFIG=str(tmp_path / "missing-config"))
+    original_sources = {path: path.read_bytes() for path in source.rglob("*") if path.is_file()}
+    result = run_ingest(source, archive, owner_names, environment=environment)
+    assert {path: path.read_bytes() for path in source.rglob("*") if path.is_file()} == original_sources
     infected_path = source / "emlx_maildir/2024/infected/003-infected.emlx"
     infected_path.unlink()
     assert not infected_path.exists()
@@ -251,7 +259,7 @@ def test_ingest_routes_preserves_and_indexes_messages(
         rebuilt.close()
 
     refreshed = subprocess.run(
-        [sys.executable, "-m", "mailarchiver", "--archive", str(archive), "refresh-index"],
+        [sys.executable, "-m", "mailarchiver", "--archive", str(archive), "refresh-index", "--workers", str(REFRESH_INDEX_DEFAULT_WORKERS)],
         check=False,
         capture_output=True,
         text=True,
@@ -1163,8 +1171,8 @@ def test_unusable_source_fails_cleanly(
     assert not list(mbox_directory(archive).glob("*.mbox"))
 
 
-def test_clamav_startup_failure_prevents_worker_activity(tmp_path: Path) -> None:
-    """Regression: clamd must become ready before workers can parse or publish mail."""
+def test_clamav_startup_failure_records_error_and_continues(tmp_path: Path) -> None:
+    """SCANNING: startup failure records its diagnostic while workers retain and index mail."""
     source = tmp_path / "source.eml"
     source.write_bytes(
         b"Message-ID: <one@example>\nDate: Thu, 1 Feb 2024 12:00:00 +0000\n\nbody\n"
@@ -1194,34 +1202,25 @@ def test_clamav_startup_failure_prevents_worker_activity(tmp_path: Path) -> None
         env=environment,
     )
 
-    assert result.returncode == 1
+    assert_success(result)
     assert "ClamAV startup failed:" in result.stderr
     assert str(missing_clamd) in result.stderr
-    assert "processed=0 active_workers=0 peak_workers=0" in result.stderr
+    assert "retaining mail and recording scanner errors" in result.stderr
     assert "Traceback" not in result.stderr
-    assert not list(mbox_directory(archive).glob("*.mbox"))
     catalog = sqlite3.connect(archive / "archive.sqlite3")
     try:
-        assert catalog.execute("SELECT count(*) FROM source_files").fetchone() == (0,)
-        assert catalog.execute("SELECT count(*) FROM observations").fetchone() == (0,)
-        assert catalog.execute("SELECT result FROM ingest_runs").fetchone() == ("failed",)
+        assert catalog.execute("SELECT count(*) FROM source_files").fetchone() == (1,)
+        assert catalog.execute("SELECT count(*) FROM observations").fetchone() == (1,)
+        assert catalog.execute("SELECT result FROM ingest_runs").fetchone() == ("completed",)
+        message_pk, = catalog.execute("SELECT message_pk FROM messages").fetchone()
+        assert read_message_bytes(archive, message_pk) == source.read_bytes()
+        assert catalog.execute("SELECT count(*) FROM metadata_defects WHERE field='antivirus'").fetchone() == (1,)
     finally:
         catalog.close()
-
-
-def test_embedded_scanner_ignores_absent_daemon_configuration(tmp_path: Path) -> None:
-    """Offline library scanning requires no daemon executable, socket or configuration."""
-    source = tmp_path / "source.eml"
-    raw = b"Message-ID: <embedded@example>\nDate: Thu, 1 Feb 2024 12:00:00 +0000\n\nbody\n"
-    source.write_bytes(raw)
-    archive = tmp_path / "archive"
-    owners = Path(__file__).parent / "fixtures/owner-names.txt"
-    environment = os.environ.copy()
-    environment.update(MAILARCHIVER_CLAMD=str(tmp_path / "missing-daemon"),
-                       MAILARCHIVER_CLAMDSCAN=str(tmp_path / "missing-client"),
-                       MAILARCHIVER_CLAMD_CONFIG=str(tmp_path / "missing-config"))
-    assert_success(run_ingest(source, archive, owners, environment=environment))
-    assert source.read_bytes() == raw
+    with sqlite3.connect(archive / "processing.sqlite3") as processing:
+        assert processing.execute("SELECT scan_status FROM message_state").fetchone() == ("scanner-error",)
+    with sqlite3.connect(archive / "search.sqlite3") as search:
+        assert search.execute("SELECT count(*) FROM message_fts WHERE message_fts MATCH 'body'").fetchone() == (1,)
 
 
 @pytest.mark.parametrize("empty_partial", [False, True])

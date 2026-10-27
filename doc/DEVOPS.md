@@ -53,9 +53,11 @@ packaging jobs as the tagged release and verifies their combined signed feed.
 Ordinary pushes omit this marker and skip installer builds. The Windows workflow
 also supports explicit dispatch for its x64 package checks.
 
-The supported Windows download is a test-signed x64 MSIX bundle with private
-CPython, ClamAV and WinSparkle. Its trust ZIP supplies the persistent public
-certificate and installation instructions. WebView2 remains an external
+The supported Windows download is an x64 MSIX bundle with private CPython,
+ClamAV and WinSparkle. Builds published so far are test-signed, and their trust
+ZIP supplies the persistent public certificate and installation instructions.
+Release and candidate workflows now require
+[Microsoft public signing](WINDOWS_PUBLIC_SIGNING.md) instead. WebView2 remains an external
 prerequisite. ARM64 package construction is not part of the current workflow.
 
 Keep the macOS native GUI test. Windows release validation should cover install,
@@ -189,12 +191,13 @@ published GitHub Release cannot be rolled back transactionally with Pages.
 See [macOS distribution](MACOS_DISTRIBUTION.md#publish-a-tagged-macos-release)
 for the tag command, packaging steps, and secret boundaries.
 
-## Local Windows MSIX prototype (2026-10-06)
+## Platform packaging
 
-See [Windows MSIX test packaging](WINDOWS_MSIX_TEST.md) for automated build/sign/test commands,
-frozen Python reader validation, external WebView2 prerequisites, native Windows
-evidence and unresolved installation/import/scanner/converter requirements.
-This local prototype is not a released or fully validated Windows application.
+[WINDOWS_MSIX_TEST.md](WINDOWS_MSIX_TEST.md) owns current x64 Python package
+structure and installed acceptance; [WINDOWS_PUBLIC_SIGNING.md](WINDOWS_PUBLIC_SIGNING.md)
+owns public-signing setup. [MACOS_DISTRIBUTION.md](MACOS_DISTRIBUTION.md) covers
+the supported Python DMG. Historical package experiments are in
+[RUST_GUI_EXPERIMENTS.md](RUST_GUI_EXPERIMENTS.md).
 
 ## Platform script layout
 
@@ -207,42 +210,9 @@ existing macOS scripts remain at their historical paths until migrated together
 with their imports, tests and workflow callers. No Linux directory is needed
 until Linux-specific tooling is added.
 
-## Historical MSIX installation matrix (2026-10-07)
+## Evidence ownership
 
-MSIX replaces the older EXE installer plan. The Python desktop is now its
-entry point; the a15 Rust WinSparkle adapter is archived and no longer ships.
-Windows automatic-update support remains unfinished. `windows-msix.yml`
-supports explicit dispatch, reusable release calls and explicit packaging-branch
-`[msix-ci]`/`[release-ci]` pushes; ordinary pushes do not run it. Two native build
-jobs produce x64 and ARM64 payloads once per workflow invocation.
-One assembly job creates a signed common bundle and a higher-version upgrade
-fixture with identical application bytes. Both installation VMs download that
-same artifact: Windows Server x64 (`windows-latest`) and Windows 11 ARM64
-(`windows-11-arm`). Installation jobs do not rebuild. Private signing keys remain
-outside uploaded artifacts. The authorized alpha may publish the validated base
-test-signed bundle and public trust material; upgrade fixtures stay CI-only.
-The release caller waits for this gate after tag preflight. Windows 10 testing
-is not required. No GitHub Team or AWS provisioning is needed.
-
-Installed checks exercise frozen Python search, autocomplete and byte retrieval,
-a native window, upgrade and uninstall, removing test packages and added trust
-in cleanup. WebView2 remains external and its absence fails this positive test.
-Its writable user-data directory is outside the immutable package. Hosted matrix
-execution is implemented, including Start-menu activation and missing-runtime
-guidance. Results must match the candidate head; earlier package results do not
-clear revised signing or updater code. Windows imports/scanner/converters and
-physical interaction remain separate acceptance gaps.
-
-Windows test signing now requires the persistent `MSIX_TEST_CERT_PFX_BASE64`
-Actions secret, passed only to bundle signing (including reusable release calls).
-The signer checks it against `scripts/win/test-signing.cer`, requires a private
-key and current validity, and removes temporary PFX material on success/failure.
-No fallback certificate is generated. This supersedes the ephemeral test-key
-policy; testers trust the public certificate once until expiration (2028-10-07)
-or deliberate rotation. Production trusted signing remains separate.
-
-## Windows consolidation (October 10, 2026)
-
-The Windows Python work is integrated into PR #153 while retaining the Mac restoration and historical Rust GUI. The supported Windows package is x64-only private CPython with ClamAV and WinSparkle. This supersedes earlier frozen-Python/ARM64 and unsupported-import descriptions in the historical sections. The signed feed publisher labels Windows items with the Python package identity and x64 architecture so the updater can select compatible installations. The native install test retains both last-window Close and File/Quit checks.
-
-The installed reader CI regression was a Windows fsync on a read-only file descriptor. Publication now syncs a writable handle, and the package's actual self-test uses the shared byte-preserving MBOX class. Source acceptance covers both script and isolated module entry points, processor discovery, search/completion, and byte hashes. Current-head signed installation still requires hosted CI evidence.
+Use the current revision's workflow and installed-artifact results. Older
+Windows ARM64 Rust results do not validate the x64 Python package, and signed
+package installation does not establish updater-driven replacement. Do not
+copy historical test counts into current operating instructions.

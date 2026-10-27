@@ -6,8 +6,10 @@ description = "Configure local and IMAP sources, then choose a fast refresh or c
 
 
 Email Collection Toolkit imports supported local email files and folders into
-an archive without changing the sources. Google Takeout MBOX, Maildir, EML,
-Babyl, and complete Apple Mail `.emlx` files can be used today.
+an archive without changing the sources. MBOX (including Google Takeout),
+Maildir, EML, Babyl, and complete Apple Mail `.emlx` files can be used today.
+The macOS application also reads Outlook PST and OST files, with
+[best-effort extraction](https://github.com/simsong/email-collection-toolkit/blob/main/doc/PST_IMPORTER.md).
 
 ## Import with the application
 
@@ -34,15 +36,48 @@ The **Ingests** window shows retained runs, source paths, message counts,
 progress, worker activity, and failures. Open it from **Window → Ingests** or
 click the status line; **Import Directory…** starts another import into that
 window's archive. If antivirus scanning is unavailable, the application warns
-you and requires an explicit choice to import without scanning.
+you and records scanner-error evidence while importing continues automatically.
+Incomplete scans and encrypted attachments are recorded without a manual-review gate.
+
+Use **Suspend Import** to checkpoint the current work without quitting. Wait for
+the suspension to finish, then use **Continue Import** to resume the saved
+settings, including after reopening the archive. Suspension also frees the
+archive for manual name edits. A message already being downloaded may finish
+before suspension completes.
 
 ![The import history window showing a completed synthetic collection import](../images/importing-interface.png)
 
 *The working import-history interface after importing synthetic messages.*
 
+
+When reopening an archive with unfinished work, review the source, import start,
+latest interruption and saved imported/duplicate counts. An unclean stop shows
+its last saved progress time because the exact interruption time is unknown.
+Choose **Continue Import** to resume ingest and content processing using the saved
+settings, **Leave import suspended** to keep work paused, or **Stop import** to
+cancel remaining work while keeping archived
+messages and history. A new explicit import can read the source again; use
+explicit reprocessing to regenerate previously cancelled derived work.
+
+## Standalone IMAP CLI
+
+The Python `mailarchiver-imap` command runs without the desktop on macOS and
+Windows. `--new ARCHIVE` creates an archive and prompts for connection settings
+and a hidden password/app password, saved in the native OS keyring. Later use
+`--archive ARCHIVE` to synchronize once and exit. `--workers` overrides the saved
+worker preference, which defaults to half the logical CPUs (maximum twice the CPU count);
+`--show-messages` adds per-download output to five-minute status. Ctrl-C saves
+completed progress for the next run.
+
+Generic IMAP excludes mailbox names containing `spam`, ignoring case. Gmail
+downloads only All Mail and records Gmail IDs and labels; Spam and Trash-only
+messages are outside that coverage. Complete messages and attachments use normal
+ingest, including its current attachment-extraction limits. Scheduling and the
+graphical source configuration below remain planned.
+
 ## Planned configured sources
 
-The saved-source interface and live IMAP adapter described below are planned
+The general saved-source interface described below is planned
 work. They are separate from the local-file import interface available today.
 
 ## Sources belong to an archive
@@ -106,8 +141,24 @@ Takeout export, local cache, or IMAP account is not added to the canonical
 archive twice. Every source observation is retained, and neither action deletes
 canonical mail.
 
-Import/Rebuild is not `refresh-index`. The latter reads messages already in the
+Import/Rebuild differs from a search-index refresh, which reads messages already in the
 archive and replaces only the disposable search index.
 
-See the [user manual](https://github.com/simsong/email-collection-toolkit/blob/main/doc/USER_MANUAL.md)
-for the currently available explicit-path commands.
+See [Advanced → Command Line](@/advanced.md#command-line) for terminal commands
+and the full command reference.
+
+While **Processing saved mail** is displayed, ECT is finishing metadata, body and
+attachment extraction, and search indexing for mail already stored locally.
+The cards show finished processing tasks and their average rate. Each worker row
+separates downloading/importing from processing and reports its own finished-task
+count. Several processing tasks can belong to one email. IMAP source progress is
+reported as download partitions rather than files.
+
+
+**Messages requiring processing** counts archived emails with unfinished work, once
+per email even when several body or attachment tasks remain. Pending, running,
+failed and blocked work is included; mail still on the server is excluded.
+The count refreshes during processing and can increase if more saved-message
+work is discovered. Each email leaves the count only after its last task finishes.
+The count can stay level while earlier stages extract bodies and attachments and
+queue later work for the same emails. Older runs may show Unavailable.

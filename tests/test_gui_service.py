@@ -15,6 +15,7 @@ from importlib.metadata import version
 from webview.menu import MenuAction, MenuSeparator
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+from threading import Event
 
 import pytest
 from pydantic import ValidationError
@@ -30,6 +31,7 @@ from mailarchiver.gui_app import (
     application_menu,
     application_metadata,
     external_link_destination,
+    license_html,
 )
 from mailarchiver.gui_service import (
     LEGACY_X_HTML_PART_ID,
@@ -446,18 +448,63 @@ def test_native_menus_route_through_the_application_controller(tmp_path: Path) -
 
     menus = application_menu(application)
 
-    assert [menu.title for menu in menus] == (["File", "Window", "Help"] if sys.platform == "win32" else ["File", "Window"])
+    assert [menu.title for menu in menus] == ["File", "Window", "Help"]
     assert all(isinstance(item, (MenuAction, MenuSeparator)) for menu in menus for item in menu.items)
     assert [item.title for item in menus[0].items if isinstance(item, MenuAction)] == [
-        "New", "Open…", "Import…", "Document Options…", "Close",
+        "New", "Open…", "Import…", "Reprocess Saved Mail…", "Document Options…", "Customizable Default Lists…", "Close",
     ] + (["Quit"] if sys.platform == "win32" else [])
     if sys.platform == "win32":
         assert [item.title for item in menus[2].items if isinstance(item, MenuAction)] == [
-            "About", "Check for Updates…", "Update Settings…"]
+            "Community Forum", "Contact Support", "User Manual", "Source Code", "License",
+            "About", "Check for Updates…", "Preferences…"]
     assert [item.title for item in menus[1].items if isinstance(item, MenuAction)] == ["New Search Window", "Ingests"]
     for action in menus[1].items:
         assert isinstance(action, MenuAction)
         assert not action.function()
+
+
+@pytest.mark.parametrize("platform", ["darwin", "win32"])
+def test_help_actions_open_the_requested_destinations(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, platform: str,
+) -> None:
+    """Requirement: every Help action dispatches its own destination on both desktops."""
+    application = PyWebViewApplication(ApplicationController(
+        ApplicationPreferencesStore(tmp_path / "preferences.json")))
+    opened: list[str] = []
+    # Replace only the OS boundaries to avoid launching browsers/native windows in unit tests.
+    monkeypatch.setattr("mailarchiver.gui_app.open_external_url", opened.append)
+    monkeypatch.setattr(application, "show_license", lambda: opened.append("embedded-license"))
+    monkeypatch.setattr(sys, "platform", platform)
+    actions = application_menu(application)[2].items[:5]
+    assert [action.title for action in actions if isinstance(action, MenuAction)] == [
+        "Community Forum", "Contact Support", "User Manual", "Source Code", "License",
+    ]
+    for action in actions:
+        assert isinstance(action, MenuAction)
+        action.function()
+    assert opened == [
+        "https://github.com/simsong/email-collection-toolkit/discussions",
+        "https://github.com/simsong/email-collection-toolkit/issues",
+        "https://simsong.github.io/email-collection-toolkit/manual/",
+        "https://github.com/simsong/email-collection-toolkit",
+        "embedded-license",
+    ]
+
+
+def test_license_view_preserves_the_complete_local_text(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Requirement: License works offline from source and packaged GUI resources."""
+    from bs4 import BeautifulSoup  # pylint: disable=import-outside-toplevel
+
+    original = (Path(__file__).parents[1] / "LICENSE").read_text(encoding="utf-8")
+    pre = BeautifulSoup(license_html(), "html.parser").pre
+    assert pre is not None and pre.get_text() == original
+    assets = tmp_path / "gui"
+    assets.mkdir()
+    (assets / "LICENSE").write_text(original, encoding="utf-8")
+    monkeypatch.setattr("mailarchiver.gui_app.GUI_DIRECTORY", assets)
+    page = BeautifulSoup(license_html(), "html.parser")
+    assert page.pre is not None and page.pre.get_text() == original
+    assert not page.find_all(["script", "link", "iframe"])
 
 
 def test_gui_api_records_independent_search_window_state(tmp_path: Path) -> None:
@@ -619,6 +666,62 @@ def test_gui_loads_indexed_previews_on_its_background_worker(tmp_path: Path) -> 
         (1, "The report is ready."),
         (2, "Plain version."),
     ]
+
+
+def test_preview_futures_ignore_old_archive_and_observe_reader_failures(tmp_path: Path) -> None:
+    """Desktop previews: only current-generation results publish; failures are consumed and retryable."""
+    first = make_gui_archive(tmp_path / "first")
+    second = make_gui_archive(tmp_path / "second")
+    with sqlite3.connect(second / "search.sqlite3") as database:
+        database.execute("UPDATE message_metadata SET preview='New archive preview'")
+    blocker = sqlite3.connect(first / "search.sqlite3")
+    blocker.execute("BEGIN EXCLUSIVE")
+    release = Event()
+    api = GuiApi(first)
+    try:
+        api.request_previews([1])
+        old_future = next(iter(api._preview_futures))
+        deadline = time.monotonic() + 2
+        while not old_future.running() and time.monotonic() < deadline:
+            time.sleep(0.001)
+        assert old_future.running()
+        queued_gate = api._preview_executor.submit(release.wait)
+        api.archive = second
+        api.invalidate_archive()
+        api.request_previews([1])
+        current_future = next(future for future, request in api._preview_futures.items() if request.archive == second)
+        blocker.rollback()
+        assert old_future.result(timeout=5)[0].preview == "The report is ready."
+        batch = api.take_previews([1])
+        assert batch["pending"] and batch["previews"] == [] and batch["error"] is None
+        release.set()
+        queued_gate.result(timeout=5)
+        current_future.result(timeout=5)
+        assert api.take_previews([1])["previews"] == [{"message_pk": 1, "preview": "New archive preview"}]
+        api.invalidate_archive()
+        search = second / "search.sqlite3"
+        saved = search.with_suffix(".saved")
+        search.rename(saved)
+        search.write_bytes(b"invalid SQLite fixture")
+        try:
+            api.request_previews([1])
+            failed = next(iter(api._preview_futures))
+            with pytest.raises(sqlite3.DatabaseError):
+                failed.result(timeout=5)
+            batch = api.take_previews([1])
+            assert not batch["pending"] and batch["previews"] == [] and batch["error"]
+        finally:
+            search.unlink()
+            saved.rename(search)
+        api.request_previews([1])
+        next(iter(api._preview_futures)).result(timeout=5)
+        assert api.take_previews([1])["error"] is None
+    finally:
+        release.set()
+        blocker.close()
+        api.close()
+    with pytest.raises(ValueError, match="closed"):
+        api.request_previews([1])
 
 
 def test_gui_selects_multipart_views_and_sanitizes_html(tmp_path: Path) -> None:
@@ -967,6 +1070,30 @@ def test_original_mailbox_tree_deduplicates_counts_merges_volumes_and_filters(tm
     scoped = find_tree_node(backup_two.children, "Professional")
     assert scoped.count == 1
     assert [item.message_pk for item in search_page(archive, "", mailbox_selections=[scoped.selection]).results] == [1]
+
+
+@pytest.mark.parametrize("show_volumes", [False, True])
+def test_imap_mailbox_labels_unquote_once_without_changing_selections(tmp_path: Path, show_volumes: bool) -> None:
+    """Desktop requirement: decode IMAP labels, retaining literal names and exact folder filters."""
+    archive = make_gui_archive(tmp_path)
+    identity = '{"stable_id":"imap-labels"}'
+    encoded = "%5BGmail%5D/All%20Mail"
+    add_tree_source(archive, identity, "IMAP", encoded, "imap", [1, 2])
+    add_tree_source(archive, identity, "IMAP", "%5BGmail%5D/Literal%2520%2B%25%2F%2E%C3%89", "imap", [1])
+    add_tree_source(archive, '{"stable_id":"local-labels"}', "Local", "Local%20Folder/A+B%25.mbox", "mbox", [2])
+    tree = mailbox_tree(archive, show_volumes)
+    gmail = find_tree_node(tree, "[Gmail]")
+    all_mail = find_tree_node(gmail.children, "All Mail")
+    literal = find_tree_node(gmail.children, "Literal%20+%/.É")
+    assert gmail.count == 2 and all_mail.count == 2 and literal.count == 1
+    assert not literal.children
+    selection = MailboxSelection.from_token(all_mail.selection)
+    assert selection.path == encoded
+    assert selection.volume_identity == (identity if show_volumes else None)
+    assert MailboxSelection.from_token(all_mail.logical_selection).path == encoded
+    assert [item.message_pk for item in search_page(archive, "", mailbox_selections=[all_mail.selection]).results] == [2, 1]
+    assert [item.message_pk for item in search_page(archive, "", mailbox_selections=[literal.selection]).results] == [1]
+    assert find_tree_node(tree, "Local%20Folder").children[0].label == "A+B%25.mbox"
 
 
 def test_filter_sets_are_versioned_and_atomically_managed(tmp_path: Path) -> None:

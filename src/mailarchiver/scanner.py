@@ -1,13 +1,27 @@
 # Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved.
-"""Direct libclamav scanning in a bounded, run-owned worker; no resident daemon."""
+
+"""Direct libclamav scanning in a bounded, run-owned worker; no resident daemon.
+
+Purpose: Supervise bounded antivirus scans without a resident service.
+
+How it works:
+Run native engines in owned workers, enforce deadlines and return typed scan evidence to
+message processing.
+
+Fundamental dependents:
+
+- ``processing.builtin``: antivirus admission depends on these actual verdicts.
+- ``clamav_update``: definition generations require real clean/infected validation scans.
+"""
 from __future__ import annotations
 
 import multiprocessing
 import os
+import signal
 import tempfile
 import time
 from collections.abc import Callable
-from concurrent.futures import Future, ThreadPoolExecutor
+from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait as wait_for_scans
 from contextlib import AbstractContextManager
 from datetime import UTC, datetime
 from multiprocessing.connection import wait
@@ -85,15 +99,15 @@ def exit_with_parent(sentinel: int) -> None:
 
 def engine_worker(connection: ScannerConnection, library: Path, definitions: DefinitionSet, workers: int, temporary_directory: Path) -> None:
     """Share one immutable engine among native scan threads; ctypes releases the GIL."""
+    signal.signal(signal.SIGINT, signal.SIG_IGN)
     parent = multiprocessing.parent_process()
     if parent is not None:
         Thread(target=exit_with_parent, args=(parent.sentinel,), name="clamav-owner", daemon=True).start()
     engine = None
-    send_lock = RLock()
     try:
         engine = Engine(library, definitions, temporary_directory)
         connection.send(ScanEvidence(status="not-scanned", engine_version=engine.version, signature_version=definitions.versions))
-        def scan(request: ScanRequest) -> None:
+        def scan(request: ScanRequest) -> ScanResponse:
             assert engine is not None
             try:
                 if request.sample is not None:
@@ -105,16 +119,25 @@ def engine_worker(connection: ScannerConnection, library: Path, definitions: Def
             except Exception as error:
                 evidence = ScanEvidence(status="scanner-error", detail=f"{type(error).__name__}: {error}",
                                         engine_version=engine.version, signature_version=definitions.versions)
-            with send_lock:
-                connection.send(ScanResponse(request_id=request.request_id, evidence=evidence))
+            return ScanResponse(request_id=request.request_id, evidence=evidence)
         with ThreadPoolExecutor(max_workers=workers, thread_name_prefix="libclamav") as pool:
-            while True:
-                request = connection.recv()
-                if request is None:
-                    break
-                if not isinstance(request, ScanRequest):
-                    raise ValueError("Invalid scanner request")
-                pool.submit(scan, request)
+            pending: set[Future[ScanResponse]] = set()
+            accepting = True
+            while accepting or pending:
+                if accepting and (not pending or connection.poll(0.01)):
+                    request = connection.recv()
+                    if request is None:
+                        accepting = False
+                    elif isinstance(request, ScanRequest):
+                        pending.add(pool.submit(scan, request))
+                    else:
+                        raise ValueError("Invalid scanner request")
+                completed = {future for future in pending if future.done()}
+                if not accepting and pending and not completed:
+                    completed, _running = wait_for_scans(pending, return_when=FIRST_COMPLETED)
+                for future in completed:
+                    pending.remove(future)
+                    connection.send(future.result())
     except (EOFError, BrokenPipeError):
         pass
     except Exception as error:
@@ -159,6 +182,7 @@ class ClamScanner(AbstractContextManager["ClamScanner"]):
         self.process: BaseProcess | ScannerProcess | None = None
         self.connection: ScannerConnection | None = None
         self.lock = RLock()
+        self.send_lock = RLock()
         self.pending: dict[str, Future[ScanEvidence]] = {}
         self.reader: Thread | None = None
         self.runtime: tempfile.TemporaryDirectory[str] | None = None
@@ -167,6 +191,9 @@ class ClamScanner(AbstractContextManager["ClamScanner"]):
     def __enter__(self) -> Self:
         try:
             definitions = self.definitions or selected_definitions()
+            if self.definitions is None:
+                from .clamav_update import definitions_for_scan
+                definitions = definitions_for_scan(definitions, status_callback=self.status_callback)
             self.runtime = tempfile.TemporaryDirectory(prefix="libclamav-", dir=self.scan_temporary_directory)
             context = multiprocessing.get_context("spawn")
             self.connection, child = context.Pipe()
@@ -187,9 +214,11 @@ class ClamScanner(AbstractContextManager["ClamScanner"]):
             with _SESSIONS_LOCK:
                 _SESSIONS[self.session] = self
             return self
-        except (OSError, ValueError, RuntimeError, EOFError) as error:
+        except BaseException as error:
             self.__exit__()
-            raise ClamScannerStartupError(str(error)) from error
+            if isinstance(error, (OSError, ValueError, RuntimeError, EOFError)):
+                raise ClamScannerStartupError(str(error)) from error
+            raise
 
     def _receive(self, deadline: float, *, startup: bool = False) -> ScanEvidence:
         assert self.connection is not None
@@ -241,7 +270,10 @@ class ClamScanner(AbstractContextManager["ClamScanner"]):
                 if self.connection is None or self.process is None or not self.process.is_alive():
                     raise RuntimeError("ClamAV worker is not running")
                 self.pending[request.request_id] = future
-                self.connection.send(request)
+                connection = self.connection
+            # A full request pipe must not hold the result reader's state lock.
+            with self.send_lock:
+                connection.send(request)
             remaining = deadline - time.monotonic()
             if remaining <= 0:
                 raise TimeoutError("ClamAV scan timed out")
