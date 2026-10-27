@@ -6,6 +6,13 @@ Entries describe their recorded revisions. For current behavior use the
 [user manual](USER_MANUAL.md) and [CLI reference](CLI_REFERENCE.md). Retired
 Rust delivery plans and historical package checks are not current acceptance.
 
+## Responsive Windows Preferences reopening
+
+Restrict the Preferences JavaScript bridge to its four settings methods. Native
+window state was being recursively inspected during packaged-app startup and
+Preferences reopening, delaying or hanging bridge initialization. Preserve normal
+Close/save behavior and advance the alpha for installer validation.
+
 ## Relocated Windows acceptance deadline
 
 Use the same bounded native desktop deadline for source and relocated MSIX

@@ -3,7 +3,8 @@
 # Mail archive normalizer implementation
 
 Windows Preferences uses the shared worker/update policy, serializes automatic
-saves, and asynchronously flushes active edits before native Close. See
+saves, and asynchronously flushes active edits before native Close. Its JavaScript
+API uses the shared method-only bridge to avoid native-object traversal. See
 [desktop implementation](implementation/DESKTOP.md) and the
 [Windows installer checklist](WINDOWS_RELEASE_TESTING.md).
 

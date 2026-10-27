@@ -127,6 +127,10 @@ editor before saving. Invalid values veto that close with feedback; Quit retains
 previously saved choices. File Close recognizes the focused native preferences
 window. A visibility-scoped timer refreshes update status and stops on Close.
 The update button follows actual backend availability and explains source launches.
+Windows Preferences uses the same method-only `WindowBridge` as the other desktop
+APIs. Only state/save/check/close_saved are visible to pywebview discovery, so its
+public API cannot recursively inspect the native WinForms/COM window. The real
+window-factory regression verifies this boundary and actual settings persistence.
 Windows Preferences serializes bridge saves and reuses its existing WebView2
 window. Close temporarily disables editing while the current settings are saved;
 save responses and errors update feedback only for the newest request. Updater

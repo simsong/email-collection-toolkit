@@ -180,6 +180,10 @@ choice unchanged and disables all worker preference controls, with the note
 `# workers set to {number} on command line`. Generic ingest, process, refresh-index
 and standalone IMAP use the preference when their flag is omitted.
 
+The Preferences JavaScript API must expose only settings state, saving, update
+checking and completed-close methods. Native window state and close-event handlers
+must not enter pywebview discovery; opening and reopening must remain responsive.
+
 Both platform Preferences windows save valid edits automatically without Done or
 Save buttons. Windows reuses its modeless window, flushes the active text edit
 before title-bar Close, and keeps invalid input open with feedback. Close must

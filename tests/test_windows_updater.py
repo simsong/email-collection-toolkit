@@ -21,6 +21,7 @@ from Cryptodome.Signature import eddsa
 from bs4 import BeautifulSoup
 from packaging.version import Version
 import pytest
+import webview
 
 from mailarchiver.release_versions import release_metadata
 from mailarchiver.updates import (PREVIEW_STREAM_LABEL, RELEASE_STREAM_LABEL,
@@ -29,7 +30,7 @@ from mailarchiver.windows_update_feed import FeedGateway, PACKAGE_NAMESPACE, SPA
 from scripts.update_appcast import AppcastRelease, SignedArchive, append_item
 from scripts.check_appcast import check_appcast
 from mailarchiver.application import ApplicationController, ApplicationPreferencesStore
-from mailarchiver.windows_update_preferences import PAGE, UpdatePreferencesApi
+from mailarchiver.windows_update_preferences import PAGE, UpdatePreferencesApi, show_windows_update_preferences
 
 
 def test_published_windows_item_reaches_the_authenticated_reader(tmp_path: Path) -> None:
@@ -57,6 +58,28 @@ def test_published_windows_item_reaches_the_authenticated_reader(tmp_path: Path)
         path.write_bytes(xml.tostring(tree))
         with pytest.raises(ValueError, match="incompatible package"):
             check_appcast(path, tag, expected_platforms=frozenset({"windows"}))
+
+
+def test_preferences_bridge_does_not_expose_native_window(tmp_path: Path) -> None:
+    """Desktop: bridge discovery must not traverse native window/COM state on reopen."""
+    controller = ApplicationController(ApplicationPreferencesStore(tmp_path / "preferences.json"))
+    service = UpdateService(UpdateStatus(version=version("mailarchiver"), channel="release"), lambda: False)
+    window = show_windows_update_preferences(service, controller.configure_updates)
+    try:
+        bridge = window._js_api
+        names = {name for name in dir(bridge) if not name.startswith("_")}
+        assert names == {"state", "save", "check", "close_saved"}
+        assert all(callable(getattr(bridge, name)) for name in names)
+        with pytest.raises(AttributeError):
+            getattr(bridge, "window")
+        with pytest.raises(AttributeError):
+            getattr(bridge, "close_requested")
+        bridge.save("preview", False)
+        assert controller.preferences.update_channel == "preview"
+        assert not controller.preferences.automatic_update_checks
+        assert not bridge.state()["automatic_checks"]
+    finally:
+        webview.windows.remove(window)
 
 
 def test_windows_settings_report_failed_save_and_restore_choices(tmp_path: Path) -> None:

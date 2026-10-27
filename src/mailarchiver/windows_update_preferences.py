@@ -161,8 +161,11 @@ class UpdatePreferencesApi:
 def show_windows_update_preferences(service: UpdateService, save: Callable[[UpdateChannel, bool], None],
                                    workers: Callable[[], WorkerSettings] | None = None, save_preferences: PreferencesSave | None = None,
                                    quitting: Callable[[], bool] = lambda: False) -> Any:
+    from .gui_app import WindowBridge
+
     api = UpdatePreferencesApi(service, save, workers, save_preferences, quitting)
-    window = webview.create_window("Preferences", html=PAGE, js_api=api, width=620, height=780)
+    window = webview.create_window("Preferences", html=PAGE,
+        js_api=WindowBridge(api, ("state", "save", "check", "close_saved")), width=620, height=780)
     if window is None:
         raise RuntimeError("Could not create Preferences window")
     api.window = window

@@ -25,6 +25,7 @@ platform or release gate has passed. [Future work](plans/README.md) is separate.
 - Preferences persist half-CPU, all-CPU or custom worker limits, defaulting to
   half the logical CPUs and never exceeding twice that count. Explicit CLI
   workers override and disable the desktop choice for that launch.
+  Preferences expose only their intended JavaScript methods, excluding native window state.
   Both Preferences windows save valid edits automatically and on Close, with
   standard platform window controls and no Done or Save button. See [desktop](requirements/DESKTOP.md).
 
