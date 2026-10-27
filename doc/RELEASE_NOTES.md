@@ -6,6 +6,13 @@ Entries describe their recorded revisions. For current behavior use the
 [user manual](USER_MANUAL.md) and [CLI reference](CLI_REFERENCE.md). Retired
 Rust delivery plans and historical package checks are not current acceptance.
 
+## Consolidated Brotli dependency updates
+
+Include Dependabot's brotli 1.2.1 and brotlicffi 1.2.1.0 lockfile updates in
+the same branch as the Unicode-folder, report and phone-list fixes. Advance
+the alpha for testing the combined dependency set. Exercise Brotli-compressed
+7z extraction alongside the default codec, retaining byte and expansion-limit checks.
+
 ## Unicode folders, report destinations and phone lists
 
 Negotiate IMAP UTF-8 folders before discovery and preserve exact folder names
