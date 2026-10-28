@@ -3,7 +3,7 @@
 //! Read-only Microsoft outlook-pst adapter. Requirements: doc/PST_IMPORTER.md.
 use anyhow::{bail, ensure, Context, Result};
 use base64::{engine::general_purpose::STANDARD, Engine};
-use chrono::{DateTime, FixedOffset, Utc};
+use chrono::{DateTime, FixedOffset, SecondsFormat, Utc};
 use outlook_pst::{
     ltp::prop_context::PropertyValue,
     messaging::{
@@ -23,8 +23,36 @@ use std::{
     io::{self, BufRead, BufReader, Read, Seek, Write},
     path::Path,
     rc::Rc,
+    time::{Duration, Instant, SystemTime},
 };
 use url::Url;
+
+fn timestamp() -> String {
+    DateTime::<Utc>::from(SystemTime::now()).to_rfc3339_opts(SecondsFormat::Millis, true)
+}
+
+struct ImportProgress<'a, W: Write> {
+    diagnostics: &'a mut W,
+    last: Instant,
+    completed: u64,
+}
+
+impl<W: Write> ImportProgress<'_, W> {
+    fn tick(&mut self, phase: &str) -> Result<()> {
+        self.completed += 1;
+        if self.last.elapsed() >= Duration::from_secs(1) {
+            writeln!(
+                self.diagnostics,
+                "progress time={} phase={phase} completed={}",
+                timestamp(),
+                self.completed
+            )?;
+            self.diagnostics.flush()?;
+            self.last = Instant::now();
+        }
+        Ok(())
+    }
+}
 
 const BODY: u16 = 0x1000;
 const HTML: u16 = 0x1013;
@@ -213,7 +241,10 @@ impl ExchangeDirectory {
     }
 }
 
-fn exchange_directory(pst: &PstStore) -> ExchangeDirectory {
+fn exchange_directory(
+    pst: &PstStore,
+    progress: &mut ImportProgress<impl Write>,
+) -> Result<ExchangeDirectory> {
     // Scan the entire hierarchy before emitting mail; retain addresses, not bodies.
     let mut directory = ExchangeDirectory::default();
     let ids = match contact_property_ids(pst) {
@@ -229,6 +260,7 @@ fn exchange_directory(pst: &PstStore) -> ExchangeDirectory {
     let mut visited = HashSet::new();
     let mut messages = HashSet::new();
     while let Some((node, depth)) = pending.pop() {
+        progress.tick("address-book")?;
         if NodeId::from(node).id_type().ok() == Some(NodeIdType::SearchFolder)
             || !visited.insert(node)
         {
@@ -251,6 +283,7 @@ fn exchange_directory(pst: &PstStore) -> ExchangeDirectory {
         };
         if let Some(table) = folder.contents_table() {
             for row in table.rows_matrix() {
+                progress.tick("address-book")?;
                 let item = u32::from(row.id());
                 if !messages.insert(item) {
                     continue;
@@ -366,7 +399,7 @@ fn exchange_directory(pst: &PstStore) -> ExchangeDirectory {
             directory.failures.insert(node, error);
         }
     }
-    directory
+    Ok(directory)
 }
 
 /// Counts describe encountered objects, never an estimate of inaccessible subtrees.
@@ -465,7 +498,7 @@ impl PstMessage {
     }
 }
 
-fn fingerprint(file: &mut File) -> Result<String> {
+fn fingerprint(file: &mut File, progress: &mut ImportProgress<impl Write>) -> Result<String> {
     file.rewind()?;
     let mut hash = Sha256::new();
     let mut buffer = [0; 65536];
@@ -475,6 +508,7 @@ fn fingerprint(file: &mut File) -> Result<String> {
             break;
         }
         hash.update(&buffer[..size]);
+        progress.tick("source-hash")?;
     }
     file.rewind()?;
     Ok(format!("{:x}", hash.finalize()))
@@ -520,18 +554,23 @@ pub fn import_selected(
     only_invalid: bool,
     selection: ImportSelection,
 ) -> Result<ImportReport> {
+    let mut progress = ImportProgress {
+        diagnostics,
+        last: Instant::now(),
+        completed: 0,
+    };
     let scanner = crate::antivirus::Scanner::from_environment()?;
     let path = path.canonicalize().context("resolve source filename")?;
     let mut source = File::open(&path).context("open source read-only")?;
     ensure!(source.metadata()?.is_file(), "source is not a regular file");
-    let original_hash = fingerprint(&mut source)?;
-    writeln!(diagnostics, "pst-importer {}: outlook-pst 1.2.0; API {}; source-sha256={original_hash}; MIME reconstructed from MAPI", env!("CARGO_PKG_VERSION"), crate::API_VERSION)?;
+    let original_hash = fingerprint(&mut source, &mut progress)?;
+    writeln!(progress.diagnostics, "pst-importer {}: outlook-pst 1.2.0; API {}; source-sha256={original_hash}; MIME reconstructed from MAPI", env!("CARGO_PKG_VERSION"), crate::API_VERSION)?;
     let mut uri = Url::from_file_path(&path)
         .map_err(|()| anyhow::anyhow!("cannot represent source filename as file URI"))?;
     let pst = open(&source)?;
     let root = pst.store().properties().ipm_sub_tree_entry_id()?;
-    let mut directory = exchange_directory(&pst);
-    writeln!(diagnostics, "address-book: contacts={} email-slots={} exchange-identities={} conflicts={} unreadable={}; scope=entire folder hierarchy, normal contents",
+    let mut directory = exchange_directory(&pst, &mut progress)?;
+    writeln!(progress.diagnostics, "address-book: contacts={} email-slots={} exchange-identities={} conflicts={} unreadable={}; scope=entire folder hierarchy, normal contents",
         directory.contact_items, directory.contacts.len(), directory.mappings.values().filter(|v| v.is_some()).count(), directory.mappings.values().filter(|v| v.is_none()).count(), directory.failures.len())?;
     let mut pending = vec![(u32::from(root.node_id()), 0)];
     let mut visited = HashSet::new();
@@ -539,6 +578,7 @@ pub fn import_selected(
     let mut report = ImportReport::default();
     let mut selection_complete = false;
     while let Some((node, depth)) = pending.pop() {
+        progress.tick("extracting")?;
         let folder_result = (|| -> Result<()> {
             ensure!(depth <= MAX_DEPTH, "folder nesting exceeds {MAX_DEPTH}");
             ensure!(visited.insert(node), "folder cycle or duplicate node");
@@ -551,6 +591,7 @@ pub fn import_selected(
                 items.sort_unstable();
                 let mut rows = 0;
                 for item in items {
+                    progress.tick("extracting")?;
                     if selection
                         .limit
                         .is_some_and(|limit| report.selected >= limit)
@@ -634,7 +675,12 @@ pub fn import_selected(
                                 return Err(error);
                             }
                             report.errors += 1;
-                            writeln!(diagnostics, "{} item={item}: {error:#}", error_kind(&error))?;
+                            writeln!(
+                                progress.diagnostics,
+                                "{} time={} item={item}: {error:#}",
+                                error_kind(&error),
+                                timestamp()
+                            )?;
                             if only_invalid {
                                 if let Some(message) = loaded {
                                     export_invalid(
@@ -689,9 +735,10 @@ pub fn import_selected(
             }
             report.errors += 1;
             writeln!(
-                diagnostics,
-                "{} folder={node}: {error:#}; inaccessible subtree extent unknown",
-                error_kind(&error)
+                progress.diagnostics,
+                "{} time={} folder={node}: {error:#}; inaccessible subtree extent unknown",
+                error_kind(&error),
+                timestamp()
             )?;
         }
         if selection_complete {
@@ -705,22 +752,26 @@ pub fn import_selected(
     for (node, error) in failures {
         report.errors += 1;
         writeln!(
-            diagnostics,
-            "{} address-book node={node}: {error:#}",
-            error_kind(&error)
+            progress.diagnostics,
+            "{} time={} address-book node={node}: {error:#}",
+            error_kind(&error),
+            timestamp()
         )?;
     }
     output.flush()?;
-    if fingerprint(&mut source)? != original_hash
-        || fingerprint(&mut File::open(&path)?)? != original_hash
+    if fingerprint(&mut source, &mut progress)? != original_hash
+        || fingerprint(&mut File::open(&path)?, &mut progress)? != original_hash
     {
         report.errors += 1;
-        writeln!(diagnostics, "ERROR source changed during extraction")?;
+        writeln!(
+            progress.diagnostics,
+            "ERROR source changed during extraction"
+        )?;
     }
-    writeln!(diagnostics, "folders={} encountered={} selected={} emitted={} non-mail={} errors={}; scope=IPM normal contents; MIME reconstructed", report.folders, report.encountered, report.selected, report.emitted, report.non_mail, report.errors)?;
+    writeln!(progress.diagnostics, "folders={} encountered={} selected={} emitted={} non-mail={} errors={}; scope=IPM normal contents; MIME reconstructed", report.folders, report.encountered, report.selected, report.emitted, report.non_mail, report.errors)?;
     if only_invalid {
         writeln!(
-            diagnostics,
+            progress.diagnostics,
             "invalid-exported={}; diagnostic records only; unreadable items cannot be exported",
             report.invalid_exported
         )?;
@@ -1461,6 +1512,33 @@ mod tests {
     use super::*;
 
     #[test]
+    fn progress_reports_elapsed_work_without_changing_mail_output() {
+        // ACQUISITION: periodic diagnostics describe actual work, with UTC timestamps.
+        let mut diagnostics = Vec::new();
+        let mut progress = ImportProgress {
+            diagnostics: &mut diagnostics,
+            last: Instant::now() - Duration::from_secs(2),
+            completed: 0,
+        };
+        progress.tick("source-hash").unwrap();
+        progress.tick("source-hash").unwrap();
+        let diagnostic = String::from_utf8(diagnostics).unwrap();
+        assert_eq!(diagnostic.lines().count(), 1);
+        assert!(diagnostic.contains("phase=source-hash completed=1"));
+        let time = diagnostic
+            .split_whitespace()
+            .find_map(|word| word.strip_prefix("time="))
+            .unwrap();
+        assert_eq!(
+            DateTime::parse_from_rfc3339(time)
+                .unwrap()
+                .offset()
+                .local_minus_utc(),
+            0
+        );
+    }
+
+    #[test]
     fn real_contacts_use_the_store_named_property_map() {
         // doc/requirements.md: preload Contacts before mail; contact LIDs must
         // resolve through PSETID_Address rather than being used as property IDs.
@@ -1471,7 +1549,13 @@ mod tests {
         let ids = contact_property_ids(&pst).unwrap();
         assert_eq!(ids.get(&0x8083), Some(&0x8027));
         assert_eq!(ids.get(&0x8084), Some(&0x808E));
-        let directory = exchange_directory(&pst);
+        let mut diagnostics = Vec::new();
+        let mut progress = ImportProgress {
+            diagnostics: &mut diagnostics,
+            last: Instant::now(),
+            completed: 0,
+        };
+        let directory = exchange_directory(&pst, &mut progress).unwrap();
         assert!(directory.failures.is_empty(), "{:?}", directory.failures);
         assert_eq!(directory.contact_items, 1);
         assert_eq!(directory.contacts.len(), 1);

@@ -30,7 +30,7 @@ X = "x"
 WIDTH = "width"
 HEIGHT = "height"
 SEARCH_METHODS = (
-    "activate", "status", "search", "search_count", "suggestions", "mailbox_tree", "message", "part",
+    "activate", "status", "search", "search_count", "suggestions", "suggestions_start", "suggestions_status", "suggestions_cancel", "mailbox_tree", "message", "part",
     "request_previews", "take_previews", "ingest_overview", "saved_filter_sets",
 )
 

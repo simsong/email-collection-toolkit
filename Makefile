@@ -843,7 +843,7 @@ test-processors: ruff
 
 .PHONY: test-cli-processors
 test-cli-processors: ruff pst-importer
-	uv run --locked pytest -q tests/test_cli_processing.py
+	uv run --locked pytest -q tests/test_cli_processing.py tests/test_future_coordinator.py tests/test_search_completion.py
 
 .PHONY: test-rollover
 test-rollover: ruff

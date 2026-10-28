@@ -218,3 +218,13 @@ connection reads current membership; no index rebuild is required. Literal
 address matching still uses the catalog address predicate. Email-fragment
 recognition permits quoted local parts while retaining name lookup for labels
 such as `Jane @ Lab`.
+
+## Cancellable autocomplete
+
+The method-only bridge exposes suggestion start/status/cancel calls backed by
+one tracked executor per window. Generation checks discard stale results and a
+SQLite progress handler interrupts canceled queries. Close cancels pending work.
+Subject predicates fold the stored `lower(subject)` expression, allowing existing
+expression indexes to filter candidates before fetching message rows. Completion
+aggregates those candidates once, with a window sum retaining the exact total
+when the list is limited. No archive schema or content-index rebuild is needed.

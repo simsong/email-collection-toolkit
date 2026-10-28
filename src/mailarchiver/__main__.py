@@ -47,7 +47,7 @@ from pydantic import BaseModel, Field
 from tabulate import tabulate
 
 from .scan_evidence import ScanEvidence, ScanFailure
-from .future_coordinator import FutureCoordinator, WORKER_NUMBER
+from .future_coordinator import BoundedWorkers, FutureCoordinator, WORKER_NUMBER
 from .application import configured_workers
 from .worker_preferences import half_cpus, worker_argument
 from .archive_integrity import MailbagArchiveIntegrityControls
@@ -289,6 +289,7 @@ class ProgressUpdate(BaseModel):
     processing_finished: bool = False
     processing_job_id: int | None = None
     processing_processor: str | None = None
+    scan_active: bool | None = None
     operation: WorkerOperation | None = None
 
 
@@ -535,6 +536,7 @@ class ProgressReporter:
         )
         self.updates: queue.SimpleQueue[ProgressUpdate] = queue.SimpleQueue()
         self.processing_workers: list[ProgressUpdate | None] = [None] * worker_count
+        self.scan_workers: list[ProgressUpdate | None] = [None] * worker_count
         self.driver_thread = threading.get_ident()
         self.output: TextIO | None = sys.stderr if terminal else None
         self.tty = self.output is not None and self.output.isatty()
@@ -687,6 +689,17 @@ class ProgressReporter:
     def record_disposition(self, disposition: str) -> None:
         self.updates.put(ProgressUpdate(worker=self._worker_number(), disposition=disposition))
 
+    def record_scan(self, source: MailObject, active: bool) -> None:
+        self.updates.put(ProgressUpdate(worker=self._worker_number(), scan_active=active,
+            path=source.source.display_name, activity_total=len(source.raw)))
+
+    def visible_workers(self) -> list[WorkerProgress]:
+        """Scanner activity overlays a lane without replacing its source accounting."""
+        return [worker if scan is None else worker.model_copy(update={
+            "phase": "scanning", "path": scan.path, "bytes_done": 0, "bytes_total": 0,
+            "activity_done": 0, "activity_total": scan.activity_total, "activity_unit": "bytes", "operation": "importing",
+        }) for worker, scan in zip(self.state.workers, self.scan_workers, strict=True)]
+
     def record_processing(self, item: ProcessingObject, processor: str, finished: bool, worker: int | None = None) -> None:
         """Queue actual processor activity without counting recovered jobs as new mail."""
         self.updates.put(ProgressUpdate(worker=worker or self._worker_number(), phase="idle" if finished else f"processing {processor}",
@@ -772,6 +785,11 @@ class ProgressReporter:
             except queue.Empty:
                 break
             worker = self.state.workers[update.worker - 1]
+            if update.scan_active is not None:
+                self.scan_workers[update.worker - 1] = update if update.scan_active else None
+                active = sum(item.phase != "idle" for item in self.visible_workers())
+                self.state.peak_active_files = max(self.state.peak_active_files, active)
+                continue
             if update.processing_active is not None:
                 self.processing_workers[update.worker - 1] = update if update.processing_active else None
                 current = update if update.processing_active else next((entry for entry in self.processing_workers if entry), None)
@@ -853,7 +871,7 @@ class ProgressReporter:
             if update.notice_kind is not None:
                 assert update.notice_path is not None and update.notice_reason is not None
                 self.notices.add((update.notice_kind, update.notice_path, update.notice_reason))
-            active = sum(item.phase != "idle" for item in self.state.workers)
+            active = sum(item.phase != "idle" for item in self.visible_workers())
             self.state.peak_active_files = max(self.state.peak_active_files, active)
 
     def _record_message(self, date: datetime) -> None:
@@ -892,7 +910,7 @@ class ProgressReporter:
             return "shutting down"
         if self.state.processing_active:
             return self.base_phase
-        phases = {worker.phase for worker in self.state.workers}
+        phases = {worker.phase for worker in self.visible_workers()}
         if phases != {"idle"}:
             return "ingesting"
         return self.base_phase
@@ -944,6 +962,7 @@ class ProgressReporter:
         elapsed = max(now - state.started_monotonic, 0.001)
         phase_elapsed = max(now - self.phase_started_monotonic, 0.0)
         overall = overall_progress(state, now)
+        state.workers = self.visible_workers()
         if state.processing_active:
             overall = overall.model_copy(update={"eta": "calculating"})
         dates = "none" if state.earliest_date is None or state.latest_date is None else f"{state.earliest_date.date()}..{state.latest_date.date()}"
@@ -952,7 +971,7 @@ class ProgressReporter:
             display_label = f"{CLAMAV_START_PHASE}: {phase_elapsed:.1f}s"
         active = sum(worker.phase != "idle" for worker in state.workers)
         if self.tty and self.output is not None:
-            top_line = self._fit(overall_line(state, now), self.terminal_columns).ljust(self.terminal_columns)
+            top_line = self._fit(overall_line(self.state, now), self.terminal_columns).ljust(self.terminal_columns)
             lines = [
                 f"{TOP_LINE_STYLE}{top_line}{ANSI_RESET}",
                 f"mailarchiver ingest  [{display_label}]",
@@ -1925,6 +1944,38 @@ def _run_ingest(request: IngestRequest, writer_lease: WriterLease, outcome: Inge
         catalog.commit()
         return source_file_pk, prior
 
+    def scan_source(item: MailObject | SourceObservation | ProgressEvent) -> tuple[MailObject | SourceObservation | ProgressEvent, ScanEvidence | None]:
+        if not isinstance(item, MailObject) or item.exclusion_reason is not None:
+            return item, None
+        evidence = None
+        scanning = False
+        try:
+            if request.scan_policy == "clamav" and item.scan_responsibility == "host":
+                digest = hashlib.sha256(item.raw).hexdigest()
+                archived = coordinator.call(lambda: catalog.execute("SELECT 1 FROM messages WHERE sha256=?", (digest,)).fetchone() is not None)
+                if not archived:
+                    if scanner_failure is not None:
+                        evidence = scanner_failure
+                    elif scanner is None:
+                        raise RuntimeError("embedded scanner is not ready")
+                    else:
+                        progress.record_scan(item, True)
+                        scanning = True
+                        with tempfile.TemporaryDirectory(prefix="scan-", dir=archive) as temporary:
+                            scan_path = Path(temporary) / "message.eml"
+                            scan_path.write_bytes(item.raw)
+                            try:
+                                evidence = scanner.scan(scan_path)
+                            except ScanFailure as error:
+                                evidence = error.evidence
+            return item, evidence
+        except BaseException as error:
+            add_message_context(error, item.source, item.cursor, item.raw, item.mbox_envelope, item.mbox_normalization)
+            raise
+        finally:
+            if scanning:
+                progress.record_scan(item, False)
+
     def ingest_container(work: ContainerWork) -> None:
         source_plugin = work.plugin.implementation
         source_file = local_source_file(work)
@@ -1932,6 +1983,12 @@ def _run_ingest(request: IngestRequest, writer_lease: WriterLease, outcome: Inge
         byte_length = work.container.estimated_bytes or 0
         source: MailObject | None = None
         items: Iterator[MailObject | SourceObservation | ProgressEvent] | None = None
+        scanned: Iterator[tuple[MailObject | SourceObservation | ProgressEvent, ScanEvidence | None]] | None = None
+
+        def before_read() -> bool:
+            check_interrupted()
+            return not stop.is_set()
+
         try:
             check_interrupted()
             if stop.is_set():
@@ -1967,6 +2024,7 @@ def _run_ingest(request: IngestRequest, writer_lease: WriterLease, outcome: Inge
                     prior_date = datetime.fromisoformat(row[0])
 
             items = iter(source_plugin.messages(work.container, decision.resume_cursor))
+            scanned = message_workers.map(scan_source, items, before_read=before_read)
             while True:
                 # Both native and API sources stop before requesting another
                 # message. A fetch already in flight may finish and be published.
@@ -1975,7 +2033,7 @@ def _run_ingest(request: IngestRequest, writer_lease: WriterLease, outcome: Inge
                     return
                 source = None
                 try:
-                    item = next(items)
+                    item, evidence = next(scanned)
                 except StopIteration:
                     break
                 if isinstance(item, ProgressEvent):
@@ -2007,25 +2065,6 @@ def _run_ingest(request: IngestRequest, writer_lease: WriterLease, outcome: Inge
                     raise RuntimeError("processor host is not initialized")
                 progress.record_worker("processing", source.source.display_name,
                                        source.completed_bytes or 0, source.total_bytes or 0)
-                evidence = None
-                if request.scan_policy == "clamav" and source.scan_responsibility == "host":
-                    digest = hashlib.sha256(raw).hexdigest()
-                    archived = coordinator.call(lambda: catalog.execute("SELECT 1 FROM messages WHERE sha256=?", (digest,)).fetchone() is not None)
-                    if not archived:
-                        if scanner_failure is not None:
-                            evidence = scanner_failure
-                        elif scanner is None:
-                            raise RuntimeError("embedded scanner is not ready")
-                        else:
-                            progress.record_worker("scanning", source.source.display_name,
-                                               source.completed_bytes or 0, source.total_bytes or 0)
-                            with tempfile.TemporaryDirectory(prefix="scan-", dir=archive) as temporary:
-                                scan_path = Path(temporary) / "message.eml"
-                                scan_path.write_bytes(raw)
-                                try:
-                                    evidence = scanner.scan(scan_path)
-                                except ScanFailure as error:
-                                    evidence = error.evidence
                 metadata = SourceMetadata(source=source.source, source_file_pk=source_file_pk,
                     work_id=source.work_id, cursor=source.cursor,
                     source_path=source_file.path if source_file is not None else None,
@@ -2053,6 +2092,8 @@ def _run_ingest(request: IngestRequest, writer_lease: WriterLease, outcome: Inge
             raise
         finally:
             try:
+                if isinstance(scanned, _ClosableIterator):
+                    scanned.close()
                 if isinstance(items, _ClosableIterator):
                     items.close()
             finally:
@@ -2216,19 +2257,20 @@ def _run_ingest(request: IngestRequest, writer_lease: WriterLease, outcome: Inge
                     progress.finish_processing()
             run_file_workers([0], 1, resume_ingest, stop, refresh_import, on_interrupt=progress.announce_interrupt, coordinator=coordinator)
         progress.set_phase("checking sources")
-        run_file_workers(
-            snapshotted_containers(),
-            request.workers,
-            ingest_container,
-            stop,
-            refresh_import,
-            concurrency=lambda work: (
-                f"{work.plugin.manifest.kind}:{work.container.concurrency_key}",
-                work.plugin.implementation.capabilities.max_concurrency,
-            ),
-            on_interrupt=progress.announce_interrupt,
-            coordinator=coordinator,
-        )
+        with BoundedWorkers(request.workers) as message_workers:
+            run_file_workers(
+                snapshotted_containers(),
+                request.workers,
+                ingest_container,
+                stop,
+                refresh_import,
+                concurrency=lambda work: (
+                    f"{work.plugin.manifest.kind}:{work.container.concurrency_key}",
+                    work.plugin.implementation.capabilities.max_concurrency,
+                ),
+                on_interrupt=progress.announce_interrupt,
+                coordinator=coordinator,
+            )
         check_interrupted()
         if request.continue_content:
             progress.set_phase("Processing message bodies and attachments", activity_kind="processing")

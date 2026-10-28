@@ -362,3 +362,13 @@ HTML destination before evaluating or writing either output, including `.JSON`
 on case-insensitive filesystems.
 No experiment applies groups to the source archive. The focused Makefile target
 exercises these contracts with miniature archives and real optional engines.
+
+## Derived content failure isolation
+
+Malformed signature address display names must not abort content processing.
+If recursive groups/comments exceed the standard address parser's recursion budget, retain
+the explicitly observed email address, omit its unparseable display name and
+record a diagnostic. Original message bytes remain unchanged. Other content
+processor failures retain retryable jobs but do not starve unrelated messages;
+report failure after the remaining queue drains. Validate through real CLI
+processing with `make test-cli-processors`.

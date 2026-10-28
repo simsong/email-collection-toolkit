@@ -96,6 +96,13 @@ platform or release gate has passed. [Future work](plans/README.md) is separate.
 
 - Freeze all manifest-referenced acquisition adapters; validate local ingestion
   with `make test-frozen-source-plugins` before packaging handoff.
+- Signature address parsing isolates recursion errors, and content dispatch drains
+  unrelated messages before raising its final failure report. See [processing](implementation/PROCESSING.md).
+- PST activity renews its child deadline; timed diagnostics identify phases and UTC
+  failure times. A shared bounded future stream parallelizes scans within mailboxes
+  and drains complete records before reporting producer failures. Autocomplete
+  uses cancellable generations and the existing subject expression index. See
+  [acquisition](implementation/ACQUISITION.md) and [search](implementation/SEARCH.md).
 - Source ingestion uses owner-thread completion futures instead of a shared
   publication mutex; one-worker processor futures keep its heartbeat live.
   See [acquisition](implementation/ACQUISITION.md).

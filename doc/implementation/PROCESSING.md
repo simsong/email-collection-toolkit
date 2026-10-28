@@ -442,3 +442,12 @@ already-detected signature blocks, not the unimplemented general repeated-tail
 extractor. Fifty representative proposals are intentionally selected and cannot
 supply unbiased real-archive accuracy. `make test-name-matcher-experiments` runs
 ordered lint/type checks and real fixture/engine tests.
+
+## Signature parsing and content failure isolation
+
+`IdentityProcessor` parses signature display names once per address-bearing line.
+A `RecursionError` from recursive RFC address groups/comments produces a retained diagnostic
+and an address-only observation. Regex-observed addresses and original canonical
+bytes remain intact. `ProductionPipeline.resume` dispatches unrelated messages
+after ordinary processor failures, then raises any requested failure report at
+the end; failed jobs remain available for retry.

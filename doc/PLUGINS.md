@@ -132,7 +132,7 @@ deduplicates those earlier records. Successful spools are removed after filing;
 receipts remain. Build the executable with `make pst-importer` or configure its
 path. Native installer bundling is separate release work.
 
-PST defaults are 60 seconds, 1 GiB stdout and 64 MiB diagnostics; settings are
+PST defaults are 60 seconds of inactivity, 16 GiB stdout and 64 MiB diagnostics; settings are
 `timeout_seconds`, `max_output_bytes` and `max_diagnostics_bytes`. Limits are checked
 while running and after exit. The receipt records the actual reaped exit code and
 observed byte counts. Retained oversized outputs are explicitly truncated to

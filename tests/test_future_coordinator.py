@@ -7,14 +7,14 @@
 # Real ingestion and interruption acceptance complement these focused contracts.
 """Source coordination requirements: ownership, notification and failure release."""
 
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeout
 import sqlite3
-from threading import Event, get_ident
+from threading import Barrier, Event, get_ident
 
 import pytest
 
 from mailarchiver.__main__ import run_file_workers
-from mailarchiver.future_coordinator import FutureCoordinator, WORKER_NUMBER
+from mailarchiver.future_coordinator import BoundedWorkers, FutureCoordinator, WORKER_NUMBER
 
 
 def test_source_workers_retain_inputs_and_owner_alone_commits() -> None:
@@ -66,3 +66,90 @@ def test_owner_failure_releases_queued_and_future_requests() -> None:
                 future.result(timeout=2)
         with pytest.raises(RuntimeError, match="coordinator stopped"):
             pool.submit(coordinator.call, lambda: 1).result(timeout=2)
+
+
+def test_one_source_streams_parallel_work_with_order_and_backpressure() -> None:
+    """ACQUISITION: one mailbox fills workers while its iterator stays on its owner."""
+    owner = get_ident()
+    barrier = Barrier(3, timeout=5)
+    read: list[int] = []
+    threads: set[int] = set()
+
+    def source():
+        for value in range(9):
+            assert get_ident() == owner
+            read.append(value)
+            yield value
+
+    def process(value: int) -> int:
+        threads.add(get_ident())
+        barrier.wait()
+        return value
+
+    with BoundedWorkers(3) as workers:
+        results = workers.map(process, source())
+        assert next(results) == 0
+        assert read == [0, 1, 2]
+        assert list(results) == list(range(1, 9))
+    assert len(threads) == 3 and owner not in threads
+
+
+def test_source_failure_drains_complete_records_before_reporting_partial_run() -> None:
+    """ACQUISITION: a failed producer cannot discard its already yielded complete mail."""
+    def source():
+        yield from range(5)
+        raise ValueError("incomplete source")
+
+    with BoundedWorkers(3) as workers:
+        results = workers.map(lambda value: value, source())
+        assert [next(results) for _ in range(5)] == list(range(5))
+        with pytest.raises(ValueError, match="incomplete source"):
+            next(results)
+
+
+def test_stop_during_source_fetch_prevents_read_ahead_of_next_message() -> None:
+    """ACQUISITION: suspension during one fetch cannot start further source pulls."""
+    stop = Event()
+    fetched: list[int] = []
+
+    def source():
+        for value in range(6):
+            fetched.append(value)
+            stop.set()
+            yield value
+
+    with BoundedWorkers(3) as workers:
+        assert list(workers.map(lambda value: value, source(), before_read=lambda: not stop.is_set())) == [0]
+    assert fetched == [0]
+
+
+def test_closing_stream_waits_for_worker_publication_before_source_driver_exits() -> None:
+    """ACQUISITION: suspend cannot strand scanner workers waiting on the source owner."""
+    coordinator = FutureCoordinator()
+    started, closing, release = Event(), Event(), Event()
+
+    def process(value: int) -> int:
+        if value:
+            started.set()
+            assert release.wait(5)
+            return coordinator.call(lambda: value)
+        assert started.wait(5)
+        return value
+
+    with BoundedWorkers(2) as workers, ThreadPoolExecutor(max_workers=1) as sources:
+        def source() -> None:
+            results = workers.map(process, range(2))
+            assert next(results) == 0
+            closing.set()
+            results.close()
+
+        future = sources.submit(source)
+        try:
+            assert closing.wait(5)
+            with pytest.raises(FutureTimeout):
+                future.result(timeout=0.05)
+        finally:
+            release.set()
+            coordinator.ready.result(timeout=5)
+            coordinator.drain()
+        future.result(timeout=5)

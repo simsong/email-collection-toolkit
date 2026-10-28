@@ -21,6 +21,7 @@ import shutil
 import sys
 import subprocess
 import tempfile
+import time
 from collections.abc import Iterator
 from pathlib import Path
 from urllib.parse import urlsplit
@@ -37,7 +38,7 @@ IMPORT_HEADERS = (b"X-Imported-URI: ", b"X-Importer-Name: ", b"X-Importer-Versio
 class PstSettings(BaseModel):
     model_config = ConfigDict(extra="forbid")
     executable: str | None = None
-    max_output_bytes: int = Field(default=1024 * 1024 * 1024, gt=0)
+    max_output_bytes: int = Field(default=16 * 1024 * 1024 * 1024, gt=0)
     max_diagnostics_bytes: int = Field(default=64 * 1024 * 1024, gt=0)
     timeout_seconds: float = Field(default=60, gt=0, allow_inf_nan=False)
 
@@ -54,6 +55,17 @@ class ImportReceipt(BaseModel):
     diagnostics_bytes: int = 0
     output_truncated: bool = False
     diagnostics_truncated: bool = False
+
+
+class ImportActivity(BaseModel):
+    deadline: float
+    sizes: tuple[int, int] = (0, 0)
+
+    def observe(self, now: float, sizes: tuple[int, int], timeout: float) -> bool:
+        if sizes != self.sizes:
+            self.sizes = sizes
+            self.deadline = now + timeout
+        return now >= self.deadline
 
 
 def file_hash(path: Path) -> str:
@@ -124,11 +136,11 @@ class PstFileParser:
             with output_path.open("wb") as output, diagnostics_path.open("wb") as diagnostics:
                 with subprocess.Popen([str(program), "--", str(source.path)], stdout=output, stderr=diagnostics, env=environment) as process:
                     try:
-                        import time
-                        deadline = time.monotonic() + settings.timeout_seconds
+                        activity = ImportActivity(deadline=time.monotonic() + settings.timeout_seconds)
                         while process.poll() is None:
-                            if time.monotonic() >= deadline:
-                                raise TimeoutError("PST importer timeout")
+                            sizes = (output_path.stat().st_size, diagnostics_path.stat().st_size)
+                            if activity.observe(time.monotonic(), sizes, settings.timeout_seconds):
+                                raise TimeoutError(f"PST importer timeout: no activity for {settings.timeout_seconds:g} seconds; evidence retained at {workspace}")
                             if output_path.stat().st_size > settings.max_output_bytes or diagnostics_path.stat().st_size > settings.max_diagnostics_bytes:
                                 raise ValueError("PST importer output limit exceeded")
                             yield ProgressEvent(work_id=container.work_id, phase="extracting PST", completed=output_path.stat().st_size, unit="bytes")

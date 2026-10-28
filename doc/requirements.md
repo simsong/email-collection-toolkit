@@ -88,6 +88,12 @@ platform or release gate has passed. [Future work](plans/README.md) is separate.
 
 - Freeze all manifest-referenced acquisition adapters; validate local ingestion
   with `make test-frozen-source-plugins` before packaging handoff.
+- Signature display-name recursion retains observed addresses and a diagnostic;
+  failed content jobs do not starve unrelated mail. See [processing](requirements/PROCESSING.md).
+- PST extraction publishes timed progress and uses an inactivity deadline. Single
+  mailbox sources stream bounded parallel scans with ordered publication. Autocomplete
+  cancels stale requests and retains legacy subject-index performance. See
+  [acquisition](requirements/ACQUISITION.md) and [search](requirements/SEARCH.md).
 - Source workers retain thread-bound input handles and return publication requests
   through futures; only their owner commits durable state. Single-worker processor
   waits retain live status heartbeats. See [acquisition](requirements/ACQUISITION.md).

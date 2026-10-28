@@ -112,7 +112,7 @@ def address_sql(tag: str, value: str, names: bool) -> SearchStatement:
 def subject_sql(_tag: str, value: str, _names: bool) -> SearchStatement:
     return SearchStatement(sql=("m.message_pk IN (SELECT subject_match.message_pk "
         "FROM messages subject_match INDEXED BY messages_subject_message "
-        "WHERE search_fold(subject_match.subject) LIKE ? ESCAPE '\\')"), parameters=[contains(search_fold(value))])
+        "WHERE search_fold(lower(subject_match.subject)) LIKE ? ESCAPE '\\')"), parameters=[contains(search_fold(value))])
 
 
 def date_sql(tag: str, value: str, _names: bool) -> SearchStatement:

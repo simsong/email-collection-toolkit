@@ -148,7 +148,8 @@ def test_ingest_routes_preserves_and_indexes_messages(
                        MAILARCHIVER_CLAMDSCAN=str(tmp_path / "missing-client"),
                        MAILARCHIVER_CLAMD_CONFIG=str(tmp_path / "missing-config"))
     original_sources = {path: path.read_bytes() for path in source.rglob("*") if path.is_file()}
-    result = run_ingest(source, archive, owner_names, environment=environment)
+    workers = min(4, os.cpu_count() or 1)
+    result = run_ingest(source, archive, owner_names, "--workers", str(workers), environment=environment)
     assert {path: path.read_bytes() for path in source.rglob("*") if path.is_file()} == original_sources
     infected_path = source / "emlx_maildir/2024/infected/003-infected.emlx"
     infected_path.unlink()
@@ -168,7 +169,7 @@ def test_ingest_routes_preserves_and_indexes_messages(
     assert "workers=" in result.stderr
     peaks = [int(value) for value in re.findall(r"\bpeak_workers=(\d+)", result.stderr)]
     assert peaks and peaks == sorted(peaks)
-    assert 1 <= peaks[-1] <= min(4, os.cpu_count() or 1)
+    assert 1 <= peaks[-1] <= workers
     assert "seen_skipped=" in result.stderr
     assert "overall_percent=100.0%" in result.stderr
     assert "files_total=4" in result.stderr

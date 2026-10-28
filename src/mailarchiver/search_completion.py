@@ -18,16 +18,18 @@ from __future__ import annotations
 import re
 import shlex
 import sqlite3
+from collections.abc import Callable
 from pathlib import Path
 
 
 from pydantic import BaseModel, Field
 
 from .sqlite_paths import sqlite_uri
+from .search_text import search_fold
 
 from .search import SEARCH_CATEGORIES
 from .search_selectors import (
-    ADDRESS_ROLES, SELECTORS, Tag, matching_addresses, prepare_names, selector_for,
+    ADDRESS_ROLES, SELECTORS, Tag, contains, matching_addresses, prepare_names, selector_for,
 )
 
 
@@ -126,7 +128,7 @@ def address_completions(database: sqlite3.Connection, value: str, tag: str, limi
     return result[:limit + 1]
 
 
-def search_suggestions(archive: Path, query: str, limit: int = 20) -> SearchSuggestions:
+def search_suggestions(archive: Path, query: str, limit: int = 20, *, cancelled: Callable[[], bool] | None = None) -> SearchSuggestions:
     if not 1 <= limit <= 50:
         raise ValueError("suggestion limit must be between 1 and 50")
     prefix, tag, value = completion_input(query)
@@ -135,6 +137,8 @@ def search_suggestions(archive: Path, query: str, limit: int = 20) -> SearchSugg
         return result
     database = sqlite3.connect(sqlite_uri(archive / 'archive.sqlite3'), uri=True)
     try:
+        if cancelled is not None:
+            database.set_progress_handler(lambda: int(cancelled()), 1000)
         database.execute("ATTACH DATABASE ? AS search", (sqlite_uri(archive / 'search.sqlite3'),))
         prepare_names(database, archive)
         spec = selector_for(tag) if tag else None
@@ -143,16 +147,19 @@ def search_suggestions(archive: Path, query: str, limit: int = 20) -> SearchSugg
         if spec is None or spec.family == "subject":
             subject = selector_for("subject")
             assert subject is not None
-            predicate = subject.sql(subject.tag, value.casefold(), False)
-            count = database.execute(f"SELECT count(*) FROM messages m WHERE m.category IN (?,?) AND {predicate.sql}",
-                                     (*SEARCH_CATEGORIES, *predicate.parameters)).fetchone()[0]
+            # Filter the stored lower(subject) expression before fetching message
+            # rows. Legacy indexes then remain covering despite Unicode folding.
+            rows = list(database.execute(
+                "WITH matched AS MATERIALIZED (SELECT message_pk FROM messages INDEXED BY messages_subject_message "
+                "WHERE search_fold(lower(subject)) LIKE ? ESCAPE '\\'), "
+                "subjects AS MATERIALIZED (SELECT subject,count(*) AS n FROM matched "
+                "CROSS JOIN messages USING(message_pk) WHERE category IN (?,?) GROUP BY subject) "
+                "SELECT subject,n,sum(n) OVER () FROM subjects ORDER BY n DESC,lower(subject) LIMIT ?",
+                (contains(search_fold(value)), *SEARCH_CATEGORIES, limit)))
+            count = rows[0][2] if rows else 0
             result.items.append(Completion(tag="subject", value=value, label=f"Subject contains “{value}”",
                                            message_count=count, choices=[choice("subject", count)]))
-            rows = database.execute(
-                f"SELECT m.subject,count(*) FROM messages m WHERE m.category IN (?,?) AND {predicate.sql} "
-                "GROUP BY m.subject ORDER BY count(*) DESC,lower(m.subject) LIMIT ?",
-                (*SEARCH_CATEGORIES, *predicate.parameters, limit))
-            for text, count in rows:
+            for text, count, _total in rows:
                 result.items.append(Completion(tag="subject", value=text, label=text,
                                                message_count=count, choices=[choice("subject", count)]))
         if spec is None or spec.family == "date":

@@ -56,7 +56,7 @@ GUI_API_METHODS = (
     "activate", "attachment", "choose_archive", "delete_filter_set", "mailbox_tree", "message",
     "copy_link", "copy_source_path", "copy_visible_text", "ingest_overview", "open_attachment", "open_ingest_window", "open_link", "open_message_window", "part", "prepare_drag", "rename_filter_set",
     "request_previews", "save_attachment", "save_filter_set", "save_message",
-    "saved_filter_sets", "search", "search_count", "status", "suggestions", "take_previews",
+    "saved_filter_sets", "search", "search_count", "status", "suggestions", "suggestions_start", "suggestions_status", "suggestions_cancel", "take_previews",
 )
 NATIVE_SMOKE_MESSAGE = (
     b"Message-ID: <native-smoke@example>\nFrom: sender@example.net\n"

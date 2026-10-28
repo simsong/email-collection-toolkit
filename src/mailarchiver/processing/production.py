@@ -227,7 +227,7 @@ class ProductionPipeline:
         failures: list[Exception] = []
         result = run(self.database, self.plugins, retry=True, pipelines=pipelines, max_jobs=max_jobs,
                      installation_config=self.installation_config, services=self, cancelled=self.cancelled, failures=failures,
-                     message_id=message_id, continue_after_failure=not fail_on_error, progress=progress, workers=workers, heartbeat=self.heartbeat)
+                     message_id=message_id, continue_after_failure=True, progress=progress, workers=workers, heartbeat=self.heartbeat)
         if fail_on_error:
             self._raise_failures(pipelines, failures)
         return result

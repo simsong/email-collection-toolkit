@@ -6,6 +6,17 @@ Entries describe their recorded revisions. For current behavior use the
 [user manual](USER_MANUAL.md) and [CLI reference](CLI_REFERENCE.md). Retired
 Rust delivery plans and historical package checks are not current acceptance.
 
+## PST liveness, mailbox concurrency and search responsiveness
+
+Keep active PST extractions running beyond the former total-time limit, report
+progress and timestamp library errors. Raise the configurable PST spool default
+to 16 GiB for multi-gigabyte recovered mail. Parallelize message scans within
+a single mailbox while preserving source order and complete records from partial runs.
+Keep malformed signature address groups/comments from aborting processing and
+drain unrelated content work before reporting other retryable failures. Cancel
+stale autocomplete queries and restore legacy subject-index performance
+without rebuilding existing archives. Advance the alpha for the combined fixes.
+
 ## Consolidated Brotli dependency updates
 
 Include Dependabot's brotli 1.2.1 and brotlicffi 1.2.1.0 lockfile updates in

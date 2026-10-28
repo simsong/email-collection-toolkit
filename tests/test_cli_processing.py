@@ -14,7 +14,7 @@ import pytest
 
 from mailarchiver.layout import mbox_directory
 from mailarchiver.standalone_verify import verify_archive
-from mailarchiver.pst_source import ImportReceipt
+from mailarchiver.pst_source import ImportActivity, ImportReceipt
 from mailarchiver.processing.builtin import QUARANTINE_UNKNOWN_DATE
 from mailarchiver.__main__ import processor_statistics_table
 from mailarchiver.processing.api import PluginStatistics
@@ -53,6 +53,87 @@ def ingest(tmp_path: Path, raw: bytes, *arguments: str) -> tuple[Path, Path]:
 HEADER = (b"From: Sender <sender@lab.example.ac.uk>\r\nTo: owner@example.test\r\n"
           b"Date: Tue, 02 Jan 2024 10:00:00 +0000\r\nMessage-ID: <parent@example.test>\r\n"
           b"Subject: Parent\r\nMIME-Version: 1.0\r\n")
+
+
+def test_pst_timeout_tracks_inactivity_in_either_stream() -> None:
+    """ACQUISITION: progress extends extraction beyond its original deadline; silence expires."""
+    activity = ImportActivity(deadline=60)
+    assert not activity.observe(59, (1, 0), 60)
+    assert not activity.observe(118, (1, 100), 60)
+    assert not activity.observe(177, (2, 100), 60)
+    assert not activity.observe(236, (2, 100), 60)
+    assert activity.observe(237, (2, 100), 60)
+
+
+def test_single_mbox_parallel_admission_preserves_bytes_and_date_order(tmp_path: Path) -> None:
+    """ACQUISITION: read-ahead retains source-order date fallback and idempotence."""
+    source = tmp_path / "recovered.mboxrd"
+    first = HEADER + b"\r\nFirst\r\n"
+    second = HEADER.replace(b"Date: Tue, 02 Jan 2024 10:00:00 +0000\r\n", b"") + b"\r\nSecond\r\n"
+    source.write_bytes(b"From pst-importer Tue Jan  2 10:00:00 2024\n" + first + b"\n"
+                       b"From pst-importer Tue Jan  2 10:00:00 2024\n" + second + b"\n")
+    original = source.read_bytes()
+    owners = tmp_path / "owners.txt"
+    owners.write_text("owner@example.test\n")
+    archive = tmp_path / "archive"
+    for _attempt in range(2):
+        cli(archive, "ingest", "--no-scan", "--workers", "3", "--defer-content",
+            "--owner-names-file", str(owners), str(source))
+    with sqlite3.connect(archive / "archive.sqlite3") as database:
+        assert database.execute("SELECT date_utc FROM messages ORDER BY message_pk").fetchall() == [
+            ("2024-01-02T10:00:00+00:00",), ("2024-01-02T10:00:00+00:00",)]
+    assert mailbox_message_bytes(mbox_directory(archive) / "2024-Archive1.mbox") == [first, second]
+    assert source.read_bytes() == original
+    assert not verify_archive(archive)
+
+
+@pytest.mark.parametrize("signature", [
+    b"(" * 1200 + b"person@example.test" + b")" * 1200,
+    b"group:" * 1200 + b"person@example.test" + b";" * 1200,
+])
+def test_signature_address_parser_recursion_preserves_mail_and_finishes_content(tmp_path: Path, signature: bytes) -> None:
+    """PROCESSING: recursive signature groups/comments cannot abort derived processing."""
+    raw = HEADER + b"Content-Type: text/plain\r\n\r\n-- \n" + signature + b"\n"
+    archive, source = ingest(tmp_path, raw, "--defer-content")
+    cli(archive, "process", "--workers", "3")
+    status = json.loads(cli(archive, "processing-status").stdout)
+    assert status["failed"] == 0 and status["pending"] == 0
+    with sqlite3.connect(archive / "processing.sqlite3") as database:
+        row = database.execute("SELECT result_json FROM invocations WHERE kind='identity-evidence' AND status='completed' "
+                               "AND result_json LIKE '%signature address%'").fetchone()
+        assert row is not None
+        result = json.loads(row[0])
+        assert any(entry['address'] == "person@example.test" and entry['kind'] == "signature" for entry in result['evidence'])
+    assert source.read_bytes() == raw and not verify_archive(archive)
+
+
+def test_content_failure_reports_after_unrelated_messages_finish(tmp_path: Path) -> None:
+    """PROCESSING: an unsuccessful derived job cannot starve subsequent saved mail."""
+    from tests.test_processing import plugin
+
+    root = tmp_path / "plugins"
+    plugin(root, "content-failure", 'if b"bad-body" in item.message_ref.path.read_bytes():\n'
+           '    raise ValueError("fixture derived failure")\nreturn ProcessingResult()')
+    manifest = root / "processors/content-failure/plugin.toml"
+    manifest.write_text(manifest.read_text().replace('pipeline="ingest"', 'pipeline="content"'))
+    source = tmp_path / "source"
+    source.mkdir()
+    for number, body in enumerate((b"bad-body", b"searchablegoodbody", b"latergoodbody")):
+        (source / f"{number}.eml").write_bytes(HEADER + b"\r\n" + body)
+    owners = tmp_path / "owners.txt"
+    owners.write_text("owner@example.test\n")
+    archive = tmp_path / "archive"
+    cli(archive, "ingest", "--no-scan", "--workers", "1", "--defer-content",
+        "--owner-names-file", str(owners), "--plugin-dir", str(root), str(source))
+    failed = subprocess.run([sys.executable, "-m", "mailarchiver", "--archive", str(archive),
+                             "process", "--workers", "1"], capture_output=True, text=True, check=False, timeout=60)
+    assert failed.returncode != 0 and "fixture derived failure" in failed.stderr
+    status = json.loads(cli(archive, "processing-status").stdout)
+    assert status["failed"] == 1 and status["pending"] == 0
+    from mailarchiver.gui_service import search_page
+    assert len(search_page(archive, "searchablegoodbody").results) == 1
+    assert len(search_page(archive, "latergoodbody").results) == 1
+    assert not verify_archive(archive)
 
 
 def test_statistics_table_aligns_counts_and_preserves_unavailable_timings() -> None:
