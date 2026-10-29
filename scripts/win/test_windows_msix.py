@@ -4,6 +4,7 @@
 # A native WebView2 smoke traverses the actual JavaScript/Python promise bridge.
 # Every synthetic archive file is hashed before and after native rendering.
 # Installation and certificate trust remain separate, explicitly invoked checks.
+# Native scanning must use this relocated package's own runtime and definitions.
 """Relocated Python webview MSIX acceptance."""
 from __future__ import annotations
 
@@ -28,7 +29,8 @@ def main() -> None:
     with zipfile.ZipFile(args.package) as package:
         package.extractall(unpacked)
     python = unpacked / "python/python.exe"
-    environment = os.environ.copy()
+    environment = {key: value for key, value in os.environ.items()
+                   if not key.startswith(("MAILARCHIVER", "MAIL_ARCHIVE", "PYTHON"))}
     environment["PYTHONPATH"] = str(output / "must-not-be-used")
     environment["APPDATA"] = str(output / "profile")
     environment["LOCALAPPDATA"] = str(output / "profile")
@@ -36,6 +38,13 @@ def main() -> None:
     code = ("import sys; from pathlib import Path; from mailarchiver.reader_fixture import check_reader; "
             "assert not any('must-not-be-used' in p for p in sys.path); check_reader(Path(sys.argv[1]))")
     subprocess.run([python, "-I", "-c", code, check], check=True, timeout=60, cwd=output, env=environment)
+    scanner_code = ("from mailarchiver.clamav_definitions import selected_definitions; "
+                    "from mailarchiver.clamav_update import validate_definitions; "
+                    "definitions = selected_definitions(); "
+                    "assert definitions.source == 'bundled', definitions; "
+                    "validate_definitions(definitions); "
+                    "print('Relocated packaged clean/EICAR scans passed:', definitions.versions)")
+    subprocess.run([python, "-I", "-c", scanner_code], check=True, timeout=150, cwd=output, env=environment)
     archive = check / "synthetic.mailarchive"
     fingerprint = "import sys,json; from pathlib import Path; from mailarchiver.reader_fixture import inventory; print(json.dumps(inventory(Path(sys.argv[1])),sort_keys=True))"
     def inventory() -> str:

@@ -61,9 +61,12 @@ jobs:
           }
           make 'SHELL=C:/Program Files/Git/usr/bin/bash.exe' msix-test "MSIX_ARGS=$arguments"
           if ($LASTEXITCODE) { throw 'MSIX assembly failed' }
-          $env:MAILARCHIVER_CLAMAV_DATABASE = (Resolve-Path 'dist/windows-msix-test/stage/python/clamav/definitions').Path
-          make MAKE=make 'SHELL=C:/Program Files/Git/usr/bin/bash.exe' check-python-reader-static test-windows-scanner test-definition-state test-python-reader test-windows-package-entry test-python-writer test-python-reader-native 'ARGS=--output dist/native-reader'
-          if ($LASTEXITCODE) { throw 'Reader or scanner checks failed' }
+          $previousDefinitions = $env:MAILARCHIVER_CLAMAV_DATABASE
+          try {
+            $env:MAILARCHIVER_CLAMAV_DATABASE = (Resolve-Path 'dist/windows-msix-test/stage/python/clamav/definitions').Path
+            make MAKE=make 'SHELL=C:/Program Files/Git/usr/bin/bash.exe' check-python-reader-static test-windows-scanner test-definition-state test-python-reader test-windows-package-entry test-python-writer test-python-reader-native 'ARGS=--output dist/native-reader'
+            if ($LASTEXITCODE) { throw 'Reader or scanner checks failed' }
+          } finally { $env:MAILARCHIVER_CLAMAV_DATABASE = $previousDefinitions }
           $package = (Get-ChildItem dist/windows-msix-test/*.msix).FullName
           make 'SHELL=C:/Program Files/Git/usr/bin/bash.exe' test-msix "MSIX_PACKAGE=$package" 'MSIX_EVIDENCE=dist/relocated'
           if ($LASTEXITCODE) { throw 'Relocated MSIX failed' }
