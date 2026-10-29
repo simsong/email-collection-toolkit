@@ -183,6 +183,12 @@ the source archive and checksum the final image. Missing protected signing or
 notarization credentials must fail release assembly; an unsigned development
 DMG must never be published as a release. The archive extension is declared in
 the bundle's document-type metadata.
+macOS branch CI, release-candidate and tag jobs must authenticate pinned
+ClamAV 1.5.4 and OpenSSL 3.6.4 source archives and build both the engine and
+FreshClam against that OpenSSL installation. Verify the resulting native linkage
+before selecting the runtime; definition signature checks and clean/EICAR acceptance
+remain mandatory. Build artifacts stay inside the checkout, without services or
+system runtime replacement. Windows retains its existing pinned portable runtime.
 The bundled ClamAV engine and updater must load against the matching OpenSSL
 libraries from their ClamAV installation, not an older same-named library
 selected from another Python dependency. The mounted DMG self-test must fail

@@ -25,6 +25,9 @@ platform or release gate has passed. [Future work](plans/README.md) is separate.
 
 ## Shared boundaries
 
+- A shared macOS action invokes `make ci-clamav` and selects its checkout-local
+  runtime through existing overrides; see [delivery](implementation/DELIVERY.md).
+
 - Windows source and relocated native acceptance retain phase reports, stack dumps and failure logs
   in branch CI. See [validation](implementation/VALIDATION.md).
 

@@ -265,6 +265,14 @@ mail account or persistent server is required.
 
 ### Runtime configuration
 
+macOS CI and release jobs use `make ci-clamav` to build checksum-pinned ClamAV
+1.5.4 against OpenSSL 3.6.4 under `.tmp/ci-clamav/`, instead of Homebrew's ClamAV
+bottle. The shared action installs build prerequisites only on the hosted runner
+and exports the existing engine/updater/certificate overrides through `GITHUB_ENV`.
+With build prerequisites already installed, `make ci-clamav-check` refreshes the
+project definitions and runs real scanner and packaging tests using that private runtime.
+Windows retains its separately pinned portable runtime.
+
 Use **File → Customizable Default Lists…** for owner/sender defaults, reply-address
 patterns, contact filters and other shared lists. See [Customizable Default Lists](doc/CUSTOMIZABLE_DEFAULT_LISTS.md)
 for all files, personal locations, archive precedence and reset behavior.
@@ -280,6 +288,10 @@ for all files, personal locations, archive precedence and reset behavior.
 | `FQDN` | IMAP tests set `localhost` for the disposable server greeting, avoiding host reverse DNS; unused by the downloader |
 | `SSL_CERT_FILE`, `SSL_CERT_DIR` | Standard TLS trust overrides for private IMAP servers |
 | `CARGO`, `RUST_TARGET_DIR` | Cargo executable and Make-selected build output (default `target/`) |
+| `OPENSSL_DIR`, `OPENSSL_LIB_DIR`, `OPENSSL_INCLUDE_DIR` | CI build script selects its private OpenSSL installation for Rust dependencies |
+| `OPENSSL_NO_VENDOR`, `PKG_CONFIG_PATH` | CI build disables vendored OpenSSL and prioritizes the selected prefix's package metadata |
+| `CARGO_BUILD_JOBS` | CI build bounds native Rust compilation parallelism |
+| `GITHUB_ENV` | GitHub-provided environment file receiving verified native runtime paths for later steps |
 | `ARGS`, `ARCHIVE`, `IMAP_ARGS` | Makefile command parameters; never a password channel |
 
 Legacy `MAILARCHIVER_CLAMD*` variables are unused. Scanning uses embedded

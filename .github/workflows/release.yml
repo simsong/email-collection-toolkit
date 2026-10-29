@@ -220,10 +220,10 @@ jobs:
         # GitHub supplies GITHUB_ACTIONS and RUNNER_ENVIRONMENT to every step:
         # https://docs.github.com/en/actions/reference/workflows-and-actions/variables#default-environment-variables
         run: make test-signing
-      - name: Install ClamAV and refresh bundled definitions
-        run: |
-          brew install clamav
-          make freshclam
+      - name: Build pinned ClamAV and OpenSSL
+        uses: ./.github/actions/prepare-clamav
+      - name: Refresh bundled definitions
+        run: make freshclam
       - name: Build DMG, list mounted contents, and run headless self-test
         if: ${{ runner.environment == 'github-hosted' }}
         env:

@@ -6,6 +6,14 @@ Entries describe their recorded revisions. For current behavior use the
 [user manual](USER_MANUAL.md) and [CLI reference](CLI_REFERENCE.md). Retired
 Rust delivery plans and historical package checks are not current acceptance.
 
+## Reproducible macOS antivirus build
+
+Build ClamAV 1.5.4 against explicitly selected OpenSSL 3.6.4 for macOS CI,
+candidate validation and release packaging. Authenticate both source archives,
+verify the linked runtime and preserve definition signature checks and scan tests.
+Windows keeps its existing portable runtime. Advance the alpha for this CI-only
+dependency fix; application behavior is unchanged.
+
 ## PST liveness, mailbox concurrency and search responsiveness
 
 The follow-up alpha preserves network-source suspension boundaries: finish the

@@ -19,6 +19,9 @@ platform or release gate has passed. [Future work](plans/README.md) is separate.
 
 ## Shared boundaries
 
+- macOS CI and release packaging build the same pinned ClamAV/OpenSSL sources
+  and retain signature verification; see [delivery](requirements/DELIVERY.md).
+
 - Source and relocated native acceptance retain current phase and timeout diagnostics; bounded
   deadlines must allow the component checks to run. See [validation](requirements/VALIDATION.md).
 

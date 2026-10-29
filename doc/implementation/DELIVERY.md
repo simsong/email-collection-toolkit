@@ -67,6 +67,16 @@ introduced. Pylint remains a complementary check.
 the regression with a stray filename before the build script's opening
 docstring fails this check before packaging starts.
 
+The local `prepare-clamav` composite action installs hosted-runner build tools,
+then invokes `make ci-clamav`. `scripts/ci_clamav.sh` verifies the upstream source
+SHA-256 digests, builds OpenSSL 3.6.4 and ClamAV 1.5.4 under `.tmp/ci-clamav/`,
+and explicitly selects that OpenSSL for CMake and Rust dependency discovery.
+It preserves native licenses/certificates, checks actual dylib linkage and version,
+and writes existing engine/updater/certificate overrides to `GITHUB_ENV` only after
+validation. All four macOS build jobs use the same action before `make freshclam`.
+`make ci-clamav-check` selects the local runtime and exercises real definition
+refresh, scanner and packaging tests; no verification bypass or daemon is introduced.
+
 `scripts/build_macos.py`, invoked by `make dmg`, uses project-local PyInstaller
 dependencies, creates the app icon from the existing PNG, collects runtime
 resources and dependency notices, declares `.mailarchive` document registration,

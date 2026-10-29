@@ -1,0 +1,21 @@
+# Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved.
+# Prepare one macOS antivirus build shared by CI and both release workflows.
+# Homebrew supplies build tools and unrelated native dependencies only.
+# The Make target authenticates and builds pinned ClamAV/OpenSSL sources.
+# Existing application overrides select that runtime in every following step.
+# No service is started and no release or tag is created by this action.
+name: Prepare pinned ClamAV and OpenSSL
+description: Build ClamAV 1.5.4 against OpenSSL 3.6.4 in the checkout
+runs:
+  using: composite
+  steps:
+    - name: Install native build prerequisites
+      shell: bash
+      run: |
+        brew install cmake ninja pkgconf json-c pcre2
+        rustup toolchain install stable --profile minimal
+    - name: Build and verify pinned antivirus runtime
+      shell: bash
+      env:
+        RUSTUP_TOOLCHAIN: stable
+      run: make ci-clamav
