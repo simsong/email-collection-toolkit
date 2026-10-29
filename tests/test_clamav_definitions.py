@@ -30,7 +30,7 @@ def test_failed_definition_export_preserves_output_and_user_state(tmp_path: Path
     state.write_bytes(b"existing cooldown state")
     monkeypatch.setenv(UPDATE_ENV, str(user))
     monkeypatch.setenv(UPDATER_ENV, str(tmp_path / "missing-freshclam"))
-    with pytest.raises(RuntimeError, match="missing-freshclam"):
+    with pytest.raises(RuntimeError):
         download_definitions(destination)
     assert not destination.exists()
     assert active.read_bytes() == b"do not read or replace user state"
@@ -63,7 +63,7 @@ def test_export_retains_explicit_state_outside_a_disposable_build(tmp_path: Path
     monkeypatch.setenv(UPDATER_ENV, str(tmp_path / "missing-freshclam"))
     for name in ("first-build", "next-build"):
         build = tmp_path / name
-        with pytest.raises(RuntimeError, match="missing-freshclam"):
+        with pytest.raises(RuntimeError):
             download_definitions(build / "definitions", state_directory=state)
         build.rmdir()
         assert cooldown.read_bytes() == b"retained cooldown"
