@@ -27,7 +27,8 @@ from typing import Literal
 from mailarchiver.self_test import SelfTestReport
 from mailarchiver.build_info import BUILD_INFO_FILENAME, write_build_info
 from mailarchiver.plugin_loader import discover_manifests
-from mailarchiver.clamav_definitions import DEVELOPMENT_DATABASE, certificates_path, library_path, read_definitions, updater_path
+from mailarchiver.clamav_definitions import certificates_path, library_path, read_definitions, updater_path
+from mailarchiver.clamav_update import UpdateResult
 from packaging.requirements import Requirement
 from packaging.utils import canonicalize_name
 from pydantic import BaseModel
@@ -384,15 +385,9 @@ def verify_dependencies(app: Path, *, environment: Mapping[str, str] | None = No
     print(f"Verified {len(checked)} bundled Mach-O files: no external non-system library paths")
 
 
-def clamav_bundle_arguments(work: Path) -> list[str]:
-    """Bundle the project's definitions and the native engine/updater with their dependencies."""
-    definitions = read_definitions(DEVELOPMENT_DATABASE, "development")
-    staging = work / "clamav-definitions"
-    staging.mkdir()
-    for path in definitions.directory.iterdir():
-        if path.is_file() and path.suffix in (".cvd", ".cld", ".sign"):
-            shutil.copyfile(path, staging / path.name)
-    arguments = ["--add-data", f"{staging}:clamav/definitions"]
+def clamav_bundle_arguments() -> list[str]:
+    """Bundle the native runtime first; the resulting ECT downloads its definitions."""
+    arguments: list[str] = []
     for binary in (library_path(), updater_path()):
         if not binary.is_file():
             raise FileNotFoundError(f"Install ClamAV before building: {binary}")
@@ -400,6 +395,27 @@ def clamav_bundle_arguments(work: Path) -> list[str]:
     if certs := certificates_path():
         arguments.extend(("--add-data", f"{certs}:clamav/certs"))
     return arguments
+
+
+def download_bundle_definitions(app: Path, work: Path) -> None:
+    """Run the staged ECT, then add only its verified export before the final seal."""
+    destination = work / "downloaded-definitions"
+    try:
+        completed = run(app / "Contents/MacOS" / APP_NAME, "--update-virus-definitions",
+                        "--directory", destination, "--state-directory", ROOT / ".tmp/installer-definition-state",
+                        cwd=work, env=native_test_environment(),
+                        capture_output=True, text=True, timeout=900)
+    except subprocess.CalledProcessError as error:
+        raise RuntimeError(f"Packaged ECT definition download failed: {error.stdout}\n{error.stderr}") from error
+    result = UpdateResult.model_validate_json(completed.stdout)
+    if result.directory != destination or read_definitions(destination, "updated").versions != result.versions:
+        raise RuntimeError("Packaged ECT did not report its verified definition export")
+    bundled = app / "Contents/Resources/clamav/definitions"
+    shutil.copytree(destination, bundled)
+    alias = app / "Contents/Frameworks/clamav/definitions"
+    if not alias.exists():
+        alias.symlink_to(os.path.relpath(bundled, alias.parent))
+    print(f"Packaged ECT downloaded and verified {result.versions}")
 
 
 def clamav_openssl_sources() -> tuple[Path, Path]:
@@ -504,7 +520,7 @@ def build(signing_identity: str, *, gui: bool = False, log_contents: bool = Fals
                    "--add-data", f"{ROOT / 'LICENSE'}:gui",
                    "--add-data", f"{ROOT / 'src/mailarchiver/standalone_verify.py'}:mailarchiver",
                    "--add-data", f"{notices}:Third Party Notices",
-                   *clamav_bundle_arguments(work),
+                   *clamav_bundle_arguments(),
                    "--add-binary", f"{ROOT / 'target/release/pst-importer'}:importers",
                    "--add-binary", f"{ROOT / 'target/release/mcti-scan'}:importers",
                    "--add-data", f"{ROOT / 'target/pff-converter'}:importers/pff-converter",
@@ -514,6 +530,9 @@ def build(signing_identity: str, *, gui: bool = False, log_contents: bool = Fals
         app = bundle_output / f"{APP_NAME}.app"
         bundle_clamav_openssl(app, signing_identity)
         bundle_sparkle(app, ROOT / ".tools/sparkle" / SPARKLE_VERSION, signing_identity)
+        # Launch a sealed staged app; downloading adds resources, not a second freezer build.
+        configure_bundle(app, signing_identity)
+        download_bundle_definitions(app, work)
         configure_bundle(app, signing_identity)
         dmg = output / dmg_filename(version("mailarchiver"), platform.machine(), signing_identity)
         candidate = work / "candidate.dmg"

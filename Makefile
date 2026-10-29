@@ -38,6 +38,15 @@ test-updater-supervisor:
 test-definition-state:
 	uv run --locked pytest -q tests/test_clamav_definitions.py
 
+# DEFINITIONS_DIRECTORY is a new explicit output, never an archive or user update store.
+.PHONY: download-definitions test-definition-download
+download-definitions:
+	@test -n "$(DEFINITIONS_DIRECTORY)" || { echo 'Specify DEFINITIONS_DIRECTORY=/new/output/path'; exit 2; }
+	uv run --locked python scripts/desktop_entry.py --update-virus-definitions --directory "$(DEFINITIONS_DIRECTORY)"
+
+test-definition-download:
+	uv run --locked pytest -q tests/test_clamav_definitions.py tests/test_python_desktop_package.py tests/test_packaging.py tests/test_website_scripts.py
+
 # Automatic refresh tests use local connectivity fixtures, never a public CDN.
 # MAILARCHIVER_CLAMAV_DATABASE pins explicit test/development definitions.
 .PHONY: test-definition-refresh

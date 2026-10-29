@@ -15,6 +15,24 @@ Do not put passwords in arguments, environment variables or shell history.
 
 ## Quick examples
 
+Packaged ECT provides a headless definition downloader before normal GUI startup:
+
+```sh
+"/Applications/Email Collection Toolkit.app/Contents/MacOS/Email Collection Toolkit" --update-virus-definitions --directory /new/build/definitions
+```
+
+The Windows package uses its private `python.exe -I -m mailarchiver.desktop_entry`
+with the same arguments. `--directory` is required and must not already exist.
+Success prints typed JSON with versions, publication date and output directory;
+failure exits nonzero without publishing partial definitions. Downloads retain
+cooldown state in a sibling `.DIRECTORY.clamav-update` directory and validate
+signatures and real clean/EICAR scans before publication. No user update generation
+is selected or replaced. `--state-directory PATH` instead retains cooldown state
+outside disposable build workspaces; it must not overlap the output directory.
+Final publication atomically refuses a destination created during the download.
+Development invokes this entry through
+`make download-definitions DEFINITIONS_DIRECTORY=/new/build/definitions`.
+
 ```sh
 # Configure a new IMAP archive, synchronize once, then exit.
 make imap IMAP_ARGS='--new /path/to/archive.mailarchive'

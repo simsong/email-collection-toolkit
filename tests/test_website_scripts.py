@@ -246,8 +246,14 @@ def test_macos_workflows_select_the_same_pinned_antivirus_before_refresh() -> No
         prepare = [index for index, step in enumerate(steps)
                    if step.get("uses") == "./.github/actions/prepare-clamav"]
         assert len(prepare) == 1, (workflow, job)
-        refresh = next(index for index, step in enumerate(steps) if "make freshclam" in step.get(RUN, ""))
-        assert prepare[0] < refresh, (workflow, job)
+        if workflow == "continuous-integration.yml":
+            refresh = next(index for index, step in enumerate(steps) if "make freshclam" in step.get(RUN, ""))
+            assert prepare[0] < refresh, (workflow, job)
+        else:
+            assert not any("make freshclam" in step.get(RUN, "") for step in steps), workflow
+            package = next(index for index, step in enumerate(steps)
+                           if "make dmg" in step.get(RUN, "") or "make release-package-check" in step.get(RUN, ""))
+            assert prepare[0] < package
         assert not any("brew install clamav" in step.get(RUN, "") for step in steps), (workflow, job)
     action = safe_load((root / ".github/actions/prepare-clamav/action.yml").read_text())
     assert action["runs"][STEPS][-1][RUN] == "make ci-clamav"

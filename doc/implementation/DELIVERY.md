@@ -73,9 +73,26 @@ SHA-256 digests, builds OpenSSL 3.6.4 and ClamAV 1.5.4 under `.tmp/ci-clamav/`,
 and explicitly selects that OpenSSL for CMake and Rust dependency discovery.
 It preserves native licenses/certificates, checks actual dylib linkage and version,
 and writes existing engine/updater/certificate overrides to `GITHUB_ENV` only after
-validation. All four macOS build jobs use the same action before `make freshclam`.
+validation. All four macOS build jobs use the same action. Ordinary source-test jobs
+use `make freshclam`; installer jobs acquire definitions through staged ECT instead.
 `make ci-clamav-check` selects the local runtime and exercises real definition
 refresh, scanner and packaging tests; no verification bypass or daemon is introduced.
+
+Both desktop entry points dispatch `--update-virus-definitions --directory` before
+GUI imports. `clamav_update.download_definitions` uses the shared supervised updater,
+temporary config and native clean/EICAR validator. A sibling hidden state directory
+retains FreshClam cooldown state and its OS lock. Installer commands pass a stable
+checkout-local `--state-directory` outside disposable build workspaces. Validated
+files stage on the output filesystem and publish with exclusive native directory
+rename, even when persistent state is on a different volume. Existing output, including
+a directory created during the download, and user generations remain untouched.
+The macOS builder freezes the runtime without definitions, seals it for launching,
+runs its executable with host overrides removed, copies the verified export and
+reseals before creating the DMG. It creates the normal resource/framework symlink
+for the inserted data. Windows builds the private Python runtime once and invokes
+its isolated `mailarchiver.desktop_entry` before copying definitions and running
+MakeAppx. Its workflow runs source scanner tests against this packaged baseline
+after assembly. Both candidate and tag workflows share these build paths.
 
 `scripts/build_macos.py`, invoked by `make dmg`, uses project-local PyInstaller
 dependencies, creates the app icon from the existing PNG, collects runtime

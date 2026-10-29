@@ -52,10 +52,8 @@ jobs:
           MSIX_PUBLISHER: ${{ vars.MSIX_PUBLISHER }}
         run: |
           $env:PATH = "C:/Program Files/Git/usr/bin;" + $env:PATH
-          make MAKE=make 'SHELL=C:/Program Files/Git/usr/bin/bash.exe' prepare-windows-clamav prepare-windows-updater freshclam test-windows-scanner test-windows-updater test-definition-state
+          make MAKE=make 'SHELL=C:/Program Files/Git/usr/bin/bash.exe' prepare-windows-clamav prepare-windows-updater test-windows-updater
           if ($LASTEXITCODE) { throw 'Windows antivirus preparation or acceptance failed' }
-          make MAKE=make 'SHELL=C:/Program Files/Git/usr/bin/bash.exe' check-python-reader-static test-python-reader test-windows-package-entry test-python-writer test-python-reader-native 'ARGS=--output dist/native-reader'
-          if ($LASTEXITCODE) { throw 'Reader checks failed' }
           $arguments = '-CreateUpgradeTest'
           if ($env:PUBLIC_SIGNING -eq 'true') {
             if ([string]::IsNullOrWhiteSpace($env:MSIX_PUBLISHER) -or $env:MSIX_PUBLISHER -eq 'CN=ECT Local Test') { throw 'Configure the approved MSIX_PUBLISHER repository variable.' }
@@ -63,6 +61,9 @@ jobs:
           }
           make 'SHELL=C:/Program Files/Git/usr/bin/bash.exe' msix-test "MSIX_ARGS=$arguments"
           if ($LASTEXITCODE) { throw 'MSIX assembly failed' }
+          $env:MAILARCHIVER_CLAMAV_DATABASE = (Resolve-Path 'dist/windows-msix-test/stage/python/clamav/definitions').Path
+          make MAKE=make 'SHELL=C:/Program Files/Git/usr/bin/bash.exe' check-python-reader-static test-windows-scanner test-definition-state test-python-reader test-windows-package-entry test-python-writer test-python-reader-native 'ARGS=--output dist/native-reader'
+          if ($LASTEXITCODE) { throw 'Reader or scanner checks failed' }
           $package = (Get-ChildItem dist/windows-msix-test/*.msix).FullName
           make 'SHELL=C:/Program Files/Git/usr/bin/bash.exe' test-msix "MSIX_PACKAGE=$package" 'MSIX_EVIDENCE=dist/relocated'
           if ($LASTEXITCODE) { throw 'Relocated MSIX failed' }

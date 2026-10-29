@@ -11,11 +11,62 @@ from pathlib import Path
 
 import pytest
 
-from mailarchiver.clamav_definitions import ActiveDefinitions, DATABASE_NAMES, UPDATE_ENV, choose_definitions, read_definitions, selected_definitions, three_months_after
-from mailarchiver.clamav_update import publish_definitions, publish_downloaded_definitions, update_lock
+from mailarchiver.clamav_definitions import ActiveDefinitions, DATABASE_NAMES, UPDATE_ENV, UPDATER_ENV, choose_definitions, read_definitions, selected_definitions, three_months_after
+from mailarchiver.clamav_update import download_definitions, publish_definition_directory, publish_definitions, publish_downloaded_definitions, update_lock
 from mailarchiver.scanner import ClamScannerStartupError
 from mailarchiver.owned_command import run_owned_command
 from mailarchiver.writer_lock import WriterLease
+
+
+def test_failed_definition_export_preserves_output_and_user_state(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Delivery: failed packaged downloads publish nothing and retain build-local cooldown state."""
+    destination = tmp_path / "export"
+    user = tmp_path / "user-updates"
+    user.mkdir()
+    active = user / "active.json"
+    active.write_bytes(b"do not read or replace user state")
+    state = tmp_path / ".export.clamav-update/freshclam.dat"
+    state.parent.mkdir()
+    state.write_bytes(b"existing cooldown state")
+    monkeypatch.setenv(UPDATE_ENV, str(user))
+    monkeypatch.setenv(UPDATER_ENV, str(tmp_path / "missing-freshclam"))
+    with pytest.raises(RuntimeError, match="missing-freshclam"):
+        download_definitions(destination)
+    assert not destination.exists()
+    assert active.read_bytes() == b"do not read or replace user state"
+    assert state.read_bytes() == b"existing cooldown state"
+    assert sorted(path.name for path in state.parent.iterdir()) == ["freshclam.dat", "update.lock"]
+
+
+def test_export_publication_excludes_a_destination_created_during_download(tmp_path: Path) -> None:
+    """Delivery: final publication must refuse a racing empty directory without replacing it."""
+    staging, destination = tmp_path / "staging", tmp_path / "output"
+    staging.mkdir()
+    (staging / "verified").write_bytes(b"verified definitions")
+    destination.mkdir()
+    with pytest.raises(FileExistsError):
+        publish_definition_directory(staging, destination)
+    assert list(destination.iterdir()) == []
+    assert (staging / "verified").read_bytes() == b"verified definitions"
+    destination.rmdir()
+    publish_definition_directory(staging, destination)
+    assert not staging.exists()
+    assert (destination / "verified").read_bytes() == b"verified definitions"
+
+
+def test_export_retains_explicit_state_outside_a_disposable_build(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Delivery: retrying a new build must retain cooldown state after the first build is removed."""
+    state = tmp_path / "persistent-state"
+    state.mkdir()
+    cooldown = state / "freshclam.dat"
+    cooldown.write_bytes(b"retained cooldown")
+    monkeypatch.setenv(UPDATER_ENV, str(tmp_path / "missing-freshclam"))
+    for name in ("first-build", "next-build"):
+        build = tmp_path / name
+        with pytest.raises(RuntimeError, match="missing-freshclam"):
+            download_definitions(build / "definitions", state_directory=state)
+        build.rmdir()
+        assert cooldown.read_bytes() == b"retained cooldown"
 
 
 def test_owned_updater_preserves_diagnostics_and_enforces_timeout() -> None:

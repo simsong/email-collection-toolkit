@@ -61,7 +61,8 @@ the remaining Apache-2.0 ftfy dependency needs compatibility resolution
 (see THIRD_PARTY_NOTICES.md).
 `make freshclam` updates ignored etc/clamdb, seeding it from
 an installed database if available. The DMG bundles this copy, the engine and
-FreshClam; release CI refreshes the definitions first. Its mounted self-test runs
+FreshClam; the staged packaged ECT now downloads and validates definitions before
+final signing on both platforms, without requiring the development copy. Its mounted self-test runs
 real clean/EICAR scans using the bundled definitions. Application releases refresh
 bundled definitions at least quarterly.
 Before signature/dependency checks and the mounted self-test, the DMG validator
@@ -112,7 +113,7 @@ development resources. MAILARCHIVER_CLAMAV_CERTIFICATES selects signature trust
 material, MAILARCHIVER_FRESHCLAM the updater, and MAILARCHIVER_CLAMAV_UPDATES a
 private update root. Frozen resource resolution uses the bundle rather than
 Homebrew. The DMG and MSIX builders bundle the engine and definitions, and
-release CI runs `make freshclam` first; see EMBEDDED_CLAMAV.md. Legacy
+each staged packaged application downloads its baseline; see EMBEDDED_CLAMAV.md. Legacy
 MAILARCHIVER_CLAMD settings are ignored.
 
 ### Automatic definition refresh
