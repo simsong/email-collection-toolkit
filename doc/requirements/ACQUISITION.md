@@ -374,3 +374,6 @@ former 1 GiB cap. Explicit lower limits remain enforced and retain bounded evide
 
 Overlapping scanner/source progress must not erase another source's active row
 or count read-ahead scan offsets as additional source bytes.
+
+Network sources retain one pending message per container: finish processing the
+current message before requesting another. Local MBOX sources use bounded read-ahead.

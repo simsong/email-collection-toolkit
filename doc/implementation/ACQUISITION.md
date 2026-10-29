@@ -725,3 +725,5 @@ activity instead of clearing it. Aggregate byte progress uses source counters on
 
 The ordered stream checks its source owner's cancellation callback before every
 read-ahead pull, so suspension during one fetch cannot initiate the next fetch.
+Network-capable adapters set a per-container pending limit of one, retaining their
+existing fetch/process/stop boundary; local mailboxes use the shared read-ahead bound.
