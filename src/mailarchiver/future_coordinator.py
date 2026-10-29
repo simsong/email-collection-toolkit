@@ -35,14 +35,17 @@ class BoundedWorkers:
         self.pool.shutdown(wait=True, cancel_futures=True)
 
     def map[T, R](self, process: Callable[[T], R], items: Iterable[T], *,
-                  before_read: Callable[[], bool] | None = None) -> Generator[R, None, None]:
+                  before_read: Callable[[], bool] | None = None, max_pending: int | None = None) -> Generator[R, None, None]:
+        if max_pending is not None and max_pending < 1:
+            raise ValueError("pending message limit must be positive")
         iterator = iter(items)
         pending: deque[Future[R]] = deque()
         exhausted = False
         discovery_error: BaseException | None = None
         try:
             while pending or not exhausted:
-                while not exhausted and self.capacity.acquire(blocking=not pending):
+                while (not exhausted and (max_pending is None or len(pending) < max_pending)
+                       and self.capacity.acquire(blocking=not pending)):
                     try:
                         if before_read is not None and not before_read():
                             self.capacity.release()

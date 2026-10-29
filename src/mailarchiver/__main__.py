@@ -2024,7 +2024,8 @@ def _run_ingest(request: IngestRequest, writer_lease: WriterLease, outcome: Inge
                     prior_date = datetime.fromisoformat(row[0])
 
             items = iter(source_plugin.messages(work.container, decision.resume_cursor))
-            scanned = message_workers.map(scan_source, items, before_read=before_read)
+            scanned = message_workers.map(scan_source, items, before_read=before_read,
+                max_pending=1 if source_plugin.capabilities.network_access else None)
             while True:
                 # Both native and API sources stop before requesting another
                 # message. A fetch already in flight may finish and be published.

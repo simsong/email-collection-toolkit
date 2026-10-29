@@ -8,6 +8,10 @@ Rust delivery plans and historical package checks are not current acceptance.
 
 ## PST liveness, mailbox concurrency and search responsiveness
 
+The follow-up alpha preserves network-source suspension boundaries: finish the
+current message before fetching another, while local MBOX scans retain bounded
+parallel read-ahead.
+
 Keep active PST extractions running beyond the former total-time limit, report
 progress and timestamp library errors. Raise the configurable PST spool default
 to 16 GiB for multi-gigabyte recovered mail. Parallelize message scans within
