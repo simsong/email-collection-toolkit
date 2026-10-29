@@ -132,6 +132,9 @@ may substitute only the OS keyring boundary to avoid editing personal credential
 * IMAP ingest supports TLS and authenticated account configuration, records
   account/folder/UID provenance, and retrieves RFC 5322 bytes without marking
   messages read or modifying the remote mailbox.
+  Negotiate advertised UTF8=ACCEPT/UTF8=ONLY before discovering UTF-8 folders;
+  preserve literal ampersands and quoted wire names. Servers without the extension
+  retain modified UTF-7 selection. Failed negotiation must not continue discovery.
 * Outlook `.pst` and `.ost` ingest does not require Outlook to modify or export
   the source. The adapter records the parser/converter and version, enumerates
   every encountered store item, preserves folder and item identifiers as
@@ -347,3 +350,27 @@ MBOX checkpoints. Driver failure releases every queued waiter before joining
 workers. Progress retains the originating worker identity, and processor waits
 continue publishing status heartbeats, including one-worker message dispatch.
 No publication mutex is needed.
+
+## PST liveness and mailbox message concurrency
+
+PST `timeout_seconds` bounds inactivity rather than total extraction time. New
+stdout or stderr bytes renew the deadline; a silent stuck child is killed and
+reaped, retaining diagnostics and its receipt. Report actual hashing, address-book
+and extraction progress at one-second intervals between work checkpoints, never
+manufacture activity while blocked inside a reader call. `LIBRARY ERROR` records
+include an ISO8601 UTC time. Stdout remains exclusively mboxrd.
+
+Single MBOX sources can fill the configured host message scan pool. Producer-scanned
+PST records pass through in order without another antivirus scan. A shared bound
+limits in-flight message records across sources; iterators stay on their source
+thread. Consume scan results in source order for fallback dates, observations and
+checkpoints. Retain already yielded complete mail before reporting a producer's
+partial-extraction failure; never admit its uncertain final record. Verify with
+`make test-cli-processors` and `make test-pst`.
+
+The default PST spool bound is 16 GiB, configurable through
+`plugins.pst.max_output_bytes`, so multi-gigabyte recovered mail does not hit the
+former 1 GiB cap. Explicit lower limits remain enforced and retain bounded evidence.
+
+Overlapping scanner/source progress must not erase another source's active row
+or count read-ahead scan offsets as additional source bytes.

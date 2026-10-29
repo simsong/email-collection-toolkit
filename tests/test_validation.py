@@ -160,13 +160,17 @@ def test_dataset_expansion_limit_is_cumulative_across_artifacts(tmp_path: Path) 
         extract(configured, manifest, DataLayout(root=tmp_path / "data"))
 
 
-def test_7z_extraction_preserves_content_and_enforces_limit(tmp_path: Path) -> None:
+@pytest.mark.parametrize("compression", [None, py7zr.FILTER_BROTLI], ids=["default", "brotli"])
+def test_7z_extraction_preserves_content_and_enforces_limit(tmp_path: Path, compression: int | None) -> None:
+    """Validation containers preserve bytes and enforce expansion limits with default and Brotli codecs."""
     source_dir = tmp_path / "source"
     source_dir.mkdir()
     raw = b"From: sf-lover@example.test\nSubject: digest\n\ncontent\n"
     (source_dir / "digest").write_bytes(raw)
     archive_path = tmp_path / "digest.7z"
-    with py7zr.SevenZipFile(archive_path, "w") as archive:
+    filter_id = "id"  # py7zr's external filter-dictionary key.
+    filters = None if compression is None else [{filter_id: compression}]
+    with py7zr.SevenZipFile(archive_path, "w", filters=filters) as archive:
         archive.writeall(source_dir, "archive")
 
     extracted = tmp_path / "extracted"

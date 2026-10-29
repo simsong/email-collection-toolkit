@@ -135,7 +135,24 @@ fn actual_pst_preserves_bodies_attachments_and_reports_partial_extraction() {
         "{diagnostics}"
     );
     assert!(diagnostics.contains("item=2097316: Missing PidTagAttachMethod"));
-    assert!(diagnostics.contains("LIBRARY ERROR (outlook-pst 1.2.0) item=2097316:"));
+    let error = diagnostics
+        .lines()
+        .find(|line| {
+            line.starts_with("LIBRARY ERROR (outlook-pst 1.2.0)") && line.contains("item=2097316:")
+        })
+        .unwrap();
+    let time = error
+        .split_whitespace()
+        .find_map(|word| word.strip_prefix("time="))
+        .unwrap();
+    let occurred = DateTime::parse_from_rfc3339(time).unwrap();
+    assert_eq!(occurred.offset().local_minus_utc(), 0);
+    assert!(
+        (DateTime::<Utc>::from(std::time::SystemTime::now()) - occurred.with_timezone(&Utc))
+            .num_seconds()
+            .abs()
+            < 30
+    );
     assert!(!diagnostics.contains("ERROR item=2097476"));
     assert_eq!(before, fs::read(&source).unwrap());
     assert_eq!(result.stdout, run(&source).stdout);

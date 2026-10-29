@@ -243,15 +243,24 @@ class IdentityProcessor:
         text = decode_text(data, item.content_metadata.charset).value
         signature = text.rsplit("\n-- \n", 1)[-1] if "\n-- \n" in text else "\n".join(text.splitlines()[-count:])
         evidence: list[AddressEvidence] = []
+        diagnostics: list[str] = []
         for line in signature.splitlines():
             if line.lstrip().startswith(">") or re.match(r"(?i)^\s*(from|to|cc|bcc|subject|date):", line):
                 continue
-            for match in EMAIL.finditer(line):
+            matches = list(EMAIL.finditer(line))
+            if not matches:
+                continue
+            try:
+                names = getaddresses([line])
+            except RecursionError:
+                names = []
+                diagnostics.append("signature address display name could not be parsed: address groups/comments exceed parser recursion limit; observed address retained")
+            for match in matches:
                 address = match.group().lower().rstrip(".")
-                named = next((decoded_header(name) for name, candidate in getaddresses([line])
+                named = next((decoded_header(name) for name, candidate in names
                               if candidate.lower() == address and name), "")
                 evidence.append(AddressEvidence(address=address, name=named, kind="signature"))
-        return ProcessingResult(evidence=tuple(evidence), phone_numbers=signature_phone_numbers(text, count))
+        return ProcessingResult(evidence=tuple(evidence), phone_numbers=signature_phone_numbers(text, count), diagnostics=tuple(diagnostics))
 
 
 class AttachedMessageLimits(BaseModel):

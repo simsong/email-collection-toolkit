@@ -51,6 +51,7 @@ from .desktop_platform import copy_windows_text, open_export, open_external_url,
 from .identity import APPLICATION_NAME
 from .build_info import BUILD_INFO, BuildInfo
 from .worker_preferences import WorkerPreferences, WorkerSettings, worker_argument
+from .search_completion import SearchSuggestions
 from .processor_graph import ProcessorGraphStatus, processor_graph
 from .updates import UpdateChannel, UpdateService, UpdateStatus, default_channel
 from .release_versions import release_metadata
@@ -796,9 +797,17 @@ class WindowBridge:
         return getattr(self._api, name)
 
 
+class SuggestionStatus(BaseModel):
+    generation: int
+    complete: bool = False
+    stale: bool = False
+    result: SearchSuggestions | None = None
+    error: str | None = None
+
+
 SEARCH_BRIDGE_METHODS = (
     "processing_work", "resume_processing", "abort_processing", "open_picker",
-    "status", "activate", "search", "suggestions", "ingest_overview", "open_ingest_window",
+    "status", "activate", "search", "suggestions", "suggestions_start", "suggestions_status", "suggestions_cancel", "ingest_overview", "open_ingest_window",
     "mailbox_tree", "saved_filter_sets", "save_filter_set", "rename_filter_set", "delete_filter_set",
     "open_message_window", "request_previews", "take_previews", "message", "part", "attachment",
     "copy_source_path", "copy_visible_text", "copy_link", "open_link", "open_attachment",
@@ -848,6 +857,12 @@ class GuiApi:
         self._preview_generation = 0
         self._preview_futures: dict[Future[list[MessagePreview]], PreviewRequest] = {}
         self._preview_closed = False
+        self._suggestion_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="mail-suggestions")
+        self._suggestion_lock = Lock()
+        self._suggestion_generation = 0
+        self._suggestion_stop = Event()
+        self._suggestion_future: Future[SearchSuggestions] | None = None
+        self._suggestion_closed = False
         self._tree_cache: dict[bool, list[dict[str, Any]]] = {}
         self._message_count: int | None = None
         self._ingest_window_lock = Lock()
@@ -858,6 +873,7 @@ class GuiApi:
 
     def invalidate_archive(self) -> None:
         """Discard derived view caches after a writer may have published."""
+        self.suggestions_cancel()
         with self._preview_lock:
             self._preview_generation += 1
             for future in self._preview_futures:
@@ -1039,6 +1055,40 @@ class GuiApi:
 
     def suggestions(self, query: str, limit: int = 20) -> dict[str, Any]:
         return search_suggestions(self._archive(), query, limit).model_dump(mode="json")
+
+    def suggestions_start(self, query: str, limit: int = 20) -> dict[str, Any]:
+        archive = self._archive()
+        with self._suggestion_lock:
+            if self._suggestion_closed:
+                raise RuntimeError("Search window is closed")
+            self._suggestion_stop.set()
+            if self._suggestion_future is not None:
+                self._suggestion_future.cancel()
+            self._suggestion_generation += 1
+            self._suggestion_stop = Event()
+            self._suggestion_future = self._suggestion_executor.submit(
+                search_suggestions, archive, query, limit, cancelled=self._suggestion_stop.is_set)
+            return SuggestionStatus(generation=self._suggestion_generation).model_dump(mode="json")
+
+    def suggestions_status(self, generation: int) -> dict[str, Any]:
+        with self._suggestion_lock:
+            status = SuggestionStatus(generation=generation, stale=generation != self._suggestion_generation)
+            future = self._suggestion_future
+            if not status.stale and future is not None and future.done():
+                status.complete = True
+                try:
+                    status.result = future.result()
+                except Exception as error:
+                    status.error = f"{type(error).__name__}: {error}"
+            return status.model_dump(mode="json")
+
+    def suggestions_cancel(self) -> None:
+        with self._suggestion_lock:
+            self._suggestion_stop.set()
+            self._suggestion_generation += 1
+            if self._suggestion_future is not None:
+                self._suggestion_future.cancel()
+            self._suggestion_future = None
 
     def mailbox_tree(self, show_volumes: bool = False) -> list[dict[str, Any]]:
         if show_volumes not in self._tree_cache:
@@ -1326,6 +1376,10 @@ class GuiApi:
         return True
 
     def close(self, *_args: object) -> None:
+        with self._suggestion_lock:
+            self._suggestion_closed = True
+        self.suggestions_cancel()
+        self._suggestion_executor.shutdown(wait=False, cancel_futures=True)
         with self._preview_lock:
             self._preview_closed = True
             for future in self._preview_futures:

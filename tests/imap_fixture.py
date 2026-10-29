@@ -5,6 +5,7 @@
 # Test setup may populate this synthetic source; the importer must leave it unchanged.
 # A tiny injected keyring replaces the OS boundary to avoid changing user credentials.
 # All listener tasks and sockets are closed when the fixture leaves its context.
+# A minimal TLS protocol fixture covers UTF8=ACCEPT, which pymap does not implement.
 """Isolated real IMAP server and synthetic credential boundary for tests."""
 from __future__ import annotations
 
@@ -115,3 +116,67 @@ class DisposableImap:
         self.thread.join(timeout=10)
         if self.thread.is_alive():
             raise RuntimeError("disposable IMAP server did not stop")
+
+
+class Utf8Imap(DisposableImap):
+    """Minimal TLS protocol fixture for RFC 6855, which pymap does not implement.
+
+    Require ENABLE before UTF-8 LIST/EXAMINE and record actual client wire bytes.
+    All names, credentials and messages are synthetic; no application methods are mocked.
+    """
+    def __init__(self, directory: Path, capability: str = "UTF8=ACCEPT", enable: str = "OK") -> None:
+        super().__init__(directory, "implicit")
+        self.capability = capability.encode("ascii")
+        self.enable = enable
+        self.commands: list[bytes] = []
+        self.names = ("旅行", "literal &AMk- &-", 'Quote " and \\ box')
+
+    async def _serve(self) -> None:
+        context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+        context.load_cert_chain(self.certificate, self.key)
+        server = await asyncio.start_server(self._connection, "127.0.0.1", 0, ssl=context)
+        async with server:
+            self.port.set_result(server.sockets[0].getsockname()[1])
+            await asyncio.to_thread(self.stop.wait)
+
+    async def _connection(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
+        authenticated = enabled = False
+        writer.write(b"* OK Disposable UTF-8 IMAP\r\n")
+        await writer.drain()
+        try:
+            while line := await reader.readline():
+                self.commands.append(line)
+                tag, command, *arguments = line.rstrip(b"\r\n").split(b" ", 2)
+                response = b"OK complete"
+                if command == b"CAPABILITY":
+                    capabilities = b"IMAP4rev1"
+                    if authenticated:
+                        capabilities += b" ENABLE " + self.capability
+                    writer.write(b"* CAPABILITY " + capabilities + b"\r\n")
+                elif command == b"LOGIN":
+                    authenticated = True
+                elif command == b"ENABLE" and authenticated and arguments == [b"UTF8=ACCEPT"]:
+                    if self.enable == "OK":
+                        enabled = True
+                        writer.write(b"* ENABLED UTF8=ACCEPT\r\n")
+                    elif self.enable == "NO":
+                        response = b"NO unsupported"
+                elif command == b"LIST" and enabled:
+                    for name in self.names:
+                        escaped = name.encode().replace(b"\\", b"\\\\").replace(b'"', b'\\"')
+                        writer.write(b'* LIST () "/" "' + escaped + b'"\r\n')
+                elif command == b"EXAMINE" and enabled:
+                    writer.write(b"* 1 EXISTS\r\n* OK [UIDVALIDITY 42] valid\r\n* OK [UIDNEXT 2] next\r\n")
+                elif command == b"UID" and enabled and arguments == [b"SEARCH UID 1:1"]:
+                    writer.write(b"* SEARCH 1\r\n")
+                elif command == b"LOGOUT":
+                    writer.write(b"* BYE closing\r\n" + tag + b" OK logout\r\n")
+                    await writer.drain()
+                    break
+                else:
+                    response = b"BAD unexpected command"
+                writer.write(tag + b" " + response + b"\r\n")
+                await writer.drain()
+        finally:
+            writer.close()
+            await writer.wait_closed()

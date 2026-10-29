@@ -6,6 +6,33 @@ Entries describe their recorded revisions. For current behavior use the
 [user manual](USER_MANUAL.md) and [CLI reference](CLI_REFERENCE.md). Retired
 Rust delivery plans and historical package checks are not current acceptance.
 
+## PST liveness, mailbox concurrency and search responsiveness
+
+Keep active PST extractions running beyond the former total-time limit, report
+progress and timestamp library errors. Raise the configurable PST spool default
+to 16 GiB for multi-gigabyte recovered mail. Parallelize message scans within
+a single mailbox while preserving source order and complete records from partial runs.
+Keep malformed signature address groups/comments from aborting processing and
+drain unrelated content work before reporting other retryable failures. Cancel
+stale autocomplete queries and restore legacy subject-index performance
+without rebuilding existing archives. Advance the alpha for the combined fixes.
+
+## Consolidated Brotli dependency updates
+
+Include Dependabot's brotli 1.2.1 and brotlicffi 1.2.1.0 lockfile updates in
+the same branch as the Unicode-folder, report and phone-list fixes. Advance
+the alpha for testing the combined dependency set. Exercise Brotli-compressed
+7z extraction alongside the default codec, retaining byte and expansion-limit checks.
+
+## Unicode folders, report destinations and phone lists
+
+Negotiate IMAP UTF-8 folders before discovery and preserve exact folder names
+when selecting them read-only; retain legacy modified UTF-7 support. Reject
+colliding HTML/JSON owner-evaluation destinations before writing. Retain both
+phone candidates in slash-separated signature lists without splitting area-code
+slashes. Existing saved mail requires explicit reprocessing to update derived
+phone observations. Advance the alpha for the next test run.
+
 ## Consolidated certificate-bundle update
 
 Include the certifi trust-store update from the dependency PR in the consolidated

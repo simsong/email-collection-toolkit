@@ -391,7 +391,14 @@ an existing password against a different host, port or TLS mode.
 
 `imap_source` replaces the reserved IMAP manifest. Discovery uses authenticated
 LIST and read-only EXAMINE, freezes UIDVALIDITY/UIDNEXT, and snapshots bounded worker
-ranges through the existing discovery database. Each worker owns a TLS session,
+ranges through the existing discovery database. After authentication, refreshed
+capabilities drive ENABLE UTF8=ACCEPT for either UTF8=ACCEPT or UTF8=ONLY servers.
+Require its ENABLED acknowledgement before LIST, decode names in the negotiated
+mode, and send escaped EXAMINE names through imaplib's negotiated encoding.
+Legacy servers retain their LIST-provided modified UTF-7 spelling. Disposable TLS
+protocol fixtures cover both extensions, rejection/missing acknowledgement and
+literal ampersands/quotes; the pymap fixture covers legacy Unicode selection.
+Each worker owns a TLS session,
 enumerates at most 65,536 UID numbers per SEARCH, fetches metadata in batches of
 256 messages, and streams complete BODY.PEEK literals through ordinary ingest.
 BODY size and UID identity must match the original wire literal before
@@ -693,3 +700,28 @@ A heartbeat-enabled one-worker dispatch also invokes processors through a retain
 future; only the standalone harness without a heartbeat may invoke inline.
 `make test-source-coordination` verifies real SQLite thread ownership, abort
 release, source concurrency, real IMAP ingestion and current-message interruption.
+
+## PST activity and parallel mailbox scanning
+
+`ImportProgress` emits timestamped stderr status at one-second work checkpoints
+in source hashing, address lookup and extraction. A blocking native call emits
+no fabricated heartbeat. `PstFileParser` observes spool and diagnostics sizes to
+renew its inactivity deadline; silent expiry retains its workspace path in the
+error. Item/folder/address-book library errors include UTC RFC3339 times.
+
+`BoundedWorkers.map` retains source-thread iteration and uses a shared semaphore
+and executor for message scans. Ordered consumption preserves date fallbacks
+and owner-only publication. Discovery errors drain pending complete records
+before propagation; cancellation closes iterators and releases capacity.
+The bound is shared across containers rather than allocating a pool per mailbox.
+
+The default PST spool bound is 16 GiB, configurable through
+`plugins.pst.max_output_bytes`, so multi-gigabyte recovered mail does not hit the
+former 1 GiB cap. Explicit lower limits remain enforced and retain bounded evidence.
+
+Scanner activity overlays logical worker lanes separately from source counters.
+Source updates continue beneath the overlay; scan completion restores the source
+activity instead of clearing it. Aggregate byte progress uses source counters only.
+
+The ordered stream checks its source owner's cancellation callback before every
+read-ahead pull, so suspension during one fetch cannot initiate the next fetch.

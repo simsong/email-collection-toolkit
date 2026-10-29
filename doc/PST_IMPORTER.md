@@ -92,7 +92,7 @@ X-Importer-Version: 1.0.0
 
 The item selector is the PST node ID, not an extraction ordinal. Stderr records
 the adapter/parser/API versions, source SHA-256, reconstruction notice, failures
-with node IDs, and final folder/encountered/emitted/non-mail/error counts.
+with node IDs and UTC ISO8601 `time=` values, and final folder/encountered/emitted/non-mail/error counts. Progress reports identify hashing, address lookup and extraction at one-second work checkpoints; blocked native calls emit no artificial activity.
 For recovered mail, one timestamp supplies both the RFC `Date:` header and the
 synthetic `From pst-importer` delimiter. The importer uses a valid transport
 `Date:`, then MAPI submit time (`0x0039`), then delivery time (`0x0E06`), then
@@ -163,7 +163,7 @@ plugins:
 ```
 
 `plugins.pst` accepts `executable`, `timeout_seconds`, `max_output_bytes`, and
-`max_diagnostics_bytes`. Uncommenting `plugins.ost` configures the libpff
+`max_diagnostics_bytes`. The timeout is an inactivity limit: stdout or stderr growth renews it, so an active long extraction can finish. Uncommenting `plugins.ost` configures the libpff
 converter for OST; it does not select a PST importer. Archive values override
 installation values.
 

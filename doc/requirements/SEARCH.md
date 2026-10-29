@@ -116,3 +116,12 @@ in its current manually assigned person group without rebuilding indexes.
 Canonical and merged alias names have the same expansion. Email substring queries
 remain address-specific; organization names retain their domain-based membership.
 `make test-gui-processing` verifies live merge and separation behavior.
+
+## Autocomplete responsiveness
+
+Superseded typing cancels outstanding SQLite suggestion work. Only the current
+generation may reach the menu; close and archive invalidation retire it. Subject
+folding must keep legacy `lower(subject)` indexes useful without modifying an
+archive or rebuilding its index. Limited subject choices retain exact aggregate
+counts, Unicode matching and quarantine exclusion. `make test-cli-processors`
+exercises the bridge lifecycle and legacy-index query semantics.

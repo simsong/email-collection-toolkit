@@ -3,18 +3,19 @@
 from __future__ import annotations
 
 import sqlite3
+import time
 from pathlib import Path
 
 import pytest
 
 from mailarchiver.__main__ import IngestRequest, run_ingest
-from mailarchiver.gui_app import IdentityPickerApi
+from mailarchiver.gui_app import GuiApi, IdentityPickerApi, SEARCH_BRIDGE_METHODS, WindowBridge
 from mailarchiver.gui_processing import PickerPage, PickerSearch, unfinished_work
 from mailarchiver.gui_service import search_page, search_suggestions
 from mailarchiver.mailsearch import parse_query, search_result_count
 from mailarchiver.owner_rules import OwnerRules
 from mailarchiver.search_selectors import recognize_date, worldwide_bounds
-from mailarchiver.search_completion import completion_input
+from mailarchiver.search_completion import SearchSuggestions, completion_input
 
 
 @pytest.mark.parametrize("query,expected", [
@@ -81,6 +82,44 @@ def test_completions_use_header_roles_and_live_authority_before_content(tmp_path
     picker.update({"operation": "rename-person", "subject": separated.groups[0].id, "name": "Moved Person"})
     assert search_result_count(archive, parse_query("from:simson")) == 1
     assert search_suggestions(archive, "Moved").items[0].message_count == 2
+
+
+def test_completion_uses_legacy_subject_index_with_unicode_and_exact_totals(tmp_path: Path) -> None:
+    """SEARCH: folded subjects keep exact totals and quarantine exclusion under a result limit."""
+    archive = completion_archive(tmp_path)
+    with sqlite3.connect(archive / "archive.sqlite3") as database:
+        database.execute("UPDATE messages SET subject='Réunión Straße'")
+        database.execute("UPDATE messages SET category='INFECTED' WHERE message_pk=3")
+    results = search_suggestions(archive, 'subject:"reunion strasse"', limit=1).items
+    assert [(item.value, item.message_count) for item in results] == [
+        ("reunion strasse", 2), ("Réunión Straße", 2)]
+    assert search_result_count(archive, parse_query('subject:"reunion strasse"')) == 2
+
+
+def test_gui_autocomplete_supersedes_queries_and_exposes_only_current_results(tmp_path: Path) -> None:
+    """SEARCH: the shipped bridge returns tracked generations and cancels stale typing."""
+    archive = completion_archive(tmp_path)
+    api = GuiApi(archive, preferences_file=tmp_path / "filters.json")
+    bridge = WindowBridge(api, SEARCH_BRIDGE_METHODS)
+    try:
+        old = bridge.suggestions_start("simson")["generation"]
+        current = bridge.suggestions_start("bcc:Hidden")["generation"]
+        assert bridge.suggestions_status(old)["stale"]
+        deadline = time.monotonic() + 5
+        while not (status := bridge.suggestions_status(current))["complete"]:
+            assert time.monotonic() < deadline
+            time.sleep(0.01)
+        assert not status["error"]
+        results = SearchSuggestions.model_validate(status["result"])
+        assert results.query == "bcc:Hidden"
+        assert [(item.tag, item.value, item.message_count) for item in results.items] == [
+            ("bcc", "Hidden", 1), ("bcc", "hidden@example.test", 1)]
+        api.invalidate_archive()
+        assert bridge.suggestions_status(current)["stale"]
+    finally:
+        api.close()
+    with pytest.raises(RuntimeError, match="closed"):
+        bridge.suggestions_start("simson")
 
 
 @pytest.mark.parametrize("value", ["2020-01-05", "1/5/2020", "January 5, 2020", "Jan 5, 2020"])

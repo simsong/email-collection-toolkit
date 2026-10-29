@@ -31,6 +31,7 @@ from mailarchiver.__main__ import (
     PROGRESS_REFRESH_SECONDS,
     TOP_LINE_STYLE,
     ProgressReporter,
+    ProgressUpdate,
     ProgressState,
     RefreshIndexProgress,
     WorkerProgress,
@@ -78,6 +79,25 @@ def test_overall_progress_uses_concurrent_source_bytes_for_percentage_and_eta() 
     assert progress.percent == 50
     assert progress.eta == "10s"
     assert overall_line(state, now=20) == "Overall:  50.0%  500 B / 1000 B  Files 2 / 4  ETA 10s"
+
+
+def test_scan_lane_completion_restores_active_source_and_never_counts_scan_offsets() -> None:
+    """ACQUISITION: overlapping source/scan activity cannot clear or multiply source progress."""
+    progress = ProgressReporter(worker_count=2, terminal=False)
+    progress.finish_inventory(SourceInventory(file_count=2, byte_count=1000))
+    progress.updates.put(ProgressUpdate(worker=1, phase="ingesting", path="A.mbox", bytes_done=200, bytes_total=500))
+    progress.updates.put(ProgressUpdate(worker=2, phase="ingesting", path="B.mbox", bytes_done=100, bytes_total=500))
+    progress.updates.put(ProgressUpdate(worker=1, scan_active=True, path="B.mbox", activity_total=50))
+    progress.display("ingesting")
+    assert progress.visible_workers()[0].phase == "scanning"
+    assert progress.visible_workers()[0].path == "B.mbox"
+    assert overall_progress(progress.state, time.monotonic()).bytes_done == 300
+    progress.updates.put(ProgressUpdate(worker=1, phase="ingesting", path="A.mbox", bytes_done=250, bytes_total=500))
+    progress.updates.put(ProgressUpdate(worker=1, scan_active=False))
+    progress.display("ingesting")
+    assert progress.visible_workers()[0].phase == "ingesting"
+    assert progress.visible_workers()[0].path == "A.mbox"
+    assert overall_progress(progress.state, time.monotonic()).bytes_done == 350
 
 
 def test_refresh_index_progress_has_a_bar_and_eta() -> None:

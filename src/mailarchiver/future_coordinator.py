@@ -9,15 +9,78 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
-from concurrent.futures import Future
+from collections import deque
+from collections.abc import Callable, Generator, Iterable
+from concurrent.futures import Future, ThreadPoolExecutor, wait
 from contextvars import Context, ContextVar, copy_context
-from threading import Lock, get_ident
-from typing import cast
+from threading import BoundedSemaphore, Lock, get_ident
+from typing import Self, cast
 
 from pydantic import BaseModel, ConfigDict
 
 WORKER_NUMBER: ContextVar[int | None] = ContextVar("mailfile_worker_number", default=None)
+
+
+class BoundedWorkers:
+    """Stream ordered results with one shared bound across all source generators."""
+
+    def __init__(self, workers: int) -> None:
+        self.pool = ThreadPoolExecutor(max_workers=workers, thread_name_prefix="mailfile")
+        self.capacity = BoundedSemaphore(workers)
+
+    def __enter__(self) -> Self:
+        return self
+
+    def __exit__(self, *_args: object) -> None:
+        self.pool.shutdown(wait=True, cancel_futures=True)
+
+    def map[T, R](self, process: Callable[[T], R], items: Iterable[T], *,
+                  before_read: Callable[[], bool] | None = None) -> Generator[R, None, None]:
+        iterator = iter(items)
+        pending: deque[Future[R]] = deque()
+        exhausted = False
+        discovery_error: BaseException | None = None
+        try:
+            while pending or not exhausted:
+                while not exhausted and self.capacity.acquire(blocking=not pending):
+                    try:
+                        if before_read is not None and not before_read():
+                            self.capacity.release()
+                            exhausted = True
+                            break
+                        item = next(iterator)
+                    except StopIteration:
+                        self.capacity.release()
+                        exhausted = True
+                        break
+                    except Exception as error:
+                        self.capacity.release()
+                        discovery_error = error
+                        exhausted = True
+                        break
+                    except BaseException:
+                        self.capacity.release()
+                        raise
+                    try:
+                        pending.append(self.pool.submit(process, item))
+                    except BaseException:
+                        self.capacity.release()
+                        raise
+                if pending:
+                    future = pending.popleft()
+                    try:
+                        yield future.result()
+                    finally:
+                        self.capacity.release()
+            if discovery_error is not None:
+                raise discovery_error
+        finally:
+            for future in pending:
+                future.cancel()
+                future.add_done_callback(lambda _future: self.capacity.release())
+            # Keep the source future alive while outstanding workers may still
+            # require its owner's publication driver during cooperative stop.
+            wait(pending)
 
 
 class DriverCall(BaseModel):

@@ -56,7 +56,8 @@ platform or release gate has passed. [Future work](plans/README.md) is separate.
   Git provenance and discloses local changes. See [delivery](requirements/DELIVERY.md).
 
 - IMAP workers prioritize missing per-message checkpoints before refreshing saved
-  metadata; interrupted UID gaps remain eligible. See [acquisition](requirements/ACQUISITION.md).
+  metadata; interrupted UID gaps remain eligible. Unicode folders retain their
+  negotiated UTF-8 or legacy modified UTF-7 wire names. See [acquisition](requirements/ACQUISITION.md).
 
 - Imports can suspend and resume without quitting; identity pickers display
   loading and retry feedback. See [desktop](requirements/DESKTOP.md).
@@ -87,6 +88,12 @@ platform or release gate has passed. [Future work](plans/README.md) is separate.
 
 - Freeze all manifest-referenced acquisition adapters; validate local ingestion
   with `make test-frozen-source-plugins` before packaging handoff.
+- Signature display-name recursion retains observed addresses and a diagnostic;
+  failed content jobs do not starve unrelated mail. See [processing](requirements/PROCESSING.md).
+- PST extraction publishes timed progress and uses an inactivity deadline. Single
+  mailbox sources stream bounded parallel scans with ordered publication. Autocomplete
+  cancels stale requests and retains legacy subject-index performance. See
+  [acquisition](requirements/ACQUISITION.md) and [search](requirements/SEARCH.md).
 - Source workers retain thread-bound input handles and return publication requests
   through futures; only their owner commits durable state. Single-worker processor
   waits retain live status heartbeats. See [acquisition](requirements/ACQUISITION.md).
@@ -111,7 +118,9 @@ platform or release gate has passed. [Future work](plans/README.md) is separate.
 
 - Optional local name-linkage comparisons retain private evidence and distinguish
   synthetic accuracy from unlabeled archive scores. Owner review distinguishes
-  non-person flags independently of identity-link judgments; see [processing research](requirements/PROCESSING.md#local-name-linkage-research).
+  non-person flags independently of identity-link judgments; HTML and JSON reports
+  require distinct destinations. Signature phone lists retain separate complete
+  numbers. See [processing research](requirements/PROCESSING.md#local-name-linkage-research).
 
 - Identity picker labels open name searches; count buttons open filtered evidence messages.
   Navigation shows pending/error feedback and targets the clicked row independently of selection.
