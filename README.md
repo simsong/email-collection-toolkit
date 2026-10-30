@@ -15,7 +15,9 @@ _NOTE --- THIS PROGRAM IS UNDER ACTIVE DEVELOPMENT. DO NOT USE OPERATIONALLY UNT
 
 For the macOS drag-to-Applications build, run `make dmg`. Python and GUI
 dependencies, the ClamAV engine and baseline definitions are bundled; the build
-fails if ClamAV is not installed. The target mounts its DMG and
+fails if ClamAV is not installed. The staged app downloads and validates its own
+definitions before final signing; installer builds require network access.
+The target mounts its DMG and
 runs headless self-tests before publishing the local artifact. Visible native
 validation is an explicit local `make check-release` operation.
 See [macOS distribution](doc/MACOS_DISTRIBUTION.md) for installation, test commands,
@@ -265,6 +267,14 @@ mail account or persistent server is required.
 
 ### Runtime configuration
 
+macOS CI and release jobs use `make ci-clamav` to build checksum-pinned ClamAV
+1.5.4 against OpenSSL 3.6.4 under `.tmp/ci-clamav/`, instead of Homebrew's ClamAV
+bottle. The shared action installs build prerequisites only on the hosted runner
+and exports the existing engine/updater/certificate overrides through `GITHUB_ENV`.
+With build prerequisites already installed, `make ci-clamav-check` refreshes the
+project definitions and runs real scanner and packaging tests using that private runtime.
+Windows retains its separately pinned portable runtime.
+
 Use **File → Customizable Default Lists…** for owner/sender defaults, reply-address
 patterns, contact filters and other shared lists. See [Customizable Default Lists](doc/CUSTOMIZABLE_DEFAULT_LISTS.md)
 for all files, personal locations, archive precedence and reset behavior.
@@ -280,6 +290,11 @@ for all files, personal locations, archive precedence and reset behavior.
 | `FQDN` | IMAP tests set `localhost` for the disposable server greeting, avoiding host reverse DNS; unused by the downloader |
 | `SSL_CERT_FILE`, `SSL_CERT_DIR` | Standard TLS trust overrides for private IMAP servers |
 | `CARGO`, `RUST_TARGET_DIR` | Cargo executable and Make-selected build output (default `target/`) |
+| `OPENSSL_DIR`, `OPENSSL_LIB_DIR`, `OPENSSL_INCLUDE_DIR` | CI build script selects its private OpenSSL installation for Rust dependencies |
+| `OPENSSL_NO_VENDOR`, `PKG_CONFIG_PATH` | CI build disables vendored OpenSSL and prioritizes the selected prefix's package metadata |
+| `CARGO_BUILD_JOBS` | CI build bounds native Rust compilation parallelism |
+| `GITHUB_ENV` | GitHub-provided environment file receiving verified native runtime paths for later steps |
+| `DEFINITIONS_DIRECTORY` | New explicit output directory for `make download-definitions`; existing destinations are refused |
 | `ARGS`, `ARCHIVE`, `IMAP_ARGS` | Makefile command parameters; never a password channel |
 
 Legacy `MAILARCHIVER_CLAMD*` variables are unused. Scanning uses embedded
@@ -432,9 +447,12 @@ x64 runtime into `.tmp/clamav-x64`; it installs no service. `make clamav-update`
 fetches and validates definitions in application-specific user storage, outside
 archives. `make clamav-seed SEED_DIRECTORY=...` copies an existing baseline and
 validates it without modifying the source or clearing CDN cooldown state.
-`make freshclam` prepares `etc/clamdb` for packaging. Native runtime and baseline
-definitions are prerequisites for the MSIX builder, which requires and bundles
-the runtime and definitions. Existing `MAILARCHIVER_CLAMAV_LIBRARY`,
+`make freshclam` prepares `etc/clamdb` for development tests. Installer builders
+stage the native runtime and ECT once, run that staged ECT's
+`--update-virus-definitions --directory NEW_DIRECTORY` command, and include the
+verified output before final DMG signing or MSIX assembly. Both installer builds
+require network access; neither downloads through the source checkout.
+Existing `MAILARCHIVER_CLAMAV_LIBRARY`,
 `MAILARCHIVER_FRESHCLAM`, `MAILARCHIVER_CLAMAV_DATABASE`,
 `MAILARCHIVER_CLAMAV_CERTIFICATES`, and `MAILARCHIVER_CLAMAV_UPDATES` override
 the engine, updater, baseline databases, signing-certificate directory, and

@@ -61,7 +61,11 @@ recorded in THIRD_PARTY_NOTICES.md.
   the API does not automatically restart an interrupted import.
 * Development definitions live in ignored `etc/clamdb/`. `make freshclam` seeds
   that directory from an installed database when available, then refreshes it.
-  The DMG bundles that project copy; release CI runs `make freshclam` before building.
+  Both installer builders instead run the staged application's explicit-directory
+  downloader with its bundled engine, updater and certificates. Publish the new
+  export only after native signature loading and clean/EICAR checks; refuse an
+  existing destination and do not read or replace the user's active generations.
+  Retain failed-download cooldown state beside the explicit build output.
   Before running the mounted app self-test, DMG validation records every mounted
   file and symlink in a retained inventory and checks that `libclamav.dylib` is
   present. Release CI also lists every inventory entry in the Actions log before

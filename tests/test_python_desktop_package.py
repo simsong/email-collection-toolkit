@@ -11,9 +11,29 @@ import subprocess
 import sys
 import tomllib
 
+import pytest
+
 from mailarchiver.windows_self_test import WindowsReport, exercise
 
 ROOT = Path(__file__).parents[1]
+
+
+@pytest.mark.parametrize("entry", [(str(ROOT / "scripts/desktop_entry.py"),),
+                                   ("-I", "-m", "mailarchiver.desktop_entry")])
+def test_packaged_downloader_requires_an_explicit_new_directory(tmp_path: Path, entry: tuple[str, ...]) -> None:
+    """Delivery: both shipped entry points dispatch headlessly and refuse existing output."""
+    command = [sys.executable, *entry, "--update-virus-definitions"]
+    missing = subprocess.run(command, text=True, capture_output=True, timeout=15, check=False)
+    assert missing.returncode == 2 and "--directory is required" in missing.stderr
+    destination = tmp_path / "keep-definitions"
+    destination.mkdir()
+    sentinel = destination / "keep"
+    sentinel.write_bytes(b"existing output")
+    existing = subprocess.run([*command, "--directory", str(destination)], cwd=tmp_path,
+                              text=True, capture_output=True, timeout=15, check=False)
+    assert existing.returncode == 1 and "destination already exists" in existing.stderr
+    assert list(destination.iterdir()) == [sentinel] and sentinel.read_bytes() == b"existing output"
+    assert not (tmp_path / ".keep-definitions.clamav-update").exists()
 
 
 def test_packaged_reader_uses_production_search_and_completion(tmp_path: Path) -> None:

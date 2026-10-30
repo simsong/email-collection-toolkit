@@ -235,6 +235,30 @@ def test_retired_reader_is_not_a_release_dependency() -> None:
     assert not (root / "rust/mailsearch-gui").exists()
 
 
+def test_macos_workflows_select_the_same_pinned_antivirus_before_refresh() -> None:
+    """Delivery: branch CI and both packaging paths must use the verified private runtime."""
+    root = Path(__file__).parents[1]
+    for workflow, job in (("continuous-integration.yml", "static-rust"),
+                          ("continuous-integration.yml", "python-browser"),
+                          ("release-candidate.yml", "macos"), ("release.yml", "macos")):
+        configuration = safe_load((root / ".github/workflows" / workflow).read_text())
+        steps = configuration[JOBS][job][STEPS]
+        prepare = [index for index, step in enumerate(steps)
+                   if step.get("uses") == "./.github/actions/prepare-clamav"]
+        assert len(prepare) == 1, (workflow, job)
+        if workflow == "continuous-integration.yml":
+            refresh = next(index for index, step in enumerate(steps) if "make freshclam" in step.get(RUN, ""))
+            assert prepare[0] < refresh, (workflow, job)
+        else:
+            assert not any("make freshclam" in step.get(RUN, "") for step in steps), workflow
+            package = next(index for index, step in enumerate(steps)
+                           if "make dmg" in step.get(RUN, "") or "make release-package-check" in step.get(RUN, ""))
+            assert prepare[0] < package
+        assert not any("brew install clamav" in step.get(RUN, "") for step in steps), (workflow, job)
+    action = safe_load((root / ".github/actions/prepare-clamav/action.yml").read_text())
+    assert action["runs"][STEPS][-1][RUN] == "make ci-clamav"
+
+
 def test_release_workflow_validates_built_distributions() -> None:
     """Requirement: a tag cannot publish a release without artifact smoke validation."""
     workflow = Path(__file__).parents[1] / ".github/workflows/release.yml"

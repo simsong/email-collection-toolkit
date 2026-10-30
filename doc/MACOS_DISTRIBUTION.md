@@ -111,11 +111,13 @@ See [CLI_REFERENCE.md](CLI_REFERENCE.md#check-the-installed-macos-executable) fo
 The application scans with [embedded libclamav](EMBEDDED_CLAMAV.md) and offline
 definitions, with updates under Application Support and refreshed app releases
 at least quarterly. Users may still explicitly import without scanning.
-The DMG bundles libclamav, FreshClam, and the definitions in `etc/clamdb/`.
-Install ClamAV for development, then run `make freshclam`: it seeds the ignored
-project directory from an installed database (normally
-`/opt/homebrew/var/lib/clamav/` on Apple Silicon Homebrew) and updates that copy.
-`make dmg` uses those local definitions; release CI runs `make freshclam` first.
+The DMG bundles libclamav, FreshClam, and definitions downloaded and verified by
+the staged ECT executable. `make dmg` stages the app once, invokes its
+`--update-virus-definitions --directory` command with stable build-local cooldown
+state, adds the verified export and applies the final signature. Network access
+is required for both local and release installer builds. `make freshclam` still
+prepares the ignored `etc/clamdb/` directory for development scanner tests;
+installer builds do not consume that copy.
 The installed app needs no Homebrew installation or resident daemon. Its mounted
 self-test checks real clean/EICAR scans and native dependency paths.
 

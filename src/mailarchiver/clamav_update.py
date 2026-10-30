@@ -5,8 +5,8 @@
 Purpose: Refresh antivirus definitions explicitly or before an ordinary scan session.
 
 How it works:
-Supervise FreshClam, validate candidate signatures by scanning, and atomically select a new
-generation.
+Supervise FreshClam, validate candidate signatures by scanning, and atomically publish a
+generation or an explicitly requested standalone definition directory.
 
 Fundamental dependents:
 
@@ -16,11 +16,14 @@ Fundamental dependents:
 from __future__ import annotations
 
 import argparse
+import ctypes
+import errno
 import importlib
 import logging
 import os
 import shutil
 import subprocess
+import sys
 import tempfile
 from contextlib import contextmanager
 from collections.abc import Callable
@@ -162,6 +165,73 @@ def publish_downloaded_definitions(
                            f"FreshClam: {diagnostics[-4096:]}") from error
 
 
+def run_freshclam(staging: Path, configuration: Path,
+                  status_callback: Callable[[], None] | None = None) -> str:
+    """Share the supervised downloader and failure checks between app and installer updates."""
+    write_freshclam_config(configuration, certificates_path(), checks=0)
+    result = run_owned_command([str(updater_path()), f"--config-file={configuration}",
+        f"--datadir={staging}", "--stdout"], timeout=600, status_callback=status_callback)
+    diagnostics = result.stdout + result.stderr
+    if result.returncode or "cool-down until" in diagnostics:
+        raise RuntimeError(f"Definition update failed ({result.returncode}): {diagnostics[-4096:]}")
+    return diagnostics
+
+
+def publish_definition_directory(staging: Path, destination: Path) -> None:
+    """Atomically publish a directory without replacing even an empty existing destination."""
+    if os.name == "nt":
+        staging.rename(destination)  # Windows rename refuses an existing destination.
+        return
+    native = ctypes.CDLL(None, use_errno=True)
+    if sys.platform == "darwin":
+        rename = native.renamex_np
+        rename.argtypes = [ctypes.c_char_p, ctypes.c_char_p, ctypes.c_uint]
+        result = rename(os.fsencode(staging), os.fsencode(destination), 4)  # RENAME_EXCL
+    elif sys.platform.startswith("linux"):
+        rename = native.renameat2
+        rename.argtypes = [ctypes.c_int, ctypes.c_char_p, ctypes.c_int, ctypes.c_char_p, ctypes.c_uint]
+        result = rename(-100, os.fsencode(staging), -100, os.fsencode(destination), 1)  # AT_FDCWD, RENAME_NOREPLACE
+    else:
+        raise OSError(errno.ENOTSUP, "Exclusive directory publication is unsupported")
+    if result:
+        error = ctypes.get_errno()
+        raise OSError(error, os.strerror(error), str(destination))
+
+
+def download_definitions(destination: Path, *, state_directory: Path | None = None) -> UpdateResult:
+    """Export verified definitions without reading or replacing the user's active generation."""
+    destination = destination.absolute()
+    if destination.exists() or destination.is_symlink():
+        raise ValueError(f"Definition destination already exists: {destination}")
+    state_root = (state_directory or destination.parent / f".{destination.name}.clamav-update").absolute()
+    output_path, state_path = destination.resolve(), state_root.resolve()
+    if output_path.is_relative_to(state_path) or state_path.is_relative_to(output_path):
+        raise ValueError("Definition output and state directories must not overlap")
+    with application_write_activity():
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        with update_lock(state_root):
+            if destination.exists() or destination.is_symlink():
+                raise ValueError(f"Definition destination already exists: {destination}")
+            with tempfile.TemporaryDirectory(prefix=f".{destination.name}-", dir=destination.parent) as temporary:
+                workspace = Path(temporary)
+                staging = workspace / "definitions"
+                staging.mkdir()
+                state = state_root / "freshclam.dat"
+                if state.is_file():
+                    shutil.copyfile(state, staging / state.name)
+                try:
+                    run_freshclam(staging, workspace / "freshclam.conf")
+                finally:
+                    if (staging / state.name).is_file():
+                        shutil.copyfile(staging / state.name, state)
+                definitions = read_definitions(staging, "updated")
+                validate_definitions(definitions)
+                (staging / state.name).unlink(missing_ok=True)
+                publish_definition_directory(staging, destination)
+                return UpdateResult(versions=definitions.versions, published=definitions.daily.published,
+                                    directory=destination)
+
+
 def refresh_definitions(*, status_callback: Callable[[], None] | None = None) -> UpdateResult:
     root = update_root()
     with application_write_activity(), update_lock(root):
@@ -180,16 +250,12 @@ def refresh_definitions(*, status_callback: Callable[[], None] | None = None) ->
             if state.is_file():
                 shutil.copyfile(state, staging / state.name)
             configuration = workspace / "freshclam.conf"
-            write_freshclam_config(configuration, certificates_path(), checks=0)
             try:
-                result = run_owned_command([str(updater_path()), f"--config-file={configuration}",
-                    f"--datadir={staging}", "--stdout"], timeout=600, status_callback=status_callback)
+                diagnostics = run_freshclam(staging, configuration, status_callback)
             finally:
                 if (staging / "freshclam.dat").is_file():
                     shutil.copyfile(staging / "freshclam.dat", state)
-            if result.returncode or "cool-down until" in (result.stdout + result.stderr):
-                raise RuntimeError(f"Definition update failed ({result.returncode}): {(result.stdout + result.stderr)[-4096:]}")
-            return publish_downloaded_definitions(staging, root, baseline, result.stdout + result.stderr,
+            return publish_downloaded_definitions(staging, root, baseline, diagnostics,
                                                  status_callback=status_callback)
 
 
@@ -240,16 +306,30 @@ def _refresh_development() -> UpdateResult:
     return UpdateResult(versions=definitions.versions, published=definitions.daily.published, directory=directory)
 
 
-def main() -> None:
+def main(argv: list[str] | None = None, *, require_directory: bool = False) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--seed", type=Path, help="verify and copy an existing local definition set into application storage")
-    parser.add_argument("--development", action="store_true", help="update etc/clamdb for development and DMG builds")
-    args = parser.parse_args()
-    if args.seed is not None and args.development:
-        parser.error("--seed and --development are mutually exclusive")
-    result = seed_definitions(args.seed) if args.seed is not None else refresh_development() if args.development else refresh_definitions()
+    modes = parser.add_mutually_exclusive_group()
+    modes.add_argument("--seed", type=Path, help="verify and copy an existing local definition set into application storage")
+    modes.add_argument("--development", action="store_true", help="update etc/clamdb for development")
+    modes.add_argument("--directory", type=Path, help="download verified definitions into a new explicit directory")
+    parser.add_argument("--state-directory", type=Path, help="retain downloader cooldown state in this separate directory")
+    args = parser.parse_args(argv)
+    if require_directory and args.directory is None:
+        parser.error("--directory is required for the packaged definition downloader")
+    if args.state_directory is not None and args.directory is None:
+        parser.error("--state-directory requires --directory")
+    try:
+        if args.directory is not None:
+            result = download_definitions(args.directory, state_directory=args.state_directory)
+        elif args.seed is not None:
+            result = seed_definitions(args.seed)
+        else:
+            result = refresh_development() if args.development else refresh_definitions()
+    except (OSError, ValueError, RuntimeError, EOFError) as error:
+        parser.exit(1, f"Virus definition update failed: {error}\n")
     print(result.model_dump_json(indent=2))
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

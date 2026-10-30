@@ -38,6 +38,15 @@ test-updater-supervisor:
 test-definition-state:
 	uv run --locked pytest -q tests/test_clamav_definitions.py
 
+# DEFINITIONS_DIRECTORY is a new explicit output, never an archive or user update store.
+.PHONY: download-definitions test-definition-download
+download-definitions:
+	@test -n "$(DEFINITIONS_DIRECTORY)" || { echo 'Specify DEFINITIONS_DIRECTORY=/new/output/path'; exit 2; }
+	uv run --locked python scripts/desktop_entry.py --update-virus-definitions --directory "$(DEFINITIONS_DIRECTORY)"
+
+test-definition-download:
+	uv run --locked pytest -q tests/test_clamav_definitions.py tests/test_python_desktop_package.py tests/test_packaging.py tests/test_website_scripts.py
+
 # Automatic refresh tests use local connectivity fixtures, never a public CDN.
 # MAILARCHIVER_CLAMAV_DATABASE pins explicit test/development definitions.
 .PHONY: test-definition-refresh
@@ -898,7 +907,17 @@ test-plugin-inventory: ruff
 	uv run --locked pytest -q tests/test_plugin_loader.py
 	uv run --locked pytest -q --browser chromium e2e_tests/test_ingest_verify.py -k about_window_displays
 
-.PHONY: test-clamav clamav-update freshclam
+# CI uses GITHUB_ENV to select the checkout-local engine, updater and certificates.
+# OPENSSL_DIR/LIB_DIR/INCLUDE_DIR and OPENSSL_NO_VENDOR pin Rust's OpenSSL discovery.
+# PKG_CONFIG_PATH and CARGO_BUILD_JOBS select the same build prefix and bound parallelism.
+.PHONY: ci-clamav ci-clamav-check test-clamav clamav-update freshclam
+ci-clamav:
+	bash scripts/ci_clamav.sh
+
+ci-clamav-check:
+	bash -n scripts/ci_clamav.sh
+	. "$(CURDIR)/.tmp/ci-clamav/environment.sh" && $(MAKE) freshclam && $(MAKE) test-clamav test-packaging
+
 test-clamav:
 	uv run --locked pytest -q tests/test_scanner.py tests/test_clamav_definitions.py
 

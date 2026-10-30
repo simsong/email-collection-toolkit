@@ -183,6 +183,21 @@ the source archive and checksum the final image. Missing protected signing or
 notarization credentials must fail release assembly; an unsigned development
 DMG must never be published as a release. The archive extension is declared in
 the bundle's document-type metadata.
+macOS branch CI, release-candidate and tag jobs must authenticate pinned
+ClamAV 1.5.4 and OpenSSL 3.6.4 source archives and build both the engine and
+FreshClam against that OpenSSL installation. Verify the resulting native linkage
+before selecting the runtime; definition signature checks and clean/EICAR acceptance
+remain mandatory. Build artifacts stay inside the checkout, without services or
+system runtime replacement. Windows retains its existing pinned portable runtime.
+Both DMG and MSIX builds must stage ECT once and use that staged application's
+`--update-virus-definitions --directory NEW_DIRECTORY` command to acquire baseline
+definitions. Build with no preexisting baseline, reject inherited host scanner
+overrides, validate signatures and real clean/EICAR verdicts, then bundle only the
+verified export. Add definitions before final app sealing/MSIX assembly and signing.
+Missing connectivity or failed validation must fail the build. Neither platform
+may substitute a source-checkout update for this packaged execution.
+Retain downloader cooldown state across failed build cleanup/retries, outside
+disposable workspaces. Atomic publication must refuse a concurrently created output.
 The bundled ClamAV engine and updater must load against the matching OpenSSL
 libraries from their ClamAV installation, not an older same-named library
 selected from another Python dependency. The mounted DMG self-test must fail

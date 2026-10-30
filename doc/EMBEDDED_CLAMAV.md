@@ -77,13 +77,15 @@ The DMG bundle contains the engine, one-shot FreshClam updater, main,
 daily and bytecode definition archives, and signature trust material required
 by that engine. Builds must verify authenticity, compatibility, hashes and
 successful scanning. Keep large definition artifacts in the build cache,
-outside Git history. The builder uses the project copy in etc/clamdb.
+outside Git history. Each builder stages the application once, then runs its
+`--update-virus-definitions --directory NEW_DIRECTORY` command using the staged
+runtime. Verified definitions are added before final signing or MSIX assembly.
 
 Run make freshclam to seed etc/clamdb from the installed database when available
 and update it in place. On Apple Silicon Homebrew, the seed is normally
 /opt/homebrew/var/lib/clamav. Copy the .cvd/.cld files and .sign files together.
-Release CI runs make freshclam before make dmg; ordinary local DMG builds use
-the existing project copy and do not require a network refresh.
+`make freshclam` remains a development workflow. DMG and MSIX builds require
+network access and run the staged ECT downloader rather than this source command.
 
 About includes Update virus definitions, also exposed through make clamav-update.
 Updates use an explicit temporary configuration, never the host's installed

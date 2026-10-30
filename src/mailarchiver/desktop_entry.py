@@ -5,7 +5,7 @@
 Purpose: Activate the isolated Python desktop in Windows packages.
 
 How it works:
-Dispatch installed self-tests or normal startup through the shared Python GUI entry point.
+Dispatch installed self-tests, headless definition exports or normal Python GUI startup.
 
 Fundamental dependents:
 
@@ -22,6 +22,9 @@ import sys
 def main() -> int:
     """Dispatch explicit package checks before loading the native GUI."""
     multiprocessing.freeze_support()
+    if len(sys.argv) > 1 and sys.argv[1] == "--update-virus-definitions":
+        from .clamav_update import main as update_main
+        return update_main(sys.argv[2:], require_directory=True)
     if len(sys.argv) == 3 and sys.argv[1] == "--msix-test":
         from .windows_self_test import exercise
         exercise(Path(sys.argv[2]), installed=True)

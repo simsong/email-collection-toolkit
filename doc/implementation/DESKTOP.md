@@ -745,7 +745,8 @@ without stdlib newline translation. Temporary input files close before reopening
 The initial Windows payload omitted ClamAV. Resource discovery now checks the
 private runtime, branch-local portable runtime and conventional Windows install.
 The updater supervisor uses a kill-on-close Windows job instead of POSIX groups.
-The MSIX builder now requires the native runtime and baseline definitions.
+The MSIX builder requires the native runtime, then uses staged Windows ECT to
+download and verify baseline definitions before MakeAppx assembly.
 Its runtime-license gate recognizes clr_loader's omitted metadata label only
 when the shipped full MIT text matches the reviewed SHA-256; unknown texts fail.
 Windows scanner startup uses an isolated interpreter that loads libclamav before

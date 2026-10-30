@@ -73,8 +73,8 @@ jobs:
           python-version: "3.12"
       - name: Set up uv
         uses: astral-sh/setup-uv@v10.0.1
-      - name: Install ClamAV
-        run: brew install clamav
+      - name: Build pinned ClamAV and OpenSSL
+        uses: ./.github/actions/prepare-clamav
       - name: Install dependencies
         run: uv sync --locked --all-groups
       - name: Refresh project virus definitions
@@ -101,8 +101,10 @@ jobs:
           python-version: "3.12"
       - name: Set up uv
         uses: astral-sh/setup-uv@v10.0.1
-      - name: Install ClamAV and PDF tools
-        run: brew install clamav poppler
+      - name: Install PDF tools
+        run: brew install poppler
+      - name: Build pinned ClamAV and OpenSSL
+        uses: ./.github/actions/prepare-clamav
       - name: Install dependencies
         run: uv sync --locked --all-groups
       - name: Verify real Sparkle release signer

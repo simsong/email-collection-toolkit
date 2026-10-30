@@ -6,6 +6,22 @@ Entries describe their recorded revisions. For current behavior use the
 [user manual](USER_MANUAL.md) and [CLI reference](CLI_REFERENCE.md). Retired
 Rust delivery plans and historical package checks are not current acceptance.
 
+## Packaged definition downloads on both installer platforms
+
+Expose a headless explicit-directory definition downloader in both ECT entry
+points. DMG and Windows MSIX builders stage ECT once and use that staged runtime
+to download, verify signatures and pass clean/EICAR checks before including the
+definitions and applying final signatures. Existing output and user updates remain
+untouched; failure blocks packaging. Advance the alpha for installer validation.
+
+## Reproducible macOS antivirus build
+
+Build ClamAV 1.5.4 against explicitly selected OpenSSL 3.6.4 for macOS CI,
+candidate validation and release packaging. Authenticate both source archives,
+verify the linked runtime and preserve definition signature checks and scan tests.
+Windows keeps its existing portable runtime. Advance the alpha for this CI-only
+dependency fix; application behavior is unchanged.
+
 ## PST liveness, mailbox concurrency and search responsiveness
 
 The follow-up alpha preserves network-source suspension boundaries: finish the

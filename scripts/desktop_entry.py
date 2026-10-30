@@ -17,6 +17,9 @@ import sys
 def main() -> int:
     """Keep headless diagnostics independent of Cocoa and user preferences."""
     multiprocessing.freeze_support()
+    if len(sys.argv) > 1 and sys.argv[1] == "--update-virus-definitions":
+        from mailarchiver.clamav_update import main as update_main
+        return update_main(sys.argv[2:], require_directory=True)
     if len(sys.argv) > 1 and sys.argv[1] == "--msix-test":
         from mailarchiver.windows_self_test import main as windows_test_main
         return windows_test_main()

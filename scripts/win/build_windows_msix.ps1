@@ -4,14 +4,13 @@
 # Python's isolated path file excludes checkout paths and user-installed modules.
 # Assembly never installs certificates or packages; separate CI validates those.
 # WebView2 remains external; the Python entry point diagnoses a missing runtime.
-# The native scanner and baseline definitions must be present in every package.
+# The staged Windows ECT downloads and verifies its baseline before packaging.
 param(
     [ValidateSet('x64')][string]$Architecture = 'x64',
     [switch]$CreateUpgradeTest,
     [string]$PythonEnvironment,
     [string]$ClamavDirectory = '.tmp/clamav-x64',
     [string]$WinSparkleDirectory = '.tmp/winsparkle',
-    [string]$DefinitionsDirectory = 'etc/clamdb',
     [string]$OutputDirectory = 'dist/windows-msix-test',
     [string]$Publisher = 'CN=ECT Local Test',
     [string]$PublisherDisplayName = 'ECT Local Test',
@@ -32,12 +31,6 @@ foreach ($name in @('libclamav.dll', 'freshclam.exe')) {
     if (-not (Test-Path -LiteralPath (Join-Path $ClamavDirectory $name) -PathType Leaf)) {
         throw "Missing Windows ClamAV runtime file: $ClamavDirectory/$name"
     }
-}
-foreach ($name in @('main', 'daily', 'bytecode')) {
-    $databases = @('.cvd', '.cld') | Where-Object {
-        Test-Path -LiteralPath (Join-Path $DefinitionsDirectory ($name + $_)) -PathType Leaf
-    }
-    if (@($databases).Count -ne 1) { throw "Expected one $name.cvd or $name.cld in $DefinitionsDirectory" }
 }
 . (Join-Path $PSScriptRoot 'sdk.ps1')
 if (-not $SdkDirectory) { $SdkDirectory = Get-WindowsSdkTools }
@@ -76,7 +69,28 @@ Copy-Item -LiteralPath (Join-Path $root 'gui') -Destination (Join-Path $privateP
 Copy-Item -LiteralPath (Join-Path $root 'LICENSE') -Destination (Join-Path $privatePython 'Lib/gui/LICENSE')
 $clamav = Join-Path $privatePython 'clamav'
 Copy-Item -LiteralPath $ClamavDirectory -Destination $clamav -Recurse
-Copy-Item -LiteralPath $DefinitionsDirectory -Destination (Join-Path $clamav 'definitions') -Recurse
+if (Test-Path -LiteralPath (Join-Path $clamav 'definitions')) {
+    throw 'The staged native runtime must not contain a preexisting definition baseline.'
+}
+$definitions = Join-Path $OutputDirectory 'downloaded-definitions'
+$definitionState = Join-Path $root '.tmp/windows-definition-state'
+$runtimeOverrides = @('MAILARCHIVER_CLAMAV_LIBRARY', 'MAILARCHIVER_FRESHCLAM',
+    'MAILARCHIVER_CLAMAV_CERTIFICATES', 'MAILARCHIVER_CLAMAV_DATABASE', 'MAILARCHIVER_CLAMAV_UPDATES')
+$savedOverrides = @{}
+foreach ($name in $runtimeOverrides) {
+    $savedOverrides[$name] = [Environment]::GetEnvironmentVariable($name)
+    [Environment]::SetEnvironmentVariable($name, $null, 'Process')
+}
+try {
+    # This isolated interpreter and module are the Windows ECT that will ship.
+    & (Join-Path $privatePython 'python.exe') -I -m mailarchiver.desktop_entry --update-virus-definitions --directory $definitions --state-directory $definitionState *> (Join-Path $OutputDirectory 'definitions-download.log')
+    if ($LASTEXITCODE) { throw 'Packaged Windows ECT definition download or validation failed; see definitions-download.log.' }
+} finally {
+    foreach ($name in $runtimeOverrides) {
+        [Environment]::SetEnvironmentVariable($name, $savedOverrides[$name], 'Process')
+    }
+}
+Copy-Item -LiteralPath $definitions -Destination (Join-Path $clamav 'definitions') -Recurse
 Copy-Item -LiteralPath $WinSparkleDirectory -Destination (Join-Path $privatePython 'winsparkle') -Recurse
 foreach ($name in @('LICENSE','COPYRIGHT','THIRD_PARTY_NOTICES.md')) {
     Copy-Item -LiteralPath (Join-Path $root $name) -Destination $stage
