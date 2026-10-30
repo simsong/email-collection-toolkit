@@ -19,6 +19,7 @@ from time import monotonic, sleep
 import webview
 
 from mailarchiver.application import ApplicationController, ApplicationPreferencesStore, IngestJob
+from mailarchiver.clamav_definitions import UPDATE_ENV, UPDATER_ENV
 from mailarchiver.gui_app import GUI_DIRECTORY, PyWebViewApplication, configure_macos_application, install_macos_document_events, macos_import_picker, macos_owner_rules
 from mailarchiver.loopback import LoopbackAssetServer
 from mailarchiver.identity import APPLICATION_NAME
@@ -74,6 +75,53 @@ def close_window(window: webview.Window) -> None:
     assert drain_bridge_calls(), "Native bridge callback did not finish before window closure"
     window.destroy()
     assert window.events.closed.wait(5)
+
+
+def check_antivirus_menu(application: PyWebViewApplication, about: webview.Window) -> None:
+    """Desktop: native menu dispatch runs the shared updater and displays retained-data failure."""
+    root = Path(os.environ[PROBE_PREFERENCES_ENV]).parent
+    settings = {UPDATE_ENV: str(root / "antivirus-updates"), UPDATER_ENV: str(root / "missing-freshclam")}
+    saved = {key: os.environ.get(key) for key in settings}
+    os.environ.update(settings)
+    handled, errors = Event(), []
+
+    def invoke() -> None:
+        try:
+            native = NSApplication.sharedApplication()
+            menu = native.mainMenu().itemAtIndex_(0).submenu()
+            titles = [item.title() for item in menu.itemArray()]
+            index = titles.index("Check for Program Updates")
+            assert titles[index + 1] == "Check for Anti-Virus Updates", titles
+            assert "Check for Updates…" not in titles, titles
+            item = menu.itemAtIndex_(index + 1)
+            for _ in range(8):
+                assert native.sendAction_to_from_(item.action(), item.target(), item)
+        except Exception:  # pylint: disable=broad-exception-caught
+            errors.append(traceback.format_exc())
+        finally:
+            handled.set()
+
+    try:
+        AppHelper.callAfter(invoke)
+        assert handled.wait(5) and not errors, errors
+        assert evaluate_async(about, """(async () => {
+            const button = document.getElementById('update-definitions');
+            const status = document.getElementById('definition-update-status');
+            const deadline = Date.now() + 5000;
+            while (!status.textContent.includes('Update failed') && Date.now() < deadline)
+                await new Promise(resolve => setTimeout(resolve, 20));
+            return button.textContent === 'Check for Anti-Virus Updates' && !button.disabled &&
+                status.textContent.includes('Existing definitions were retained.');
+        })()""") is True
+        assert application._about_visible  # pylint: disable=protected-access
+        assert webview.windows == [about], "Anti-virus command duplicated About"
+        assert not (root / "antivirus-updates/active.json").exists()
+    finally:
+        for key, value in saved.items():
+            if value is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = value
 
 
 def check_reprocess_menu(application: PyWebViewApplication, api) -> None:
@@ -285,6 +333,7 @@ def main() -> None:
 
             AppHelper.callLater(0.3, inspect_reopened)
             assert reopened.wait(5), "About menu reopening check timed out"
+            check_antivirus_menu(application, about)
             # Disabling command-line reinterpretation must retain genuine Finder opens.
             native = NSApplication.sharedApplication()
             AppHelper.callAfter(native.delegate().application_openFiles_, native, [str(archive)])

@@ -160,7 +160,7 @@ def choose_definitions(baseline: DefinitionSet | None, root: Path) -> Definition
     manifest = root / "active.json"
     if not manifest.is_file():
         if baseline is None:
-            raise ValueError("Virus definitions are not installed. Choose Update virus definitions in About.")
+            raise ValueError("Virus definitions are not installed. Choose Check for Anti-Virus Updates in About.")
         return DefinitionSelection(definitions=baseline)
     try:
         active = ActiveDefinitions.model_validate_json(manifest.read_bytes())
@@ -172,7 +172,7 @@ def choose_definitions(baseline: DefinitionSet | None, root: Path) -> Definition
         updated = read_definitions(directory, "updated")
     except (OSError, ValueError, OverflowError) as error:
         if baseline is None:
-            raise ValueError(f"Updated definitions unavailable: {error}. Choose Update virus definitions in About.") from error
+            raise ValueError(f"Updated definitions unavailable: {error}. Choose Check for Anti-Virus Updates in About.") from error
         return DefinitionSelection(definitions=baseline, warning=f"Updated definitions unavailable; using baseline: {error}")
     return DefinitionSelection(definitions=updated if baseline is None or updated.daily.version > baseline.daily.version else baseline)
 

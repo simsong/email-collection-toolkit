@@ -1592,6 +1592,8 @@ class PyWebViewApplication:
         self._native_child_ids: dict[str, str] = {}
         self._about_api = AboutApi(self)
         self._about_window: Any = None
+        self._about_lock = RLock()
+        self._antivirus_task: Future[None] | None = None
         self._license_window: Any = None
         self._processor_graph_window: Any = None
         self._reader_window: Any = None
@@ -1795,49 +1797,68 @@ class PyWebViewApplication:
 
     def create_about_window(self, *, hidden: bool = False) -> None:
         """Retain the application anchor; show health on an explicit About request."""
-        if self._connectivity is None:
-            self._connectivity = ConnectivityMonitor()
-        if self._about_window is not None:
-            self._about_visible = True
-            self._about_window.restore()
-            self._about_window.show()
-            self._refresh_menus()
-            return
-        window = webview.create_window(
-            f"About {APPLICATION_NAME}",
-            self.asset_url("about.html"),
-            js_api=WindowBridge(self._about_api, ("status", "update_definitions", "show_processor_graph")),
-            width=620,
-            height=620,
-            hidden=hidden,
-            min_size=(480, 420),
-            text_select=True,
-            menu=self.menu(),
-        )
-        if window is None:
-            raise RuntimeError("pywebview failed to create a window")
-        self._about_window = window
-        self._about_visible = not hidden
-        window.events.shown += lambda *_args: self._refresh_menus()
+        self._ensure_about_window(hidden=hidden)
 
-        def closing(*_args: object) -> bool:
-            if self._quitting or sys.platform == "win32":
-                return True
-            # Keep a hidden native window so closing the last visible window does
-            # not end pywebview's event loop or remove File/New/Open and About.
-            self._about_visible = False
-            window.hide()
-            self._refresh_menus()
-            return False
+    def _ensure_about_window(self, *, hidden: bool = False) -> webview.Window:
+        """Serialize About creation without holding the general application lock across native UI calls."""
+        with self._about_lock:
+            if self._connectivity is None:
+                self._connectivity = ConnectivityMonitor()
+            if self._about_window is not None and not self._about_window.events.closed.is_set():
+                self._about_visible = True
+                self._about_window.restore()
+                self._about_window.show()
+                self._refresh_menus()
+                return self._about_window
+            window = webview.create_window(
+                f"About {APPLICATION_NAME}",
+                self.asset_url("about.html"),
+                js_api=WindowBridge(self._about_api, ("status", "update_definitions", "show_processor_graph")),
+                width=620,
+                height=620,
+                hidden=hidden,
+                min_size=(480, 420),
+                text_select=True,
+                menu=self.menu(),
+            )
+            if window is None:
+                raise RuntimeError("pywebview failed to create a window")
+            self._about_window = window
+            self._about_visible = not hidden
+            window.events.shown += lambda *_args: self._refresh_menus()
 
-        def closed(*_args: object) -> None:
-            self._about_window = None
-            self._about_visible = False
-            self._refresh_menus()
+            def closing(*_args: object) -> bool:
+                if self._quitting or sys.platform == "win32":
+                    return True
+                # Keep a hidden native window so closing the last visible window does
+                # not end pywebview's event loop or remove File/New/Open and About.
+                self._about_visible = False
+                window.hide()
+                self._refresh_menus()
+                return False
 
-        window.events.closing += closing
-        window.events.closed += closed
-        self._refresh_menus()
+            def closed(*_args: object) -> None:
+                with self._about_lock:
+                    if self._about_window is not window:
+                        return
+                    self._about_window = None
+                    self._about_visible = False
+                self._refresh_menus()
+
+            window.events.closing += closing
+            window.events.closed += closed
+            self._refresh_menus()
+            return window
+
+    def check_antivirus_updates(self) -> None:
+        """Coalesce pending commands and dispatch through the captured, shared About window."""
+        def check() -> None:
+            window = self._ensure_about_window()
+            window.evaluate_js("void updateDefinitions();")
+
+        with self._lock:
+            if self._antivirus_task is None or self._antivirus_task.done():
+                self._antivirus_task = self._submit_task("Anti-virus update check", check)
 
     def show_processor_graph(self) -> bool:
         """Open or focus one read-only graph window using the current About registry."""
@@ -2949,7 +2970,8 @@ class PyWebViewApplication:
             appkit = import_module("AppKit")
             for offset, (title, action, key) in enumerate((
                 ("Preferences…", "showUpdatePreferences:", ","),
-                ("Check for Updates…", "checkForUpdates:", ""),
+                ("Check for Program Updates", "checkForUpdates:", ""),
+                ("Check for Anti-Virus Updates", "checkForAntivirusUpdates:", ""),
             ), 1):
                 item = appkit.NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(title, action, key)
                 item.setTarget_(BrowserView.app.delegate())
@@ -3069,7 +3091,8 @@ def application_menu(application: PyWebViewApplication) -> list[Menu]:
                             MenuAction("Ingests", application.open_active_ingest_window),
                             *application.window_menu_items()]),
             Menu("Help", [*help_items, MenuSeparator(), MenuAction("About", application.create_about_window),
-                          MenuAction("Check for Updates…", application.updates.check),
+                          MenuAction("Check for Program Updates", application.updates.check),
+                          MenuAction("Check for Anti-Virus Updates", application.check_antivirus_updates),
                           MenuAction("Preferences…", application.show_update_preferences)]),
         ]
     file_items.extend(
@@ -3167,6 +3190,9 @@ def install_macos_document_events(application: PyWebViewApplication) -> None:
 
         def checkForUpdates_(self, _sender):
             application.updates.check()
+
+        def checkForAntivirusUpdates_(self, _sender):
+            application.check_antivirus_updates()
 
         def showMailArchiverAbout_(self, _sender):
             application._submit_task("About window", application.create_about_window)

@@ -36,10 +36,10 @@ Archive creation, importing, reading and search use the shared Python services
 and webview interface. The package bundles ClamAV; virus definitions are stored
 under the user's Local AppData, outside .mailarchive folders. This preview has
 a separate package identity and does not replace the historical Rust preview.
-WinSparkle provides Check for Updates and Update Settings in the Help menu.
+Help provides Check for Program Updates, Check for Anti-Virus Updates and
+Preferences. Anti-virus updates open About and use its verified definition updater.
 A complete updater-driven Python package upgrade has not yet been validated,
-and the published feed has no Python Windows release; install signed previews
-manually until a compatible update is published.
+although signed previews are available for manual installation.
 
 Files: base.msixbundle is the only installer; local-test.cer is its public
 certificate; sha256.json contains checksums. No upgrade fixture is needed

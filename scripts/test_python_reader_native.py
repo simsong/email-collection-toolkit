@@ -12,6 +12,7 @@ from collections.abc import Callable
 import faulthandler
 from importlib import import_module
 import json
+import os
 from pathlib import Path
 import subprocess
 import sys
@@ -22,12 +23,70 @@ from time import monotonic
 from pydantic import BaseModel
 
 from mailarchiver.reader_fixture import NATIVE_DESKTOP_TIMEOUT, RAW_MESSAGE, check_reader, inventory
+from mailarchiver.clamav_definitions import UPDATE_ENV, UPDATER_ENV
 
 
 class DesktopResult(BaseModel):
     passed: bool
     error: str | None = None
     phase: str = "startup"
+
+
+def check_windows_antivirus_menu(application, search, evaluate, progress: Callable[[str], None], output: Path) -> None:
+    """Cold and reopened Windows menu bursts retain one About and the existing definitions."""
+    system = import_module("System")
+    forms = import_module("System.Windows.Forms")
+    webview = import_module("webview")
+    settings = {UPDATE_ENV: str(output / "antivirus-updates"), UPDATER_ENV: str(output / "missing-freshclam")}
+    saved = {key: os.environ.get(key) for key in settings}
+    os.environ.update(settings)
+    try:
+        for phase in ("cold", "reopened"):
+            progress(f"Windows anti-virus menu ({phase})")
+            if application._about_window is not None and not application._about_window.events.closed.is_set():
+                raise AssertionError("Anti-virus cold-window acceptance requires no existing About")
+
+            def burst() -> None:
+                strips = [control for control in search.native.Controls if isinstance(control, forms.MenuStrip)]
+                if len(strips) != 1 or strips[0].IsDisposed:
+                    raise AssertionError("Windows anti-virus command requires one live native menu")
+                heading = next(heading for heading in strips[0].Items if str(heading.Text) == "Help")
+                item = next(item for item in heading.DropDownItems if str(item.Text) == "Check for Anti-Virus Updates")
+                if item.IsDisposed or not item.Enabled or item.Owner != heading.DropDown:
+                    raise AssertionError("Windows anti-virus command is detached, disposed or disabled")
+                for _ in range(8):
+                    item.PerformClick()
+
+            search.native.Invoke(system.Action(burst))
+            deadline = monotonic() + 20
+            about = None
+            while monotonic() < deadline:
+                about = application._about_window
+                if about is not None and not about.events.closed.is_set():
+                    break
+                Event().wait(0.025)
+            if about is None or about.events.closed.is_set() or not about.events.loaded.wait(20):
+                raise TimeoutError("Anti-virus command did not create and load About")
+            answer = evaluate("(async () => { const deadline=Date.now()+10000; "
+                              "const status=document.getElementById('definition-update-status'); "
+                              "while (!status.textContent.includes('Update failed') && Date.now()<deadline) "
+                              "await new Promise(resolve=>setTimeout(resolve,25)); "
+                              "return status.textContent.includes('Existing definitions were retained.') && "
+                              "!document.getElementById('update-definitions').disabled && "
+                              "document.getElementById('update-definitions').textContent === 'Check for Anti-Virus Updates'; })()", about)
+            if not answer or not application._about_visible or (output / "antivirus-updates/active.json").exists():
+                raise AssertionError("Windows anti-virus menu did not report a retained-data update failure")
+            if [window for window in webview.windows if window.title.startswith("About ")] != [about]:
+                raise AssertionError("Repeated anti-virus commands created duplicate About windows")
+            about.destroy()
+            if not about.events.closed.wait(20):
+                raise TimeoutError("Anti-virus About did not close")
+    finally:
+        for key, value in saved.items():
+            if value is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = value
 
 
 def check_windows_preferences(application, evaluate, progress: Callable[[str], None]) -> None:
@@ -133,7 +192,8 @@ def desktop_check(output: Path) -> None:
         if not application.updates.status.available:
             raise AssertionError(application.updates.status.detail)
     progress("Opening synthetic archive")
-    application.create_about_window(hidden=True)
+    if sys.platform != "win32":
+        application.create_about_window(hidden=True)
     # Requirement: a file chosen inside a collection opens the enclosing document.
     api = application.open_document(archive / "archive.sqlite3")
 
@@ -176,9 +236,12 @@ def desktop_check(output: Path) -> None:
                 if len(menus) != 1:
                     raise AssertionError("Reader accumulated native menu strips")
                 labels = [str(item.Text) for heading in menus[0].Items for item in heading.DropDownItems]
-                if not {"New", "Import…", "Document Options…", "Check for Updates…", "Preferences…",
+                if not {"New", "Import…", "Document Options…", "Check for Program Updates", "Preferences…",
                         "Reprocess Saved Mail…"}.issubset(labels):
                     raise AssertionError("Native Windows creation/import actions are missing")
+                if labels[labels.index("Check for Program Updates") + 1] != "Check for Anti-Virus Updates":
+                    raise AssertionError("Native Windows anti-virus command must follow program updates")
+                check_windows_antivirus_menu(application, api.window, evaluate, progress, output)
                 check_windows_preferences(application, evaluate, progress)
                 progress("Windows clipboard")
                 # Save and restore clipboard contents within the UI thread, never log them.

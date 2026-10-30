@@ -220,8 +220,10 @@ def exercise_gui(archive: Path, directory: Path, report: SelfTestReport) -> None
                     preferences_item = application_menu.itemWithTitle_("Preferences…")
                     if preferences_item is None or preferences_item.keyEquivalent() != ",":
                         raise AssertionError("Command-comma is not bound to Updates preferences")
-                    if application_menu.itemWithTitle_("Check for Updates…") is None:
-                        raise AssertionError("Native update-check command is missing")
+                    titles = [item.title() for item in application_menu.itemArray()]
+                    program_index = titles.index("Check for Program Updates")
+                    if titles[program_index + 1] != "Check for Anti-Virus Updates":
+                        raise AssertionError("Native anti-virus command must follow program updates")
                     build_key = "CFBundleVersion"
                     if not foundation.NSBundle.mainBundle().infoDictionary()[build_key].isdigit():
                         raise AssertionError("Cocoa replaced the numeric Sparkle build version")

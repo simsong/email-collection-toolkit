@@ -142,6 +142,16 @@ this edit-validation veto. Browser acceptance checks auto-save and close flushin
 `make test-python-reader-native` exercises the actual Windows title-bar Close and
 reopen path during package CI.
 
+Native menus place **Check for Anti-Virus Updates** directly below **Check for
+Program Updates**. `check_antivirus_updates` coalesces pending tracked commands,
+serializes About creation and invokes the captured window's existing JavaScript
+update action after its bridge is ready. A closed window clears only its own
+registration. The button disables duplicate requests and retains shared progress
+and failure feedback. Windows native acceptance starts without About, dispatches
+bursts of real menu clicks, closes About and repeats the cold-window check.
+`make test-native-application` dispatches the real Cocoa command against an unavailable
+fixture updater; `make test-clamav-gui` checks the About button and retained definitions.
+
 `application_menu` adds the shared Help destinations using the system browser
 adapter, with Windows' existing About/update actions retained. `show_license`
 reuses a selectable local window containing escaped, complete GPL text, without
@@ -771,7 +781,8 @@ reservation with macOS Sparkle. A private tokenized loopback gateway validates
 complete feed signatures and selects only the Python x64 package identity.
 The SDK handles installer verification and confirmation; the app schedules daily
 checks in installed builds. Source launches permit manual checks only and refuse
-installer execution. Help contains Check for Updates and Update Settings.
+installer execution. Help contains Check for Program Updates, Check for Anti-Virus
+Updates and Preferences.
 Actual SDK initialization and signed-feed filtering pass focused tests; an
 end-to-end signed Python package upgrade remains unvalidated. The published feed
 does not yet contain a Python Windows release. Native file drag remains unimplemented.

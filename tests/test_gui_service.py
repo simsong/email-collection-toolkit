@@ -441,10 +441,14 @@ def test_gui_application_uses_the_source_controlled_rainbow_icon() -> None:
     assert icon.is_file()
 
 
-def test_native_menus_route_through_the_application_controller(tmp_path: Path) -> None:
+@pytest.mark.parametrize("platform", ["darwin", "win32"])
+def test_native_menus_route_through_the_application_controller(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, platform: str,
+) -> None:
     """Requirement: native menu callbacks resolve active state instead of capturing one GuiApi."""
     controller = ApplicationController(ApplicationPreferencesStore(tmp_path / "preferences.json"))
     application = PyWebViewApplication(controller)
+    monkeypatch.setattr(sys, "platform", platform)
 
     menus = application_menu(application)
 
@@ -456,7 +460,10 @@ def test_native_menus_route_through_the_application_controller(tmp_path: Path) -
     if sys.platform == "win32":
         assert [item.title for item in menus[2].items if isinstance(item, MenuAction)] == [
             "Community Forum", "Contact Support", "User Manual", "Source Code", "License",
-            "About", "Check for Updates…", "Preferences…"]
+            "About", "Check for Program Updates", "Check for Anti-Virus Updates", "Preferences…"]
+        antivirus_action = menus[2].items[-2]
+        assert isinstance(antivirus_action, MenuAction)
+        assert antivirus_action.function == application.check_antivirus_updates
     assert [item.title for item in menus[1].items if isinstance(item, MenuAction)] == ["New Search Window", "Ingests"]
     for action in menus[1].items:
         assert isinstance(action, MenuAction)

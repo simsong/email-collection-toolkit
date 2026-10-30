@@ -42,7 +42,7 @@ PAGE = """<!doctype html><html><head><meta charset="utf-8"><title>Preferences</t
 <label><input type="checkbox" id="automatic"> Check automatically each day</label>
 <p>Downloading and installation require confirmation.</p>
 <p>Valid changes save automatically. Close this window when finished.</p>
-<button id="check" disabled>Check for Updates…</button>
+<button id="check" disabled>Check for Program Updates</button>
 <p id="update-status" role="status"></p><p id="status" role="status"></p><script>
 const status = document.getElementById('status');
 let workerSettings=null, ready=false, closing=false, saveQueue=Promise.resolve(), saveRevision=0;

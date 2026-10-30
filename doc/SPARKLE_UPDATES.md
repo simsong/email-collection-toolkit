@@ -13,8 +13,10 @@ services, and definition databases live outside archives.
 
 ## User behavior
 
-The application menu contains Preferences… (Command-comma) and Check for
-Updates…. On Windows, Help contains Check for Updates and Update Settings.
+The application menu contains Preferences… (Command-comma), Check for Program
+Updates and Check for Anti-Virus Updates. On Windows, these actions are in Help.
+The anti-virus action opens About and starts its definition update with shared
+progress and error feedback; it does not replace the ClamAV engine.
 The shared Python preferences retain the track and automatic-check setting.
 Stable installations
 initially use Release updates. Alpha/beta installations initially use Preview
@@ -80,6 +82,9 @@ Mach-O audit.
 After signing, notarization, stapling, and artifact validation, the publisher
 signs/verifies the final DMG, appends the release item, and signs/verifies the
 XML feed itself. Release notes are embedded inside that signed feed. New items
+render Markdown entries as wrapping HTML for both updaters, with document
+boilerplate omitted and relative links resolved to the matching tagged source.
+Historical descriptions retain their recorded content. New items
 declare the minimum macOS version and require `arm64` hardware. The app enables `SURequireSignedFeed` and
 `SUVerifyUpdateBeforeExtraction`. Pages copies the signed bytes without XML
 rewriting. Both deployment paths cryptographically verify the exact feed bytes
