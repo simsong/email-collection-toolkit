@@ -21,13 +21,49 @@ import xml.etree.ElementTree as xml
 from typing import Literal
 
 import pytest
+from bs4 import BeautifulSoup
 
-from scripts.update_appcast import AppcastRelease, SPARKLE_HARDWARE, SPARKLE_MINIMUM_SYSTEM, SPARKLE_PRIVATE_KEY_SECRET, append_item, require_matching_key, sign_feed, signed_archive, signing_key, verify_signed_archive
+from scripts.update_appcast import AppcastRelease, SPARKLE_HARDWARE, SPARKLE_MINIMUM_SYSTEM, SPARKLE_PRIVATE_KEY_SECRET, append_item, release_notes_html, require_matching_key, sign_feed, signed_archive, signing_key, verify_signed_archive
 from scripts.check_appcast import check_appcast
 import scripts.sign_historical_appcast as historical_signer
 from scripts.sign_historical_appcast import FIRST_RELEASE, audit_legacy_feed, sign_historical_appcast
 from scripts.macos_signing import NATIVE_TRUST_ENV_PREFIXES, RELEASE_SECRET_NAMES, release_safe_environment
 from mailarchiver.release_versions import release_metadata
+
+
+def test_release_notes_render_entries_links_and_literal_html() -> None:
+    """Delivery: native update notes render Markdown, omit boilerplate and retain safe links."""
+    source = """<!-- Copyright fixture -->
+
+# Release notes
+
+Repository introduction, omitted from the updater.
+
+## Readable updates
+
+Use **verified** definitions and `ECT`.
+
+- First change
+- See [manual](USER_MANUAL.md#updates) and [source](https://example.org/).
+
+<script>window.injected = true</script>
+
+[unsafe](javascript:alert(1))
+"""
+    tag = release_metadata(tomllib.loads((Path(__file__).parents[1] / "pyproject.toml").read_text())["project"]["version"])[0]
+    rendered = BeautifulSoup(release_notes_html(source, tag), "html.parser")
+    assert rendered.h1 is None
+    assert "Repository introduction" not in rendered.get_text()
+    assert "Copyright fixture" not in rendered.get_text()
+    assert rendered.h2 is not None and rendered.h2.get_text() == "Readable updates"
+    assert rendered.strong is not None and rendered.strong.get_text() == "verified"
+    assert rendered.code is not None and rendered.code.get_text() == "ECT"
+    assert len(rendered.select("ul > li")) == 2
+    assert [link.get("href") for link in rendered.select("a")] == [
+        f"https://github.com/simsong/email-collection-toolkit/blob/{tag}/doc/USER_MANUAL.md#updates",
+        "https://example.org/",
+    ]
+    assert rendered.script is None
 
 
 @pytest.mark.parametrize("failure", [None, 0, 1, 2, 3, 4])
@@ -445,7 +481,9 @@ def test_real_signer_signs_xml_and_rejects_modified_feed(tmp_path: Path, monkeyp
     assert item is not None
     assert item.findtext(SPARKLE_MINIMUM_SYSTEM) == "15.0"
     assert item.findtext(SPARKLE_HARDWARE) == "arm64"
-    assert item.findtext("description") == "<pre>Notes &lt;with&gt; text</pre>"
+    notes = BeautifulSoup(item.findtext("description", ""), "html.parser")
+    assert notes.p is not None and notes.p.get_text() == "Notes <with> text"
+    assert notes.pre is None
     signed = appcast.read_bytes()
     assert b"edSignature" in signed
     appcast.write_bytes(signed.replace(b"Fixture", b"Changed"))

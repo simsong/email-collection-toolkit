@@ -19,6 +19,12 @@ platform or release gate has passed. [Future work](plans/README.md) is separate.
 
 ## Shared boundaries
 
+- Update dialogs render embedded release notes as rich text with wrapping and
+  working links; see [delivery](requirements/DELIVERY.md).
+
+- Platform menus distinguish program updates from anti-virus definition updates;
+  the latter also remains available in About. See [desktop](requirements/DESKTOP.md).
+
 - Both installer builders run staged ECT's explicit-directory definition downloader
   before packaging and final signing; see [delivery](requirements/DELIVERY.md).
 

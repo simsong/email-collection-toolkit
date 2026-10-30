@@ -428,6 +428,13 @@ test-signing: ruff
 test-sparkle-signing: sparkle-tools ruff
 	uv run --locked --group packaging pytest -q tests/test_sparkle_signing.py
 
+.PHONY: test-update-presentation
+test-update-presentation:
+	$(MAKE) lint
+	$(MAKE) types
+	uv run --locked --group packaging pytest -q tests/test_sparkle_signing.py tests/test_gui_service.py tests/test_clamav_definitions.py
+	uv run --locked --group packaging pytest -q --browser chromium e2e_tests/test_update_notes.py e2e_tests/test_clamav_about.py
+
 .PHONY: sparkle-probe test-updates
 sparkle-probe: sparkle-tools ruff
 	uv run --locked --group packaging python scripts/sparkle_probe.py $(ARGS)

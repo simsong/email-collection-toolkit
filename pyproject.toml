@@ -2,7 +2,7 @@
 
 [project]
 name = "mailarchiver"
-version = "1.0.0a45"
+version = "1.0.0a46"
 description = "Personal MBOX archive normalizer"
 requires-python = ">=3.12"
 license = "GPL-2.0-only"
@@ -78,9 +78,11 @@ dev = [
     "types-pyyaml>=6.0.12.20260906",
     "types-tabulate>=0.10.0.20260508",
     "pymap>=0.36.7",
+    "markdown-it-py>=4,<5",
 ]
 packaging = [
     "dmgbuild>=1.6.7 ; sys_platform == 'darwin'",
+    "markdown-it-py>=4,<5",
     "pycryptodomex>=3.23.0",
     "pyinstaller>=6.22,<7",
 ]

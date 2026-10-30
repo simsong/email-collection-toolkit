@@ -87,7 +87,8 @@ and update it in place. On Apple Silicon Homebrew, the seed is normally
 `make freshclam` remains a development workflow. DMG and MSIX builds require
 network access and run the staged ECT downloader rather than this source command.
 
-About includes Update virus definitions, also exposed through make clamav-update.
+About includes **Check for Anti-Virus Updates**, also available directly below
+**Check for Program Updates** in the native platform menu and through `make clamav-update`.
 Updates use an explicit temporary configuration, never the host's installed
 freshclam.conf, and independent staging copies. The mounted-DMG updater check
 uses that same configuration writer and the mounted app's certificates. FreshClam
@@ -111,7 +112,7 @@ freshness authority; copying files or updating the older main database must not
 reset age. Unknown or future dates are explicitly reported.
 
 After the publication timestamp plus three calendar months, display a readable
-yellow notice recommending Update virus definitions or downloading a newer app.
+yellow notice recommending a definition refresh or downloading a newer app.
 Clamp the day at month-end. At the exact threshold there is no age warning;
 after it there is. Old definitions continue to work offline.
 

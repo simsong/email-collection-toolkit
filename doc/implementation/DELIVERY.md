@@ -358,6 +358,13 @@ existing output and does not upload or publish anything; an operator must
 separately review and publish the resulting feed asset and Pages update.
 External release notes are not supported because they need their own Sparkle
 signature.
+The publisher uses build-only `markdown-it-py` to render the changelog from its
+first level-two entry heading. Both platform items embed the same HTML document,
+with system fonts, light/dark colors and wrapping text. Raw HTML is disabled and
+relative links resolve against the tagged `doc/RELEASE_NOTES.md` source. Previous
+items retain their original descriptions. `make test-update-presentation` runs
+ordered lint/types, signer/menu/update tests and browser rendering checks, saving
+light/dark previews under `.tmp/update-notes-*.png`.
 The frozen controller/compiled delegate probe and real HTTPS standard-UI probe
 passed during development; these do not establish signed application replacement.
 [SPARKLE_UPDATES.md](../SPARKLE_UPDATES.md) records validation targets and remaining

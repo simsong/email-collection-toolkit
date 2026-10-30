@@ -3,6 +3,7 @@
 # Validate version and archive metadata before writing the feed.
 # Supply the protected Ed25519 seed only through signer standard input.
 # Verify archive and XML signatures before release publication.
+# Render embedded Markdown notes as wrapping HTML for both native updaters.
 # Keep Apple and build-environment credentials away from the signer.
 
 """Append signed macOS and Windows installers, then authenticate the complete feed."""
@@ -12,7 +13,6 @@ from __future__ import annotations
 import argparse
 import base64
 import binascii
-import html
 import os
 import subprocess
 import tempfile
@@ -22,7 +22,9 @@ from datetime import UTC, datetime
 from email.utils import format_datetime
 from pathlib import Path
 from typing import Literal
+from urllib.parse import urljoin
 
+from markdown_it import MarkdownIt
 from pydantic import BaseModel, Field, SecretStr
 
 from mailarchiver.release_versions import PREVIEW_CHANNEL, release_metadata
@@ -42,6 +44,29 @@ SPARKLE_HARDWARE = f"{{{SPARKLE_NAMESPACE}}}hardwareRequirements"
 SPARKLE_OS = f"{{{SPARKLE_NAMESPACE}}}os"
 SPARKLE_PRIVATE_KEY_SECRET = "SPARKLE_ED25519_PRIVATE_KEY_BASE64"
 OCTET_STREAM = "application/octet-stream"
+
+
+def release_notes_html(notes: str, tag: str) -> str:
+    """Render changelog entries without the repository document's introductory boilerplate."""
+    _, separator, entries = notes.partition("\n## ")
+    if separator:
+        notes = "## " + entries
+    parser = MarkdownIt("commonmark").disable(["html_block", "html_inline"])
+    tokens = parser.parse(notes)
+    source = f"https://github.com/simsong/email-collection-toolkit/blob/{tag}/doc/RELEASE_NOTES.md"
+    for token in tokens:
+        for child in token.children or []:
+            if child.type == "link_open":
+                href = child.attrGet("href")
+                if isinstance(href, str) and href:
+                    child.attrSet("href", urljoin(source, href))
+    content = parser.renderer.render(tokens, parser.options, {})
+    return ("<!DOCTYPE html><html><head><meta charset='utf-8'><style>"
+            ":root{color-scheme:light dark}"
+            "body{font:13px -apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;"
+            "line-height:1.5;margin:16px;overflow-wrap:anywhere}"
+            "h2{font-size:1.25em}pre{white-space:pre-wrap}img{max-width:100%}"
+            "</style></head><body>" + content + "</body></html>")
 
 
 class SignedArchive(BaseModel):
@@ -147,7 +172,7 @@ def append_item(appcast: Path, release: AppcastRelease) -> None:
     if release.hardware:
         xml.SubElement(item, SPARKLE_HARDWARE).text = release.hardware
     if release.release_notes:
-        xml.SubElement(item, "description").text = f"<pre>{html.escape(release.release_notes)}</pre>"
+        xml.SubElement(item, "description").text = release_notes_html(release.release_notes, release.tag)
     if release.channel == PREVIEW_CHANNEL:
         xml.SubElement(item, SPARKLE_CHANNEL).text = PREVIEW_CHANNEL
     xml.SubElement(item, "pubDate").text = format_datetime(datetime.now(UTC), usegmt=True)
@@ -193,13 +218,15 @@ def main() -> None:
     # No failed Windows signature may leave an apparently complete candidate.
     key = signing_key()
     require_matching_key(key, SPARKLE_PUBLIC_KEY)
+    notes = (ROOT / "doc/RELEASE_NOTES.md").read_text(encoding="utf-8")
     releases = [AppcastRelease(tag=args.tag, channel=channel, sparkle_version=sparkle_version,
                               display_version=display_version, url=args.url,
-                              release_notes=(ROOT / "doc/RELEASE_NOTES.md").read_text(encoding="utf-8"),
+                              release_notes=notes,
                               archive=signed_archive(args.archive, args.signer, key))]
     if args.windows_archive:
         releases.append(AppcastRelease(tag=args.tag, channel=channel, sparkle_version=sparkle_version,
                                        display_version=display_version, url=args.windows_url,
+                                       release_notes=notes,
                                        archive=signed_archive(args.windows_archive, args.signer, key),
                                        platform="windows", hardware=None, minimum_system="10.0.19041"))
     from scripts.check_appcast import check_appcast  # pylint: disable=import-outside-toplevel

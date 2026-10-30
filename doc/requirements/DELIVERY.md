@@ -85,7 +85,7 @@ means published preview builds; it does not mean installing an arbitrary source
 checkout. This preference is independent of website downloads.
 
 The frozen macOS app must use Sparkle's standard updater UI, with native
-Preferences… and Check for Updates… commands. Stable installations default to
+Preferences… and Check for Program Updates commands. Stable installations default to
 release-only; alpha/beta installations default to preview plus stable. Explicit
 choices and daily-check preferences migrate outside archives and survive recent
 archive changes and upgrades. Download and installation require confirmation.
@@ -242,6 +242,11 @@ signer test after installing them. `make sparkle-keys` invokes the
 verified `generate_keys` tool locally. The private Ed25519 key remains outside
 Git; it is never an application, Apple-signing, or notarization credential.
 The packaged app contains only its `SUPublicEDKey` and fixed appcast HTTPS URL.
+Release descriptions must embed formatted HTML inside the authenticated feed,
+with headings, paragraphs, lists, links and code rendered from Markdown.
+Omit the repository document's header and introduction before its first entry.
+Text must wrap at the update dialog width; relative documentation links must
+resolve to the matching tagged source. Preserve existing historical items.
 `SPARKLE_ED25519_PRIVATE_KEY_BASE64` is release-only: `sign_update` receives it
 on standard input after Apple notarization/stapling, never through an argument,
 bundle, or application subprocess environment. Before publication, the release

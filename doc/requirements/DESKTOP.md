@@ -92,6 +92,11 @@ User Manual, Source Code, and License. Web actions open the project's Discussion
 Issues, `/manual/` website page, and repository in the system browser. License
 displays the complete embedded project GPL text offline in a selectable window.
 Existing About and update actions remain available in their platform menus.
+The macOS application menu and Windows Help menu place **Check for Anti-Virus Updates**
+immediately below **Check for Program Updates**. The anti-virus command opens About
+and starts the same verified definition update as its identically named button,
+with progress and success/failure feedback; repeated requests during that check
+must not start another download. Program-update preferences use the same program label.
 The website navigation labels its documentation entry User Manual and links to
 `/manual/`; Advanced remains available through the manual, rather than the header.
 The manual indexes Importing, Searching, Features (`/features/`), and Advanced.

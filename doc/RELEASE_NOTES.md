@@ -6,6 +6,22 @@ Entries describe their recorded revisions. For current behavior use the
 [user manual](USER_MANUAL.md) and [CLI reference](CLI_REFERENCE.md). Retired
 Rust delivery plans and historical package checks are not current acceptance.
 
+## Readable update notes
+
+The update dialog displays **formatted release notes** instead of raw Markdown.
+
+- Headings, lists, links and `code` use readable, wrapping HTML.
+- Repository copyright comments and introductory boilerplate are omitted.
+- Documentation links open the matching tagged source on GitHub.
+
+## Explicit program and anti-virus update commands
+
+Add Check for Anti-Virus Updates immediately below Check for Program Updates in
+the macOS application menu and Windows Help menu. The anti-virus command opens
+About and starts its existing verified definition updater. About uses the same
+button label and feedback; program-update preferences use the clearer program label.
+Advance the alpha for local testing.
+
 ## Packaged definition downloads on both installer platforms
 
 Expose a headless explicit-directory definition downloader in both ECT entry

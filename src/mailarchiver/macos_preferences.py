@@ -121,7 +121,7 @@ class MacOSPreferences:
         label(f"Downloading and installation always require confirmation.\n{UPDATE_STREAM_HELP}", 150, 64)
         self.detail = label("", 70, 72)
         self.detail.setAccessibilityIdentifier_("update-status")
-        self.check = appkit.NSButton.buttonWithTitle_target_action_("Check for Updates…", self.delegate, "checkUpdates:")
+        self.check = appkit.NSButton.buttonWithTitle_target_action_("Check for Program Updates", self.delegate, "checkUpdates:")
         self.check.setFrame_(((24, 24), (220, 32)))
         self.check.setAccessibilityIdentifier_("check-updates")
         view.addSubview_(self.check)

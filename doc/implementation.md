@@ -25,6 +25,12 @@ platform or release gate has passed. [Future work](plans/README.md) is separate.
 
 ## Shared boundaries
 
+- The appcast writer renders Markdown changelog entries into embedded HTML for
+  both native updaters; see [delivery](implementation/DELIVERY.md).
+
+- Native anti-virus update commands open About and invoke its existing asynchronous
+  definition updater and feedback. See [desktop](implementation/DESKTOP.md).
+
 - Both packaged entry points expose `--update-virus-definitions --directory`;
   macOS and Windows builders consume its verified export before sealing installers.
   See [delivery](implementation/DELIVERY.md).

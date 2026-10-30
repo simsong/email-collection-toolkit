@@ -39,7 +39,7 @@ def test_about_age_warning_and_update_failure_preserve_definitions(tmp_path: Pat
             evidence = Path(__file__).resolve().parents[1] / ".tmp" / f"about-clamav-{theme}.png"
             evidence.parent.mkdir(exist_ok=True)
             page.screenshot(path=str(evidence), full_page=True)
-        button = page.get_by_role("button", name="Update virus definitions", exact=True)
+        button = page.get_by_role("button", name="Check for Anti-Virus Updates", exact=True)
         button.click()
         expect(page.locator("#definition-update-status")).to_contain_text("Update failed")
         expect(button).to_be_enabled()

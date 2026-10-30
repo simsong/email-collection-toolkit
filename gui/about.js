@@ -140,6 +140,7 @@ async function showProcessorGraph() {
 
 async function updateDefinitions() {
   const button = byId("update-definitions");
+  if (button.disabled) return;
   const message = byId("definition-update-status");
   button.disabled = true;
   message.textContent = "Downloading and verifying virus definitions…";
