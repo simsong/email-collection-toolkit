@@ -42,7 +42,7 @@ def test_appcast_notes_render_without_markdown_or_horizontal_scroll(
     page.set_viewport_size({WIDTH: 720, HEIGHT: 480})
     page.emulate_media(color_scheme=theme)
     page.set_content(description)
-    expect(page.locator("h2").first).to_have_text("Readable update notes")
+    expect(page.get_by_role("heading", name="Readable update notes", exact=True)).to_have_count(1)
     expect(page.locator("h1")).to_have_count(0)
     expect(page.locator("body")).not_to_contain_text("<!-- Copyright")
     expect(page.locator("body")).not_to_contain_text("Entries describe their recorded revisions")

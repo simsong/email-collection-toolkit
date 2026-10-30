@@ -6,6 +6,13 @@ Entries describe their recorded revisions. For current behavior use the
 [user manual](USER_MANUAL.md) and [CLI reference](CLI_REFERENCE.md). Retired
 Rust delivery plans and historical package checks are not current acceptance.
 
+## Native macOS archive path menu
+
+Saved archive Search and Ingest windows expose macOS's title-bar document icon
+and ancestor-folder menu. Control-click, right-click or Command-click the title
+to locate the archive in its folder hierarchy. Custom titles and message counts
+are retained; Untitled and utility windows have no represented path.
+
 ## Readable update notes
 
 The update dialog displays **formatted release notes** instead of raw Markdown.

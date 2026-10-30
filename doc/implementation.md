@@ -25,6 +25,9 @@ platform or release gate has passed. [Future work](plans/README.md) is separate.
 
 ## Shared boundaries
 
+- The macOS adapter sets archive windows' represented folder URLs on Cocoa's main
+  thread, retaining their custom titles. See [desktop](implementation/DESKTOP.md).
+
 - The appcast writer renders Markdown changelog entries into embedded HTML for
   both native updaters; see [delivery](implementation/DELIVERY.md).
 
