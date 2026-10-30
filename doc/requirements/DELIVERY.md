@@ -242,6 +242,9 @@ signer test after installing them. `make sparkle-keys` invokes the
 verified `generate_keys` tool locally. The private Ed25519 key remains outside
 Git; it is never an application, Apple-signing, or notarization credential.
 The packaged app contains only its `SUPublicEDKey` and fixed appcast HTTPS URL.
+Apple ticket transport retries must be bounded and limited to the demonstrated
+interrupted-connection failure; they must never bypass ticket validity or final
+Gatekeeper checks, resubmit notarization, or hide permanent/exhausted errors.
 Release descriptions must embed formatted HTML inside the authenticated feed,
 with headings, paragraphs, lists, links and code rendered from Markdown.
 Omit the repository document's header and introduction before its first entry.

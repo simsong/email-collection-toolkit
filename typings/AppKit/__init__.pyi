@@ -63,6 +63,7 @@ NSWindowStyleMaskClosable: int
 NSWindowStyleMaskMiniaturizable: int
 NSWindowCloseButton: int
 NSWindowMiniaturizeButton: int
+NSWindowDocumentIconButton: int
 NSBitmapImageFileTypePNG: int
 NSBackingStoreBuffered: int
 NSRadioButton: int

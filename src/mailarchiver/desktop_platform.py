@@ -2,10 +2,11 @@
 
 """Small native adapters for the Python webview desktop.
 
-Purpose: Supply native Windows services for the shared desktop host.
+Purpose: Supply native macOS and Windows services for the shared desktop host.
 
 How it works:
-Check WebView2 and adapt clipboard, menu refresh, file opening and external links to Windows.
+Adapt Cocoa document paths and Windows clipboard, menus and WebView2 without leaking
+platform imports into the other desktop's startup.
 
 Fundamental dependents:
 
@@ -22,6 +23,21 @@ import subprocess
 import sys
 from typing import Any
 import webbrowser
+
+
+def set_macos_document_path(window: Any, path: Path | None) -> None:
+    """Enable Cocoa's proxy icon/path menu without replacing the application's title."""
+    if sys.platform != "darwin":
+        return
+    app_helper = import_module("PyObjCTools.AppHelper")
+    foundation = import_module("Foundation")
+
+    def apply() -> None:
+        if window.native is not None and not window.events.closed.is_set():
+            url = foundation.NSURL.fileURLWithPath_isDirectory_(str(path.absolute()), True) if path else None
+            window.native.setRepresentedURL_(url)
+
+    app_helper.callAfter(apply)
 
 
 def windows_webview() -> str:

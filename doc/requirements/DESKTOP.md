@@ -5,6 +5,15 @@
 Current subsystem contract and acceptance boundaries. This is not a claim of
 platform/release acceptance. Deferred features live in [plans](../plans/README.md).
 
+## macOS document paths
+
+Saved archive Search and Ingest windows associate their native title bar with
+the user-selected archive folder. Control-click, right-click or Command-click
+the document title/icon to show macOS's ancestor-folder path menu. Preserve the
+application's title and message count. Untitled, About and settings windows
+have no represented path. This integration is macOS-only and never changes
+archive or source content.
+
 ## Saved import recovery and notices
 
 During saved-mail processing, show **Messages requiring processing**. Count each

@@ -416,6 +416,8 @@ rebuild: it also remembers your last source-picker directory. Invalid YAML
 produces an error rather than silently replacing your owner rules.
 For a saved document, the window title shows the archive path and total number
 of deduplicated, searchable messages.
+On macOS, Control-click, right-click or Command-click the title/document icon in
+a Search or Ingests window to show the archive's folder hierarchy.
 On first launch, all three setup steps appear together:
 
 1. **Select the root folder to ingest** with **Choose folder…**. Its files and

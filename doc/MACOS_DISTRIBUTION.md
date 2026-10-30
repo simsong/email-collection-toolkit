@@ -157,7 +157,11 @@ secrets. A tagged release additionally requires `APPLE_NOTARY_KEY_ID`,
 `APPLE_NOTARY_ISSUER_ID`, and `APPLE_NOTARY_PRIVATE_KEY_BASE64`, which is the
 Base64 encoding of the complete `.p8` API private-key file. The workflow builds,
 notarizes, staples, Gatekeeper-validates, and retests the resulting DMG before
-it becomes a release artifact. The release tag must contain this workflow and
+it becomes a release artifact. Ticket stapling and validation retry at most three times, with five-
+and ten-second delays, only for Apple's interrupted-connection error (`-1005`,
+exit 68). Invalid tickets, other errors and exhausted retries remain fatal;
+notarization submission, signature checks and Gatekeeper are not retried.
+The release tag must contain this workflow and
 builder; dispatching an older tag does not retrofit the new builder. Release
 tags must be annotated and match the project version; Git-tag signatures and
 release-signing public keys are not required. Automatic imports are rejected

@@ -47,7 +47,7 @@ from pydantic import BaseModel, Field
 from webview.menu import Menu, MenuAction, MenuSeparator
 
 from .file_drag import FILE_DRAGS, install_file_drag
-from .desktop_platform import copy_windows_text, open_export, open_external_url, refresh_windows_menu, startup_error, windows_webview
+from .desktop_platform import copy_windows_text, open_export, open_external_url, refresh_windows_menu, set_macos_document_path, startup_error, windows_webview
 from .identity import APPLICATION_NAME
 from .build_info import BUILD_INFO, BuildInfo
 from .worker_preferences import WorkerPreferences, WorkerSettings, worker_argument
@@ -1012,6 +1012,7 @@ class GuiApi:
                     self._ingest_window_api.window.run_js("window.refreshHistory();")
         status = self.status()
         self.window.set_title(_window_title(self.archive, int(status["message_count"])))
+        set_macos_document_path(self.window, self.archive)
         return status
 
     def search(
@@ -1973,6 +1974,8 @@ class PyWebViewApplication:
             self._apis[session.window_id] = api
             self._native_search_ids[window.uid] = session.window_id
         window.events.shown += lambda *_args: self.activate_window(session.window_id)
+        window.events.shown += lambda *_args: set_macos_document_path(window, document.display_path)
+        set_macos_document_path(window, document.display_path)
         window.events.restored += lambda *_args: self.activate_window(session.window_id)
         window.events.closing += lambda *_args: self._can_close_search_window(session.window_id)
         window.events.closed += lambda *_args: self._close_window(session.window_id)
@@ -2654,6 +2657,8 @@ class PyWebViewApplication:
                 self._refresh_menus()
 
             window.events.closed += closed
+            window.events.shown += lambda *_args: set_macos_document_path(window, document.display_path)
+            set_macos_document_path(window, document.display_path)
         self._refresh_menus()
         return True
 

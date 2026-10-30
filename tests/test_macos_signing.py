@@ -15,6 +15,7 @@ from pydantic import SecretStr
 from yaml import safe_load
 
 from scripts.macos_signing import (
+    APPLE_CONNECTION_LOST, run_notary_stage,
     CERTIFICATE_SECRET, GITHUB_ACTIONS, NOTARY_ISSUER_SECRET, NOTARY_KEY_ID_SECRET, NOTARY_PRIVATE_KEY_SECRET,
     PASSWORD_SECRET, RUNNER_ENVIRONMENT, SPARKLE_PRIVATE_KEY_SECRET, NotarizationCredentials, SigningSecrets, developer_identity,
     dmg_filename, notary_log_summary, release_safe_environment, safe_apple_error, security_command, sign_image,
@@ -29,6 +30,38 @@ ASSEMBLE, MACOS, PREFLIGHT, PATH, NAME = "assemble", "macos", "preflight", "path
 RUNS_ON, CONDITION = "runs-on", "if"
 RELEASE_TAG, GITHUB_OUTPUT = "RELEASE_TAG", "GITHUB_OUTPUT"
 COMMIT_STEP = "Verify release commit"
+
+
+@pytest.mark.parametrize("failures,message,exit_code,retry,expected_code,calls", [
+    (2, APPLE_CONNECTION_LOST, 68, True, 0, 3),
+    (99, APPLE_CONNECTION_LOST, 68, True, 68, 3),
+    (99, "Ticket is invalid", 68, True, 68, 1),
+    (99, APPLE_CONNECTION_LOST, 65, True, 65, 1),
+    (99, APPLE_CONNECTION_LOST, 68, False, 68, 1),
+])
+def test_notary_ticket_retries_only_interrupted_connections(
+    tmp_path: Path, failures: int, message: str, exit_code: int, retry: bool, expected_code: int, calls: int,
+) -> None:
+    """Delivery: retry observed ticket transport failures, retain permanent errors and bounded exhaustion."""
+    script = tmp_path / "ticket_service.py"
+    script.write_text('''# Exercise a transient external ticket-service response without Apple credentials.
+# Count real subprocess invocations in a task-owned file.
+# Fail the requested number of times with the supplied status and diagnostic.
+# Return success only after the simulated interrupted connections recover.
+# No network, signing material or native application windows are involved.
+from pathlib import Path
+import sys
+state = Path(sys.argv[1])
+count = int(state.read_text()) + 1 if state.exists() else 1
+state.write_text(str(count))
+print(sys.argv[3], file=sys.stderr)
+raise SystemExit(int(sys.argv[4]) if count <= int(sys.argv[2]) else 0)
+''')
+    state = tmp_path / "calls"
+    result = run_notary_stage([sys.executable, str(script), str(state), str(failures), message, str(exit_code)],
+                              timeout=5, retry_network=retry)
+    assert result.returncode == expected_code
+    assert int(state.read_text()) == calls
 
 
 @pytest.mark.parametrize("certificate,password", [("", ""), ("encoded", ""), ("", "password"), (" \n", "password")])

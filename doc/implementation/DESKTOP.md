@@ -5,6 +5,19 @@
 Current implementation and validation boundaries. Deferred feature designs
 live in [plans](../plans/README.md); historical evidence does not validate this revision.
 
+## macOS document paths
+
+`set_macos_document_path` is a macOS-only adapter that schedules
+`NSWindow.setRepresentedURL_` through Cocoa's main loop. Search and Ingest
+windows supply the archive's display path after creation and on native Show;
+the immediate call also covers windows shown before event handlers are attached.
+The legacy archive chooser refreshes the association when its selection changes.
+Untitled windows supply no URL, and closed native windows are skipped. Cocoa
+provides the proxy icon and ancestor menu while the existing custom title remains.
+`make test-native-application` checks saved Search/Ingest URLs, no URL on About
+or Untitled and retained titles on synthetic mail. The native path popup is also
+checked through a real right-click during visual acceptance.
+
 ## Saved import recovery and notices
 
 `processing_progress.saved_messages_remaining` joins unfinished jobs to

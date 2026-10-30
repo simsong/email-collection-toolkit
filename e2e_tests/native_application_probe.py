@@ -77,6 +77,32 @@ def close_window(window: webview.Window) -> None:
     assert window.events.closed.wait(5)
 
 
+def check_document_path(window: webview.Window, path: Path | None) -> None:
+    """Desktop: native archive association and proxy icon retain custom titles and exclude utility windows."""
+    appkit = import_module("AppKit")
+    finished, errors = Event(), []
+
+    def inspect() -> None:
+        try:
+            native = window.native
+            assert native is not None
+            represented = native.representedURL()
+            if path is None:
+                assert represented is None, represented
+            else:
+                assert represented is not None and Path(str(represented.path())) == path.absolute(), represented
+                button = native.standardWindowButton_(appkit.NSWindowDocumentIconButton)
+                assert button is not None and button.image() is not None
+            assert native.title() == window.title, "Represented path replaced the application title"
+        except Exception:  # pylint: disable=broad-exception-caught
+            errors.append(traceback.format_exc())
+        finally:
+            finished.set()
+
+    AppHelper.callAfter(inspect)
+    assert finished.wait(5) and not errors, errors
+
+
 def check_antivirus_menu(application: PyWebViewApplication, about: webview.Window) -> None:
     """Desktop: native menu dispatch runs the shared updater and displays retained-data failure."""
     root = Path(os.environ[PROBE_PREFERENCES_ENV]).parent
@@ -333,6 +359,7 @@ def main() -> None:
 
             AppHelper.callLater(0.3, inspect_reopened)
             assert reopened.wait(5), "About menu reopening check timed out"
+            check_document_path(about, None)
             check_antivirus_menu(application, about)
             # Disabling command-line reinterpretation must retain genuine Finder opens.
             native = NSApplication.sharedApplication()
@@ -347,6 +374,12 @@ def main() -> None:
             assert document is not None and document.path is not None and document.display_path is not None
             assert api.search_window is not None
             assert api.window.events.loaded.wait(10), "Document bridge failed to load"
+            check_document_path(api.window, document.display_path)
+            untitled = application.create_search_window(controller.new_search_window(controller.new_document()))
+            assert untitled.window.events.loaded.wait(10)
+            check_document_path(untitled.window, None)
+            close_window(untitled.window)
+            application.activate_window(api.search_window.window_id)
             assert evaluate_async(api.window, "window.pywebview.api.status()")['message_count'] == 1
             assert api.window.evaluate_js("document.getElementById('choose-archive') === null")
             check_new_search(True)
@@ -605,6 +638,7 @@ def main() -> None:
             assert application.open_ingest_window(document)
             ingest = next(window for window in webview.windows if " — Ingests — " in window.title)
             assert ingest.events.loaded.wait(10), "Ingest bridge failed to load"
+            check_document_path(ingest, document.display_path)
             evaluate_async(ingest, "refreshHistory().then(() => true)")
             assert ingest.evaluate_js("document.getElementById('import-directory').textContent") == "Import Directory…"
             assert not ingest.evaluate_js("document.getElementById('import-directory').disabled")
