@@ -3,6 +3,7 @@
 # Distinguish hosted signing from local explicit identities.
 # Redact secret values from errors and child-process environments.
 # Keep notarization and Sparkle keys separate from application execution.
+# Retry only interrupted Apple ticket connections, retaining every trust gate.
 # Restore the original Keychain search list after every signing attempt.
 
 """Optional Developer ID signing with a short-lived imported identity."""
@@ -17,6 +18,7 @@ import secrets
 import shlex
 import subprocess
 import tempfile
+from time import sleep
 from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
 from pathlib import Path
@@ -29,6 +31,7 @@ NOTARY_KEY_ID_SECRET = "APPLE_NOTARY_KEY_ID"
 NOTARY_ISSUER_SECRET = "APPLE_NOTARY_ISSUER_ID"
 NOTARY_PRIVATE_KEY_SECRET = "APPLE_NOTARY_PRIVATE_KEY_BASE64"
 SPARKLE_PRIVATE_KEY_SECRET = "SPARKLE_ED25519_PRIVATE_KEY_BASE64"
+APPLE_CONNECTION_LOST = "NSURLErrorDomain Code=-1005"
 PEM_PRIVATE_KEY_BEGIN = b"-----BEGIN PRIVATE KEY-----"
 PEM_PRIVATE_KEY_END = b"-----END PRIVATE KEY-----"
 RELEASE_SECRET_NAMES = (CERTIFICATE_SECRET, PASSWORD_SECRET, NOTARY_KEY_ID_SECRET, NOTARY_ISSUER_SECRET,
@@ -240,6 +243,18 @@ def sign_image(image: Path, identity: str) -> None:
         subprocess.run(["/usr/bin/codesign", "--verify", "--strict", str(image)], check=True)
 
 
+def run_notary_stage(arguments: list[str], timeout: int, *, retry_network: bool = False) -> subprocess.CompletedProcess[str]:
+    """Retry at most three attempts for stapler's observed interrupted-connection error."""
+    remaining = 3 if retry_network else 1
+    while True:
+        result = subprocess.run(arguments, check=False, capture_output=True, text=True, timeout=timeout)
+        remaining -= 1
+        if (not remaining or result.returncode != 68
+                or APPLE_CONNECTION_LOST not in result.stdout + result.stderr):
+            return result
+        sleep(5 * (3 - remaining))
+
+
 def notarize_image(image: Path, credentials: NotarizationCredentials, work_root: Path) -> None:
     """Submit a signed DMG, staple Apple's ticket, and require Gatekeeper acceptance."""
     if not image.is_file() or image.suffix != ".dmg":
@@ -264,7 +279,7 @@ def notarize_image(image: Path, credentials: NotarizationCredentials, work_root:
                       ("Gatekeeper assessment", ["/usr/sbin/spctl", "--assess", "--type", "open",
                                                  "--context", "context:primary-signature", "--verbose=4", str(image)], 120)]
             for stage, arguments, timeout in stages:
-                result = subprocess.run(arguments, check=False, capture_output=True, text=True, timeout=timeout)
+                result = run_notary_stage(arguments, timeout, retry_network=stage in {"ticket stapling", "ticket validation"})
                 submission = NotarySubmission()
                 if stage == "notarytool submission":
                     try:

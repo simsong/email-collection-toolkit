@@ -151,6 +151,11 @@ the tag/version validator: unsigned annotated tags pass; lightweight tags,
 version mismatches, and a different checked-out commit fail.
 Real Developer ID import/signing and hosted GUI execution require a credentialed
 Mac release trial; pure policy tests do not establish those properties.
+Ticket stapling/validation use at most three attempts only for stapler exit 68
+with `NSURLErrorDomain Code=-1005`, retaining each command's timeout and sleeping
+five then ten seconds. All permanent errors, exhausted retries and final trust
+gates still fail. Real subprocess fixtures exercise recovery, bounds and rejection
+without Apple credentials; hosted candidates exercise the actual Apple operations.
 
 Release metadata is parsed with `packaging.version.Version`, rather than a
 home-grown version regular expression. Package metadata and About use its

@@ -12,6 +12,8 @@ Saved archive Search and Ingest windows expose macOS's title-bar document icon
 and ancestor-folder menu. Control-click, right-click or Command-click the title
 to locate the archive in its folder hierarchy. Custom titles and message counts
 are retained; Untitled and utility windows have no represented path.
+Candidate packaging also retries interrupted Apple ticket-service connections
+within a fixed limit while retaining all notarization and trust checks.
 
 ## Readable update notes
 
