@@ -117,10 +117,11 @@ Generate installer metadata from public GitHub releases through
 
 Missing platform assets use the generic page with an availability notice.
 All buttons work without JavaScript or browser platform detection. Show a
-preview warning and Windows certificate-trust instructions beside these buttons.
+preview warning beside these buttons. Signed Windows installers need no website
+certificate-trust instructions or separate installation guide.
 The page states Apple Silicon macOS and x64 Windows requirements. Prefer complete stable releases, falling
 back to clearly labeled previews before the first stable release. Nonempty,
-exactly named DMG/MSIX assets, the Windows trust ZIP and authenticated appcast
+exactly named DMG/MSIX assets, the Windows release ZIP and authenticated appcast
 are required for a complete release; a requested publication tag must be
 complete or Pages fails. Historical Mac-only releases retain their Mac links.
 

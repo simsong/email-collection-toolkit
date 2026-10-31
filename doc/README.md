@@ -36,6 +36,7 @@ or historical test result is not evidence that a feature shipped.
 
 | Document | Owns |
 | --- | --- |
+| [FOR_DEVELOPERS.md](FOR_DEVELOPERS.md) | Source installation, desktop builds, developer tools, and test entry points |
 | [END_TO_END_TESTING.md](END_TO_END_TESTING.md) | Test layers, fixture safety and native acceptance limits |
 | [REGRESSION.md](REGRESSION.md) | Corpus comparison, baseline retention and metrics |
 | [DEVOPS.md](DEVOPS.md) | Workflow triggers, publication policy and shared feed |

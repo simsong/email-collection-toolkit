@@ -269,7 +269,10 @@ for commands, limitations, and Apple's renewal/notarization steps.
 ## Toolkit branding and website media
 
 The application, installer, documentation, and website use Email Collection
-Toolkit. The homepage Download button opens the GitHub releases listing.
+Toolkit. The homepage exposes direct macOS and Windows installer buttons,
+with a GitHub releases fallback when an installer is unavailable. The Platform
+downloads disclosure repeats available installer links without Windows
+certificate-trust instructions or installation-guide links.
 Repository and Pages URLs use the renamed project. The platform
 settings helper chooses the current application directory containing preferences.json or auth/, then an
 existing legacy directory, without

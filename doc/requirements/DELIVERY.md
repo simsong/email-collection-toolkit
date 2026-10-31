@@ -18,9 +18,9 @@ installer” and “Download macOS installer” buttons beside “Show all insta
 Each platform button links directly to its available published installer; a
 missing asset falls back to the generic releases page with an availability
 notice. All three buttons work without JavaScript or platform detection. The
-page states Apple Silicon macOS and x64 Windows requirements, labels preview
-downloads visibly, and exposes Windows certificate-trust instructions beside
-the buttons before the additional-links disclosure. The website has no
+page states Apple Silicon macOS and x64 Windows requirements and labels preview
+downloads visibly. Signed Windows installers need no website certificate-trust
+instructions or installation-guide links. The website has no
 update-stream selector; that preference belongs in the application.
 These are release-workflow requirements, not evidence of Windows feature parity.
 Website screenshot validation uses purpose-made synthetic mail and a real
