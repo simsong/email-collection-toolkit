@@ -6,6 +6,14 @@ Entries describe their recorded revisions. For current behavior use the
 [user manual](USER_MANUAL.md) and [CLI reference](CLI_REFERENCE.md). Retired
 Rust delivery plans and historical package checks are not current acceptance.
 
+## User-focused README and signed Windows download guidance
+
+Rewrite the README around desktop installation, supported sources, archive care,
+versioning, and program/antivirus updates. Move source setup, packaging, and test
+details to `FOR_DEVELOPERS.md`, retaining current platform and extraction limits.
+Remove the website's obsolete Windows certificate-trust notice and separate
+installation-guide links now that public installers are signed.
+
 ## Native macOS archive path menu
 
 Saved archive Search and Ingest windows expose macOS's title-bar document icon

@@ -40,5 +40,5 @@ disposable directory when restarting or rebuilding the preview. This does not pu
 the site.
 
 The homepage shows a preview warning when its primary downloads use a preview
-release, and Windows installation instructions beside the installer buttons
-before users expand the additional platform links.
+release. Platform downloads link directly to installers; signed Windows releases
+need no certificate-trust instructions or separate installation guide.
