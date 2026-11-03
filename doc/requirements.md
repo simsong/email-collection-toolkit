@@ -77,6 +77,9 @@ platform or release gate has passed. [Future work](plans/README.md) is separate.
 - Imports can suspend and resume without quitting; identity pickers display
   loading and retry feedback. See [desktop](requirements/DESKTOP.md).
 
+- IMAP connection timeouts and disconnects pause downloads with saved progress and
+  a **Resume** button; see [acquisition](requirements/ACQUISITION.md).
+
 - About status remains available during import writer locks; plugin inventory
   retries separately. See [desktop](requirements/DESKTOP.md).
 

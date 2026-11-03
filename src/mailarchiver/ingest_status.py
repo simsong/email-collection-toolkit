@@ -32,7 +32,7 @@ STATUS_DIRECTORY = "status"
 STATUS_PREFIX = "ingest-"
 STALE_AFTER_SECONDS = 5
 STATUS_REFRESH_SECONDS = 1
-IngestState = Literal["running", "completed", "interrupted", "disk-full", "failed", "stale"]
+IngestState = Literal["running", "completed", "paused", "interrupted", "disk-full", "failed", "stale"]
 WorkerOperation = Literal["downloading", "importing", "processing"]
 
 

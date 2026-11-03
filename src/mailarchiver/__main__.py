@@ -38,6 +38,7 @@ from datetime import UTC, datetime
 from functools import partial
 from importlib.metadata import version
 from pathlib import Path
+from contextlib import closing
 from types import TracebackType
 from typing import Literal, Protocol, TextIO, TypeVar, runtime_checkable
 from urllib.parse import parse_qsl, quote, urlencode, urlsplit, urlunsplit
@@ -55,8 +56,10 @@ from .archive_path import add_archive_argument, require_archive
 from .contacts import contacts, load_owner_addresses, print_contacts
 from .document_options import DocumentOptions, read_owner_names
 from .ingest_diagnostics import add_message_context, format_failure, format_source_identity
+from .imap_protocol import ImapPaused
 from .owner_rules import OwnerRules
 from .catalog import (
+    PROCESSING_DATABASE,
     UnsupportedSearchSchemaError,
     address_pk,
     create_catalog,
@@ -94,6 +97,7 @@ from .message import ParsedMessage
 from .processing.api import PluginStatistics, ProcessingObject
 from .processing.contracts import MailboxReference, ProcessingPolicy, SourceMetadata
 from .processing.production import ProductionPipeline
+from .processing.store import connect as processing_connection
 from .processing_progress import saved_messages_remaining
 from .plugin_api import (
     ArchiveReference,
@@ -1095,10 +1099,10 @@ class ProgressReporter:
                 self.rendered_lines = 0
             print(f"ingest status disabled: {self.status_write_error}", file=self.output)
 
-    def finish(self, status: IngestState, failure_detail: str | None = None) -> None:
+    def finish(self, status: IngestState, failure_detail: str | None = None, *, phase: str | None = None) -> None:
         self._drain_updates()
         self._emit_notices()
-        self.display(status, status, failure_detail)
+        self.display(phase or status, status, failure_detail)
 
 
 def run_file_workers[WorkerItem](
@@ -1514,6 +1518,7 @@ def _run_ingest(request: IngestRequest, writer_lease: WriterLease, outcome: Inge
     )
     succeeded = False
     interrupted = False
+    pause_reason: str | None = None
     disk_full = False
     failure_detail: str | None = None
 
@@ -2279,6 +2284,15 @@ def _run_ingest(request: IngestRequest, writer_lease: WriterLease, outcome: Inge
         catalog.commit()
         search.commit()
         succeeded = True
+    except ImapPaused as error:
+        if pipeline is None:
+            with closing(processing_connection(archive, create=not (archive / PROCESSING_DATABASE).exists(),
+                                               production=True)) as database, database:
+                save_processing_request(database, saved_request)
+        pause_reason = str(error)
+        catalog.commit()
+        search.commit()
+        raise
     except KeyboardInterrupt as error:
         progress.announce_interrupt()
         interrupted = True
@@ -2304,14 +2318,15 @@ def _run_ingest(request: IngestRequest, writer_lease: WriterLease, outcome: Inge
         discovery.close()
         for box in boxes.values():
             box.close()
-        result = "completed" if succeeded else "interrupted" if interrupted else "disk-full" if disk_full else "failed"
+        result = ("completed" if succeeded else "paused" if pause_reason else
+                  "interrupted" if interrupted else "disk-full" if disk_full else "failed")
         catalog.execute(
             "UPDATE ingest_runs SET completed_at = ?, result = ?, detail = ? WHERE run_pk = ?",
-            (datetime.now(UTC).isoformat(), result, failure_detail, run_pk),
+            (datetime.now(UTC).isoformat(), result, failure_detail or pause_reason, run_pk),
         )
         catalog.commit()
         integrity_error: Exception | None = None
-        if boxes or succeeded or interrupted:
+        if boxes or succeeded or interrupted or pause_reason:
             try:
                 checkpoint_archive()
                 catalog.commit()
@@ -2338,8 +2353,8 @@ def _run_ingest(request: IngestRequest, writer_lease: WriterLease, outcome: Inge
             pipeline.close()
         catalog.close()
         search.close()
-        progress.finish(result, failure_detail)
-        if integrity_error is not None and succeeded:
+        progress.finish(result, failure_detail, phase=pause_reason if result == "paused" else None)
+        if integrity_error is not None and (succeeded or pause_reason is not None):
             raise integrity_error
 
 
@@ -2712,6 +2727,9 @@ def main() -> int:
         )
         print(f"\n{message}\n", file=sys.stderr, flush=True)
         return 130
+    except ImapPaused as error:
+        print(f"paused: {error}", file=sys.stderr, flush=True)
+        return 75
     except KeyboardInterrupt:
         print("interrupted: archive state committed through the last completed message", file=sys.stderr, flush=True)
         print_report(Path(args.archive), None, DEFAULT_REPORT_TOP)

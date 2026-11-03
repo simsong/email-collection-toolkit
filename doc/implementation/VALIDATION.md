@@ -317,7 +317,11 @@ exercise complete scoped searches and rich MIME behavior.
 `make test-e2e` drives
 the complete interface in headless Chromium while binding every bridge method
 to the real Python service and disposable test archive. It therefore works
-without a visible desktop on macOS and Linux. `make test-native-gui` separately
+without a visible desktop on macOS and Linux. `make test-imap` also runs the
+browser pause/resume acceptance; `PYTEST_ARGS='--browser-channel chrome'` selects
+an installed Chrome instead of bundled Chromium. Screenshot targets accept
+`ARGS=--browser-channel=chrome` for the same choice.
+`make test-native-gui` separately
 drives a hidden Cocoa/WKWebView window on macOS against a purpose-built
 one-message derived archive to retain the native bridge boundary without
 ClamAV or the full lifecycle fixture. This explicit local development target is

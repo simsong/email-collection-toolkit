@@ -65,8 +65,10 @@ async function refreshHistory() {
     starting = Boolean(history.starting);
     byId("suspend-import").disabled = importing || !history.active || history.suspending;
     byId("resume-import").disabled = importing || !history.can_resume;
+    byId("resume-import").textContent = statuses[0]?.state === "paused" ? "Resume" : "Continue Import";
     byId("import-control-status").textContent = history.suspending
       ? "Suspending import… waiting for current work to finish and save its checkpoint."
+      : statuses[0]?.state === "paused" ? "Download paused. Reconnect to the network, then choose Resume."
       : history.can_resume ? "Import is suspended or unfinished. Continue Import resumes saved work." : "";
     byId("import-control-status").hidden = !byId("import-control-status").textContent;
     byId("starting-import").hidden = !starting;

@@ -6,6 +6,15 @@ Entries describe their recorded revisions. For current behavior use the
 [user manual](USER_MANUAL.md) and [CLI reference](CLI_REFERENCE.md). Retired
 Rust delivery plans and historical package checks are not current acceptance.
 
+## Pause interrupted IMAP downloads
+
+IMAP timeouts and dropped connections now pause downloads with saved progress
+instead of reporting import failure. Ingests shows **paused** and a **Resume**
+button that reconnects without downloading committed messages again, including
+after reopening the archive. Authentication and TLS verification errors remain
+failures. Terminal downloads report the pause and exit 75; rerun to continue.
+Advance the alpha for local validation.
+
 ## User-focused README and signed Windows download guidance
 
 Rewrite the README around desktop installation, supported sources, archive care,

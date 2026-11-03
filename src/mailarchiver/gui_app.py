@@ -51,6 +51,7 @@ from .desktop_platform import copy_windows_text, open_export, open_external_url,
 from .identity import APPLICATION_NAME
 from .build_info import BUILD_INFO, BuildInfo
 from .worker_preferences import WorkerPreferences, WorkerSettings, worker_argument
+from .imap_protocol import ImapPaused
 from .search_completion import SearchSuggestions
 from .processor_graph import ProcessorGraphStatus, processor_graph
 from .updates import UpdateChannel, UpdateService, UpdateStatus, default_channel
@@ -2374,7 +2375,7 @@ class PyWebViewApplication:
         except BaseException as caught:  # pylint: disable=broad-exception-caught
             logging.getLogger(__name__).debug("Best-effort operation failed", exc_info=True)
             error = caught
-            if isinstance(caught, IngestInterrupted):
+            if isinstance(caught, (IngestInterrupted, ImapPaused)):
                 try:
                     if outcome.accepted_request is None:
                         raise ValueError("Import stopped before its settings were accepted.")
@@ -2393,7 +2394,9 @@ class PyWebViewApplication:
             if not self._quitting:
                 self._refresh_search_windows(refresh)
                 self._refresh_menus()
-        if isinstance(error, IngestInterrupted):
+        if isinstance(error, ImapPaused):
+            self.add_notice("information", f"Import paused for {document.display_path}: {error}")
+        elif isinstance(error, IngestInterrupted):
             self.add_notice("information", f"Import suspended for {document.display_path}; use Continue Import in Ingests to resume.")
         elif error is None:
             self.add_notice("information", f"Import completed for {document.display_path}")

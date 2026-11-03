@@ -412,6 +412,23 @@ refetched legacy CRLF messages can therefore create a distinct LF variant. Gmail
 special-use `\\All` mailbox; X-GM-MSGID and X-GM-LABELS replace header-based matching.
 INTERNALDATE is an explicit source-date fallback, not a rewrite of RFC 5322 headers.
 
+`ImapSession` translates socket timeouts, connection loss and IMAP aborts into
+`ImapPaused`, including discovery and authentication transport interruptions.
+Rejected credentials and invalid TLS certificates remain failures. Exceptional
+session teardown closes the socket directly without issuing LOGOUT on a damaged
+buffered stream; cleanup cannot replace the original error. Ingest commits saved
+progress, refreshes archive integrity, records `paused` in the catalog/status file,
+and retains the reason in the status phase without failure detail. Early pauses
+also persist the normalized accepted request before processing initialization,
+so a CLI discovery pause can resume in the desktop. Both CLI entry
+points report the pause and return 75. GUI recovery saves accepted settings, releases
+the writer lease and shows an informational notice; **Resume** opens fresh sessions.
+`make test-imap` interrupts real TLS traffic during discovery, authentication and
+body retrieval, including a partial literal, then clicks the real Resume button
+after restarting the application, including CLI-to-desktop and parallel workers.
+It verifies exact bytes, checkpoints, search,
+source flags and the absence of repeat committed-body downloads.
+
 Each worker snapshots its account/mailbox/UIDVALIDITY/range's committed UID set in
 a temporary SQL table, committing that copy before yielding so it releases the
 catalog read lock. Bounded SEARCH windows first select UIDs absent from the saved

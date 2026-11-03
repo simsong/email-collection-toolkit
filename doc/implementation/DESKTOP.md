@@ -954,6 +954,10 @@ processing database if preflight had not yet done so. Continue reconstructs the
 saved request and acquires a new writer lease; it does not quit or abort jobs.
 Availability follows actual unfinished source/content work, including deferred
 work after a completed latest run, and remains disabled for an active writer.
+IMAP connection interruption uses the same saved-request path with a distinct
+`paused` status and informational notice. Ingests labels its existing continuation
+button **Resume** for the latest paused run and displays its network reason in
+the phase caption. Paused status circles use the amber pause symbol.
 
 Native Close callbacks from pywebview's worker threads dispatch Cocoa focus lookup
 and closure to the main thread, with a bounded result wait. This includes personal

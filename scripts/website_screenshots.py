@@ -81,7 +81,7 @@ def build_collection(work: Path) -> Path:
     return archive
 
 
-def main() -> None:
+def main(browser_channel: str | None = None) -> None:
     """Write screenshots only after the real interfaces have rendered their data."""
     OUTPUT.mkdir(parents=True, exist_ok=True)
     with TemporaryDirectory(prefix="toolkit-website-") as temporary:
@@ -90,7 +90,7 @@ def main() -> None:
         api = GuiApi(archive, work, preferences_file=work / "filter-sets.json")
         try:
             with sync_playwright() as playwright:
-                browser = playwright.chromium.launch(channel="msedge" if sys.platform == "win32" else None)
+                browser = playwright.chromium.launch(channel=browser_channel or ("msedge" if sys.platform == "win32" else None))
                 try:
                     page = browser.new_page(viewport={WIDTH: 1440, HEIGHT: 960}, device_scale_factor=1)
                     bridge(page, api, SEARCH_METHODS)
@@ -141,7 +141,7 @@ def main() -> None:
             api.close()
 
 
-def capture_site() -> None:
+def capture_site(browser_channel: str | None = None) -> None:
     """Inspect the locally built homepage and documentation with local assets only."""
     site = ROOT / ".tmp/website-check"
     previews = ROOT / ".tmp/website-previews"
@@ -161,7 +161,7 @@ def capture_site() -> None:
         route.fulfill(path=path)
 
     with sync_playwright() as playwright:
-        browser = playwright.chromium.launch(channel="msedge" if sys.platform == "win32" else None)
+        browser = playwright.chromium.launch(channel=browser_channel or ("msedge" if sys.platform == "win32" else None))
         try:
             page = browser.new_page(viewport={WIDTH: 1440, HEIGHT: 1100})
             page.route("**/*", local_asset)
@@ -191,7 +191,9 @@ def capture_site() -> None:
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--site-only", action="store_true")
-    if parser.parse_args().site_only:
-        capture_site()
+    parser.add_argument("--browser-channel", help="Use an installed Chromium channel, such as chrome or msedge")
+    args = parser.parse_args()
+    if args.site_only:
+        capture_site(args.browser_channel)
     else:
-        main()
+        main(args.browser_channel)
