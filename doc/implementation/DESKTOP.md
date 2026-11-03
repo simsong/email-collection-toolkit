@@ -5,6 +5,24 @@
 Current implementation and validation boundaries. Deferred feature designs
 live in [plans](../plans/README.md); historical evidence does not validate this revision.
 
+## Timeout status and screenshot identification
+
+`IngestStatus.for_display` converts top-level legacy IMAP `TimeoutError` failures
+and current timed-out pauses into short timeout snapshots without failure detail.
+History, search overview and About apply this read-only projection. Other failures,
+including finalization failures with a nested timeout, retain their diagnostics.
+Ingests renders the timeout label, a yellow circle with a horizontal dash and saved
+progress without a finalizing ETA. Persistent status files remain unchanged.
+`make test-timeout-presentation` covers old snapshots, true failures and real TLS
+pause/resume through the browser.
+
+Cocoa menu refresh installs one identified `NSTitlebarAccessoryViewController`
+with `NSLayoutAttributeRight` on each titled application window. Its label uses
+the immutable launch `APPLICATION_VERSION` in parentheses and leaves the native
+title and represented URL intact. Native lifecycle acceptance checks Search,
+Ingests, About and Untitled labels, right alignment and absence of duplicates,
+and captures the synthetic Ingests frame including its title bar.
+
 ## macOS document paths
 
 `set_macos_document_path` is a macOS-only adapter that schedules
@@ -61,7 +79,7 @@ labels, so color is supplementary. `IngestJob.started_at` lets the history bridg
 expose accepted startup until a new run snapshot exists. The startup banner is
 polled each second. A newly appearing run is selected even if startup finishes
 between polls; further refreshes preserve manual history selection.
-Historical failures are not reclassified. The finished-job card explains its unit.
+Historical timeout display is normalized without rewriting saved failures. The finished-job card explains its unit.
 The main search status line and About activity cards likewise show finished
 processing jobs and the current processor instead of a source percentage/ETA.
 

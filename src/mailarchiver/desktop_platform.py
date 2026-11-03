@@ -25,6 +25,38 @@ from typing import Any
 import webbrowser
 
 
+TITLEBAR_VERSION_ID = "mailarchiver-titlebar-version"
+
+
+def set_macos_titlebar_version(window: Any, version: str) -> None:
+    """On Cocoa's main thread, retain one right-aligned version accessory per titled window."""
+    if sys.platform != "darwin":
+        return
+    appkit = import_module("AppKit")
+    if not window.styleMask() & appkit.NSWindowStyleMaskTitled:
+        return
+    for accessory in window.titlebarAccessoryViewControllers():
+        if accessory.view().identifier() == TITLEBAR_VERSION_ID:
+            return
+    label = appkit.NSTextField.labelWithString_(f"({version})")
+    label.setFont_(appkit.NSFont.systemFontOfSize_(12))
+    label.setTextColor_(appkit.NSColor.secondaryLabelColor())
+    label.setDrawsBackground_(True)
+    label.setBackgroundColor_(appkit.NSColor.windowBackgroundColor())
+    label.setAlignment_(appkit.NSTextAlignmentCenter)
+    label.sizeToFit()
+    label.setFrameSize_((label.frame().size.width + 16, label.frame().size.height + 4))
+    height = max(22, window.frame().size.height - window.contentView().frame().size.height)
+    view = appkit.NSView.alloc().initWithFrame_(((0, 0), (label.frame().size.width, height)))
+    view.setIdentifier_(TITLEBAR_VERSION_ID)
+    label.setFrameOrigin_((0, (height - label.frame().size.height) / 2))
+    view.addSubview_(label)
+    accessory = appkit.NSTitlebarAccessoryViewController.alloc().init()
+    accessory.setView_(view)
+    accessory.setLayoutAttribute_(appkit.NSLayoutAttributeRight)
+    window.addTitlebarAccessoryViewController_(accessory)
+
+
 def set_macos_document_path(window: Any, path: Path | None) -> None:
     """Enable Cocoa's proxy icon/path menu without replacing the application's title."""
     if sys.platform != "darwin":

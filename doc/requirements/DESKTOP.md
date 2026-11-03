@@ -5,6 +5,21 @@
 Current subsystem contract and acceptance boundaries. This is not a claim of
 platform/release acceptance. Deferred features live in [plans](../plans/README.md).
 
+## Timeout status and screenshot identification
+
+For IMAP timeouts, show a short **Timeout** status and a yellow traffic-light
+circle containing a horizontal dash. Keep **Resume** available for unfinished
+work. Do not show a traceback, red failure box or finalizing ETA for this status.
+Apply the same presentation to earlier saved IMAP runs whose top-level failure
+is `TimeoutError`; retain the original status/diagnostics on disk. A real failure
+that merely contains a timeout in its exception chain must remain a failure.
+
+On macOS, show the launch application version in parentheses at the top right
+of titled application windows, including Search, Ingests and About. Preserve
+custom titles and the native document-path menu. Repeated activation must not
+add duplicate version labels; later editable installs must not relabel a running
+process. Read the version from installed metadata, never a hard-coded candidate.
+
 ## macOS document paths
 
 Saved archive Search and Ingest windows associate their native title bar with

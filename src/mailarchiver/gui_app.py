@@ -47,7 +47,7 @@ from pydantic import BaseModel, Field
 from webview.menu import Menu, MenuAction, MenuSeparator
 
 from .file_drag import FILE_DRAGS, install_file_drag
-from .desktop_platform import copy_windows_text, open_export, open_external_url, refresh_windows_menu, set_macos_document_path, startup_error, windows_webview
+from .desktop_platform import copy_windows_text, open_export, open_external_url, refresh_windows_menu, set_macos_document_path, set_macos_titlebar_version, startup_error, windows_webview
 from .identity import APPLICATION_NAME
 from .build_info import BUILD_INFO, BuildInfo
 from .worker_preferences import WorkerPreferences, WorkerSettings, worker_argument
@@ -620,7 +620,7 @@ class IngestWindowApi:
         if self.archive is None:
             return GuiIngestHistory(statuses=[], errors=[]).model_dump(mode="json")
         history = read_ingest_history(self.archive)
-        statuses = [GuiIngestStatus(**status.model_dump(), source_labels=[source_label(self.archive, root)
+        statuses = [GuiIngestStatus(**status.for_display().model_dump(), source_labels=[source_label(self.archive, root)
                     for root in status.source_roots]) for status in history.statuses]
         job = self._document.ingest_job if self._document is not None else None
         starting = bool(job is not None and not job.finished.is_set()
@@ -945,6 +945,7 @@ class GuiApi:
         if self.application is not None:
             self.application._reap_tasks()
         status = latest_ingest_status(self._archive()) if self.archive and _is_archive(self.archive) else None
+        status = status.for_display() if status is not None else None
         active = bool(self.document and self.document.ingest_job) or bool(status and status.state == "running")
         return GuiIngestOverview(status=status, active=active).model_dump(mode="json")
 
@@ -1924,12 +1925,13 @@ class PyWebViewApplication:
             if document.path is None:
                 continue
             job = document.ingest_job
+            status = latest_ingest_status(document.path)
             ingests.append(
                 AboutIngestStatus(
                     archive=str(document.display_path or document.path),
                     owner_window_id=job.owner_window_id if job else None,
                     operation_id=job.operation_id if job else None,
-                    status=latest_ingest_status(document.path),
+                    status=status.for_display() if status is not None else None,
                 )
             )
         inventory = plugin_inventory(active.path if active else None)
@@ -2949,6 +2951,9 @@ class PyWebViewApplication:
             return
 
         def refresh() -> None:
+            appkit = import_module("AppKit")
+            for native_window in appkit.NSApplication.sharedApplication().windows():
+                set_macos_titlebar_version(native_window, APPLICATION_VERSION)
             # A launched/background app or native modal panel may have no webview key window.
             # Build the menu anyway, resolving Cocoa focus only on its main thread.
             active = webview.active_window()
@@ -2975,7 +2980,6 @@ class PyWebViewApplication:
             about_item.setAction_("showMailArchiverAbout:")
             self.start_updates()
             app_menu = menu.itemAtIndex_(0).submenu()
-            appkit = import_module("AppKit")
             for offset, (title, action, key) in enumerate((
                 ("Preferences…", "showUpdatePreferences:", ","),
                 ("Check for Program Updates", "checkForUpdates:", ""),

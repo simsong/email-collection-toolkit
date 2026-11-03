@@ -32,7 +32,8 @@ body { display: flex; flex-direction: column; }
 .state-dot.running, .state-dot.completed { background: #207a3a; }
 .state-dot.running { box-shadow: 0 0 0 3px color-mix(in srgb, #207a3a 20%, transparent); }
 .state-dot.failed, .state-dot.disk-full, .state-dot.stale { background: #c43b35; }
-.state-dot.interrupted, .state-dot.paused { background: #946010; }
+.state-dot.interrupted { background: #946010; }
+.state-dot.paused { background: #f4c542; color: #453400; }
 #starting-import:not([hidden]) { display: flex; align-items: center; gap: 8px; padding: 12px; font-weight: 650; border-bottom: 1px solid var(--border); }
 .history-main { min-width: 0; }
 .history-title { display: flex; justify-content: space-between; gap: 6px; font-weight: 650; }

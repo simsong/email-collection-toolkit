@@ -25,6 +25,9 @@ platform or release gate has passed. [Future work](plans/README.md) is separate.
 
 ## Shared boundaries
 
+- Display-only timeout normalization retains saved diagnostics, and a Cocoa
+  title-bar accessory shows the launch version. See [desktop](implementation/DESKTOP.md).
+
 - The macOS adapter sets archive windows' represented folder URLs on Cocoa's main
   thread, retaining their custom titles. See [desktop](implementation/DESKTOP.md).
 

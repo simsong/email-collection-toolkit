@@ -16,7 +16,7 @@ import pytest
 from mailarchiver.__main__ import IngestRequest, run_ingest
 from mailarchiver.application import ApplicationController, ApplicationPreferencesStore
 from mailarchiver.document_options import DocumentOptions
-from mailarchiver.gui_app import GuiApi, GuiIngestHistory, IdentityPickerApi, IngestWindowApi, PyWebViewApplication
+from mailarchiver.gui_app import GuiApi, GuiIngestHistory, GuiIngestOverview, IdentityPickerApi, IngestWindowApi, PyWebViewApplication
 from mailarchiver.gui_processing import PickerPage, PickerSearch, abort_processing, plugin_inventory, registered_processors, resume_request, unfinished_work
 from mailarchiver.ingest_status import IngestCounts, IngestStatusFile, read_ingest_history
 from mailarchiver.archive_config import load_archive_config, save_archive_config
@@ -388,6 +388,37 @@ def build_interrupted_archive(root: Path) -> Path:
             "state": state, "counts": IngestCounts(archived=archived, duplicates=duplicates)})
         IngestStatusFile(archive, status.status_id).write(status)
     return archive
+
+
+@pytest.mark.parametrize("detail,imap,timeout", [
+    ("TimeoutError: The read operation timed out\n\nTraceback: synthetic", True, True),
+    ("TimeoutError: The read operation timed out\n\nTraceback: synthetic", False, False),
+    ("OSError: finalization failed\n\nCaused by: TimeoutError: timed out", True, False),
+])
+def test_timeout_presentation_preserves_history_and_real_failures(tmp_path: Path,
+        detail: str, imap: bool, timeout: bool) -> None:
+    """Desktop: only a top-level IMAP timeout becomes a quiet pause in both history and search."""
+    archive = build_deferred_archive(tmp_path)
+    template = read_ingest_history(archive).statuses[0]
+    status = template.model_copy(update={"status_id": "ingest-timeout-display", "state": "failed",
+        "source_roots": ["imap://synthetic-account"] if imap else ["synthetic.mbox"],
+        "started_at": datetime.now(UTC), "failure_detail": detail})
+    saved = IngestStatusFile(archive, status.status_id)
+    saved.write(status)
+    original = saved.path.read_bytes()
+    history = GuiIngestHistory.model_validate(IngestWindowApi(archive).history())
+    api = GuiApi(archive)
+    try:
+        overview = GuiIngestOverview.model_validate(api.ingest_overview())
+        assert overview.status is not None
+        for displayed in (history.statuses[0], overview.status):
+            assert displayed.timed_out == timeout
+            assert displayed.state == ("paused" if timeout else "failed")
+            assert displayed.failure_detail == (None if timeout else detail)
+        assert saved.path.read_bytes() == original
+        assert read_ingest_history(archive).statuses[0].state == "failed"
+    finally:
+        api.close()
 
 
 @pytest.mark.parametrize("configuration", ["present", "missing", "invalid"])

@@ -642,6 +642,12 @@ test-imap:
 	uv run --locked pytest -q tests/test_imap.py $(PYTEST_ARGS)
 	uv run --locked pytest -q --browser chromium e2e_tests/test_imap_pause.py $(PYTEST_ARGS)
 
+# Quiet legacy timeout presentation and real pause/Resume traffic-light rendering.
+.PHONY: test-timeout-presentation
+test-timeout-presentation: ruff
+	uv run --locked pytest -q tests/test_gui_processing.py $(PYTEST_ARGS)
+	uv run --locked pytest -q --browser chromium e2e_tests/test_ingest_diagnostics.py e2e_tests/test_imap_pause.py $(PYTEST_ARGS)
+
 # Regression acceptance for Macroscope's Unicode folder, report and phone findings.
 .PHONY: test-macroscope-fixes
 MACROSCOPE_FIX_SOURCES = src/mailarchiver/imap_protocol.py src/mailarchiver/processing/phones.py scripts/name_matcher/evaluate.py tests/imap_fixture.py tests/test_imap.py tests/test_processing.py tests/test_name_linkage_experiments.py

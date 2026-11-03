@@ -103,6 +103,7 @@ class IngestStatus(BaseModel):
     counts: IngestCounts
     years: list[YearProgress]
     failure_detail: str | None = None
+    timed_out: bool = False
     scan_policy: Literal["clamav", "not-scanned", "unknown"] = "unknown"
     processing_active: bool = False
     processing_jobs_completed: int = 0
@@ -126,6 +127,16 @@ class IngestStatus(BaseModel):
         if (checked_at - self.updated_at).total_seconds() <= STALE_AFTER_SECONDS:
             return self
         return self.model_copy(update={"state": "stale", "phase": "status heartbeat lost"})
+
+    def for_display(self) -> IngestStatus:
+        """Present current and legacy IMAP timeouts quietly, retaining the saved diagnostics."""
+        legacy_timeout = (self.state == "failed" and self.failure_detail is not None
+                          and self.failure_detail.startswith("TimeoutError:")
+                          and any(root.startswith("imap://") for root in self.source_roots))
+        if legacy_timeout or (self.state == "paused" and "timed out" in self.phase):
+            return self.model_copy(update={"state": "paused", "phase": "Timeout. Choose Resume when connected.",
+                                           "failure_detail": None, "timed_out": True})
+        return self
 
 
 class IngestStatusReadError(BaseModel):

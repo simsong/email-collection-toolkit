@@ -89,7 +89,9 @@ def test_network_pause_and_resume_through_real_ingest_window(imap_archive: Path,
         controls = IngestWindowApi(imap_archive, application=app, document=api.document)
         bridge(page, controls, ("history", "antivirus", "can_import_directory", "suspend_import", "resume_import"))
         page.goto((GUI_DIRECTORY / "ingests.html").as_uri())
-        expect(page.locator(".state-badge")).to_have_text("paused")
+        expect(page.locator(".state-badge")).to_have_text("Timeout" if fault.mode in {"timeout", "partial"} else "paused")
+        expect(page.locator(".history-row.selected .state-dot")).to_have_text("−")
+        assert page.locator(".history-row.selected .state-dot").evaluate("el => getComputedStyle(el).backgroundColor") == "rgb(244, 197, 66)"
         expect(page.get_by_role("heading", name="Failure", exact=True)).to_have_count(0)
         expect(page.locator("#import-control-status")).to_contain_text("Download paused")
         resume = page.get_by_role("button", name="Resume", exact=True)

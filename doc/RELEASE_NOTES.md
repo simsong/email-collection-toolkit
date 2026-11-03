@@ -6,6 +6,14 @@ Entries describe their recorded revisions. For current behavior use the
 [user manual](USER_MANUAL.md) and [CLI reference](CLI_REFERENCE.md). Retired
 Rust delivery plans and historical package checks are not current acceptance.
 
+## Quiet timeout status and visible screenshot version
+
+Show timeouts as a short **Timeout** status with a yellow circle and horizontal
+dash, without a traceback or red failure panel. This also applies to earlier
+saved IMAP timeout entries; their original diagnostics remain on disk. Real
+failures retain their diagnostic display. macOS title bars show the launch
+version in parentheses at the top right for screenshot identification.
+
 ## Pause interrupted IMAP downloads
 
 IMAP timeouts and dropped connections now pause downloads with saved progress

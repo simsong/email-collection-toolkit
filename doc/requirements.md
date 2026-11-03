@@ -19,6 +19,10 @@ platform or release gate has passed. [Future work](plans/README.md) is separate.
 
 ## Shared boundaries
 
+- Desktop timeout status uses a yellow circle with a horizontal dash and no
+  traceback; macOS title bars show the launch version at the top right.
+  See [desktop](requirements/DESKTOP.md).
+
 - Saved archive windows on macOS expose the native title-bar document-path menu;
   untitled and utility windows have no represented path. See [desktop](requirements/DESKTOP.md).
 

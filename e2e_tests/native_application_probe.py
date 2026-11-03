@@ -15,12 +15,14 @@ from importlib import import_module
 from pathlib import Path
 from threading import Event, enumerate as active_threads
 from time import monotonic, sleep
+from typing import Any, cast
 
 import webview
 
 from mailarchiver.application import ApplicationController, ApplicationPreferencesStore, IngestJob
 from mailarchiver.clamav_definitions import UPDATE_ENV, UPDATER_ENV
-from mailarchiver.gui_app import GUI_DIRECTORY, PyWebViewApplication, configure_macos_application, install_macos_document_events, macos_import_picker, macos_owner_rules
+from mailarchiver.gui_app import APPLICATION_VERSION, GUI_DIRECTORY, PyWebViewApplication, configure_macos_application, install_macos_document_events, macos_import_picker, macos_owner_rules
+from mailarchiver.desktop_platform import TITLEBAR_VERSION_ID
 from mailarchiver.loopback import LoopbackAssetServer
 from mailarchiver.identity import APPLICATION_NAME
 from mailarchiver.owner_rules import OwnerRules
@@ -84,7 +86,7 @@ def check_document_path(window: webview.Window, path: Path | None) -> None:
 
     def inspect() -> None:
         try:
-            native = window.native
+            native = cast(Any, window.native)
             assert native is not None
             represented = native.representedURL()
             if path is None:
@@ -94,6 +96,22 @@ def check_document_path(window: webview.Window, path: Path | None) -> None:
                 button = native.standardWindowButton_(appkit.NSWindowDocumentIconButton)
                 assert button is not None and button.image() is not None
             assert native.title() == window.title, "Represented path replaced the application title"
+            accessories = [item for item in native.titlebarAccessoryViewControllers()
+                           if item.view().identifier() == TITLEBAR_VERSION_ID]
+            assert len(accessories) == 1, "Version is missing or duplicated in title bar"
+            accessory = accessories[0]
+            assert accessory.layoutAttribute() == appkit.NSLayoutAttributeRight
+            label = accessory.view().subviews()[0]
+            assert label.stringValue() == f"({APPLICATION_VERSION})"
+            bounds = label.convertRect_toView_(label.bounds(), None)
+            assert bounds.origin.x > native.frame().size.width / 2, bounds
+            if " — Ingests — " in window.title:
+                frame = native.contentView().superview()
+                bitmap = frame.bitmapImageRepForCachingDisplayInRect_(frame.bounds())
+                frame.cacheDisplayInRect_toBitmapImageRep_(frame.bounds(), bitmap)
+                image = bitmap.representationUsingType_properties_(appkit.NSBitmapImageFileTypePNG, {})
+                destination = Path(os.environ[PROBE_PREFERENCES_ENV]).parent / "native-ingests-titlebar.png"
+                assert image.writeToFile_atomically_(str(destination), True)
         except Exception:  # pylint: disable=broad-exception-caught
             errors.append(traceback.format_exc())
         finally:

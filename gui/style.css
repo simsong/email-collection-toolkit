@@ -171,7 +171,8 @@ mark.message-find-current { outline: 2px solid AccentColor; outline-offset: 1px;
 .ingest-status-line.link-destination { color: CanvasText; cursor: default; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
 .ingest-status-line.running::before { content: "●"; margin-right: 7px; color: #2a9d4b; }
 .ingest-status-line.failed::before, .ingest-status-line.disk-full::before, .ingest-status-line.stale::before { content: "●"; margin-right: 7px; color: #c43b35; }
-.ingest-status-line.interrupted::before, .ingest-status-line.paused::before { content: "●"; margin-right: 7px; color: #d89024; }
+.ingest-status-line.interrupted::before { content: "●"; margin-right: 7px; color: #d89024; }
+.ingest-status-line.paused::before { content: "−"; display: inline-flex; align-items: center; justify-content: center; width: 18px; height: 18px; margin-right: 7px; border-radius: 50%; background: #f4c542; color: #453400; font-weight: bold; }
 .archive-status-banner { flex: none; max-height: 40%; overflow: auto; border-top: 1px solid var(--border); background: var(--surface); color: var(--muted); }
 .archive-status-banner[hidden] { display: none; }
 #archive-status-messages p { margin: 0; padding: 5px 12px; line-height: 20px; overflow-wrap: anywhere; }
