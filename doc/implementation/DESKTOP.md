@@ -21,7 +21,15 @@ with `NSLayoutAttributeRight` on each titled application window. Its label uses
 the immutable launch `APPLICATION_VERSION` in parentheses and leaves the native
 title and represented URL intact. Native lifecycle acceptance checks Search,
 Ingests, About and Untitled labels, right alignment and absence of duplicates,
-and captures the synthetic Ingests frame including its title bar.
+and captures the synthetic Ingests frame including its title bar. Windows menu
+refresh adds one right-aligned version label and caption suffix, including utility
+and Preferences windows. **Show Archive in Explorer** opens the active saved
+archive folder through the Windows shell. Each window's document-menu availability
+comes from its own document mapping, so utility activation cannot disable commands
+in an underlying archive window. Native acceptance checks Preferences and standalone
+message open/close against that invariant. Standalone viewers register their
+archive as child-window context until Close, so their own New Search, Explorer
+and customizable-list commands resolve the displayed message's archive.
 
 ## macOS document paths
 
@@ -697,8 +705,18 @@ AppKit builds its pasteboard. Unregistered text and link drags are unchanged.
 Every preparation writes into a fresh `drags/<uuid>/` subdirectory, isolating it
 from attachment basenames and later exports. Preparation and close share a lock;
 close revokes its tokens and rejects later preparation before cleaning exports.
-The status bridge disables the drag control on non-macOS backends. Startup
-awaits Tabulator `tableBuilt` before clearing the initial result viewport. Queued
+Windows uses the same prepared export tokens, validating viewer ownership before
+marshalling copy-only `DataObject.SetFileDropList`/`DoDragDrop` onto the WinForms
+STA thread. Closing revokes tokens immediately and defers temporary-file cleanup
+until active OLE transfers finish. Standalone message viewers own independent
+temporary storage and cancellation state; parent cleanup cannot delete an active
+child transfer. The transfer context is exercised by unit and native lifecycle
+acceptance. Unsupported backends hide the drag control.
+The native Windows acceptance probe transfers a real EML to an OLE drop target
+and checks exact bytes; browser tests exercise preparation and selection. The
+probe converts CSS coordinates with the WebView pixel ratio, checks visible
+physical input points, and retains display geometry/DPI in `drag-geometry.json`.
+Startup awaits Tabulator `tableBuilt` before clearing the initial result viewport. Queued
 row-click callbacks verify the search generation and current row before selecting.
 The browser acceptance test rejects unhandled page errors and verifies export bytes.
 `make test-file-drag` checks exact
@@ -816,11 +834,14 @@ installer execution. Help contains Check for Program Updates, Check for Anti-Vir
 Updates and Preferences.
 Actual SDK initialization and signed-feed filtering pass focused tests; an
 end-to-end signed Python package upgrade remains unvalidated. The published feed
-does not yet contain a Python Windows release. Native file drag remains unimplemented.
-Windows definition download remains blocked by a CDN cooldown during local
-acceptance; native scanning and validated local initialization pass. macOS
-acceptance remains unvalidated.
-macOS packaging remains the Python builder on main.
+does not yet contain a Python Windows release. Current branch CI must independently
+validate source and relocated native UI, clean/EICAR scans, bundled importers,
+and test-signed installation/upgrade/uninstall; an earlier revision is not proof.
+Windows bundles both Rust helpers and the isolated libpff converter under private
+Python `importers/`. Shared executable discovery checks that layout before
+development and PATH. Rust ClamAV loading includes the DLL directory and default
+Windows search directories, allowing colocated dependencies without PATH changes.
+macOS packaging retains its frozen Python builder.
 
 `reader_fixture.py` constructs only a newly reserved synthetic fixture, without
 enabling the POSIX archive publisher on Windows. Make targets exercise shared

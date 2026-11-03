@@ -6,6 +6,18 @@ Entries describe their recorded revisions. For current behavior use the
 [user manual](USER_MANUAL.md) and [CLI reference](CLI_REFERENCE.md). Retired
 Rust delivery plans and historical package checks are not current acceptance.
 
+## Windows desktop parity
+
+Windows now bundles the same read-only PST/OST import helpers, supports native
+EML/ZIP drag-out to Explorer, and shows the launch version at the right of the
+native menu bar and in the window caption. File > Show Archive in Explorer opens
+the active archive folder. The shared timeout/Resume presentation and prior
+worker, progress, Preferences and window-lifecycle fixes apply to both desktops.
+Windows acceptance now exercises those shared regressions, native OLE transfer,
+and relocated Outlook import with source integrity and retry checks. Package
+builds alone do not establish installed behavior; see the
+[Windows checklist](WINDOWS_RELEASE_TESTING.md) for remaining acceptance gates.
+
 ## Quiet timeout status and visible screenshot version
 
 Show timeouts as a short **Timeout** status with a yellow circle and horizontal

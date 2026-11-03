@@ -36,6 +36,7 @@ const state = {
   remoteContentAuthorizedPart: null,
   view: null,
   fileDragSupported: false,
+  nativeFileDrag: false,
   dragExports: new Map(),
   dragPreparing: new Set(),
   dragEpoch: 0,
@@ -464,6 +465,7 @@ function resetArchiveView() {
 
 function applyStatus(status) {
   state.fileDragSupported = Boolean(status.file_drag_supported);
+  state.nativeFileDrag = Boolean(status.native_file_drag);
   elements["message-file-well"].hidden = !state.fileDragSupported;
   elements["message-file-well"].draggable = state.fileDragSupported;
   state.highlightBackground = status.configuration.search_highlight_background;
@@ -2117,7 +2119,7 @@ function showMultipleMessageSelection() {
   title.textContent = `${count} messages selected.`;
   const detail = document.createElement("p");
   detail.textContent = state.fileDragSupported
-    ? "Drag the selected messages or the file icon to Finder to export a ZIP archive."
+    ? `Drag the selected messages or the file icon to ${state.nativeFileDrag ? "Explorer" : "Finder"} to export a ZIP archive.`
     : "Select a single message to use Save Message.";
   elements["message-selection-summary"].replaceChildren(title, detail, elements["message-file-well"]);
   elements["message-selection-summary"].hidden = false;
@@ -2155,7 +2157,8 @@ function updateMessageFileWell() {
   const info = state.dragExports.get(dragExportKey(messagePks));
   const multiple = messagePks.length > 1;
   elements["message-file-name"].textContent = info?.filename || (multiple ? `${messagePks.length} Messages.zip` : "Message.eml");
-  const action = multiple ? "Drag selected messages to Finder as a ZIP archive" : "Drag this message to Finder";
+  const destination = state.nativeFileDrag ? "Explorer" : "Finder";
+  const action = multiple ? `Drag selected messages to ${destination} as a ZIP archive` : `Drag this message to ${destination}`;
   elements["message-file-well"].title = `${action}; the first drag prepares its temporary file`;
   elements["message-file-well"].setAttribute("aria-label", action);
 }
@@ -2173,6 +2176,11 @@ function installDrag(element, messagePks) {
       return;
     }
     event.dataTransfer.clearData();
+    if (state.nativeFileDrag) {
+      event.preventDefault();
+      await call(() => window.pywebview.api.start_drag(info.token));
+      return;
+    }
     event.dataTransfer.effectAllowed = "copy";
     // Both result rows and the icon well use this path. Cocoa replaces the
     // token with one public.file-url item (the modern filenames equivalent).

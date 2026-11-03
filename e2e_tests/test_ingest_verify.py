@@ -184,7 +184,7 @@ def test_search_ui_end_to_end_without_a_window(
     assert {"saved-tiny.png", "saved-review.command", "filter-sets.json"} <= exports
     saved = list(export_directory.glob("saved-Rich UI message-*.eml"))
     assert len(saved) == 1 and saved[0].read_bytes() == RICH_MESSAGE
-    if sys.platform == "darwin":
+    if sys.platform in {"darwin", "win32"}:
         dragged = list((export_directory / "drags").rglob("Rich UI message-*.eml"))
         assert len(dragged) == 1 and dragged[0].read_bytes() == RICH_MESSAGE
     else:

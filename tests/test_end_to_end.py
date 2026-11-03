@@ -335,14 +335,14 @@ def test_refresh_index_excludes_quarantine_mailboxes(tmp_path: Path) -> None:
         catalog.close()
 
     refreshed = subprocess.run(
-        [sys.executable, "-m", "mailarchiver", "--archive", str(archive), "refresh-index"],
+        [sys.executable, "-m", "mailarchiver", "--archive", str(archive), "refresh-index", "--workers", "1"],
         check=False,
         capture_output=True,
         text=True,
     )
 
     assert_success(refreshed)
-    assert f"Refreshing search index ({REFRESH_INDEX_DEFAULT_WORKERS} workers)" in refreshed.stderr
+    assert "Refreshing search index (1 workers)" in refreshed.stderr
     search = sqlite3.connect(archive / "search.sqlite3")
     try:
         assert search.execute("SELECT sha256 FROM message_fts").fetchall() == [

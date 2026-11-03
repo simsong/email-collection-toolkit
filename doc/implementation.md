@@ -26,10 +26,11 @@ platform or release gate has passed. [Future work](plans/README.md) is separate.
 ## Shared boundaries
 
 - Display-only timeout normalization retains saved diagnostics, and a Cocoa
-  title-bar accessory shows the launch version. See [desktop](implementation/DESKTOP.md).
+  title-bar accessory and right-aligned Windows menu label show the launch version. See [desktop](implementation/DESKTOP.md).
 
 - The macOS adapter sets archive windows' represented folder URLs on Cocoa's main
-  thread, retaining their custom titles. See [desktop](implementation/DESKTOP.md).
+  thread, retaining their custom titles. Windows opens the active saved
+  archive folder through its native shell command. See [desktop](implementation/DESKTOP.md).
 
 - The appcast writer renders Markdown changelog entries into embedded HTML for
   both native updaters; see [delivery](implementation/DELIVERY.md).

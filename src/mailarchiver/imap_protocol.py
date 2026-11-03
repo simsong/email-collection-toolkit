@@ -36,12 +36,18 @@ class ImapPaused(ConnectionError):
     """A lost IMAP connection requires a fresh session and an explicit resume."""
 
 
-def connection_interrupted(error: BaseException) -> bool:
-    """Keep transport interruptions distinct from TLS, authentication and data errors."""
+def connection_cause(error: BaseException) -> BaseException:
+    """Recover the socket exception imaplib wraps while sending commands or literals."""
     # imaplib wraps socket exceptions in command-specific aborts. Inspect the
     # actual cause instead of trusting arbitrary server text in the wrapper.
     while isinstance(error, imaplib.IMAP4.abort) and error.__context__ is not None:
         error = error.__context__
+    return error
+
+
+def connection_interrupted(error: BaseException) -> bool:
+    """Keep transport interruptions distinct from TLS, authentication and data errors."""
+    error = connection_cause(error)
     return isinstance(error, (TimeoutError, ConnectionError,
                               ssl.SSLEOFError, ssl.SSLZeroReturnError)) or (
         isinstance(error, OSError) and error.errno in {
@@ -293,7 +299,7 @@ class ImapSession:
                 except OSError:
                     logging.getLogger(__name__).debug("IMAP socket cleanup did not complete", exc_info=True)
         if _error is not None and (connection_interrupted(_error) or server_closed):
-            reason = "timed out" if isinstance(_error, TimeoutError) else "was interrupted"
+            reason = "timed out" if isinstance(connection_cause(_error), TimeoutError) else "was interrupted"
             raise ImapPaused(f"IMAP connection {reason}. Saved progress is retained; use Resume when connected.") from _error
 
     @staticmethod

@@ -26,6 +26,7 @@ import webbrowser
 
 
 TITLEBAR_VERSION_ID = "mailarchiver-titlebar-version"
+WINDOWS_VERSION_ID = "mailarchiver-window-version"
 
 
 def set_macos_titlebar_version(window: Any, version: str) -> None:
@@ -100,7 +101,25 @@ def copy_windows_text(window: Any, text: str) -> None:
     window.native.Invoke(system.Action(lambda: forms.Clipboard.SetText(text) if text else forms.Clipboard.Clear()))
 
 
-def refresh_windows_menu(window: Any, menu: Any, has_document: bool) -> None:
+def drag_windows_file(window: Any, path: Path) -> None:
+    """Transfer an explicitly exported file through WinForms' native copy-only OLE drag."""
+    if window is None or window.native is None:
+        raise ValueError("Dragging requires an open reader window")
+    system = import_module("System")
+    forms = import_module("System.Windows.Forms")
+    collections = import_module("System.Collections.Specialized")
+
+    def drag() -> None:
+        files = collections.StringCollection()
+        files.Add(str(path))
+        data = forms.DataObject()
+        data.SetFileDropList(files)
+        window.native.DoDragDrop(data, forms.DragDropEffects.Copy)
+
+    window.native.Invoke(system.Action(drag))
+
+
+def refresh_windows_menu(window: Any, menu: Any, has_document: bool, version: str) -> None:
     """Replace pywebview's menu strip rather than accumulating native controls."""
     system = import_module("System")
     forms = import_module("System.Windows.Forms")
@@ -117,11 +136,18 @@ def refresh_windows_menu(window: Any, menu: Any, has_document: bool) -> None:
                 continue
             for heading in control.Items:
                 for item in heading.DropDownItems:
-                    if item.Text == "New Search Window":
+                    if item.Text in {"New Search Window", "Show Archive in Explorer"}:
                         item.Enabled = has_document
                     key = {"New": forms.Keys.N, "Open…": forms.Keys.O, "Close": forms.Keys.W}.get(str(item.Text))
                     if key is not None:
                         item.ShortcutKeys = forms.Keys(int(forms.Keys.Control) | int(key))
+            label = forms.ToolStripLabel(f"({version})")
+            label.Name = WINDOWS_VERSION_ID
+            label.Alignment = forms.ToolStripItemAlignment.Right
+            control.Items.Add(label)
+        suffix = f" ({version})"
+        if not str(native.Text).endswith(suffix):
+            native.Text = str(native.Text) + suffix
     window.native.Invoke(system.Action(replace))
 
 

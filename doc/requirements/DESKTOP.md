@@ -14,8 +14,9 @@ Apply the same presentation to earlier saved IMAP runs whose top-level failure
 is `TimeoutError`; retain the original status/diagnostics on disk. A real failure
 that merely contains a timeout in its exception chain must remain a failure.
 
-On macOS, show the launch application version in parentheses at the top right
-of titled application windows, including Search, Ingests and About. Preserve
+Show the launch application version in parentheses at the top right of native
+application windows, including Search, Ingests, About and Preferences. macOS uses
+the title bar; Windows uses its native menu bar and includes it in the caption. Preserve
 custom titles and the native document-path menu. Repeated activation must not
 add duplicate version labels; later editable installs must not relabel a running
 process. Read the version from installed metadata, never a hard-coded candidate.
@@ -27,7 +28,8 @@ the user-selected archive folder. Control-click, right-click or Command-click
 the document title/icon to show macOS's ancestor-folder path menu. Preserve the
 application's title and message count. Untitled, About and settings windows
 have no represented path. This integration is macOS-only and never changes
-archive or source content.
+archive or source content. Windows provides **File > Show Archive in Explorer**
+for the active saved archive, disabled when no document is active.
 
 ## Saved import recovery and notices
 
@@ -632,13 +634,16 @@ same drag implementation, which creates that copy only when a drag starts, never
 while browsing, selecting, or hovering
 over a result. Because the pywebview bridge is asynchronous, the first drag
 prepares the disposable file and the next drag copies the actual `.eml` file to
-Finder or the Desktop. Multiple messages transfer as an actual ZIP file. Neither
+Finder, Explorer or the Desktop. Multiple messages transfer as an actual ZIP file. Neither
 operation may create a `.fileloc`/`.webloc` shortcut or expose link/text URL drag
 representations supplied by the application. The application explicitly writes
-only `public.file-url`, the modern file-path transfer type; macOS may add its own
+only `public.file-url` on macOS or native `FileDrop` on Windows, the modern file-path transfer type; macOS may add its own
 compatibility aliases. Each drag export is isolated from attachment exports and later
 drags; closing the viewer serializes with preparation and revokes every token.
-Backends without the macOS file-drag adapter hide and reject this drag control.
+Windows accepts only a registered export token owned by that viewer, never an
+arbitrary path, and uses copy-only native OLE transfer. An active Windows drag
+retains its export until completion even if the viewer or its parent closes. Other backends
+without a native adapter hide and reject this drag control.
 The result table must finish initializing before startup clears or populates it.
 Queued clicks must not select rows discarded by a subsequent search.
 Message headers remain selectable text. Printing prints the displayed headers

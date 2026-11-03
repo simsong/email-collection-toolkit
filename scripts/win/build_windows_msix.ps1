@@ -32,6 +32,14 @@ foreach ($name in @('libclamav.dll', 'freshclam.exe')) {
         throw "Missing Windows ClamAV runtime file: $ClamavDirectory/$name"
     }
 }
+foreach ($name in @('pst-importer.exe', 'mcti-scan.exe')) {
+    if (-not (Test-Path -LiteralPath (Join-Path $root "target/release/$name") -PathType Leaf)) {
+        throw "Missing Outlook importer $name; run make pst-importer mcti-scan first."
+    }
+}
+if (-not (Test-Path -LiteralPath (Join-Path $root 'target/pff-converter/pff-converter.exe') -PathType Leaf)) {
+    throw 'Missing standalone Outlook converter; run make pff-converter-bundle first.'
+}
 . (Join-Path $PSScriptRoot 'sdk.ps1')
 if (-not $SdkDirectory) { $SdkDirectory = Get-WindowsSdkTools }
 if (-not $PythonEnvironment) {
@@ -92,12 +100,26 @@ try {
 }
 Copy-Item -LiteralPath $definitions -Destination (Join-Path $clamav 'definitions') -Recurse
 Copy-Item -LiteralPath $WinSparkleDirectory -Destination (Join-Path $privatePython 'winsparkle') -Recurse
+$importers = Join-Path $privatePython 'importers'
+New-Item -ItemType Directory -Path $importers | Out-Null
+foreach ($name in @('pst-importer.exe', 'mcti-scan.exe')) {
+    Copy-Item -LiteralPath (Join-Path $root "target/release/$name") -Destination $importers
+}
+foreach ($name in @('vcruntime140.dll', 'vcruntime140_1.dll')) {
+    Copy-Item -LiteralPath (Join-Path $privatePython $name) -Destination $importers
+}
+Copy-Item -LiteralPath (Join-Path $root 'target/pff-converter') -Destination $importers -Recurse
 foreach ($name in @('LICENSE','COPYRIGHT','THIRD_PARTY_NOTICES.md')) {
     Copy-Item -LiteralPath (Join-Path $root $name) -Destination $stage
 }
 Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'test_windows_msix.py') -Destination $stage
 Copy-Item -LiteralPath (Join-Path $root 'scripts/test_python_reader_native.py') -Destination $stage
 Copy-Item -LiteralPath (Join-Path $root 'licenses') -Destination $stage -Recurse
+$converterNotices = Join-Path $stage 'licenses/pff-converter'
+New-Item -ItemType Directory -Path $converterNotices | Out-Null
+foreach ($name in @('LICENSE', 'COPYRIGHT', 'libpff-LGPL.txt')) {
+    Copy-Item -LiteralPath (Join-Path $root "converters/pff/$name") -Destination $converterNotices
+}
 New-Item -ItemType Directory -Path (Join-Path $stage 'Assets') | Out-Null
 Copy-Item -LiteralPath (Join-Path $root 'gui/icons/rainbow-post-48.png') -Destination (Join-Path $stage 'Assets/Logo.png')
 Copy-Item -LiteralPath (Join-Path $root 'gui/icons/rainbow-post-192.png') -Destination (Join-Path $stage 'Assets/Tile.png')

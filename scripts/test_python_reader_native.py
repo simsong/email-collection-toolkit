@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import argparse
+import ctypes
 from collections.abc import Callable
 import faulthandler
 from importlib import import_module
@@ -30,6 +31,16 @@ class DesktopResult(BaseModel):
     passed: bool
     error: str | None = None
     phase: str = "startup"
+
+
+class NativeDragGeometry(BaseModel):
+    """Physical display evidence for the CSS-to-native input conversion."""
+
+    pixel_ratio: float
+    dpi: int
+    working_area: tuple[int, int, int, int]
+    source_screen: tuple[int, int]
+    target_screen: tuple[int, int]
 
 
 def check_windows_antivirus_menu(application, search, evaluate, progress: Callable[[str], None], output: Path) -> None:
@@ -78,6 +89,7 @@ def check_windows_antivirus_menu(application, search, evaluate, progress: Callab
                 raise AssertionError("Windows anti-virus menu did not report a retained-data update failure")
             if [window for window in webview.windows if window.title.startswith("About ")] != [about]:
                 raise AssertionError("Repeated anti-virus commands created duplicate About windows")
+            check_windows_version(about)
             about.destroy()
             if not about.events.closed.wait(20):
                 raise TimeoutError("Anti-virus About did not close")
@@ -89,7 +101,7 @@ def check_windows_antivirus_menu(application, search, evaluate, progress: Callab
                 os.environ[key] = value
 
 
-def check_windows_preferences(application, evaluate, progress: Callable[[str], None]) -> None:
+def check_windows_preferences(application, search, evaluate, progress: Callable[[str], None]) -> None:
     """Native Close flushes active edits, and reopening restores the saved settings."""
     progress("Preferences loading")
     application.show_update_preferences()
@@ -98,6 +110,8 @@ def check_windows_preferences(application, evaluate, progress: Callable[[str], N
         raise TimeoutError("Preferences did not load")
     evaluate("(async () => { while (document.body.dataset.ready !== 'true') "
              "await new Promise(resolve => setTimeout(resolve, 25)); return true; })()", window)
+    check_windows_version(window)
+    check_windows_document_menu(search)
     application.show_update_preferences()
     if application._windows_preferences_window is not window:
         raise AssertionError("Preferences created a duplicate native window")
@@ -113,6 +127,7 @@ def check_windows_preferences(application, evaluate, progress: Callable[[str], N
     window.destroy()
     if not window.events.closed.wait(20):
         raise TimeoutError("Preferences Close did not finish")
+    check_windows_document_menu(search)
     if application.controller.preferences.workers.custom_count != 2:
         raise AssertionError("Native Close lost the unfinished worker edit")
     progress("Preferences reopening")
@@ -125,10 +140,202 @@ def check_windows_preferences(application, evaluate, progress: Callable[[str], N
                       "return document.getElementById('worker-count').value; })()", reopened)
     if answer != "2":
         raise AssertionError("Reopened Preferences lost the saved worker count")
+    check_windows_version(reopened)
     progress("Reopened Preferences Close")
     reopened.destroy()
     if not reopened.events.closed.wait(20):
         raise TimeoutError("Reopened Preferences did not close")
+    check_windows_document_menu(search)
+
+
+def check_windows_document_menu(window) -> None:
+    """Utility-window activation must not disable the archive window's own commands."""
+    system = import_module("System")
+    forms = import_module("System.Windows.Forms")
+    enabled = []
+
+    def inspect() -> None:
+        strips = [control for control in window.native.Controls if isinstance(control, forms.MenuStrip)]
+        for strip in strips:
+            for heading in strip.Items:
+                if isinstance(heading, forms.ToolStripMenuItem):
+                    enabled.extend(bool(item.Enabled) for item in heading.DropDownItems
+                                   if str(item.Text) in {"New Search Window", "Show Archive in Explorer"})
+
+    window.native.Invoke(system.Action(inspect))
+    if enabled != [True, True]:
+        raise AssertionError(f"Archive document commands are disabled or missing: {enabled}")
+
+
+def check_windows_version(window) -> None:
+    """The immutable version remains visible at the right of the native application bar."""
+    from mailarchiver.desktop_platform import WINDOWS_VERSION_ID
+    from mailarchiver.gui_app import APPLICATION_VERSION
+    system = import_module("System")
+    forms = import_module("System.Windows.Forms")
+    errors = []
+
+    def inspect() -> None:
+        strips = [control for control in window.native.Controls if isinstance(control, forms.MenuStrip)]
+        labels = [item for strip in strips for item in strip.Items if item.Name == WINDOWS_VERSION_ID]
+        if len(labels) != 1 or str(labels[0].Text) != f"({APPLICATION_VERSION})":
+            errors.append("Missing or duplicate screenshot version label")
+        elif labels[0].Alignment != forms.ToolStripItemAlignment.Right:
+            errors.append("Screenshot version is not right aligned")
+        if not str(window.native.Text).endswith(f" ({APPLICATION_VERSION})"):
+            errors.append("Native caption omitted the launch version")
+
+    window.native.Invoke(system.Action(inspect))
+    if errors:
+        raise AssertionError(errors)
+
+
+def check_windows_message_commands(application, parent, child, progress: Callable[[str], None]) -> None:
+    """A focused standalone viewer routes real native commands to its archive."""
+    system = import_module("System")
+    forms = import_module("System.Windows.Forms")
+    check_windows_document_menu(child)
+
+    def invoke(label: str) -> None:
+        def click() -> None:
+            child.native.Activate()
+            strips = [control for control in child.native.Controls if isinstance(control, forms.MenuStrip)]
+            item = next(item for strip in strips for heading in strip.Items
+                        if isinstance(heading, forms.ToolStripMenuItem) for item in heading.DropDownItems
+                        if str(item.Text) == label)
+            item.PerformClick()
+        child.native.Invoke(system.Action(click))
+
+    progress("Standalone New Search command")
+    before = {api.window.uid for api in application._search_apis()}
+    invoke("New Search Window")
+    deadline = monotonic() + 20
+    opened = []
+    while not opened and monotonic() < deadline:
+        opened = [api for api in application._search_apis() if api.window.uid not in before]
+        Event().wait(0.025)
+    if len(opened) != 1 or opened[0].document is not parent.document:
+        raise AssertionError("Standalone New Search lost its archive context")
+    extra = opened[0].window
+    if not extra.events.loaded.wait(25):
+        raise TimeoutError("Standalone New Search did not load")
+    extra.destroy()
+    if not extra.events.closed.wait(20):
+        raise TimeoutError("Standalone New Search did not close")
+    progress("Standalone archive default-list command")
+    invoke("Customizable Default Lists…")
+    document_id = parent.document.descriptor.document_id
+    deadline = monotonic() + 20
+    while document_id not in application._default_lists_apis and monotonic() < deadline:
+        Event().wait(0.025)
+    editor = application._default_lists_apis.get(document_id)
+    if editor is None or editor.archive != parent.archive:
+        raise AssertionError("Standalone default-list command opened personal or another archive's defaults")
+    if not editor.window.events.loaded.wait(25):
+        raise TimeoutError("Standalone archive defaults did not load")
+    editor.window.destroy()
+    if not editor.window.events.closed.wait(20):
+        raise TimeoutError("Standalone archive defaults did not close")
+
+
+def check_windows_file_drag(api, evaluate, progress: Callable[[str], None], output: Path) -> None:
+    """Move a real exported EML through native OLE, never a URL or caller-provided path."""
+    if sys.platform != "win32":
+        raise RuntimeError("Native OLE acceptance requires Windows")
+    system = import_module("System")
+    forms = import_module("System.Windows.Forms")
+    drawing = import_module("System.Drawing")
+    progress("Windows native file drag")
+    api.window.native.Invoke(system.Action(lambda: setattr(
+        api.window.native, "WindowState", forms.FormWindowState.Maximized)))
+    evaluate("prepareDrag([state.selected]).then(() => true)")
+    point = evaluate("(async () => { await new Promise(requestAnimationFrame); "
+                     "await new Promise(requestAnimationFrame); "
+                     "const r=elements['message-file-well'].getBoundingClientRect(); "
+                     "return [r.x+r.width/2,r.y+r.height/2,window.devicePixelRatio]; })()")
+    dropped = Event()
+    targets, points, paths = [], [], []
+
+    def enter(_sender, event) -> None:
+        if event.Data.GetDataPresent(forms.DataFormats.FileDrop):
+            event.Effect = forms.DragDropEffects.Copy
+
+    def receive(_sender, event) -> None:
+        paths.extend(str(path) for path in event.Data.GetData(forms.DataFormats.FileDrop))
+        dropped.set()
+
+    def prepare() -> None:
+        source = api.window.native
+        area = forms.Screen.FromControl(source).WorkingArea
+        client = drawing.Point(round(point[0] * point[2]), round(point[1] * point[2]))
+        if not source.webview.ClientRectangle.Contains(client):
+            raise AssertionError("The scaled file-drag origin is outside its WebView")
+        start = source.webview.PointToScreen(client)
+        target = forms.Form()
+        target.Text = "Synthetic file-drop acceptance"
+        target.StartPosition = forms.FormStartPosition.Manual
+        target.Location = drawing.Point(area.Left + 10 if start.X > area.Left + area.Width // 2
+                                        else area.Right - 250, area.Top + 10)
+        target.Size = drawing.Size(240, 140)
+        target.TopMost = True
+        target.AllowDrop = True
+        target.DragEnter += enter
+        target.DragDrop += receive
+        target.Show()
+        targets.append(target)
+        finish = target.PointToScreen(drawing.Point(target.ClientSize.Width // 2, target.ClientSize.Height // 2))
+        if not area.Contains(start) or not area.Contains(finish) or target.Bounds.Contains(start):
+            target.Close()
+            raise AssertionError("Native file-drag coordinates must be visible and unobscured")
+        points.extend((start, finish))
+        geometry = NativeDragGeometry(pixel_ratio=point[2], dpi=source.DeviceDpi,
+            working_area=(area.Left, area.Top, area.Width, area.Height),
+            source_screen=(start.X, start.Y), target_screen=(finish.X, finish.Y))
+        (output / "drag-geometry.json").write_text(geometry.model_dump_json(indent=2), encoding="utf-8")
+
+    api.window.native.Invoke(system.Action(prepare))
+    user32 = ctypes.WinDLL("user32", use_last_error=True)
+    user32.SetCursorPos.argtypes = [ctypes.c_int, ctypes.c_int]
+    user32.mouse_event.argtypes = [ctypes.c_uint32, ctypes.c_uint32, ctypes.c_uint32,
+                                   ctypes.c_uint32, ctypes.c_size_t]
+    try:
+        start, finish = points
+        user32.SetCursorPos(start.X, start.Y)
+        user32.mouse_event(0x0002, 0, 0, 0, 0)
+        Event().wait(0.1)
+        user32.SetCursorPos(start.X - 20, start.Y)
+        Event().wait(0.3)
+        user32.SetCursorPos(finish.X, finish.Y)
+        Event().wait(0.3)
+        user32.mouse_event(0x0004, 0, 0, 0, 0)
+        if not dropped.wait(10):
+            raise AssertionError("Native Windows file drag did not reach its OLE drop target")
+        if len(paths) != 1 or Path(paths[0]).suffix != ".eml" or Path(paths[0]).read_bytes() != RAW_MESSAGE:
+            raise AssertionError("Windows native file drag did not preserve the exported message bytes")
+    finally:
+        user32.mouse_event(0x0004, 0, 0, 0, 0)
+        api.window.native.Invoke(system.Action(targets[0].Close))
+
+
+def capture_windows_frame(window, destination: Path) -> None:
+    """Retain native version/menu/caption pixels as well as the WebView-only image."""
+    system = import_module("System")
+    drawing = import_module("System.Drawing")
+    imaging = import_module("System.Drawing.Imaging")
+
+    def capture() -> None:
+        window.native.Activate()
+        bounds = window.native.Bounds
+        bitmap = drawing.Bitmap(bounds.Width, bounds.Height)
+        graphics = drawing.Graphics.FromImage(bitmap)
+        try:
+            graphics.CopyFromScreen(bounds.Location, drawing.Point(0, 0), bounds.Size)
+            bitmap.Save(str(destination), imaging.ImageFormat.Png)
+        finally:
+            graphics.Dispose()
+            bitmap.Dispose()
+
+    window.native.Invoke(system.Action(capture))
 
 
 def check_native_import(application, output: Path) -> None:
@@ -159,6 +366,13 @@ def check_native_import(application, output: Path) -> None:
     statuses = [read_ingest_status(path) for path in (destination / "status").glob("*.json")]
     if len(statuses) != 1 or statuses[0].state != "completed":
         raise AssertionError("Native import did not retain its completed status")
+    if sys.platform == "win32":
+        check_windows_version(api.window)
+        ingest = application._ingest_apis[document.descriptor.document_id].window
+        if not ingest.events.loaded.wait(25):
+            raise TimeoutError("Ingest history did not load")
+        check_windows_version(ingest)
+        capture_windows_frame(ingest, output / "ingests-frame.png")
 
 
 def desktop_check(output: Path) -> None:
@@ -235,14 +449,38 @@ def desktop_check(output: Path) -> None:
                     control for control in api.window.native.Controls if isinstance(control, forms.MenuStrip))))
                 if len(menus) != 1:
                     raise AssertionError("Reader accumulated native menu strips")
-                labels = [str(item.Text) for heading in menus[0].Items for item in heading.DropDownItems]
+                labels = [str(item.Text) for heading in menus[0].Items
+                          if isinstance(heading, forms.ToolStripMenuItem) for item in heading.DropDownItems]
                 if not {"New", "Import…", "Document Options…", "Check for Program Updates", "Preferences…",
                         "Reprocess Saved Mail…"}.issubset(labels):
                     raise AssertionError("Native Windows creation/import actions are missing")
                 if labels[labels.index("Check for Program Updates") + 1] != "Check for Anti-Virus Updates":
                     raise AssertionError("Native Windows anti-virus command must follow program updates")
                 check_windows_antivirus_menu(application, api.window, evaluate, progress, output)
-                check_windows_preferences(application, evaluate, progress)
+                check_windows_preferences(application, api.window, evaluate, progress)
+                check_windows_version(api.window)
+                check_windows_file_drag(api, evaluate, progress, output)
+                progress("Windows standalone message version")
+                api.open_message_window(int(evaluate("state.selected")))
+                child = api.children[-1].window
+                if not child.events.loaded.wait(25):
+                    raise TimeoutError("Standalone message did not load")
+                check_windows_version(child)
+                check_windows_document_menu(api.window)
+                check_windows_message_commands(application, api, child, progress)
+                progress("Standalone export survives parent cleanup")
+                child_api = api.children[-1]
+                exported = child_api.prepare_drag([int(evaluate("state.selected"))])
+                with child_api._drag_export(exported["token"]) as path:
+                    api.cleanup_exports(quitting=True)
+                    if path.read_bytes() != RAW_MESSAGE:
+                        raise AssertionError("Parent cleanup changed the active standalone export")
+                if path.exists():
+                    raise AssertionError("Closed standalone export survived completion of its transfer")
+                child.destroy()
+                if not child.events.closed.wait(20):
+                    raise TimeoutError("Standalone message did not close")
+                check_windows_document_menu(api.window)
                 progress("Windows clipboard")
                 # Save and restore clipboard contents within the UI thread, never log them.
                 saved = []
@@ -266,6 +504,7 @@ def desktop_check(output: Path) -> None:
                     raise TimeoutError("Native screenshot timed out")
                 (output / "reader.png").write_bytes(bytes(stream.ToArray()))
                 stream.Dispose()
+                capture_windows_frame(api.window, output / "reader-frame.png")
             if inventory(archive) != before:
                 raise AssertionError("Desktop interaction changed archive files")
             progress("Native import with preservation and scanning")

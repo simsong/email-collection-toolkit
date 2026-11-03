@@ -47,7 +47,7 @@ from pydantic import BaseModel, Field
 from webview.menu import Menu, MenuAction, MenuSeparator
 
 from .file_drag import FILE_DRAGS, install_file_drag
-from .desktop_platform import copy_windows_text, open_export, open_external_url, refresh_windows_menu, set_macos_document_path, set_macos_titlebar_version, startup_error, windows_webview
+from .desktop_platform import copy_windows_text, drag_windows_file, open_export, open_external_url, refresh_windows_menu, set_macos_document_path, set_macos_titlebar_version, startup_error, windows_webview
 from .identity import APPLICATION_NAME
 from .build_info import BUILD_INFO, BuildInfo
 from .worker_preferences import WorkerPreferences, WorkerSettings, worker_argument
@@ -186,7 +186,8 @@ class GuiStatus(BaseModel):
     untitled: bool = False
     generation: int = 0
     opened_in_new_window: bool = False
-    file_drag_supported: bool = sys.platform == "darwin"
+    file_drag_supported: bool = sys.platform in {"darwin", "win32"}
+    native_file_drag: bool = sys.platform == "win32"
     write_available: bool = True
     configuration: GuiConfiguration
     notices: list[ApplicationNotice] = Field(default_factory=list)
@@ -812,7 +813,7 @@ SEARCH_BRIDGE_METHODS = (
     "mailbox_tree", "saved_filter_sets", "save_filter_set", "rename_filter_set", "delete_filter_set",
     "open_message_window", "request_previews", "take_previews", "message", "part", "attachment",
     "copy_source_path", "copy_visible_text", "copy_link", "open_link", "open_attachment",
-    "save_message", "save_attachment", "prepare_drag",
+    "save_message", "save_attachment", "prepare_drag", "start_drag",
 )
 
 
@@ -836,6 +837,7 @@ class GuiApi:
         self.archive = document.path if document is not None else archive
         self.window: Any = None
         self._drag_tokens: set[str] = set()
+        self._active_drags = 0
         self._drag_lock = Lock()
         self._drag_closed = False
         self._export_stop = Event()
@@ -1308,7 +1310,7 @@ class GuiApi:
         return str(destination)
 
     def prepare_drag(self, message_pks: list[int]) -> dict[str, str]:
-        """Prepare one explicit Finder drag without proactively exporting mail."""
+        """Prepare one explicit native file drag without proactively exporting mail."""
         with self._drag_lock:
             if self._drag_closed or self._export_stop.is_set():
                 raise ValueError("message viewer is closed")
@@ -1327,6 +1329,32 @@ class GuiApi:
             token = FILE_DRAGS.register(destination)
             self._drag_tokens.add(token)
             return DragExport(filename=destination.name, token=token).model_dump()
+
+    def start_drag(self, token: str) -> bool:
+        """Allow the Windows native bridge to drag only this window's registered exports."""
+        with self._drag_export(token) as path:
+            if sys.platform != "win32":
+                raise ValueError("This native drag bridge is Windows-only")
+            drag_windows_file(self.window, path)
+        return True
+
+    @contextmanager
+    def _drag_export(self, token: str) -> Iterator[Path]:
+        """Keep this viewer's prepared file alive until its native consumer finishes."""
+        with self._drag_lock:
+            if self._drag_closed or token not in self._drag_tokens:
+                raise ValueError("The prepared export is no longer available")
+            path = FILE_DRAGS.resolve(token)
+            if path is None:
+                raise ValueError("The prepared export is no longer available")
+            self._active_drags += 1
+        try:
+            yield path
+        finally:
+            with self._drag_lock:
+                self._active_drags -= 1
+                if self._drag_closed and not self._active_drags and self._temporary:
+                    self._temporary.cleanup()
 
     def open_attachment(self, message_pk: int, part_id: int, confirmed: bool = False) -> dict[str, Any]:
         descriptor = attachment_descriptor(self._archive(), message_pk, part_id)
@@ -1351,10 +1379,9 @@ class GuiApi:
         parameters = [("message", str(message_pk)), ("standalone", "1")]
         parameters.extend(("highlight", term) for term in highlight_terms or [])
         child_api = GuiApi(
-            self._archive(), self.temporary_directory, self.e2e_directory, self.filter_sets.path,
+            self._archive(), preferences_file=self.filter_sets.path,
             application=self.application, document=self.document,
         )
-        child_api._export_stop = self._export_stop
         child = webview.create_window(
             view.subject,
             f"{base_url}?{urlencode(parameters)}",
@@ -1369,13 +1396,25 @@ class GuiApi:
             raise RuntimeError("pywebview failed to create a window")
         child_api.set_window(child)
         self.children.append(child_api)
+        document_id = self.document.descriptor.document_id if self.application and self.document else None
+        if self.application is not None and document_id is not None:
+            with self.application._lock:
+                self.application._native_child_ids[child.uid] = document_id
+            self.application.controller.attach_child_window(document_id, child.uid)
 
         def close_child(*_args: object) -> None:
             child_api.close()
             if child_api in self.children:
                 self.children.remove(child_api)
+            if self.application is not None and document_id is not None:
+                with self.application._lock:
+                    self.application._native_child_ids.pop(child.uid, None)
+                self.application.controller.close_child_window(document_id, child.uid)
+                self.application._refresh_menus()
 
         child.events.closed += close_child
+        if self.application is not None:
+            self.application._refresh_menus()
         return True
 
     def close(self, *_args: object) -> None:
@@ -1413,7 +1452,7 @@ class GuiApi:
             self._drag_closed = True
             FILE_DRAGS.discard(self._drag_tokens)
             self._drag_tokens.clear()
-            if self._temporary:
+            if self._temporary and not self._active_drags:
                 self._temporary.cleanup()
 
     def _archive(self) -> Path:
@@ -1593,6 +1632,7 @@ class PyWebViewApplication:
         self._default_lists_apis: dict[str, DefaultListsApi] = {}
         self._native_search_ids: dict[str, str] = {}
         self._native_child_ids: dict[str, str] = {}
+        self._windows_menu_hooks: set[str] = set()
         self._about_api = AboutApi(self)
         self._about_window: Any = None
         self._about_lock = RLock()
@@ -1748,6 +1788,7 @@ class PyWebViewApplication:
                         self._windows_preferences_window = None
 
                 window.events.closed += closed
+                self._refresh_menus()
             else:
                 if self._preferences_window is None:
                     self._preferences_window = MacOSPreferences(self.updates, self.save_preferences)
@@ -2512,6 +2553,14 @@ class PyWebViewApplication:
         document = self.active_document()
         return self.open_ingest_window(document) if document is not None else False
 
+    def reveal_active_archive(self) -> bool:
+        """Open the saved archive folder through the platform shell."""
+        document = self.active_document()
+        if document is None or document.display_path is None:
+            return False
+        open_export(document.display_path)
+        return True
+
     def open_default_lists(self, document: ArchiveDocument | None = None, *, personal: bool = False) -> bool:
         api = None if personal or document else self.active_api()
         document = None if personal else (document or (api.document if api else None))
@@ -2930,6 +2979,13 @@ class PyWebViewApplication:
         windows.append(self._processor_graph_window)
         if self._setup_api is not None:
             windows.append(self._setup_api.window)
+        if sys.platform == "win32":
+            windows.extend(window for window in webview.windows if window not in windows)
+            for window in windows:
+                if window is not None and window.uid not in self._windows_menu_hooks:
+                    self._windows_menu_hooks.add(window.uid)
+                    window.events.shown += lambda *_args: self._refresh_menus()
+                    window.events.closed += lambda *_args, uid=window.uid: self._windows_menu_hooks.discard(uid)
         for window in windows:
             if window is not None:
                 window.menu = menu
@@ -2937,7 +2993,8 @@ class PyWebViewApplication:
         if sys.platform == "win32":
             for window in windows:
                 if window is not None and window.native is not None:
-                    refresh_windows_menu(window, menu, self.active_document() is not None)
+                    document = self.document_for_native_window(window.uid)
+                    refresh_windows_menu(window, menu, document is not None, APPLICATION_VERSION)
 
     def _refresh_macos_menu(self) -> None:
         """Refresh pywebview's process menu and its dynamic Close enabled state."""
@@ -3097,6 +3154,7 @@ def application_menu(application: PyWebViewApplication) -> list[Menu]:
                           MenuAction("Reprocess Saved Mail…", application.reprocess_active_document),
                           MenuAction("Document Options…", application.open_document_options),
                           MenuAction("Customizable Default Lists…", application.open_default_lists),
+                          MenuAction("Show Archive in Explorer", application.reveal_active_archive),
                           MenuAction("Close", application.close_active_window),
                           MenuSeparator(), MenuAction("Quit", application.request_quit)]),
             Menu("Window", [MenuAction("New Search Window", application.new_search_window),

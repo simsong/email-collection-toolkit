@@ -523,7 +523,7 @@ Exit 3 reports incomplete source items with fully written emitted records; other
 nonzero exits retain evidence without admitting potentially truncated output.
 
 `make pff-converter` installs the separately locked converter environment;
-`make pff-converter-bundle` builds its standalone executable for the DMG.
+`make pff-converter-bundle` builds its standalone executable for the DMG or MSIX.
 The bundle excludes pypff from the main application and includes the independent
 converter, its source and notices. For scanned imports, the host first invokes
 the external converter and then `mcti-scan`, a separate GPLv2 Rust executable
@@ -681,8 +681,10 @@ The detailed distinction and reader limits are in
 
 Packages use selected OS/architecture-specific executables and native
 dependencies; the Rust adapter does not require a JVM.
-The macOS builder bundles `pst-importer`, `mcti-scan` and the `pff-converter`.
-The Windows MSIX does not yet include them, and no Linux Snap builder exists.
+Both macOS and Windows builders bundle `pst-importer`, `mcti-scan` and the
+independent `pff-converter`. Windows places them in private Python `importers/`,
+with .exe-aware discovery and colocated runtime dependencies. No Linux Snap
+builder exists.
 
 The Cargo workspace now contains `rust/mct-importer`: the Rust library,
 `pst-importer`, `mdti-validator` and `mcti-generator` implement/test

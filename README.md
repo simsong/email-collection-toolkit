@@ -14,9 +14,8 @@ version 1.0 ships.**
 ## Desktop application
 
 We build traditional desktop applications for Windows and macOS. Both include
-an embedded Python runtime, so you do not need to install Python. The macOS
-application also includes compiled Rust-based PST import tools; packaging these
-tools for Windows remains unfinished.
+an embedded Python runtime, so you do not need to install Python. Both applications bundle the Rust PST reader and the independent OST converter;
+Outlook and separate import-tool installations are not required.
 
 The toolkit imports email from local files and downloads email from IMAP servers
 without changing the source mail. Messages are stored in MBOX files, typically
@@ -60,7 +59,7 @@ Available now:
 - Local import from MBOX, Emacs RMAIL Babyl, EML, Maildir, and complete Apple Mail
   `.emlx` messages.
 - Outlook PST import through the Rust reader and OST import through a separate
-  converter on macOS. These readers report partial extraction and reconstruction
+  converter on macOS and Windows. These readers report partial extraction and reconstruction
   limits; see [PST/OST reader limits](doc/PST_IMPORTER.md).
 - Read-only IMAP downloads on macOS and Windows through the standalone CLI,
   including Gmail accounts that support password-based IMAP access.
@@ -70,7 +69,6 @@ Available now:
 
 Still unfinished or planned:
 
-- Packaging the PST/OST import tools for Windows.
 - Eudora-specific and general working IMAP-cache adapters, direct Gmail API/OAuth
   acquisition, and Microsoft 365 OAuth acquisition.
 - A desktop account-setup interface and scheduled IMAP downloads.

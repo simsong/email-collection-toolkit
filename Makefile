@@ -89,7 +89,7 @@ check-python-reader-static:
 	uv run --locked ty check $(PYTHON_READER_SOURCES) --error-on-warning
 	uv run --locked pyright $(PYTHON_READER_SOURCES) --warnings
 
-msix-test: ruff runtime-license-check
+msix-test: ruff runtime-license-check pst-importer mcti-scan pff-converter-bundle
 	pwsh -NoProfile -File scripts/win/build_windows_msix.ps1 $(MSIX_ARGS)
 
 # Explicit dependency download only: no service installation or host PATH changes.
@@ -98,7 +98,7 @@ prepare-windows-clamav:
 	pwsh -NoProfile -File scripts/win/prepare_clamav.ps1
 
 test-msix:
-	uv run --locked python scripts/win/test_windows_msix.py "$(MSIX_PACKAGE)" "$(MSIX_EVIDENCE)"
+	uv run --locked python scripts/win/test_windows_msix.py "$(MSIX_PACKAGE)" "$(MSIX_EVIDENCE)" --pst-fixture rust/mct-importer/tests/fixtures/mail.pst --ost-fixture tests/fixtures/pff/sample.ost
 
 msix-bundle:
 	pwsh -NoProfile -File scripts/win/bundle_test_msix.ps1 -InputDirectory "$(MSIX_PAYLOADS)" $(MSIX_ARGS)
@@ -571,7 +571,7 @@ test-workflow-gates:
 	uv run --locked pytest -q tests/test_website_scripts.py tests/test_macos_signing.py
 
 test: pst-importer mcti-scan pff-converter test-pff-converter
-	uv run pytest -q --durations=20
+	uv run pytest -q --durations=20 $(PYTEST_ARGS)
 
 .PHONY: archive-verifier verify-database test-import-e2e test-corpus-import update-corpus-expectations
 # ARCHIVE selects the quiescent archive; verification never repairs it.
@@ -606,7 +606,7 @@ test-apple-mail-compare:
 
 test-e2e:
 	$(MAKE) test-import-e2e
-	uv run pytest -q --browser chromium --tracing=retain-on-failure e2e_tests
+	uv run pytest -q --browser chromium --tracing=retain-on-failure e2e_tests $(PYTEST_ARGS)
 
 test-encoding:
 	uv run pytest -q tests/test_encoding.py

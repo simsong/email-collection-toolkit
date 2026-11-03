@@ -30,8 +30,8 @@ browser: installed Edge on Windows, Playwright Chromium on other platforms.
 
 Supported packages must bundle their selected executables and dependencies
 without requiring user-installed runtimes, compilers or Outlook. The macOS
-package includes the PST/OST helpers; Windows helper packaging and Linux
-distribution remain deferred. Full installed ingest/scanner acceptance must be
+and Windows packages include the Rust PST/scanner helpers and separately
+bundled libpff converter. Linux distribution remains deferred. Full installed ingest/scanner acceptance must be
 established separately for each supported platform. The configured PST importer is the Rust helper;
 Java is required only if a Java importer is selected for distribution.
 [PST_IMPORTER.md](../PST_IMPORTER.md#platform-packaging-and-qualification) defines architecture-specific
@@ -45,7 +45,9 @@ distinguish installed tools from validated application support. Windows delivery
 requires full ingest, preservation, recovery, and native desktop validation;
 WSL/Linux results do not establish Windows compatibility. The Windows writer and
 embedded scanner are implemented (see [Shared Python Windows desktop](DESKTOP.md#shared-python-windows-desktop));
-PST/OST converters are not yet packaged for Windows.
+The relocated Windows package must ingest the real PST/OST fixtures without
+checkout tools, preserve sources and decoded content, retain partial-extraction
+evidence, and remain idempotent on retry.
 
 ## Build identity
 

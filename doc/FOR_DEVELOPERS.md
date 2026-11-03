@@ -52,9 +52,9 @@ or tests without explicit authorization; use synthetic fixtures or copied data.
 ## Desktop implementation
 
 The desktop uses Python/pywebview on macOS and Windows. Windows uses WebView2
-and a private x64 CPython runtime. The macOS package bundles the Rust PST
-importer, `mcti-scan`, and the separate `pff-converter`; Windows packaging of
-these importer tools remains unfinished.
+and a private x64 CPython runtime. Both packages bundle the Rust PST
+importer, `mcti-scan`, and the separate `pff-converter`. Installed runtime
+acceptance is required independently for each platform.
 
 On macOS, `make gui` creates an ad-hoc-signed development application under
 `.tmp/` that reuses the active virtual environment. The launcher preserves the
@@ -74,9 +74,9 @@ Rust importer development uses `make rust-programs` to build `mdti-validator`,
 `mcti-generator`, and [`pst-importer`](PST_IMPORTER.md). See [MCT Importer API 1.0](MCT_IMPORTER_API.md) for
 the contract, individual targets and validation pipeline. Rust/Cargo are
 required to build these tools. The standalone PST helper uses Microsoft's Rust crate;
-the CLI archive host runs it through the common processing pipelines. The macOS
-DMG bundles `pst-importer`, `mcti-scan` and the `pff-converter`, so packaged
-users need no compiler; the Windows MSIX does not yet include them.
+the CLI archive host runs it through the common processing pipelines. Both the
+macOS DMG and Windows MSIX bundle `pst-importer`, `mcti-scan` and the
+`pff-converter`, so packaged users need no compiler.
 
 PST test inventories and the Rust corpus downloader live in [`pst/`](../pst/README.md);
 use `make pst-download-plan` to inspect the plan and `make pst-download` to fetch
@@ -156,6 +156,8 @@ make check
 ```
 
 Install the pinned headless Chromium once with `make install-test-browser`.
+To use an already installed Chrome instead, run
+`make check PYTEST_ARGS='--browser-channel chrome'`; Windows CI uses Edge.
 `make check` runs Ruff and Pylint, then ty and Pyright, then Rust and license
 checks, then both test suites and website validation without showing a window.
 CI runs `make check-static` and `make check-tests` in parallel jobs; local

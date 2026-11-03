@@ -37,7 +37,7 @@ from mailarchiver.imap_credentials import PASSWORD_KEY, password_for, _developme
 from keyring.errors import KeyringError
 from mailarchiver.imap_models import ImapAccount, ImapDownload, ImapMailbox, ImapMessageMetadata
 from mailarchiver.imap_cli import prompt_account
-from mailarchiver.imap_protocol import ImapSession, body_literal, decode_mailbox, message_metadata, response_tokens, selected_mailboxes
+from mailarchiver.imap_protocol import ImapPaused, ImapSession, body_literal, decode_mailbox, message_metadata, response_tokens, selected_mailboxes
 from mailarchiver.imap_state import initialize_state, known_observation, record_download, refresh_observation, totals
 from mailarchiver.gui_processing import resume_request, unfinished_work
 from mailarchiver.gui_app import IngestWindowApi
@@ -442,6 +442,19 @@ def test_invalid_imap_response_remains_a_failure(imap_archive: Path, imap_inbox:
     imap_inbox.fault = None
     assert synchronize(args) == 0
     assert totals(imap_archive).archived == 3 and totals(imap_archive).duplicates == 0
+
+
+def test_imaplib_wrapped_send_timeout_retains_timeout_presentation() -> None:
+    """Stdlib's command-send wrapper must retain the same Timeout reason as socket reads."""
+    session = ImapSession(ImapAccount(server="fixture.example.test", username="fixture"), "unused")
+    try:
+        try:
+            raise TimeoutError("The write operation timed out")
+        except TimeoutError as cause:
+            raise imaplib.IMAP4.abort("socket error: The write operation timed out") from cause
+    except imaplib.IMAP4.abort as error:
+        with pytest.raises(ImapPaused, match="IMAP connection timed out"):
+            session.__exit__(type(error), error, error.__traceback__)
 
 
 def test_rejected_credentials_remain_a_failure(imap_archive: Path, imap_inbox: DisposableImap) -> None:
