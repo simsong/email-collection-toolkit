@@ -130,6 +130,39 @@ resident antivirus service is configured.
 
 ## Tests
 
+### Windows CI timing diagnostics
+
+Windows CI exposes build, reader/scanner, writer, Outlook, GUI/native and relocated
+checks as separate steps. The writer and Outlook steps also profile the synthetic
+stop/restart and OST CLI tests. Reproduce collection through the normal targets:
+
+```console
+make test-ci-diagnostics
+make test-python-writer CI_DIAGNOSTICS=1
+make test-pff CI_DIAGNOSTICS=1
+```
+
+`CI_DIAGNOSTICS_DIRECTORY` defaults to `dist/ci-diagnostics`. Each selected test
+gets its own directory with `report.json` (phase wall/CPU time, Windows process I/O
+counts and per-thread operation timings), `calls.txt` (ranked operations/callers),
+and `threads.txt` (all-thread stacks every 30 seconds). The always-run
+`msix-build-logs-x64` artifact retains these files after test failures. Phase start
+and finish markers also stream to the CI log.
+
+Look for time in `os.fsync`, `storage_sync.replace_file`, SQLite calls, file calls
+and lock/subprocess waits. Counts and maximum latency distinguish many small
+operations from individual stalls. Nested/parallel timings overlap; do not add
+them as if they were exclusive CPU time. Windows I/O counts include file/device/
+network activity and exclude child processes. In particular, the OST test's child
+CLI appears as a parent subprocess wait; the report does not profile its internals.
+Profiling adds overhead and cannot by itself prove a disk or antivirus cause.
+Call timings cover the calling thread and new workers. Existing threads remain
+visible in stack dumps without replacing their profiler hooks. The stack sampler
+needs Python thread scheduling; it does not replace or cancel a native watchdog
+such as pytest's `faulthandler_timeout` for a C call that holds the GIL.
+It does not change synchronization/durability settings or record mail bodies,
+credentials, SQL text or frame locals. Use purpose-made fixtures only.
+
 `make test-ingest-progress` checks source versus saved-mail progress, independent
 worker task totals, and the actual browser display using synthetic archives.
 

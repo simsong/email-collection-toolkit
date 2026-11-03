@@ -47,7 +47,7 @@ jobs:
           choco install make --yes --no-progress
           uv sync --locked --python cpython-3.12-windows-x86_64-none
           rustup toolchain install stable --profile minimal
-      - name: Validate reader and build Python payload
+      - name: Build antivirus, updater and Python payload
         env:
           PUBLIC_SIGNING: ${{ inputs.public_signing }}
           MSIX_PUBLISHER: ${{ vars.MSIX_PUBLISHER }}
@@ -62,15 +62,33 @@ jobs:
           }
           make 'SHELL=C:/Program Files/Git/usr/bin/bash.exe' msix-test "MSIX_ARGS=$arguments"
           if ($LASTEXITCODE) { throw 'MSIX assembly failed' }
-          $previousDefinitions = $env:MAILARCHIVER_CLAMAV_DATABASE
-          try {
-            $env:MAILARCHIVER_CLAMAV_DATABASE = (Resolve-Path 'dist/windows-msix-test/stage/python/clamav/definitions').Path
-            make MAKE=make 'SHELL=C:/Program Files/Git/usr/bin/bash.exe' check-python-reader-static test-windows-scanner test-definition-state test-python-reader test-windows-package-entry test-python-writer test-pff
-            if ($LASTEXITCODE) { throw 'Reader or scanner checks failed' }
-            $env:PYTEST_ADDOPTS = '--browser-channel msedge'
-            make MAKE=make 'SHELL=C:/Program Files/Git/usr/bin/bash.exe' test-timeout-presentation test-worker-preferences test-ingest-progress-service test-gui-processing test-python-reader-native 'ARGS=--output dist/native-reader'
-            if ($LASTEXITCODE) { throw 'Shared GUI or native Windows checks failed' }
-          } finally { $env:MAILARCHIVER_CLAMAV_DATABASE = $previousDefinitions }
+          $definitions = (Resolve-Path 'dist/windows-msix-test/stage/python/clamav/definitions').Path
+          "MAILARCHIVER_CLAMAV_DATABASE=$definitions" >> $env:GITHUB_ENV
+      - name: Validate reader, scanner and diagnostics
+        run: |
+          $env:PATH = "C:/Program Files/Git/usr/bin;" + $env:PATH
+          make MAKE=make 'SHELL=C:/Program Files/Git/usr/bin/bash.exe' check-python-reader-static test-windows-scanner test-definition-state test-python-reader test-windows-package-entry test-ci-diagnostics
+          if ($LASTEXITCODE) { throw 'Reader, scanner or diagnostics checks failed' }
+      - name: Profile writer and interruption recovery
+        run: |
+          $env:PATH = "C:/Program Files/Git/usr/bin;" + $env:PATH
+          make MAKE=make 'SHELL=C:/Program Files/Git/usr/bin/bash.exe' test-python-writer CI_DIAGNOSTICS=1
+          if ($LASTEXITCODE) { throw 'Writer or interruption recovery checks failed' }
+      - name: Profile PST and OST ingestion
+        run: |
+          $env:PATH = "C:/Program Files/Git/usr/bin;" + $env:PATH
+          make MAKE=make 'SHELL=C:/Program Files/Git/usr/bin/bash.exe' test-pff CI_DIAGNOSTICS=1
+          if ($LASTEXITCODE) { throw 'PST or OST checks failed' }
+      - name: Validate shared GUI and native Windows behavior
+        env:
+          PYTEST_ADDOPTS: --browser-channel msedge
+        run: |
+          $env:PATH = "C:/Program Files/Git/usr/bin;" + $env:PATH
+          make MAKE=make 'SHELL=C:/Program Files/Git/usr/bin/bash.exe' test-timeout-presentation test-worker-preferences test-ingest-progress-service test-gui-processing test-python-reader-native 'ARGS=--output dist/native-reader'
+          if ($LASTEXITCODE) { throw 'Shared GUI or native Windows checks failed' }
+      - name: Validate relocated package
+        run: |
+          $env:PATH = "C:/Program Files/Git/usr/bin;" + $env:PATH
           $package = (Get-ChildItem dist/windows-msix-test/*.msix).FullName
           make 'SHELL=C:/Program Files/Git/usr/bin/bash.exe' test-msix "MSIX_PACKAGE=$package" 'MSIX_EVIDENCE=dist/relocated'
           if ($LASTEXITCODE) { throw 'Relocated MSIX failed' }
@@ -95,6 +113,7 @@ jobs:
             dist/relocated/*.json
             dist/relocated/reader/*.json
             dist/relocated/reader/*.png
+            dist/ci-diagnostics/**
           retention-days: 7
   bundle:
     needs: payload

@@ -166,6 +166,7 @@ reference; their workflows are in [For developers](doc/FOR_DEVELOPERS.md).
 | `UV_CACHE_DIR`, `UV_PYTHON_INSTALL_DIR`, `UV_PYTHON_BIN_DIR` | Locations for uv's cache, managed Python, and interpreter links |
 | `UV_PROJECT_ENVIRONMENT`, `PYTHONPATH` | Isolated packaging environment and repository-local test import path |
 | `FQDN` | Disposable IMAP tests use `localhost` to avoid reverse DNS |
+| `CI_DIAGNOSTICS`, `CI_DIAGNOSTICS_DIRECTORY` | Opt-in synthetic writer/OST test profiles (`1` enables); output directory, default `dist/ci-diagnostics` |
 | `MAILARCHIVER_NATIVE_APPLICATION_E2E`, `MAILARCHIVER_NATIVE_GUI_E2E` | Opt into visible native application or GUI tests |
 | `GITHUB_ENV`, `RUNNER_TEMP` | GitHub Actions environment handoff file and temporary area |
 | `GITHUB_REPOSITORY`, `GH_TOKEN`, `GITHUB_REF_NAME` | Release repository, API authorization, and tag being validated |

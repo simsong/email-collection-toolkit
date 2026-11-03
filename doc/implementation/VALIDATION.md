@@ -74,6 +74,22 @@ repeated listener setup/teardown, without dropping distinct failure-mode tests.
 
 ## CI and release validation
 
+Windows writer and PFF targets enable `scripts.ci_diagnostics` for the real
+stop/restart and OST CLI fixtures. The caller and subsequently created workers get a
+profiling hook timing selected storage/SQLite/file/sleep operations; `calls.txt`
+ranks total/max completed-call time by caller and thread. `report.json` records named phases,
+elapsed and process CPU time, thread names and native process I/O deltas on Windows.
+`threads.txt` receives all-thread stack dumps every 30 seconds from an owned sampler.
+Phase-start JSON remains available before a test completes; completed failures
+also retain profiles. Windows uploads this directory with its always-run build logs.
+Profiling is opt-in, uses only synthetic tests and refuses an existing caller/default
+profiler. Existing worker hooks and native faulthandler watchdog timers remain untouched.
+Owned callbacks self-disable after collection, including in surviving workers.
+The sampler requires Python thread scheduling; pre-existing threads appear in stacks,
+not call timing. Native watchdogs can separately diagnose a C call holding the GIL.
+Cumulative call times include nesting and parallel overlap; process counters
+exclude children and do not establish physical disk/antivirus causation.
+
 The ordinary Python/browser job allows 60 minutes. Pytest and the focused Windows
 writer target report their 20 slowest cases. Both source and relocated native desktop parents use the shared
 `reader_fixture.NATIVE_DESKTOP_TIMEOUT` of 300 seconds, including its existing 120-second import check; it writes phase JSON and

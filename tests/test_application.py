@@ -59,10 +59,12 @@ def test_gui_stop_checkpoints_partial_import_and_reimport_has_no_duplicates(tmp_
     request = IngestRequest(archive=archive, roots=[str(source)], owner_names_file=owners, scan_policy="not-scanned")
     stop = Event()
     errors: list[BaseException] = []
+    from scripts.ci_diagnostics import phase
 
     def import_mail() -> None:
         try:
-            run_ingest(request, stop_event=stop)
+            with phase("initial-import-until-stop"):
+                run_ingest(request, stop_event=stop)
         except BaseException as error:
             errors.append(error)
 
@@ -88,7 +90,8 @@ def test_gui_stop_checkpoints_partial_import_and_reimport_has_no_duplicates(tmp_
     assert not worker.is_alive() and count > 0, errors
     assert len(errors) == 1 and isinstance(errors[0], IngestInterrupted)
     assert read_ingest_history(archive).statuses[0].state == "interrupted"
-    assert not verify_archive(archive)
+    with phase("verify-partial-archive"):
+        assert not verify_archive(archive)
     with sqlite3.connect(archive / "archive.sqlite3") as catalog:
         partial = catalog.execute("SELECT COUNT(*) FROM messages").fetchone()[0]
     assert 0 < partial < len(digests)
@@ -97,12 +100,14 @@ def test_gui_stop_checkpoints_partial_import_and_reimport_has_no_duplicates(tmp_
     assert unfinished_work(archive).source_roots == [str(source)]
     recovered_request = resume_request(archive, True, True)
     assert recovered_request.roots == [str(source)]
-    run_ingest(recovered_request)
+    with phase("resume-and-process-saved-mail"):
+        run_ingest(recovered_request)
     assert not unfinished_work(archive).incomplete
     with sqlite3.connect(archive / "archive.sqlite3") as catalog:
         rows = catalog.execute("SELECT sha256 FROM messages").fetchall()
     assert len(rows) == len(digests) and {row[0] for row in rows} == digests
-    assert not verify_archive(archive)
+    with phase("verify-complete-archive"):
+        assert not verify_archive(archive)
     with source.open("rb") as stream:
         assert hashlib.file_digest(stream, "sha256").hexdigest() == source_digest
 

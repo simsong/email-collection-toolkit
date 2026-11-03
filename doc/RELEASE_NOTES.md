@@ -8,6 +8,9 @@ Rust delivery plans and historical package checks are not current acceptance.
 
 ## Windows desktop parity
 
+Windows CI separates stage durations and retains opt-in phase, thread-profile,
+CPU/I/O and stack evidence for the slow synthetic writer and OST tests.
+
 Keep genuine PST and ambiguous-origin timeout failures visible in mixed-source
 runs; only confirmed legacy IMAP transport tracebacks receive quiet timeout
 presentation. Windows regression fixtures use focused stop/restart workloads and

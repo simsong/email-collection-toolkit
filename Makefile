@@ -53,8 +53,16 @@ test-definition-download:
 test-definition-refresh:
 	uv run --locked pytest -q tests/test_clamav_refresh.py
 
+# CI_DIAGNOSTICS enables fixture-only call/phase/stack evidence; its directory contains no archive.
+CI_DIAGNOSTICS ?= 0
+CI_DIAGNOSTICS_DIRECTORY ?= dist/ci-diagnostics
+CI_DIAGNOSTICS_ARGS = $(if $(filter 1,$(CI_DIAGNOSTICS)),-p scripts.ci_diagnostics --ci-diagnostics-dir="$(CI_DIAGNOSTICS_DIRECTORY)" --capture=tee-sys)
 test-python-writer:
-	uv run --locked pytest -q --durations=20 tests/test_application.py tests/test_writer_lock.py tests/test_plugin_configuration.py tests/test_portable_writer.py $(PYTEST_ARGS)
+	uv run --locked pytest -q --durations=20 $(CI_DIAGNOSTICS_ARGS) tests/test_application.py tests/test_writer_lock.py tests/test_plugin_configuration.py tests/test_portable_writer.py $(PYTEST_ARGS)
+
+.PHONY: test-ci-diagnostics
+test-ci-diagnostics: ruff
+	uv run --locked pytest -q tests/test_ci_diagnostics.py
 
 .PHONY: test-python-preservation
 test-python-preservation:
@@ -892,7 +900,7 @@ test-pst-downloader:
 
 .PHONY: test-pff
 test-pff: pst-importer mcti-scan pff-converter test-pff-converter
-	uv run --locked pytest -q --durations=20 tests/test_pff_source.py tests/test_cli_processing.py tests/test_plugin_loader.py tests/test_source_integrity.py
+	uv run --locked pytest -q --durations=20 $(CI_DIAGNOSTICS_ARGS) tests/test_pff_source.py tests/test_cli_processing.py tests/test_plugin_loader.py tests/test_source_integrity.py $(PYTEST_ARGS)
 
 .PHONY: test-gui-processing
 .PHONY: test-worker-preferences test-native-worker-preferences

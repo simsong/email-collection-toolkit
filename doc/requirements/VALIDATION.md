@@ -7,6 +7,14 @@ platform/release acceptance. Deferred features live in [plans](../plans/README.m
 
 ## Shared acceptance coverage
 
+Windows CI shall expose separate build, reader/scanner, writer, Outlook, GUI/native
+and relocated-package stage durations. Selected slow synthetic ingest tests shall
+retain phase wall/CPU timings, thread call profiles, periodic stack dumps and
+Windows process I/O counts, including evidence after test failure. Diagnostics
+must preserve assertions and storage durability and must not record mail bodies,
+credentials or frame locals. Profiles add overhead and cannot alone attribute a
+slowdown to physical disk latency, antivirus or child-process work.
+
 Byte-preservation test readers must retain message CRLF/LF and mboxrd quoting
 regardless of the host's newline convention. A finite producer can finish before
 an inactivity deadline is observed; distinguish that documented partial outcome
