@@ -329,6 +329,9 @@ show that current work is finishing until its checkpoints are saved and the
 writer lease is released. Do not quit or cancel saved jobs. Retain accepted
 settings even if suspension precedes processing initialization, so reopening
 the archive can continue. Resume must preserve bytes and source idempotence.
+Network-interrupted IMAP runs display **paused** with a pause symbol and a
+**Resume** button. Explain that the network must be available before resuming;
+do not display a failure traceback or error notice for this expected interruption.
 On macOS, one source picker accepts files and directories together with an
 **Import** action, without a preliminary source-type question. Its title names
 the destination archive and its message shows the full destination path.

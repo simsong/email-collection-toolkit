@@ -118,6 +118,76 @@ class DisposableImap:
             raise RuntimeError("disposable IMAP server did not stop")
 
 
+class ImapFault(BaseModel):
+    command: bytes
+    mode: Literal["timeout", "disconnect", "partial", "malformed"]
+    skip: int = 0
+    response: bytes = b"invalid IMAP response\r\n"
+
+
+class InterruptibleImap(DisposableImap):
+    """Interrupt real TLS requests through a proxy to the disposable pymap backend."""
+    def __init__(self, directory: Path) -> None:
+        super().__init__(directory, "implicit")
+        self.fault: ImapFault | None = None
+        self.commands: list[bytes] = []
+
+    async def _serve(self) -> None:
+        args = argparse.Namespace(host="127.0.0.1", port=0, debug=False, cert=str(self.certificate),
+            key=str(self.key), tls=True, demo_data=False, demo_user="demouser", demo_password="demopass",
+            passlib_cfg=None, proxy_protocol="noop")
+        backend, config = await DictBackend.init(args)
+        config.apply_context()
+        callback = ProxyProtocolReader(config.proxy_protocol).get_callback(IMAPServer(backend.login, config))
+        upstream = await asyncio.start_server(callback, "127.0.0.1", 0)
+        upstream_port = upstream.sockets[0].getsockname()[1]
+
+        async def connection(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
+            remote_reader, remote_writer = await asyncio.open_connection("127.0.0.1", upstream_port)
+
+            async def requests() -> None:
+                while line := await reader.readline():
+                    self.commands.append(line)
+                    fault = self.fault
+                    if fault is not None and fault.command in line:
+                        if fault.skip:
+                            fault.skip -= 1
+                        else:
+                            if fault.mode == "partial":
+                                writer.write(b"* 2 FETCH (UID 2 RFC822.SIZE 100 BODY[] {100}\r\nSubject: partial\r\n")
+                                await writer.drain()
+                            elif fault.mode == "malformed":
+                                writer.write(fault.response)
+                                await writer.drain()
+                            if fault.mode != "disconnect":
+                                await reader.read()  # Client timeout closes this stalled transport.
+                            return
+                    remote_writer.write(line)
+                    await remote_writer.drain()
+
+            async def responses() -> None:
+                while data := await remote_reader.read(65536):
+                    writer.write(data)
+                    await writer.drain()
+
+            tasks = [asyncio.create_task(requests()), asyncio.create_task(responses())]
+            try:
+                await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
+            finally:
+                for task in tasks:
+                    task.cancel()
+                await asyncio.gather(*tasks, return_exceptions=True)
+                remote_writer.close()
+                writer.close()
+                await asyncio.gather(remote_writer.wait_closed(), writer.wait_closed(), return_exceptions=True)
+
+        async with upstream:
+            server = await asyncio.start_server(connection, "127.0.0.1", 0, ssl=config.ssl_context)
+            async with server:
+                self.port.set_result(server.sockets[0].getsockname()[1])
+                await asyncio.to_thread(self.stop.wait)
+
+
 class Utf8Imap(DisposableImap):
     """Minimal TLS protocol fixture for RFC 6855, which pymap does not implement.
 

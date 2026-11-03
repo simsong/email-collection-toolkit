@@ -88,6 +88,9 @@ platform or release gate has passed. [Future work](plans/README.md) is separate.
   picker counts aggregate in one query with visible pending states.
   See [desktop](implementation/DESKTOP.md).
 
+- IMAP transport interruptions publish `paused` runs and reuse saved-request
+  recovery through **Resume**; see [acquisition](implementation/ACQUISITION.md).
+
 - About shares one bounded plugin-settings read and defers only busy inventories;
   see [desktop](implementation/DESKTOP.md).
 

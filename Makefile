@@ -639,7 +639,8 @@ imap:
 # Pytest starts/stops loopback TLS IMAP, seeds three INBOX messages, and checks CLI/GUI search.
 # The fixture sets FQDN=localhost so server greetings never query host DNS.
 test-imap:
-	uv run --locked pytest -q tests/test_imap.py
+	uv run --locked pytest -q tests/test_imap.py $(PYTEST_ARGS)
+	uv run --locked pytest -q --browser chromium e2e_tests/test_imap_pause.py $(PYTEST_ARGS)
 
 # Regression acceptance for Macroscope's Unicode folder, report and phone findings.
 .PHONY: test-macroscope-fixes
@@ -817,7 +818,7 @@ website-icons:
 
 .PHONY: website-screenshots
 website-screenshots:
-	uv run --group dev python -m scripts.website_screenshots
+	uv run --group dev python -m scripts.website_screenshots $(ARGS)
 
 .PHONY: website-gmail-illustrations
 website-gmail-illustrations:
@@ -907,7 +908,7 @@ test-gui-processing: ruff
 
 .PHONY: website-preview-screenshots
 website-preview-screenshots: website-build-check
-	uv run --group dev python -m scripts.website_screenshots --site-only
+	uv run --group dev python -m scripts.website_screenshots --site-only $(ARGS)
 
 .PHONY: test-plugin-inventory
 test-plugin-inventory: ruff

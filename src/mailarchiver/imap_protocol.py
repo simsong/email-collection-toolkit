@@ -15,7 +15,9 @@ Fundamental dependents:
 from __future__ import annotations
 
 import base64
+import errno
 import imaplib
+import logging
 import re
 import ssl
 from collections.abc import Sequence
@@ -28,6 +30,23 @@ from .imap_models import ImapAccount, ImapMailbox, ImapMessageMetadata
 
 IMAP_TIMEOUT = 30
 UID_BATCH_SIZE = 256
+
+
+class ImapPaused(ConnectionError):
+    """A lost IMAP connection requires a fresh session and an explicit resume."""
+
+
+def connection_interrupted(error: BaseException) -> bool:
+    """Keep transport interruptions distinct from TLS, authentication and data errors."""
+    # imaplib wraps socket exceptions in command-specific aborts. Inspect the
+    # actual cause instead of trusting arbitrary server text in the wrapper.
+    while isinstance(error, imaplib.IMAP4.abort) and error.__context__ is not None:
+        error = error.__context__
+    return isinstance(error, (TimeoutError, ConnectionError,
+                              ssl.SSLEOFError, ssl.SSLZeroReturnError)) or (
+        isinstance(error, OSError) and error.errno in {
+            errno.ENETDOWN, errno.ENETRESET, errno.ENETUNREACH, errno.EHOSTUNREACH}) or (
+        isinstance(error, imaplib.IMAP4.abort) and str(error) == "socket error: EOF")
 
 
 class ImapToken(BaseModel):
@@ -231,6 +250,8 @@ class ImapSession:
                     if not self.account.username.isascii() or not self.password.isascii():
                         raise ValueError("Non-ASCII credentials require a server offering SASL PLAIN")
                     client.login(quoted(self.account.username.encode("ascii")).decode("ascii"), self.password)
+            except imaplib.IMAP4.abort:
+                raise
             except imaplib.IMAP4.error:
                 raise ValueError("IMAP authentication failed; check the password or app password") from None
             status, capabilities = client.capability()
@@ -247,8 +268,8 @@ class ImapSession:
                     raise RuntimeError("IMAP server did not enable UTF8=ACCEPT")
                 self.utf8 = True
             return self
-        except BaseException:
-            self.__exit__(None, None, None)
+        except BaseException as error:
+            self.__exit__(type(error), error, error.__traceback__)
             raise
         finally:
             self.password = ""
@@ -256,11 +277,24 @@ class ImapSession:
     def __exit__(self, _kind: type[BaseException] | None, _error: BaseException | None,
                  _traceback: TracebackType | None) -> None:
         client, self.client = self.client, None
+        server_closed = bool(client is not None and isinstance(_error, imaplib.IMAP4.abort)
+                             and client.response("BYE")[1] != [None])
         if client is not None:
             try:
-                client.logout()
+                # A timed-out buffered socket cannot be reused, even for LOGOUT.
+                if _error is None:
+                    client.logout()
             except (OSError, imaplib.IMAP4.error):
-                client.shutdown()
+                logging.getLogger(__name__).debug("IMAP logout did not complete", exc_info=True)
+            finally:
+                try:
+                    if client.sock.fileno() >= 0:
+                        client.shutdown()
+                except OSError:
+                    logging.getLogger(__name__).debug("IMAP socket cleanup did not complete", exc_info=True)
+        if _error is not None and (connection_interrupted(_error) or server_closed):
+            reason = "timed out" if isinstance(_error, TimeoutError) else "was interrupted"
+            raise ImapPaused(f"IMAP connection {reason}. Saved progress is retained; use Resume when connected.") from _error
 
     @staticmethod
     def _ok(status: str, command: str) -> None:

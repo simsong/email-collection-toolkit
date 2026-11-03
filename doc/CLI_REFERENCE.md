@@ -147,6 +147,8 @@ the logical CPU count; unavailable CPU detection counts as one. Status prints at
 on exit; `--show-messages` adds disposition and subject for each download.
 Ctrl-C checkpoints and exits 130; a blocked network operation has a 30-second
 socket timeout. Rerunning resumes committed progress.
+Timeouts and lost connections record a paused run and exit 75 with saved progress;
+rerun the command when connected, or choose **Resume** in the desktop Ingests window.
 
 Generic IMAP includes selectable mailboxes except names containing `spam`,
 case-insensitively. Gmail fetches bodies only from special-use All Mail and uses
