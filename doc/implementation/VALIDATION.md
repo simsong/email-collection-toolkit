@@ -20,6 +20,26 @@ The shared timeout target also runs the real IMAP finalization-obstruction case:
 macOS reports `IsADirectoryError`, Windows `PermissionError`; both must retain the
 actual destination and failed status instead of a network pause.
 
+The GUI stop/restart fixture uses 64 distinct messages and still requires a strict
+partial checkpoint, interrupted status, full recovery, exact hashes and no source
+changes. Its previous 600-message recovery took 490–1,703 seconds on hosted Windows.
+The real 80-message OST CLI fixture allows 600 seconds per acquisition/content
+subprocess on Windows (120 elsewhere), retaining its exact partial-result, count,
+search and integrity checks. `make test-pff` reports its 20 slowest cases. These
+budgets accommodate observed runner variability; only successful Windows execution
+establishes acceptance.
+
+Relocated Outlook acceptance runs each PST/OST import and retry in a separate
+600-second subprocess, retaining phase markers in CI and `outlook-import.log`.
+Each attempt retains count, receipt, helper isolation and archive-integrity checks;
+the parent retains source hashes. The Windows payload job allows 90 minutes for
+source suites and all four relocated attempts, rather than one 180-second budget
+for the entire relocated Outlook sequence. This ceiling is not an expected runtime.
+Windows also runs `test-worker-preferences` (including override/persistence and
+asynchronous-save cases) and `test-ingest-progress-service` (live worker-pool and
+backlog checks). `test-ingest-progress` adds its browser-history case, already
+covered in Windows by `test-gui-processing`, without repeating it in the service target.
+
 `test_reserved_characters_and_read_only_attachments` checks SQLite URI handling;
 `test_reader_archive_under_uri_reserved_path` runs the complete shared reader
 acceptance (all sort orders, Unicode rendering, exact export and unchanged files),

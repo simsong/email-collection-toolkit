@@ -19,7 +19,8 @@ def test_saved_timeout_shows_yellow_dash_without_traceback(tmp_path: Path, page:
     saved = IngestStatusFile(archive, "ingest-legacy-timeout")
     progress = ProgressReporter(1, status_file=saved, archive=archive, run_pk=1,
         source_roots=["imap://synthetic-account?archive=fixture"], terminal=False)
-    progress.finish("failed", "TimeoutError: The read operation timed out\n\nTraceback (most recent call last):\nsynthetic stack")
+    progress.finish("failed", "TimeoutError: The read operation timed out\n\nTraceback (most recent call last):\n"
+                    '  File "/fixture/imap_protocol.py", line 331, in body\nsynthetic stack')
     original = saved.path.read_bytes()
     bridge(page, IngestWindowApi(archive), ("history", "antivirus", "can_import_directory"))
     page.goto((GUI_DIRECTORY / "ingests.html").as_uri())

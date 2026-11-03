@@ -34,9 +34,9 @@ from mailarchiver.writer_lock import WriterLease
 from tests.test_end_to_end import mailbox_message_bytes
 
 
-def cli(archive: Path, *arguments: str) -> subprocess.CompletedProcess[str]:
+def cli(archive: Path, *arguments: str, timeout: float = 60) -> subprocess.CompletedProcess[str]:
     result = subprocess.run([sys.executable, "-m", "mailarchiver", "--archive", str(archive), *arguments],
-                            capture_output=True, text=True, check=False, timeout=60)
+                            capture_output=True, text=True, check=False, timeout=timeout)
     assert result.returncode == 0, result.stdout + result.stderr
     return result
 

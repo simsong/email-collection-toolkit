@@ -36,6 +36,17 @@ IngestState = Literal["running", "completed", "paused", "interrupted", "disk-ful
 WorkerOperation = Literal["downloading", "importing", "processing"]
 
 
+def legacy_imap_timeout(detail: str) -> bool:
+    """Require IMAP transport frames in the outer failure, not a nested cause or source list."""
+    if not detail.startswith("TimeoutError:"):
+        return False
+    for separator in ("\nDuring handling of", "\nCaused by:"):
+        detail = detail.split(separator, 1)[0]
+    return any(line.lstrip().startswith('File "')
+               and line.partition('\", line ')[0].replace("\\", "/").endswith(("/imap_protocol.py", "/imaplib.py"))
+               for line in detail.splitlines())
+
+
 class YearProgress(BaseModel):
     year: int
     messages: int = 0
@@ -130,9 +141,7 @@ class IngestStatus(BaseModel):
 
     def for_display(self) -> IngestStatus:
         """Present current and legacy IMAP timeouts quietly, retaining the saved diagnostics."""
-        legacy_timeout = (self.state == "failed" and self.failure_detail is not None
-                          and self.failure_detail.startswith("TimeoutError:")
-                          and any(root.startswith("imap://") for root in self.source_roots))
+        legacy_timeout = self.state == "failed" and legacy_imap_timeout(self.failure_detail or "")
         if legacy_timeout or (self.state == "paused" and "timed out" in self.phase):
             return self.model_copy(update={"state": "paused", "phase": "Timeout. Choose Resume when connected.",
                                            "failure_detail": None, "timed_out": True})

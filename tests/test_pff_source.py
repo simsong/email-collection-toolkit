@@ -186,13 +186,15 @@ def test_ost_cli_directory_ingest_and_search(tmp_path: Path) -> None:
     owners = tmp_path / "owners.txt"
     owners.write_text("owner@example.test\n")
     archive = tmp_path / "archive"
+    # Hosted Windows durable writes can exceed two minutes for this real 80-message cache.
+    timeout = 600 if os.name == "nt" else 120
     result = subprocess.run([sys.executable, "-m", "mailarchiver", "--archive", str(archive), "ingest", "--no-scan",
                              "--owner-names-file", str(owners), str(directory)],
-                            capture_output=True, text=True, check=False, timeout=120)
+                            capture_output=True, text=True, check=False, timeout=timeout)
     assert result.returncode != 0 and "libpff extraction incomplete" in result.stderr
     with sqlite3.connect(archive / "archive.sqlite3") as db:
         assert db.execute("SELECT count(*) FROM messages").fetchone() == (80,)
-    cli(archive, "process", "--phase", "content")
+    cli(archive, "process", "--phase", "content", timeout=timeout)
     search = subprocess.run([sys.executable, "-m", "mailarchiver.mailsearch", "--archive", str(archive), "subject:newsletter"],
                             capture_output=True, text=True, check=False, timeout=30)
     assert search.returncode == 0 and "newsletter copy" in search.stdout

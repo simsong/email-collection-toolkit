@@ -29,7 +29,7 @@ jobs:
     if: github.event_name != 'push' || github.ref_type == 'tag' || contains(github.event.head_commit.message, '[msix-ci]') || contains(github.event.head_commit.message, '[release-ci]')
     name: Build payload (${{ matrix.arch }})
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 45
+    timeout-minutes: 90
     strategy:
       fail-fast: false
       matrix:
@@ -68,7 +68,7 @@ jobs:
             make MAKE=make 'SHELL=C:/Program Files/Git/usr/bin/bash.exe' check-python-reader-static test-windows-scanner test-definition-state test-python-reader test-windows-package-entry test-python-writer test-pff
             if ($LASTEXITCODE) { throw 'Reader or scanner checks failed' }
             $env:PYTEST_ADDOPTS = '--browser-channel msedge'
-            make MAKE=make 'SHELL=C:/Program Files/Git/usr/bin/bash.exe' test-timeout-presentation test-gui-processing test-python-reader-native 'ARGS=--output dist/native-reader'
+            make MAKE=make 'SHELL=C:/Program Files/Git/usr/bin/bash.exe' test-timeout-presentation test-worker-preferences test-ingest-progress-service test-gui-processing test-python-reader-native 'ARGS=--output dist/native-reader'
             if ($LASTEXITCODE) { throw 'Shared GUI or native Windows checks failed' }
           } finally { $env:MAILARCHIVER_CLAMAV_DATABASE = $previousDefinitions }
           $package = (Get-ChildItem dist/windows-msix-test/*.msix).FullName

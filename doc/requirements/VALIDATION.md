@@ -17,6 +17,14 @@ parent timeout, for source and relocated package runs. Both use the same overall
 deadline, which must permit the existing import deadline and
 Preferences Close/reopen checks without dropping their assertions. CI must allow
 the complete ordinary suite to finish; timeout changes do not establish success.
+Stop/restart fixtures must prove partial durable publication and exact recovery
+without turning acceptance into a bulk throughput benchmark. Real OST acquisition
+and content processing retain bounded platform-appropriate test deadlines and all
+message-count, failure-evidence, search and archive-integrity assertions.
+Relocated PST/OST retries must each have enough bounded time to complete the same
+real scanning/import checks, with phase evidence and an encompassing CI deadline.
+Windows acceptance must execute the shared worker-policy/preferences and live
+saved-content pool/backlog regressions, beyond rendering recorded snapshots.
 
 Reader acceptance must retain search, Unicode rendering, exact export and source
 immutability under URI-reserved archive paths. Shared scanner checks must cover

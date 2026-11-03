@@ -45,7 +45,8 @@ def test_gui_stop_checkpoints_partial_import_and_reimport_has_no_duplicates(tmp_
     source = tmp_path / "source.mbox"
     digests = set()
     with source.open("wb") as output:
-        for number in range(600):
+        # Stop/restart and exact deduplication need a partial fixture, not a bulk benchmark.
+        for number in range(64):
             raw = (f"Message-ID: <stop-{number}@example.test>\nFrom: sender@example.test\n"
                    f"Date: Mon, 07 Sep 2026 12:00:00 +0000\nSubject: Stop fixture {number}\n\nBody\n").encode()
             digests.add(hashlib.sha256(raw).hexdigest())

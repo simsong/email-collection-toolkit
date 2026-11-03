@@ -11,7 +11,9 @@ For IMAP timeouts, show a short **Timeout** status and a yellow traffic-light
 circle containing a horizontal dash. Keep **Resume** available for unfinished
 work. Do not show a traceback, red failure box or finalizing ETA for this status.
 Apply the same presentation to earlier saved IMAP runs whose top-level failure
-is `TimeoutError`; retain the original status/diagnostics on disk. A real failure
+is `TimeoutError` and whose outer traceback identifies IMAP transport; retain the
+original status/diagnostics on disk. An IMAP root alone does not establish the
+origin of a timeout in a mixed-source run. A real failure
 that merely contains a timeout in its exception chain must remain a failure.
 
 Show the launch application version in parentheses at the top right of native

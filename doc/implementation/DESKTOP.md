@@ -9,6 +9,9 @@ live in [plans](../plans/README.md); historical evidence does not validate this 
 
 `IngestStatus.for_display` converts top-level legacy IMAP `TimeoutError` failures
 and current timed-out pauses into short timeout snapshots without failure detail.
+Legacy normalization requires an `imap_protocol.py` or `imaplib.py` frame in the
+outer traceback, before any exception-chain section. Merely having an IMAP source
+does not hide a PST, finalization or ambiguous-origin timeout.
 History, search overview and About apply this read-only projection. Other failures,
 including finalization failures with a nested timeout, retain their diagnostics.
 Ingests renders the timeout label, a yellow circle with a horizontal dash and saved

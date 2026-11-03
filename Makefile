@@ -696,11 +696,14 @@ test-headers:
 test-progress:
 	uv run pytest -q tests/test_progress.py tests/test_sources.py
 
-# Source versus saved-mail progress, unequal worker totals, and actual browser rendering.
-.PHONY: test-ingest-progress
-test-ingest-progress: ruff
+# Live source/saved-mail progress and worker pools; shared by Windows acceptance.
+.PHONY: test-ingest-progress-service test-ingest-progress
+test-ingest-progress-service: ruff
 	$(MAKE) test-progress
 	uv run --locked pytest -q tests/test_ingest_recovery.py::test_cli_saved_content_uses_worker_pool_and_preserves_search_and_bytes tests/test_ingest_recovery.py::test_saved_message_count_waits_for_body_and_attachment_tasks
+
+# Full progress acceptance adds the browser case already run by test-gui-processing.
+test-ingest-progress: test-ingest-progress-service
 	uv run --locked pytest -q --browser chromium e2e_tests/test_gui_processing.py::test_processing_history_shows_jobs_instead_of_zero_source_progress
 
 .PHONY: test-interrupt
@@ -889,7 +892,7 @@ test-pst-downloader:
 
 .PHONY: test-pff
 test-pff: pst-importer mcti-scan pff-converter test-pff-converter
-	uv run --locked pytest -q tests/test_pff_source.py tests/test_cli_processing.py tests/test_plugin_loader.py tests/test_source_integrity.py
+	uv run --locked pytest -q --durations=20 tests/test_pff_source.py tests/test_cli_processing.py tests/test_plugin_loader.py tests/test_source_integrity.py
 
 .PHONY: test-gui-processing
 .PHONY: test-worker-preferences test-native-worker-preferences

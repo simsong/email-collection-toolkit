@@ -390,18 +390,24 @@ def build_interrupted_archive(root: Path) -> Path:
     return archive
 
 
-@pytest.mark.parametrize("detail,imap,timeout", [
-    ("TimeoutError: The read operation timed out\n\nTraceback: synthetic", True, True),
-    ("TimeoutError: The read operation timed out\n\nTraceback: synthetic", False, False),
-    ("OSError: finalization failed\n\nCaused by: TimeoutError: timed out", True, False),
+@pytest.mark.parametrize("detail,roots,timeout", [
+    ('TimeoutError: timed out\n  File "/fixture/imap_protocol.py", line 1, in body', ["imap://account"], True),
+    ('TimeoutError: timed out\n  File "C:\\fixture\\imaplib.py", line 1, in read', ["imap://account", "mail.pst"], True),
+    ('TimeoutError: PST importer timeout\n  File "/fixture/pst_source.py", line 1, in messages',
+     ["imap://account", "mail.pst"], False),
+    ("TimeoutError: ambiguous origin", ["imap://account"], False),
+    ('OSError: finalization failed\n\nCaused by:\n  File "/fixture/imap_protocol.py", line 1, in body',
+     ["imap://account"], False),
+    ('TimeoutError: finalization timed out\n  File "/fixture/storage_sync.py", line 1, in replace_file'
+     '\n\nDuring handling of:\n  File "/fixture/imap_protocol.py", line 1, in body', ["imap://account"], False),
 ])
 def test_timeout_presentation_preserves_history_and_real_failures(tmp_path: Path,
-        detail: str, imap: bool, timeout: bool) -> None:
+        detail: str, roots: list[str], timeout: bool) -> None:
     """Desktop: only a top-level IMAP timeout becomes a quiet pause in both history and search."""
     archive = build_deferred_archive(tmp_path)
     template = read_ingest_history(archive).statuses[0]
     status = template.model_copy(update={"status_id": "ingest-timeout-display", "state": "failed",
-        "source_roots": ["imap://synthetic-account"] if imap else ["synthetic.mbox"],
+        "source_roots": roots,
         "started_at": datetime.now(UTC), "failure_detail": detail})
     saved = IngestStatusFile(archive, status.status_id)
     saved.write(status)

@@ -71,36 +71,41 @@ from mailarchiver.pst_source import ImportReceipt
 root = Path(sys.argv[1])
 for name in ('pst-importer', 'mcti-scan', 'pff-converter'):
     assert importer_executable(name).is_relative_to(Path(sys.executable).parent / 'importers')
-for kind, expected_count, partial_error in (
-        ('pst', 11, 'PST extraction incomplete'), ('ost', 80, 'libpff extraction incomplete;')):
-    fixture, = (root / 'outlook-sources').glob('*.' + kind)
-    request = IngestRequest(archive=root / (kind + '.mailarchive'), roots=[str(fixture)],
-        owner_rules=OwnerRules(include=['*@example.test']), workers=1, scan_policy='clamav', index_attachments=True)
-    for attempt in range(2):
-        try:
-            run_ingest(request, terminal=False)
-        except RuntimeError as error:
-            if not str(error).startswith(partial_error):
-                raise
-        else:
-            raise AssertionError('The documented partial fixture unexpectedly completed: ' + kind)
-        assert search_count(request.archive, '').total == expected_count
-        assert not verify_archive(request.archive)
-        if kind == 'ost':
-            receipts = [PffReceipt.model_validate_json(path.read_bytes())
-                        for path in (request.archive / 'processing-libpff').glob('*/receipt.json')]
-            assert len(receipts) == attempt + 1
-            assert all(item.emitted == 80 and item.errors == 1 and not item.complete for item in receipts)
-        else:
-            receipts = [ImportReceipt.model_validate_json(path.read_bytes())
-                        for path in (request.archive / 'processing-pst').glob('*/receipt.json')]
-            assert len(receipts) == attempt + 1
-            assert all(item.emitted == 11 and item.exit_code == 1 for item in receipts)
+kind, attempt = sys.argv[2], int(sys.argv[3])
+expected_count, partial_error = (11, 'PST extraction incomplete') if kind == 'pst' else (80, 'libpff extraction incomplete;')
+fixture, = (root / 'outlook-sources').glob('*.' + kind)
+request = IngestRequest(archive=root / (kind + '.mailarchive'), roots=[str(fixture)],
+    owner_rules=OwnerRules(include=['*@example.test']), workers=1, scan_policy='clamav', index_attachments=True)
+try:
+    run_ingest(request, terminal=False)
+except RuntimeError as error:
+    if not str(error).startswith(partial_error):
+        raise
+else:
+    raise AssertionError('The documented partial fixture unexpectedly completed: ' + kind)
+assert search_count(request.archive, '').total == expected_count
+assert not verify_archive(request.archive)
+if kind == 'ost':
+    receipts = [PffReceipt.model_validate_json(path.read_bytes())
+                for path in (request.archive / 'processing-libpff').glob('*/receipt.json')]
+    assert len(receipts) == attempt + 1
+    assert all(item.emitted == 80 and item.errors == 1 and not item.complete for item in receipts)
+else:
+    receipts = [ImportReceipt.model_validate_json(path.read_bytes())
+                for path in (request.archive / 'processing-pst').glob('*/receipt.json')]
+    assert len(receipts) == attempt + 1
+    assert all(item.emitted == 11 and item.exit_code == 1 for item in receipts)
 
 """
     with (output / "outlook-import.log").open("w", encoding="utf-8") as log:
-        subprocess.run([python, "-I", "-c", outlook_code, output], check=True, timeout=180,
-                       cwd=output, env=environment, stdout=log, stderr=subprocess.STDOUT)
+        for kind in ("pst", "ost"):
+            for attempt in range(2):
+                phase = f"Relocated {kind.upper()} import {attempt + 1}/2"
+                print(phase, flush=True)
+                print(phase, file=log, flush=True)
+                subprocess.run([python, "-I", "-c", outlook_code, output, kind, str(attempt)],
+                               check=True, timeout=600, cwd=output, env=environment,
+                               stdout=log, stderr=subprocess.STDOUT)
     for fixture, expected in zip(fixtures, hashes, strict=True):
         for path in (fixture, outlook_sources / fixture.name):
             with path.open("rb") as source:
