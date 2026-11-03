@@ -7,6 +7,19 @@ live in [plans](../plans/README.md); historical evidence does not validate this 
 
 ## Shared acceptance coverage
 
+The fixture MBOX reader parses binary envelope/separator lines independently of
+`mailbox.get_bytes`, which normalizes CRLF on Windows. A mixed-ending regression
+checks its byte oracle with independent LF/CRLF envelopes and separators. The tiny PST
+deadline case accepts either an observed timeout or the fixture's exact partial
+receipt; `ImportActivity` tests still require expiry after a silent interval and
+deadline extension after real stdout/stderr progress. A separate configured Python
+producer runs through the real PST supervisor, records its PID and stalls. The
+test requires a timeout, process termination (a held Windows process handle or
+POSIX liveness check), a durable nonzero-exit receipt and unchanged input bytes.
+The shared timeout target also runs the real IMAP finalization-obstruction case:
+macOS reports `IsADirectoryError`, Windows `PermissionError`; both must retain the
+actual destination and failed status instead of a network pause.
+
 `test_reserved_characters_and_read_only_attachments` checks SQLite URI handling;
 `test_reader_archive_under_uri_reserved_path` runs the complete shared reader
 acceptance (all sort orders, Unicode rendering, exact export and unchanged files),

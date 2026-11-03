@@ -3,18 +3,25 @@
 from __future__ import annotations
 
 import hashlib
+from collections.abc import Generator
+from contextlib import closing
+import ctypes
 import json
+import os
 import re
 import sqlite3
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 import pytest
 
 from mailarchiver.layout import mbox_directory
 from mailarchiver.standalone_verify import verify_archive
-from mailarchiver.pst_source import ImportActivity, ImportReceipt
+from mailarchiver.pst_source import ImportActivity, ImportReceipt, PstSettings
+from mailarchiver.plugin_api import MailContainer, ProgressEvent, SourceSpec
+from mailarchiver.plugin_loader import load_plugins
 from mailarchiver.processing.builtin import QUARANTINE_UNKNOWN_DATE
 from mailarchiver.__main__ import processor_statistics_table
 from mailarchiver.processing.api import PluginStatistics
@@ -63,6 +70,67 @@ def test_pst_timeout_tracks_inactivity_in_either_stream() -> None:
     assert not activity.observe(177, (2, 100), 60)
     assert not activity.observe(236, (2, 100), 60)
     assert activity.observe(237, (2, 100), 60)
+
+
+def test_pst_supervisor_kills_silent_producer_and_retains_receipt(tmp_path: Path) -> None:
+    """ACQUISITION: the real PST supervisor kills and reaps a stalled configured producer."""
+    producer = tmp_path / "silent.pst"
+    producer.write_text(
+        "# This synthetic producer runs under the configured Python executable.\n"
+        "# Its PST suffix enters the ordinary external-importer supervision path.\n"
+        "# A PID marker proves the child started before the inactivity check.\n"
+        "# It then remains silent beyond the host's extraction deadline.\n"
+        "# The completion marker distinguishes natural exit from termination.\n"
+        "# It uses only pytest-owned files and never changes a mail store.\n"
+        "import os\nfrom pathlib import Path\nimport time\n"
+        "Path(__file__).with_suffix('.pid').write_text(str(os.getpid()), encoding='ascii')\n"
+        "time.sleep(60)\n"
+        "Path(__file__).with_suffix('.completed').write_text('natural exit', encoding='ascii')\n",
+        encoding="utf-8")
+    original = producer.read_bytes()
+    archive = tmp_path / "archive"
+    archive.mkdir()
+    settings = PstSettings(executable=sys.executable, timeout_seconds=1)
+    configure(archive, "pst", settings.model_dump(mode="json"))
+    registry = load_plugins(archive=archive, scan_policy="not-scanned")
+    source = next(item.implementation for item in registry.sources if item.manifest.kind == "file-folder")
+    container, = (item for item in source.discover(SourceSpec(locator=str(producer))) if isinstance(item, MailContainer))
+    events = source.messages(container, None)
+    assert isinstance(events, Generator)
+    with closing(events):
+        assert isinstance(next(events), ProgressEvent)
+        marker = producer.with_suffix(".pid")
+        deadline = time.monotonic() + 10
+        while (not marker.exists() or not marker.stat().st_size) and time.monotonic() < deadline:
+            time.sleep(0.01)
+        assert marker.exists() and marker.stat().st_size, "Configured producer did not start"
+        pid = int(marker.read_text(encoding="ascii"))
+        if sys.platform == "win32":
+            native = ctypes.WinDLL("kernel32", use_last_error=True)
+            native.OpenProcess.argtypes = [ctypes.c_uint32, ctypes.c_int, ctypes.c_uint32]
+            native.OpenProcess.restype = ctypes.c_void_p
+            native.WaitForSingleObject.argtypes = [ctypes.c_void_p, ctypes.c_uint32]
+            native.WaitForSingleObject.restype = ctypes.c_uint32
+            native.CloseHandle.argtypes = [ctypes.c_void_p]
+            handle = native.OpenProcess(0x100000, False, pid)
+            assert handle
+            try:
+                with pytest.raises(TimeoutError, match="PST importer timeout"):
+                    list(events)
+                assert native.WaitForSingleObject(handle, 5000) == 0
+            finally:
+                native.CloseHandle(handle)
+        else:
+            with pytest.raises(TimeoutError, match="PST importer timeout"):
+                list(events)
+            with pytest.raises(ProcessLookupError):
+                os.kill(pid, 0)
+    path, = (archive / "processing-pst").glob("*/receipt.json")
+    receipt = ImportReceipt.model_validate_json(path.read_text(encoding="utf-8"))
+    assert receipt.exit_code is not None and receipt.exit_code != 0 and receipt.emitted == 0
+    assert receipt.source_sha256 == hashlib.sha256(original).hexdigest()
+    assert path.with_name("output.mboxrd").read_bytes() == b""
+    assert not producer.with_suffix(".completed").exists() and producer.read_bytes() == original
 
 
 def test_single_mbox_parallel_admission_preserves_bytes_and_date_order(tmp_path: Path) -> None:
@@ -449,7 +517,7 @@ def test_cli_public_providers_are_not_institutional_affiliations(tmp_path: Path)
 
 @pytest.mark.parametrize("setting,value", [("timeout_seconds", 0.000001), ("max_output_bytes", 1), ("max_diagnostics_bytes", 1)])
 def test_cli_pst_failed_limits_record_exit_and_bound_evidence(tmp_path: Path, setting: str, value: int | float) -> None:
-    """Actual Rust timeout and fast stdout/stderr overflow preserve exit evidence and bounded prefixes."""
+    """Finite Rust work may beat an inactivity timeout; every failure retains accurate evidence."""
     fixture = Path(__file__).resolve().parents[1] / "rust/mct-importer/tests/fixtures/mail.pst"
     archive = tmp_path / "archive"
     archive.mkdir()
@@ -463,7 +531,14 @@ def test_cli_pst_failed_limits_record_exit_and_bound_evidence(tmp_path: Path, se
     receipt = ImportReceipt.model_validate_json(path.read_text())
     assert receipt.exit_code is not None
     if setting == "timeout_seconds":
-        assert "PST importer timeout" in result.stderr
+        if "PST importer timeout" in result.stderr:
+            assert receipt.exit_code != 0
+        else:
+            # Output progress resets inactivity; the small fixture may finish
+            # before the supervisor observes any silent interval on this host.
+            assert "PST extraction incomplete" in result.stderr
+            assert receipt.exit_code == 1 and receipt.emitted == 11
+            assert "errors=2" in path.with_name("stderr.txt").read_text()
     elif setting == "max_output_bytes":
         assert receipt.output_truncated and receipt.output_bytes > 1
         assert path.with_name("output.mboxrd").stat().st_size == 1

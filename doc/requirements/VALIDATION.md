@@ -7,6 +7,11 @@ platform/release acceptance. Deferred features live in [plans](../plans/README.m
 
 ## Shared acceptance coverage
 
+Byte-preservation test readers must retain message CRLF/LF and mboxrd quoting
+regardless of the host's newline convention. A finite producer can finish before
+an inactivity deadline is observed; distinguish that documented partial outcome
+from a real timeout, retaining exit and receipt evidence in either case.
+
 Native desktop acceptance must retain a phase report and diagnostics after a
 parent timeout, for source and relocated package runs. Both use the same overall
 deadline, which must permit the existing import deadline and

@@ -479,6 +479,7 @@ def test_network_pause_does_not_hide_finalization_failure(imap_archive: Path, im
     # This is a fresh synthetic archive: obstruct the real final metadata replacement.
     obstruction = imap_archive / OWNER_NAMES_DETECTED
     obstruction.mkdir()
+    expected_error = PermissionError if sys.platform == "win32" else IsADirectoryError
     args = parser().parse_args(["--archive", str(imap_archive), "--no-scan", "--workers", "1"])
     app, api = open_headless(imap_archive, tmp_path / "preferences.json", workers_override=1)
     try:
@@ -487,12 +488,14 @@ def test_network_pause_does_not_hide_finalization_failure(imap_archive: Path, im
                 roots=[imap_locator(imap_archive, imap_inbox.account, 1)], workers=1, scan_policy="not-scanned")
             assert app.start_import(api, [], processing_request=request)
             wait_for_import(api)
-            assert any(notice.severity == "error" and "IsADirectoryError" in notice.message
+            assert any(notice.severity == "error" and expected_error.__name__ in notice.message
+                       and OWNER_NAMES_DETECTED in notice.message
                        for notice in app.notices()), app.notices()
             assert not any("Import paused" in notice.message for notice in app.notices())
         else:
-            with pytest.raises(IsADirectoryError):
+            with pytest.raises(expected_error) as failure:
                 synchronize(args)
+            assert failure.value.filename2 == str(obstruction)
         status = read_ingest_history(imap_archive).statuses[0]
         assert status.state == "failed" and status.failure_detail and OWNER_NAMES_DETECTED in status.failure_detail
         assert api.document is not None and api.document.ingest_job is None

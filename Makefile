@@ -645,7 +645,7 @@ test-imap:
 # Quiet legacy timeout presentation and real pause/Resume traffic-light rendering.
 .PHONY: test-timeout-presentation
 test-timeout-presentation: ruff
-	uv run --locked pytest -q tests/test_gui_processing.py $(PYTEST_ARGS)
+	uv run --locked pytest -q tests/test_gui_processing.py tests/test_imap.py::test_network_pause_does_not_hide_finalization_failure $(PYTEST_ARGS)
 	uv run --locked pytest -q --browser chromium e2e_tests/test_ingest_diagnostics.py e2e_tests/test_imap_pause.py $(PYTEST_ARGS)
 
 # Regression acceptance for Macroscope's Unicode folder, report and phone findings.

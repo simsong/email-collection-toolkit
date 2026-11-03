@@ -94,11 +94,43 @@ def run_ingest(
 
 
 def mailbox_message_bytes(path: Path) -> list[bytes]:
-    box = mailbox.mbox(path, factory=None, create=False)
-    try:
-        return [box.get_bytes(key, from_=False) for key in box.iterkeys()]
-    finally:
-        box.close()
+    """Read fixture MBOX framing without the host's stdlib newline conversion."""
+    messages: list[bytes] = []
+    raw = bytearray()
+    last_line = b""
+    started = False
+
+    def record() -> bytes:
+        data = bytes(raw)
+        return data[:-len(last_line)] if last_line in (b"\n", b"\r\n") else data
+
+    with path.open("rb") as stream:
+        for line in stream:
+            if line.startswith(b"From "):
+                if started:
+                    messages.append(record())
+                raw.clear()
+                last_line, started = b"", True
+            elif started:
+                raw.extend(line)
+                last_line = line
+    if started:
+        messages.append(record())
+    return messages
+
+
+@pytest.mark.parametrize("framing", [b"\n", b"\r\n"])
+@pytest.mark.parametrize("separator", [b"", b"\n", b"\r\n"])
+def test_fixture_mbox_reader_preserves_wire_endings(tmp_path: Path, framing: bytes, separator: bytes) -> None:
+    """The byte-preservation oracle must preserve CRLF, LF and quoting on every host."""
+    messages = [b"Subject: wire\r\n\r\ninvalid:\xff\rlone\r\n>From quoted\r\n",
+                b"Subject: local\n\nbody\n"]
+    envelope = b"From fixture Tue Jan  2 10:00:00 2024" + framing
+    stored = b"".join(envelope + raw + separator for raw in messages)
+    path = tmp_path / "mixed.mbox"
+    path.write_bytes(stored)
+    assert mailbox_message_bytes(path) == messages
+    assert path.read_bytes() == stored
 
 
 def assert_success(result: subprocess.CompletedProcess[str]) -> None:
