@@ -32,8 +32,19 @@ STATUS_DIRECTORY = "status"
 STATUS_PREFIX = "ingest-"
 STALE_AFTER_SECONDS = 5
 STATUS_REFRESH_SECONDS = 1
-IngestState = Literal["running", "completed", "interrupted", "disk-full", "failed", "stale"]
+IngestState = Literal["running", "completed", "paused", "interrupted", "disk-full", "failed", "stale"]
 WorkerOperation = Literal["downloading", "importing", "processing"]
+
+
+def legacy_imap_timeout(detail: str) -> bool:
+    """Require IMAP transport frames in the outer failure, not a nested cause or source list."""
+    if not detail.startswith("TimeoutError:"):
+        return False
+    for separator in ("\nDuring handling of", "\nCaused by:"):
+        detail = detail.split(separator, 1)[0]
+    return any(line.lstrip().startswith('File "')
+               and line.partition('\", line ')[0].replace("\\", "/").endswith(("/imap_protocol.py", "/imaplib.py"))
+               for line in detail.splitlines())
 
 
 class YearProgress(BaseModel):
@@ -103,6 +114,7 @@ class IngestStatus(BaseModel):
     counts: IngestCounts
     years: list[YearProgress]
     failure_detail: str | None = None
+    timed_out: bool = False
     scan_policy: Literal["clamav", "not-scanned", "unknown"] = "unknown"
     processing_active: bool = False
     processing_jobs_completed: int = 0
@@ -126,6 +138,14 @@ class IngestStatus(BaseModel):
         if (checked_at - self.updated_at).total_seconds() <= STALE_AFTER_SECONDS:
             return self
         return self.model_copy(update={"state": "stale", "phase": "status heartbeat lost"})
+
+    def for_display(self) -> IngestStatus:
+        """Present current and legacy IMAP timeouts quietly, retaining the saved diagnostics."""
+        legacy_timeout = self.state == "failed" and legacy_imap_timeout(self.failure_detail or "")
+        if legacy_timeout or (self.state == "paused" and "timed out" in self.phase):
+            return self.model_copy(update={"state": "paused", "phase": "Timeout. Choose Resume when connected.",
+                                           "failure_detail": None, "timed_out": True})
+        return self
 
 
 class IngestStatusReadError(BaseModel):

@@ -5,13 +5,63 @@ from pathlib import Path
 import sqlite3
 import subprocess
 import sys
+import tracemalloc
+from email import policy
+from email.parser import BytesParser
 
 import pytest
 
 from mailarchiver.gui_processing import unfinished_work
 from mailarchiver.processing.mime import CHUNK, MimeLimits, extract_parts
+from mailarchiver.mime_tree import MimeReaderBudget, MimeReaderLimitError, OriginalMimeParts, walk_mime
 from mailarchiver.standalone_verify import verify_archive
 from tests.test_cli_processing import HEADER, cli, configure, ingest
+from tests.test_message import encoded_nested_message
+
+
+@pytest.mark.parametrize("limits", [MimeLimits(max_depth=4), MimeLimits(max_parts=4),
+    MimeLimits(max_child_messages=3), MimeLimits(max_expanded_bytes=1000)])
+def test_encoded_reader_limits_abort_instead_of_returning_partial_ids(limits: MimeLimits) -> None:
+    """DESKTOP/SEARCH: shallow individual parses cannot bypass cumulative reader budgets."""
+    raw = encoded_nested_message(12, b"unchanged leaf\n")
+    original = OriginalMimeParts(entity=raw, budget=MimeReaderBudget(limits=limits))
+    with pytest.raises(MimeReaderLimitError, match="limit"):
+        list(walk_mime(BytesParser(policy=policy.compat32).parsebytes(raw), original))
+    assert original.budget.decoded_bytes <= limits.max_expanded_bytes
+    assert original.budget.cached_parts <= limits.max_parts
+
+
+def test_reader_sibling_decodes_share_one_budget_and_cache() -> None:
+    """DESKTOP: repeated requests reuse a decode, while sibling payloads cannot each reset the byte allowance."""
+    payload = b"x" * 512
+    part = b"--x\nContent-Type: application/octet-stream\nContent-Transfer-Encoding: base64\n\n" + base64.b64encode(payload) + b"\n"
+    raw = b"Content-Type: multipart/mixed; boundary=x\n\n" + part * 2 + b"--x--\n"
+    original = OriginalMimeParts(entity=raw, budget=MimeReaderBudget(limits=MimeLimits(max_expanded_bytes=1000)))
+    assert original.size((1,)) == len(payload) and original.payload((1,)) == payload
+    assert original.budget.decoded_bytes == len(payload)
+    with pytest.raises(MimeReaderLimitError, match="byte limit"):
+        original.size((2,))
+    assert original.budget.decoded_bytes == len(payload)
+
+
+def test_raw_mime_spans_do_not_retain_nested_payload_copies() -> None:
+    """DESKTOP: nested unencoded containers share source bytes rather than retaining depth times the message."""
+    payload = b"x" * (512 * 1024)
+    raw = b"Content-Type: application/pdf\n\n" + payload
+    for level in reversed(range(32)):
+        raw = f"Content-Type: multipart/mixed; boundary=b{level}\n\n--b{level}\n".encode() + raw + f"\n--b{level}--\n".encode()
+    owned_trace = not tracemalloc.is_tracing()
+    if owned_trace:
+        tracemalloc.start()
+    baseline = tracemalloc.get_traced_memory()[0]
+    try:
+        original = OriginalMimeParts(entity=raw)
+        assert original.payload((1,) * 32) == payload
+        assert original.size((1,) * 32) == len(payload)
+        assert tracemalloc.get_traced_memory()[0] - baseline < 4 * len(raw)
+    finally:
+        if owned_trace:
+            tracemalloc.stop()
 
 
 def attached(raw: bytes, boundary: bytes) -> bytes:
@@ -109,15 +159,3 @@ def test_scan_evidence_continues_but_unhandled_custom_plugin_errors_remain_faile
     if not failed:
         assert not verify_archive(archive)
     assert source.read_bytes() == raw
-
-
-def test_scan_outcome_classification() -> None:
-    """Recorded scanner responses distinguish limits, errors and actual positive detection."""
-    from mailarchiver.processing.builtin import scan_result
-    from mailarchiver.processing.contracts import ScanEvidence
-    versions = ScanEvidence(status="not-scanned", engine_version="1.4", signature_version="42")
-    assert scan_result(0, b"file: OK", b"", versions).status == "clean"
-    assert scan_result(2, b"", b"connection failed", versions).status == "scanner-error"
-    assert scan_result(1, b"file: Heuristics.Limits.Exceeded.MaxFileSize FOUND\n", b"", versions).status == "unscannable"
-    mixed = b"file: Heuristics.Encrypted.Zip FOUND\nfile: Win.TestVirus FOUND\n"
-    assert scan_result(1, mixed, b"", versions).status == "infected"

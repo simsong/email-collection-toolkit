@@ -25,7 +25,7 @@ import stat as stat_module
 from abc import ABC, abstractmethod
 from collections.abc import Callable, Iterable, Iterator
 from email import policy
-from email.parser import BytesParser
+from email.parser import BytesHeaderParser
 from fnmatch import fnmatchcase
 from pathlib import Path
 from typing import Literal
@@ -696,7 +696,7 @@ def _mbox_envelope_sender(envelope: bytes) -> bytes:
 def _mbcp_exclusion(envelope_sender: bytes, raw: bytes) -> str | None:
     if envelope_sender != MBCP_ENVELOPE_SENDER:
         return None
-    message = BytesParser(policy=policy.compat32).parsebytes(raw)
+    message = BytesHeaderParser(policy=policy.compat32).parsebytes(raw)
     names = {name.casefold() for name in message}
     payload = message.get_payload()
     if {"x-uid", "x-mbcp-flags"} <= names <= MBCP_HEADERS and str(payload).strip() == "":
@@ -712,7 +712,7 @@ def _unwrap_xxx_record(raw: bytes, envelope: bytes) -> tuple[bytes, bytes]:
     separator = HEADER_SEPARATOR.search(raw)
     if separator is None:
         return raw, envelope
-    wrapper = BytesParser(policy=policy.compat32).parsebytes(raw[: separator.end()])
+    wrapper = BytesHeaderParser(policy=policy.compat32).parsebytes(raw[: separator.end()])
     if not wrapper.keys() or wrapper.defects or not {name.casefold() for name in wrapper} <= XXX_WRAPPER_HEADERS:
         return raw, envelope
     nested = raw[separator.end():]

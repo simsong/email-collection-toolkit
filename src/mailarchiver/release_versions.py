@@ -31,7 +31,7 @@ def release_metadata(version_text: str) -> tuple[str, str, int, str]:
         raise ValueError(f"invalid PEP 440 version: {version_text}") from error
     if str(version) != version_text:
         raise ValueError("release version must use canonical PEP 440 spelling")
-    if version.epoch or len(version.release) != 3 or version.dev or version.post or version.local:
+    if version.epoch or len(version.release) != 3 or version.dev is not None or version.post is not None or version.local:
         raise ValueError("releases must use MAJOR.MINOR.PATCH, optionally followed by aN or bN")
     major, minor, patch = version.release
     if any(value > 999 for value in version.release):

@@ -17,10 +17,22 @@ platform or release gate has passed. [Future work](plans/README.md) is separate.
 | [Delivery](requirements/DELIVERY.md) | Platform packaging, release identity, signing and publication |
 | [Validation](requirements/VALIDATION.md) | Fixtures, independent checks, CI and acceptance limits |
 
+The toolkit function audit covers preservation, MIME ancestry, failure isolation,
+portable process tests, validation inputs and release dependency checks. Current
+contracts and acceptance limits are recorded in each subsystem's **Function audit
+repairs** section; [audit scope](TOOLKIT_AUDIT.md) distinguishes reviewed code from
+platform acceptance and deferred work.
+
 ## Shared boundaries
 
+- Desktop timeout status uses a yellow circle with a horizontal dash and no
+  traceback; native macOS and Windows window bars show the launch version
+  at the top right.
+  See [desktop](requirements/DESKTOP.md).
+
 - Saved archive windows on macOS expose the native title-bar document-path menu;
-  untitled and utility windows have no represented path. See [desktop](requirements/DESKTOP.md).
+  untitled and utility windows have no represented path. Windows provides
+  **Show Archive in Explorer** for the saved active archive. See [desktop](requirements/DESKTOP.md).
 
 - Update dialogs render embedded release notes as rich text with wrapping and
   working links; see [delivery](requirements/DELIVERY.md).
@@ -35,7 +47,11 @@ platform or release gate has passed. [Future work](plans/README.md) is separate.
   and retain signature verification; see [delivery](requirements/DELIVERY.md).
 
 - Source and relocated native acceptance retain current phase and timeout diagnostics; bounded
-  deadlines must allow the component checks to run. See [validation](requirements/VALIDATION.md).
+  deadlines must allow the component checks to run. JavaScript checks must collect
+  both scalar and Promise results and report JavaScript errors.
+  See [validation](requirements/VALIDATION.md).
+
+- Research process-memory reports must use byte units on macOS, Linux and Windows.
 
 - Preferences persist half-CPU, all-CPU or custom worker limits, defaulting to
   half the logical CPUs and never exceeding twice that count. Explicit CLI
@@ -76,6 +92,10 @@ platform or release gate has passed. [Future work](plans/README.md) is separate.
 
 - Imports can suspend and resume without quitting; identity pickers display
   loading and retry feedback. See [desktop](requirements/DESKTOP.md).
+
+- IMAP connection timeouts and disconnects pause downloads with saved progress and
+  a **Resume** button, including host-down socket errors where the platform exposes
+  them; see [acquisition](requirements/ACQUISITION.md).
 
 - About status remains available during import writer locks; plugin inventory
   retries separately. See [desktop](requirements/DESKTOP.md).

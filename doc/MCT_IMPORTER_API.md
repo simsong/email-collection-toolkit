@@ -11,9 +11,8 @@ intentionally `mdti-validator`, as requested; the generator is `mcti-generator`.
 ## Build and run
 
 Rust and Cargo are required to build these programs and the Rust PST
-importer. Use the installed stable Rust toolchain, including rustfmt and Clippy.
-This change was developed with Rust 1.98.1. Other compiler versions have not
-been qualified locally. `Cargo.lock` pins dependencies for repeatable builds.
+importer. `rust-toolchain.toml` selects Rust 1.99.0 locally, including rustfmt
+and Clippy; hosted CI explicitly provisions stable. `Cargo.lock` pins dependencies for repeatable builds.
 This adds no Rust dependency to existing Python-only local-mail importing.
 Packaged PST importing will require its compiled Rust helper, not a Rust
 compiler installed by the end user. The macOS DMG bundles the helper.
@@ -187,8 +186,9 @@ new hashes or writes an archive. Existing hash meanings remain unchanged.
 zero/large counts, malformed headers/URIs/encodings, folding and inherited
 provenance fields, missing final framing, size limits, multipart closure and
 recovery after invalid records. `make rust-smoke` exercises release binaries.
-CI defines native Linux/macOS/Windows Rust checks; a matrix definition is not
-evidence those hosted jobs have run. Current local qualification is macOS.
+Ordinary CI runs Rust checks on macOS; Windows package gates also build and
+exercise the helpers natively. Linux delivery remains deferred. Configuration
+is not evidence that a particular revision passed any platform gate.
 
 The framing rule follows [Library of Congress MBOXRD](https://www.loc.gov/preservation/digital/formats/fdd/fdd000385.shtml).
 Header/body structure follows [RFC 2822](https://www.rfc-editor.org/rfc/rfc2822)

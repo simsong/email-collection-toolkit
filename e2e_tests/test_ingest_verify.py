@@ -9,7 +9,6 @@
 
 from __future__ import annotations
 
-import hashlib
 import json
 import os
 import shutil
@@ -29,7 +28,6 @@ from e2e_tests.eicar_fixture import write_eicar_emlx
 from e2e_tests.generate_corpus import RICH_MESSAGE
 from mailarchiver.application import ApplicationController, ApplicationPreferencesStore
 from mailarchiver.__main__ import IngestRequest, run_ingest
-from mailarchiver.catalog import address_pk, create_catalog, create_search
 from mailarchiver.gui_app import (
     E2E_DRIVER,
     GUI_DIRECTORY,
@@ -44,9 +42,9 @@ from mailarchiver.gui_app import (
     ProcessorGraphApi,
 )
 from mailarchiver.gui_service import MessageView, PartContent, SearchPage, write_message
+from mailarchiver.mailsearch import read_message_bytes
 from mailarchiver.reader_fixture import inventory
 from mailarchiver.processing.store import connect as connect_processing
-from mailarchiver.search import index_message
 from mailarchiver.owner_rules import OwnerRules
 from mailarchiver.standalone_verify import INSTALLED_NAME
 
@@ -127,23 +125,14 @@ def built_archive(tmp_path_factory: pytest.TempPathFactory) -> BuiltArchive:
 
 @pytest.fixture(scope="module")
 def native_smoke_archive(tmp_path_factory: pytest.TempPathFactory) -> Path:
-    """Build the smallest derived archive that proves a real bridge search."""
-    archive = tmp_path_factory.mktemp("native-smoke-archive")
-    catalog = create_catalog(archive / "archive.sqlite3")
-    search = create_search(archive / "search.sqlite3")
-    try:
-        sender = address_pk(catalog, "sender@example.net")
-        catalog.execute(
-            "INSERT INTO messages(message_id_normalized, sha256, sender_address_pk, subject, date_utc, date_source, category) "
-            "VALUES ('native-smoke@example', ?, ?, 'Native smoke', '2024-01-03T10:00:00+00:00', 'date', 'Archive')",
-            (hashlib.sha256(NATIVE_SMOKE_MESSAGE).hexdigest(), sender),
-        )
-        index_message(search, NATIVE_SMOKE_MESSAGE, False)
-        catalog.commit()
-        search.commit()
-    finally:
-        catalog.close()
-        search.close()
+    """Ingest one real canonical message for native search, standalone viewer and export acceptance."""
+    temporary = tmp_path_factory.mktemp("native-smoke-archive")
+    source = temporary / "fixture.eml"
+    source.write_bytes(NATIVE_SMOKE_MESSAGE)
+    archive = temporary / "archive"
+    run_ingest(IngestRequest(archive=archive, roots=[str(source)], scan_policy="not-scanned",
+                            owner_rules=OwnerRules(include=["owner@example.test"])), terminal=False)
+    assert source.read_bytes() == read_message_bytes(archive, 1) == NATIVE_SMOKE_MESSAGE
     return archive
 
 
@@ -184,7 +173,7 @@ def test_search_ui_end_to_end_without_a_window(
     assert {"saved-tiny.png", "saved-review.command", "filter-sets.json"} <= exports
     saved = list(export_directory.glob("saved-Rich UI message-*.eml"))
     assert len(saved) == 1 and saved[0].read_bytes() == RICH_MESSAGE
-    if sys.platform == "darwin":
+    if sys.platform in {"darwin", "win32"}:
         dragged = list((export_directory / "drags").rglob("Rich UI message-*.eml"))
         assert len(dragged) == 1 and dragged[0].read_bytes() == RICH_MESSAGE
     else:

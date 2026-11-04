@@ -13,7 +13,9 @@ from collections.abc import Iterator
 from contextlib import closing
 from datetime import UTC, datetime
 from email.parser import BytesParser
+import errno
 import hashlib
+import imaplib
 import json
 from pathlib import Path
 import sqlite3
@@ -29,13 +31,14 @@ import pytest
 from mailarchiver.__main__ import IngestRequest
 from mailarchiver.application import create_empty_archive
 from mailarchiver.archive_config import load_archive_config, save_archive_config
+from mailarchiver.document_options import OWNER_NAMES_DETECTED
 from mailarchiver.imap_cli import SyncReporter, parser, synchronize
 from mailarchiver.imap_credentials import save_password
 from mailarchiver.imap_credentials import PASSWORD_KEY, password_for, _development_password
 from keyring.errors import KeyringError
 from mailarchiver.imap_models import ImapAccount, ImapDownload, ImapMailbox, ImapMessageMetadata
 from mailarchiver.imap_cli import prompt_account
-from mailarchiver.imap_protocol import ImapSession, body_literal, decode_mailbox, message_metadata, response_tokens, selected_mailboxes
+from mailarchiver.imap_protocol import ImapPaused, ImapSession, body_literal, connection_interrupted, decode_mailbox, message_metadata, response_tokens, selected_mailboxes
 from mailarchiver.imap_state import initialize_state, known_observation, record_download, refresh_observation, totals
 from mailarchiver.gui_processing import resume_request, unfinished_work
 from mailarchiver.gui_app import IngestWindowApi
@@ -49,7 +52,30 @@ from mailarchiver.mbox import MboxLocation, read_verified_location
 from mailarchiver.owner_rules import OwnerRules
 from mailarchiver.plugin_api import MailContainer, MailObject, SourceObservation, SourceReference, SourceSpec
 
-from imap_fixture import DisposableImap, FixtureKeyring, Utf8Imap
+from tests.imap_fixture import DisposableImap, FixtureKeyring, ImapFault, InterruptibleImap, Utf8Imap
+
+
+@pytest.mark.parametrize("valid_password", [False, True])
+def test_real_tls_plain_authentication_accepts_unicode_and_rejects_bad_password(
+    tmp_path: Path, valid_password: bool,
+) -> None:
+    """ACQUISITION: a PLAIN-only TLS server must accept UTF-8 credentials without LOGIN."""
+    username, password = "démouser", "fixture-pässword"
+    server = Utf8Imap(tmp_path, credentials=(username, password))
+    try:
+        account = server.start().model_copy(update={"username": username})
+        if valid_password:
+            with ImapSession(account, password, server.context) as session:
+                assert [mailbox.name for mailbox in session.mailboxes()] == list(server.names)
+        else:
+            with pytest.raises(ValueError, match="IMAP authentication failed") as failure:
+                with ImapSession(account, "incorrect", server.context):
+                    pytest.fail("invalid credentials were accepted")
+            assert password not in str(failure.value)
+        assert any(b" AUTHENTICATE PLAIN" in command for command in server.commands)
+        assert not any(b" LOGIN " in command for command in server.commands)
+    finally:
+        server.close()
 
 
 @pytest.mark.parametrize("status", [-25293, -25308, None])
@@ -129,8 +155,9 @@ def imap_server_identity(monkeypatch: pytest.MonkeyPatch) -> None:
 def imap_server(tmp_path: Path, request: pytest.FixtureRequest) -> Iterator[DisposableImap]:
     """Pytest owns the isolated TLS listener, including cleanup after setup/assertion failures."""
     tls = getattr(request, "param", "implicit")
-    assert tls in {"implicit", "starttls"}
-    server = DisposableImap(tmp_path, "implicit" if tls == "implicit" else "starttls")
+    assert tls in {"implicit", "starttls", "interruptible"}
+    server = (InterruptibleImap(tmp_path) if tls == "interruptible" else
+              DisposableImap(tmp_path, "implicit" if tls == "implicit" else "starttls"))
     try:
         server.start()
         yield server
@@ -406,6 +433,135 @@ def test_gui_background_ingests_three_inbox_messages_and_indexes_them(imap_archi
         api.close()
 
 
+@pytest.mark.parametrize("imap_server", ["interruptible"], indirect=True)
+def test_standalone_cli_reports_network_pause_as_temporary(imap_archive: Path,
+        imap_inbox: DisposableImap, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
+    """CLI pauses retain checkpoints and return the temporary-failure exit code without a traceback."""
+    assert isinstance(imap_inbox, InterruptibleImap)
+    monkeypatch.setattr("mailarchiver.imap_protocol.IMAP_TIMEOUT", 1)
+    imap_inbox.fault = ImapFault(command=b"BODY.PEEK[]", mode="timeout", skip=1)
+    args = parser().parse_args(["--archive", str(imap_archive), "--no-scan", "--workers", "1"])
+    assert synchronize(args) == 75
+    assert read_ingest_history(imap_archive).statuses[0].state == "paused"
+    output = capsys.readouterr().err
+    assert "paused" in output and "failed" not in output and "Traceback" not in output
+    imap_inbox.fault = None
+    assert synchronize(args) == 0
+    assert totals(imap_archive).archived == 3 and totals(imap_archive).duplicates == 0
+
+
+@pytest.mark.parametrize("imap_server", ["interruptible"], indirect=True)
+@pytest.mark.parametrize("response", [b"invalid IMAP response\r\n", b"invalid IMAP response\n",
+                                      b"socket error: invalid IMAP response\r\n"])
+def test_invalid_imap_response_remains_a_failure(imap_archive: Path, imap_inbox: DisposableImap,
+                                                response: bytes) -> None:
+    """A malformed response is an acquisition defect, even though imaplib raises abort for it."""
+    assert isinstance(imap_inbox, InterruptibleImap)
+    imap_inbox.fault = ImapFault(command=b"BODY.PEEK[]", mode="malformed", skip=1, response=response)
+    args = parser().parse_args(["--archive", str(imap_archive), "--no-scan", "--workers", "1"])
+    with pytest.raises(imaplib.IMAP4.abort, match="unexpected response|unterminated line"):
+        synchronize(args)
+    status = read_ingest_history(imap_archive).statuses[0]
+    assert status.state == "failed" and status.failure_detail and "invalid IMAP response" in status.failure_detail
+    imap_inbox.fault = None
+    assert synchronize(args) == 0
+    assert totals(imap_archive).archived == 3 and totals(imap_archive).duplicates == 0
+
+
+@pytest.mark.parametrize("wrapped", [False, True], ids=["direct", "imaplib-wrapped"])
+def test_host_down_is_a_resumable_transport_interruption(wrapped: bool) -> None:
+    """ACQUISITION: host-down socket failures pause instead of recording a failed ingest."""
+    host_down = getattr(errno, "EHOSTDOWN", None)
+    if host_down is None:
+        pytest.skip("This platform does not expose EHOSTDOWN")
+    session = ImapSession(ImapAccount(server="fixture.example.test", username="fixture"), "unused")
+    try:
+        try:
+            raise OSError(host_down, "Host is down")
+        except OSError:
+            if wrapped:
+                raise imaplib.IMAP4.abort("socket error: Host is down")
+            raise
+    except (OSError, imaplib.IMAP4.abort) as error:
+        assert connection_interrupted(error)
+        with pytest.raises(ImapPaused, match="IMAP connection was interrupted.*use Resume"):
+            session.__exit__(type(error), error, error.__traceback__)
+
+
+@pytest.mark.parametrize("error", [OSError("Host is down"), OSError(errno.EACCES, "Host is down")])
+def test_host_down_handling_requires_a_transport_errno(error: OSError) -> None:
+    """ACQUISITION: host-down-looking text alone must not hide genuine failures."""
+    assert not connection_interrupted(error)
+
+
+def test_imaplib_wrapped_send_timeout_retains_timeout_presentation() -> None:
+    """Stdlib's command-send wrapper must retain the same Timeout reason as socket reads."""
+    session = ImapSession(ImapAccount(server="fixture.example.test", username="fixture"), "unused")
+    try:
+        try:
+            raise TimeoutError("The write operation timed out")
+        except TimeoutError as cause:
+            raise imaplib.IMAP4.abort("socket error: The write operation timed out") from cause
+    except imaplib.IMAP4.abort as error:
+        with pytest.raises(ImapPaused, match="IMAP connection timed out"):
+            session.__exit__(type(error), error, error.__traceback__)
+
+
+def test_rejected_credentials_remain_a_failure(imap_archive: Path, imap_inbox: DisposableImap) -> None:
+    """An authentication rejection must request corrected credentials rather than network resumption."""
+    assert imap_inbox.account is not None
+    save_password(imap_inbox.account, "incorrect-synthetic-password")
+    args = parser().parse_args(["--archive", str(imap_archive), "--no-scan", "--workers", "1"])
+    with pytest.raises(ValueError, match="authentication failed"):
+        synchronize(args)
+    status = read_ingest_history(imap_archive).statuses[0]
+    assert status.state == "failed" and status.failure_detail and "authentication failed" in status.failure_detail
+
+
+@pytest.mark.parametrize("imap_server", ["interruptible"], indirect=True)
+@pytest.mark.parametrize("gui", [False, True], ids=["cli", "gui"])
+def test_network_pause_does_not_hide_finalization_failure(imap_archive: Path, imap_inbox: DisposableImap,
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch, gui: bool) -> None:
+    """A real destination-write failure after a timeout must override the expected network pause."""
+    assert isinstance(imap_inbox, InterruptibleImap) and imap_inbox.account is not None
+    monkeypatch.setattr("mailarchiver.imap_protocol.IMAP_TIMEOUT", 1)
+    imap_inbox.fault = ImapFault(command=b" LIST ", mode="timeout")
+    # This is a fresh synthetic archive: obstruct the real final metadata replacement.
+    obstruction = imap_archive / OWNER_NAMES_DETECTED
+    obstruction.mkdir()
+    expected_error = PermissionError if sys.platform == "win32" else IsADirectoryError
+    args = parser().parse_args(["--archive", str(imap_archive), "--no-scan", "--workers", "1"])
+    app, api = open_headless(imap_archive, tmp_path / "preferences.json", workers_override=1)
+    try:
+        if gui:
+            request = IngestRequest(archive=imap_archive,
+                roots=[imap_locator(imap_archive, imap_inbox.account, 1)], workers=1, scan_policy="not-scanned")
+            assert app.start_import(api, [], processing_request=request)
+            wait_for_import(api)
+            assert any(notice.severity == "error" and expected_error.__name__ in notice.message
+                       and OWNER_NAMES_DETECTED in notice.message
+                       for notice in app.notices()), app.notices()
+            assert not any("Import paused" in notice.message for notice in app.notices())
+        else:
+            with pytest.raises(expected_error) as failure:
+                synchronize(args)
+            assert failure.value.filename2 == str(obstruction)
+        status = read_ingest_history(imap_archive).statuses[0]
+        assert status.state == "failed" and status.failure_detail and OWNER_NAMES_DETECTED in status.failure_detail
+        assert api.document is not None and api.document.ingest_job is None
+        with WriterLease.acquire(imap_archive, api.document.descriptor.identity, "failure fixture", "failed", "test"):
+            pass
+        obstruction.rmdir()
+        imap_inbox.fault = None
+        assert synchronize(args) == 0
+        assert totals(imap_archive).archived == 3 and totals(imap_archive).duplicates == 0
+        assert not verify_archive(imap_archive)
+    finally:
+        imap_inbox.fault = None
+        app.shutdown()
+        api.close()
+
+
 def test_resume_downloads_checkpoint_gaps_before_saved_metadata(imap_archive: Path,
         imap_inbox: DisposableImap) -> None:
     """IMAP resume: missing UIDs take priority without skipping holes or mutable-label refresh."""
@@ -554,6 +710,8 @@ def test_reporter_updates_while_sync_is_running(tmp_path: Path, capsys: pytest.C
 @pytest.mark.parametrize("scan", [False, True])
 def test_cli_ctrl_c_checkpoints_and_next_invocation_resumes(tmp_path: Path, imap_server: DisposableImap, scan: bool) -> None:
     """Interrupt the real CLI process during downloads, then finish without duplicate publication."""
+    if sys.platform == "win32":
+        pytest.skip("POSIX SIGINT delivery; native Windows console acceptance remains separate")
     server = imap_server
     account = server.account
     assert account is not None
@@ -642,6 +800,8 @@ def test_configuration_identity_changes_and_legacy_compatibility(tmp_path: Path)
 @pytest.mark.skipif(sys.platform == "win32", reason="POSIX PTY; Windows native password-prompt acceptance remains separate")
 def test_cli_new_archive_prompts_save_secret_and_run(tmp_path: Path, imap_server: DisposableImap) -> None:
     """Drive real terminal prompts through --new, including hidden password entry and saved reuse."""
+    if sys.platform == "win32":
+        pytest.skip("POSIX PTY; Windows native password-prompt acceptance remains separate")
     import pty  # pylint: disable=import-outside-toplevel
     import select  # pylint: disable=import-outside-toplevel
     server = imap_server

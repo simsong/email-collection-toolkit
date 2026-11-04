@@ -73,9 +73,10 @@ recorded in THIRD_PARTY_NOTICES.md.
   must report the underlying loader error, not misidentify it as a missing
   file. A failed self-test never publishes the candidate DMG.
 * `ingest --workers N` controls the number of source containers ingested
-  simultaneously. Its default is the detected CPU count capped at eight, and
-  `N` must be positive. Each worker reads and parses its mailfile and submits
-  one ClamAV request at a time. Duplicate admission, SQLite commits, the
+  simultaneously. The shared worker preference defaults to half the detected
+  CPUs (at least one); an explicit `N` must be positive and at most twice
+  that CPU count. Bounded message admission also permits one large mailfile
+  to use concurrent scan requests. Duplicate admission, SQLite commits, the
   publication journal, and canonical MBOX appends remain serialized through
   one publisher. A source plug-in may declare a lower concurrency limit for
   each source-native `concurrency_key`; the framework enforces it and fairly

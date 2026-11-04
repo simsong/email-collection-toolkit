@@ -149,10 +149,12 @@ user authorization for that action.
 
 Codex and Claude Code use the shared `@simsong-agent` account for all GitHub
 writes and browser actions; never use the personal `@simsong` account.
-Each agent uses its own commit email. Claude must not claim to be Codex or
-use the Codex signing key. Codex retains its existing commit identity and key.
+Agent commits use `simsong+agent@acm.org` and the shared agent GPG key
+`4499250C3C89FE58AC6E92AD737897AAFB061983`. Codex uses author name
+`Codex AI Assistant`; Claude uses `Claude Code Agent`. Neither claims the other.
+Historical `simsong+codex@acm.org` commits must not be rewritten.
 Verify the CLI identity, SSH push identity, and browser login separately. Before committing, configure and verify author and committer as
-`Codex AI Assistant <simsong+codex@acm.org>` and verify the signing key belongs to
+`Codex AI Assistant <simsong+agent@acm.org>` and verify the signing key belongs to
 that identity. Sign every Codex commit. Verify the result before pushing with
 `git log -1 --format='%G? %GS %an <%ae> %cn <%ce>'`. To correct identity on an
 existing commit, use `git commit --amend --reset-author -S`.

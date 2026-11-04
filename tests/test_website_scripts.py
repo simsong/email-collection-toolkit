@@ -610,7 +610,7 @@ class DownloadLinks(HTMLParser):
 
 @pytest.mark.parametrize("tags", [("v2.0.0", "v2.1.0b1"), ("v2.1.0b1",), ("v2.0.0a1",)])
 def test_static_platform_downloads_render_without_javascript(tmp_path: Path, tags: tuple[str, ...]) -> None:
-    """Website requirement: real Zola HTML exposes direct platform assets with preview labels."""
+    """Website requirement: direct installers and preview labels without Windows trust instructions."""
     import shutil
     from pydantic import TypeAdapter
     if not shutil.which("zola"):
@@ -634,7 +634,9 @@ def test_static_platform_downloads_render_without_javascript(tmp_path: Path, tag
         assert links.mac_url in anchors.urls
         if links.windows_url:
             assert links.windows_url in anchors.urls
-            assert links.windows_help_url in anchors.urls
+            assert links.windows_help_url not in anchors.urls
+    assert "Windows installation instructions" not in html
+    assert "test-signed" not in html
     assert "Current release:" in html
     assert "Download Windows installer" in html
     assert "Download macOS installer" in html

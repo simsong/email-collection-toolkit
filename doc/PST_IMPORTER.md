@@ -13,9 +13,9 @@ search, export, and collection work.
 
 ## Build and run
 
-Rust/Cargo are required to build the helper. The macOS DMG bundles the native
-executable, so its users need neither Rust nor Outlook; the Windows MSIX does
-not yet include it. The locked dependency uses no JVM or C PST library.
+Rust/Cargo are required to build the helper. Both the macOS DMG and Windows MSIX
+bundle the native executable, so their users need neither Rust nor Outlook.
+The locked dependency uses no JVM or C PST library.
 
 ```sh
 make rust-programs        # all three tools
@@ -128,7 +128,7 @@ and libpff's
 
 The Rust adapter and pinned `outlook-pst` crate require PST client magic. The
 Python host routes OST to the separate `pff-converter` executable using
-`libpff-python==20231205`. Renaming a file does not change its internal format:
+`libpff-python==20260926`. Renaming a file does not change its internal format:
 `SO` selects libpff, while `SM` remains PST even with an `.ost` suffix.
 
 OST import is deliberately **best effort**. The converter extracts the email
@@ -344,14 +344,14 @@ semantics, large files and damaged-store recovery require additional qualificati
 
 The subprocess contract avoids a Python/Rust ABI dependency. Installers must
 bundle their selected executables and dependencies so users need no compiler,
-Python, Java, or Outlook. The current macOS builder bundles the PST and OST
-helpers; each nested Mach-O dependency must be audited and signed before the
+Python, Java, or Outlook. Both builders bundle the PST and OST helpers.
+On macOS, each nested Mach-O dependency must be audited and signed before the
 app, then notarized, stapled, and tested from the installed DMG.
 
 | Target | Required qualification |
 | --- | --- |
 | macOS arm64; Intel separately if offered | Installed and quarantined app without developer runtimes, relocation, architecture, source fixity, and independent archive verification. |
-| Windows x64 in v1.1; ARM64 separately | Native installed ingest, binary pipes, Unicode and space paths, NTFS locking, cancellation, scanning, recovery, and bundled DLLs. |
+| Windows x64; ARM64 separately if offered | Native installed ingest, binary pipes, Unicode and space paths, NTFS locking, cancellation, scanning, recovery, and bundled DLLs. |
 | Linux Snap amd64 if offered | Bundled helpers inside strict confinement, writable user staging, permitted source access, cancellation, refresh, and archive reopening. |
 
 Rust-only PST delivery avoids a JVM. The libpff OST converter carries its own

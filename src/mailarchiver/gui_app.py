@@ -47,10 +47,11 @@ from pydantic import BaseModel, Field
 from webview.menu import Menu, MenuAction, MenuSeparator
 
 from .file_drag import FILE_DRAGS, install_file_drag
-from .desktop_platform import copy_windows_text, open_export, open_external_url, refresh_windows_menu, set_macos_document_path, startup_error, windows_webview
+from .desktop_platform import copy_windows_text, drag_windows_file, open_export, open_external_url, refresh_windows_menu, set_macos_document_path, set_macos_titlebar_version, startup_error, windows_webview
 from .identity import APPLICATION_NAME
 from .build_info import BUILD_INFO, BuildInfo
 from .worker_preferences import WorkerPreferences, WorkerSettings, worker_argument
+from .imap_protocol import ImapPaused
 from .search_completion import SearchSuggestions
 from .processor_graph import ProcessorGraphStatus, processor_graph
 from .updates import UpdateChannel, UpdateService, UpdateStatus, default_channel
@@ -65,6 +66,7 @@ from .application import (
     IngestJob,
     SearchWindow,
     SetupSelection,
+    validate_ingest_paths,
 )
 from .scanner import CLAMAV_DOWNLOAD_URL, UNSCANNED_WARNING, ScannerAvailability, scanner_availability
 from .configuration import GuiConfiguration, application_configuration
@@ -185,7 +187,8 @@ class GuiStatus(BaseModel):
     untitled: bool = False
     generation: int = 0
     opened_in_new_window: bool = False
-    file_drag_supported: bool = sys.platform == "darwin"
+    file_drag_supported: bool = sys.platform in {"darwin", "win32"}
+    native_file_drag: bool = sys.platform == "win32"
     write_available: bool = True
     configuration: GuiConfiguration
     notices: list[ApplicationNotice] = Field(default_factory=list)
@@ -619,7 +622,7 @@ class IngestWindowApi:
         if self.archive is None:
             return GuiIngestHistory(statuses=[], errors=[]).model_dump(mode="json")
         history = read_ingest_history(self.archive)
-        statuses = [GuiIngestStatus(**status.model_dump(), source_labels=[source_label(self.archive, root)
+        statuses = [GuiIngestStatus(**status.for_display().model_dump(), source_labels=[source_label(self.archive, root)
                     for root in status.source_roots]) for status in history.statuses]
         job = self._document.ingest_job if self._document is not None else None
         starting = bool(job is not None and not job.finished.is_set()
@@ -811,7 +814,7 @@ SEARCH_BRIDGE_METHODS = (
     "mailbox_tree", "saved_filter_sets", "save_filter_set", "rename_filter_set", "delete_filter_set",
     "open_message_window", "request_previews", "take_previews", "message", "part", "attachment",
     "copy_source_path", "copy_visible_text", "copy_link", "open_link", "open_attachment",
-    "save_message", "save_attachment", "prepare_drag",
+    "save_message", "save_attachment", "prepare_drag", "start_drag",
 )
 
 
@@ -835,6 +838,7 @@ class GuiApi:
         self.archive = document.path if document is not None else archive
         self.window: Any = None
         self._drag_tokens: set[str] = set()
+        self._active_drags = 0
         self._drag_lock = Lock()
         self._drag_closed = False
         self._export_stop = Event()
@@ -906,7 +910,7 @@ class GuiApi:
             opened_in_new_window=opened_in_new_window,
             configuration=application_configuration().gui,
             notices=self.application.notices() if self.application else [],
-            archive_status_messages=["Currently only .txt email attachments are indexed"] if ready else [],
+            archive_status_messages=["Attachment searches use extracted text when available."] if ready else [],
         ).model_dump(mode="json")
 
     def activate(self) -> bool:
@@ -944,6 +948,7 @@ class GuiApi:
         if self.application is not None:
             self.application._reap_tasks()
         status = latest_ingest_status(self._archive()) if self.archive and _is_archive(self.archive) else None
+        status = status.for_display() if status is not None else None
         active = bool(self.document and self.document.ingest_job) or bool(status and status.state == "running")
         return GuiIngestOverview(status=status, active=active).model_dump(mode="json")
 
@@ -1306,7 +1311,7 @@ class GuiApi:
         return str(destination)
 
     def prepare_drag(self, message_pks: list[int]) -> dict[str, str]:
-        """Prepare one explicit Finder drag without proactively exporting mail."""
+        """Prepare one explicit native file drag without proactively exporting mail."""
         with self._drag_lock:
             if self._drag_closed or self._export_stop.is_set():
                 raise ValueError("message viewer is closed")
@@ -1326,12 +1331,38 @@ class GuiApi:
             self._drag_tokens.add(token)
             return DragExport(filename=destination.name, token=token).model_dump()
 
+    def start_drag(self, token: str) -> bool:
+        """Allow the Windows native bridge to drag only this window's registered exports."""
+        with self._drag_export(token) as path:
+            if sys.platform != "win32":
+                raise ValueError("This native drag bridge is Windows-only")
+            drag_windows_file(self.window, path)
+        return True
+
+    @contextmanager
+    def _drag_export(self, token: str) -> Iterator[Path]:
+        """Keep this viewer's prepared file alive until its native consumer finishes."""
+        with self._drag_lock:
+            if self._drag_closed or token not in self._drag_tokens:
+                raise ValueError("The prepared export is no longer available")
+            path = FILE_DRAGS.resolve(token)
+            if path is None:
+                raise ValueError("The prepared export is no longer available")
+            self._active_drags += 1
+        try:
+            yield path
+        finally:
+            with self._drag_lock:
+                self._active_drags -= 1
+                if self._drag_closed and not self._active_drags and self._temporary:
+                    self._temporary.cleanup()
+
     def open_attachment(self, message_pk: int, part_id: int, confirmed: bool = False) -> dict[str, Any]:
         descriptor = attachment_descriptor(self._archive(), message_pk, part_id)
         risky = is_risky(descriptor.filename, descriptor.content_type)
         if risky and not confirmed:
             return OpenResult(filename=descriptor.filename, requires_confirmation=True).model_dump()
-        destination = self.temporary_directory / safe_filename(
+        destination = self.temporary_directory / "attachments" / uuid4().hex / safe_filename(
             descriptor.filename, part_id, descriptor.content_type
         )
         with self._drag_lock:
@@ -1345,35 +1376,51 @@ class GuiApi:
         view: MessageView = describe_message(self._archive(), message_pk)
         if self.e2e_directory is not None:
             return True
-        base_url = str(self.window.get_current_url()).split("?", 1)[0]
         parameters = [("message", str(message_pk)), ("standalone", "1")]
         parameters.extend(("highlight", term) for term in highlight_terms or [])
+        if self.application is not None:
+            child_url = self.application.asset_url("index.html", parameters)
+        else:
+            base_url = str(self.window.get_current_url()).split("?", 1)[0]
+            child_url = f"{base_url}?{urlencode(parameters)}"
         child_api = GuiApi(
-            self._archive(), self.temporary_directory, self.e2e_directory, self.filter_sets.path,
+            self._archive(), preferences_file=self.filter_sets.path,
             application=self.application, document=self.document,
         )
-        child_api._export_stop = self._export_stop
         child = webview.create_window(
             view.subject,
-            f"{base_url}?{urlencode(parameters)}",
+            child_url,
             js_api=WindowBridge(child_api, SEARCH_BRIDGE_METHODS),
             width=900,
             height=760,
             min_size=(560, 420),
             text_select=True,
             draggable=True,
+            menu=self.application.menu() if self.application is not None else [],
         )
         if child is None:
             raise RuntimeError("pywebview failed to create a window")
         child_api.set_window(child)
         self.children.append(child_api)
+        document_id = self.document.descriptor.document_id if self.application and self.document else None
+        if self.application is not None and document_id is not None:
+            with self.application._lock:
+                self.application._native_child_ids[child.uid] = document_id
+            self.application.controller.attach_child_window(document_id, child.uid)
 
         def close_child(*_args: object) -> None:
             child_api.close()
             if child_api in self.children:
                 self.children.remove(child_api)
+            if self.application is not None and document_id is not None:
+                with self.application._lock:
+                    self.application._native_child_ids.pop(child.uid, None)
+                self.application.controller.close_child_window(document_id, child.uid)
+                self.application._refresh_menus()
 
         child.events.closed += close_child
+        if self.application is not None:
+            self.application._refresh_menus()
         return True
 
     def close(self, *_args: object) -> None:
@@ -1411,7 +1458,7 @@ class GuiApi:
             self._drag_closed = True
             FILE_DRAGS.discard(self._drag_tokens)
             self._drag_tokens.clear()
-            if self._temporary:
+            if self._temporary and not self._active_drags:
                 self._temporary.cleanup()
 
     def _archive(self) -> Path:
@@ -1591,6 +1638,7 @@ class PyWebViewApplication:
         self._default_lists_apis: dict[str, DefaultListsApi] = {}
         self._native_search_ids: dict[str, str] = {}
         self._native_child_ids: dict[str, str] = {}
+        self._windows_menu_hooks: set[str] = set()
         self._about_api = AboutApi(self)
         self._about_window: Any = None
         self._about_lock = RLock()
@@ -1746,6 +1794,7 @@ class PyWebViewApplication:
                         self._windows_preferences_window = None
 
                 window.events.closed += closed
+                self._refresh_menus()
             else:
                 if self._preferences_window is None:
                     self._preferences_window = MacOSPreferences(self.updates, self.save_preferences)
@@ -1863,29 +1912,34 @@ class PyWebViewApplication:
 
     def show_processor_graph(self) -> bool:
         """Open or focus one read-only graph window using the current About registry."""
+        reused = False
         with self._lock:
             if self._quitting:
                 return False
-            if self._processor_graph_window is not None:
-                self._processor_graph_window.restore()
-                self._processor_graph_window.show()
-                self._processor_graph_window.run_js("window.refreshProcessorGraph?.();")
-                return True
-            window = webview.create_window(
-                f"{APPLICATION_NAME} — Processor graph", self.asset_url("processor-graph.html"),
-                js_api=WindowBridge(ProcessorGraphApi(self), ("status",)),
-                width=1150, height=820, min_size=(640, 480), text_select=True, menu=self.menu(),
-            )
+            window = self._processor_graph_window
             if window is None:
-                raise RuntimeError("Could not open processor graph")
-            self._processor_graph_window = window
+                window = webview.create_window(
+                    f"{APPLICATION_NAME} — Processor graph", self.asset_url("processor-graph.html"),
+                    js_api=WindowBridge(ProcessorGraphApi(self), ("status",)),
+                    width=1150, height=820, min_size=(640, 480), text_select=True, menu=self.menu(),
+                )
+                if window is None:
+                    raise RuntimeError("Could not open processor graph")
+                self._processor_graph_window = window
 
-            def closed(*_args: object) -> None:
-                with self._lock:
-                    self._processor_graph_window = None
-                self._refresh_menus()
+                def closed(*_args: object) -> None:
+                    with self._lock:
+                        if self._processor_graph_window is window:
+                            self._processor_graph_window = None
+                    self._refresh_menus()
 
-            window.events.closed += closed
+                window.events.closed += closed
+            else:
+                reused = True
+        if reused:
+            window.restore()
+            window.show()
+            window.run_js("window.refreshProcessorGraph?.();")
         self._refresh_menus()
         return True
 
@@ -1923,12 +1977,13 @@ class PyWebViewApplication:
             if document.path is None:
                 continue
             job = document.ingest_job
+            status = latest_ingest_status(document.path)
             ingests.append(
                 AboutIngestStatus(
                     archive=str(document.display_path or document.path),
                     owner_window_id=job.owner_window_id if job else None,
                     operation_id=job.operation_id if job else None,
-                    status=latest_ingest_status(document.path),
+                    status=status.for_display() if status is not None else None,
                 )
             )
         inventory = plugin_inventory(active.path if active else None)
@@ -2239,6 +2294,7 @@ class PyWebViewApplication:
         operation_id = uuid4().hex
         lease: WriterLease | None = None
         try:
+            validate_ingest_paths(request.roots, request.archive)
             with self.writer_activity():
                 try:
                     lease = WriterLease.acquire(
@@ -2374,7 +2430,7 @@ class PyWebViewApplication:
         except BaseException as caught:  # pylint: disable=broad-exception-caught
             logging.getLogger(__name__).debug("Best-effort operation failed", exc_info=True)
             error = caught
-            if isinstance(caught, IngestInterrupted):
+            if isinstance(caught, (IngestInterrupted, ImapPaused)):
                 try:
                     if outcome.accepted_request is None:
                         raise ValueError("Import stopped before its settings were accepted.")
@@ -2393,7 +2449,9 @@ class PyWebViewApplication:
             if not self._quitting:
                 self._refresh_search_windows(refresh)
                 self._refresh_menus()
-        if isinstance(error, IngestInterrupted):
+        if isinstance(error, ImapPaused):
+            self.add_notice("information", f"Import paused for {document.display_path}: {error}")
+        elif isinstance(error, IngestInterrupted):
             self.add_notice("information", f"Import suspended for {document.display_path}; use Continue Import in Ingests to resume.")
         elif error is None:
             self.add_notice("information", f"Import completed for {document.display_path}")
@@ -2507,6 +2565,14 @@ class PyWebViewApplication:
         document = self.active_document()
         return self.open_ingest_window(document) if document is not None else False
 
+    def reveal_active_archive(self) -> bool:
+        """Open the saved archive folder through the platform shell."""
+        document = self.active_document()
+        if document is None or document.display_path is None:
+            return False
+        open_export(document.display_path)
+        return True
+
     def open_default_lists(self, document: ArchiveDocument | None = None, *, personal: bool = False) -> bool:
         api = None if personal or document else self.active_api()
         document = None if personal else (document or (api.document if api else None))
@@ -2619,46 +2685,48 @@ class PyWebViewApplication:
         document_id = document.descriptor.document_id
         with self._lock:
             api = self._ingest_apis.get(document_id)
-            if api is not None and api.window is not None:
-                if status_id is not None:
-                    api.window.run_js(f"window.selectIngest({json.dumps(status_id)});")
-                api.window.restore()
-                api.window.show()
-                return True
-            api = IngestWindowApi(document.path, application=self, document=document)
-            window = webview.create_window(
-                f"{APPLICATION_NAME} — Ingests — {document.display_path}",
-                self.asset_url(
-                    "ingests.html",
-                    [("status", status_id)] if status_id is not None else None,
-                ),
-                js_api=WindowBridge(api, ("history", "can_import_directory", "import_directory", "antivirus", "install_antivirus",
-                                          "suspend_import", "resume_import")),
-                width=1050,
-                height=700,
-                min_size=(720, 440),
-                text_select=True,
-                menu=self.menu(),
-            )
-            if window is None:
-                raise RuntimeError("pywebview failed to create a window")
-            api.set_window(window)
-            self._ingest_apis[document_id] = api
-            self._native_child_ids[window.uid] = document_id
-            self.controller.attach_child_window(document_id, window.uid)
+            reused = api.window if api is not None else None
+            if reused is None:
+                api = IngestWindowApi(document.path, application=self, document=document)
+                window = webview.create_window(
+                    f"{APPLICATION_NAME} — Ingests — {document.display_path}",
+                    self.asset_url(
+                        "ingests.html",
+                        [("status", status_id)] if status_id is not None else None,
+                    ),
+                    js_api=WindowBridge(api, ("history", "can_import_directory", "import_directory", "antivirus", "install_antivirus",
+                                              "suspend_import", "resume_import")),
+                    width=1050,
+                    height=700,
+                    min_size=(720, 440),
+                    text_select=True,
+                    menu=self.menu(),
+                )
+                if window is None:
+                    raise RuntimeError("pywebview failed to create a window")
+                api.set_window(window)
+                self._ingest_apis[document_id] = api
+                self._native_child_ids[window.uid] = document_id
+                self.controller.attach_child_window(document_id, window.uid)
 
-            def closed(*_args: object) -> None:
-                api.close()
-                with self._lock:
-                    if self._ingest_apis.get(document_id) is api:
-                        self._ingest_apis.pop(document_id)
-                    self._native_child_ids.pop(window.uid, None)
-                self.controller.close_child_window(document_id, window.uid)
-                self._refresh_menus()
+                def closed(*_args: object) -> None:
+                    api.close()
+                    with self._lock:
+                        if self._ingest_apis.get(document_id) is api:
+                            self._ingest_apis.pop(document_id)
+                        self._native_child_ids.pop(window.uid, None)
+                    self.controller.close_child_window(document_id, window.uid)
+                    self._refresh_menus()
 
-            window.events.closed += closed
-            window.events.shown += lambda *_args: set_macos_document_path(window, document.display_path)
-            set_macos_document_path(window, document.display_path)
+                window.events.closed += closed
+                window.events.shown += lambda *_args: set_macos_document_path(window, document.display_path)
+                set_macos_document_path(window, document.display_path)
+        if reused is not None:
+            if status_id is not None:
+                reused.run_js(f"window.selectIngest({json.dumps(status_id)});")
+            reused.restore()
+            reused.show()
+            return True
         self._refresh_menus()
         return True
 
@@ -2677,16 +2745,20 @@ class PyWebViewApplication:
         if sys.platform == "win32" and not self._quitting and not self._search_apis():
             self.request_quit()
 
+    def _registered_windows(self) -> tuple[webview.Window, ...]:
+        """Snapshot registries without retaining the application lock during native calls."""
+        with self._lock:
+            windows = [api.window for registry in (self._apis, self._ingest_apis, self._options_apis, self._default_lists_apis)
+                       for api in registry.values()]
+            windows.extend((self._about_window, self._reader_window, self._license_window, self._processor_graph_window))
+            if self._setup_api is not None:
+                windows.append(self._setup_api.window)
+            # Standalone viewers and picker children are owned by webview too.
+            windows.extend(window for window in tuple(webview.windows) if window not in windows)
+            return tuple(window for window in windows if window is not None)
+
     def focus_window(self, uid: str) -> bool:
-        windows = [api.window for api in self._search_apis()]
-        windows.extend(api.window for api in self._ingest_apis.values())
-        windows.extend(api.window for api in self._options_apis.values())
-        windows.extend(api.window for api in self._default_lists_apis.values())
-        windows.append(self._about_window)
-        windows.append(self._license_window)
-        windows.append(self._processor_graph_window)
-        if self._setup_api is not None:
-            windows.append(self._setup_api.window)
+        windows = self._registered_windows()
         window = next((candidate for candidate in windows if candidate is not None and candidate.uid == uid), None)
         if window is None:
             return False
@@ -2699,14 +2771,19 @@ class PyWebViewApplication:
 
     def window_menu_items(self) -> list[MenuAction]:
         items = []
-        if self._setup_api is not None and self._setup_visible:
+        with self._lock:
+            setup_visible = self._setup_api is not None and self._setup_visible
+            auxiliary = ((self._about_window if self._about_visible else None, f"About {APPLICATION_NAME}"),
+                         (self._license_window, "License"), (self._processor_graph_window, "Processor graph"))
+            ingests = tuple(self._ingest_apis.items())
+            options = tuple(self._options_apis.values())
+            editors = tuple(self._default_lists_apis.values())
+            child_ids = set(self._native_child_ids)
+        if setup_visible:
             items.append(MenuAction("Get started", self.show_setup))
-        if self._about_window is not None and self._about_visible:
-            items.append(MenuAction(f"About {APPLICATION_NAME}", lambda: self.focus_window(self._about_window.uid)))
-        if self._license_window is not None:
-            items.append(MenuAction("License", lambda: self.focus_window(self._license_window.uid)))
-        if self._processor_graph_window is not None:
-            items.append(MenuAction("Processor graph", lambda: self.focus_window(self._processor_graph_window.uid)))
+        for window, title in auxiliary:
+            if window is not None:
+                items.append(MenuAction(title, lambda uid=window.uid: self.focus_window(uid)))
         for index, api in enumerate(self._search_apis(), 1):
             if api.window is None:
                 continue
@@ -2718,7 +2795,7 @@ class PyWebViewApplication:
                     lambda uid=api.window.uid: self.focus_window(uid),
                 )
             )
-        for document_id, api in tuple(self._ingest_apis.items()):
+        for document_id, api in ingests:
             if api.window is None:
                 continue
             document = self.controller.document(document_id)
@@ -2729,10 +2806,18 @@ class PyWebViewApplication:
                     lambda uid=api.window.uid: self.focus_window(uid),
                 )
             )
-        for api in tuple(self._options_apis.values()):
+        for api in options:
             items.append(MenuAction(api.window.title, lambda uid=api.window.uid: self.focus_window(uid)))
-        for editor in tuple(self._default_lists_apis.values()):
+        for editor in editors:
             items.append(MenuAction(editor.window.title, lambda uid=editor.window.uid: self.focus_window(uid)))
+        listed = {window.uid for window, _title in auxiliary if window is not None}
+        listed.update(api.window.uid for api in self._search_apis() if api.window is not None)
+        listed.update(api.window.uid for _document_id, api in ingests if api.window is not None)
+        listed.update(api.window.uid for api in options)
+        listed.update(editor.window.uid for editor in editors)
+        for window in self._registered_windows():
+            if window.uid in child_ids and window.uid not in listed:
+                items.append(MenuAction(window.title, lambda uid=window.uid: self.focus_window(uid)))
         return items
 
     def _can_close_search_window(self, window_id: str) -> bool:
@@ -2917,14 +3002,13 @@ class PyWebViewApplication:
 
     def _refresh_menus(self) -> None:
         menu = self.menu()
-        windows = [api.window for api in self._search_apis()]
-        windows.extend(api.window for api in self._ingest_apis.values())
-        windows.append(self._about_window)
-        windows.append(self._reader_window)
-        windows.append(self._license_window)
-        windows.append(self._processor_graph_window)
-        if self._setup_api is not None:
-            windows.append(self._setup_api.window)
+        windows = list(self._registered_windows())
+        if sys.platform == "win32":
+            for window in windows:
+                if window is not None and window.uid not in self._windows_menu_hooks:
+                    self._windows_menu_hooks.add(window.uid)
+                    window.events.shown += lambda *_args: self._refresh_menus()
+                    window.events.closed += lambda *_args, uid=window.uid: self._windows_menu_hooks.discard(uid)
         for window in windows:
             if window is not None:
                 window.menu = menu
@@ -2932,7 +3016,8 @@ class PyWebViewApplication:
         if sys.platform == "win32":
             for window in windows:
                 if window is not None and window.native is not None:
-                    refresh_windows_menu(window, menu, self.active_document() is not None)
+                    document = self.document_for_native_window(window.uid)
+                    refresh_windows_menu(window, menu, document is not None, APPLICATION_VERSION)
 
     def _refresh_macos_menu(self) -> None:
         """Refresh pywebview's process menu and its dynamic Close enabled state."""
@@ -2946,6 +3031,9 @@ class PyWebViewApplication:
             return
 
         def refresh() -> None:
+            appkit = import_module("AppKit")
+            for native_window in appkit.NSApplication.sharedApplication().windows():
+                set_macos_titlebar_version(native_window, APPLICATION_VERSION)
             # A launched/background app or native modal panel may have no webview key window.
             # Build the menu anyway, resolving Cocoa focus only on its main thread.
             active = webview.active_window()
@@ -2972,7 +3060,6 @@ class PyWebViewApplication:
             about_item.setAction_("showMailArchiverAbout:")
             self.start_updates()
             app_menu = menu.itemAtIndex_(0).submenu()
-            appkit = import_module("AppKit")
             for offset, (title, action, key) in enumerate((
                 ("Preferences…", "showUpdatePreferences:", ","),
                 ("Check for Program Updates", "checkForUpdates:", ""),
@@ -3014,10 +3101,12 @@ class PyWebViewApplication:
                 with self._lock:
                     search_id = self._native_search_ids.get(active.uid)
                     child = active.uid in self._native_child_ids
-                setup = self._setup_api
+                    setup = self._setup_api
+                    editors = tuple(self._default_lists_apis.values())
+                    auxiliary = (self._license_window, self._processor_graph_window)
                 busy = setup is not None and setup._lock.locked()
-                list_editor = any(editor.window is active for editor in self._default_lists_apis.values())
-                enabled = child or list_editor or active in (self._license_window, self._processor_graph_window) or (setup is not None and active is setup.window) or (
+                list_editor = any(editor.window is active for editor in editors)
+                enabled = child or list_editor or active in auxiliary or (setup is not None and active is setup.window) or (
                     search_id is not None and self.controller.can_close_window(search_id)
                 )
                 preferences_focused = self._preferences_window is not None and (
@@ -3090,6 +3179,7 @@ def application_menu(application: PyWebViewApplication) -> list[Menu]:
                           MenuAction("Reprocess Saved Mail…", application.reprocess_active_document),
                           MenuAction("Document Options…", application.open_document_options),
                           MenuAction("Customizable Default Lists…", application.open_default_lists),
+                          MenuAction("Show Archive in Explorer", application.reveal_active_archive),
                           MenuAction("Close", application.close_active_window),
                           MenuSeparator(), MenuAction("Quit", application.request_quit)]),
             Menu("Window", [MenuAction("New Search Window", application.new_search_window),

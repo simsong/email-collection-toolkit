@@ -3,22 +3,24 @@
 from __future__ import annotations
 
 import json
-from threading import Barrier, Event
+from threading import Barrier, Event, Thread
 from datetime import UTC, datetime
 from urllib.parse import urlencode
 from pathlib import Path
 
-from playwright.sync_api import Page, expect
+import pytest
+
+from playwright.sync_api import Dialog, Page, expect
 
 from mailarchiver.__main__ import IngestRequest, load_processing_request, run_ingest
 from mailarchiver.application import IngestJob
-from mailarchiver.gui_app import AboutApi, GUI_DIRECTORY, SEARCH_BRIDGE_METHODS, GuiApi, IdentityPickerApi, IngestWindowApi
+from mailarchiver.gui_app import AboutApi, DocumentOptionsApi, GUI_DIRECTORY, SEARCH_BRIDGE_METHODS, GuiApi, IdentityPickerApi, IngestWindowApi
 from mailarchiver.gui_processing import PickerPage, connection, resume_request, unfinished_work
 from mailarchiver.ingest_status import IngestStatusFile, read_ingest_history
 from mailarchiver.owner_rules import OwnerRules
 from mailarchiver.writer_lock import WriterLease
 from tests.test_gui_processing import build_entity_archive, build_phone_archive, build_deferred_archive, build_interrupted_archive, open_headless, wait_for_import
-from tests.test_gui_service import add_tree_source, make_gui_archive
+from tests.test_gui_service import MULTIPART_MESSAGE, add_tree_source, make_gui_archive, malformed_attachment_message
 from tests.test_processing import plugin
 from tests.test_cli_processing import HEADER
 
@@ -355,22 +357,37 @@ def test_processing_history_shows_jobs_instead_of_zero_source_progress(tmp_path:
     expect(page.locator(".history-row.selected .history-summary")).to_contain_text("25 source messages")
     app, api = open_headless(archive, tmp_path / "preferences.json")
     search_page, about_page = page.context.new_page(), page.context.new_page()
+    heartbeat_stop = Event()
+    heartbeat_errors: list[BaseException] = []
+
+    def keep_running_snapshot_current() -> None:
+        try:
+            while not heartbeat_stop.is_set():
+                status_file.write(status.model_copy(update={"updated_at": datetime.now(UTC)}))
+                heartbeat_stop.wait(0.1)
+        except BaseException as error:
+            heartbeat_errors.append(error)
+
+    heartbeat = Thread(target=keep_running_snapshot_current, daemon=True)
+    heartbeat.start()
     try:
-        status_file.write(status.model_copy(update={"updated_at": datetime.now(UTC)}))
         expose(search_page, api, SEARCH_BRIDGE_METHODS)
         search_page.goto((GUI_DIRECTORY / "index.html").as_uri())
         expect(search_page.locator("#ingest-status-line")).to_contain_text("1,701 processing tasks finished · mime")
         expect(search_page.locator("#ingest-status-line")).not_to_contain_text("0.0%")
-        status_file.write(status.model_copy(update={"updated_at": datetime.now(UTC)}))
         expose(about_page, AboutApi(app), ("status",))
         about_page.goto((GUI_DIRECTORY / "about.html").as_uri())
         expect(about_page.locator(".activity")).to_contain_text("1,701 processing tasks finished · mime")
         expect(about_page.locator(".activity")).not_to_contain_text("0.0%")
     finally:
+        heartbeat_stop.set()
+        heartbeat.join(timeout=5)
         search_page.close()
         about_page.close()
         api.close()
         app.shutdown()
+        assert not heartbeat.is_alive(), "fixture heartbeat did not stop"
+        assert not heartbeat_errors, heartbeat_errors
     (archive / "status" / f"{status.status_id}.json").write_text(
         status.model_copy(update={"state": "failed"}).model_dump_json(), encoding="utf-8")
     page.reload()
@@ -817,5 +834,174 @@ def test_shutdown_overlay_dims_content_and_blocks_interaction(tmp_path: Path, pa
         page.evaluate(script)
         expect(page.locator("#shutdown-overlay")).to_have_count(1)
         page.screenshot(path=str(tmp_path / "shutdown-overlay.png"))
+    finally:
+        api.close()
+
+
+def test_attachment_responses_cannot_cross_selection_or_newer_preview(tmp_path: Path, page: Page) -> None:
+    """DESKTOP: delayed real attachment bytes cannot replace a newer message or preview."""
+    risky = MULTIPART_MESSAGE.replace(b"filename=../report.pdf", b"filename=run.command").replace(b"application/pdf", b"application/octet-stream")
+    archive = make_gui_archive(tmp_path, ((risky, "risky@example.test", "risky fixture", "2024-01-01T00:00:00+00:00"),))
+    api = GuiApi(archive, e2e_directory=tmp_path)
+    expose(page, api, SEARCH_BRIDGE_METHODS)
+    try:
+        page.goto((GUI_DIRECTORY / "index.html").as_uri() + "?" + urlencode({"query": "from:sender@example.net"}))
+        expect(page.locator(".result")).to_have_count(3)
+        page.evaluate("selectMessage(2)")
+        page.evaluate("""() => {
+            const actual = window.pywebview.api.attachment;
+            window.attachmentReplies = [];
+            window.pywebview.api.attachment = async (...args) => {
+                const result = await actual(...args);
+                await new Promise(resolve => window.attachmentReplies.push(resolve));
+                return result;
+            };
+            window.oldPreview = previewAttachment(state.view.attachments.find(item => item.content_type === 'application/pdf'));
+        }""")
+        page.wait_for_function("window.attachmentReplies.length === 1")
+        page.evaluate("selectMessage(1)")
+        page.evaluate("selectMessage(2)")
+        page.evaluate("async () => { window.attachmentReplies.shift()(); await window.oldPreview; }")
+        expect(page.locator("#attachment-preview iframe")).to_have_count(0)
+        page.evaluate("() => { window.firstPreview = previewAttachment(state.view.attachments.find(item => item.content_type === 'application/pdf')); }")
+        page.wait_for_function("window.attachmentReplies.length === 1")
+        page.evaluate("() => { window.newPreview = previewAttachment(state.view.attachments.find(item => item.content_type === 'application/pdf')); }")
+        page.wait_for_function("window.attachmentReplies.length === 2")
+        page.evaluate("async () => { window.attachmentReplies.pop()(); await window.newPreview; }")
+        preview = page.locator("#attachment-preview iframe")
+        expect(preview).to_have_count(1)
+        current = preview.get_attribute("src")
+        page.evaluate("async () => { window.attachmentReplies.shift()(); await window.firstPreview; }")
+        assert preview.get_attribute("src") == current
+        dialogs: list[str] = []
+        def dismiss(dialog: Dialog) -> None:
+            dialogs.append(dialog.message)
+            dialog.dismiss()
+
+        page.on("dialog", dismiss)
+        page.evaluate("selectMessage(3)")
+        page.evaluate("""() => {
+            const actual = window.pywebview.api.open_attachment;
+            window.pywebview.api.open_attachment = async (...args) => {
+                const result = await actual(...args);
+                await new Promise(resolve => { window.releaseOldOpen = resolve; });
+                return result;
+            };
+            window.oldOpen = openAttachment(state.view.attachments.find(item => item.filename === 'run.command'));
+        }""")
+        page.wait_for_function("typeof window.releaseOldOpen === 'function'")
+        page.evaluate("selectMessage(1)")
+        page.evaluate("selectMessage(3)")
+        page.evaluate("async () => { window.releaseOldOpen(); await window.oldOpen; }")
+        assert dialogs == []
+    finally:
+        api.close()
+
+
+def test_filter_manager_tracks_two_consecutive_renames_and_delete(tmp_path: Path, page: Page) -> None:
+    """DESKTOP: the active saved filter follows its current name after every rename."""
+    archive = make_gui_archive(tmp_path)
+    add_tree_source(archive, '{"kind":"filter-audit"}', "Fixture", "Inbox", "mbox", [1, 2])
+    api = GuiApi(archive, e2e_directory=tmp_path, preferences_file=tmp_path / "filters.json")
+    api.save_filter_set("First", False, [])
+    expose(page, api, SEARCH_BRIDGE_METHODS)
+    try:
+        page.goto((GUI_DIRECTORY / "index.html").as_uri())
+        page.locator("#show-original-folders").check()
+        page.locator("#filter-set").select_option("First")
+        page.locator("#manage-filter-sets").click()
+        row = page.locator(".filter-set-row").filter(has=page.get_by_role("textbox", name="Rename First", exact=True))
+        row.locator("input").fill("Second")
+        row.get_by_role("button", name="Rename", exact=True).click()
+        expect(page.locator("#filter-set")).to_have_value("Second")
+        row.locator("input").fill("Third")
+        row.get_by_role("button", name="Rename", exact=True).click()
+        expect(page.locator("#filter-set")).to_have_value("Third")
+        row.get_by_role("button", name="Delete", exact=True).click()
+        expect(page.locator("#filter-set")).to_have_value("__current")
+        assert api.saved_filter_sets()["filter_sets"] == []
+    finally:
+        api.close()
+
+
+def test_owner_options_ignore_status_started_before_a_successful_save(tmp_path: Path, page: Page) -> None:
+    """DESKTOP: an old real settings snapshot cannot undo the just-saved owner rules."""
+    app, search = open_headless(build_deferred_archive(tmp_path), tmp_path / "preferences.json")
+    assert search.document is not None
+    api = DocumentOptionsApi(search.document, app)
+    expose(page, api, ("status", "update"))
+    try:
+        page.goto((GUI_DIRECTORY / "options.html").as_uri())
+        expect(page.locator("#save")).to_be_enabled()
+        page.evaluate("""() => {
+            const actual = window.pywebview.api.status;
+            let held = false;
+            window.pywebview.api.status = async () => {
+                const result = await actual();
+                if (!held) {
+                    held = true;
+                    await new Promise(resolve => { window.releaseOldOptions = resolve; });
+                }
+                return result;
+            };
+            window.oldOptions = refreshOptions();
+        }""")
+        page.wait_for_function("typeof window.releaseOldOptions === 'function'")
+        page.locator("#owner-include").fill("new-owner@example.test")
+        page.locator("#save").click()
+        expect(page.locator("#saved")).to_be_visible()
+        page.evaluate("async () => { window.releaseOldOptions(); await window.oldOptions; }")
+        expect(page.locator("#owner-include")).to_have_value("new-owner@example.test")
+        assert api.status()["include"] == ["new-owner@example.test"]
+    finally:
+        search.close()
+        app.shutdown()
+
+
+@pytest.mark.parametrize(("transfer", "payload"), [("base64", b"%%%invalid%%%"), ("quoted-printable", b"=zz")])
+@pytest.mark.parametrize("content_type", ["message/rfc822", "application/pdf"])
+def test_invalid_attachment_keeps_parent_and_original_export_available(tmp_path: Path, page: Page, transfer: str, payload: bytes, content_type: str) -> None:
+    """DESKTOP: actual UI isolates an attachment diagnostic while preserving parent and original export."""
+    raw = malformed_attachment_message(transfer, payload, content_type)
+    archive = make_gui_archive(tmp_path, ((raw, "bad-attachment@example", "readable parent", "2024-01-01T00:00:00+00:00"),))
+    api = GuiApi(archive, e2e_directory=tmp_path)
+    expose(page, api, SEARCH_BRIDGE_METHODS)
+    try:
+        page.goto((GUI_DIRECTORY / "index.html").as_uri() + "?" + urlencode({"query": "subject:readable"}))
+        page.locator(".result").click()
+        expect(page.locator("#message-content")).to_contain_text("healthybody")
+        row = page.locator(".attachment-unavailable")
+        expect(row).to_contain_text("Cannot decode attachment")
+        expect(row.locator("button")).to_have_count(0)
+        page.screenshot(path=str(tmp_path / "invalid-attachment.png"), full_page=True)
+        page.locator("#part-select").select_option(label="Raw Source")
+        expect(page.locator("#message-content")).to_contain_text(payload.decode())
+        exported = api.save_message(3)
+        assert exported is not None and Path(exported).read_bytes() == raw
+    finally:
+        api.close()
+
+
+@pytest.mark.parametrize("encoded", [False, True])
+def test_deep_mime_still_opens_raw_source_and_saves_original(tmp_path: Path, page: Page, encoded: bool) -> None:
+    """ARCHIVE/DESKTOP: the shipped reader exposes a saved unparseable message and its real Save control."""
+    from mailarchiver.gui_service import RAW_PART_ID
+    from tests.test_cli_processing import ingest
+    from tests.test_message import deeply_nested_message, encoded_nested_message
+    raw = HEADER + encoded_nested_message(80) if encoded else deeply_nested_message(HEADER, b"\r\n")
+    archive, source = ingest(tmp_path, raw, "--defer-content")
+    api = GuiApi(archive, e2e_directory=tmp_path)
+    expose(page, api, SEARCH_BRIDGE_METHODS)
+    page.expose_function("saved_original_exists", lambda: any(path.read_bytes() == raw for path in tmp_path.glob("saved-*.eml")))
+    try:
+        page.goto((GUI_DIRECTORY / "index.html").as_uri() + "?" + urlencode({"query": "subject:Parent"}))
+        page.locator(".result").click()
+        expect(page.locator("#part-select")).to_have_value(str(RAW_PART_ID))
+        expect(page.locator("#message-content")).to_contain_text("Content-Transfer-Encoding: quoted-printable" if encoded else "boundary=b1099")
+        expect(page.locator("#error")).to_be_hidden()
+        page.locator("#save-message").click()
+        page.wait_for_function("async () => await window.saved_original_exists()")
+        page.screenshot(path=str(tmp_path / "deep-mime-raw-source.png"), full_page=True)
+        assert source.read_bytes() == raw
     finally:
         api.close()

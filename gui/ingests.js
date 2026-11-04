@@ -10,6 +10,7 @@ let importing = false;
 let starting = false;
 const byId = id => document.getElementById(id);
 const integer = value => Number(value || 0).toLocaleString();
+const stateLabel = status => status.timed_out ? "Timeout" : status.state;
 const processingMode = status => !(status.state !== "running" && (status.processed_messages || status.files_processed))
   && (status.activity_kind === "processing" || status.processing_active
     || ["recovering archived content", "recovering pending imports", "processing content"].includes(status.phase));
@@ -65,8 +66,10 @@ async function refreshHistory() {
     starting = Boolean(history.starting);
     byId("suspend-import").disabled = importing || !history.active || history.suspending;
     byId("resume-import").disabled = importing || !history.can_resume;
+    byId("resume-import").textContent = statuses[0]?.state === "paused" ? "Resume" : "Continue Import";
     byId("import-control-status").textContent = history.suspending
       ? "Suspending import… waiting for current work to finish and save its checkpoint."
+      : statuses[0]?.state === "paused" ? "Download paused. Reconnect to the network, then choose Resume."
       : history.can_resume ? "Import is suspended or unfinished. Continue Import resumes saved work." : "";
     byId("import-control-status").hidden = !byId("import-control-status").textContent;
     byId("starting-import").hidden = !starting;
@@ -128,14 +131,14 @@ function historyRow(status) {
   dot.className = `state-dot ${status.state}`;
   dot.setAttribute("aria-hidden", "true");
   dot.textContent = ["failed", "disk-full", "stale"].includes(status.state) ? "X"
-    : ["running", "completed"].includes(status.state) ? "✓" : "Ⅱ";
+    : ["running", "completed"].includes(status.state) ? "✓" : status.state === "paused" ? "−" : "Ⅱ";
   const main = document.createElement("span");
   main.className = "history-main";
   const title = document.createElement("span");
   title.className = "history-title";
   const state = document.createElement("span");
   state.className = "history-state";
-  state.textContent = status.state;
+  state.textContent = stateLabel(status);
   const percent = document.createElement("span");
   percent.textContent = processingActive(status) ? "Processing" : `${Number(status.percent).toFixed(1)}%`;
   title.append(state, percent);
@@ -176,7 +179,7 @@ function renderDetail(status) {
   headingText.append(title, subtitle);
   const badge = document.createElement("span");
   badge.className = "state-badge";
-  badge.textContent = status.state;
+  badge.textContent = stateLabel(status);
   heading.append(headingText, badge);
 
   const track = document.createElement("div");
@@ -194,7 +197,8 @@ function renderDetail(status) {
   const processing = `${integer(status.processing_jobs_completed)} tasks finished · ${processorLabel(status.processing_processor || "preparing")}`;
   track.setAttribute("aria-valuetext", processingNow ? processing : `${Number(status.percent).toFixed(1)}%`);
   if (!processingNow) track.setAttribute("aria-valuenow", Number(status.percent));
-  caption.append(textSpan(phaseLabel(status)), textSpan(processingNow ? processing : `${Number(status.percent).toFixed(1)}% · ETA ${status.eta}`));
+  caption.append(textSpan(phaseLabel(status)), textSpan(processingNow ? processing : status.state === "paused"
+    ? `${Number(status.percent).toFixed(1)}% saved` : `${Number(status.percent).toFixed(1)}% · ETA ${status.eta}`));
 
   detail.append(heading, track, caption, statistics(status));
   if (processingMode(status)) {

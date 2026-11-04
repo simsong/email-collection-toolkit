@@ -194,7 +194,7 @@ def create_catalog(path: Path, *, check_same_thread: bool = True) -> sqlite3.Con
             _require_version(database, tables, SCHEMA_VERSION, "archive")
             _require_archive_layout(database, tables)
         else:
-            database.executescript(_schema(ARCHIVE_SCHEMA))
+            database.executescript("BEGIN IMMEDIATE;\n" + _schema(ARCHIVE_SCHEMA) + "\nCOMMIT;")
         return database
     except BaseException:
         database.close()
@@ -204,6 +204,7 @@ def create_catalog(path: Path, *, check_same_thread: bool = True) -> sqlite3.Con
 def create_search(path: Path, *, check_same_thread: bool = True) -> sqlite3.Connection:
     database = sqlite3.connect(path, check_same_thread=check_same_thread)
     try:
+        database.execute("PRAGMA foreign_keys = ON")
         tables = _tables(database)
         if tables:
             try:
@@ -211,7 +212,7 @@ def create_search(path: Path, *, check_same_thread: bool = True) -> sqlite3.Conn
                 _require_search_layout(database, tables)
             except RuntimeError as error:
                 raise UnsupportedSearchSchemaError(str(error)) from error
-        database.executescript(_schema(SEARCH_SCHEMA))
+        database.executescript("BEGIN IMMEDIATE;\n" + _schema(SEARCH_SCHEMA) + "\nCOMMIT;")
         return database
     except BaseException:
         database.close()

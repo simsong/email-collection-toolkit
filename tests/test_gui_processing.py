@@ -16,7 +16,7 @@ import pytest
 from mailarchiver.__main__ import IngestRequest, run_ingest
 from mailarchiver.application import ApplicationController, ApplicationPreferencesStore
 from mailarchiver.document_options import DocumentOptions
-from mailarchiver.gui_app import GuiApi, GuiIngestHistory, IdentityPickerApi, IngestWindowApi, PyWebViewApplication
+from mailarchiver.gui_app import GuiApi, GuiIngestHistory, GuiIngestOverview, IdentityPickerApi, IngestWindowApi, PyWebViewApplication
 from mailarchiver.gui_processing import PickerPage, PickerSearch, abort_processing, plugin_inventory, registered_processors, resume_request, unfinished_work
 from mailarchiver.ingest_status import IngestCounts, IngestStatusFile, read_ingest_history
 from mailarchiver.archive_config import load_archive_config, save_archive_config
@@ -56,9 +56,12 @@ def open_headless(archive: Path, preferences: Path, *, exit_process: Callable[[i
 
 
 def wait_for_import(api: GuiApi) -> None:
-    assert api.document is not None and api.document.ingest_job is not None
+    assert api.document is not None
     job = api.document.ingest_job
-    assert job.finished.wait(30), "GUI background processing did not finish"
+    if job is not None:
+        assert job.finished.wait(30), "GUI background processing did not finish"
+    # A quick successful job may already have released its document reservation.
+    # Callers still assert durable completion, output and application notices.
 
 
 def test_gui_resumes_cli_content_and_displays_attached_provenance(tmp_path: Path) -> None:
@@ -390,6 +393,43 @@ def build_interrupted_archive(root: Path) -> Path:
     return archive
 
 
+@pytest.mark.parametrize("detail,roots,timeout", [
+    ('TimeoutError: timed out\n  File "/fixture/imap_protocol.py", line 1, in body', ["imap://account"], True),
+    ('TimeoutError: timed out\n  File "C:\\fixture\\imaplib.py", line 1, in read', ["imap://account", "mail.pst"], True),
+    ('TimeoutError: PST importer timeout\n  File "/fixture/pst_source.py", line 1, in messages',
+     ["imap://account", "mail.pst"], False),
+    ("TimeoutError: ambiguous origin", ["imap://account"], False),
+    ('OSError: finalization failed\n\nCaused by:\n  File "/fixture/imap_protocol.py", line 1, in body',
+     ["imap://account"], False),
+    ('TimeoutError: finalization timed out\n  File "/fixture/storage_sync.py", line 1, in replace_file'
+     '\n\nDuring handling of:\n  File "/fixture/imap_protocol.py", line 1, in body', ["imap://account"], False),
+])
+def test_timeout_presentation_preserves_history_and_real_failures(tmp_path: Path,
+        detail: str, roots: list[str], timeout: bool) -> None:
+    """Desktop: only a top-level IMAP timeout becomes a quiet pause in both history and search."""
+    archive = build_deferred_archive(tmp_path)
+    template = read_ingest_history(archive).statuses[0]
+    status = template.model_copy(update={"status_id": "ingest-timeout-display", "state": "failed",
+        "source_roots": roots,
+        "started_at": datetime.now(UTC), "failure_detail": detail})
+    saved = IngestStatusFile(archive, status.status_id)
+    saved.write(status)
+    original = saved.path.read_bytes()
+    history = GuiIngestHistory.model_validate(IngestWindowApi(archive).history())
+    api = GuiApi(archive)
+    try:
+        overview = GuiIngestOverview.model_validate(api.ingest_overview())
+        assert overview.status is not None
+        for displayed in (history.statuses[0], overview.status):
+            assert displayed.timed_out == timeout
+            assert displayed.state == ("paused" if timeout else "failed")
+            assert displayed.failure_detail == (None if timeout else detail)
+        assert saved.path.read_bytes() == original
+        assert read_ingest_history(archive).statuses[0].state == "failed"
+    finally:
+        api.close()
+
+
 @pytest.mark.parametrize("configuration", ["present", "missing", "invalid"])
 def test_history_labels_preserve_saved_imap_locators(tmp_path: Path, configuration: str) -> None:
     """Desktop Sources shows account/server labels without changing resumable history."""
@@ -675,4 +715,21 @@ def test_background_command_failure_is_observed_in_application_notices(tmp_path:
         assert any(notice.severity == "error" and "Fixture command failed" in notice.message for notice in app.notices())
         assert future not in app._tasks
     finally:
+        app.shutdown()
+
+
+@pytest.mark.parametrize("source_kind", ["parent", "archive", "mailbox"])
+def test_gui_rejects_overlapping_source_before_settings_or_lease_writes(tmp_path: Path, source_kind: str) -> None:
+    """SOURCES: rejecting GUI input must not persist owner changes or touch the selected source archive."""
+    archive = build_deferred_archive(tmp_path)
+    app, api = open_headless(archive, tmp_path / "preferences.json")
+    source = archive.parent if source_kind == "parent" else archive if source_kind == "archive" else next((archive / "data/mbox").glob("*.mbox"))
+    before = {path.relative_to(archive): path.read_bytes() for path in archive.rglob("*") if path.is_file()}
+    try:
+        assert not app.start_import(api, [source], owner_rules=OwnerRules(include=["changed@example.test"]), scan_policy="not-scanned")
+        assert api.document is not None and api.document.ingest_job is None
+        assert {path.relative_to(archive): path.read_bytes() for path in archive.rglob("*") if path.is_file()} == before
+        assert any("separate source and archive" in notice.message for notice in app.notices())
+    finally:
+        api.close()
         app.shutdown()

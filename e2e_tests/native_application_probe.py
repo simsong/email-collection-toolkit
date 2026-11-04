@@ -15,12 +15,14 @@ from importlib import import_module
 from pathlib import Path
 from threading import Event, enumerate as active_threads
 from time import monotonic, sleep
+from typing import Any, cast
 
 import webview
 
 from mailarchiver.application import ApplicationController, ApplicationPreferencesStore, IngestJob
 from mailarchiver.clamav_definitions import UPDATE_ENV, UPDATER_ENV
-from mailarchiver.gui_app import GUI_DIRECTORY, PyWebViewApplication, configure_macos_application, install_macos_document_events, macos_import_picker, macos_owner_rules
+from mailarchiver.gui_app import APPLICATION_VERSION, GUI_DIRECTORY, PyWebViewApplication, configure_macos_application, install_macos_document_events, macos_import_picker, macos_owner_rules
+from mailarchiver.desktop_platform import TITLEBAR_VERSION_ID
 from mailarchiver.loopback import LoopbackAssetServer
 from mailarchiver.identity import APPLICATION_NAME
 from mailarchiver.owner_rules import OwnerRules
@@ -84,7 +86,7 @@ def check_document_path(window: webview.Window, path: Path | None) -> None:
 
     def inspect() -> None:
         try:
-            native = window.native
+            native = cast(Any, window.native)
             assert native is not None
             represented = native.representedURL()
             if path is None:
@@ -94,6 +96,22 @@ def check_document_path(window: webview.Window, path: Path | None) -> None:
                 button = native.standardWindowButton_(appkit.NSWindowDocumentIconButton)
                 assert button is not None and button.image() is not None
             assert native.title() == window.title, "Represented path replaced the application title"
+            accessories = [item for item in native.titlebarAccessoryViewControllers()
+                           if item.view().identifier() == TITLEBAR_VERSION_ID]
+            assert len(accessories) == 1, "Version is missing or duplicated in title bar"
+            accessory = accessories[0]
+            assert accessory.layoutAttribute() == appkit.NSLayoutAttributeRight
+            label = accessory.view().subviews()[0]
+            assert label.stringValue() == f"({APPLICATION_VERSION})"
+            bounds = label.convertRect_toView_(label.bounds(), None)
+            assert bounds.origin.x > native.frame().size.width / 2, bounds
+            if " — Ingests — " in window.title:
+                frame = native.contentView().superview()
+                bitmap = frame.bitmapImageRepForCachingDisplayInRect_(frame.bounds())
+                frame.cacheDisplayInRect_toBitmapImageRep_(frame.bounds(), bitmap)
+                image = bitmap.representationUsingType_properties_(appkit.NSBitmapImageFileTypePNG, {})
+                destination = Path(os.environ[PROBE_PREFERENCES_ENV]).parent / "native-ingests-titlebar.png"
+                assert image.writeToFile_atomically_(str(destination), True)
         except Exception:  # pylint: disable=broad-exception-caught
             errors.append(traceback.format_exc())
         finally:
@@ -381,6 +399,44 @@ def main() -> None:
             close_window(untitled.window)
             application.activate_window(api.search_window.window_id)
             assert evaluate_async(api.window, "window.pywebview.api.status()")['message_count'] == 1
+            assert api.open_message_window(1)
+            standalone = api.children[-1].window
+            assert standalone.original_url.startswith(server.origin + "/bootstrap/"), "Standalone viewer needs fresh asset authentication"
+            assert standalone.events.loaded.wait(10), "Standalone message bridge failed to load"
+            assert [menu.title for menu in standalone.menu] == ["File", "Window", "Help"]
+            assert standalone in application._registered_windows()
+            assert any(item.title == standalone.title for item in application.window_menu_items())
+            reader_menu_checked = Event()
+
+            def check_reader_menu() -> None:
+                try:
+                    assert webview.active_window() is standalone
+                    menu = NSApplication.sharedApplication().mainMenu()
+                    assert all(menu.itemWithTitle_(title) is not None for title in ("File", "Window", "Help"))
+                    assert menu.itemWithTitle_("File").submenu().itemWithTitle_("Close").isEnabled()
+                except Exception:  # pylint: disable=broad-exception-caught
+                    failures.append(traceback.format_exc())
+                finally:
+                    reader_menu_checked.set()
+
+            def inspect_reader_menu() -> None:
+                try:
+                    app = NSApplication.sharedApplication()
+                    app.activateIgnoringOtherApps_(True)
+                    standalone.native.makeKeyAndOrderFront_(None)
+                    assert webview.active_window() is standalone, f"Standalone focus unavailable; active={app.isActive()}"
+                    application._refresh_macos_menu()
+                    # Inspect after the queued native refresh actually executes.
+                    AppHelper.callAfter(check_reader_menu)
+                except Exception:  # pylint: disable=broad-exception-caught
+                    failures.append(traceback.format_exc())
+                    reader_menu_checked.set()
+
+            AppHelper.callAfter(inspect_reader_menu)
+            assert reader_menu_checked.wait(5), "Standalone native menu inspection timed out"
+            assert not failures, failures
+            close_window(standalone)
+            application.activate_window(api.search_window.window_id)
             assert api.window.evaluate_js("document.getElementById('choose-archive') === null")
             check_new_search(True)
             # Picker navigation must create a real search window bound to its archive.
@@ -563,12 +619,20 @@ def main() -> None:
             assert native_lists is not None
             focused_list = Event()
             focus_deadline = monotonic() + 3
+            focus_diagnostics: list[str] = []
 
             def wait_for_list_focus() -> None:
                 if webview.active_window() == lists:
                     focused_list.set()
                 elif monotonic() < focus_deadline:
                     AppHelper.callLater(0.02, wait_for_list_focus)
+                else:
+                    app = NSApplication.sharedApplication()
+                    key, modal = app.keyWindow(), app.modalWindow()
+                    focus_diagnostics.append(f"active={app.isActive()} key={key.title() if key else None!r} "
+                        f"modal={modal.title() if modal else None!r} windows=" + repr([
+                            (window.title(), window.isKeyWindow(), window.isVisible(), window.level())
+                            for window in app.windows()]))
 
             def focus_list() -> None:
                 NSApplication.sharedApplication().activateIgnoringOtherApps_(True)
@@ -576,7 +640,7 @@ def main() -> None:
                 wait_for_list_focus()
 
             AppHelper.callAfter(focus_list)
-            assert focused_list.wait(5)
+            assert focused_list.wait(5), focus_diagnostics
             closed_menu = Event()
 
             def check_list_close() -> None:

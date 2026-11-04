@@ -18,7 +18,7 @@ from tests.test_gui_service import make_gui_archive
 
 WIDTH = "width"
 HEIGHT = "height"
-NOTICE = "Currently only .txt email attachments are indexed"
+NOTICE = "Attachment searches use extracted text when available."
 
 
 @pytest.mark.parametrize("height", [600, 960])

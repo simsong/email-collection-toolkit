@@ -7,7 +7,7 @@ application, packaging scripts, and native probes. PyObjC exposes these APIs
 dynamically, so they are absent from its Python source interface. Both ty and
 Pyright load this directory; it is not installed into the runtime package.
 
-`pypff` describes only the libpff-python 20231205 native APIs used by the
+`pypff` describes only the libpff-python 20260926 native APIs used by the
 in-process Outlook reader. Signatures are checked against the upstream C binding
 and exercised with genuine PST/OST fixtures by `make test-pff`.
 

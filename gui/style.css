@@ -157,6 +157,9 @@ mark.message-find-current { outline: 2px solid AccentColor; outline-offset: 1px;
 .attachment { display: inline-flex; align-items: center; gap: 6px; max-width: 520px; padding: 5px 6px; border: 1px solid var(--border); border-radius: 6px; }
 .attachment-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .attachment-size { color: var(--muted); }
+.attachment-unavailable { display: flex; flex-wrap: wrap; }
+.attachment-unavailable .attachment-name { flex-basis: 100%; }
+.attachment-unavailable .attachment-size { font-size: 12px; white-space: normal; }
 #attachment-preview { margin-top: 14px; }
 #attachment-preview img { max-width: 100%; max-height: 600px; object-fit: contain; }
 #attachment-preview iframe { width: 100%; height: 650px; border: 1px solid var(--border); border-radius: 5px; }
@@ -172,6 +175,7 @@ mark.message-find-current { outline: 2px solid AccentColor; outline-offset: 1px;
 .ingest-status-line.running::before { content: "●"; margin-right: 7px; color: #2a9d4b; }
 .ingest-status-line.failed::before, .ingest-status-line.disk-full::before, .ingest-status-line.stale::before { content: "●"; margin-right: 7px; color: #c43b35; }
 .ingest-status-line.interrupted::before { content: "●"; margin-right: 7px; color: #d89024; }
+.ingest-status-line.paused::before { content: "−"; display: inline-flex; align-items: center; justify-content: center; width: 18px; height: 18px; margin-right: 7px; border-radius: 50%; background: #f4c542; color: #453400; font-weight: bold; }
 .archive-status-banner { flex: none; max-height: 40%; overflow: auto; border-top: 1px solid var(--border); background: var(--surface); color: var(--muted); }
 .archive-status-banner[hidden] { display: none; }
 #archive-status-messages p { margin: 0; padding: 5px 12px; line-height: 20px; overflow-wrap: anywhere; }

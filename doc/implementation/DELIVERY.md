@@ -269,7 +269,10 @@ for commands, limitations, and Apple's renewal/notarization steps.
 ## Toolkit branding and website media
 
 The application, installer, documentation, and website use Email Collection
-Toolkit. The homepage Download button opens the GitHub releases listing.
+Toolkit. The homepage exposes direct macOS and Windows installer buttons,
+with a GitHub releases fallback when an installer is unavailable. The Platform
+downloads disclosure repeats available installer links without Windows
+certificate-trust instructions or installation-guide links.
 Repository and Pages URLs use the renamed project. The platform
 settings helper chooses the current application directory containing preferences.json or auth/, then an
 existing legacy directory, without
@@ -381,3 +384,13 @@ The macOS build derives hidden imports from trusted built-in acquisition manifes
 `make test-frozen-source-plugins` uses those same arguments and resources to build
 a temporary PyInstaller CLI, ingest synthetic EML, and verify canonical bytes.
 This component test does not establish signed/notarized DMG or Windows acceptance.
+
+## Function audit repairs
+
+The release mapper tests dev/post markers for presence rather than truthiness.
+`verify_dependencies` inventories load commands once, starts a separate runpath
+chain for each Mach-O executable and uses the main app context for dynamically
+loaded extension modules. `make sparkle-tools` verifies the archive SHA-256, then
+`sparkle_bundle.verify_cache` compares all consumed bytes, symlinks and framework
+inventory before bundling. The optional Swift summary helper compiles into a
+unique staging file, avoiding simultaneous first-use path collisions.

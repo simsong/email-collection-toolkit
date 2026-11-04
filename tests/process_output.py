@@ -1,0 +1,115 @@
+# Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved.
+# Supervise disposable CLI fixtures with bounded, portable output capture.
+# Reader threads consume pipes on Windows as well as POSIX without select().
+# Queues expose readiness while retained chunks preserve complete diagnostics.
+# The context owns process termination and joins readers on every exit path.
+# Interruptible Python children map Windows console Break to KeyboardInterrupt.
+# All commands and source mail used by these tests are purpose-made fixtures.
+"""Real subprocess capture and interruption for preservation regressions."""
+from __future__ import annotations
+
+from collections.abc import Mapping, Sequence
+from pathlib import Path
+from queue import Queue
+import os
+import signal
+import subprocess
+import sys
+import ctypes
+from threading import Thread
+from time import monotonic, sleep
+from typing import BinaryIO, Self
+
+from pydantic import BaseModel
+
+INTERRUPT_SETUP = "import signal\nif hasattr(signal, 'SIGBREAK'): signal.signal(signal.SIGBREAK, signal.default_int_handler)\n"
+
+
+def assert_process_exited(pid: int, timeout: float = 5) -> None:
+    """Observe real process termination, including a reparented POSIX zombie."""
+    if os.name == "nt":
+        native = ctypes.WinDLL("kernel32", use_last_error=True)
+        native.OpenProcess.argtypes = [ctypes.c_uint32, ctypes.c_int, ctypes.c_uint32]
+        native.OpenProcess.restype = ctypes.c_void_p
+        native.WaitForSingleObject.argtypes = [ctypes.c_void_p, ctypes.c_uint32]
+        native.WaitForSingleObject.restype = ctypes.c_uint32
+        native.CloseHandle.argtypes = [ctypes.c_void_p]
+        native.CloseHandle.restype = ctypes.c_int
+        handle = native.OpenProcess(0x100000, False, pid)
+        if not handle:
+            error = ctypes.get_last_error()
+            if error == 87:  # An exited PID is no longer a process object.
+                return
+            raise ctypes.WinError(error)
+        try:
+            assert native.WaitForSingleObject(handle, int(timeout * 1000)) == 0, f"process {pid} survived its owner"
+        finally:
+            native.CloseHandle(handle)
+        return
+    deadline = monotonic() + timeout
+    while monotonic() < deadline:
+        state = subprocess.run(["ps", "-o", "stat=", "-p", str(pid)], capture_output=True, text=True,
+                               check=False, timeout=2).stdout.strip()
+        if not state or state.startswith("Z"):
+            return
+        sleep(0.05)
+    raise AssertionError(f"process {pid} survived its owner")
+
+
+def python_module(module: str, arguments: Sequence[str]) -> list[str]:
+    """Run the real module with a graceful Windows console-interrupt handler."""
+    code = INTERRUPT_SETUP + "import runpy,sys\nmodule=sys.argv.pop(1)\nsys.argv[0]=module\nrunpy.run_module(module,run_name='__main__',alter_sys=True)\n"
+    return [sys.executable, "-c", code, module, *arguments]
+
+
+class CommandResult(BaseModel):
+    returncode: int
+    stdout: bytes
+    stderr: bytes
+
+
+class CapturedCommand:
+    """Own actual pipes/processes; no background fixture reader may wait indefinitely."""
+
+    def __init__(self, arguments: Sequence[str], *, cwd: Path | None = None,
+                 env: Mapping[str, str] | None = None) -> None:
+        self.process = subprocess.Popen(arguments, cwd=cwd, env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            creationflags=subprocess.CREATE_NEW_PROCESS_GROUP if os.name == "nt" else 0)
+        assert self.process.stdout is not None and self.process.stderr is not None
+        self.stdout: Queue[bytes] = Queue()
+        self.stderr: Queue[bytes] = Queue()
+        self._stdout: list[bytes] = []
+        self._stderr: list[bytes] = []
+        self._readers = [Thread(target=self._read, args=(stream, queue, chunks), daemon=True)
+            for stream, queue, chunks in ((self.process.stdout, self.stdout, self._stdout),
+                                          (self.process.stderr, self.stderr, self._stderr))]
+        for reader in self._readers:
+            reader.start()
+
+    @staticmethod
+    def _read(stream: BinaryIO, queue: Queue[bytes], chunks: list[bytes]) -> None:
+        try:
+            while chunk := stream.readline(65536):
+                chunks.append(chunk)
+                queue.put(chunk)
+        finally:
+            stream.close()
+
+    def __enter__(self) -> Self:
+        return self
+
+    def interrupt(self) -> None:
+        self.process.send_signal(signal.CTRL_BREAK_EVENT if os.name == "nt" else signal.SIGINT)
+
+    def finish(self, timeout: float) -> CommandResult:
+        code = self.process.wait(timeout=timeout)
+        for reader in self._readers:
+            reader.join(timeout=3)
+            if reader.is_alive():
+                raise TimeoutError("fixture output reader did not finish after process exit")
+        return CommandResult(returncode=code, stdout=b"".join(self._stdout), stderr=b"".join(self._stderr))
+
+    def __exit__(self, *_: object) -> None:
+        if self.process.poll() is None:
+            self.process.kill()
+        self.finish(timeout=5)

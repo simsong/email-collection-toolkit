@@ -22,8 +22,8 @@ An explicit `fail-import` ends its rank immediately; the coordinator submits no
 further invocations, including same-rank subscribers, after accepting that stop.
 Running inputs remain pinned against collection, including shared raw digests.
 Production passes `request.workers` to both archived-content and final-content
-passes; CLI `process` retains the saved request's worker count (or the ordinary
-default when no request is saved). Source admission retains its existing
+passes; CLI `process --workers` overrides the shared worker preference, while
+other saved processing/source policy is retained. Source admission retains its existing
 serialized publication path.
 Progress uses logical pool lanes; finishing one lane preserves other active jobs.
 Coordinator source-style publication events retain counters without replacing
@@ -86,12 +86,15 @@ and unlimited content work enabled, the host drains eligible message/content
 jobs before replaying unpublished ingest roots or traversing sources, then runs
 content processing again for newly admitted mail. Deferred or explicitly bounded
 content runs retain their previous dispatch order and job budget.
+Saved-import replay isolates ordinary failures for already archived messages in
+these modes too; unpublished roots keep stop-on-error behavior. Failed jobs stay
+recorded, and explicit `fail-import` still propagates before new source admission.
 The preliminary pass retains failed jobs without raising their aggregate error;
 the ordinary final content pass still reports failures after mail admission.
 Its dispatcher continues independent jobs after failure while leaving descendants
 blocked behind failed prerequisites. Explicit `fail-import` results still stop the
-run, and cancellation still propagates. Normal dispatch retains its stop-on-error
-behavior; the preliminary pass is the only production caller opting into continuation.
+run, and cancellation still propagates. New-message dispatch retains its
+stop-on-error behavior; recovery of archived messages opts into continuation.
 Failure summaries use the failed job's own invocation or input error, avoiding
 misattribution to an unrelated older extraction/scanner failure.
 `make test-ingest-recovery` uses real clean/EICAR scans, retained typed failures,
@@ -387,6 +390,10 @@ archives need explicit reprocessing to acquire them. Merely opening the picker
 does not reprocess messages or import private research evidence.
 
 ## Optional name-linkage comparison
+
+The experiment report reads Windows peak working set using `K32GetProcessMemoryInfo`.
+Other hosts use `getrusage`; Linux KiB values are converted to bytes while macOS
+values already use bytes. The memory regression retains a real touched allocation.
 
 An additional Splink comparison enables native full-name term-frequency
 adjustments. The unadjusted engine remains a separate baseline. A real-engine

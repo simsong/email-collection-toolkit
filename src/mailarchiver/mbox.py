@@ -24,7 +24,7 @@ import mailbox
 import os
 import shutil
 import sqlite3
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Generator
 from datetime import UTC, datetime
 from enum import Enum
 from pathlib import Path
@@ -231,7 +231,7 @@ def _read_stored_record(path: Path, location: MboxLocation) -> tuple[bytes, byte
     return envelope + separator, raw
 
 
-def read_location_candidates(path: Path, location: MboxLocation) -> Iterator[bytes]:
+def read_location_candidates(path: Path, location: MboxLocation) -> Generator[bytes, None, None]:
     """Yield stored and alternate original-byte interpretations of one MBOX record.
 
     Try reversible mboxrd, then legacy mboxo interpretations, with or without
@@ -260,8 +260,9 @@ def read_location_candidates(path: Path, location: MboxLocation) -> Iterator[byt
             if raw.endswith(b"\r\n"):
                 variants.append(raw[:-2])
             for variant in variants:
-                if variant not in seen:
-                    seen.add(variant)
+                fingerprint = hashlib.sha256(variant).digest()
+                if fingerprint not in seen:
+                    seen.add(fingerprint)
                     yield variant
 
 

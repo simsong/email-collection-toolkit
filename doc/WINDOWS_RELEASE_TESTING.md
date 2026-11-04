@@ -12,6 +12,16 @@ A successful build does not establish these manual checks.
 - Install and launch without Python or a checkout. Confirm About shows the new
   version and commit, the application icon/name, and the registered processors.
   Open the processor graph and inspect MIME extraction's possible output types.
+- Check the launch version in parentheses at the top right of Search, Ingests,
+  About and Preferences. Reopening must not duplicate the label. Use File > Show
+  Archive in Explorer to locate the active saved archive folder.
+- Drag one message and multiple messages to Explorer. The first gesture prepares
+  the export; the next copies an EML or ZIP with exact message bytes, never a shortcut.
+- Import the purpose-made PST/OST fixtures without a checkout or external tools.
+  Retain any documented partial-conversion evidence and confirm retry adds no
+  duplicate messages or source changes.
+- Interrupt a test IMAP download. Confirm the yellow Timeout circle has a horizontal
+  dash, no traceback or finalizing ETA, and Resume reconnects past committed UIDs.
 - Open Preferences from Help. Change Half CPUs, All CPUs and Custom; close with
   the title-bar X while editing a valid count, reopen and confirm persistence.
   Reject zero, fractions and more than twice the CPUs. For a separate source/CLI
@@ -50,7 +60,20 @@ A successful build does not establish these manual checks.
 
 Windows uses Ctrl shortcuts and its own title-bar controls. macOS Command-Tab
 branding and traffic lights are platform-specific. Existing Windows limitations
-remain native Explorer drag-out, bundled PST/OST conversion, and native ARM64
-packages (the x64 package can run under emulation). The authoritative matcher is
+remain native ARM64 packages (the x64 package can run under emulation). The authoritative matcher is
 not connected on either platform; loading/navigation fixes do not enable it.
 A complete updater-driven replacement remains a separate acceptance exercise.
+
+## Cross-platform regression evidence
+
+The Python host and HTML UI are shared. `test-gui-processing` exercises progress,
+window ownership, last-window veto, shutdown, saved-request recovery and worker
+settings; `test-timeout-presentation` exercises real TLS interruption and Resume,
+including saved legacy timeout display. Windows branch CI runs these browser tests
+in Edge, the native Preferences/menu/clipboard/import/OLE probe in WebView2, and
+that native probe again from the relocated package. The relocated Outlook gate
+uses genuine checked-in fixtures, verifies source hashes and archive integrity,
+requires the OST fixture's documented partial receipt and checks retry idempotence.
+Record workflow head and results for this candidate; macOS results alone cannot
+clear Windows acceptance. Updater-driven replacement, native ARM64 and manual
+visual checks above retain their own evidence boundaries.

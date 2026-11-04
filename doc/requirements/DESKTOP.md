@@ -5,6 +5,24 @@
 Current subsystem contract and acceptance boundaries. This is not a claim of
 platform/release acceptance. Deferred features live in [plans](../plans/README.md).
 
+## Timeout status and screenshot identification
+
+For IMAP timeouts, show a short **Timeout** status and a yellow traffic-light
+circle containing a horizontal dash. Keep **Resume** available for unfinished
+work. Do not show a traceback, red failure box or finalizing ETA for this status.
+Apply the same presentation to earlier saved IMAP runs whose top-level failure
+is `TimeoutError` and whose outer traceback identifies IMAP transport; retain the
+original status/diagnostics on disk. An IMAP root alone does not establish the
+origin of a timeout in a mixed-source run. A real failure
+that merely contains a timeout in its exception chain must remain a failure.
+
+Show the launch application version in parentheses at the top right of native
+application windows, including Search, Ingests, About and Preferences. macOS uses
+the title bar; Windows uses its native menu bar and includes it in the caption. Preserve
+custom titles and the native document-path menu. Repeated activation must not
+add duplicate version labels; later editable installs must not relabel a running
+process. Read the version from installed metadata, never a hard-coded candidate.
+
 ## macOS document paths
 
 Saved archive Search and Ingest windows associate their native title bar with
@@ -12,7 +30,8 @@ the user-selected archive folder. Control-click, right-click or Command-click
 the document title/icon to show macOS's ancestor-folder path menu. Preserve the
 application's title and message count. Untitled, About and settings windows
 have no represented path. This integration is macOS-only and never changes
-archive or source content.
+archive or source content. Windows provides **File > Show Archive in Explorer**
+for the active saved archive, disabled when no document is active.
 
 ## Saved import recovery and notices
 
@@ -329,6 +348,9 @@ show that current work is finishing until its checkpoints are saved and the
 writer lease is released. Do not quit or cancel saved jobs. Retain accepted
 settings even if suspension precedes processing initialization, so reopening
 the archive can continue. Resume must preserve bytes and source idempotence.
+Network-interrupted IMAP runs display **paused** with a pause symbol and a
+**Resume** button. Explain that the network must be available before resuming;
+do not display a failure traceback or error notice for this expected interruption.
 On macOS, one source picker accepts files and directories together with an
 **Import** action, without a preliminary source-type question. Its title names
 the destination archive and its message shows the full destination path.
@@ -614,13 +636,16 @@ same drag implementation, which creates that copy only when a drag starts, never
 while browsing, selecting, or hovering
 over a result. Because the pywebview bridge is asynchronous, the first drag
 prepares the disposable file and the next drag copies the actual `.eml` file to
-Finder or the Desktop. Multiple messages transfer as an actual ZIP file. Neither
+Finder, Explorer or the Desktop. Multiple messages transfer as an actual ZIP file. Neither
 operation may create a `.fileloc`/`.webloc` shortcut or expose link/text URL drag
 representations supplied by the application. The application explicitly writes
-only `public.file-url`, the modern file-path transfer type; macOS may add its own
+only `public.file-url` on macOS or native `FileDrop` on Windows, the modern file-path transfer type; macOS may add its own
 compatibility aliases. Each drag export is isolated from attachment exports and later
 drags; closing the viewer serializes with preparation and revokes every token.
-Backends without the macOS file-drag adapter hide and reject this drag control.
+Windows accepts only a registered export token owned by that viewer, never an
+arbitrary path, and uses copy-only native OLE transfer. An active Windows drag
+retains its export until completion even if the viewer or its parent closes. Other backends
+without a native adapter hide and reject this drag control.
 The result table must finish initializing before startup clears or populates it.
 Queued clicks must not select rows discarded by a subsequent search.
 Message headers remain selectable text. Printing prints the displayed headers
@@ -777,3 +802,43 @@ Cocoa Open, About and Setup commands and startup export cleanup share named
 futures, command admission, error collection and bounded shutdown. Native UI
 marshaling and source-preservation rules remain. Dedicated-thread exceptions
 are documented in the [threading audit](../THREADING.md).
+
+## Function audit repairs
+
+An exported attached message must preserve its decoded RFC bytes, including folds,
+malformed headers and LF/CRLF endings. Multipart attachments also export their
+original decoded payload. Export basenames must obey Windows restrictions and a
+bounded UTF-8 length, including trailing-character and device-name checks after
+truncation. Each external attachment open owns a different temporary path.
+Late attachment results and owner-settings polls must not replace newer selections
+or saved values. Native window calls must occur after releasing registry locks.
+Standalone message windows must obtain fresh loopback authentication rather than
+depending on another window's cookies.
+Validate with `make test`, `make test-e2e` and native source/package acceptance.
+
+A malformed attachment transfer encoding must not block its parent's headers,
+body, Raw Source, Save Message or drag. Its size is unknown and its own diagnostic
+is visible; explicit attachment extraction fails without writing a substitute.
+Legacy CR-only MIME boundaries are supported for byte-exact selected exports.
+Valid legacy uuencode attachments retain decoded-byte export. An ambiguous Unix
+envelope inside unterminated MIME headers is reported as unavailable, never
+silently omitted from the exported payload.
+Attachment descriptions must reuse raw boundary traversal within a message,
+avoiding repeated scans of preceding siblings. A synthetic 2 MiB/2,000-attachment
+selection regression exercises responsive metadata and exact first/last exports.
+When full MIME parsing fails, verified headers and Raw Source remain available,
+along with original-message save and drag. Raw Source rendering must not recurse
+through MIME merely to display the original bytes.
+Attachment-search status describes available extracted text without claiming that
+only `.txt` filenames are supported or that every binary format is searchable.
+Decoded reader traversal applies the shared default MIME limits independently of
+processing overrides: depth, node/child counts and cumulative decoded bytes are
+bounded. Locator headers are limited to 1 MiB. Exhaustion falls back to verified
+headers and Raw Source without exposing partial part IDs; Save Message retains
+the complete original. Raw boundary caches must share byte spans, not retain one
+whole subtree copy per depth.
+
+Standalone message windows receive the application menu at creation and remain
+in the shared native window snapshot and Window menu. Native Close remains
+available when a standalone viewer is focused, including on macOS. Native
+acceptance checks actual File/Window/Help headings and Close enabled state.

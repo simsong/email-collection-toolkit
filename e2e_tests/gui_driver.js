@@ -36,6 +36,15 @@
   };
   const assertSharedFileDrag = async (row, label) => {
     const well = document.getElementById("message-file-well");
+    if (state.nativeFileDrag) {
+      // Browser-only checks prepare real exports; the Windows native probe
+      // verifies OLE transfer with real mouse input and a native drop target.
+      const key = dragExportKey(selectedDragMessagePks());
+      await prepareDrag(selectedDragMessagePks());
+      await waitFor(() => state.dragExports.has(key), `${label}: Windows prepares its registered file export`);
+      assert(row.draggable && well.draggable && !well.hidden, `${label}: Windows exposes native file dragging`);
+      return;
+    }
     if (!state.fileDragSupported) {
       for (const element of [row, well]) {
         const {event} = startFileDrag(element);
@@ -226,7 +235,7 @@
       document.getElementById("message-file-well").parentElement === selectionSummary,
     "multiple selected rows replace the stale message with a selected-message summary and ZIP drag icon");
     await assertSharedFileDrag(rows()[0], "multi-message ZIP");
-    if (state.fileDragSupported) {
+    if (state.fileDragSupported && !state.nativeFileDrag) {
       const otherPk = Number(rows()[3].dataset.messagePk);
       startFileDrag(rows()[3]);
       await waitFor(() => state.dragExports.has(String(otherPk)),

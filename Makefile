@@ -53,8 +53,16 @@ test-definition-download:
 test-definition-refresh:
 	uv run --locked pytest -q tests/test_clamav_refresh.py
 
+# CI_DIAGNOSTICS enables fixture-only call/phase/stack evidence; its directory contains no archive.
+CI_DIAGNOSTICS ?= 0
+CI_DIAGNOSTICS_DIRECTORY ?= dist/ci-diagnostics
+CI_DIAGNOSTICS_ARGS = $(if $(filter 1,$(CI_DIAGNOSTICS)),-p scripts.ci_diagnostics --ci-diagnostics-dir="$(CI_DIAGNOSTICS_DIRECTORY)" --capture=tee-sys)
 test-python-writer:
-	uv run --locked pytest -q --durations=20 tests/test_application.py tests/test_writer_lock.py tests/test_plugin_configuration.py tests/test_portable_writer.py $(PYTEST_ARGS)
+	uv run --locked pytest -q --durations=20 $(CI_DIAGNOSTICS_ARGS) tests/test_application.py tests/test_writer_lock.py tests/test_plugin_configuration.py tests/test_portable_writer.py $(PYTEST_ARGS)
+
+.PHONY: test-ci-diagnostics
+test-ci-diagnostics: ruff
+	uv run --locked pytest -q tests/test_ci_diagnostics.py
 
 .PHONY: test-python-preservation
 test-python-preservation:
@@ -89,7 +97,7 @@ check-python-reader-static:
 	uv run --locked ty check $(PYTHON_READER_SOURCES) --error-on-warning
 	uv run --locked pyright $(PYTHON_READER_SOURCES) --warnings
 
-msix-test: ruff runtime-license-check
+msix-test: ruff runtime-license-check pst-importer mcti-scan pff-converter-bundle
 	pwsh -NoProfile -File scripts/win/build_windows_msix.ps1 $(MSIX_ARGS)
 
 # Explicit dependency download only: no service installation or host PATH changes.
@@ -98,7 +106,7 @@ prepare-windows-clamav:
 	pwsh -NoProfile -File scripts/win/prepare_clamav.ps1
 
 test-msix:
-	uv run --locked python scripts/win/test_windows_msix.py "$(MSIX_PACKAGE)" "$(MSIX_EVIDENCE)"
+	uv run --locked python scripts/win/test_windows_msix.py "$(MSIX_PACKAGE)" "$(MSIX_EVIDENCE)" --pst-fixture rust/mct-importer/tests/fixtures/mail.pst --ost-fixture tests/fixtures/pff/sample.ost
 
 msix-bundle:
 	pwsh -NoProfile -File scripts/win/bundle_test_msix.ps1 -InputDirectory "$(MSIX_PAYLOADS)" $(MSIX_ARGS)
@@ -304,17 +312,12 @@ sparkle-tools:
 	@printf '%s  %s\n' "$(SPARKLE_SHA256)" "$(SPARKLE_ARCHIVE)" | shasum -a 256 -c -
 	@if test -e "$(SPARKLE_DIR)"; then \
 		test -x "$(SPARKLE_DIR)/bin/generate_keys" -a -x "$(SPARKLE_DIR)/bin/sign_update" || { echo "incomplete Sparkle tools directory: $(SPARKLE_DIR)" >&2; exit 1; }; \
-		verified=$$(mktemp "$(SPARKLE_DOWNLOAD_DIR)/.sparkle-verify.XXXXXX") || exit 1; \
-		trap 'rm -f "$$verified"' 0; \
-		for tool in generate_keys sign_update; do \
-			tar -xOf "$(SPARKLE_ARCHIVE)" "./bin/$$tool" > "$$verified" || { echo "verified Sparkle archive is missing tool: $$tool" >&2; exit 1; }; \
-			cmp "$$verified" "$(SPARKLE_DIR)/bin/$$tool" || { echo "cached Sparkle tool differs from verified archive: $$tool" >&2; exit 1; }; \
-		done; \
 	else \
 		mkdir -p "$(SPARKLE_DIR)"; \
 		tar -xJf "$(SPARKLE_ARCHIVE)" --strip-components=1 -C "$(SPARKLE_DIR)"; \
 		test -x "$(SPARKLE_DIR)/bin/generate_keys" -a -x "$(SPARKLE_DIR)/bin/sign_update"; \
 	fi
+	uv run --locked python scripts/sparkle_bundle.py "$(SPARKLE_ARCHIVE)" "$(SPARKLE_DIR)"
 
 sparkle-keys: sparkle-tools
 	"$(SPARKLE_DIR)/bin/generate_keys"
@@ -518,6 +521,7 @@ test-matcher-prototype: ruff
 
 gui-smoke: test-native-gui
 
+# Native focus/menu checks require a logged-in, unlocked desktop.
 .PHONY: test-native-application
 test-native-application: ruff
 	MAILARCHIVER_NATIVE_APPLICATION_E2E=1 uv run pytest -q e2e_tests/test_ingest_verify.py::test_native_application_lifecycle
@@ -571,7 +575,7 @@ test-workflow-gates:
 	uv run --locked pytest -q tests/test_website_scripts.py tests/test_macos_signing.py
 
 test: pst-importer mcti-scan pff-converter test-pff-converter
-	uv run pytest -q --durations=20
+	uv run pytest -q --durations=20 $(PYTEST_ARGS)
 
 .PHONY: archive-verifier verify-database test-import-e2e test-corpus-import update-corpus-expectations
 # ARCHIVE selects the quiescent archive; verification never repairs it.
@@ -606,7 +610,7 @@ test-apple-mail-compare:
 
 test-e2e:
 	$(MAKE) test-import-e2e
-	uv run pytest -q --browser chromium --tracing=retain-on-failure e2e_tests
+	uv run pytest -q --browser chromium --tracing=retain-on-failure e2e_tests $(PYTEST_ARGS)
 
 test-encoding:
 	uv run pytest -q tests/test_encoding.py
@@ -639,7 +643,14 @@ imap:
 # Pytest starts/stops loopback TLS IMAP, seeds three INBOX messages, and checks CLI/GUI search.
 # The fixture sets FQDN=localhost so server greetings never query host DNS.
 test-imap:
-	uv run --locked pytest -q tests/test_imap.py
+	uv run --locked pytest -q tests/test_imap.py $(PYTEST_ARGS)
+	uv run --locked pytest -q --browser chromium e2e_tests/test_imap_pause.py $(PYTEST_ARGS)
+
+# Quiet legacy timeout presentation and real pause/Resume traffic-light rendering.
+.PHONY: test-timeout-presentation
+test-timeout-presentation: ruff
+	uv run --locked pytest -q tests/test_gui_processing.py tests/test_imap.py::test_network_pause_does_not_hide_finalization_failure $(PYTEST_ARGS)
+	uv run --locked pytest -q --browser chromium e2e_tests/test_ingest_diagnostics.py e2e_tests/test_imap_pause.py $(PYTEST_ARGS)
 
 # Regression acceptance for Macroscope's Unicode folder, report and phone findings.
 .PHONY: test-macroscope-fixes
@@ -689,11 +700,14 @@ test-headers:
 test-progress:
 	uv run pytest -q tests/test_progress.py tests/test_sources.py
 
-# Source versus saved-mail progress, unequal worker totals, and actual browser rendering.
-.PHONY: test-ingest-progress
-test-ingest-progress: ruff
+# Live source/saved-mail progress and worker pools; shared by Windows acceptance.
+.PHONY: test-ingest-progress-service test-ingest-progress
+test-ingest-progress-service: ruff
 	$(MAKE) test-progress
 	uv run --locked pytest -q tests/test_ingest_recovery.py::test_cli_saved_content_uses_worker_pool_and_preserves_search_and_bytes tests/test_ingest_recovery.py::test_saved_message_count_waits_for_body_and_attachment_tasks
+
+# Full progress acceptance adds the browser case already run by test-gui-processing.
+test-ingest-progress: test-ingest-progress-service
 	uv run --locked pytest -q --browser chromium e2e_tests/test_gui_processing.py::test_processing_history_shows_jobs_instead_of_zero_source_progress
 
 .PHONY: test-interrupt
@@ -817,7 +831,7 @@ website-icons:
 
 .PHONY: website-screenshots
 website-screenshots:
-	uv run --group dev python -m scripts.website_screenshots
+	uv run --group dev python -m scripts.website_screenshots $(ARGS)
 
 .PHONY: website-gmail-illustrations
 website-gmail-illustrations:
@@ -882,7 +896,7 @@ test-pst-downloader:
 
 .PHONY: test-pff
 test-pff: pst-importer mcti-scan pff-converter test-pff-converter
-	uv run --locked pytest -q tests/test_pff_source.py tests/test_cli_processing.py tests/test_plugin_loader.py tests/test_source_integrity.py
+	uv run --locked pytest -q --durations=20 $(CI_DIAGNOSTICS_ARGS) tests/test_pff_source.py tests/test_cli_processing.py tests/test_plugin_loader.py tests/test_source_integrity.py $(PYTEST_ARGS)
 
 .PHONY: test-gui-processing
 .PHONY: test-worker-preferences test-native-worker-preferences
@@ -907,7 +921,7 @@ test-gui-processing: ruff
 
 .PHONY: website-preview-screenshots
 website-preview-screenshots: website-build-check
-	uv run --group dev python -m scripts.website_screenshots --site-only
+	uv run --group dev python -m scripts.website_screenshots --site-only $(ARGS)
 
 .PHONY: test-plugin-inventory
 test-plugin-inventory: ruff

@@ -62,7 +62,17 @@ impl Scanner {
             std::env::var_os("MAILARCHIVER_CLAMAV_DATABASE").context("missing definitions")?,
         );
         // SAFETY: all symbols below follow the verified libclamav 1.x public C ABI.
+        #[cfg(not(windows))]
         let library = unsafe { Library::new(library_path)? };
+        #[cfg(windows)]
+        let library: Library = unsafe {
+            libloading::os::windows::Library::load_with_flags(
+                library_path,
+                libloading::os::windows::LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR
+                    | libloading::os::windows::LOAD_LIBRARY_SEARCH_DEFAULT_DIRS,
+            )?
+            .into()
+        };
         let version = unsafe { CStr::from_ptr(library.get::<Version>(b"cl_retver\0")?()) }
             .to_str()?
             .to_owned();

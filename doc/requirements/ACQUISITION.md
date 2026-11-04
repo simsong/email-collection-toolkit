@@ -35,8 +35,9 @@ Development-app credential reads retain the existing interpreter's Keychain trus
 without changing vault access rules. Report native failure status without exposing
 passwords or raw private backend exception text.
 
-Each invocation synchronizes once and exits. Eight download workers are the default;
-`--workers` sets a positive count. Generic IMAP includes every selectable mailbox
+Each invocation synchronizes once and exits. Download workers use the shared
+preference (half CPUs by default, at least one); `--workers` overrides it with
+a positive count no greater than twice the detected CPU count. Generic IMAP includes every selectable mailbox
 except names containing `spam`, case-insensitively. Gmail discovers special-use
 All Mail, fetches bodies only there, and obtains message identities and label
 membership through `X-GM-MSGID` and `X-GM-LABELS`; other folders are not fetched.
@@ -76,6 +77,14 @@ per-download dispositions and subjects. Ctrl-C cooperatively stops and checkpoin
 returning 130; network operations retain a 30-second socket timeout. Reruns resume
 committed progress. Workers shall close source iterators on their owning threads;
 terminal process-group interrupts shall not abort scanner children mid-message.
+IMAP timeouts and lost connections, including after laptop sleep, shall record a
+**paused** run rather than a failure, including host-down socket errors where the
+platform exposes them. Retain committed per-message progress and accepted
+settings, release the connection and writer lease, and offer **Resume**
+in Ingests. Resume reconnects and downloads missing checkpoints without repeating
+committed bodies. Incomplete literals must never become successful checkpoints.
+The CLI reports the pause and exits 75 (temporary interruption); rerunning resumes.
+Authentication rejection, TLS verification and invalid-response errors remain failures.
 Default scanning remains required; only explicit `--no-scan`
 permits unscanned ingest. Attachment extraction retains current local-import limits.
 No scheduler, background agent, graphical panel or graph is delivered in this phase.
@@ -377,3 +386,16 @@ or count read-ahead scan offsets as additional source bytes.
 
 Network sources retain one pending message per container: finish processing the
 current message before requesting another. Local MBOX sources use bounded read-ahead.
+
+## Function audit repairs
+
+IMAP capability negotiation must recognize the standard-library string
+`AUTH=PLAIN` value, including Unicode credentials, while failed authentication
+remains a real error. PST traversal excludes virtual search folders before
+selection/counting. Converter evidence destinations cannot alias each other or
+the source through hardlinks. Invalid reconstructed Message-ID values remain
+separate evidence; inherited importer headers are retained after the converter's
+own provenance, long subjects may use folded encoded words, and DEL/C1 controls
+are rejected. Validate with `make test-imap`, `make test-pst` and `make test-pff`.
+PDF-derived MBOX publication must atomically refuse a racing destination without
+requiring hardlink-capable storage; existing output remains untouched.

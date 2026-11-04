@@ -10,6 +10,7 @@ import sys
 from importlib.metadata import version
 from pathlib import Path
 from shutil import copytree
+import pytest
 
 from mailarchiver import standalone_verify
 from mailarchiver.bagit import initialize_bag, refresh_tag_manifest, write_bag_checkpoint
@@ -17,6 +18,18 @@ from mailarchiver.catalog import create_catalog
 from mailarchiver.standalone_verify import verify_archive
 
 FIXTURE = Path(__file__).parent / "data" / "three-message-mailbag"
+
+
+def test_fixture_generator_never_deletes_arbitrary_existing_output(tmp_path: Path) -> None:
+    """Source safety: fixture regeneration must refuse unrelated directories and their bytes."""
+    from tests.generate_bagit_fixture import generate
+    output = tmp_path / "user-data"
+    output.mkdir()
+    original = output / "private.eml"
+    original.write_bytes(b"user-owned mail")
+    with pytest.raises(FileExistsError, match="refusing to replace"):
+        generate(output)
+    assert list(output.iterdir()) == [original] and original.read_bytes() == b"user-owned mail"
 
 
 def test_new_bag_records_the_installed_application_version(tmp_path: Path) -> None:

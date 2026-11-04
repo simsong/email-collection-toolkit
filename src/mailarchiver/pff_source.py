@@ -17,9 +17,7 @@ from __future__ import annotations
 
 import hashlib
 import os
-import shutil
 import subprocess
-import sys
 import tempfile
 import time
 from collections.abc import Generator, Iterator
@@ -31,8 +29,7 @@ from .clamav_definitions import LIBRARY_ENV, DATABASE_ENV, CERTIFICATES_ENV, lib
 from .plugin_api import FileProbe, MailContainer, MailObject, PluginContext, ProgressEvent
 from .pst_source import file_hash, validate_record
 from .sources import LocalSourcePlugin, MboxFileParser
-
-ROOT = Path(__file__).resolve().parents[2]
+from .importer_tools import importer_executable as executable
 
 
 class PffSettings(BaseModel):
@@ -59,24 +56,6 @@ class PffReceipt(BaseModel):
     complete: bool = False
     failure: str | None = None
     reconstructed_mime: bool = True
-
-
-def executable(name: str, configured: str | None = None) -> Path:
-    suffix = ".exe" if os.name == "nt" else ""
-    if configured:
-        return Path(configured).resolve(strict=True)
-    if getattr(sys, "frozen", False):
-        base = Path(getattr(sys, "_MEIPASS")) / "importers"
-        candidate = base / "pff-converter" / (name + suffix) if name == "pff-converter" else base / (name + suffix)
-    elif name == "pff-converter":
-        candidate = ROOT / "converters/pff/.venv" / ("Scripts" if os.name == "nt" else "bin") / (name + suffix)
-    else:
-        candidate = ROOT / "target/release" / (name + suffix)
-    if candidate.is_file():
-        return candidate.resolve()
-    if found := shutil.which(name):
-        return Path(found).resolve()
-    raise FileNotFoundError(f"{name} unavailable; run make {name} or configure plugins.ost.executable")
 
 
 def run_converter(command: list[str], output: Path, diagnostics: Path, settings: PffSettings,

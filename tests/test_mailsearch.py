@@ -422,6 +422,41 @@ def test_message_views_select_headers_and_preferred_mime_parts() -> None:
     assert "HTML text" in render_message(html_only, False, False)
 
 
+@pytest.mark.parametrize("attached_message", [False, True])
+def test_cli_body_rendering_excludes_attachment_descendants(attached_message: bool) -> None:
+    """SEARCH: CLI plain/HTML selection respects the same attachment ancestry as desktop and indexing."""
+    body = (b"--child\nContent-Type: text/plain\n\nattachmentsecret\n"
+            b"--child\nContent-Type: text/html\n\n<p>attachmentsecret</p>\n--child--\n")
+    content = b"Content-Type: multipart/alternative; boundary=child\n\n" + body
+    attachment = (b"Content-Type: message/rfc822\nContent-Disposition: attachment; filename=child.eml\n\n" + content
+                  if attached_message else b"Content-Type: multipart/alternative; boundary=child\nContent-Disposition: attachment; filename=parts.mime\n\n" + body)
+    raw = (b"From: parent@example.test\nContent-Type: multipart/mixed; boundary=outer\n\n"
+           b"--outer\nContent-Type: text/plain\n\nparent plain\n--outer\nContent-Type: text/html\n\n<p>parent HTML</p>\n--outer\n"
+           + attachment + b"\n--outer--\n")
+    for html in (False, True):
+        displayed = render_message(raw, False, html)
+        assert ("parent HTML" if html else "parent plain") in displayed and "attachmentsecret" not in displayed
+
+
+def test_malformed_uu_body_cannot_expand_into_fabricated_zero_bytes() -> None:
+    """SEARCH/ARCHIVE: best-effort text and metadata retain opaque wire data instead of padded decoder output."""
+    from mailarchiver.message import parse_message
+    raw = (b"X-GM-THRID: fixture\nDate: Mon, 1 Jan 1979 00:00:00 +0000\nContent-Type: text/plain\n"
+           b"Content-Transfer-Encoding: uuencode\n\nbegin 644 old.txt\n" + b"M\n" * 1024 + b"end\n")
+    displayed = render_message(raw, False, False)
+    assert "begin 644 old.txt" in displayed and "\x00" not in displayed and len(displayed) < 4 * len(raw)
+    assert parse_message(raw, Path("/input/1979/old.eml"), None).sha256 == hashlib.sha256(raw).hexdigest()
+
+
+def test_legacy_uu_body_with_unicode_filename_keeps_decoded_text() -> None:
+    """SEARCH: bounded leaf decoding retains valid legacy UU data even when the ignored filename is Unicode."""
+    import codecs
+    body = "legacy café body\n".encode()
+    wire = codecs.encode(body, "uu").replace(b"<data>", "café.txt".encode())
+    raw = b"From: sender@example.test\nContent-Type: text/plain; charset=utf-8\nContent-Transfer-Encoding: x-uue\n\n" + wire
+    assert "legacy café body" in render_message(raw, False, False)
+
+
 def test_mailsearch_mime_outputs_original_source(tmp_path: Path) -> None:
     """Requirement: --mime returns all original MIME parts and headers unchanged."""
     archive, raw = make_archive(tmp_path)

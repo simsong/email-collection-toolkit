@@ -97,18 +97,16 @@ def test_static_downloads(browser: Browser, download_site: tuple[str, list[Publi
             expect(page.get_by_text("Preview release:", exact=False)).to_be_visible()
         else:
             expect(page.get_by_text("Preview release:", exact=False)).to_have_count(0)
-        if links and links.windows_help_url:
-            expect(page.locator("#installer-downloads > p").get_by_role(
-                "link", name="Windows installation instructions", exact=True)).to_have_attribute(
-                    "href", links.windows_help_url)
-            expect(page.get_by_text("Read the Windows installation instructions", exact=False)).to_be_visible()
-        page.get_by_text("Platform links and installation instructions", exact=True).click()
+        # Signed Windows installers need no certificate-trust or installation guide.
+        expect(page.get_by_role("link", name="Windows installation instructions", exact=True)).to_have_count(0)
+        expect(page.get_by_text("test-signed", exact=False)).to_have_count(0)
+        page.get_by_text("Platform downloads", exact=True).click()
         for publication in publications:
             published = installer_links(publication)
             expect(page.locator(f'details a[href="{published.mac_url}"]')).to_be_visible()
             if published.windows_url:
                 expect(page.locator(f'details a[href="{published.windows_url}"]')).to_be_visible()
-                expect(page.locator(f'details a[href="{published.windows_help_url}"]')).to_be_visible()
+                expect(page.locator(f'a[href="{published.windows_help_url}"]')).to_have_count(0)
 
 
 @pytest.mark.parametrize("width", [390, 1280])

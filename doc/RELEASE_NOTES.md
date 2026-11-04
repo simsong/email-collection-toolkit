@@ -6,6 +6,83 @@ Entries describe their recorded revisions. For current behavior use the
 [user manual](USER_MANUAL.md) and [CLI reference](CLI_REFERENCE.md). Retired
 Rust delivery plans and historical package checks are not current acceptance.
 
+## 1.0.0a54 — toolkit audit repairs
+
+- Treat direct and imaplib-wrapped host-down socket errors as resumable IMAP pauses
+  on platforms that expose `EHOSTDOWN`.
+- Retain mail with malformed address metadata, unusual charset labels, overflowed
+  dates or deeply nested MIME. Historical metadata failures no longer starve new
+  mail, including deferred content runs; explicit processor stops remain effective.
+- Preserve attached EML and multipart payload bytes; keep attachment subtrees out of
+  parent bodies, recognize digest children, and retain stable decoded-child IDs.
+  Describe many attachments with one boundary traversal. Use portable, distinct
+  attachment export paths, recheck shortened basenames for Windows restrictions,
+  and discard stale UI replies.
+- Authenticate each standalone message window with its own loopback bootstrap,
+  so private webviews can open messages without inheriting the parent's cookies.
+- Bound decoded reader work and share raw byte spans; keep original-message access
+  on resource exhaustion and preserve the previous index if a rebuild cannot finish.
+- Reject overlapping local input/output paths and evidence-file aliases; initialize
+  SQLite schemas atomically with foreign keys enabled; bound legacy MBOX candidate memory.
+- Honor pinned public-inbox commits and MBOX dialects; repair small/empty audit reports
+  and AWS worker startup; tighten release-version, native dependency and Sparkle cache checks.
+- Repair Windows process/cancellation/Quit regressions and retain real cross-platform
+  acceptance gates. These changes require new native Windows and signed package validation.
+
+## Windows desktop parity
+
+Native reader acceptance collects scalar JavaScript results through the same
+Promise callback as asynchronous checks, fixing a false standalone-window timeout.
+Synchronous JavaScript errors and rejected Promises retain explicit failure diagnostics.
+Research memory reporting supports Windows and normalizes Linux RSS to bytes.
+Research archive fixtures preserve original line endings on Windows.
+
+Close the rebuilt search database before replacing the live index on Windows,
+and keep macOS Full Disk Access instructions out of Windows file-error guidance.
+
+Windows CI separates stage durations and retains opt-in phase, thread-profile,
+CPU/I/O and stack evidence for the slow synthetic writer and OST tests.
+
+Keep genuine PST and ambiguous-origin timeout failures visible in mixed-source
+runs; only confirmed legacy IMAP transport tracebacks receive quiet timeout
+presentation. Windows regression fixtures use focused stop/restart workloads and
+separate bounded relocated Outlook attempts with phase diagnostics.
+
+Windows now bundles the same read-only PST/OST import helpers, supports native
+EML/ZIP drag-out to Explorer, and shows the launch version at the right of the
+native menu bar and in the window caption. File > Show Archive in Explorer opens
+the active archive folder. The shared timeout/Resume presentation and prior
+worker, progress, Preferences and window-lifecycle fixes apply to both desktops.
+Windows acceptance now exercises those shared regressions, native OLE transfer,
+and relocated Outlook import with source integrity and retry checks. Package
+builds alone do not establish installed behavior; see the
+[Windows checklist](WINDOWS_RELEASE_TESTING.md) for remaining acceptance gates.
+
+## Quiet timeout status and visible screenshot version
+
+Show timeouts as a short **Timeout** status with a yellow circle and horizontal
+dash, without a traceback or red failure panel. This also applies to earlier
+saved IMAP timeout entries; their original diagnostics remain on disk. Real
+failures retain their diagnostic display. macOS title bars show the launch
+version in parentheses at the top right for screenshot identification.
+
+## Pause interrupted IMAP downloads
+
+IMAP timeouts and dropped connections now pause downloads with saved progress
+instead of reporting import failure. Ingests shows **paused** and a **Resume**
+button that reconnects without downloading committed messages again, including
+after reopening the archive. Authentication and TLS verification errors remain
+failures. Terminal downloads report the pause and exit 75; rerun to continue.
+Advance the alpha for local validation.
+
+## User-focused README and signed Windows download guidance
+
+Rewrite the README around desktop installation, supported sources, archive care,
+versioning, and program/antivirus updates. Move source setup, packaging, and test
+details to `FOR_DEVELOPERS.md`, retaining current platform and extraction limits.
+Remove the website's obsolete Windows certificate-trust notice and separate
+installation-guide links now that public installers are signed.
+
 ## Native macOS archive path menu
 
 Saved archive Search and Ingest windows expose macOS's title-bar document icon

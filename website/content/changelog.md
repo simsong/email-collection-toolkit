@@ -4,6 +4,11 @@ description = "Changes to the Email Collection Toolkit website, separate from ap
 +++
 <!-- Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved. -->
 
+## 2026-10-30
+
+- Remove the Windows certificate-trust notice and installation-guide links now
+  that Windows installers are publicly signed. Keep direct platform downloads.
+
 
 ## 2026-10-12
 

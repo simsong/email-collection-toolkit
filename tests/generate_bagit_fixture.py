@@ -49,7 +49,12 @@ MESSAGES = (
 
 def generate(output: Path) -> None:
     """Replace only the designated fixture directory with deterministic content."""
+    if output.is_symlink():
+        raise ValueError("fixture output must not be a symlink")
     if output.exists():
+        designated = Path(__file__).parent / "data" / "three-message-mailbag"
+        if output.resolve() != designated.resolve():
+            raise FileExistsError(f"refusing to replace existing output: {output}")
         shutil.rmtree(output)
     mbox_directory(output).mkdir(parents=True)
     (output / "integrity").mkdir()

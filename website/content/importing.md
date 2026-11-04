@@ -45,6 +45,11 @@ settings, including after reopening the archive. Suspension also frees the
 archive for manual name edits. A message already being downloaded may finish
 before suspension completes.
 
+If an IMAP connection times out, including after laptop sleep, the
+download shows **Timeout** with a yellow circle and horizontal dash, and keeps
+its saved progress. No timeout traceback is displayed. Reconnect to the network,
+then click **Resume** in Ingests. Messages already saved are not downloaded again.
+
 ![The import history window showing a completed synthetic collection import](../images/importing-interface.png)
 
 *The working import-history interface after importing synthetic messages.*

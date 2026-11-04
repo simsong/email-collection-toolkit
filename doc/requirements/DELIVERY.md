@@ -18,9 +18,9 @@ installer” and “Download macOS installer” buttons beside “Show all insta
 Each platform button links directly to its available published installer; a
 missing asset falls back to the generic releases page with an availability
 notice. All three buttons work without JavaScript or platform detection. The
-page states Apple Silicon macOS and x64 Windows requirements, labels preview
-downloads visibly, and exposes Windows certificate-trust instructions beside
-the buttons before the additional-links disclosure. The website has no
+page states Apple Silicon macOS and x64 Windows requirements and labels preview
+downloads visibly. Signed Windows installers need no website certificate-trust
+instructions or installation-guide links. The website has no
 update-stream selector; that preference belongs in the application.
 These are release-workflow requirements, not evidence of Windows feature parity.
 Website screenshot validation uses purpose-made synthetic mail and a real
@@ -30,8 +30,8 @@ browser: installed Edge on Windows, Playwright Chromium on other platforms.
 
 Supported packages must bundle their selected executables and dependencies
 without requiring user-installed runtimes, compilers or Outlook. The macOS
-package includes the PST/OST helpers; Windows helper packaging and Linux
-distribution remain deferred. Full installed ingest/scanner acceptance must be
+and Windows packages include the Rust PST/scanner helpers and separately
+bundled libpff converter. Linux distribution remains deferred. Full installed ingest/scanner acceptance must be
 established separately for each supported platform. The configured PST importer is the Rust helper;
 Java is required only if a Java importer is selected for distribution.
 [PST_IMPORTER.md](../PST_IMPORTER.md#platform-packaging-and-qualification) defines architecture-specific
@@ -45,7 +45,9 @@ distinguish installed tools from validated application support. Windows delivery
 requires full ingest, preservation, recovery, and native desktop validation;
 WSL/Linux results do not establish Windows compatibility. The Windows writer and
 embedded scanner are implemented (see [Shared Python Windows desktop](DESKTOP.md#shared-python-windows-desktop));
-PST/OST converters are not yet packaged for Windows.
+The relocated Windows package must ingest the real PST/OST fixtures without
+checkout tools, preserve sources and decoded content, retain partial-extraction
+evidence, and remain idempotent on retry.
 
 ## Build identity
 
@@ -405,3 +407,13 @@ it does not establish current-head packaging or Windows feature parity.
 Every bundled source/file manifest must resolve in the frozen application, even
 when that provider is unused. Synthetic local ingest must load the registry and
 preserve canonical bytes without an installed source checkout.
+
+## Function audit repairs
+
+Reject dev/post release versions even when their numeric suffix is zero.
+Mach-O dependency validation must resolve each executable's loader chain and
+`@executable_path` independently; an unrelated helper runpath cannot satisfy
+another executable. All cached Sparkle framework resources, links, notices and
+consumed tools must match the SHA-256-verified pinned archive, with no extra
+framework files. Validate with `make test-python-desktop-package` and
+`make test-sparkle-signing`; signed installer acceptance remains separate.

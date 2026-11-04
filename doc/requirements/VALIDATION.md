@@ -7,11 +7,38 @@ platform/release acceptance. Deferred features live in [plans](../plans/README.m
 
 ## Shared acceptance coverage
 
+Windows CI shall expose separate build, reader/scanner, writer, Outlook, GUI/native
+and relocated-package stage durations. Selected slow synthetic ingest tests shall
+retain phase wall/CPU timings, thread call profiles, periodic stack dumps and
+Windows process I/O counts, including evidence after test failure. Diagnostics
+must preserve assertions and storage durability and must not record mail bodies,
+credentials or frame locals. Profiles add overhead and cannot alone attribute a
+slowdown to physical disk latency, antivirus or child-process work.
+
+Byte-preservation test readers must retain message CRLF/LF and mboxrd quoting
+regardless of the host's newline convention. A finite producer can finish before
+an inactivity deadline is observed; distinguish that documented partial outcome
+from a real timeout, retaining exit and receipt evidence in either case.
+
 Native desktop acceptance must retain a phase report and diagnostics after a
 parent timeout, for source and relocated package runs. Both use the same overall
 deadline, which must permit the existing import deadline and
 Preferences Close/reopen checks without dropping their assertions. CI must allow
 the complete ordinary suite to finish; timeout changes do not establish success.
+Native JavaScript checks must collect synchronous scalar values, including false
+and null, as well as Promise results; thrown errors and rejected Promises must
+fail with their JavaScript diagnostics. Import-window acceptance must explicitly
+open the Ingests window when calling the background import service directly.
+Stop/restart fixtures must prove partial durable publication and exact recovery
+without turning acceptance into a bulk throughput benchmark. Real OST acquisition
+and content processing retain bounded platform-appropriate test deadlines and all
+message-count, failure-evidence, search and archive-integrity assertions.
+Relocated PST/OST retries must each have enough bounded time to complete the same
+real scanning/import checks, with phase evidence and an encompassing CI deadline.
+Windows acceptance must execute the shared worker-policy/preferences and live
+saved-content pool/backlog regressions, beyond rendering recorded snapshots.
+Fixtures that hand a disposable index to a rebuild subprocess must close their
+SQLite connections first; ending a transaction alone must not hold Windows files open.
 
 Reader acceptance must retain search, Unicode rendering, exact export and source
 immutability under URI-reserved archive paths. Shared scanner checks must cover
@@ -131,10 +158,10 @@ coordination plan; obtain explicit user approval before conflicting work.
 Recheck before integration/publication and when scope changes; an existing
 approval covers only the disclosed conflict and plan.
 
-Copilot review requests must use `gh` with the authorized `simsong` identity,
-not browser control. That exception is review-request-only; all other Codex
-GitHub writes retain `simsong-agent`. A successful command alone does not prove
-that review was requested.
+Copilot review requests must use `gh pr edit <number> --add-reviewer '@copilot'`
+as `simsong-agent`. Never use the personal account, browser control, or a
+comment mention as a fallback. Verify reviewer or review-request timeline
+evidence; command success alone does not establish a queued review.
 
 Before pr-to-ready handoff, intended task changes and local-only commits in
 every task checkout must be reconciled, validated, and published in the delivery
@@ -251,3 +278,31 @@ user workflows link there instead of maintaining separate option inventories.
 Specialist guides own their byte-level format, provider and platform contracts.
 Requirements state invariants; implementation maps them to code and evidence.
 Historical logs are dated and cannot override current behavior.
+
+## Function audit repairs
+
+Public-inbox preparation must use the acquired commit and only its reachable
+blobs, excluding later/other-branch/unreachable objects. Stream blobs within the
+dataset expansion budget, including non-message blobs. Preserve `.mboxrd` when
+copying mailbox inputs. AWS UserData must be encoded once by the SDK; workers use
+embedded-scanner definitions without installing a ClamAV daemon. Data-quality
+reports permit zero results and sample every candidate when fewer than 100 exist.
+Provider comparison rereads must match their indexed byte hash. Fixture generation
+may replace only its designated checked-in fixture, never arbitrary existing output.
+Subprocess regressions require bounded readiness, cleanup and platform-native
+interrupt/liveness handling. Validate through `make test` and actual Windows CI.
+
+Native focus/menu acceptance requires an unlocked interactive desktop. A locked
+session or unavailable key window is an unmet runtime prerequisite, not evidence
+that native behavior passed. Preserve focus/modal/window diagnostics and rerun
+on the same candidate when the desktop is available; do not weaken key-window
+assertions or replace native acceptance with headless tests.
+Native reader/export fixtures must contain real canonical mail and MBOX locations,
+verified against their unchanged synthetic source before the GUI runs.
+
+Application-writing test batches share the real cross-process installation guard.
+Run them serially unless that entire guard boundary is explicitly isolated;
+otherwise update-reservation assertions can correctly fail on another test writer.
+A synthetic running-status UI fixture must supply a live heartbeat through page
+startup and assertions, then stop and join its producer without changing the
+production stale deadline.

@@ -2,6 +2,12 @@
 
 # Mail archive normalizer implementation
 
+Native reader acceptance normalizes JavaScript evaluations to Promises before
+waiting for pywebview callbacks, including scalar selections and false/null results.
+An explicit result envelope retains synchronous errors and rejected Promises as failures.
+Name-linkage reports read Windows peak working set through the native process API;
+POSIX peak RSS is normalized from its platform units to bytes.
+
 Windows Preferences uses the shared worker/update policy, serializes automatic
 saves, and asynchronously flushes active edits before native Close. Its JavaScript
 API uses the shared method-only bridge to avoid native-object traversal. See
@@ -23,10 +29,20 @@ platform or release gate has passed. [Future work](plans/README.md) is separate.
 | [Delivery](implementation/DELIVERY.md) | Platform packaging, release identity, signing and publication |
 | [Validation](implementation/VALIDATION.md) | Fixtures, independent checks, CI and acceptance limits |
 
+The toolkit function audit covers preservation, MIME ancestry, failure isolation,
+portable process tests, validation inputs and release dependency checks. Current
+contracts and acceptance limits are recorded in each subsystem's **Function audit
+repairs** section; [audit scope](TOOLKIT_AUDIT.md) distinguishes reviewed code from
+platform acceptance and deferred work.
+
 ## Shared boundaries
 
+- Display-only timeout normalization retains saved diagnostics, and a Cocoa
+  title-bar accessory and right-aligned Windows menu label show the launch version. See [desktop](implementation/DESKTOP.md).
+
 - The macOS adapter sets archive windows' represented folder URLs on Cocoa's main
-  thread, retaining their custom titles. See [desktop](implementation/DESKTOP.md).
+  thread, retaining their custom titles. Windows opens the active saved
+  archive folder through its native shell command. See [desktop](implementation/DESKTOP.md).
 
 - The appcast writer renders Markdown changelog entries into embedded HTML for
   both native updaters; see [delivery](implementation/DELIVERY.md).
@@ -87,6 +103,10 @@ platform or release gate has passed. [Future work](plans/README.md) is separate.
 - Ingest-window controls reuse checkpoint interruption and saved requests;
   picker counts aggregate in one query with visible pending states.
   See [desktop](implementation/DESKTOP.md).
+
+- IMAP transport interruptions publish `paused` runs and reuse saved-request
+  recovery through **Resume**, including direct and imaplib-wrapped `EHOSTDOWN`
+  errors where available; see [acquisition](implementation/ACQUISITION.md).
 
 - About shares one bounded plugin-settings read and defers only busy inventories;
   see [desktop](implementation/DESKTOP.md).

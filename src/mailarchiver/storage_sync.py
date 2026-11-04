@@ -5,20 +5,44 @@
 Purpose: Publish flushed files with platform-appropriate rename durability.
 
 How it works:
-Replace files atomically, flush POSIX directories and use Windows write-through publication
-with bounded retries.
+Replace files atomically, exclusively rename new files/directories, flush POSIX directories
+and use Windows write-through replacement with bounded retries.
 
 Fundamental dependents:
 
 - ``mbox``: canonical journal/publication steps depend on these storage guarantees.
 - ``bagit``: checkpoint files must use the same durable replacement boundary.
+- ``clamav_update`` and ``pdf_mail``: new outputs must refuse competing destinations.
 """
 from __future__ import annotations
 
 import ctypes
+import errno
 import os
+import sys
 from pathlib import Path
 from time import monotonic, sleep
+
+
+def publish_exclusive(source: Path, destination: Path) -> None:
+    """Atomically rename without replacing a file, symlink or even an empty directory."""
+    if os.name == "nt":
+        source.rename(destination)
+        return
+    native = ctypes.CDLL(None, use_errno=True)
+    if sys.platform == "darwin":
+        rename = native.renamex_np
+        rename.argtypes = [ctypes.c_char_p, ctypes.c_char_p, ctypes.c_uint]
+        result = rename(os.fsencode(source), os.fsencode(destination), 4)  # RENAME_EXCL
+    elif sys.platform.startswith("linux"):
+        rename = native.renameat2
+        rename.argtypes = [ctypes.c_int, ctypes.c_char_p, ctypes.c_int, ctypes.c_char_p, ctypes.c_uint]
+        result = rename(-100, os.fsencode(source), -100, os.fsencode(destination), 1)  # AT_FDCWD, RENAME_NOREPLACE
+    else:
+        raise OSError(errno.ENOTSUP, "Exclusive publication is unsupported")
+    if result:
+        error = ctypes.get_errno()
+        raise OSError(error, os.strerror(error), str(destination))
 
 
 def sync_directory(path: Path) -> None:

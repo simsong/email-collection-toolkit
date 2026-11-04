@@ -270,6 +270,38 @@ def test_dependency_audit_rejects_external_rpath(tmp_path: Path) -> None:
 
 
 @pytest.mark.skipif(sys.platform != "darwin", reason="Mach-O linkage requires Apple's toolchain")
+def test_dependency_audit_keeps_helper_executable_runpaths_isolated(tmp_path: Path) -> None:
+    """Packaging: an unrelated helper rpath cannot satisfy the app, and helpers use their own executable path."""
+    scripts = str(ROOT / "scripts")
+    sys.path.insert(0, scripts)
+    try:
+        from build_macos import verify_dependencies
+    finally:
+        sys.path.remove(scripts)
+    app = tmp_path / "Fixture.app"
+    main = app / "Contents/MacOS/main"
+    helper = app / "Contents/Helpers/helper"
+    library = helper.parent / "lib/value.dylib"
+    library.parent.mkdir(parents=True)
+    main.parent.mkdir(parents=True)
+    source = tmp_path / "value.c"
+    source.write_text("int fixture_value(void) { return 7; }\n")
+    subprocess.run(["cc", "-dynamiclib", str(source), "-Wl,-install_name,@rpath/value.dylib", "-o", str(library)], check=True)
+    source.write_text("extern int fixture_value(void); int main(void) { return fixture_value() != 7; }\n")
+    subprocess.run(["cc", str(source), str(library), "-o", str(main)], check=True)
+    subprocess.run(["cc", str(source), str(library), "-Wl,-rpath,@loader_path/lib", "-o", str(helper)], check=True)
+    with pytest.raises(RuntimeError, match="unresolved bundled dependency"):
+        verify_dependencies(app)
+    source.write_text("int main(void) { return 0; }\n")
+    subprocess.run(["cc", str(source), "-o", str(main)], check=True)
+    source.write_text("extern int fixture_value(void); int main(void) { return fixture_value() != 7; }\n")
+    subprocess.run(["cc", str(source), str(library), "-Wl,-rpath,@executable_path/lib", "-o", str(helper)], check=True)
+    verify_dependencies(app)
+    subprocess.run([str(main)], check=True)
+    subprocess.run([str(helper)], check=True)
+
+
+@pytest.mark.skipif(sys.platform != "darwin", reason="Mach-O linkage requires Apple's toolchain")
 def test_dependency_audit_filters_release_credentials(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:

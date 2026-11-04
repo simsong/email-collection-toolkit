@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import base64
 from concurrent.futures import Future
 import imaplib
 from pathlib import Path
@@ -118,16 +119,88 @@ class DisposableImap:
             raise RuntimeError("disposable IMAP server did not stop")
 
 
+class ImapFault(BaseModel):
+    command: bytes
+    mode: Literal["timeout", "disconnect", "partial", "malformed"]
+    skip: int = 0
+    response: bytes = b"invalid IMAP response\r\n"
+
+
+class InterruptibleImap(DisposableImap):
+    """Interrupt real TLS requests through a proxy to the disposable pymap backend."""
+    def __init__(self, directory: Path) -> None:
+        super().__init__(directory, "implicit")
+        self.fault: ImapFault | None = None
+        self.commands: list[bytes] = []
+
+    async def _serve(self) -> None:
+        args = argparse.Namespace(host="127.0.0.1", port=0, debug=False, cert=str(self.certificate),
+            key=str(self.key), tls=True, demo_data=False, demo_user="demouser", demo_password="demopass",
+            passlib_cfg=None, proxy_protocol="noop")
+        backend, config = await DictBackend.init(args)
+        config.apply_context()
+        callback = ProxyProtocolReader(config.proxy_protocol).get_callback(IMAPServer(backend.login, config))
+        upstream = await asyncio.start_server(callback, "127.0.0.1", 0)
+        upstream_port = upstream.sockets[0].getsockname()[1]
+
+        async def connection(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
+            remote_reader, remote_writer = await asyncio.open_connection("127.0.0.1", upstream_port)
+
+            async def requests() -> None:
+                while line := await reader.readline():
+                    self.commands.append(line)
+                    fault = self.fault
+                    if fault is not None and fault.command in line:
+                        if fault.skip:
+                            fault.skip -= 1
+                        else:
+                            if fault.mode == "partial":
+                                writer.write(b"* 2 FETCH (UID 2 RFC822.SIZE 100 BODY[] {100}\r\nSubject: partial\r\n")
+                                await writer.drain()
+                            elif fault.mode == "malformed":
+                                writer.write(fault.response)
+                                await writer.drain()
+                            if fault.mode != "disconnect":
+                                await reader.read()  # Client timeout closes this stalled transport.
+                            return
+                    remote_writer.write(line)
+                    await remote_writer.drain()
+
+            async def responses() -> None:
+                while data := await remote_reader.read(65536):
+                    writer.write(data)
+                    await writer.drain()
+
+            tasks = [asyncio.create_task(requests()), asyncio.create_task(responses())]
+            try:
+                await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
+            finally:
+                for task in tasks:
+                    task.cancel()
+                await asyncio.gather(*tasks, return_exceptions=True)
+                remote_writer.close()
+                writer.close()
+                await asyncio.gather(remote_writer.wait_closed(), writer.wait_closed(), return_exceptions=True)
+
+        async with upstream:
+            server = await asyncio.start_server(connection, "127.0.0.1", 0, ssl=config.ssl_context)
+            async with server:
+                self.port.set_result(server.sockets[0].getsockname()[1])
+                await asyncio.to_thread(self.stop.wait)
+
+
 class Utf8Imap(DisposableImap):
     """Minimal TLS protocol fixture for RFC 6855, which pymap does not implement.
 
     Require ENABLE before UTF-8 LIST/EXAMINE and record actual client wire bytes.
     All names, credentials and messages are synthetic; no application methods are mocked.
     """
-    def __init__(self, directory: Path, capability: str = "UTF8=ACCEPT", enable: str = "OK") -> None:
+    def __init__(self, directory: Path, capability: str = "UTF8=ACCEPT", enable: str = "OK", *,
+                 credentials: tuple[str, str] | None = None) -> None:
         super().__init__(directory, "implicit")
         self.capability = capability.encode("ascii")
         self.enable = enable
+        self.credentials = credentials
         self.commands: list[bytes] = []
         self.names = ("旅行", "literal &AMk- &-", 'Quote " and \\ box')
 
@@ -150,11 +223,24 @@ class Utf8Imap(DisposableImap):
                 response = b"OK complete"
                 if command == b"CAPABILITY":
                     capabilities = b"IMAP4rev1"
+                    if not authenticated and self.credentials is not None:
+                        capabilities += b" AUTH=PLAIN LOGINDISABLED"
                     if authenticated:
                         capabilities += b" ENABLE " + self.capability
                     writer.write(b"* CAPABILITY " + capabilities + b"\r\n")
                 elif command == b"LOGIN":
-                    authenticated = True
+                    if self.credentials is None:
+                        authenticated = True
+                    else:
+                        response = b"NO LOGIN disabled"
+                elif command == b"AUTHENTICATE" and arguments == [b"PLAIN"] and self.credentials is not None:
+                    writer.write(b"+ \r\n")
+                    await writer.drain()
+                    credentials = base64.b64decode((await reader.readline()).strip(), validate=True)
+                    username, password = self.credentials
+                    authenticated = credentials == b"\0" + username.encode() + b"\0" + password.encode()
+                    if not authenticated:
+                        response = b"NO invalid credentials"
                 elif command == b"ENABLE" and authenticated and arguments == [b"UTF8=ACCEPT"]:
                     if self.enable == "OK":
                         enabled = True

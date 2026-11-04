@@ -7,6 +7,53 @@ live in [plans](../plans/README.md); historical evidence does not validate this 
 
 ## Shared acceptance coverage
 
+The native reader helper wraps evaluated expressions in an async function so
+pywebview delivers scalar and Promise results through its Promise-only callback.
+The real native run checks numeric, false, null and Promise results before reader
+operations, verifies pywebview's direct scalar return separately, and requires
+synchronous errors and rejected Promises to retain their diagnostics through a
+typed result envelope. Its direct background import opens Ingests explicitly before checking
+that window's version and capturing its frame.
+Name-linkage fixtures use the canonical byte-preserving MBOX writer rather than
+the unadapted Windows stdlib writer, avoiding newline-induced hash mismatches.
+
+The fixture MBOX reader parses binary envelope/separator lines independently of
+`mailbox.get_bytes`, which normalizes CRLF on Windows. A mixed-ending regression
+checks its byte oracle with independent LF/CRLF envelopes and separators. The tiny PST
+deadline case accepts either an observed timeout or the fixture's exact partial
+receipt; `ImportActivity` tests still require expiry after a silent interval and
+deadline extension after real stdout/stderr progress. A separate configured Python
+producer runs through the real PST supervisor, records its PID and stalls. The
+test requires a timeout, process termination (a held Windows process handle or
+POSIX liveness check), a durable nonzero-exit receipt and unchanged input bytes.
+The shared timeout target also runs the real IMAP finalization-obstruction case:
+macOS reports `IsADirectoryError`, Windows `PermissionError`; both must retain the
+actual destination and failed status instead of a network pause.
+
+The GUI stop/restart fixture uses 64 distinct messages and still requires a strict
+partial checkpoint, interrupted status, full recovery, exact hashes and no source
+changes. Its previous 600-message recovery took 490–1,703 seconds on hosted Windows.
+The real 80-message OST CLI fixture allows 600 seconds per acquisition/content
+subprocess on Windows (120 elsewhere), retaining its exact partial-result, count,
+search and integrity checks. `make test-pff` reports its 20 slowest cases. These
+budgets accommodate observed runner variability; only successful Windows execution
+establishes acceptance.
+
+Relocated Outlook acceptance runs each PST/OST import and retry in a separate
+600-second subprocess, retaining phase markers in CI and `outlook-import.log`.
+Each attempt retains count, receipt, helper isolation and archive-integrity checks;
+the parent retains source hashes. The Windows payload job allows 90 minutes for
+source suites and all four relocated attempts, rather than one 180-second budget
+for the entire relocated Outlook sequence. This ceiling is not an expected runtime.
+Windows also runs `test-worker-preferences` (including override/persistence and
+asynchronous-save cases) and `test-ingest-progress-service` (live worker-pool and
+backlog checks). `test-ingest-progress` adds its browser-history case, already
+covered in Windows by `test-gui-processing`, without repeating it in the service target.
+The worker-preference CLI fixture explicitly closes its obsolete-index setup
+connection before starting repair. A SQLite transaction context does not close
+the connection; leaving that fixture handle alive caused Windows replacement
+to fail even after the application closed its own staging connection.
+
 `test_reserved_characters_and_read_only_attachments` checks SQLite URI handling;
 `test_reader_archive_under_uri_reserved_path` runs the complete shared reader
 acceptance (all sort orders, Unicode rendering, exact export and unchanged files),
@@ -40,6 +87,31 @@ and live Gmail remain separate acceptance boundaries. Shared fixtures replace
 repeated listener setup/teardown, without dropping distinct failure-mode tests.
 
 ## CI and release validation
+
+Windows writer and PFF targets enable `scripts.ci_diagnostics` for the real
+stop/restart and OST CLI fixtures. The caller and subsequently created workers get a
+profiling hook timing selected storage/SQLite/file/sleep operations; `calls.txt`
+ranks total/max completed-call time by caller and thread. `report.json` records named phases,
+elapsed and process CPU time, thread names and native process I/O deltas on Windows.
+`threads.txt` receives all-thread code-location stacks every 30 seconds from an
+owned sampler using `sys._current_frames`. It never invokes a concurrent native
+traceback dump. Windows crashed and a local run hung during the watchdog test;
+concurrent native dumping was suspected, but the underlying cause is unproven.
+Only filenames, line numbers and function names are serialized, with a 256-frame
+limit per thread; source lines and frame locals remain excluded.
+Phase-start JSON remains available before a test completes; completed failures
+also retain profiles. Windows uploads this directory with its always-run build logs.
+Profiling is opt-in, uses only synthetic tests and refuses an existing caller/default
+profiler. Existing worker hooks and native faulthandler watchdog timers remain untouched.
+Owned callbacks self-disable after collection, including in surviving workers.
+The sampler requires Python thread scheduling; pre-existing threads appear in stacks,
+not call timing. Pytest's native timed dumps are rejected in profiling mode because
+firing one during collection has not completed safely. Native timer ownership is
+checked in a 15-second-bounded child: its timer fires after collector cleanup and
+continues repeating. This proves registration is preserved, not safe simultaneous
+native dumping. A native watchdog alone remains available for a C call holding the GIL.
+Cumulative call times include nesting and parallel overlap; process counters
+exclude children and do not establish physical disk/antivirus causation.
 
 The ordinary Python/browser job allows 60 minutes. Pytest and the focused Windows
 writer target report their 20 slowest cases. Both source and relocated native desktop parents use the shared
@@ -317,7 +389,11 @@ exercise complete scoped searches and rich MIME behavior.
 `make test-e2e` drives
 the complete interface in headless Chromium while binding every bridge method
 to the real Python service and disposable test archive. It therefore works
-without a visible desktop on macOS and Linux. `make test-native-gui` separately
+without a visible desktop on macOS and Linux. `make test-imap` also runs the
+browser pause/resume acceptance; `PYTEST_ARGS='--browser-channel chrome'` selects
+an installed Chrome instead of bundled Chromium. Screenshot targets accept
+`ARGS=--browser-channel=chrome` for the same choice.
+`make test-native-gui` separately
 drives a hidden Cocoa/WKWebView window on macOS against a purpose-built
 one-message derived archive to retain the native bridge boundary without
 ClamAV or the full lifecycle fixture. This explicit local development target is
@@ -369,7 +445,8 @@ overlap. Potential conflicts require a concrete list and coordination plan plus
 explicit user approval; the ledger records the approved scope and subsequent
 checks before integration or publication. Separate worktrees do not waive this
 gate. Copilot review requests use `gh pr edit <number> --add-reviewer '@copilot'`
-as `simsong`, followed by restoration of `simsong-agent` for all other writes.
+as `simsong-agent`, the same authorized account used for all agent GitHub writes.
+A missing request remains a blocker; no personal-account fallback is permitted.
 Review-request timeline or reviewer evidence verifies the request; no browser
 control is used. Before handoff it inventories task checkouts, reconciles intended
 uncommitted changes and unpublished commits into the delivery branch, and records
@@ -417,3 +494,31 @@ owner when needed.
 
 Integrity hash-standard versions must be JSON integers. The standalone verifier
 rejects boolean, floating-point, and string alternatives without coercion.
+
+## Function audit repairs
+
+`prepare` receives the source manifest; public-inbox enumeration streams
+`rev-list --objects` at the recorded commit through `cat-file`, rather than all
+repository objects. Blob content streams in bounded chunks under a shared dataset
+expansion budget; failed enumeration kills its owned Git children. Prepared mailbox suffixes retain the declared quoting dialect.
+The Lambda supplies raw script text to boto3; an offline real-SDK wire test proves
+single encoding. Its worker exports the embedded database/updater paths.
+Data-quality CSV writers receive a schema independently of row count and sample
+`min(population,100)`. Ancillary readers share URI escaping and close on setup errors.
+Apple cache comparison checks reread SHA-256 before header deltas.
+`tests.process_output` owns bounded pipe readers, interruption and child liveness;
+Windows uses console Break with a child handler. Scanner cancellation observes the
+actual native process. Quit startup delays a real settings save with bounded events
+and propagates child-thread errors before process exit.
+
+The native lifecycle probe retains application-active, key-window, modal-window
+and visible-window state when its bounded personal-list focus check fails.
+Its shared smoke fixture uses real ingestion and verifies canonical message bytes;
+catalog/search rows alone cannot support standalone viewing or export acceptance.
+This distinguishes an inactive/locked desktop from an assumed menu regression;
+non-interactive reprocessing and Quit checks remain separate evidence.
+
+The processing-history browser fixture refreshes its typed status snapshot while
+checking live search/About footers. Cleanup stops and joins the heartbeat and
+propagates producer failures. Full Make validation batches run serially to retain
+the real installation-guard assertions, not concurrent writers from another batch.

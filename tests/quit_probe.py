@@ -14,7 +14,7 @@ import sqlite3
 import sys
 from pathlib import Path
 from threading import Event, Thread
-from time import sleep
+from time import monotonic, sleep
 
 import webview
 
@@ -23,6 +23,7 @@ from mailarchiver.application import ApplicationController, ApplicationPreferenc
 from mailarchiver.gui_app import (
     GUI_DIRECTORY, GuiApi, PyWebViewApplication, SetupApi, configure_macos_application, install_macos_document_events,
 )
+from mailarchiver.document_options import DocumentOptions, OwnerRulesState
 from mailarchiver.layout import mbox_directory
 from mailarchiver.loopback import LoopbackAssetServer
 from mailarchiver.mbox import PendingPublication, journal_publication
@@ -88,7 +89,16 @@ def main() -> None:
         run_ingest(IngestRequest.model_validate_json((root / "request.json").read_text()), terminal=False)
         return
     controller = ApplicationController(ApplicationPreferencesStore(root / "preferences.json"))
-    app = PyWebViewApplication(controller)
+    startup_finished = Event()
+    startup_errors: list[str] = []
+
+    def probe_exit(code: int) -> None:
+        if mode == "startup" and (not startup_finished.wait(2) or startup_errors):
+            (root / "startup-error").write_text("; ".join(startup_errors) or "startup did not finish")
+            os._exit(2)
+        os._exit(code)
+
+    app = PyWebViewApplication(controller, exit_process=probe_exit)
     # This live non-daemon waiter would hang sys.exit/Py_FinalizeEx indefinitely.
     Thread(target=Event().wait, name="stranded-ui-callback", daemon=False).start()
     if mode in {"blocked", "cooperative"}:
@@ -129,36 +139,41 @@ def main() -> None:
         if mode not in {"lock", "setup-lock"}:
             assert app.has_active_ingest(), "unknown state must still require confirmation"
     if mode == "startup":
-        if sys.platform == "win32":
-            raise RuntimeError("This startup probe requires POSIX FIFOs")
         document = controller.create_document(root / "startup-archive")
         assert document.path is not None
         session = controller.new_search_window(document)
         api = GuiApi(document.path, application=app, document=document, search_window=session)
-        config = document.path / "config.yaml"
-        os.mkfifo(config)
-        started = Event()
+        saving, release = Event(), Event()
+        original_save = DocumentOptions.save
+
+        def delayed_save(options: DocumentOptions, rules: OwnerRules, lease: WriterLease,
+                         revision: str | None = None) -> OwnerRulesState:
+            saving.set()
+            if not release.wait(5):
+                raise TimeoutError("Quit did not release the settings fixture")
+            return original_save(options, rules, lease, revision)
+
+        setattr(DocumentOptions, "save", delayed_save)
 
         def start_import() -> None:
-            assert not app.start_import(api, [], owner_rules=OwnerRules(include=["owner@example.test"]), scan_policy="not-scanned")
-            (root / "startup-stopped").touch()
-
-        Thread(target=start_import, daemon=True).start()
-        descriptor = os.open(config, os.O_WRONLY)
+            try:
+                if app.start_import(api, [], owner_rules=OwnerRules(include=["owner@example.test"]), scan_policy="not-scanned"):
+                    raise AssertionError("a new import started after Quit")
+                (root / "startup-stopped").touch()
+            except BaseException as error:
+                startup_errors.append(f"{type(error).__name__}: {error}")
+            finally:
+                startup_finished.set()
 
         def finish_settings() -> None:
-            assert started.wait(5)
-            sleep(0.3)
-            # Release the delayed read, then allow ordinary repeated settings reads.
-            # Keep the FIFO handle alive only for the first reader already waiting.
-            ready = config.with_suffix(".ready")
-            ready.write_text("{}\n", encoding="utf-8")
-            os.replace(ready, config)
-            os.write(descriptor, b"{}\n")
-            os.close(descriptor)
+            deadline = monotonic() + 5
+            while not app._quitting and monotonic() < deadline:
+                sleep(0.01)
+            release.set()
 
+        Thread(target=start_import, daemon=True).start()
+        assert saving.wait(5), "real settings save did not start"
         Thread(target=finish_settings, daemon=True).start()
-        started.set()
     if mode == "definitions":
         def update_definitions() -> None:
             with app.definitions_activity():

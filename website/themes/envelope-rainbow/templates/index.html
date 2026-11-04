@@ -25,16 +25,14 @@
       </div>
       {% if not primary.windows_url %}<p>No published Windows installer is available for this release; the Windows button opens all releases.</p>{% endif %}
       {% if not primary.mac_url %}<p>No published macOS installer is available for this release; the macOS button opens all releases.</p>{% endif %}
-      {% if primary.windows_help_url %}<p>Read the Windows installation instructions before installing. Older test-signed releases require trusting their included certificate.
-        <a href="{{ primary.windows_help_url }}">Windows installation instructions</a></p>{% endif %}
       <p>macOS installers require Apple Silicon; Windows installers require x64.
         Choose your update stream in the application's Preferences panel.</p>
       <p>Current release: <a href="{{ releases.current_url }}">{{ releases.current_version }}</a>{% if not releases.stable.tag and releases.preview.tag %} (preview){% endif %}</p>
-      <details><summary>Platform links and installation instructions</summary>
+      <details><summary>Platform downloads</summary>
         {% for stream in [releases.stable, releases.preview] %}
         {% if stream.mac_url %}<p>{{ stream.version }}{% if stream.tag == releases.preview.tag %} (preview){% endif %}:
           <a href="{{ stream.mac_url }}">macOS (.dmg)</a>
-          {% if stream.windows_url %} · <a href="{{ stream.windows_url }}">Windows (.msixbundle)</a> · <a href="{{ stream.windows_help_url }}">Windows installation instructions</a>{% endif %}
+          {% if stream.windows_url %} · <a href="{{ stream.windows_url }}">Windows (.msixbundle)</a>{% endif %}
         </p>{% endif %}
         {% endfor %}
         <p><a href="{{ config.extra.readme }}">Read the README</a></p>

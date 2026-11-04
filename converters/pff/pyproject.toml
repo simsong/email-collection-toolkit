@@ -6,7 +6,10 @@ description = "Read-only standalone PST/OST to MCT mboxrd converter"
 requires-python = ">=3.12"
 license = "GPL-3.0-only"
 license-files = ["LICENSE", "COPYRIGHT", "libpff-LGPL.txt"]
-dependencies = ["libpff-python==20231205", "pydantic>=2.13.4"]
+dependencies = [
+    "libpff-python==20260926",
+    "pydantic>=2.13.4",
+]
 
 [project.scripts]
 pff-converter = "pff_converter.cli:main"

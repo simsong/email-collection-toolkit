@@ -11,6 +11,7 @@ from pathlib import Path
 import pytest
 
 from mailarchiver.pdf_mail import extract_pdf_mail, write_pdf_mbox
+from mailarchiver import pdf_mail
 
 DATA = Path(__file__).parent / "data"
 PDF = DATA / "sipbadmin.pdf"
@@ -35,6 +36,23 @@ def _reviewed_body(message: mailbox.mboxMessage) -> str:
 
 def _comparable_text(value: str) -> str:
     return " ".join(value.casefold().split())
+
+
+def test_pdf_publication_does_not_overwrite_a_concurrent_destination(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """PDF export: exclusive final publication must retain a destination created during rendering."""
+    extraction = extract_pdf_mail(PDF)
+    destination = tmp_path / "derived.mboxrd"
+    actual_publish = pdf_mail.publish_exclusive
+
+    def competing_publish(source: Path, target: Path) -> None:
+        target.write_bytes(b"concurrent user output")
+        actual_publish(source, target)
+
+    monkeypatch.setattr(pdf_mail, "publish_exclusive", competing_publish)
+    with pytest.raises(FileExistsError):
+        write_pdf_mbox(extraction, destination)
+    assert destination.read_bytes() == b"concurrent user output"
+    assert list(tmp_path.iterdir()) == [destination]
 
 
 def test_sipbadmin_pdf_extracts_reviewed_message_structure(tmp_path: Path) -> None:

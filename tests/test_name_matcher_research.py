@@ -5,14 +5,13 @@
 from __future__ import annotations
 
 import hashlib
-import mailbox
 import sqlite3
 from pathlib import Path
 
 import pytest
 import yaml
 
-from mailarchiver.mbox import add_message
+from mailarchiver.mbox import PreservingMbox, add_message
 from scripts.name_matcher.ai import AIProvider, AIResult, correlate_results, make_request
 from scripts.name_matcher.build_observations import build_database, publish_evidence
 from scripts.name_matcher.models import SignatureFactKind, SignatureMethod
@@ -91,7 +90,9 @@ def _one_message_archive(path: Path, raw: bytes) -> None:
         (digest, sender_pk),
     ).lastrowid
     mbox_file = path / "data" / "mbox" / "2024-Archive1.mbox"
-    box = mailbox.mbox(mbox_file, create=True)
+    # Requirement: canonical fixture bytes match the catalog hash on every host;
+    # the unadapted Windows stdlib writer translates LF to CRLF.
+    box = PreservingMbox(mbox_file, create=True)
     location = add_message(box, mbox_file, raw)
     box.close()
     generation_pk = catalog.execute(

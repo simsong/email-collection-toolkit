@@ -10,7 +10,6 @@ import json
 import mailbox
 import os
 import re
-import signal
 import sqlite3
 import subprocess
 import sys
@@ -19,6 +18,7 @@ from pathlib import Path
 from shutil import copy, copytree
 
 import pytest
+from tests.process_output import CapturedCommand, python_module
 
 from e2e_tests.eicar_fixture import write_eicar_emlx
 from mailarchiver.__main__ import (
@@ -94,11 +94,43 @@ def run_ingest(
 
 
 def mailbox_message_bytes(path: Path) -> list[bytes]:
-    box = mailbox.mbox(path, factory=None, create=False)
-    try:
-        return [box.get_bytes(key, from_=False) for key in box.iterkeys()]
-    finally:
-        box.close()
+    """Read fixture MBOX framing without the host's stdlib newline conversion."""
+    messages: list[bytes] = []
+    raw = bytearray()
+    last_line = b""
+    started = False
+
+    def record() -> bytes:
+        data = bytes(raw)
+        return data[:-len(last_line)] if last_line in (b"\n", b"\r\n") else data
+
+    with path.open("rb") as stream:
+        for line in stream:
+            if line.startswith(b"From "):
+                if started:
+                    messages.append(record())
+                raw.clear()
+                last_line, started = b"", True
+            elif started:
+                raw.extend(line)
+                last_line = line
+    if started:
+        messages.append(record())
+    return messages
+
+
+@pytest.mark.parametrize("framing", [b"\n", b"\r\n"])
+@pytest.mark.parametrize("separator", [b"", b"\n", b"\r\n"])
+def test_fixture_mbox_reader_preserves_wire_endings(tmp_path: Path, framing: bytes, separator: bytes) -> None:
+    """The byte-preservation oracle must preserve CRLF, LF and quoting on every host."""
+    messages = [b"Subject: wire\r\n\r\ninvalid:\xff\rlone\r\n>From quoted\r\n",
+                b"Subject: local\n\nbody\n"]
+    envelope = b"From fixture Tue Jan  2 10:00:00 2024" + framing
+    stored = b"".join(envelope + raw + separator for raw in messages)
+    path = tmp_path / "mixed.mbox"
+    path.write_bytes(stored)
+    assert mailbox_message_bytes(path) == messages
+    assert path.read_bytes() == stored
 
 
 def assert_success(result: subprocess.CompletedProcess[str]) -> None:
@@ -335,14 +367,14 @@ def test_refresh_index_excludes_quarantine_mailboxes(tmp_path: Path) -> None:
         catalog.close()
 
     refreshed = subprocess.run(
-        [sys.executable, "-m", "mailarchiver", "--archive", str(archive), "refresh-index"],
+        [sys.executable, "-m", "mailarchiver", "--archive", str(archive), "refresh-index", "--workers", "1"],
         check=False,
         capture_output=True,
         text=True,
     )
 
     assert_success(refreshed)
-    assert f"Refreshing search index ({REFRESH_INDEX_DEFAULT_WORKERS} workers)" in refreshed.stderr
+    assert "Refreshing search index (1 workers)" in refreshed.stderr
     search = sqlite3.connect(archive / "search.sqlite3")
     try:
         assert search.execute("SELECT sha256 FROM message_fts").fetchall() == [
@@ -439,23 +471,17 @@ def test_refresh_index_interrupt_retains_prior_search_index(tmp_path: Path) -> N
     finally:
         old_search.close()
 
-    process = subprocess.Popen(
-        [sys.executable, "-m", "mailarchiver", "--archive", str(archive), "refresh-index"],
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        text=True,
-    )
-    assert process.stderr is not None
-    safety_notice = process.stderr.readline()
-    assert "Ctrl-C discards the incomplete replacement" in safety_notice
-    progress = process.stderr.readline()
-    assert progress.startswith("Checking canonical mailboxes:")
-    assert "0/10 messages" in progress
-    assert "ETA calculating" in progress
-    process.send_signal(signal.SIGINT)
-    stdout, stderr = process.communicate(timeout=20)
-
-    assert process.returncode == 130, stdout + stderr
+    with CapturedCommand(python_module("mailarchiver", ["--archive", str(archive), "refresh-index"])) as command:
+        safety_notice = command.stderr.get(timeout=20).decode()
+        assert "Ctrl-C discards the incomplete replacement" in safety_notice
+        progress = command.stderr.get(timeout=20).decode()
+        assert progress.startswith("Checking canonical mailboxes:")
+        assert "0/10 messages" in progress
+        assert "ETA calculating" in progress
+        command.interrupt()
+        result = command.finish(timeout=20)
+    stdout, stderr = result.stdout.decode(), result.stderr.decode()
+    assert result.returncode == 130, stdout + stderr
     assert "discarded incomplete replacement; the existing search index is unchanged" in stderr
     assert "Traceback" not in stderr
     assert not (archive / "search.sqlite3.tmp").exists()
@@ -1001,28 +1027,13 @@ def test_interrupt_stops_cleanly(source_mail: tuple[Path, dict[str, bytes]], tmp
     source, _ = source_mail
     archive = tmp_path / "archive"
     owner_names = Path(__file__).parent / "fixtures" / "owner-names.txt"
-    process = subprocess.Popen(
-        [
-            sys.executable,
-            "-m",
-            "mailarchiver",
-            "--archive",
-            str(archive),
-            "ingest",
-            "--owner-names-file",
-            str(owner_names),
-            "--clamav",
-            str(source),
-        ],
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        text=True,
-    )
-    assert process.stderr is not None
-    assert process.stderr.readline().startswith("started:")
-    process.send_signal(signal.SIGINT)
-    stdout, stderr = process.communicate(timeout=20)
-    assert process.returncode == 130, stdout + stderr
+    with CapturedCommand(python_module("mailarchiver", ["--archive", str(archive), "ingest",
+            "--owner-names-file", str(owner_names), "--clamav", str(source)])) as command:
+        assert command.stderr.get(timeout=20).startswith(b"started:")
+        command.interrupt()
+        result = command.finish(timeout=20)
+    stdout, stderr = result.stdout.decode().replace("\r\n", "\n"), result.stderr.decode()
+    assert result.returncode == 130, stdout + stderr
     assert "interrupted:" in stderr
     assert "**Interrupted. Shutting down…**" in stderr
     assert stderr.index("**Interrupted. Shutting down…**") < stderr.index("interrupted:")

@@ -1,7 +1,19 @@
 # Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved.
 
 """Minimal Cocoa Foundation selectors used by mailarchiver."""
-from typing import Any, Callable, Mapping, Self
+from typing import Any, Callable, Mapping, NamedTuple, Self
+
+class NSPoint(NamedTuple):
+    x: float
+    y: float
+
+class NSSize(NamedTuple):
+    width: float
+    height: float
+
+class NSRect(NamedTuple):
+    origin: NSPoint
+    size: NSSize
 
 class NSSet:
     @classmethod

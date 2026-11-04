@@ -5,12 +5,8 @@
 from __future__ import annotations
 
 import queue
-import multiprocessing
 import os
 import re
-import select
-import signal
-import subprocess
 import sys
 import textwrap
 import threading
@@ -54,6 +50,10 @@ from mailarchiver.processing.runtime import run
 from mailarchiver.processing.store import connect, enqueue, submit
 from mailarchiver.processing_progress import saved_messages_remaining
 from tests.test_processing import MESSAGE, plugin
+from tests.process_output import CapturedCommand, INTERRUPT_SETUP
+from mailarchiver.scanner import ClamScanner
+from mailarchiver.windows_scanner import ScannerProcess
+from multiprocessing.process import BaseProcess
 
 
 def test_overall_progress_uses_concurrent_source_bytes_for_percentage_and_eta() -> None:
@@ -334,19 +334,29 @@ def test_blocking_clamav_preflight_keeps_live_status(tmp_path: Path, monkeypatch
     reporter.finish("completed")
 
 
-def test_cancelled_ingest_scanner_startup_reaps_native_worker() -> None:
+def test_cancelled_ingest_scanner_startup_reaps_native_worker(monkeypatch: pytest.MonkeyPatch) -> None:
     """SCANNING: cancelling the startup future releases its real owned scanner process."""
-    prior = {child.pid for child in multiprocessing.active_children()}
-    cancelled: list[int | None] = []
+    scanners: list[ClamScanner] = []
+    cancelled: list[BaseProcess | ScannerProcess] = []
+    # Observe the real constructor only; startup, IPC and native engines remain real.
+    def observe(status_callback: Callable[[], None], *, workers: int) -> ClamScanner:
+        scanner = ClamScanner(status_callback, workers=workers)
+        scanners.append(scanner)
+        return scanner
+    monkeypatch.setattr("mailarchiver.__main__.ClamScanner", observe)
     def cancel() -> None:
-        children = [child.pid for child in multiprocessing.active_children() if child.pid not in prior]
-        if children:
-            cancelled.extend(children)
+        worker = scanners[0].process
+        if not cancelled and worker is not None and worker.pid is not None and worker.is_alive():
+            cancelled.append(worker)
             raise IngestInterrupted("suspend during scanner startup")
-    with pytest.raises(IngestInterrupted, match="suspend during scanner startup"):
-        start_ingest_scanner(cancel, 2)
-    assert cancelled
-    assert not {child.pid for child in multiprocessing.active_children()} - prior
+    try:
+        with pytest.raises(IngestInterrupted, match="suspend during scanner startup"):
+            start_ingest_scanner(cancel, 2)
+        assert cancelled and all(not worker.is_alive() for worker in cancelled)
+        assert all(scanner.process is None and scanner.runtime is None for scanner in scanners)
+    finally:
+        for scanner in scanners:
+            scanner.__exit__()
 
 
 def test_file_worker_pool_runs_no_more_than_requested_mailfiles() -> None:
@@ -434,7 +444,7 @@ def test_file_worker_pool_preserves_deferred_discovery_traceback() -> None:
 def test_interrupt_notice_precedes_worker_shutdown(tmp_path: Path) -> None:
     """Real SIGINT acknowledges immediately, even while a worker cannot yet finish."""
     release = tmp_path / "release-worker"
-    script = textwrap.dedent("""
+    script = INTERRUPT_SETUP + textwrap.dedent("""
         import sys, threading, time
         from pathlib import Path
         from mailarchiver.__main__ import ProgressReporter, run_file_workers
@@ -456,31 +466,23 @@ def test_interrupt_notice_precedes_worker_shutdown(tmp_path: Path) -> None:
             print('cleanup complete', flush=True)
             raise SystemExit(130)
     """)
-    process = subprocess.Popen([sys.executable, "-c", script, str(release)], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-    assert process.stdout is not None and process.stderr is not None
-    try:
-        assert select.select([process.stdout], [], [], 10)[0], "worker did not start"
-        assert process.stdout.readline() == b"worker-ready\n"
-        process.send_signal(signal.SIGINT)
-        deadline = time.monotonic() + 2
-        received = b""
-        while b"**Interrupted. Shutting down" not in received:
-            remaining = deadline - time.monotonic()
-            assert remaining > 0 and select.select([process.stderr], [], [], remaining)[0], "no immediate interrupt acknowledgement"
-            chunk = os.read(process.stderr.fileno(), 8192)
-            assert chunk, "process exited without acknowledging interruption"
-            received += chunk
-        assert process.poll() is None, "worker must still be blocked when the notice arrives"
-        release.touch()
-        stdout, stderr = process.communicate(timeout=10)
-        assert process.returncode == 130
-        assert b"cleanup complete" in stdout
-        assert (received + stderr).count(b"**Interrupted. Shutting down") == 1
-    finally:
-        release.touch()
-        if process.poll() is None:
-            process.kill()
-        process.wait(timeout=10)
+    with CapturedCommand([sys.executable, "-c", script, str(release)]) as child:
+        try:
+            assert child.stdout.get(timeout=10).rstrip(b"\r\n") == b"worker-ready"
+            child.interrupt()
+            deadline = time.monotonic() + 2
+            received = b""
+            while b"**Interrupted. Shutting down" not in received:
+                received += child.stderr.get(timeout=max(0.01, deadline - time.monotonic()))
+                assert time.monotonic() <= deadline, "no immediate interrupt acknowledgement"
+            assert child.process.poll() is None, "worker must still be blocked when the notice arrives"
+            release.touch()
+            result = child.finish(timeout=10)
+            assert result.returncode == 130
+            assert b"cleanup complete" in result.stdout
+            assert result.stderr.count(b"**Interrupted. Shutting down") == 1
+        finally:
+            release.touch()
 
 
 def test_interrupt_notice_survives_dashboard_redraw(capsys: pytest.CaptureFixture[str]) -> None:

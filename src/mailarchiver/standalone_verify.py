@@ -78,7 +78,7 @@ import os
 import re
 import sys
 import time
-from collections.abc import Iterable
+from collections.abc import Generator, Iterable
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path, PurePosixPath
@@ -483,7 +483,7 @@ def _parse_token(token: object, standards: list[HashStandard]) -> tuple[HashStan
     return standard, digest
 
 
-def _stored_candidates(box: mailbox.mbox, key: str) -> Iterable[bytes]:
+def _stored_candidates(box: mailbox.mbox, key: str) -> Generator[bytes, None, None]:
     """Independently recover mboxrd, legacy mboxo, envelope and final-LF variants."""
     with box.get_file(key, from_=True) as source:
         record = source.read()
@@ -511,8 +511,9 @@ def _stored_candidates(box: mailbox.mbox, key: str) -> Iterable[bytes]:
             if stored.endswith(b"\r\n"):
                 variants.append(stored[:-2])
             for variant in variants:
-                if variant not in seen:
-                    seen.add(variant)
+                fingerprint = hashlib.sha256(variant).digest()
+                if fingerprint not in seen:
+                    seen.add(fingerprint)
                     yield variant
 
 

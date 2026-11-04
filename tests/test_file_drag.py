@@ -47,6 +47,48 @@ def test_file_drags_reject_paths_and_missing_exports(tmp_path: Path) -> None:
     assert exports.resolve(token) is None
 
 
+def test_native_drag_bridge_rejects_foreign_paths_tokens_and_closed_windows(tmp_path: Path) -> None:
+    """Native drag cannot turn a renderer-supplied path or another window's token into file access."""
+    archive = make_gui_archive(tmp_path)
+    owner = GuiApi(archive, temporary_directory=tmp_path / "owner")
+    other = GuiApi(archive, temporary_directory=tmp_path / "other")
+    exported = owner.prepare_drag([1])
+    path = FILE_DRAGS.resolve(exported["token"])
+    assert path is not None
+    for token in (str(path), path.as_uri(), exported["token"]):
+        with pytest.raises(ValueError, match="no longer available"):
+            other.start_drag(token)
+    path.unlink()
+    with pytest.raises(ValueError, match="no longer available"):
+        owner.start_drag(exported["token"])
+    owner.close()
+    with pytest.raises(ValueError, match="no longer available"):
+        owner.start_drag(exported["token"])
+    other.close()
+
+
+def test_parent_cleanup_retains_active_child_export_until_transfer_finishes(tmp_path: Path) -> None:
+    """Parent/quit cleanup revokes child tokens without deleting an active transfer's bytes."""
+    archive = make_gui_archive(tmp_path)
+    parent = GuiApi(archive)
+    child = GuiApi(archive)
+    parent.children.append(child)
+    parent_export = parent.prepare_drag([1])
+    parent_path = FILE_DRAGS.resolve(parent_export["token"])
+    child_export = child.prepare_drag([1])
+    try:
+        with child._drag_export(child_export["token"]) as path:
+            parent.cleanup_exports(quitting=True)
+            assert parent_path is not None and not parent_path.exists()
+            assert FILE_DRAGS.resolve(child_export["token"]) is None
+            assert path.read_bytes() == SIMPLE_MESSAGE
+            with pytest.raises(ValueError, match="viewer is closed"):
+                child.prepare_drag([1])
+        assert not path.exists()
+    finally:
+        parent.close()
+
+
 @pytest.mark.skipif(sys.platform != "darwin", reason="requires the macOS pasteboard")
 @pytest.mark.parametrize("suffix", [".eml", ".zip"])
 def test_native_drag_writers_advertise_files_only(tmp_path: Path, suffix: str) -> None:

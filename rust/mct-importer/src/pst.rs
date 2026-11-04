@@ -579,6 +579,9 @@ pub fn import_selected(
     let mut selection_complete = false;
     while let Some((node, depth)) = pending.pop() {
         progress.tick("extracting")?;
+        if NodeId::from(node).id_type().ok() == Some(NodeIdType::SearchFolder) {
+            continue;
+        }
         let folder_result = (|| -> Result<()> {
             ensure!(depth <= MAX_DEPTH, "folder nesting exceeds {MAX_DEPTH}");
             ensure!(visited.insert(node), "folder cycle or duplicate node");

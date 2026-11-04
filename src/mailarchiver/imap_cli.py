@@ -34,6 +34,7 @@ from .worker_preferences import worker_argument
 from .archive_config import load_archive_config, save_archive_config
 from .imap_credentials import password_for, save_password
 from .imap_models import ImapAccount, ImapTotals
+from .imap_protocol import ImapPaused
 from .imap_source import imap_locator
 from .imap_state import totals
 from .owner_rules import OwnerRules
@@ -190,6 +191,9 @@ def synchronize(args: argparse.Namespace) -> int:
         run_ingest(request, writer_lease=lease, terminal=False, stop_event=stop)
         result = "completed"
         return 0
+    except ImapPaused as error:
+        result = f"paused; {error}"
+        return 75
     except KeyboardInterrupt:
         result = "interrupted; saved progress will resume on the next run"
         return 130

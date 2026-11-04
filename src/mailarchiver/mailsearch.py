@@ -17,6 +17,8 @@ Fundamental dependents:
 from __future__ import annotations
 
 import argparse
+from collections.abc import Iterator
+from contextlib import contextmanager
 import json
 import re
 import shlex
@@ -41,7 +43,8 @@ from .layout import mbox_path
 from .mailbox_tree import MailboxSelection
 from .mbox import MboxLocation, read_verified_location
 from .message import decoded_header
-from .search import SEARCH_CATEGORIES, decoded_part, html_text, is_attachment
+from .search import SEARCH_CATEGORIES, decoded_part, html_text
+from .mime_tree import walk_mime
 from .processing.identities import IdentityMessages
 from .search_selectors import SELECTORS, SearchStatement, prepare_names, selector_for
 from .search_text import (
@@ -458,6 +461,25 @@ def _is_plain_recent_text_search(
     ))
 
 
+@contextmanager
+def _search_session(archive: Path) -> Iterator[tuple[sqlite3.Connection, SearchIndexStamp | None]]:
+    """Keep page/count vocabulary preparation on the same read-only snapshot contract."""
+    catalog_path, search_path = archive / "archive.sqlite3", archive / "search.sqlite3"
+    if not catalog_path.is_file() or not search_path.is_file():
+        raise ValueError(f"{archive} must contain archive.sqlite3 and search.sqlite3")
+    database = sqlite3.connect(sqlite_uri(catalog_path), uri=True)
+    try:
+        before = SearchIndexStamp.read(search_path)
+        database.execute("ATTACH DATABASE ? AS search", (sqlite_uri(search_path),))
+        database.execute("BEGIN")
+        database.execute("SELECT version FROM search.schema_info").fetchone()
+        after = SearchIndexStamp.read(search_path)
+        stamp = before if before == after and database.execute("PRAGMA search.journal_mode").fetchone()[0] == "delete" else None
+        yield database, stamp
+    finally:
+        database.close()
+
+
 def search_header_page(
     archive: Path,
     terms: SearchTerms,
@@ -470,17 +492,7 @@ def search_header_page(
     find_older: bool = False,
     complete_sort: bool = False,
 ) -> SearchHeaderPage:
-    catalog_path, search_path = archive / "archive.sqlite3", archive / "search.sqlite3"
-    if not catalog_path.is_file() or not search_path.is_file():
-        raise ValueError(f"{archive} must contain archive.sqlite3 and search.sqlite3")
-    database = sqlite3.connect(sqlite_uri(catalog_path), uri=True)
-    try:
-        before = SearchIndexStamp.read(search_path)
-        database.execute("ATTACH DATABASE ? AS search", (sqlite_uri(search_path),))
-        database.execute("BEGIN")
-        database.execute("SELECT version FROM search.schema_info").fetchone()
-        after = SearchIndexStamp.read(search_path)
-        stamp = before if before == after and database.execute("PRAGMA search.journal_mode").fetchone()[0] == "delete" else None
+    with _search_session(archive) as (database, stamp):
         prepare_names(database, archive)
         terms = terms.model_copy(update={"address_names": True})
         terms = _prepare_text(database, terms, search_attachments, stamp)
@@ -507,8 +519,6 @@ def search_header_page(
                 for row in database.execute(statement.sql, statement.parameters)
             ]
         )
-    finally:
-        database.close()
 
 
 def search_result_count(
@@ -519,24 +529,12 @@ def search_result_count(
     maximum: int | None = None,
 ) -> int:
     """Count searchable matches, stopping at ``maximum`` when supplied."""
-    catalog_path, search_path = archive / "archive.sqlite3", archive / "search.sqlite3"
-    if not catalog_path.is_file() or not search_path.is_file():
-        raise ValueError(f"{archive} must contain archive.sqlite3 and search.sqlite3")
-    database = sqlite3.connect(sqlite_uri(catalog_path), uri=True)
-    try:
-        before = SearchIndexStamp.read(search_path)
-        database.execute("ATTACH DATABASE ? AS search", (sqlite_uri(search_path),))
-        database.execute("BEGIN")
-        database.execute("SELECT version FROM search.schema_info").fetchone()
-        after = SearchIndexStamp.read(search_path)
-        stamp = before if before == after and database.execute("PRAGMA search.journal_mode").fetchone()[0] == "delete" else None
+    with _search_session(archive) as (database, stamp):
         prepare_names(database, archive)
         terms = terms.model_copy(update={"address_names": True})
         terms = _prepare_text(database, terms, search_attachments, stamp)
         statement = _count_statement(terms, search_attachments, mailbox_selections, maximum)
         return int(database.execute(statement.sql, statement.parameters).fetchone()[0])
-    finally:
-        database.close()
 
 
 def search_headers(
@@ -568,8 +566,8 @@ def rendered_headers(message: Message, full: bool) -> str:
 
 
 def text_parts(message: Message, content_type: str) -> list[str]:
-    parts = message.walk() if message.is_multipart() else [message]
-    return [decoded_part(part) for part in parts if part.get_content_type() == content_type and not is_attachment(part)]
+    return [decoded_part(node.part) for node in walk_mime(message)
+            if node.part.get_content_type() == content_type and not node.attachment]
 
 
 def render_message(raw: bytes, full_headers: bool, html: bool) -> str:

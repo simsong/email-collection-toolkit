@@ -26,10 +26,10 @@ from striprtf.striprtf import rtf_to_text
 
 from ..encoding import decode_text
 from ..reply_addresses import RoutingCandidate
-from ..message import MetadataDefect, ParsedMessage, decoded_header, decoded_message_header, parse_message
+from ..message import MetadataDefect, ParsedMessage, decoded_header, decoded_message_header, header_addresses, parse_message
 from ..search import html_text, suggested_addresses
 from .api import Emission, Handoff, ProcessingObject, ProcessingResult, PromotedMessage
-from .contracts import AddressEvidence, Filing, HeaderMetadata, MimeInventory, ScanEvidence, ScanFailure, ScanStatus, TextContent
+from .contracts import AddressEvidence, Filing, HeaderMetadata, MimeInventory, ScanEvidence, ScanFailure, TextContent
 from ..scan_evidence import DETECTION_HEADER, ENGINE_HEADER, DEFINITIONS_HEADER
 from .phones import signature_phone_numbers
 from .mime import ExtractionLimitError, MimeLimits, extract_parts, read_headers
@@ -119,17 +119,6 @@ class ClamAVProcessor:
 
 
 
-def scan_result(returncode: int, stdout: bytes, stderr: bytes, versions: ScanEvidence) -> ScanEvidence:
-    """Interpret actual scanner responses; heuristic limits are not clean scans."""
-    detail = (stdout + b"\n" + stderr).decode("utf-8", "replace").strip()[-4096:]
-    status: ScanStatus = "clean" if returncode == 0 else "infected" if returncode == 1 else "scanner-error"
-    detections = re.findall(r": (.+) FOUND(?:\r?\n|$)", stdout.decode("utf-8", "replace"))
-    if returncode == 1 and detections and all(name.startswith(("Heuristics.Limits.Exceeded", "Heuristics.Encrypted")) for name in detections):
-        status = "unscannable"
-    return ScanEvidence(status=status, detail=detail or f"clamdscan exit {returncode}",
-                        engine_version=versions.engine_version, signature_version=versions.signature_version)
-
-
 def quarantine_metadata(item: ProcessingObject) -> ParsedMessage:
     """A positive scan must file original bytes even when metadata is unusable."""
     try:
@@ -168,11 +157,11 @@ class HeaderProcessor:
             end = source.tell()
             source.seek(0)
             raw = source.read(end)
-        suggestions = tuple(suggested_addresses(headers))
+        suggestions = tuple(suggested_addresses(headers, parsed.defects))
         search_headers = "\n".join(decoded_message_header(raw, headers, name) for name in ("From", "To", "Cc", "Subject", "Date"))
         routing=tuple(RoutingCandidate(address=address.strip(),display_name=decoded_header(name),header=field)
             for field in ('from','to','cc','bcc','reply-to')
-            for name,address in getaddresses([str(value) for value in headers.get_all(field,[])]) if address.strip())
+            for name,address in header_addresses(headers, field, parsed.defects) if address.strip())
         return ProcessingResult(headers=HeaderMetadata(parsed=parsed, suggestions=suggestions, search_headers=search_headers,routing_candidates=routing),
             evidence=tuple(AddressEvidence(address=identity.address, name=identity.display_name, kind="header")
                            for identity in suggestions if "@" in identity.address))

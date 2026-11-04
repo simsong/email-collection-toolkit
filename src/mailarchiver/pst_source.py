@@ -17,8 +17,6 @@ from __future__ import annotations
 
 import hashlib
 import os
-import shutil
-import sys
 import subprocess
 import tempfile
 import time
@@ -31,6 +29,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from .clamav_definitions import LIBRARY_ENV, DATABASE_ENV, CERTIFICATES_ENV, library_path, selected_definitions, certificates_path
 from .plugin_api import FileProbe, MailContainer, MailObject, PluginContext, ProgressEvent
 from .sources import LocalSourcePlugin, MboxFileParser
+from .importer_tools import importer_executable
 
 IMPORT_HEADERS = (b"X-Imported-URI: ", b"X-Importer-Name: ", b"X-Importer-Version: ")
 
@@ -106,15 +105,7 @@ class PstFileParser:
         if self.context.archive is None:
             raise ValueError("PST extraction requires an archive workspace")
         settings = PstSettings.model_validate(self.context.get_my_config())
-        bundled = Path(getattr(sys, "_MEIPASS", "")) / "importers/pst-importer"
-        executable = settings.executable or (str(bundled) if getattr(sys, "frozen", False) else shutil.which("pst-importer"))
-        if executable is None:
-            candidate = Path(__file__).resolve().parents[2] / "target" / "release" / "pst-importer"
-            if candidate.is_file():
-                executable = str(candidate)
-        if executable is None:
-            raise FileNotFoundError("PST importer unavailable; run make pst-importer or configure plugins.pst.executable")
-        program = Path(executable).resolve()
+        program = importer_executable("pst-importer", settings.executable)
         source = LocalSourcePlugin.source_file(container)
         root = self.context.archive / "processing-pst"
         root.mkdir(exist_ok=True)
