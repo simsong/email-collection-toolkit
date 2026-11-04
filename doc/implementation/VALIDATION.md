@@ -10,7 +10,9 @@ live in [plans](../plans/README.md); historical evidence does not validate this 
 The native reader helper wraps evaluated expressions in an async function so
 pywebview delivers scalar and Promise results through its Promise-only callback.
 The real native run checks numeric, false, null and Promise results before reader
-operations. Its direct background import opens Ingests explicitly before checking
+operations, verifies pywebview's direct scalar return separately, and requires
+synchronous errors and rejected Promises to retain their diagnostics through a
+typed result envelope. Its direct background import opens Ingests explicitly before checking
 that window's version and capturing its frame.
 Name-linkage fixtures use the canonical byte-preserving MBOX writer rather than
 the unadapted Windows stdlib writer, avoiding newline-induced hash mismatches.

@@ -26,7 +26,8 @@ deadline, which must permit the existing import deadline and
 Preferences Close/reopen checks without dropping their assertions. CI must allow
 the complete ordinary suite to finish; timeout changes do not establish success.
 Native JavaScript checks must collect synchronous scalar values, including false
-and null, as well as Promise results. Import-window acceptance must explicitly
+and null, as well as Promise results; thrown errors and rejected Promises must
+fail with their JavaScript diagnostics. Import-window acceptance must explicitly
 open the Ingests window when calling the background import service directly.
 Stop/restart fixtures must prove partial durable publication and exact recovery
 without turning acceptance into a bulk throughput benchmark. Real OST acquisition

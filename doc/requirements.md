@@ -48,7 +48,8 @@ platform acceptance and deferred work.
 
 - Source and relocated native acceptance retain current phase and timeout diagnostics; bounded
   deadlines must allow the component checks to run. JavaScript checks must collect
-  both scalar and Promise results. See [validation](requirements/VALIDATION.md).
+  both scalar and Promise results and report JavaScript errors.
+  See [validation](requirements/VALIDATION.md).
 
 - Research process-memory reports must use byte units on macOS, Linux and Windows.
 

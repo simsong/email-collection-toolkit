@@ -31,6 +31,7 @@ Rust delivery plans and historical package checks are not current acceptance.
 
 Native reader acceptance collects scalar JavaScript results through the same
 Promise callback as asynchronous checks, fixing a false standalone-window timeout.
+Synchronous JavaScript errors and rejected Promises retain explicit failure diagnostics.
 Research memory reporting supports Windows and normalizes Linux RSS to bytes.
 Research archive fixtures preserve original line endings on Windows.
 

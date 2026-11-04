@@ -20,6 +20,7 @@ import sys
 import tempfile
 from threading import Event
 from time import monotonic
+from typing import Any
 
 from pydantic import BaseModel
 
@@ -31,6 +32,13 @@ class DesktopResult(BaseModel):
     passed: bool
     error: str | None = None
     phase: str = "startup"
+
+
+class JavaScriptResult(BaseModel):
+    """Typed result envelope at the native JavaScript boundary."""
+
+    value: Any = None
+    error: str | None
 
 
 class NativeDragGeometry(BaseModel):
@@ -420,11 +428,16 @@ def desktop_check(output: Path) -> None:
             finished.set()
         # pywebview invokes callbacks only for Promises, returning scalars directly.
         # Normalize both forms so scalar selections use the same bounded wait.
-        expression = f"(async () => {{ return eval({json.dumps(script)}); }})()"
+        expression = ("(async () => { try { return {value: await eval("
+                      + json.dumps(script) + "), error: null}; } "
+                      "catch (error) { return {value: null, error: String(error)}; } })()")
         (window or api.window).evaluate_js(expression, callback=receive)
         if not finished.wait(20):
             raise TimeoutError("Native UI operation timed out")
-        return values[0]
+        result = JavaScriptResult.model_validate(values[0])
+        if result.error is not None:
+            raise RuntimeError(f"Native JavaScript evaluation failed: {result.error}")
+        return result.value
 
     def exercise() -> None:
         try:
@@ -434,10 +447,25 @@ def desktop_check(output: Path) -> None:
             # Requirement: native acceptance collects scalar and Promise results,
             # including false/null, without mistaking a missing callback for UI failure.
             progress("JavaScript result delivery")
+            callbacks = []
+            direct = api.window.evaluate_js("41", callback=callbacks.append)
+            if direct != 41 or callbacks:
+                raise AssertionError("Scalar evaluations must return directly without a Promise callback")
             for script, expected in (("1", 1), ("false", False), ("null", None),
                                      ("Promise.resolve('ready')", "ready")):
                 if evaluate(script) != expected:
                     raise AssertionError(f"Native JavaScript result was lost: {script}")
+            for script, expected in (
+                    ("(() => { throw new Error('synthetic synchronous failure'); })()", "synthetic synchronous failure"),
+                    ("Promise.reject(new Error('synthetic rejected promise'))", "synthetic rejected promise")):
+                try:
+                    evaluate(script)
+                except RuntimeError as error:
+                    if expected not in str(error):
+                        raise AssertionError("Native JavaScript error lost its diagnostic") from error
+                else:
+                    raise AssertionError("Native JavaScript error was mistaken for a successful result")
+            progress("JavaScript values and errors verified")
             progress("Search and message rendering")
             answer = evaluate("(async () => { while (!document.title.includes('synthetic.mailarchive')) "
                               "await new Promise(resolve => setTimeout(resolve, 25)); elements.search.value='observatory'; "

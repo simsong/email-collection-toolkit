@@ -4,6 +4,7 @@
 
 Native reader acceptance normalizes JavaScript evaluations to Promises before
 waiting for pywebview callbacks, including scalar selections and false/null results.
+An explicit result envelope retains synchronous errors and rejected Promises as failures.
 Name-linkage reports read Windows peak working set through the native process API;
 POSIX peak RSS is normalized from its platform units to bytes.
 
