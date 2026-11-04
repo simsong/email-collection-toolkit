@@ -9,16 +9,18 @@
 from __future__ import annotations
 
 import argparse
+import ctypes
 import hashlib
 import html
 import importlib.metadata
+from importlib import import_module
 import json
 import logging
 import os
 import random
 import re
-import resource
 import sqlite3
+import sys
 import time
 
 import yaml
@@ -36,6 +38,33 @@ from .linkage import FEATURES, ROLE, SEED, BlockingSummary, Pair, Profile, Quali
 
 THRESHOLDS = (0.5, 0.9, 0.99, 0.999)
 DEFAULT_THRESHOLD = 0.99
+
+
+class _MemoryCounters(ctypes.Structure):
+    cb: int
+    PeakWorkingSetSize: int
+    _fields_ = [("cb", ctypes.c_uint32), ("PageFaultCount", ctypes.c_uint32)] + [
+        (name, ctypes.c_size_t) for name in (
+            "PeakWorkingSetSize", "WorkingSetSize", "QuotaPeakPagedPoolUsage",
+            "QuotaPagedPoolUsage", "QuotaPeakNonPagedPoolUsage", "QuotaNonPagedPoolUsage",
+            "PagefileUsage", "PeakPagefileUsage")]
+
+
+def peak_rss_bytes() -> int:
+    """Report the process high-water resident memory in bytes on each host."""
+    if sys.platform != "win32":
+        resource = import_module("resource")
+        peak = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+        return int(peak) * (1 if sys.platform == "darwin" else 1024)
+    kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel.GetCurrentProcess.restype = ctypes.c_void_p
+    kernel.K32GetProcessMemoryInfo.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_uint32]
+    kernel.K32GetProcessMemoryInfo.restype = ctypes.c_int
+    counters = _MemoryCounters()
+    counters.cb = ctypes.sizeof(counters)
+    if not kernel.K32GetProcessMemoryInfo(kernel.GetCurrentProcess(), ctypes.byref(counters), counters.cb):
+        raise ctypes.WinError(ctypes.get_last_error())
+    return int(counters.PeakWorkingSetSize)
 
 
 class Timing(BaseModel):
@@ -456,7 +485,7 @@ def main() -> None:
         candidate_sha256=fingerprint,preparation=preparation,blocking=blocking,block_summary=blocking_summary,
         versions={name:importlib.metadata.version(name) for name in ('dedupe','splink','duckdb','numpy','scikit-learn')})
     run_engines(summary,profiles,pairs,output)
-    summary.process_peak_rss_bytes=resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+    summary.process_peak_rss_bytes=peak_rss_bytes()
     summary.source_unchanged=verify_source(output,archive)
     (output/'summary.json').write_text(summary.model_dump_json(indent=2))
     render_report(summary,profiles,output)

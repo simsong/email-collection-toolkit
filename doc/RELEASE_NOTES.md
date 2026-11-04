@@ -29,6 +29,11 @@ Rust delivery plans and historical package checks are not current acceptance.
 
 ## Windows desktop parity
 
+Native reader acceptance collects scalar JavaScript results through the same
+Promise callback as asynchronous checks, fixing a false standalone-window timeout.
+Research memory reporting supports Windows and normalizes Linux RSS to bytes.
+Research archive fixtures preserve original line endings on Windows.
+
 Close the rebuilt search database before replacing the live index on Windows,
 and keep macOS Full Disk Access instructions out of Windows file-error guidance.
 

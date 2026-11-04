@@ -354,6 +354,7 @@ def check_native_import(application, output: Path) -> None:
     if not application.start_import(api, [source], owner_rules=OwnerRules(include=["*@example.test"]),
                                     scan_policy="clamav" if sys.platform == "win32" else "not-scanned"):
         raise AssertionError("Native desktop import did not start")
+    application.open_ingest_window(document)
     deadline = monotonic() + 120
     while document.ingest_job is not None and monotonic() < deadline:
         Event().wait(0.05)
@@ -417,7 +418,10 @@ def desktop_check(output: Path) -> None:
         def receive(value):
             values.append(value)
             finished.set()
-        (window or api.window).evaluate_js(script, callback=receive)
+        # pywebview invokes callbacks only for Promises, returning scalars directly.
+        # Normalize both forms so scalar selections use the same bounded wait.
+        expression = f"(async () => {{ return eval({json.dumps(script)}); }})()"
+        (window or api.window).evaluate_js(expression, callback=receive)
         if not finished.wait(20):
             raise TimeoutError("Native UI operation timed out")
         return values[0]
@@ -427,6 +431,13 @@ def desktop_check(output: Path) -> None:
             progress("Search loading")
             if not api.window.events.loaded.wait(25):
                 raise TimeoutError("Search window did not load")
+            # Requirement: native acceptance collects scalar and Promise results,
+            # including false/null, without mistaking a missing callback for UI failure.
+            progress("JavaScript result delivery")
+            for script, expected in (("1", 1), ("false", False), ("null", None),
+                                     ("Promise.resolve('ready')", "ready")):
+                if evaluate(script) != expected:
+                    raise AssertionError(f"Native JavaScript result was lost: {script}")
             progress("Search and message rendering")
             answer = evaluate("(async () => { while (!document.title.includes('synthetic.mailarchive')) "
                               "await new Promise(resolve => setTimeout(resolve, 25)); elements.search.value='observatory'; "

@@ -391,6 +391,10 @@ does not reprocess messages or import private research evidence.
 
 ## Optional name-linkage comparison
 
+The experiment report reads Windows peak working set using `K32GetProcessMemoryInfo`.
+Other hosts use `getrusage`; Linux KiB values are converted to bytes while macOS
+values already use bytes. The memory regression retains a real touched allocation.
+
 An additional Splink comparison enables native full-name term-frequency
 adjustments. The unadjusted engine remains a separate baseline. A real-engine
 regression compares rare/common exact names while holding other fields equal.

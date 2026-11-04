@@ -683,6 +683,8 @@ def test_reporter_updates_while_sync_is_running(tmp_path: Path, capsys: pytest.C
 @pytest.mark.parametrize("scan", [False, True])
 def test_cli_ctrl_c_checkpoints_and_next_invocation_resumes(tmp_path: Path, imap_server: DisposableImap, scan: bool) -> None:
     """Interrupt the real CLI process during downloads, then finish without duplicate publication."""
+    if sys.platform == "win32":
+        pytest.skip("POSIX SIGINT delivery; native Windows console acceptance remains separate")
     server = imap_server
     account = server.account
     assert account is not None
@@ -771,6 +773,8 @@ def test_configuration_identity_changes_and_legacy_compatibility(tmp_path: Path)
 @pytest.mark.skipif(sys.platform == "win32", reason="POSIX PTY; Windows native password-prompt acceptance remains separate")
 def test_cli_new_archive_prompts_save_secret_and_run(tmp_path: Path, imap_server: DisposableImap) -> None:
     """Drive real terminal prompts through --new, including hidden password entry and saved reuse."""
+    if sys.platform == "win32":
+        pytest.skip("POSIX PTY; Windows native password-prompt acceptance remains separate")
     import pty  # pylint: disable=import-outside-toplevel
     import select  # pylint: disable=import-outside-toplevel
     server = imap_server

@@ -47,7 +47,10 @@ platform acceptance and deferred work.
   and retain signature verification; see [delivery](requirements/DELIVERY.md).
 
 - Source and relocated native acceptance retain current phase and timeout diagnostics; bounded
-  deadlines must allow the component checks to run. See [validation](requirements/VALIDATION.md).
+  deadlines must allow the component checks to run. JavaScript checks must collect
+  both scalar and Promise results. See [validation](requirements/VALIDATION.md).
+
+- Research process-memory reports must use byte units on macOS, Linux and Windows.
 
 - Preferences persist half-CPU, all-CPU or custom worker limits, defaulting to
   half the logical CPUs and never exceeding twice that count. Explicit CLI

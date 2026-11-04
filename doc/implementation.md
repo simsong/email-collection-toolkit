@@ -2,6 +2,11 @@
 
 # Mail archive normalizer implementation
 
+Native reader acceptance normalizes JavaScript evaluations to Promises before
+waiting for pywebview callbacks, including scalar selections and false/null results.
+Name-linkage reports read Windows peak working set through the native process API;
+POSIX peak RSS is normalized from its platform units to bytes.
+
 Windows Preferences uses the shared worker/update policy, serializes automatic
 saves, and asynchronously flushes active edits before native Close. Its JavaScript
 API uses the shared method-only bridge to avoid native-object traversal. See

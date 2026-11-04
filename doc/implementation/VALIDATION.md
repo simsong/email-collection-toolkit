@@ -7,6 +7,14 @@ live in [plans](../plans/README.md); historical evidence does not validate this 
 
 ## Shared acceptance coverage
 
+The native reader helper wraps evaluated expressions in an async function so
+pywebview delivers scalar and Promise results through its Promise-only callback.
+The real native run checks numeric, false, null and Promise results before reader
+operations. Its direct background import opens Ingests explicitly before checking
+that window's version and capturing its frame.
+Name-linkage fixtures use the canonical byte-preserving MBOX writer rather than
+the unadapted Windows stdlib writer, avoiding newline-induced hash mismatches.
+
 The fixture MBOX reader parses binary envelope/separator lines independently of
 `mailbox.get_bytes`, which normalizes CRLF on Windows. A mixed-ending regression
 checks its byte oracle with independent LF/CRLF envelopes and separators. The tiny PST

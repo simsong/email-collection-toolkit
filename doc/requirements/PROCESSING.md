@@ -332,6 +332,9 @@ No Requests-based fetching or public-suffix network update occurs at runtime.
 
 ## Local name-linkage research
 
+Process high-water resident-memory measurements use bytes on macOS, Linux and
+Windows, with failures reported rather than invented measurements.
+
 Person-focused Name and research views shall hide recognized company/organization
 and service identities by default, with a control to show excluded entries.
 Unknown and conflicting names remain visible. Filtering changes no canonical

@@ -18,13 +18,23 @@ from pathlib import Path
 import pytest
 
 from scripts.name_matcher.engines import fit_dedupe, fit_splink, score_dedupe, score_splink, splink_on_new_profiles
-from scripts.name_matcher.experiments import prepare_profiles, validate_evidence
+from scripts.name_matcher.experiments import peak_rss_bytes, prepare_profiles, validate_evidence
 from scripts.name_matcher.linkage import Pair, Profile, candidates, fit_mixture, name_key, quality, synthetic_profiles
 from scripts.name_matcher.build_observations import build_database
 from tests.test_name_matcher_research import _one_message_archive
 from mailarchiver.name_entities import classify_name, word_rules
 from scripts.name_matcher.evaluate import OwnerEvaluation, evaluate, write_report
 from scripts.name_matcher.experiments import save_pairs
+
+
+def test_peak_resident_memory_uses_bytes_on_current_platform() -> None:
+    # Requirement: research memory reports work on Windows and use byte units.
+    # Retain and touch real memory so a KiB result cannot satisfy the lower bound.
+    allocation = bytearray(8 * 1024 * 1024)
+    allocation[::4096] = b"x" * (len(allocation) // 4096)
+    before = peak_rss_bytes()
+    assert before >= len(allocation)
+    assert peak_rss_bytes() >= before
 
 
 @pytest.mark.parametrize('name,address,kind',[
