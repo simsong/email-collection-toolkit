@@ -33,6 +33,7 @@ from pydantic import Field, model_validator
 
 from .plugin_api import FrozenModel
 from .mboxrd import quote
+from .storage_sync import publish_exclusive
 
 PDF_MAGIC = b"%PDF-"
 PDF_TEXT_POLICY = "native-pdf-text-v1"
@@ -323,7 +324,8 @@ def write_pdf_mbox(extraction: PdfMailExtraction, output: Path) -> None:
         box.flush()
         box.unlock()
         box.close()
-        os.replace(temporary, destination)
+        # Same-directory exclusive publication preserves a competing output.
+        publish_exclusive(temporary, destination)
     except BaseException:
         try:
             box.close()

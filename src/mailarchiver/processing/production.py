@@ -197,16 +197,20 @@ class ProductionPipeline:
     def resume_ingest(self, *, progress: ProcessingProgress | None = None) -> None:
         """Replay durable ingest work with cooperative stops between messages."""
         while row := self.database.execute("SELECT json_extract(item_json,'$.message_id') FROM jobs "
-                "WHERE status IN ('pending','running','failed') AND json_extract(item_json,'$.pipeline') "
+                "WHERE status IN ('pending','running') AND json_extract(item_json,'$.pipeline') "
                 "IN ('ingest','message') AND (parent_job_id IS NULL OR EXISTS "
                 "(SELECT 1 FROM jobs parent WHERE parent.job_id=jobs.parent_job_id "
                 "AND parent.status='completed')) ORDER BY job_id LIMIT 1").fetchone():
             if self.cancelled is not None:
                 self.cancelled()
-            self._finish_ingest_message(str(row[0]), progress=progress)
+            # Archived metadata failures cannot starve fresh sources, even when
+            # the content sweep is deferred. Explicit fail-import still raises.
+            archived = self.catalog.execute("SELECT 1 FROM messages WHERE sha256=?", (str(row[0]),)).fetchone() is not None
+            self._finish_ingest_message(str(row[0]), progress=progress, fail_on_error=not archived)
             self.release(str(row[0]))
 
-    def _finish_ingest_message(self, message_id: str, *, progress: ProcessingProgress | None = None) -> None:
+    def _finish_ingest_message(self, message_id: str, *, progress: ProcessingProgress | None = None,
+                               fail_on_error: bool = True) -> None:
         # The owner-thread coordinator serializes ingest calls. Finish
         # this message before honoring cooperative Quit; processor deadlines
         # still apply, and GUI termination has its own five-second hard limit.
@@ -216,8 +220,9 @@ class ProductionPipeline:
             failures: list[Exception] = []
             dispatch(self.database, self.plugins, pipelines=("ingest", "message"),
                      installation_config=self.installation_config, services=self, failures=failures, message_id=message_id,
-                     progress=progress, heartbeat=self.heartbeat)
-            self._raise_failures(("ingest", "message"), failures)
+                     progress=progress, heartbeat=self.heartbeat, continue_after_failure=not fail_on_error)
+            if fail_on_error:
+                self._raise_failures(("ingest", "message"), failures, message_id=message_id)
         finally:
             self.cancelled = cancelled
             self._ingesting = ingesting
@@ -229,12 +234,14 @@ class ProductionPipeline:
                      installation_config=self.installation_config, services=self, cancelled=self.cancelled, failures=failures,
                      message_id=message_id, continue_after_failure=True, progress=progress, workers=workers, heartbeat=self.heartbeat)
         if fail_on_error:
-            self._raise_failures(pipelines, failures)
+            self._raise_failures(pipelines, failures, message_id=message_id)
         return result
 
-    def _raise_failures(self, pipelines: tuple[Pipeline, ...], failures: list[Exception]) -> None:
+    def _raise_failures(self, pipelines: tuple[Pipeline, ...], failures: list[Exception], *, message_id: str | None = None) -> None:
         placeholders = ",".join("?" for _ in pipelines)
-        failed = self.database.execute(f"SELECT job_id,detail FROM jobs WHERE status='failed' AND json_extract(item_json,'$.pipeline') IN ({placeholders}) ORDER BY job_id LIMIT 1", pipelines).fetchone()
+        failed = self.database.execute(f"SELECT job_id,detail FROM jobs WHERE status='failed' AND json_extract(item_json,'$.pipeline') IN ({placeholders}) "
+            "AND (? IS NULL OR json_extract(item_json,'$.message_id')=?) ORDER BY job_id LIMIT 1",
+            (*pipelines, message_id, message_id)).fetchone()
         if failed:
             error = self.database.execute("SELECT error,kind FROM invocations WHERE job_id=? AND status='failed' ORDER BY invocation_id DESC LIMIT 1", (failed[0],)).fetchone() if failed[1] == RANK_FAILURE else None
             prefix = "failed to parse message" if error and error[1] in ("file-message", "headers") else "processor failed"

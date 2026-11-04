@@ -26,9 +26,36 @@ from bs4 import BeautifulSoup
 from scripts.update_appcast import AppcastRelease, SPARKLE_HARDWARE, SPARKLE_MINIMUM_SYSTEM, SPARKLE_PRIVATE_KEY_SECRET, append_item, release_notes_html, require_matching_key, sign_feed, signed_archive, signing_key, verify_signed_archive
 from scripts.check_appcast import check_appcast
 import scripts.sign_historical_appcast as historical_signer
+from scripts.sparkle_bundle import verify_cache
+from mailarchiver.release_versions import release_metadata
 from scripts.sign_historical_appcast import FIRST_RELEASE, audit_legacy_feed, sign_historical_appcast
 from scripts.macos_signing import NATIVE_TRUST_ENV_PREFIXES, RELEASE_SECRET_NAMES, release_safe_environment
-from mailarchiver.release_versions import release_metadata
+
+
+def test_sparkle_cache_authenticates_resources_and_rejects_extra_code(tmp_path: Path) -> None:
+    """DELIVERY: cached non-tool framework content must match the pinned archive too."""
+    archive = tmp_path / "Sparkle.tar.xz"
+    tools = tmp_path / "tools"
+    names = ("LICENSE", "bin/sign_update", "bin/generate_keys", "Sparkle.framework/Versions/B/Resources/Info.plist")
+    with tarfile.open(archive, "w:xz") as destination:
+        for name in names:
+            data = ("verified " + name).encode()
+            item = tarfile.TarInfo("./" + name)
+            item.size = len(data)
+            destination.addfile(item, io.BytesIO(data))
+            path = tools / name
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(data)
+    verify_cache(archive, tools)
+    resource = tools / names[-1]
+    expected = resource.read_bytes()
+    resource.write_bytes(b"same-version changed resource")
+    with pytest.raises(ValueError, match="differs from verified archive"):
+        verify_cache(archive, tools)
+    resource.write_bytes(expected)
+    (resource.parent / "unexpected.dylib").write_bytes(b"extra code")
+    with pytest.raises(ValueError, match="inventory differs"):
+        verify_cache(archive, tools)
 
 
 def test_release_notes_render_entries_links_and_literal_html() -> None:
@@ -262,7 +289,8 @@ def test_sparkle_tools_rejects_a_modified_cached_signer(tmp_path: Path) -> None:
     downloads = tmp_path / "downloads"
     downloads.mkdir()
     archive = downloads / "Sparkle-2.10.0.tar.xz"
-    binaries = {"./bin/generate_keys": b"key generator", "./bin/sign_update": b"trusted signer"}
+    binaries = {"./bin/generate_keys": b"key generator", "./bin/sign_update": b"trusted signer",
+                "./LICENSE": b"fixture notice", "./Sparkle.framework/Resources/Info.plist": b"fixture metadata"}
     with tarfile.open(archive, "w:xz") as bundle:
         for name, data in binaries.items():
             member = tarfile.TarInfo(name)
@@ -282,7 +310,7 @@ def test_sparkle_tools_rejects_a_modified_cached_signer(tmp_path: Path) -> None:
 
     rejected = subprocess.run(command, cwd=repository, capture_output=True, text=True, check=False)
     assert rejected.returncode != 0
-    assert "cached Sparkle tool differs from verified archive: sign_update" in rejected.stderr
+    assert "cached Sparkle file differs from verified archive: bin/sign_update" in rejected.stderr
 
 
 def test_sparkle_tools_rejects_missing_member_with_empty_cached_executable(tmp_path: Path) -> None:
@@ -309,7 +337,7 @@ def test_sparkle_tools_rejects_missing_member_with_empty_cached_executable(tmp_p
         cwd=repository, capture_output=True, text=True, check=False,
     )
     assert result.returncode != 0
-    assert "verified Sparkle archive is missing tool: sign_update" in result.stderr
+    assert "cached Sparkle inventory differs from verified archive" in result.stderr
 
 
 def test_historical_signing_orchestration_preserves_source_and_creates_verified_output(

@@ -22,7 +22,9 @@ def main() -> int:
     try:
         source = args.source.resolve(strict=True)
         destinations = [path.resolve() for path in (args.receipt, args.diagnostics) if path]
-        if any(path == source or (path.exists() and path.samefile(source)) for path in destinations) or len(set(destinations)) != len(destinations):
+        aliases = any(first == second or (first.exists() and second.exists() and first.samefile(second))
+                      for index, first in enumerate(destinations) for second in destinations[index + 1:])
+        if any(path == source or (path.exists() and path.samefile(source)) for path in destinations) or aliases:
             raise ValueError("receipt and diagnostics must be distinct from the source and each other")
         settings = PffSettings(timeout_seconds=args.timeout_seconds,
                                max_message_bytes=args.max_message_bytes,

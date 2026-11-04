@@ -330,7 +330,7 @@ def test_release_version_maps_to_a_single_public_track(
 
 @pytest.mark.parametrize("version", [
     "not-a-version", "1.0", "1.0.0-alpha.2", "1.0.0a0", "1.0.0a400", "1.0.0rc1", "1.0.0.dev1",
-    "1.0.0+local",
+    "1.0.0+local", "1.0.0.dev0", "1.0.0.post0", "1.0.0a1.dev0", "1.0.0a1.post0",
 ])
 def test_release_version_rejects_noncanonical_or_unsupported_pep_440_forms(version: str) -> None:
     """Version policy accepts only canonical stable, alpha, and beta PEP 440 releases."""

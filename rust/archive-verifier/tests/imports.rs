@@ -149,8 +149,13 @@ fn synthetic_lifecycle() -> Result<()> {
         let raw = template.replace("{{EICAR_BASE64}}", &STANDARD.encode(trigger));
         fs::create_dir_all(infected.parent().context("infected parent")?)?;
         fs::write(&infected, format!("{}\n{raw}", raw.len()))?;
+        let complete_source = fingerprint(&source)?;
         let archive = work.join("archive");
         let ingested = ingest(&source, &archive, &owners, &work.join("import.log"));
+        ensure!(
+            fingerprint(&source)? == complete_source,
+            "synthetic sources, including infected mail, changed"
+        );
         fs::remove_file(&infected)?;
         ingested?;
         ensure!(

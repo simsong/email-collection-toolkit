@@ -294,7 +294,8 @@ def test_mime_tokens_are_validated_before_plugin_execution(tmp_path: Path, conte
 
 def test_timeout_cannot_write_late_result(tmp_path: Path) -> None:
     import time
-    plugin(tmp_path, "late", 'time.sleep(1)\n(item.archive.path / "late-write").write_text("bad")\nreturn ProcessingResult()', timeout=0.3)
+    # PROCESSING: portable workers must check cancellation before side effects.
+    plugin(tmp_path, "late", 'time.sleep(1)\nitem.check_cancelled()\n(item.archive.path / "late-write").write_text("bad")\nreturn ProcessingResult()', timeout=0.3)
     plugins = load_processors((tmp_path,))
     archive = tmp_path / "archive"
     with connect(archive, create=True) as database:

@@ -157,6 +157,9 @@ mark.message-find-current { outline: 2px solid AccentColor; outline-offset: 1px;
 .attachment { display: inline-flex; align-items: center; gap: 6px; max-width: 520px; padding: 5px 6px; border: 1px solid var(--border); border-radius: 6px; }
 .attachment-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .attachment-size { color: var(--muted); }
+.attachment-unavailable { display: flex; flex-wrap: wrap; }
+.attachment-unavailable .attachment-name { flex-basis: 100%; }
+.attachment-unavailable .attachment-size { font-size: 12px; white-space: normal; }
 #attachment-preview { margin-top: 14px; }
 #attachment-preview img { max-width: 100%; max-height: 600px; object-fit: contain; }
 #attachment-preview iframe { width: 100%; height: 650px; border: 1px solid var(--border); border-radius: 5px; }

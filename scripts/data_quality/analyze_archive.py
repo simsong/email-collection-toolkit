@@ -30,6 +30,7 @@ from mailarchiver.mbox import MboxLocation, read_verified_location, synthetic_en
 from mailarchiver.mboxrd import quote
 from mailarchiver.source_volume import METADATA_CURRENT_MOUNT_PATH
 from mailarchiver.sources import source_files, source_messages
+from mailarchiver.sqlite_paths import sqlite_uri
 
 SAMPLE_SEED = 20260827
 MIN_REAL_YEAR = 1983
@@ -127,10 +128,14 @@ def arguments() -> argparse.Namespace:
 
 def open_catalog(archive: Path) -> sqlite3.Connection:
     database = (archive / "archive.sqlite3").resolve()
-    connection = sqlite3.connect(f"file:{database}?mode=ro", uri=True, timeout=30)
+    connection = sqlite3.connect(sqlite_uri(database), uri=True, timeout=30)
     connection.row_factory = sqlite3.Row
-    connection.execute("PRAGMA query_only=ON")
-    connection.execute("PRAGMA busy_timeout=30000")
+    try:
+        connection.execute("PRAGMA query_only=ON")
+        connection.execute("PRAGMA busy_timeout=30000")
+    except BaseException:
+        connection.close()
+        raise
     return connection
 
 
@@ -262,13 +267,11 @@ def write_mbox(path: Path, messages: list[bytes]) -> None:
             box.close()
 
 
-def write_csv(path: Path, models: Sequence[BaseModel]) -> None:
+def write_csv(path: Path, models: Sequence[BaseModel], model_type: type[BaseModel]) -> None:
     if path.exists():
         raise FileExistsError(f"refusing to replace {path}")
-    if not models:
-        raise ValueError(f"no records for {path}")
     with path.open("w", newline="", encoding="utf-8") as destination:
-        writer = csv.DictWriter(destination, fieldnames=list(models[0].model_fields))
+        writer = csv.DictWriter(destination, fieldnames=list(model_type.model_fields))
         writer.writeheader()
         for model in models:
             writer.writerow(model.model_dump())
@@ -304,7 +307,7 @@ def analyze_bad_dates(connection: sqlite3.Connection, archive: Path, output: Pat
         ))
     path = output / "BAD_DATES.mboxrd"
     write_mbox(path, raw_messages)
-    write_csv(output / "BAD_DATES.csv", evidence)
+    write_csv(output / "BAD_DATES.csv", evidence, EarlyDateEvidence)
     return evidence, path
 
 
@@ -336,7 +339,7 @@ def analyze_missing_senders(connection: sqlite3.Connection, archive: Path, outpu
     population = selected_messages(
         connection, "m.category IN (?,?) AND e.address=''", NORMAL_CATEGORIES,
     )
-    selected = random.Random(SAMPLE_SEED).sample(population, 100)
+    selected = random.Random(SAMPLE_SEED).sample(population, min(len(population), 100))
     evidence: list[MissingSenderEvidence] = []
     raw_messages: list[bytes] = []
     for order, record in enumerate(selected, 1):
@@ -359,7 +362,7 @@ def analyze_missing_senders(connection: sqlite3.Connection, archive: Path, outpu
         ))
     path = output / "MISSING_SENDER.mboxrd"
     write_mbox(path, raw_messages)
-    write_csv(output / "MISSING_SENDER.csv", evidence)
+    write_csv(output / "MISSING_SENDER.csv", evidence, MissingSenderEvidence)
     return evidence, len(population), path
 
 
@@ -405,7 +408,7 @@ def analyze_early_source(root: Path, output: Path) -> list[EarlySourceFile]:
                 logging.getLogger(__name__).debug("Best-effort operation failed", exc_info=True)
                 result.error = f"{type(error).__name__}: {error}"
         evidence.append(result)
-    write_csv(output / "EARLY_SOURCE_FILES.csv", evidence)
+    write_csv(output / "EARLY_SOURCE_FILES.csv", evidence, EarlySourceFile)
     return evidence
 
 

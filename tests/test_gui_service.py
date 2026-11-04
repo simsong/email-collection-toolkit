@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 import base64
+import codecs
 import hashlib
 import json
 import sqlite3
@@ -23,6 +24,7 @@ from pydantic import ValidationError
 from mailarchiver.application import ApplicationController, ApplicationPreferencesStore
 from mailarchiver.bagit import initialize_bag
 from mailarchiver.catalog import address_pk, create_catalog, create_search
+from mailarchiver.mailsearch import read_message_bytes
 from mailarchiver.configuration import application_configuration, load_configuration
 from mailarchiver.gui_app import (
     GuiApi,
@@ -40,6 +42,7 @@ from mailarchiver.gui_service import (
     attachment_descriptor,
     describe_message,
     is_risky,
+    safe_filename,
     message_previews,
     render_part,
     search_count,
@@ -761,6 +764,57 @@ def test_gui_selects_multipart_views_and_sanitizes_html(tmp_path: Path) -> None:
     assert "Subject: multipart message" in render_part(archive, 2, RAW_PART_ID).content
 
 
+@pytest.mark.parametrize("newline", [b"\n", b"\r\n", b"\r"])
+@pytest.mark.parametrize("transfer", ["7bit", "base64", "quoted-printable", "x-uuencode"])
+@pytest.mark.parametrize("malformed", [False, True])
+def test_attached_messages_keep_original_bytes_and_parent_body(
+    tmp_path: Path, newline: bytes, transfer: str, malformed: bool,
+) -> None:
+    """DESKTOP/SEARCH: attached EML is exact export data, never its parent's body."""
+    import quopri
+    from email import policy
+    from email.parser import BytesParser
+    from mailarchiver.search import attachment_text, message_text
+    child = (b"From: nested@example.test\nSubject: original \xff\nX-Folded: first\n\tsecond\n"
+             + (b"malformed header line\n" if malformed else b"")
+             + b"Content-Type: text/html\n\n<p>nestedattachmentsecret</p>\n").replace(b"\n", newline)
+    encoded = (base64.b64encode(child) if transfer == "base64" else quopri.encodestring(child) if transfer == "quoted-printable"
+               else codecs.encode(child, "uu").replace(b"\n", newline) if transfer == "x-uuencode" else child)
+    prefix = (b"From: sender@example.net\nMessage-ID: <nested-export@example>\n"
+              b"Date: Mon, 1 Jan 2024 00:00:00 +0000\nSubject: enclosing message\n"
+              b"Content-Type: multipart/mixed; boundary=audit\n\n--audit\n"
+              b"Content-Type: text/plain\n\nouterbodyonly\n--audit\n"
+              b"Content-Type: message/rfc822\nContent-Disposition: attachment; filename=original.eml\n"
+              + f"Content-Transfer-Encoding: {transfer}\n\n".encode()).replace(b"\n", newline)
+    raw = prefix + encoded + newline + b"--audit--" + newline
+    archive = make_gui_archive(tmp_path, ((raw, "nested-export@example", "enclosing message", "2024-01-01T00:00:00+00:00"),))
+    view = describe_message(archive, 3)
+    assert len(view.attachments) == 1
+    attachment = view.attachments[0]
+    assert attachment.byte_length == len(child)
+    assert render_part(archive, 3, view.preferred_part_id).content == "outerbodyonly"
+    assert "nestedattachmentsecret" not in message_text(raw, False)
+    assert "nestedattachmentsecret" in message_text(raw, True)
+    if transfer != "7bit":
+        assert attachment_text(BytesParser(policy=policy.compat32).parsebytes(raw)) == ""
+    assert base64.b64decode(attachment_content(archive, 3, attachment.part_id).content_base64) == child
+    output = tmp_path / "saved-original.eml"
+    write_attachment(archive, 3, attachment.part_id, output)
+    assert output.read_bytes() == child
+    assert read_message_bytes(archive, 3) == raw
+
+
+@pytest.mark.parametrize("filename", ["CON.txt", "con .txt", "NUL", "COM¹.pdf", "LPT9.log", "a?b*.pdf", 'a"<>|b.pdf',
+    "report.pdf. ", "😀" * 100 + ".pdf", "a" * 239 + " " + "b" * 60,
+    " " * 240 + "b" * 60, "CON" + " " * 240 + "b" * 60, "CON." + "x" * 300])
+def test_attachment_export_names_are_portable(filename: str) -> None:
+    """DESKTOP: derived basenames are valid on Windows and bounded in UTF-8 bytes."""
+    name = safe_filename(filename, 2, "application/pdf")
+    assert name and not any(character in name for character in '<>:"/\\|?*')
+    assert not name.endswith((".", " ")) and len(name.encode("utf-8")) <= 240
+    assert name.split(".", 1)[0].rstrip(" ").upper() not in {"CON", "NUL", "COM¹", "LPT9"}
+
+
 def test_gui_recovers_declared_korean_headers_and_raw_display(tmp_path: Path) -> None:
     """Requirement: GUI recovery uses declared Korean charsets for derived headers and source text."""
     archive = make_gui_archive(
@@ -973,12 +1027,38 @@ def test_gui_multi_message_drag_zip_preserves_each_exported_message(tmp_path: Pa
 def test_gui_concurrent_drag_exports_have_distinct_temporary_paths(tmp_path: Path) -> None:
     """Requirement: concurrent drag preparation cannot share a temporary export file."""
     archive = make_gui_archive(tmp_path)
-    destination = tmp_path / "drag" / "message.eml"
+    api = GuiApi(archive)
+    try:
+        with ThreadPoolExecutor(max_workers=8) as executor:
+            exports = list(executor.map(lambda number: api.prepare_drag([1 if number % 2 else 2]), range(16)))
+        paths = []
+        for number, exported in enumerate(exports):
+            with api._drag_export(exported["token"]) as path:
+                assert path.read_bytes() == (SIMPLE_MESSAGE if number % 2 else MULTIPART_MESSAGE)
+                paths.append(path)
+        assert len(set(paths)) == 16
+    finally:
+        api.close()
+    assert not any(path.exists() for path in paths)
 
-    with ThreadPoolExecutor(max_workers=8) as executor:
-        list(executor.map(lambda _: write_message(archive, 2, destination), range(16)))
 
-    assert destination.read_bytes() == MULTIPART_MESSAGE
+def test_opened_attachments_keep_separate_export_paths(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """DESKTOP: opening a second same-named attachment cannot change the first viewer's file."""
+    from mailarchiver import gui_app
+    other = MULTIPART_MESSAGE.replace(b"JVBERi0xLjQK", b"JVBERi0xLjUK")
+    archive = make_gui_archive(tmp_path, ((other, "other-attachment@example", "other", "2024-01-01T00:00:00+00:00"),))
+    opened: list[Path] = []
+    # Intercept only the external viewer launch; extraction and path ownership are real.
+    monkeypatch.setattr(gui_app, "open_export", opened.append)
+    api = GuiApi(archive)
+    try:
+        for message_pk in (2, 3):
+            attachment = next(item for item in describe_message(archive, message_pk).attachments if item.content_type == "application/pdf")
+            assert api.open_attachment(message_pk, attachment.part_id)["opened"]
+        assert len(set(opened)) == 2
+        assert [path.read_bytes() for path in opened] == [b"%PDF-1.4\n", b"%PDF-1.5\n"]
+    finally:
+        api.close()
 
 
 @pytest.mark.parametrize(("filename", "content_type", "risky"), [
@@ -1166,3 +1246,214 @@ def test_gui_search_syntax_errors_are_results(tmp_path: Path, query: str, error:
         assert api.search("report")["results"]
     finally:
         api.close()
+
+
+@pytest.mark.parametrize("newline", [b"\n", b"\r\n"])
+def test_multipart_attachment_is_one_exact_export_and_never_parent_body(tmp_path: Path, newline: bytes) -> None:
+    """DESKTOP/SEARCH: multipart attachment ancestry and byte export agree across readers."""
+    from email import policy
+    from email.parser import BytesParser
+    from mailarchiver.search import indexed_attachments, message_text
+    from mailarchiver.processing.mime import extract_parts
+    payload = (b"--inner\nContent-Type: text/html\n\n<p>nestedsecret</p>\n--inner--\n").replace(b"\n", newline)
+    raw = (b"From: sender@example.net\nDate: Mon, 1 Jan 2024 00:00:00 +0000\nSubject: multipart attachment\n"
+           b"Content-Type: multipart/mixed; boundary=outer\n\n--outer\nContent-Type: text/plain\n\nparentonly\n"
+           b"--outer\nContent-Type: multipart/mixed; boundary=inner\nContent-Disposition: attachment; filename=parts.mime\n\n").replace(b"\n", newline)
+    raw += payload + newline + b"--outer--" + newline
+    archive = make_gui_archive(tmp_path, ((raw, "multipart-attachment@example", "multipart attachment", "2024-01-01T00:00:00+00:00"),))
+    view = describe_message(archive, 3)
+    attachment, = view.attachments
+    assert base64.b64decode(attachment_content(archive, 3, attachment.part_id).content_base64) == payload
+    assert render_part(archive, 3, view.preferred_part_id).content == "parentonly"
+    assert "nestedsecret" not in message_text(raw, False) and "nestedsecret" in message_text(raw, True)
+    assert len(indexed_attachments(BytesParser(policy=policy.compat32).parsebytes(raw), raw)) == 1
+    source = tmp_path / "multipart.eml"
+    source.write_bytes(raw)
+    workspace = tmp_path / "parts"
+    workspace.mkdir()
+    extracted = extract_parts(source, workspace)
+    assert len(extracted.attachments) == 1 and extracted.attachments[0].part_id == attachment.part_id
+    assert all(part.scope == "attachment" for part in extracted.parts if b"nestedsecret" in part.reference.path.read_bytes())
+
+
+def malformed_attachment_message(transfer: str, payload: bytes, content_type: str = "message/rfc822") -> bytes:
+    """Build a readable parent with invalid transfer data in one attached email."""
+    return (b"From: sender@example.net\nDate: Mon, 1 Jan 2024 00:00:00 +0000\nSubject: readable parent\n"
+           b"Content-Type: multipart/mixed; boundary=outer\n\n--outer\nContent-Type: text/plain\n\nhealthybody\n"
+           + f"--outer\nContent-Type: {content_type}\nContent-Disposition: attachment; filename=bad.eml\n".encode()
+           + f"Content-Transfer-Encoding: {transfer}\n\n".encode() + payload + b"\n--outer--\n")
+
+
+@pytest.mark.parametrize(("transfer", "payload"), [
+    ("base64", b"%%%invalid%%%"), ("quoted-printable", b"=zz"), ("uuencode", b"begin 644 bad.eml\n!\n"),
+    ("uuencode", b"begin 644 bad.eml\nM\nend\n"),
+])
+@pytest.mark.parametrize("content_type", ["message/rfc822", "application/pdf", "image/png"])
+def test_bad_attachment_encoding_does_not_hide_its_parent(tmp_path: Path, transfer: str, payload: bytes, content_type: str) -> None:
+    """DESKTOP: invalid attached data is local metadata failure, while parent/raw/export remain accessible."""
+    raw = malformed_attachment_message(transfer, payload, content_type)
+    archive = make_gui_archive(tmp_path, ((raw, "bad-attachment@example", "readable parent", "2024-01-01T00:00:00+00:00"),))
+    view = describe_message(archive, 3)
+    attachment, = view.attachments
+    assert attachment.byte_length is None and attachment.error and "Cannot decode attachment" in attachment.error
+    from mailarchiver.search import message_text
+    assert payload.decode() not in message_text(raw, True)
+    assert render_part(archive, 3, view.preferred_part_id).content == "healthybody"
+    assert payload.decode() in render_part(archive, 3, RAW_PART_ID).content
+    output = tmp_path / "original.eml"
+    write_message(archive, 3, output)
+    assert output.read_bytes() == raw
+    destination = tmp_path / "bad-export.eml"
+    with pytest.raises(ValueError):
+        write_attachment(archive, 3, attachment.part_id, destination)
+    assert not destination.exists() and read_message_bytes(archive, 3) == raw
+    api = GuiApi(archive)
+    try:
+        exported = api.prepare_drag([3])
+        with api._drag_export(exported["token"]) as path:
+            assert path.read_bytes() == raw
+    finally:
+        api.close()
+
+
+@pytest.mark.parametrize("separator", [b"\n\r\n", b"\r\n\n", b"\r\n\r", b"\r\r\n", b"\n\r"])
+def test_attached_export_retains_headers_with_mixed_newline_separator(tmp_path: Path, separator: bytes) -> None:
+    """DESKTOP: raw payload offsets follow logical header lines, including mixed legacy separators."""
+    child = b"From: nested@example.test\nSubject: retained headers\n\nchild body\n"
+    raw = (b"From: sender@example.net\nDate: Mon, 1 Jan 2024 00:00:00 +0000\nSubject: mixed attachment\n"
+           b"Content-Type: multipart/mixed; boundary=x\n\n--x\nContent-Type: message/rfc822\n"
+           b"Content-Disposition: attachment; filename=child.eml" + separator + child + b"\n--x--\n")
+    archive = make_gui_archive(tmp_path, ((raw, "mixed-export@example", "mixed attachment", "2024-01-01T00:00:00+00:00"),))
+    attachment, = describe_message(archive, 3).attachments
+    assert attachment.error is None and attachment.byte_length == len(child)
+    assert base64.b64decode(attachment_content(archive, 3, attachment.part_id).content_base64) == child
+
+
+@pytest.mark.parametrize("position", ["first", "later"])
+@pytest.mark.parametrize("newline", [b"\n", b"\r\n", b"\r"])
+def test_redundant_opening_boundaries_keep_attachment_numbering(tmp_path: Path, position: str, newline: bytes) -> None:
+    """DESKTOP: stdlib-ignored repeated boundaries cannot create a zero-byte or wrong attachment."""
+    child = b"From: nested@example.test\nSubject: exact child\n\nnonempty child\n".replace(b"\n", newline)
+    head = (b"From: sender@example.net\nDate: Mon, 1 Jan 2024 00:00:00 +0000\nSubject: repeated boundary\n"
+            b"Content-Type: multipart/mixed; boundary=x\n\n").replace(b"\n", newline)
+    before = b"--x\nContent-Type: text/plain\n\nparent body\n" if position == "later" else b""
+    wrapper = (b"--x\n--x\nContent-Type: message/rfc822\nContent-Disposition: attachment; filename=child.eml\n\n")
+    raw = head + (before + wrapper).replace(b"\n", newline) + child + newline + b"--x--" + newline
+    archive = make_gui_archive(tmp_path, ((raw, "repeated-export@example", "repeated boundary", "2024-01-01T00:00:00+00:00"),))
+    attachment, = describe_message(archive, 3).attachments
+    assert attachment.error is None and attachment.byte_length == len(child)
+    assert base64.b64decode(attachment_content(archive, 3, attachment.part_id).content_base64) == child
+
+
+def test_standalone_webview_is_registered_and_listed_without_native_start(tmp_path: Path) -> None:
+    """DESKTOP: standalone children participate in shared menu/focus snapshots on both platforms."""
+    import webview
+    application = PyWebViewApplication(ApplicationController(ApplicationPreferencesStore(tmp_path / "preferences.json")))
+    document = application.controller.create_document(tmp_path / "archive")
+    window = webview.create_window("Standalone synthetic message", "about:blank", menu=application.menu())
+    assert window is not None
+    application._native_child_ids[window.uid] = document.descriptor.document_id
+    try:
+        assert window in application._registered_windows()
+        assert [menu.title for menu in window.menu] == ["File", "Window", "Help"]
+        assert any(item.title == window.title for item in application.window_menu_items())
+    finally:
+        application._native_child_ids.pop(window.uid)
+        webview.windows.remove(window)
+        application.shutdown()
+
+
+@pytest.mark.parametrize("newline", [b"\n", b"\r\n", b"\r"])
+def test_attached_payload_with_missing_header_separator_keeps_all_original_bytes(tmp_path: Path, newline: bytes) -> None:
+    """DESKTOP: a malformed wrapper's first non-header line starts payload without silent truncation."""
+    child = (b"malformed first body line\nFrom: child@example.test\nSubject: original child\n\noriginal child body\n").replace(b"\n", newline)
+    raw = (b"From: sender@example.net\nDate: Mon, 1 Jan 2024 00:00:00 +0000\nSubject: malformed wrapper\n"
+           b"Content-Type: multipart/mixed; boundary=x\n\n--x\nContent-Type: message/rfc822\n"
+           b"Content-Disposition: attachment; filename=child.eml\n").replace(b"\n", newline)
+    raw += child + newline + b"--x--" + newline
+    archive = make_gui_archive(tmp_path, ((raw, "missing-separator@example", "malformed wrapper", "2024-01-01T00:00:00+00:00"),))
+    attachment, = describe_message(archive, 3).attachments
+    assert attachment.error is None and attachment.byte_length == len(child)
+    assert base64.b64decode(attachment_content(archive, 3, attachment.part_id).content_base64) == child
+
+
+@pytest.mark.parametrize("newline", [b"\n", b"\r\n", b"\r"])
+@pytest.mark.parametrize("body", [b"", b"original body\n"])
+def test_missing_separator_unix_envelope_refuses_ambiguous_export(tmp_path: Path, newline: bytes, body: bytes) -> None:
+    """DESKTOP: ambiguous wrapper envelopes cannot silently disappear from an exported attachment."""
+    child = b"From retained Thu Jan  1 00:00:00 1970\n" + body
+    raw = malformed_attachment_message("7bit", child).replace(b"Content-Transfer-Encoding: 7bit\n\n", b"Content-Transfer-Encoding: 7bit\n")
+    raw = raw.replace(b"\n", newline)
+    archive = make_gui_archive(tmp_path, ((raw, "ambiguous-envelope@example", "readable parent", "2024-01-01T00:00:00+00:00"),))
+    view = describe_message(archive, 3)
+    attachment, = view.attachments
+    assert attachment.error and "ambiguous Unix envelope" in attachment.error and attachment.byte_length is None
+    assert render_part(archive, 3, view.preferred_part_id).content == "healthybody"
+    output = tmp_path / "original.eml"
+    write_message(archive, 3, output)
+    assert output.read_bytes() == raw
+    destination = tmp_path / "ambiguous.eml"
+    with pytest.raises(ValueError, match="ambiguous Unix envelope"):
+        write_attachment(archive, 3, attachment.part_id, destination)
+    assert not destination.exists() and read_message_bytes(archive, 3) == raw
+
+
+@pytest.mark.parametrize("newline", [b"\n", b"\r\n", b"\r"])
+@pytest.mark.parametrize("transfer", ["x-uuencode", "uuencode", "uue", "x-uue"])
+def test_legacy_uuencode_binary_attachment_exports_decoded_bytes(tmp_path: Path, newline: bytes, transfer: str) -> None:
+    """DESKTOP: previously supported uuencode aliases retain binary export across transport line endings."""
+    payload = b"%PDF-1.0\nlegacy binary \x00\xff\r\n"
+    encoded = codecs.encode(payload, "uu").replace(b"\nend\n", b"\n end \t\n")
+    raw = malformed_attachment_message(transfer, encoded, "application/pdf").replace(b"\n", newline)
+    archive = make_gui_archive(tmp_path, ((raw, "uuencode@example", "readable parent", "2024-01-01T00:00:00+00:00"),))
+    attachment, = describe_message(archive, 3).attachments
+    assert attachment.error is None and attachment.byte_length == len(payload)
+    output = tmp_path / "legacy.pdf"
+    write_attachment(archive, 3, attachment.part_id, output)
+    assert output.read_bytes() == payload and read_message_bytes(archive, 3) == raw
+
+
+def test_many_small_attachments_have_responsive_exact_metadata(tmp_path: Path) -> None:
+    """DESKTOP: a small valid message within the part budget must not incur quadratic selection latency."""
+    payload = b"x" * 1024
+    parts = [f"--many\nContent-Type: application/octet-stream\nContent-Disposition: attachment; filename={number}.bin\n\n".encode()
+             + payload + b"\n" for number in range(2000)]
+    raw = (b"From: sender@example.test\nContent-Type: multipart/mixed; boundary=many\n\n" + b"".join(parts) + b"--many--\n")
+    archive = make_gui_archive(tmp_path, ((raw, "many@example", "many attachments", "2024-01-01T00:00:00+00:00"),))
+    started = time.monotonic()
+    view = describe_message(archive, 3)
+    elapsed = time.monotonic() - started
+    assert len(view.attachments) == 2000 and all(item.byte_length == len(payload) and item.error is None for item in view.attachments)
+    # Wide allowance for CI hosts; the regression took about 29 seconds locally.
+    assert elapsed < 10, f"describing a 2 MiB message took {elapsed:.2f}s"
+    for item in (view.attachments[0], view.attachments[-1]):
+        assert base64.b64decode(attachment_content(archive, 3, item.part_id).content_base64) == payload
+
+
+@pytest.mark.parametrize("transfer", ["7bit", "base64", "quoted-printable"])
+def test_encoded_attached_multipart_keeps_inventory_reader_and_export_ids(tmp_path: Path, transfer: str) -> None:
+    """SEARCH/DESKTOP: decoded child traversal gives later attachments the same IDs before and after rebuild."""
+    import quopri
+    from mailarchiver.processing.mime import extract_parts
+    from mailarchiver.search import prepare_search_message
+    child = (b"From: child@example.test\nContent-Type: multipart/alternative; boundary=child\n\n"
+             b"--child\nContent-Type: text/plain\n\nchild body\n--child\nContent-Type: text/html\n\n<p>child body</p>\n--child--\n")
+    encoded = base64.b64encode(child) if transfer == "base64" else quopri.encodestring(child) if transfer == "quoted-printable" else child
+    raw = (b"From: parent@example.test\nContent-Type: multipart/mixed; boundary=outer\n\n"
+           b"--outer\nContent-Type: text/plain\n\nparent body\n--outer\nContent-Type: message/rfc822\n"
+           b"Content-Disposition: attachment; filename=child.eml\nContent-Transfer-Encoding: " + transfer.encode() + b"\n\n"
+           + encoded + b"\n--outer\nContent-Type: application/pdf\nContent-Disposition: attachment; filename=later.pdf\n\n%PDF-original\n--outer--\n")
+    source, workspace = tmp_path / "source.eml", tmp_path / "parts"
+    source.write_bytes(raw)
+    workspace.mkdir()
+    extracted = extract_parts(source, workspace)
+    rebuilt = prepare_search_message(raw, False)
+    expected = [(2, "child.eml"), (6, "later.pdf")]
+    assert [(item.part_id, item.filename) for item in extracted.attachments] == expected
+    assert [(item.part_id, item.filename) for item in rebuilt.attachments] == expected
+    archive = make_gui_archive(tmp_path, ((raw, "stable-ids@example", "stable IDs", "2024-01-01T00:00:00+00:00"),))
+    view = describe_message(archive, 3)
+    assert [(item.part_id, item.filename) for item in view.attachments] == expected
+    assert render_part(archive, 3, view.preferred_part_id).content == "parent body"
+    assert base64.b64decode(attachment_content(archive, 3, 2).content_base64) == child
+    assert base64.b64decode(attachment_content(archive, 3, 6).content_base64) == b"%PDF-original"

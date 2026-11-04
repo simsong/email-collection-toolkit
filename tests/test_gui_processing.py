@@ -56,9 +56,12 @@ def open_headless(archive: Path, preferences: Path, *, exit_process: Callable[[i
 
 
 def wait_for_import(api: GuiApi) -> None:
-    assert api.document is not None and api.document.ingest_job is not None
+    assert api.document is not None
     job = api.document.ingest_job
-    assert job.finished.wait(30), "GUI background processing did not finish"
+    if job is not None:
+        assert job.finished.wait(30), "GUI background processing did not finish"
+    # A quick successful job may already have released its document reservation.
+    # Callers still assert durable completion, output and application notices.
 
 
 def test_gui_resumes_cli_content_and_displays_attached_provenance(tmp_path: Path) -> None:
@@ -712,4 +715,21 @@ def test_background_command_failure_is_observed_in_application_notices(tmp_path:
         assert any(notice.severity == "error" and "Fixture command failed" in notice.message for notice in app.notices())
         assert future not in app._tasks
     finally:
+        app.shutdown()
+
+
+@pytest.mark.parametrize("source_kind", ["parent", "archive", "mailbox"])
+def test_gui_rejects_overlapping_source_before_settings_or_lease_writes(tmp_path: Path, source_kind: str) -> None:
+    """SOURCES: rejecting GUI input must not persist owner changes or touch the selected source archive."""
+    archive = build_deferred_archive(tmp_path)
+    app, api = open_headless(archive, tmp_path / "preferences.json")
+    source = archive.parent if source_kind == "parent" else archive if source_kind == "archive" else next((archive / "data/mbox").glob("*.mbox"))
+    before = {path.relative_to(archive): path.read_bytes() for path in archive.rglob("*") if path.is_file()}
+    try:
+        assert not app.start_import(api, [source], owner_rules=OwnerRules(include=["changed@example.test"]), scan_policy="not-scanned")
+        assert api.document is not None and api.document.ingest_job is None
+        assert {path.relative_to(archive): path.read_bytes() for path in archive.rglob("*") if path.is_file()} == before
+        assert any("separate source and archive" in notice.message for notice in app.notices())
+    finally:
+        api.close()
         app.shutdown()

@@ -4,7 +4,6 @@
 
 from __future__ import annotations
 
-import base64
 import os
 import shlex
 import textwrap
@@ -84,12 +83,12 @@ def worker_script(request: LaunchRequest, bucket: str, prefix: str, repository: 
 
         export DEBIAN_FRONTEND=noninteractive
         apt-get update
-        apt-get install -y awscli clamav clamav-daemon curl git make
-        systemctl stop clamav-daemon clamav-freshclam || true
+        apt-get install -y awscli clamav clamav-freshclam curl git make
+        systemctl stop clamav-freshclam || true
         freshclam || compgen -G '/var/lib/clamav/*.c[lv]d' >/dev/null
         curl -LsSf https://astral.sh/uv/install.sh | env UV_INSTALL_DIR=/usr/local/bin sh
 
-        install -d -m 0755 /opt/mailarchiver /var/lib/mailarchiver-validation /run/clamav /var/log/clamav
+        install -d -m 0755 /opt/mailarchiver /var/lib/mailarchiver-validation
         git -C /opt/mailarchiver init repository
         git -C /opt/mailarchiver/repository remote add origin {values['repository']}
         git -C /opt/mailarchiver/repository fetch --depth=1 origin {values['ref']}
@@ -97,20 +96,8 @@ def worker_script(request: LaunchRequest, bucket: str, prefix: str, repository: 
         cd /opt/mailarchiver/repository
         uv sync --frozen --no-dev
 
-        cat >/etc/clamav/mailarchiver-clamd.conf <<'EOF'
-        DatabaseDirectory /var/lib/clamav
-        LocalSocket /run/clamav/mailarchiver-validation.sock
-        FixStaleSocket yes
-        PidFile /run/clamav/mailarchiver-validation.pid
-        LogFile /var/log/clamav/mailarchiver-validation.log
-        LogTime yes
-        User root
-        ScanMail yes
-        EOF
-        export MAILARCHIVER_CLAMD=/usr/sbin/clamd
-        export MAILARCHIVER_CLAMDSCAN=/usr/bin/clamdscan
-        export MAILARCHIVER_CLAMD_CONFIG=/etc/clamav/mailarchiver-clamd.conf
-        export MAILARCHIVER_CLAMD_SOCKET=/run/clamav/mailarchiver-validation.sock
+        export MAILARCHIVER_CLAMAV_DATABASE=/var/lib/clamav
+        export MAILARCHIVER_FRESHCLAM=/usr/bin/freshclam
 
         if make validation-run DATASET="${{dataset}}" VALIDATION_DATA_DIR=/var/lib/mailarchiver-validation/data; then
           aws s3 cp "/var/lib/mailarchiver-validation/data/runs/${{dataset}}.json" "$destination/run-report.json"
@@ -181,7 +168,7 @@ def lambda_handler(event: dict[str, Any], _context: object) -> dict[str, str]:
                 ],
             },
         ],
-        UserData=base64.b64encode(script.encode()).decode(),
+        UserData=script,
     )
     instance_id = response["Instances"][0]["InstanceId"]
     output_prefix = f"s3://{bucket}/{prefix.strip('/')}/{request.run_id}/{request.dataset_id}/"

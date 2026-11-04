@@ -25,14 +25,14 @@ import tempfile
 import zipfile
 from email import policy
 from email.message import Message
-from email.parser import BytesParser
+from email.parser import BytesHeaderParser, BytesParser
 from pathlib import Path, PurePosixPath, PureWindowsPath
 from threading import Lock
 
 from urllib.parse import urlparse
 
 from bs4 import BeautifulSoup
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from .sqlite_paths import sqlite_uri
 
@@ -51,6 +51,7 @@ from .mailsearch import (
     search_result_count,
 )
 from .message import decoded_message_header
+from .mime_tree import MimeReaderLimitError, OriginalMimeParts, decoded_leaf_payload, original_part_payload, walk_mime
 from .plugin_api import SourceContainerMetadata
 from .processing.identities import IdentityMessages
 from .search import SEARCH_CATEGORIES, decoded_part, is_attachment
@@ -124,10 +125,11 @@ class AttachmentInfo(BaseModel):
     part_id: int
     filename: str
     content_type: str
-    byte_length: int
+    byte_length: int | None
     inline: bool
     preview: str | None = None
     risky: bool = False
+    error: str | None = None
 
 
 class SourceLocation(BaseModel):
@@ -178,6 +180,14 @@ class AttachmentContent(BaseModel):
 class AttachmentDescriptor(BaseModel):
     filename: str
     content_type: str
+
+
+class _AttachmentSource(BaseModel):
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+    raw: bytes
+    part: Message
+    part_path: tuple[int, ...]
+    descriptor: AttachmentDescriptor
 
 
 def search_page(
@@ -292,9 +302,14 @@ def message_previews(archive: Path, message_pks: list[int]) -> list[MessagePrevi
         database.close()
 
 
-def parsed_message(archive: Path, message_pk: int) -> tuple[bytes, Message]:
+def parsed_message(archive: Path, message_pk: int, *, headers_only: bool = False) -> tuple[bytes, Message]:
     raw = read_message_bytes(archive, message_pk)
-    return raw, BytesParser(policy=policy.compat32).parsebytes(raw)
+    if not headers_only:
+        try:
+            return raw, BytesParser(policy=policy.compat32).parsebytes(raw)
+        except (RecursionError, ValueError):
+            pass  # Full MIME is derived; verified source/header access remains available.
+    return raw, BytesHeaderParser(policy=policy.compat32).parsebytes(raw)
 
 
 def describe_message(archive: Path, message_pk: int) -> MessageView:
@@ -309,13 +324,29 @@ def describe_message(archive: Path, message_pk: int) -> MessageView:
     body_parts: list[BodyPart] = []
     attachments: list[AttachmentInfo] = []
     legacy_x_html = legacy_x_html_body(raw, message)
-    for part_id, part in enumerate(_parts(message)):
+    original = OriginalMimeParts(entity=raw)
+    try:
+        nodes = list(walk_mime(message, original))
+    except MimeReaderLimitError:
+        # Do not expose partial IDs; release decoded caches and retain Raw/Save.
+        original = OriginalMimeParts(entity=raw)
+        nodes = []
+        legacy_x_html = None
+    for node in nodes:
+        part_id, part = node.part_id, node.part
+        if node.ancestor_attachment:
+            continue
         if legacy_x_html is not None and part is message:
             continue
         content_type = part.get_content_type()
         attachment = _is_gui_attachment(part)
         if attachment:
-            payload = _payload_bytes(part)
+            error = None
+            try:
+                byte_length = original.size(node.part_path)
+            except (ValueError, LookupError, UnicodeError) as failure:
+                byte_length = None
+                error = f"Cannot decode attachment: {failure}. Save Message preserves the original bytes."
             filename = safe_filename(part.get_filename(), part_id, content_type)
             preview = "image" if content_type.startswith("image/") else "pdf" if content_type == "application/pdf" else None
             attachments.append(
@@ -323,10 +354,11 @@ def describe_message(archive: Path, message_pk: int) -> MessageView:
                     part_id=part_id,
                     filename=filename,
                     content_type=content_type,
-                    byte_length=len(payload),
+                    byte_length=byte_length,
                     inline=part.get_content_disposition() == "inline" or bool(part.get("Content-ID")),
                     preview=preview,
                     risky=is_risky(filename, content_type),
+                    error=error,
                 )
             )
         elif content_type in {"text/plain", "text/html"}:
@@ -336,7 +368,7 @@ def describe_message(archive: Path, message_pk: int) -> MessageView:
         body_parts.append(BodyPart(part_id=LEGACY_X_HTML_PART_ID, content_type="text/html", label="HTML — legacy x-html"))
     body_parts.append(BodyPart(part_id=RAW_PART_ID, content_type="message/rfc822", label="Raw Source"))
     html_candidates = [
-        (part.part_id, len(decoded_part(_part(message, part.part_id)).strip()))
+        (part.part_id, len(decoded_part(nodes[part.part_id].part).strip()))
         for part in body_parts
         if part.content_type == "text/html" and part.part_id >= 0
     ]
@@ -492,7 +524,7 @@ def _source_location(
 
 
 def render_part(archive: Path, message_pk: int, part_id: int, allow_remote: bool = False) -> PartContent:
-    raw, message = parsed_message(archive, message_pk)
+    raw, message = parsed_message(archive, message_pk, headers_only=part_id == RAW_PART_ID)
     if part_id == RAW_PART_ID:
         return PartContent(
             part_id=part_id,
@@ -512,7 +544,7 @@ def render_part(archive: Path, message_pk: int, part_id: int, allow_remote: bool
             content=content,
             remote_content_blocked=blocked,
         )
-    part = _part(message, part_id)
+    part = _part(message, part_id, raw)
     content_type = part.get_content_type()
     if content_type == "text/plain":
         return PartContent(part_id=part_id, kind="text", content_type=content_type, content=decoded_part(part))
@@ -529,18 +561,17 @@ def render_part(archive: Path, message_pk: int, part_id: int, allow_remote: bool
 
 
 def attachment_content(archive: Path, message_pk: int, part_id: int) -> AttachmentContent:
-    part, descriptor = _attachment(archive, message_pk, part_id)
+    source = _attachment(archive, message_pk, part_id)
     return AttachmentContent(
-        filename=descriptor.filename,
-        content_type=descriptor.content_type,
-        content_base64=base64.b64encode(_payload_bytes(part)).decode("ascii"),
+        filename=source.descriptor.filename,
+        content_type=source.descriptor.content_type,
+        content_base64=base64.b64encode(_payload_bytes(source.part, source.raw, source.part_path)).decode("ascii"),
     )
 
 
 def attachment_descriptor(archive: Path, message_pk: int, part_id: int) -> AttachmentDescriptor:
     """Return attachment naming and type metadata without base64-encoding its payload."""
-    _, descriptor = _attachment(archive, message_pk, part_id)
-    return descriptor
+    return _attachment(archive, message_pk, part_id).descriptor
 
 
 def write_message(archive: Path, message_pk: int, destination: Path) -> None:
@@ -568,18 +599,27 @@ def write_messages_zip(archive: Path, message_pks: list[int], destination: Path)
 
 
 def write_attachment(archive: Path, message_pk: int, part_id: int, destination: Path) -> None:
-    part, _ = _attachment(archive, message_pk, part_id)
-    _write_bytes(destination, _payload_bytes(part))
+    source = _attachment(archive, message_pk, part_id)
+    _write_bytes(destination, _payload_bytes(source.part, source.raw, source.part_path))
 
 
 def export_filename(view: MessageView) -> str:
     subject = re.sub(r"[^\w .()-]+", "_", view.subject, flags=re.UNICODE).strip(" .") or "message"
-    return f"{subject[:80]}-{view.message_pk}.eml"
+    return safe_filename(f"{subject[:80]}-{view.message_pk}.eml", view.message_pk, "message/rfc822")
 
 
 def safe_filename(filename: str | None, part_id: int, content_type: str) -> str:
-    candidate = Path(str(filename or "")).name
-    candidate = "".join(character for character in candidate if character >= " " and character not in "/\\:")
+    candidate = str(filename or "").replace("\\", "/").rsplit("/", 1)[-1]
+    candidate = "".join(character for character in candidate if character >= " " and character not in '/\\:<>"|?*\x7f').rstrip(" .")
+    while candidate:
+        candidate = candidate.rstrip(" .")
+        stem = candidate.split(".", 1)[0].rstrip(" ").upper()
+        if stem in {"CON", "PRN", "AUX", "NUL", "CONIN$", "CONOUT$"} or re.fullmatch(r"(?:COM|LPT)[1-9¹²³]", stem):
+            candidate = "_" + candidate
+        if len(candidate.encode("utf-8")) <= 240:
+            break
+        suffix = Path(candidate).suffix.encode("utf-8")[:40].decode("utf-8", "ignore")
+        candidate = candidate.encode("utf-8")[:240 - len(suffix.encode("utf-8"))].decode("utf-8", "ignore") + suffix
     if candidate:
         return candidate
     suffix = ".pdf" if content_type == "application/pdf" else ".bin"
@@ -650,8 +690,8 @@ def legacy_x_html_body(raw: bytes, message: Message) -> str | None:
     return decode_text(match.group("body"), message.get_content_charset()).value
 
 
-def _parts(message: Message) -> list[Message]:
-    return list(message.walk()) if message.is_multipart() else [message]
+def _parts(message: Message, raw: bytes) -> list[Message]:
+    return [node.part for node in walk_mime(message, OriginalMimeParts(entity=raw))]
 
 
 def _is_gui_attachment(part: Message) -> bool:
@@ -659,27 +699,33 @@ def _is_gui_attachment(part: Message) -> bool:
     return is_attachment(part) or content_type.startswith("image/") or content_type == "application/pdf"
 
 
-def _part(message: Message, part_id: int) -> Message:
-    parts = _parts(message)
+def _part(message: Message, part_id: int, raw: bytes) -> Message:
+    parts = _parts(message, raw)
     if part_id < 0 or part_id >= len(parts):
         raise ValueError(f"no MIME part {part_id}")
     return parts[part_id]
 
 
-def _attachment(archive: Path, message_pk: int, part_id: int) -> tuple[Message, AttachmentDescriptor]:
-    _, message = parsed_message(archive, message_pk)
-    part = _part(message, part_id)
+def _attachment(archive: Path, message_pk: int, part_id: int) -> _AttachmentSource:
+    raw, message = parsed_message(archive, message_pk)
+    node = next((node for node in walk_mime(message, OriginalMimeParts(entity=raw)) if node.part_id == part_id), None)
+    if node is None:
+        raise ValueError(f"no MIME part {part_id}")
+    part = node.part
     content_type = part.get_content_type()
     if not _is_gui_attachment(part):
         raise ValueError(f"MIME part {part_id} is not an attachment")
-    return part, AttachmentDescriptor(
-        filename=safe_filename(part.get_filename(), part_id, content_type),
-        content_type=content_type,
-    )
+    return _AttachmentSource(raw=raw, part=part, part_path=node.part_path,
+        descriptor=AttachmentDescriptor(filename=safe_filename(part.get_filename(), part_id, content_type),
+                                        content_type=content_type))
 
 
-def _payload_bytes(part: Message) -> bytes:
-    payload = part.get_payload(decode=True)
+def _payload_bytes(part: Message, raw: bytes | None = None, part_path: tuple[int, ...] = ()) -> bytes:
+    if raw is not None:
+        return original_part_payload(raw, part_path)
+    if part.is_multipart() or part.get_content_type() == "message/rfc822":
+        raise ValueError("original bytes are required for an attached message")
+    payload = decoded_leaf_payload(part)
     if isinstance(payload, bytes):
         return payload
     value = part.get_payload()
@@ -690,7 +736,10 @@ def _payload_bytes(part: Message) -> bytes:
 
 def _cid_images(message: Message) -> dict[str, str]:
     images: dict[str, str] = {}
-    for part in _parts(message):
+    for node in walk_mime(message):
+        if node.ancestor_attachment:
+            continue
+        part = node.part
         content_id = str(part.get("Content-ID", "")).strip("<>").casefold()
         if content_id and part.get_content_type().startswith("image/"):
             encoded = base64.b64encode(_payload_bytes(part)).decode("ascii")

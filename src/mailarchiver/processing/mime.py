@@ -28,26 +28,19 @@ from typing import BinaryIO
 from uuid import uuid4
 from collections.abc import Callable
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel
 
 from .api import ContentReference, MIME_TYPE, Scope
 from .contracts import ContentMetadata
 from ..message import decoded_header
 from ..search import IndexedAttachment
+from ..mime_tree import MimeLimits as MimeLimits
 
 CHUNK = 1024 * 1024
 
 
 class ExtractionLimitError(RuntimeError):
     """Incomplete derived extraction; original mail remains available for retry."""
-
-
-class MimeLimits(BaseModel):
-    model_config = ConfigDict(extra="forbid", frozen=True)
-    max_expanded_bytes: int = Field(default=128 * 1024 * 1024, gt=0, strict=True)
-    max_depth: int = Field(default=40, gt=0, strict=True)
-    max_parts: int = Field(default=10000, gt=0, strict=True)
-    max_child_messages: int = Field(default=1000, gt=0, strict=True)
 
 
 class MimeBudget(BaseModel):
@@ -171,6 +164,9 @@ def _children(source: BinaryIO, boundary: bytes, workspace: Path, check: Callabl
                 if output is not None:
                     # RFC 2046: the CRLF introducing a delimiter belongs to it.
                     end = output.tell()
+                    if end == 0 and marker == b"--" + boundary:
+                        # Stdlib coalesces directly repeated opening delimiters.
+                        continue
                     output.seek(max(0, end - 2))
                     tail = output.read()
                     output.truncate(end - (2 if tail.endswith(b"\r\n") else 1 if tail.endswith(b"\n") else 0))
@@ -200,7 +196,8 @@ def extract_parts(path: Path, workspace: Path, *, cancelled: Callable[[], None] 
         if cancelled is not None:
             cancelled()
 
-    def visit(current: Path, part_path: tuple[int, ...], inherited: Scope, collect: bool = True) -> None:
+    def visit(current: Path, part_path: tuple[int, ...], inherited: Scope, collect: bool = True,
+              default_type: str = "text/plain") -> None:
         nonlocal next_part
         check()
         part_id = next_part
@@ -209,6 +206,7 @@ def extract_parts(path: Path, workspace: Path, *, cancelled: Callable[[], None] 
             raise ExtractionLimitError("MIME depth limit reached; parent retained; raise plugins.mime.max_depth and retry")
         with current.open("rb") as source:
             headers = read_headers(source)
+            headers.set_default_type(default_type)
             body_offset = source.tell()
             content_type = headers.get_content_type().lower()
             if content_type == "message/rfc822":
@@ -219,7 +217,7 @@ def extract_parts(path: Path, workspace: Path, *, cancelled: Callable[[], None] 
             attached = inherited == "attachment" or headers.get_content_disposition() == "attachment" or supplied_name is not None
             scope: Scope = "attachment" if attached or content_type == "message/rfc822" else "body"
             filename = decoded_header(str(supplied_name)) if supplied_name else None
-            if collect and (attached or content_type == "message/rfc822"):
+            if collect and inherited != "attachment" and (attached or content_type == "message/rfc822"):
                 ordinal = len(result.attachments) + 1
                 result.attachments.append(IndexedAttachment(attachment_ordinal=ordinal, part_id=part_id,
                     filename=filename or f"attachment-{ordinal}", mime_type=content_type))
@@ -228,7 +226,8 @@ def extract_parts(path: Path, workspace: Path, *, cancelled: Callable[[], None] 
                 children = _children(source, boundary.encode("ascii", "replace"), workspace, check, budget)
                 if children:
                     for index, child in enumerate(children, 1):
-                        visit(child, (*part_path, index), scope, collect)
+                        default = "message/rfc822" if content_type == "multipart/digest" else "text/plain"
+                        visit(child, (*part_path, index), scope, collect, default)
                     return
                 result.diagnostics.append(f"missing MIME boundaries at {part_path}")
             if not collect and content_type != "message/rfc822":

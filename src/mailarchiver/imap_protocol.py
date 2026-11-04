@@ -249,7 +249,7 @@ class ImapSession:
             if self.account.tls == "starttls":
                 client.starttls(ssl_context=self.context)
             try:
-                if b"AUTH=PLAIN" in client.capabilities:
+                if "AUTH=PLAIN" in client.capabilities:
                     credentials = b"\x00" + self.account.username.encode("utf-8") + b"\x00" + self.password.encode("utf-8")
                     client.authenticate("PLAIN", lambda _challenge: credentials)
                 else:

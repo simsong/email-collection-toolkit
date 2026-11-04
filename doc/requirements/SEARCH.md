@@ -128,3 +128,23 @@ folding must keep legacy `lower(subject)` indexes useful without modifying an
 archive or rebuilding its index. Limited subject choices retain exact aggregate
 counts, Unicode matching and quarantine exclusion. `make test-cli-processors`
 exercises the bridge lifecycle and legacy-index query semantics.
+
+## Function audit repairs
+
+A MIME attachment's entire subtree stays outside the enclosing message's ordinary
+body, preferred HTML and body index. Its descendants are available only through
+explicit attachment text indexing or the separately promoted child message.
+Attachment metadata lists the outer attachment once, with stable MIME part IDs.
+Encoded attached-message trees use the same decoded depth-first numbering in
+production, readers and index rebuilds. A digest child without `Content-Type`
+defaults to `message/rfc822`; explicit types override that default. Its original
+decoded child bytes are promoted separately, never indexed as ordinary parent text.
+Repeated opening delimiters must not invent empty plain-text parts that suppress
+real HTML. Ordinary CLI body rendering also excludes attachment descendants.
+Explicit attachment text indexing uses decoded child text, never its base64
+transport representation; unavailable encoded children remain opaque.
+Reader resource exhaustion must abort derived indexing/rebuilds, not silently
+publish partial attachment IDs or text. A failed rebuild keeps the prior index
+and canonical bytes unchanged.
+MIME charset labels that name byte transforms are invalid text codecs and use the
+ordinary recovery path. Validate with `make test` and `make test-e2e`.

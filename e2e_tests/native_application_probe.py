@@ -399,6 +399,44 @@ def main() -> None:
             close_window(untitled.window)
             application.activate_window(api.search_window.window_id)
             assert evaluate_async(api.window, "window.pywebview.api.status()")['message_count'] == 1
+            assert api.open_message_window(1)
+            standalone = api.children[-1].window
+            assert standalone.original_url.startswith(server.origin + "/bootstrap/"), "Standalone viewer needs fresh asset authentication"
+            assert standalone.events.loaded.wait(10), "Standalone message bridge failed to load"
+            assert [menu.title for menu in standalone.menu] == ["File", "Window", "Help"]
+            assert standalone in application._registered_windows()
+            assert any(item.title == standalone.title for item in application.window_menu_items())
+            reader_menu_checked = Event()
+
+            def check_reader_menu() -> None:
+                try:
+                    assert webview.active_window() is standalone
+                    menu = NSApplication.sharedApplication().mainMenu()
+                    assert all(menu.itemWithTitle_(title) is not None for title in ("File", "Window", "Help"))
+                    assert menu.itemWithTitle_("File").submenu().itemWithTitle_("Close").isEnabled()
+                except Exception:  # pylint: disable=broad-exception-caught
+                    failures.append(traceback.format_exc())
+                finally:
+                    reader_menu_checked.set()
+
+            def inspect_reader_menu() -> None:
+                try:
+                    app = NSApplication.sharedApplication()
+                    app.activateIgnoringOtherApps_(True)
+                    standalone.native.makeKeyAndOrderFront_(None)
+                    assert webview.active_window() is standalone, f"Standalone focus unavailable; active={app.isActive()}"
+                    application._refresh_macos_menu()
+                    # Inspect after the queued native refresh actually executes.
+                    AppHelper.callAfter(check_reader_menu)
+                except Exception:  # pylint: disable=broad-exception-caught
+                    failures.append(traceback.format_exc())
+                    reader_menu_checked.set()
+
+            AppHelper.callAfter(inspect_reader_menu)
+            assert reader_menu_checked.wait(5), "Standalone native menu inspection timed out"
+            assert not failures, failures
+            close_window(standalone)
+            application.activate_window(api.search_window.window_id)
             assert api.window.evaluate_js("document.getElementById('choose-archive') === null")
             check_new_search(True)
             # Picker navigation must create a real search window bound to its archive.
@@ -581,12 +619,20 @@ def main() -> None:
             assert native_lists is not None
             focused_list = Event()
             focus_deadline = monotonic() + 3
+            focus_diagnostics: list[str] = []
 
             def wait_for_list_focus() -> None:
                 if webview.active_window() == lists:
                     focused_list.set()
                 elif monotonic() < focus_deadline:
                     AppHelper.callLater(0.02, wait_for_list_focus)
+                else:
+                    app = NSApplication.sharedApplication()
+                    key, modal = app.keyWindow(), app.modalWindow()
+                    focus_diagnostics.append(f"active={app.isActive()} key={key.title() if key else None!r} "
+                        f"modal={modal.title() if modal else None!r} windows=" + repr([
+                            (window.title(), window.isKeyWindow(), window.isVisible(), window.level())
+                            for window in app.windows()]))
 
             def focus_list() -> None:
                 NSApplication.sharedApplication().activateIgnoringOtherApps_(True)
@@ -594,7 +640,7 @@ def main() -> None:
                 wait_for_list_focus()
 
             AppHelper.callAfter(focus_list)
-            assert focused_list.wait(5)
+            assert focused_list.wait(5), focus_diagnostics
             closed_menu = Event()
 
             def check_list_close() -> None:

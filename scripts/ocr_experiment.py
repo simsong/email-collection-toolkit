@@ -26,6 +26,7 @@ from statistics import median
 from pydantic import BaseModel
 
 from mailarchiver.mbox import MboxLocation, read_verified_location
+from mailarchiver.sqlite_paths import sqlite_uri
 
 PDFINFO_ENCRYPTED = "Encrypted"
 PDFINFO_PAGES = "Pages"
@@ -137,10 +138,14 @@ class ComparisonRollup(BaseModel):
 
 
 def connection(archive: Path) -> sqlite3.Connection:
-    database = sqlite3.connect(f"file:{archive / 'archive.sqlite3'}?mode=ro", uri=True, timeout=30)
-    database.execute("PRAGMA query_only=ON")
-    database.execute("PRAGMA busy_timeout=30000")
-    database.execute("ATTACH DATABASE ? AS search", (f"file:{archive / 'search.sqlite3'}?mode=ro",))
+    database = sqlite3.connect(sqlite_uri(archive / "archive.sqlite3"), uri=True, timeout=30)
+    try:
+        database.execute("PRAGMA query_only=ON")
+        database.execute("PRAGMA busy_timeout=30000")
+        database.execute("ATTACH DATABASE ? AS search", (sqlite_uri(archive / "search.sqlite3"),))
+    except BaseException:
+        database.close()
+        raise
     return database
 
 

@@ -194,13 +194,15 @@ def test_gzip_extraction_streams_and_enforces_limit(tmp_path: Path) -> None:
         extract_gzip(archive_path, tmp_path, len(raw) - 1)
 
 
-def test_public_inbox_exports_message_blobs_without_git_metadata(tmp_path: Path) -> None:
+@pytest.mark.parametrize("padding_headers", [0, 110])
+def test_public_inbox_exports_message_blobs_without_git_metadata(tmp_path: Path, padding_headers: int) -> None:
     repository = tmp_path / "repository"
     repository.mkdir()
     subprocess.run(["git", "init", "-q", str(repository)], check=True)
     subprocess.run(["git", "-C", str(repository), "config", "user.email", "test@example.test"], check=True)
     subprocess.run(["git", "-C", str(repository), "config", "user.name", "Test"], check=True)
-    raw = b"From: author@example.test\nTo: list@example.test\nSubject: docs\n\npatch\n"
+    raw = (b"X-Audit: " + b"x" * 80 + b"\n") * padding_headers
+    raw += b"From: author@example.test\nTo: list@example.test\nSubject: docs\n\npatch\n"
     (repository / "message").write_bytes(raw)
     (repository / "not-a-message").write_text("ordinary git blob\n", encoding="utf-8")
     subprocess.run(["git", "-C", str(repository), "add", "."], check=True)
@@ -211,3 +213,40 @@ def test_public_inbox_exports_message_blobs_without_git_metadata(tmp_path: Path)
 
     assert prepare(dataset("public-inbox-test", "public-inbox"), [mirror], layout) == 1
     assert next(layout.prepared("public-inbox-test").iterdir()).read_bytes() == raw
+
+
+def test_public_inbox_uses_acquired_commit_not_later_or_unreachable_blobs(tmp_path: Path) -> None:
+    """VALIDATION: prepared corpora must be reproducible from their acquired commit."""
+    repository = tmp_path / "repository.git"
+    subprocess.run(["git", "init", "--bare", "-q", str(repository)], check=True)
+    prefix = ["git", "--git-dir", str(repository)]
+    raw = b"From: author@example.test\nSubject: pinned\n\noriginal\n"
+    blob = subprocess.run([*prefix, "hash-object", "-w", "--stdin"], input=raw, capture_output=True, check=True).stdout.strip().decode()
+    tree = subprocess.run([*prefix, "mktree"], input=f"100644 blob {blob}\tmessage\n".encode(), capture_output=True, check=True).stdout.strip().decode()
+    commit = subprocess.run([*prefix, "-c", "user.name=Test", "-c", "user.email=test@example.test", "commit-tree", tree],
+        input=b"pinned\n", capture_output=True, check=True).stdout.strip().decode()
+    other = b"From: other@example.test\nSubject: excluded\n\nnot acquired\n"
+    other_blob = subprocess.run([*prefix, "hash-object", "-w", "--stdin"], input=other, capture_output=True, check=True).stdout.strip().decode()
+    other_tree = subprocess.run([*prefix, "mktree"], input=f"100644 blob {other_blob}\tmessage\n".encode(), capture_output=True, check=True).stdout.strip().decode()
+    later = subprocess.run([*prefix, "-c", "user.name=Test", "-c", "user.email=test@example.test", "commit-tree", other_tree, "-p", commit],
+        input=b"later\n", capture_output=True, check=True).stdout.strip().decode()
+    subprocess.run([*prefix, "update-ref", "HEAD", later], check=True)
+    subprocess.run([*prefix, "hash-object", "-w", "--stdin"], input=other.replace(b"excluded", b"unreachable"), capture_output=True, check=True)
+    config = dataset("pinned", "public-inbox")
+    manifest = SourceManifest(dataset_id="pinned", acquired_at="2026-11-04T00:00:00Z", artifacts=[
+        AcquiredArtifact(source_kind="git", url="https://example.test/archive", path=str(repository), archive="none", git_commit=commit)])
+    layout = DataLayout(root=tmp_path / "data")
+    assert prepare(config, [repository], layout, manifest) == 1
+    assert [path.read_bytes() for path in layout.prepared("pinned").iterdir()] == [raw]
+    with pytest.raises(ValueError, match="configured limit"):
+        prepare(config.model_copy(update={"max_unpacked_bytes": len(raw) - 1}), [repository], layout, manifest)
+
+
+def test_mailbox_preparation_preserves_declared_mboxrd_dialect(tmp_path: Path) -> None:
+    """VALIDATION: preparation retains the dialect needed to restore quoted From lines."""
+    source = tmp_path / "source.mboxrd"
+    source.write_bytes(b"From author@example.test Mon Jan  1 00:00:00 2024\nFrom: author@example.test\n\n>From body\n>>From quoted\n")
+    layout = DataLayout(root=tmp_path / "data")
+    assert prepare(dataset("dialect", "mailboxes"), [source], layout) == 1
+    prepared, = layout.prepared("dialect").iterdir()
+    assert prepared.suffix == ".mboxrd" and prepared.read_bytes() == source.read_bytes()

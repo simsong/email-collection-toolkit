@@ -435,7 +435,8 @@ overlap. Potential conflicts require a concrete list and coordination plan plus
 explicit user approval; the ledger records the approved scope and subsequent
 checks before integration or publication. Separate worktrees do not waive this
 gate. Copilot review requests use `gh pr edit <number> --add-reviewer '@copilot'`
-as `simsong`, followed by restoration of `simsong-agent` for all other writes.
+as `simsong-agent`, the same authorized account used for all agent GitHub writes.
+A missing request remains a blocker; no personal-account fallback is permitted.
 Review-request timeline or reviewer evidence verifies the request; no browser
 control is used. Before handoff it inventories task checkouts, reconciles intended
 uncommitted changes and unpublished commits into the delivery branch, and records
@@ -483,3 +484,31 @@ owner when needed.
 
 Integrity hash-standard versions must be JSON integers. The standalone verifier
 rejects boolean, floating-point, and string alternatives without coercion.
+
+## Function audit repairs
+
+`prepare` receives the source manifest; public-inbox enumeration streams
+`rev-list --objects` at the recorded commit through `cat-file`, rather than all
+repository objects. Blob content streams in bounded chunks under a shared dataset
+expansion budget; failed enumeration kills its owned Git children. Prepared mailbox suffixes retain the declared quoting dialect.
+The Lambda supplies raw script text to boto3; an offline real-SDK wire test proves
+single encoding. Its worker exports the embedded database/updater paths.
+Data-quality CSV writers receive a schema independently of row count and sample
+`min(population,100)`. Ancillary readers share URI escaping and close on setup errors.
+Apple cache comparison checks reread SHA-256 before header deltas.
+`tests.process_output` owns bounded pipe readers, interruption and child liveness;
+Windows uses console Break with a child handler. Scanner cancellation observes the
+actual native process. Quit startup delays a real settings save with bounded events
+and propagates child-thread errors before process exit.
+
+The native lifecycle probe retains application-active, key-window, modal-window
+and visible-window state when its bounded personal-list focus check fails.
+Its shared smoke fixture uses real ingestion and verifies canonical message bytes;
+catalog/search rows alone cannot support standalone viewing or export acceptance.
+This distinguishes an inactive/locked desktop from an assumed menu regression;
+non-interactive reprocessing and Quit checks remain separate evidence.
+
+The processing-history browser fixture refreshes its typed status snapshot while
+checking live search/About footers. Cleanup stops and joins the heartbeat and
+propagates producer failures. Full Make validation batches run serially to retain
+the real installation-guard assertions, not concurrent writers from another batch.

@@ -62,6 +62,28 @@ HEADER = (b"From: Sender <sender@lab.example.ac.uk>\r\nTo: owner@example.test\r\
           b"Subject: Parent\r\nMIME-Version: 1.0\r\n")
 
 
+@pytest.mark.parametrize("relationship", ["source-is-destination", "source-parent", "source-child", "symlink"])
+def test_shared_ingest_rejects_source_destination_overlap_before_writes(tmp_path: Path, relationship: str) -> None:
+    """SOURCES: CLI and desktop admission share the same source-preservation boundary."""
+    from mailarchiver.__main__ import IngestRequest, run_ingest
+    archive = tmp_path / "archive"
+    archive.mkdir()
+    raw = HEADER + b"\r\noriginal\r\n"
+    message = archive / "source.eml"
+    message.write_bytes(raw)
+    source = archive if relationship == "source-is-destination" else tmp_path if relationship == "source-parent" else message
+    if relationship == "symlink":
+        source = tmp_path / "alias"
+        try:
+            source.symlink_to(archive, target_is_directory=True)
+        except OSError:
+            pytest.skip("creating a directory symlink requires unavailable host privileges")
+    before = {path.relative_to(archive): path.read_bytes() for path in archive.rglob("*") if path.is_file()}
+    with pytest.raises(ValueError, match="separate source and archive"):
+        run_ingest(IngestRequest(archive=archive, roots=[str(source)], scan_policy="not-scanned"), terminal=False)
+    assert {path.relative_to(archive): path.read_bytes() for path in archive.rglob("*") if path.is_file()} == before
+
+
 def test_pst_timeout_tracks_inactivity_in_either_stream() -> None:
     """ACQUISITION: progress extends extraction beyond its original deadline; silence expires."""
     activity = ImportActivity(deadline=60)

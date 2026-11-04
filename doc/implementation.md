@@ -23,6 +23,12 @@ platform or release gate has passed. [Future work](plans/README.md) is separate.
 | [Delivery](implementation/DELIVERY.md) | Platform packaging, release identity, signing and publication |
 | [Validation](implementation/VALIDATION.md) | Fixtures, independent checks, CI and acceptance limits |
 
+The toolkit function audit covers preservation, MIME ancestry, failure isolation,
+portable process tests, validation inputs and release dependency checks. Current
+contracts and acceptance limits are recorded in each subsystem's **Function audit
+repairs** section; [audit scope](TOOLKIT_AUDIT.md) distinguishes reviewed code from
+platform acceptance and deferred work.
+
 ## Shared boundaries
 
 - Display-only timeout normalization retains saved diagnostics, and a Cocoa

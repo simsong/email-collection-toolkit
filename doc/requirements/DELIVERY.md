@@ -407,3 +407,13 @@ it does not establish current-head packaging or Windows feature parity.
 Every bundled source/file manifest must resolve in the frozen application, even
 when that provider is unused. Synthetic local ingest must load the registry and
 preserve canonical bytes without an installed source checkout.
+
+## Function audit repairs
+
+Reject dev/post release versions even when their numeric suffix is zero.
+Mach-O dependency validation must resolve each executable's loader chain and
+`@executable_path` independently; an unrelated helper runpath cannot satisfy
+another executable. All cached Sparkle framework resources, links, notices and
+consumed tools must match the SHA-256-verified pinned archive, with no extra
+framework files. Validate with `make test-python-desktop-package` and
+`make test-sparkle-signing`; signed installer acceptance remains separate.

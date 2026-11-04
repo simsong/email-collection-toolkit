@@ -282,7 +282,8 @@ Addresses identified by a `Sent` message are filtered from correspondent lists
 only, not from stored metadata or yearly people totals.  `report --top 0`
 suppresses those lists.
 
-`ingest --workers N` defaults to `min(os.cpu_count(), 8)` and means at most `N`
+`ingest --workers N` resolves the shared worker preference (half CPUs by default,
+at least one, maximum twice CPUs) and means at most `N`
 source containers in flight. Each framework worker invokes source controls,
 streams plug-in records, parses, and sends
 one ClamAV request at a time, allowing independent mailfiles to use concurrent
@@ -374,7 +375,7 @@ command is currently implemented.
 
 `imap_cli` exposes `mailarchiver-imap` and `make imap IMAP_ARGS=...`. It reuses
 `create_empty_archive`, archive validation, the writer lease and `run_ingest`,
-with eight workers by default and terminal scoreboard output disabled. A separate
+with the shared worker preference and terminal scoreboard output disabled. A separate
 catalog reader prints committed totals every 300 seconds and optional message lines.
 The SIGINT handler requests cooperative cancellation and retains the lease until
 the ingest engine has stopped and checkpointed. No desktop window or OS scheduler
@@ -746,3 +747,16 @@ The ordered stream checks its source owner's cancellation callback before every
 read-ahead pull, so suspension during one fetch cannot initiate the next fetch.
 Network-capable adapters set a per-container pending limit of one, retaining their
 existing fetch/process/stop boundary; local mailboxes use the shared read-ahead bound.
+
+## Function audit repairs
+
+`ImapSession` uses string capabilities from imaplib for SASL PLAIN. Its TLS fixture
+accepts and rejects real UTF-8 PLAIN logins. The Rust traversal skips SearchFolder
+nodes consistently with address-book traversal. The libpff CLI checks pairwise
+`samefile` evidence aliases. Reconstruction retains invalid IDs as a base64 MIME
+part, copies inherited provenance, folds overlong unbroken subjects with adjacent
+RFC 2047 words, and rejects Unicode control characters.
+PDF MBOX derivation and definition-directory publication share
+`storage_sync.publish_exclusive`: Windows rename, macOS `RENAME_EXCL` or Linux
+`RENAME_NOREPLACE`. Publication atomically refuses existing files, links and
+directories without requiring hardlinks; unsupported native operations fail safely.

@@ -7,6 +7,7 @@
 # Separate index repair must leave canonical mail and the processing queue unchanged.
 
 from collections.abc import Iterator
+from contextlib import closing
 import base64
 import hashlib
 import sqlite3
@@ -36,6 +37,7 @@ from mailarchiver.scanner import ClamScanner
 from mailarchiver.standalone_verify import verify_archive
 from tests.test_cli_processing import HEADER, cli, configure, ingest
 from tests.test_processing import plugin
+from tests.test_message import deeply_nested_message, encoded_nested_message
 
 
 @pytest.fixture(scope="module")
@@ -55,6 +57,202 @@ def encrypted_message(*, infected: bool = False) -> bytes:
         raw += (b'\r\n--encrypted\r\nContent-Type: application/octet-stream\r\n'
                 b'Content-Transfer-Encoding: base64\r\n\r\n' + base64.encodebytes(EICAR))
     return raw + b'\r\n--encrypted--\r\n'
+
+
+def test_recursive_address_header_does_not_block_filing_or_later_mail(tmp_path: Path) -> None:
+    """ARCHIVE/PROCESSING: malformed derived addresses retain mail and healthy header evidence."""
+    raw = HEADER.replace(b"To: owner@example.test", b"To: " + b"group:" * 1100 + b"bad@example.test" + b";" * 1100)
+    raw = raw.replace(b"Subject: Parent", b"Cc: Healthy <healthy@example.test>\r\nSubject: malformed-address") + b"\r\nbody\r\n"
+    archive, source = ingest(tmp_path, raw)
+    healthy = HEADER.replace(b"<parent@example.test>", b"<healthy@example.test>") + b"\r\nhealthytoken\r\n"
+    source.write_bytes(healthy)
+    cli(archive, "ingest", "--no-scan", "--owner-names-file", str(tmp_path / "owners.txt"), str(source))
+    with sqlite3.connect(archive / "archive.sqlite3") as database:
+        assert database.execute("SELECT count(*) FROM messages").fetchone() == (2,)
+        assert database.execute("SELECT count(*) FROM metadata_defects WHERE field='to' OR field='To'").fetchone()[0] >= 1
+    with sqlite3.connect(archive / "search.sqlite3") as database:
+        assert database.execute("SELECT display_name FROM address_suggestions WHERE address='healthy@example.test'").fetchone() == ("Healthy",)
+    assert {read_message_bytes(archive, number) for number in (1, 2)} == {raw, healthy}
+
+
+@pytest.mark.parametrize("deferred", [False, True])
+def test_archived_failed_message_job_does_not_starve_new_sources(tmp_path: Path, deferred: bool) -> None:
+    """PROCESSING: historical metadata failures stay visible while unrelated sources reach canonical mail."""
+    archive, source = ingest(tmp_path, HEADER + b"\r\nold\r\n")
+    # A genuine plugin exception leaves a durable failed message job on archived mail.
+    plugins = tmp_path / "plugins"
+    plugin(plugins, "broken-metadata", 'raise ValueError("historical metadata failure")')
+    manifest = plugins / "processors" / "broken-metadata" / "plugin.toml"
+    manifest.write_text(manifest.read_text().replace('pipeline="ingest"', 'pipeline="message"'))
+    source.write_bytes(HEADER.replace(b"<parent@example.test>", b"<new@example.test>") + b"\r\nnewbody\r\n")
+    result = subprocess.run([sys.executable, "-m", "mailarchiver", "--archive", str(archive), "ingest", "--no-scan",
+        "--plugin-dir", str(plugins), "--owner-names-file", str(tmp_path / "owners.txt"), str(source)],
+        capture_output=True, text=True, check=False, timeout=60)
+    assert result.returncode != 0 and "historical metadata failure" in result.stderr
+    # The first failure occurs after publication; the next fresh source must also publish.
+    source.write_bytes(HEADER.replace(b"<parent@example.test>", b"<newer@example.test>") + b"\r\nnewerbody\r\n")
+    result = subprocess.run([sys.executable, "-m", "mailarchiver", "--archive", str(archive), "ingest", "--no-scan",
+        "--plugin-dir", str(plugins), "--owner-names-file", str(tmp_path / "owners.txt"),
+        *(("--defer-content",) if deferred else ()), str(source)],
+        capture_output=True, text=True, check=False, timeout=60)
+    assert result.returncode != 0 and "historical metadata failure" in result.stderr
+    with sqlite3.connect(archive / "archive.sqlite3") as database:
+        assert database.execute("SELECT count(*) FROM messages").fetchone() == (3,)
+    with sqlite3.connect(archive / "processing.sqlite3") as database:
+        assert database.execute("SELECT count(*) FROM jobs WHERE status='failed'").fetchone()[0] >= 2
+
+
+def test_deferred_saved_message_replay_honors_explicit_stop(tmp_path: Path) -> None:
+    """PROCESSING: recovery may isolate an exception, but an explicit fail-import still stops new admission."""
+    original = HEADER + b"\r\noriginal\r\n"
+    archive, source = ingest(tmp_path, original)
+    plugins = tmp_path / "plugins"
+    plugin(plugins, "stop-metadata", 'return ProcessingResult(outcome="fail-import")')
+    manifest = plugins / "processors" / "stop-metadata" / "plugin.toml"
+    manifest.write_text(manifest.read_text().replace('pipeline="ingest"', 'pipeline="message"'))
+    command = [sys.executable, "-m", "mailarchiver", "--archive", str(archive), "ingest", "--no-scan",
+        "--plugin-dir", str(plugins), "--owner-names-file", str(tmp_path / "owners.txt"), "--defer-content", str(source)]
+    stopped = HEADER + b"\r\nstopped\r\n"
+    source.write_bytes(stopped)
+    assert subprocess.run(command, capture_output=True, text=True, check=False, timeout=60).returncode != 0
+    fresh = HEADER + b"\r\nunadmitted\r\n"
+    source.write_bytes(fresh)
+    result = subprocess.run(command, capture_output=True, text=True, check=False, timeout=60)
+    assert result.returncode != 0 and "processor requested fail-import" in result.stderr
+    with sqlite3.connect(archive / "archive.sqlite3") as database:
+        assert database.execute("SELECT count(*) FROM messages").fetchone() == (2,)
+    assert {read_message_bytes(archive, number) for number in (1, 2)} == {original, stopped}
+    assert source.read_bytes() == fresh and not verify_archive(archive)
+
+
+@pytest.mark.parametrize("quoted_envelope", [False, True])
+def test_deep_mime_is_preserved_before_bounded_content_failure(tmp_path: Path, quoted_envelope: bool) -> None:
+    """ARCHIVE: deeply nested MIME may fail derived extraction but cannot prevent canonical filing."""
+    from mailarchiver.gui_service import RAW_PART_ID, describe_message, render_part, write_message
+    from mailarchiver.gui_app import GuiApi
+    raw = deeply_nested_message(HEADER, b"\r\n")
+    if quoted_envelope:
+        raw = b">From sender@example.test Mon Jan 1 00:00:00 2024\r\n" + raw
+    source = tmp_path / "deep.eml"
+    source.write_bytes(raw)
+    owners = tmp_path / "owners.txt"
+    owners.write_text("owner@example.test\n")
+    archive = tmp_path / "archive"
+    result = subprocess.run([sys.executable, "-m", "mailarchiver", "--archive", str(archive), "ingest", "--no-scan",
+        "--owner-names-file", str(owners), str(source)], capture_output=True, text=True, check=False, timeout=60)
+    if quoted_envelope:
+        # The quoted prefix makes the nested content opaque to derived extraction.
+        assert result.returncode == 0, result.stderr
+    else:
+        assert result.returncode != 0
+    assert read_message_bytes(archive, 1) == raw and source.read_bytes() == raw
+    assert verify_archive(archive, quiet=True) == []
+    view = describe_message(archive, 1)
+    if not quoted_envelope:
+        assert view.preferred_part_id == RAW_PART_ID
+    assert render_part(archive, 1, RAW_PART_ID).content == raw.decode()
+    output = tmp_path / "saved.eml"
+    write_message(archive, 1, output)
+    assert output.read_bytes() == raw
+    api = GuiApi(archive, e2e_directory=tmp_path)
+    try:
+        exported = api.prepare_drag([1])
+        with api._drag_export(exported["token"]) as path:
+            assert path.read_bytes() == raw
+    finally:
+        api.close()
+
+
+def test_deep_mbcp_envelope_mail_and_following_record_are_preserved(tmp_path: Path) -> None:
+    """ARCHIVE: a metadata-stub envelope must not make MIME parsing gate real mail or later records."""
+    raw = deeply_nested_message(HEADER, b"\r\n")
+    healthy = HEADER.replace(b"<parent@example.test>", b"<following@example.test>") + b"\r\nfollowing body\r\n"
+    source = tmp_path / "legacy.mbox"
+    wire = (b"From mbcp@s.eecs.harvard.edu Mon Jan 1 00:00:00 2024\r\n" + raw
+            + b"From sender@example.test Mon Jan 1 00:00:01 2024\r\n" + healthy)
+    source.write_bytes(wire)
+    owners = tmp_path / "owners.txt"
+    owners.write_text("owner@example.test\n")
+    archive = tmp_path / "archive"
+    result = subprocess.run([sys.executable, "-m", "mailarchiver", "--archive", str(archive), "ingest", "--no-scan",
+        "--owner-names-file", str(owners), str(source)], capture_output=True, text=True, check=False, timeout=60)
+    assert result.returncode != 0  # Derived deep-MIME work fails after preservation.
+    assert [read_message_bytes(archive, number) for number in (1, 2)] == [raw, healthy]
+    assert source.read_bytes() == wire and verify_archive(archive, quiet=True) == []
+
+
+def test_encoded_reader_exhaustion_keeps_raw_export_and_existing_search_index(tmp_path: Path) -> None:
+    """DESKTOP/SEARCH: over-budget derived traversal offers original bytes and cannot publish a partial rebuild."""
+    from mailarchiver.gui_service import RAW_PART_ID, describe_message, render_part, write_message
+    from mailarchiver.mime_tree import MimeReaderLimitError
+    from mailarchiver.search import prepare_search_message
+    raw = HEADER + encoded_nested_message(80)
+    archive, source = ingest(tmp_path, raw, "--defer-content")
+    view = describe_message(archive, 1)
+    assert view.preferred_part_id == RAW_PART_ID and view.attachments == []
+    assert [part.part_id for part in view.body_parts] == [RAW_PART_ID]
+    assert render_part(archive, 1, RAW_PART_ID).content == raw.decode()
+    output = tmp_path / "original.eml"
+    write_message(archive, 1, output)
+    assert output.read_bytes() == raw
+    with pytest.raises(MimeReaderLimitError):
+        prepare_search_message(raw, True)
+    old_index = (archive / "search.sqlite3").read_bytes()
+    result = subprocess.run([sys.executable, "-m", "mailarchiver", "--archive", str(archive), "refresh-index"],
+                            capture_output=True, text=True, check=False, timeout=30)
+    assert result.returncode != 0 and "MIME reader" in result.stderr
+    assert (archive / "search.sqlite3").read_bytes() == old_index
+    assert not (archive / "search.sqlite3.tmp").exists()
+    assert read_message_bytes(archive, 1) == raw and source.read_bytes() == raw
+    assert verify_archive(archive, quiet=True) == []
+
+
+@pytest.mark.parametrize("newline", [b"\n", b"\r\n"])
+def test_repeated_opening_delimiters_keep_real_html_and_attachment_ids(tmp_path: Path, newline: bytes) -> None:
+    """SEARCH: ignored empty delimiters cannot suppress HTML or change IDs after a real rebuild."""
+    body = (b"Content-Type: multipart/mixed; boundary=x\n\n--x\n--x\nContent-Type: text/html\n\n<p>realhtmltoken</p>\n"
+            b"--x\nContent-Type: application/pdf\nContent-Disposition: attachment; filename=a.pdf\n\n%PDF-A\n"
+            b"--x\n--x\nContent-Type: application/pdf\nContent-Disposition: attachment; filename=b.pdf\n\n%PDF-B\n--x--\n")
+    raw = HEADER.replace(b"\r\n", newline) + body.replace(b"\n", newline)
+    archive, source = ingest(tmp_path, raw)
+    for rebuild in (False, True):
+        if rebuild:
+            cli(archive, "refresh-index")
+        with closing(sqlite3.connect(archive / "search.sqlite3")) as database:
+            row = database.execute("SELECT content FROM message_fts").fetchone()
+            assert row is not None and "realhtmltoken" in row[0]
+            assert database.execute("SELECT part_id,filename FROM message_attachments ORDER BY attachment_ordinal").fetchall() == [(2, "a.pdf"), (3, "b.pdf")]
+    assert read_message_bytes(archive, 1) == raw and source.read_bytes() == raw
+    assert verify_archive(archive, quiet=True) == []
+
+
+@pytest.mark.parametrize("declared_type", [None, "message/rfc822", "text/plain"])
+def test_digest_defaults_promote_exact_children_without_parent_body_leak(tmp_path: Path, declared_type: str | None) -> None:
+    """SEARCH/PROCESSING: digest defaults are attached RFC mail; an explicit child type still wins."""
+    from mailarchiver.processing.mime import extract_parts
+    promoted = declared_type != "text/plain"
+    child = HEADER.replace(b"<parent@example.test>", b"<digest-child@example.test>") + b"\r\ndigestchildsecret\r\n" if promoted else b"digestchildsecret\r\n"
+    wrapper = f"Content-Type: {declared_type}\r\n".encode() if declared_type is not None else b""
+    raw = HEADER + b"Content-Type: multipart/digest; boundary=d\r\n\r\n--d\r\n" + wrapper + b"\r\n" + child + b"\r\n--d--\r\n"
+    source, workspace = tmp_path / "digest.eml", tmp_path / "parts"
+    source.write_bytes(raw)
+    workspace.mkdir()
+    extracted = extract_parts(source, workspace)
+    assert len(extracted.attachments) == int(promoted)
+    part, = extracted.parts
+    assert part.scope == ("attachment" if promoted else "body")
+    assert part.content_type == ("message/rfc822" if promoted else "text/plain") and part.reference.path.read_bytes() == child
+    archive, original = ingest(tmp_path, raw)
+    assert read_message_bytes(archive, 1) == raw and original.read_bytes() == raw
+    if promoted:
+        assert read_message_bytes(archive, 2) == child
+    with closing(sqlite3.connect(archive / "archive.sqlite3")) as database:
+        assert database.execute("SELECT count(*) FROM messages").fetchone() == (1 + int(promoted),)
+    with closing(sqlite3.connect(archive / "search.sqlite3")) as database:
+        row = database.execute("SELECT content FROM message_fts JOIN message_metadata ON message_fts.rowid=message_metadata.message_fts_rowid WHERE message_metadata.sha256=?",
+                               (hashlib.sha256(raw).hexdigest(),)).fetchone()
+        assert row is not None and ("digestchildsecret" in row[0]) != promoted
+    assert verify_archive(archive, quiet=True) == []
 
 
 @pytest.mark.parametrize("status,detail", [

@@ -3,13 +3,18 @@
 """Verify journal recovery retains committed mail and rolls back orphaned appends."""
 
 import hashlib
+import tracemalloc
 from mailarchiver.standalone_verify import PreservingMbox
+from mailarchiver.standalone_verify import _stored_candidates
 from pathlib import Path
+
+import pytest
 
 from mailarchiver.bagit import initialize_bag
 from mailarchiver.catalog import create_catalog, create_search
 from mailarchiver.layout import mbox_directory
 from mailarchiver.mbox import (
+    MboxLocation,
     PendingPublication,
     PublicationRecovery,
     add_message,
@@ -19,6 +24,42 @@ from mailarchiver.mbox import (
     recover_publication,
 )
 from mailarchiver.search import index_message
+
+
+@pytest.mark.parametrize("independent", [False, True])
+def test_late_legacy_quote_recovery_does_not_retain_message_copies(tmp_path: Path, independent: bool) -> None:
+    """ARCHIVE: twelve ambiguous legacy lines must not retain thousands of payloads."""
+    envelope = b"From sender@example.test Thu Feb  1 12:00:00 2024\n"
+    raw = (b"Subject: bounded legacy recovery\n\n>From literal zero\n"
+           + b"".join(f"From original {number}\n".encode() for number in range(1, 12))
+           + b"x" * (128 * 1024) + b"\n")
+    stored = envelope + raw.replace(b"\nFrom ", b"\n>From ") + b"\n"
+    path = tmp_path / "legacy.mbox"
+    path.write_bytes(stored)
+    box = PreservingMbox(path, factory=None, create=False)
+    candidates = _stored_candidates(box, next(box.iterkeys())) if independent else read_location_candidates(
+        path, MboxLocation(byte_offset=0, byte_length=len(stored)))
+    owned_trace = not tracemalloc.is_tracing()
+    if owned_trace:
+        tracemalloc.start()
+    baseline = tracemalloc.get_traced_memory()[0]
+    found = False
+    count = 0
+    try:
+        for count, candidate in enumerate(candidates, 1):
+            # Fail an old implementation early, without deliberately exhausting RAM.
+            if count % 32 == 0:
+                assert tracemalloc.get_traced_memory()[0] - baseline < 8 * 1024 * 1024
+            if candidate == raw:
+                found = True
+                break
+        assert found and count >= 4096
+        assert path.read_bytes() == stored
+    finally:
+        candidates.close()
+        box.close()
+        if owned_trace:
+            tracemalloc.stop()
 
 
 def test_recovery_truncates_orphaned_mbox_append_and_search_row(tmp_path: Path) -> None:

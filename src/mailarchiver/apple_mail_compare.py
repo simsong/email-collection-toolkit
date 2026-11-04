@@ -471,6 +471,8 @@ def _analyze_headers(
         rows = list(rows_iter)
         relative_path = str(rows[0][1])
         apple_raw = emlx_bytes(apple_root / relative_path)
+        if hashlib.sha256(apple_raw).hexdigest() != str(rows[0][2]):
+            raise RuntimeError(f"Apple Mail cache message changed after indexing: {relative_path}")
         apple_headers = _relaxed_headers(apple_raw)
         best: tuple[int, int, Counter[str], Counter[str], Counter[str]] | None = None
         best_key: tuple[int, int] | None = None

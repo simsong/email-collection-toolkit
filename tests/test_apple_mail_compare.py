@@ -51,6 +51,25 @@ def _write_emlx(path: Path, raw: bytes, *, partial: bool = False) -> None:
     )
 
 
+def test_comparison_rejects_cache_changes_after_inventory(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """VALIDATION: reread provider bytes must still match the inventory used to pair messages."""
+    from mailarchiver import apple_mail_compare as comparison
+    raw = b"From: sender@example\nMessage-ID: <changed@example>\n\nbody\n"
+    archive, apple = tmp_path / "archive", tmp_path / "Mail"
+    _archive(archive, [raw])
+    path = apple / "V10/account/Inbox.mbox/Messages/1.emlx"
+    _write_emlx(path, raw.replace(b"Message-ID:", b"X-Local: before\nMessage-ID:"))
+    actual_analyze = comparison._analyze_headers
+
+    def changed_cache(database: sqlite3.Connection, apple_root: Path, archive_root: Path):
+        _write_emlx(path, raw.replace(b"Message-ID:", b"X-Local: after\nMessage-ID:"))
+        return actual_analyze(database, apple_root, archive_root)
+
+    monkeypatch.setattr(comparison, "_analyze_headers", changed_cache)
+    with pytest.raises(RuntimeError, match="changed after indexing"):
+        comparison.compare_apple_mail(apple, archive, progress_every=0)
+
+
 def _archive(archive: Path, messages: list[bytes]) -> None:
     initialize_bag(archive)
     path = mbox_directory(archive) / "2024-Archive1.mbox"

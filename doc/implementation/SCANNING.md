@@ -81,7 +81,8 @@ native loader's underlying error (PyInstaller's generic wrapper hides it).
 requests skip scanner construction and persist an `antivirus` metadata defect
 in the existing catalog transaction for each new message. Run status includes
 the policy (older files default to `unknown`), without changing the catalog
-schema or canonical bytes. Failed required scanning still stops import.
+schema or canonical bytes. Scanner errors and unscannable input retain their
+actual evidence and permit canonical filing; they never become clean verdicts.
 The native source picker and Ingests page show a missing-configuration banner;
 the final native confirmation defaults to Cancel and gates the opt-out.
 Import confirmations use a 560-point-wide selectable AppKit accessory label,
@@ -154,9 +155,9 @@ public-CDN requests or writes to user update storage. Automatic-refresh tests re
 that pin explicitly and isolate their update directories and HTTP endpoints.
 
 
-Current MIME traversal uses the standard-library parser without explicit size,
-recursion, time, or decompression limits. Plain text and rendered HTML are
-indexed first for normal mail; optional extraction covers decoded text
-attachments only. Future binary attachment adapters need explicit bounds and
-must record failures without affecting preservation. Quarantine categories are
-omitted from FTS entirely.
+Production MIME extraction streams to run-owned files with `plugins.mime`
+bounds: 128 MiB expanded bytes, depth 40, 10,000 parts and 1,000 attached
+messages by default. Processor deadlines and text-index byte limits add
+independent bounds. Limit failures retain the canonical original and durable
+diagnostics. Parent body selection excludes attachment subtrees. Optional
+attachment indexing remains decoded text only; quarantine stays outside FTS.

@@ -41,6 +41,7 @@ const state = {
   dragPreparing: new Set(),
   dragEpoch: 0,
   previewUrl: null,
+  attachmentRequest: 0,
   ingestStatusText: "",
   processingStarting: false,
   ingestOverviewGeneration: 0,
@@ -772,11 +773,13 @@ async function openFilterManager() {
     const row = document.createElement("div"); row.className = "filter-set-row";
     const input = document.createElement("input"); input.value = item.name; input.setAttribute("aria-label", `Rename ${item.name}`);
     const rename = actionButton("Rename", async () => {
-      const preferences = await call(() => window.pywebview.api.rename_filter_set(currentName, input.value.trim()));
+      const previousName = currentName;
+      const nextName = input.value.trim();
+      const preferences = await call(() => window.pywebview.api.rename_filter_set(previousName, nextName));
       if (!preferences) return;
-      currentName = input.value.trim();
+      currentName = nextName;
       state.filterSets = preferences.filter_sets;
-      if (state.activeFilterSet === item.name) state.activeFilterSet = currentName;
+      if (state.activeFilterSet === previousName) state.activeFilterSet = currentName;
       populateFilterSetMenu();
     });
     const remove = actionButton("Delete", async () => {
@@ -1160,14 +1163,6 @@ function clearResultViewport() {
   state.resultTable?.clearData();
 }
 
-function toggleSortDirection() {
-  state.sortDirection = state.sortDirection === "descending" ? "ascending" : "descending";
-  const descending = state.sortDirection === "descending";
-  elements["sort-direction"].textContent = descending ? "↓" : "↑";
-  elements["sort-direction"].ariaLabel = descending ? "Sort descending" : "Sort ascending";
-  elements["sort-direction"].title = elements["sort-direction"].ariaLabel;
-  runSearch();
-}
 
 function showResultTable() {
   elements["result-help"].hidden = true;
@@ -1413,6 +1408,7 @@ function queuePreviews(messagePks, request) {
 async function selectMessage(messagePk) {
   showSingleMessageSelection();
   clearLinkDestination();
+  clearAttachmentPreview();
   state.selectionRequest = messagePk;
   state.partRequest += 1;
   state.remoteContentAuthorizedMessage = null;
@@ -2052,8 +2048,14 @@ function renderAttachments(attachments) {
     const item = document.createElement("div");
     item.className = "attachment";
     const name = document.createElement("span"); name.className = "attachment-name"; name.textContent = attachment.filename;
-    const size = document.createElement("span"); size.className = "attachment-size"; size.textContent = byteSize(attachment.byte_length);
+    const size = document.createElement("span"); size.className = "attachment-size";
+    size.textContent = attachment.error || byteSize(attachment.byte_length);
     item.append(name, size);
+    if (attachment.error) {
+      item.classList.add("attachment-unavailable");
+      elements["attachment-list"].append(item);
+      continue;
+    }
     if (attachment.preview) item.append(actionButton("Preview", () => previewAttachment(attachment)));
     item.append(actionButton("Open", () => openAttachment(attachment)));
     item.append(actionButton("Save…", () => saveAttachment(attachment)));
@@ -2070,9 +2072,11 @@ function actionButton(label, action) {
 }
 
 async function previewAttachment(attachment) {
-  const content = await call(() => window.pywebview.api.attachment(state.selected, attachment.part_id));
-  if (!content) return;
   clearAttachmentPreview();
+  const messagePk = state.selected;
+  const request = state.attachmentRequest;
+  const content = await call(() => window.pywebview.api.attachment(messagePk, attachment.part_id));
+  if (!content || state.selected !== messagePk || state.attachmentRequest !== request) return;
   const bytes = Uint8Array.from(atob(content.content_base64), character => character.charCodeAt(0));
   state.previewUrl = URL.createObjectURL(new Blob([bytes], {type: content.content_type}));
   const preview = attachment.preview === "image" ? document.createElement("img") : document.createElement("iframe");
@@ -2082,9 +2086,12 @@ async function previewAttachment(attachment) {
 }
 
 async function openAttachment(attachment) {
-  let result = await call(() => window.pywebview.api.open_attachment(state.selected, attachment.part_id, false));
+  const messagePk = state.selected;
+  const request = ++state.attachmentRequest;
+  let result = await call(() => window.pywebview.api.open_attachment(messagePk, attachment.part_id, false));
+  if (state.selected !== messagePk || state.attachmentRequest !== request) return;
   if (result?.requires_confirmation && confirm(`${attachment.filename} may contain active or unrecognized content. Open it anyway?`)) {
-    result = await call(() => window.pywebview.api.open_attachment(state.selected, attachment.part_id, true));
+    result = await call(() => window.pywebview.api.open_attachment(messagePk, attachment.part_id, true));
   }
 }
 
@@ -2093,6 +2100,7 @@ function saveAttachment(attachment) {
 }
 
 function clearAttachmentPreview() {
+  state.attachmentRequest += 1;
   if (state.previewUrl) URL.revokeObjectURL(state.previewUrl);
   state.previewUrl = null;
   elements["attachment-preview"].replaceChildren();

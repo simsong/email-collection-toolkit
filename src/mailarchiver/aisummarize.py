@@ -15,8 +15,10 @@ Fundamental dependents:
 from __future__ import annotations
 
 import hashlib
+import os
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 SWIFT_SOURCE = Path(__file__).with_name("apple_summary.swift")
@@ -31,7 +33,9 @@ def helper_path() -> Path:
 
 def build_helper(destination: Path) -> None:
     CACHE_DIRECTORY.mkdir(parents=True, exist_ok=True)
-    temporary = destination.with_suffix(".tmp")
+    descriptor, name = tempfile.mkstemp(prefix=f".{destination.name}.", dir=destination.parent)
+    os.close(descriptor)
+    temporary = Path(name)
     command = [
         "/usr/bin/xcrun",
         "swiftc",

@@ -10,7 +10,6 @@ import json
 import mailbox
 import os
 import re
-import signal
 import sqlite3
 import subprocess
 import sys
@@ -19,6 +18,7 @@ from pathlib import Path
 from shutil import copy, copytree
 
 import pytest
+from tests.process_output import CapturedCommand, python_module
 
 from e2e_tests.eicar_fixture import write_eicar_emlx
 from mailarchiver.__main__ import (
@@ -471,23 +471,17 @@ def test_refresh_index_interrupt_retains_prior_search_index(tmp_path: Path) -> N
     finally:
         old_search.close()
 
-    process = subprocess.Popen(
-        [sys.executable, "-m", "mailarchiver", "--archive", str(archive), "refresh-index"],
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        text=True,
-    )
-    assert process.stderr is not None
-    safety_notice = process.stderr.readline()
-    assert "Ctrl-C discards the incomplete replacement" in safety_notice
-    progress = process.stderr.readline()
-    assert progress.startswith("Checking canonical mailboxes:")
-    assert "0/10 messages" in progress
-    assert "ETA calculating" in progress
-    process.send_signal(signal.SIGINT)
-    stdout, stderr = process.communicate(timeout=20)
-
-    assert process.returncode == 130, stdout + stderr
+    with CapturedCommand(python_module("mailarchiver", ["--archive", str(archive), "refresh-index"])) as command:
+        safety_notice = command.stderr.get(timeout=20).decode()
+        assert "Ctrl-C discards the incomplete replacement" in safety_notice
+        progress = command.stderr.get(timeout=20).decode()
+        assert progress.startswith("Checking canonical mailboxes:")
+        assert "0/10 messages" in progress
+        assert "ETA calculating" in progress
+        command.interrupt()
+        result = command.finish(timeout=20)
+    stdout, stderr = result.stdout.decode(), result.stderr.decode()
+    assert result.returncode == 130, stdout + stderr
     assert "discarded incomplete replacement; the existing search index is unchanged" in stderr
     assert "Traceback" not in stderr
     assert not (archive / "search.sqlite3.tmp").exists()
@@ -1033,28 +1027,13 @@ def test_interrupt_stops_cleanly(source_mail: tuple[Path, dict[str, bytes]], tmp
     source, _ = source_mail
     archive = tmp_path / "archive"
     owner_names = Path(__file__).parent / "fixtures" / "owner-names.txt"
-    process = subprocess.Popen(
-        [
-            sys.executable,
-            "-m",
-            "mailarchiver",
-            "--archive",
-            str(archive),
-            "ingest",
-            "--owner-names-file",
-            str(owner_names),
-            "--clamav",
-            str(source),
-        ],
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        text=True,
-    )
-    assert process.stderr is not None
-    assert process.stderr.readline().startswith("started:")
-    process.send_signal(signal.SIGINT)
-    stdout, stderr = process.communicate(timeout=20)
-    assert process.returncode == 130, stdout + stderr
+    with CapturedCommand(python_module("mailarchiver", ["--archive", str(archive), "ingest",
+            "--owner-names-file", str(owner_names), "--clamav", str(source)])) as command:
+        assert command.stderr.get(timeout=20).startswith(b"started:")
+        command.interrupt()
+        result = command.finish(timeout=20)
+    stdout, stderr = result.stdout.decode().replace("\r\n", "\n"), result.stderr.decode()
+    assert result.returncode == 130, stdout + stderr
     assert "interrupted:" in stderr
     assert "**Interrupted. Shutting down…**" in stderr
     assert stderr.index("**Interrupted. Shutting down…**") < stderr.index("interrupted:")

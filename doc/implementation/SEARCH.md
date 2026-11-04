@@ -232,3 +232,28 @@ Subject predicates fold the stored `lower(subject)` expression, allowing existin
 expression indexes to filter candidates before fetching message rows. Completion
 aggregates those candidates once, with a window sum retaining the exact total
 when the list is limited. No archive schema or content-index rebuild is needed.
+
+## Function audit repairs
+
+`mime_tree.walk_mime` carries attachment ancestry iteratively with depth-first part
+IDs. Viewer body selection, `preferred_body_text`, attachment text and inventory
+use that boundary; the streaming processor inventory also excludes descendants
+of an already inventoried attachment. `mailsearch._search_session` shares the
+read-only attached-database transaction and vocabulary stamp between page and count.
+Transform-codec `LookupError` is handled by the ordinary text decoding fallback.
+ID-bearing reader walks receive `OriginalMimeParts` and parse decoded RFC child
+trees, matching production's preflight numbering. Failed encoded children remain
+opaque, as do encoded children without original-byte context. Attachment-text
+traversal receives the same original-byte context, and CLI
+body selection uses shared ancestry. Streaming extraction reuses its empty spool
+across consecutive opening delimiters, avoiding phantom parts and excess part counts.
+Streaming digest traversal passes
+the parent-dependent default MIME type before classifying each child; explicit
+headers still win. The existing decoded preflight/resource limits remain intact.
+`MimeReaderLimitError` propagates through search preparation and the staged rebuild;
+the failed staging database is closed/removed and the old live index remains.
+Shared `decoded_leaf_payload` keeps ordinary best-effort body decoding, but validates
+uuencode lengths before decoding. Malformed/oversized UU bodies remain opaque wire
+text rather than expanding through stdlib zero padding; explicit file export still
+fails strictly. Header sender/body-date recovery and CID-only display use the same
+safe leaf decoder.

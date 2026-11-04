@@ -12,6 +12,7 @@ from __future__ import annotations
 import argparse
 import os
 import platform
+import re
 import plistlib
 import shutil
 import subprocess
@@ -329,12 +330,12 @@ def load_dependencies(commands: str) -> tuple[str, ...]:
     return tuple(paths)
 
 
-def bundle_loader_path(app: Path, binary: Path, value: str) -> Path:
+def bundle_loader_path(app: Path, binary: Path, value: str, executable: Path | None = None) -> Path:
     """Expand loader paths and reject build-machine or escaping search paths."""
     if value == "@loader_path" or value.startswith("@loader_path/"):
         target = binary.parent / value.removeprefix("@loader_path").lstrip("/")
     elif value == "@executable_path" or value.startswith("@executable_path/"):
-        target = app / "Contents/MacOS" / value.removeprefix("@executable_path").lstrip("/")
+        target = (executable.parent if executable is not None else app / "Contents/MacOS") / value.removeprefix("@executable_path").lstrip("/")
     else:
         target = Path(value)
         if not target.is_absolute():
@@ -345,44 +346,82 @@ def bundle_loader_path(app: Path, binary: Path, value: str) -> Path:
     return resolved
 
 
+class NativeLoads(BaseModel):
+    path: Path
+    executable: bool
+    rpaths: tuple[str, ...]
+    dependencies: tuple[str, ...]
+
+
 def verify_dependencies(app: Path, *, environment: Mapping[str, str] | None = None) -> None:
-    """Reject accidental Homebrew/build-machine linkage in every bundled Mach-O file."""
+    """Resolve dylibs in each executable's actual loader chain, never a global rpath union."""
     if environment is None:
         environment = native_test_environment()
-    checked: set[Path] = set()
-    rpaths: set[Path] = set()
+    app = app.resolve()
+    binaries: dict[Path, NativeLoads] = {}
     for candidate in app.rglob("*"):
         if not candidate.is_file():
             continue
         path = candidate.resolve()
-        if not path.is_relative_to(app.resolve()):
+        if not path.is_relative_to(app):
             raise RuntimeError(f"bundle file links outside app: {candidate}")
-        if path in checked:
+        if path in binaries:
             continue
         with path.open("rb") as handle:
             if handle.read(4) not in MACHO_MAGIC:
                 continue
-        checked.add(path)
-        commands = run("/usr/bin/otool", "-l", path, capture_output=True, text=True,
-                       env=environment).stdout
-        rpaths.update(bundle_loader_path(app, path, value) for value in load_rpaths(commands))
-    for path in checked:
-        commands = run("/usr/bin/otool", "-l", path, capture_output=True, text=True,
-                       env=environment).stdout
-        for dependency in load_dependencies(commands):
+        commands = run("/usr/bin/otool", "-l", path, capture_output=True, text=True, env=environment).stdout
+        header = run("/usr/bin/otool", "-hv", path, capture_output=True, text=True, env=environment).stdout
+        binaries[path] = NativeLoads(path=path, executable=bool(re.search(r"\bEXECUTE\b", header)),
+            rpaths=load_rpaths(commands), dependencies=load_dependencies(commands))
+    executables = [path for path, loads in binaries.items() if loads.executable]
+    if not executables:
+        raise RuntimeError("no native executable found inside app")
+    info = app / "Contents/Info.plist"
+    main = app / "Contents/MacOS"
+    if info.exists():
+        with info.open("rb") as stream:
+            main /= plistlib.load(stream)["CFBundleExecutable"]
+    else:
+        main = next((path for path in executables if path.parent == main), executables[0])
+    if main not in binaries:
+        raise RuntimeError(f"missing application executable: {main}")
+    visited: set[tuple[Path, Path, tuple[Path, ...]]] = set()
+    reached: set[Path] = set()
+
+    def visit(path: Path, executable: Path, inherited: tuple[Path, ...]) -> None:
+        loads = binaries[path]
+        local = tuple(bundle_loader_path(app, path, value, executable) for value in loads.rpaths)
+        roots = tuple(dict.fromkeys((*local, *inherited)))
+        key = (path, executable, roots)
+        if key in visited:
+            return
+        visited.add(key)
+        reached.add(path)
+        for dependency in loads.dependencies:
             if dependency.startswith(("/usr/lib/", "/System/Library/")):
                 continue
             if dependency.startswith("@rpath/"):
-                candidates = [(root / dependency.removeprefix("@rpath/")).resolve() for root in rpaths]
-                if not any(item.is_relative_to(app.resolve()) and item.is_file() for item in candidates):
+                candidates = [(root / dependency.removeprefix("@rpath/")).resolve() for root in roots]
+                target = next((item for item in candidates if item.is_relative_to(app) and item.is_file()), None)
+                if target is None:
                     raise RuntimeError(f"unresolved bundled dependency: {path}: {dependency}")
             else:
-                target = bundle_loader_path(app, path, dependency)
+                target = bundle_loader_path(app, path, dependency, executable)
                 if not target.is_file():
                     raise RuntimeError(f"missing bundled dependency: {path}: {dependency}")
-    if not checked:
-        raise RuntimeError("no native executable found inside app")
-    print(f"Verified {len(checked)} bundled Mach-O files: no external non-system library paths")
+            if target not in binaries:
+                raise RuntimeError(f"dependency is not bundled Mach-O: {path}: {dependency}")
+            visit(target, executable, roots)
+
+    for executable in executables:
+        visit(executable, executable, ())
+    # Python extension modules are loaded dynamically by the main application.
+    main_roots = tuple(bundle_loader_path(app, main, value, main) for value in binaries[main].rpaths)
+    for path in binaries:
+        if path not in reached:
+            visit(path, main, main_roots)
+    print(f"Verified {len(binaries)} bundled Mach-O files: no external non-system library paths")
 
 
 def clamav_bundle_arguments() -> list[str]:

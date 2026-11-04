@@ -384,3 +384,19 @@ developer-written catalog migrations remain a [separate plan](../plans/ARCHIVE_E
 the existing `schema_info` version check does not implement those safeguards.
 `locations` and
 `mbox_generations` are written as part of each message publication.
+
+## Function audit repairs
+
+`parse_message` admits header metadata with `BytesHeaderParser`; optional quoted-body
+date recovery is fallible. Quoted MBOX sender recovery also uses `BytesHeaderParser`;
+Google Chat fallback excludes declared multipart/message entities as well as parsed
+containers. Address headers are parsed independently by
+`header_addresses`, preserving healthy fields and recording malformed ones.
+`run_ingest` and GUI `start_import` call `validate_ingest_paths` before writer
+leases or owner-setting saves; setup uses the same individual path guard.
+`create_catalog`/`create_search` enable foreign keys before an explicit DDL transaction;
+close-on-error rolls back partial tables/version markers. The canonical reader and
+standalone verifier independently deduplicate legacy candidates with SHA-256
+fingerprints, retaining only the current candidate's full bytes.
+Legacy MBCP-stub and XXX-wrapper checks use `BytesHeaderParser`; a complex MIME
+body cannot prevent a genuine MBCP-envelope record from reaching filing.

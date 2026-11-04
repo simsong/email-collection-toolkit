@@ -802,3 +802,43 @@ Cocoa Open, About and Setup commands and startup export cleanup share named
 futures, command admission, error collection and bounded shutdown. Native UI
 marshaling and source-preservation rules remain. Dedicated-thread exceptions
 are documented in the [threading audit](../THREADING.md).
+
+## Function audit repairs
+
+An exported attached message must preserve its decoded RFC bytes, including folds,
+malformed headers and LF/CRLF endings. Multipart attachments also export their
+original decoded payload. Export basenames must obey Windows restrictions and a
+bounded UTF-8 length, including trailing-character and device-name checks after
+truncation. Each external attachment open owns a different temporary path.
+Late attachment results and owner-settings polls must not replace newer selections
+or saved values. Native window calls must occur after releasing registry locks.
+Standalone message windows must obtain fresh loopback authentication rather than
+depending on another window's cookies.
+Validate with `make test`, `make test-e2e` and native source/package acceptance.
+
+A malformed attachment transfer encoding must not block its parent's headers,
+body, Raw Source, Save Message or drag. Its size is unknown and its own diagnostic
+is visible; explicit attachment extraction fails without writing a substitute.
+Legacy CR-only MIME boundaries are supported for byte-exact selected exports.
+Valid legacy uuencode attachments retain decoded-byte export. An ambiguous Unix
+envelope inside unterminated MIME headers is reported as unavailable, never
+silently omitted from the exported payload.
+Attachment descriptions must reuse raw boundary traversal within a message,
+avoiding repeated scans of preceding siblings. A synthetic 2 MiB/2,000-attachment
+selection regression exercises responsive metadata and exact first/last exports.
+When full MIME parsing fails, verified headers and Raw Source remain available,
+along with original-message save and drag. Raw Source rendering must not recurse
+through MIME merely to display the original bytes.
+Attachment-search status describes available extracted text without claiming that
+only `.txt` filenames are supported or that every binary format is searchable.
+Decoded reader traversal applies the shared default MIME limits independently of
+processing overrides: depth, node/child counts and cumulative decoded bytes are
+bounded. Locator headers are limited to 1 MiB. Exhaustion falls back to verified
+headers and Raw Source without exposing partial part IDs; Save Message retains
+the complete original. Raw boundary caches must share byte spans, not retain one
+whole subtree copy per depth.
+
+Standalone message windows receive the application menu at creation and remain
+in the shared native window snapshot and Window menu. Native Close remains
+available when a standalone viewer is focused, including on macOS. Native
+acceptance checks actual File/Window/Help headings and Close enabled state.

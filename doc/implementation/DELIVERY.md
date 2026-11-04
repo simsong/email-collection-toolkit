@@ -384,3 +384,13 @@ The macOS build derives hidden imports from trusted built-in acquisition manifes
 `make test-frozen-source-plugins` uses those same arguments and resources to build
 a temporary PyInstaller CLI, ingest synthetic EML, and verify canonical bytes.
 This component test does not establish signed/notarized DMG or Windows acceptance.
+
+## Function audit repairs
+
+The release mapper tests dev/post markers for presence rather than truthiness.
+`verify_dependencies` inventories load commands once, starts a separate runpath
+chain for each Mach-O executable and uses the main app context for dynamically
+loaded extension modules. `make sparkle-tools` verifies the archive SHA-256, then
+`sparkle_bundle.verify_cache` compares all consumed bytes, symlinks and framework
+inventory before bundling. The optional Swift summary helper compiles into a
+unique staging file, avoiding simultaneous first-use path collisions.

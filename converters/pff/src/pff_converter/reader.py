@@ -31,8 +31,7 @@ SENDER_ADDRESS_TYPE, SENDER_ADDRESS = 0x0C1E, 0x0C1F
 INTERNET_CPID = 0x3FDE
 ATTACH_METHOD, ATTACH_FILENAME, ATTACH_SHORT_FILENAME = 0x3705, 0x3707, 0x3704
 ATTACH_MIME, ATTACH_CONTENT_ID = 0x370E, 0x3712
-EXCLUDED_HEADERS = frozenset({"content-type", "content-transfer-encoding", "content-length", "mime-version",
-                               "x-imported-uri", "x-importer-name", "x-importer-version"})
+EXCLUDED_HEADERS = frozenset({"content-type", "content-transfer-encoding", "content-length", "mime-version"})
 
 
 class PffSettings(BaseModel):
@@ -107,7 +106,7 @@ def message_id_valid(value: str) -> bool:
         return False
     value = value[1:-1]
     return (value.count("@") == 1 and all(value.partition("@")[index] for index in (0, 2))
-            and all(not (character.isspace() or ord(character) < 32 or character in "<>")
+            and all(not (character.isspace() or ord(character) < 32 or ord(character) == 127 or character in "<>")
                     for character in value))
 
 
@@ -116,10 +115,10 @@ def normalized_subject(value: str) -> str:
         if len(value) < 2:
             raise ValueError("missing PST subject prefix length")
         value = value[2:]
-    if any(character != "\t" and ord(character) < 32 for character in value):
+    if any(character != "\t" and (ord(character) < 32 or 127 <= ord(character) <= 159) for character in value):
         raise ValueError("control character in Subject")
     decoded = str(make_header(decode_header(value)))
-    if any(character != "\t" and ord(character) < 32 for character in decoded):
+    if any(character != "\t" and (ord(character) < 32 or 127 <= ord(character) <= 159) for character in decoded):
         raise ValueError("decoded control character in Subject")
     return decoded
 
@@ -197,7 +196,7 @@ def header(out: "_MimeWriter", name: str, value: str, separator: str = ": ") -> 
         raise ValueError("invalid header name")
     if "\r" in value.replace("\r\n", "") or "\n" in value.replace("\r\n", ""):
         raise ValueError("invalid header folding")
-    if any(ord(character) < 32 and character not in "\r\n\t" for character in value):
+    if any((ord(character) < 32 and character not in "\r\n\t") or 127 <= ord(character) <= 159 for character in value):
         raise ValueError("control character in header")
     if "\r\n" in value:
         lines = value.split("\r\n")
@@ -213,6 +212,12 @@ def header(out: "_MimeWriter", name: str, value: str, separator: str = ": ") -> 
         split = next((match for match in reversed(breaks)
                       if len((prefix + value[:match.start()]).encode("utf-8")) <= 998), None)
         if split is None:
+            if name.lower() == "subject":
+                # Adjacent RFC 2047 words unfold without adding subject whitespace.
+                encoded = ["=?utf-8?b?" + base64.b64encode(value[index:index + 10].encode()).decode() + "?="
+                           for index in range(0, len(value), 10)]
+                out.write((prefix + "\r\n ".join(encoded) + "\r\n").encode("ascii"))
+                return
             raise ValueError("overlong unbreakable header")
         out.write((prefix + value[:split.start()] + "\r\n").encode("utf-8"))
         value = value[split.end():]
@@ -332,6 +337,9 @@ def _render(message: pypff.message, uri: str, folder: tuple[str, ...], item: int
     if not bodies:
         writer.write(separator)
         writer.part("text/plain; charset=utf-8", io.BytesIO())
+    if original_id and "Message-ID" not in primary:
+        writer.write(separator)
+        writer.part("text/plain; charset=utf-8", io.BytesIO(original_id.encode("utf-8")), filename="original-message-id.txt")
     if transport:
         writer.write(separator)
         writer.part("application/octet-stream", io.BytesIO(transport.encode("utf-8")), filename="original-transport-headers.txt")

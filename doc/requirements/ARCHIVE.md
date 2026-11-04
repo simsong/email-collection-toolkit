@@ -367,7 +367,7 @@ content.  It tracks at least:
 * parsed sender and recipient identity foreign keys, and decoded/unfolded
   Subject headers; sender identity uses a valid `From:` address, then a valid
   `From:` inside a quoted nested-MBOX record, then a valid RFC `Sender:`
-  address. A narrowly recognized Google Chat event with none of these
+  address. A narrowly recognized single-part Google Chat event with none of these
   uses its embedded full name suffixed by `(Google Chat)`; all other missing
   senders remain empty in metadata and display as `(missing sender)` in reports.
   Every parser-provided header value is normalized to text,
@@ -456,3 +456,20 @@ package. A redacted or otherwise restricted release is a separate BagIt bag
 with its own payload, manifests, Mailbag identifiers, and audit mapping. PDF
 and WARC representations remain opt-in, sandboxed publication derivatives and
 must not make remote requests without explicit authorization.
+
+## Function audit repairs
+
+Canonical admission must not require recursive MIME extraction. Invalid address metadata,
+non-text MIME charset codecs, UTC date overflow and deeply nested MIME retain their
+original bytes and SHA-256; derived failures remain diagnostics. Quoted MBOX sender
+recovery also reads headers only; attached chat actors cannot supply a parent's sender.
+MBCP stub detection must inspect headers and opaque body text without recursive MIME
+parsing. A genuine record with that envelope sender and subsequent records remain
+eligible for canonical admission.
+Local source and
+destination paths must be separate before either CLI or desktop acquires a
+writer lease or saves owner settings.
+Fresh catalog and search schemas must initialize transactionally, including their
+version marker, while foreign-key enforcement remains active. Independent legacy
+MBOX interpretations retain compact digest fingerprints instead of all candidate
+message bodies. Validate with `make test` and `make test-ingest-recovery`.

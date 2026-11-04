@@ -60,5 +60,24 @@ def test_generated_headers_fold_or_reject_before_the_mct_line_limit() -> None:
     writer = _MimeWriter(PffSettings(), time.monotonic() + 1)
     header(writer, "Subject", "word " * 300)
     assert max(map(len, writer.output.getvalue().split(b"\r\n"))) <= 998
+    from email.header import decode_header, make_header
+    from email.parser import BytesHeaderParser
+    for subject in ("x" * 999, "😀" * 1000):
+        folded = _MimeWriter(PffSettings(), time.monotonic() + 1)
+        header(folded, "Subject", subject)
+        rendered = folded.output.getvalue()
+        assert max(map(len, rendered.split(b"\r\n"))) <= 998
+        assert str(make_header(decode_header(BytesHeaderParser().parsebytes(rendered)["Subject"]))) == subject
     with pytest.raises(ValueError, match="unbreakable"):
-        header(writer, "Subject", "x" * 999)
+        header(writer, "X-Unbreakable", "x" * 999)
+
+
+@pytest.mark.parametrize("control", ["\x7f", "\x85", "\x9f"])
+def test_control_characters_cannot_enter_reconstructed_headers(control: str) -> None:
+    """PST header safety matches Rust Unicode control rejection, including DEL/C1."""
+    assert not message_id_valid(f"<local{control}@example.test>")
+    with pytest.raises(ValueError, match="control"):
+        normalized_subject(f"subject{control}")
+    writer = _MimeWriter(PffSettings(), time.monotonic() + 1)
+    with pytest.raises(ValueError, match="control"):
+        header(writer, "X-Test", f"value{control}")

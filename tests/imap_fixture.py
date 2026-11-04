@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import base64
 from concurrent.futures import Future
 import imaplib
 from pathlib import Path
@@ -194,10 +195,12 @@ class Utf8Imap(DisposableImap):
     Require ENABLE before UTF-8 LIST/EXAMINE and record actual client wire bytes.
     All names, credentials and messages are synthetic; no application methods are mocked.
     """
-    def __init__(self, directory: Path, capability: str = "UTF8=ACCEPT", enable: str = "OK") -> None:
+    def __init__(self, directory: Path, capability: str = "UTF8=ACCEPT", enable: str = "OK", *,
+                 credentials: tuple[str, str] | None = None) -> None:
         super().__init__(directory, "implicit")
         self.capability = capability.encode("ascii")
         self.enable = enable
+        self.credentials = credentials
         self.commands: list[bytes] = []
         self.names = ("旅行", "literal &AMk- &-", 'Quote " and \\ box')
 
@@ -220,11 +223,24 @@ class Utf8Imap(DisposableImap):
                 response = b"OK complete"
                 if command == b"CAPABILITY":
                     capabilities = b"IMAP4rev1"
+                    if not authenticated and self.credentials is not None:
+                        capabilities += b" AUTH=PLAIN LOGINDISABLED"
                     if authenticated:
                         capabilities += b" ENABLE " + self.capability
                     writer.write(b"* CAPABILITY " + capabilities + b"\r\n")
                 elif command == b"LOGIN":
-                    authenticated = True
+                    if self.credentials is None:
+                        authenticated = True
+                    else:
+                        response = b"NO LOGIN disabled"
+                elif command == b"AUTHENTICATE" and arguments == [b"PLAIN"] and self.credentials is not None:
+                    writer.write(b"+ \r\n")
+                    await writer.drain()
+                    credentials = base64.b64decode((await reader.readline()).strip(), validate=True)
+                    username, password = self.credentials
+                    authenticated = credentials == b"\0" + username.encode() + b"\0" + password.encode()
+                    if not authenticated:
+                        response = b"NO invalid credentials"
                 elif command == b"ENABLE" and authenticated and arguments == [b"UTF8=ACCEPT"]:
                     if self.enable == "OK":
                         enabled = True

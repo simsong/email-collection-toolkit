@@ -3,6 +3,7 @@
 """Verify packaged V1 schemas, indexes, and fail-closed schema handling."""
 
 import sqlite3
+from collections.abc import Callable
 from importlib import resources
 from pathlib import Path
 
@@ -42,6 +43,31 @@ def test_each_database_has_one_packaged_v1_schema() -> None:
         ARCHIVE_SCHEMA,
         SEARCH_SCHEMA,
     ]
+
+
+@pytest.mark.parametrize("create", [create_catalog, create_search])
+def test_schema_failure_rolls_back_version_and_all_partial_tables(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, create: Callable[..., sqlite3.Connection],
+) -> None:
+    """ARCHIVE/SEARCH: a failed DDL operation must leave a retryable empty database."""
+    from mailarchiver import catalog as catalog_module
+    original_schema = catalog_module._schema
+    path = tmp_path / "database.sqlite3"
+
+    def invalid_schema(name: str) -> str:
+        return original_schema(name) + "\nCREATE TABLE audit_fault(value); CREATE TABLE audit_fault(value);"
+
+    with monkeypatch.context() as context:
+        context.setattr(catalog_module, "_schema", invalid_schema)
+        with pytest.raises(sqlite3.DatabaseError, match="already exists"):
+            create(path)
+    with sqlite3.connect(path) as database:
+        assert database.execute("SELECT name FROM sqlite_master WHERE name NOT LIKE 'sqlite_%'").fetchall() == []
+    database = create(path)
+    try:
+        assert database.execute("SELECT count(*) FROM schema_info").fetchone() == (1,)
+    finally:
+        database.close()
 
 
 def test_packaged_v1_schema_creates_current_catalog(tmp_path: Path) -> None:

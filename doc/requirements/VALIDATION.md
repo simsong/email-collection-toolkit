@@ -154,10 +154,10 @@ coordination plan; obtain explicit user approval before conflicting work.
 Recheck before integration/publication and when scope changes; an existing
 approval covers only the disclosed conflict and plan.
 
-Copilot review requests must use `gh` with the authorized `simsong` identity,
-not browser control. That exception is review-request-only; all other Codex
-GitHub writes retain `simsong-agent`. A successful command alone does not prove
-that review was requested.
+Copilot review requests must use `gh pr edit <number> --add-reviewer '@copilot'`
+as `simsong-agent`. Never use the personal account, browser control, or a
+comment mention as a fallback. Verify reviewer or review-request timeline
+evidence; command success alone does not establish a queued review.
 
 Before pr-to-ready handoff, intended task changes and local-only commits in
 every task checkout must be reconciled, validated, and published in the delivery
@@ -274,3 +274,31 @@ user workflows link there instead of maintaining separate option inventories.
 Specialist guides own their byte-level format, provider and platform contracts.
 Requirements state invariants; implementation maps them to code and evidence.
 Historical logs are dated and cannot override current behavior.
+
+## Function audit repairs
+
+Public-inbox preparation must use the acquired commit and only its reachable
+blobs, excluding later/other-branch/unreachable objects. Stream blobs within the
+dataset expansion budget, including non-message blobs. Preserve `.mboxrd` when
+copying mailbox inputs. AWS UserData must be encoded once by the SDK; workers use
+embedded-scanner definitions without installing a ClamAV daemon. Data-quality
+reports permit zero results and sample every candidate when fewer than 100 exist.
+Provider comparison rereads must match their indexed byte hash. Fixture generation
+may replace only its designated checked-in fixture, never arbitrary existing output.
+Subprocess regressions require bounded readiness, cleanup and platform-native
+interrupt/liveness handling. Validate through `make test` and actual Windows CI.
+
+Native focus/menu acceptance requires an unlocked interactive desktop. A locked
+session or unavailable key window is an unmet runtime prerequisite, not evidence
+that native behavior passed. Preserve focus/modal/window diagnostics and rerun
+on the same candidate when the desktop is available; do not weaken key-window
+assertions or replace native acceptance with headless tests.
+Native reader/export fixtures must contain real canonical mail and MBOX locations,
+verified against their unchanged synthetic source before the GUI runs.
+
+Application-writing test batches share the real cross-process installation guard.
+Run them serially unless that entire guard boundary is explicitly isolated;
+otherwise update-reservation assertions can correctly fail on another test writer.
+A synthetic running-status UI fixture must supply a live heartbeat through page
+startup and assertions, then stop and join its producer without changing the
+production stale deadline.

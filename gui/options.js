@@ -6,6 +6,7 @@ let current = null;
 let saving = false;
 let dirty = false;
 let initialized = false;
+let refreshGeneration = 0;
 
 function render(state, replace = false) {
   if (!dirty || replace) {
@@ -28,7 +29,11 @@ function controls() {
 
 async function refreshOptions() {
   if (saving) return;
-  try { render(await window.pywebview.api.status()); }
+  const generation = ++refreshGeneration;
+  try {
+    const state = await window.pywebview.api.status();
+    if (!saving && generation === refreshGeneration) render(state);
+  }
   catch (error) { showError(error); }
 }
 
@@ -40,6 +45,7 @@ function showError(error) {
 async function saveOptions() {
   if (saving || !current) return;
   saving = true;
+  refreshGeneration += 1;
   controls();
   byId("error").hidden = true;
   try {

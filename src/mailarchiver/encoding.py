@@ -127,7 +127,7 @@ def decode_text(payload: bytes, declared_encoding: str | None = None) -> Decoded
     if declared is not None:
         try:
             text = payload.decode(declared)
-        except UnicodeError as error:
+        except (LookupError, UnicodeError) as error:
             declared_error = f"{declared_encoding}: {type(error).__name__}: {error}"
             rejected.add(declared)
         else:
@@ -152,7 +152,7 @@ def decode_text(payload: bytes, declared_encoding: str | None = None) -> Decoded
             continue
         try:
             text = sample.decode(encoding)
-        except UnicodeError:
+        except (LookupError, UnicodeError):
             continue
         candidates.append(
             _EncodingCandidate(encoding=encoding, quality=_quality(text), candidate_rank=candidate_rank)
@@ -163,7 +163,7 @@ def decode_text(payload: bytes, declared_encoding: str | None = None) -> Decoded
             break
         try:
             text = payload.decode(candidate.encoding)
-        except UnicodeError:
+        except (LookupError, UnicodeError):
             continue
         repaired, changed = _repair(text)
         return DecodedText(value=repaired, encoding=candidate.encoding, repaired=changed, defect=declared_error)

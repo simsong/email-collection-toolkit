@@ -49,7 +49,7 @@ from tabulate import tabulate
 
 from .scan_evidence import ScanEvidence, ScanFailure
 from .future_coordinator import BoundedWorkers, FutureCoordinator, WORKER_NUMBER
-from .application import configured_workers
+from .application import configured_workers, validate_ingest_paths
 from .worker_preferences import half_cpus, worker_argument
 from .archive_integrity import MailbagArchiveIntegrityControls
 from .archive_path import add_archive_argument, require_archive
@@ -1335,6 +1335,7 @@ def run_ingest(
     request: IngestRequest, writer_lease: WriterLease | None = None, *, outcome: IngestOutcome | None = None, terminal: bool = True, stop_event: threading.Event | None = None,
 ) -> None:
     """Run ingest under the archive's OS writer lock."""
+    validate_ingest_paths(request.roots, request.archive)
     roots = []
     for root in request.roots:
         if root.startswith("imap://"):

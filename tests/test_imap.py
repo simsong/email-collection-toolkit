@@ -54,6 +54,29 @@ from mailarchiver.plugin_api import MailContainer, MailObject, SourceObservation
 from tests.imap_fixture import DisposableImap, FixtureKeyring, ImapFault, InterruptibleImap, Utf8Imap
 
 
+@pytest.mark.parametrize("valid_password", [False, True])
+def test_real_tls_plain_authentication_accepts_unicode_and_rejects_bad_password(
+    tmp_path: Path, valid_password: bool,
+) -> None:
+    """ACQUISITION: a PLAIN-only TLS server must accept UTF-8 credentials without LOGIN."""
+    username, password = "démouser", "fixture-pässword"
+    server = Utf8Imap(tmp_path, credentials=(username, password))
+    try:
+        account = server.start().model_copy(update={"username": username})
+        if valid_password:
+            with ImapSession(account, password, server.context) as session:
+                assert [mailbox.name for mailbox in session.mailboxes()] == list(server.names)
+        else:
+            with pytest.raises(ValueError, match="IMAP authentication failed") as failure:
+                with ImapSession(account, "incorrect", server.context):
+                    pytest.fail("invalid credentials were accepted")
+            assert password not in str(failure.value)
+        assert any(b" AUTHENTICATE PLAIN" in command for command in server.commands)
+        assert not any(b" LOGIN " in command for command in server.commands)
+    finally:
+        server.close()
+
+
 @pytest.mark.parametrize("status", [-25293, -25308, None])
 def test_credential_errors_keep_native_status_without_private_exception_text(status: int | None,
         monkeypatch: pytest.MonkeyPatch) -> None:

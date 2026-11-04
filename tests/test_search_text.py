@@ -9,6 +9,7 @@
 from __future__ import annotations
 
 import hashlib
+from contextlib import closing
 import sqlite3
 from email.header import Header
 from pathlib import Path
@@ -251,11 +252,11 @@ def test_vocabulary_cache_tracks_index_updates_and_atomic_replacement(tmp_path: 
     archive = natural_archive(tmp_path, ["body"], legacy=True)
     assert search_page(archive, "unusualstrasse").results == []
     path = archive / "search.sqlite3"
-    with sqlite3.connect(path) as database:
+    with closing(sqlite3.connect(path)) as database, database:
         database.execute("UPDATE message_fts SET content=content || ' unusualstraße'")
     assert len(search_page(archive, "unusualstrasse").results) == 1
     replacement = tmp_path / "replacement.sqlite3"
-    with sqlite3.connect(path) as original, sqlite3.connect(replacement) as copied:
+    with closing(sqlite3.connect(path)) as original, closing(sqlite3.connect(replacement)) as copied, copied:
         original.backup(copied)
         copied.execute("UPDATE message_fts SET content=content || ' anotherstraße'")
     replacement.replace(path)

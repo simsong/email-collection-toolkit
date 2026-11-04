@@ -6,6 +6,27 @@ Entries describe their recorded revisions. For current behavior use the
 [user manual](USER_MANUAL.md) and [CLI reference](CLI_REFERENCE.md). Retired
 Rust delivery plans and historical package checks are not current acceptance.
 
+## 1.0.0a54 — toolkit audit repairs
+
+- Retain mail with malformed address metadata, unusual charset labels, overflowed
+  dates or deeply nested MIME. Historical metadata failures no longer starve new
+  mail, including deferred content runs; explicit processor stops remain effective.
+- Preserve attached EML and multipart payload bytes; keep attachment subtrees out of
+  parent bodies, recognize digest children, and retain stable decoded-child IDs.
+  Describe many attachments with one boundary traversal. Use portable, distinct
+  attachment export paths, recheck shortened basenames for Windows restrictions,
+  and discard stale UI replies.
+- Authenticate each standalone message window with its own loopback bootstrap,
+  so private webviews can open messages without inheriting the parent's cookies.
+- Bound decoded reader work and share raw byte spans; keep original-message access
+  on resource exhaustion and preserve the previous index if a rebuild cannot finish.
+- Reject overlapping local input/output paths and evidence-file aliases; initialize
+  SQLite schemas atomically with foreign keys enabled; bound legacy MBOX candidate memory.
+- Honor pinned public-inbox commits and MBOX dialects; repair small/empty audit reports
+  and AWS worker startup; tighten release-version, native dependency and Sparkle cache checks.
+- Repair Windows process/cancellation/Quit regressions and retain real cross-platform
+  acceptance gates. These changes require new native Windows and signed package validation.
+
 ## Windows desktop parity
 
 Close the rebuilt search database before replacing the live index on Windows,

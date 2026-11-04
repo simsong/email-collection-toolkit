@@ -34,6 +34,7 @@ import urllib.request
 import uuid
 import zipfile
 from collections.abc import Iterator
+from contextlib import nullcontext
 from datetime import UTC, datetime
 from pathlib import Path, PurePosixPath
 from typing import Literal
@@ -48,6 +49,7 @@ SOURCE_MANIFEST = "source-manifest.json"
 RUN_REPORT = "run-report.json"
 DEFAULT_CONFIG_DIR = Path("validation/datasets")
 DEFAULT_DATA_DIR = Path("data")
+HEADER_SAMPLE_BYTES = 64 * 1024
 
 
 class StrictModel(BaseModel):
@@ -418,13 +420,13 @@ def candidate_files(inputs: list[Path], config: PreprocessConfig) -> Iterator[tu
 
 
 def header_like(raw: bytes) -> bool:
-    head = raw[:65536]
+    head = raw[:HEADER_SAMPLE_BYTES]
     return bool(re.search(br"(?mi)^(date|from|to|subject|message-id|received):[ \t]*", head))
 
 
 def read_head(path: Path) -> bytes:
     with path.open("rb") as handle:
-        return handle.read(65536)
+        return handle.read(HEADER_SAMPLE_BYTES)
 
 
 def link_or_copy(source: Path, destination: Path) -> None:
@@ -473,59 +475,92 @@ def write_mbox_messages(source: Path, prepared: Path, start: int) -> int:
     return count
 
 
-def git_blob_ids(repository: Path) -> list[str]:
-    object_lines = subprocess.run(
-        [
-            "git",
-            "--git-dir",
-            str(repository),
-            "cat-file",
-            "--batch-all-objects",
-            "--batch-check=%(objectname) %(objecttype)",
-        ],
-        check=True,
-        capture_output=True,
-        text=True,
-    ).stdout.splitlines()
-    return [line.split(" ", 1)[0] for line in object_lines if line.endswith(" blob")]
+def git_blob_ids(repository: Path, commit: str) -> Iterator[str]:
+    """Stream only blobs reachable from the recorded acquisition commit."""
+    prefix = ["git", "--git-dir", str(repository)]
+    with subprocess.Popen([*prefix, "rev-list", "--objects", "--no-object-names", commit], stdout=subprocess.PIPE) as history:
+        with subprocess.Popen([*prefix, "cat-file", "--batch-check"], stdin=subprocess.PIPE, stdout=subprocess.PIPE) as objects:
+            assert history.stdout is not None and objects.stdin is not None and objects.stdout is not None
+            try:
+                for object_id in history.stdout:
+                    objects.stdin.write(object_id)
+                    objects.stdin.flush()
+                    response = objects.stdout.readline().decode("ascii").split()
+                    if len(response) != 3:
+                        raise ValueError(f"unexpected git object response: {response}")
+                    if response[1] == "blob":
+                        yield response[0]
+                objects.stdin.close()
+                if objects.wait() or history.wait():
+                    raise ValueError("could not enumerate acquired Git history")
+            finally:
+                for process in (objects, history):
+                    if process.poll() is None:
+                        process.kill()
 
 
-def prepare_public_inbox(repository: Path, prepared: Path, start: int) -> int:
+class PublicInboxBudget(BaseModel):
+    remaining: int = Field(ge=0)
+
+
+def prepare_public_inbox(repository: Path, prepared: Path, start: int, commit: str,
+                         budget: PublicInboxBudget) -> int:
     count = start
-    with subprocess.Popen(
-        ["git", "--git-dir", str(repository), "cat-file", "--batch"],
-        stdin=subprocess.PIPE,
-        stdout=subprocess.PIPE,
-    ) as process:
+    with subprocess.Popen(["git", "--git-dir", str(repository), "cat-file", "--batch"],
+                          stdin=subprocess.PIPE, stdout=subprocess.PIPE) as process:
         assert process.stdin is not None and process.stdout is not None
-        for object_id in git_blob_ids(repository):
-            process.stdin.write(f"{object_id}\n".encode())
-            process.stdin.flush()
-            response = process.stdout.readline().decode("ascii").split()
-            if len(response) != 3 or response[1] != "blob":
-                raise ValueError(f"unexpected git cat-file response for {object_id}: {response}")
-            raw = process.stdout.read(int(response[2]))
-            if process.stdout.read(1) != b"\n":
-                raise ValueError(f"unterminated git cat-file response for {object_id}")
-            if header_like(raw):
-                (prepared / f"{count:08d}-{object_id}.eml").write_bytes(raw)
-                count += 1
-        process.stdin.close()
-        if process.wait() != 0:
-            raise subprocess.CalledProcessError(process.returncode, process.args)
+        try:
+            for object_id in git_blob_ids(repository, commit):
+                process.stdin.write(f"{object_id}\n".encode())
+                process.stdin.flush()
+                response = process.stdout.readline().decode("ascii").split()
+                if len(response) != 3 or response[1] != "blob":
+                    raise ValueError(f"unexpected git cat-file response for {object_id}: {response}")
+                size = int(response[2])
+                if not 0 <= size <= budget.remaining:
+                    raise ValueError("public-inbox expands beyond configured limit")
+                budget.remaining -= size
+                prefix = process.stdout.read(min(size, HEADER_SAMPLE_BYTES))
+                if len(prefix) != min(size, HEADER_SAMPLE_BYTES):
+                    raise ValueError("truncated public-inbox blob")
+                destination = prepared / f"{count:08d}-{object_id}.eml" if header_like(prefix) else None
+                with destination.open("wb") if destination else nullcontext() as output:
+                    if output is not None:
+                        output.write(prefix)
+                    remaining = size - len(prefix)
+                    while remaining:
+                        block = process.stdout.read(min(remaining, 1024 * 1024))
+                        if not block:
+                            raise ValueError("truncated public-inbox blob")
+                        remaining -= len(block)
+                        if output is not None:
+                            output.write(block)
+                if process.stdout.read(1) != b"\n":
+                    raise ValueError(f"unterminated git cat-file response for {object_id}")
+                count += destination is not None
+            process.stdin.close()
+            if process.wait() != 0:
+                raise subprocess.CalledProcessError(process.returncode, process.args)
+        finally:
+            if process.poll() is None:
+                process.kill()
     return count
 
 
-def prepare(dataset: DatasetConfig, inputs: list[Path], layout: DataLayout) -> int:
+def prepare(dataset: DatasetConfig, inputs: list[Path], layout: DataLayout, manifest: SourceManifest | None = None) -> int:
     target = layout.prepared(dataset.id)
     if target.exists():
         shutil.rmtree(target)
     target.mkdir(parents=True)
     count = 0
     if dataset.preprocess.kind == "public-inbox":
+        budget = PublicInboxBudget(remaining=dataset.max_unpacked_bytes)
         for source in inputs:
             if source.name.endswith(".git"):
-                count = prepare_public_inbox(source, target, count)
+                artifact = next((item for item in manifest.artifacts if Path(item.path).resolve() == source.resolve()), None) if manifest else None
+                if manifest is not None and (artifact is None or artifact.git_commit is None):
+                    raise ValueError(f"public-inbox source lacks an acquired commit: {source}")
+                count = prepare_public_inbox(source, target, count, artifact.git_commit if artifact and artifact.git_commit else "HEAD", budget)
         return validate_prepared_count(dataset, count)
     for _base, path in candidate_files(inputs, dataset.preprocess):
         head = read_head(path)
@@ -540,7 +575,7 @@ def prepare(dataset: DatasetConfig, inputs: list[Path], layout: DataLayout) -> i
             continue
         if dataset.preprocess.kind in {"mixed", "sf-lovers"} and not (is_mbox or header_like(head)):
             continue
-        suffix = ".mbox" if is_mbox else ".eml"
+        suffix = (".mboxrd" if path.suffix.lower() == ".mboxrd" else ".mbox") if is_mbox else ".eml"
         link_or_copy(path, prepared_destination(target, count, path, suffix))
         count += 1
     return validate_prepared_count(dataset, count)
@@ -584,7 +619,7 @@ def run_dataset(dataset: DatasetConfig, layout: DataLayout, owner_names: Path) -
     (layout.run_dir() / f"{dataset.id}.json").unlink(missing_ok=True)
     manifest = acquire(dataset, layout)
     inputs = extract(dataset, manifest, layout)
-    prepared_files = prepare(dataset, inputs, layout)
+    prepared_files = prepare(dataset, inputs, layout, manifest)
     mailbag = layout.mailbag(dataset.id)
     if mailbag.exists():
         shutil.rmtree(mailbag)
@@ -707,7 +742,7 @@ def main() -> int:
             print(acquire(dataset, layout).model_dump_json(indent=2))
         elif args.command == "prepare":
             manifest = acquire(dataset, layout)
-            print(f"prepared {prepare(dataset, extract(dataset, manifest, layout), layout):,} files")
+            print(f"prepared {prepare(dataset, extract(dataset, manifest, layout), layout, manifest):,} files")
         elif args.command == "run":
             print(run_dataset(dataset, layout, args.owner_names_file.resolve()).model_dump_json(indent=2))
         else:

@@ -23,6 +23,32 @@ SOURCE_FIXTURE = Path(__file__).parent / "data" / "email-korean-bad-encoding.eml
 KOREAN_MESSAGE_ID = "<20020719111745.3C1DE9171E@vineyard.net>"
 
 
+class DecodeCountingBytes(bytes):
+    calls: list[str]
+    slices: list[slice]
+
+    def __new__(cls, value: bytes) -> Self:
+        instance = super().__new__(cls, value)
+        instance.calls = []
+        instance.slices = []
+        return instance
+
+    @overload
+    def __getitem__(self, key: SupportsIndex, /) -> int: ...
+
+    @overload
+    def __getitem__(self, key: slice, /) -> bytes: ...
+
+    def __getitem__(self, key: SupportsIndex | slice, /) -> int | bytes:
+        if isinstance(key, slice):
+            self.slices.append(key)
+        return super().__getitem__(key)
+
+    def decode(self, encoding: str = "utf-8", errors: str = "strict") -> str:
+        self.calls.append(encoding)
+        return super().decode(encoding, errors)
+
+
 def test_declared_ks_c_5601_is_decoded_as_euc_kr() -> None:
     """Requirement: a valid legacy MIME charset produces readable derived text."""
     body = "부자가 되세요".encode("euc-kr")
@@ -53,6 +79,18 @@ def test_misdeclared_utf8_uses_readable_western_encoding() -> None:
     assert result.defect is not None
 
 
+@pytest.mark.parametrize("charset", ["base64_codec", "hex_codec", "rot_13"])
+def test_transform_codecs_are_invalid_mime_charsets(charset: str) -> None:
+    """Malformed MIME charset names cannot prevent best-effort text recovery."""
+    raw = "café: unchanged original".encode("utf-8")
+    result = decode_text(raw, charset)
+    assert result.value == "café: unchanged original"
+    defect = result.defect
+    assert isinstance(defect, str)
+    assert charset in str(defect)
+    assert raw == "café: unchanged original".encode("utf-8")
+
+
 def test_detector_candidates_precede_universal_single_byte_fallbacks() -> None:
     """Requirement: detector evidence precedes codecs that accept nearly every byte."""
     body = b"The world\x92s largest"
@@ -70,31 +108,6 @@ def test_detector_candidates_precede_universal_single_byte_fallbacks() -> None:
 def test_large_payload_is_ranked_on_a_sample_before_one_full_fallback_decode() -> None:
     """Requirement: candidate ranking must not repeatedly decode a complete large MIME part."""
 
-    class DecodeCountingBytes(bytes):
-        calls: list[str]
-        slices: list[slice]
-
-        def __new__(cls, value: bytes) -> Self:
-            instance = super().__new__(cls, value)
-            instance.calls = []
-            instance.slices = []
-            return instance
-
-        @overload
-        def __getitem__(self, key: SupportsIndex, /) -> int: ...
-
-        @overload
-        def __getitem__(self, key: slice, /) -> bytes: ...
-
-        def __getitem__(self, key: SupportsIndex | slice, /) -> int | bytes:
-            if isinstance(key, slice):
-                self.slices.append(key)
-            return super().__getitem__(key)
-
-        def decode(self, encoding: str = "utf-8", errors: str = "strict") -> str:
-            self.calls.append(encoding)
-            return super().decode(encoding, errors)
-
     body = DecodeCountingBytes("한국어메시지".encode("euc-kr") * 50_000)
 
     result = decode_text(body, "utf-8")
@@ -107,31 +120,6 @@ def test_large_payload_is_ranked_on_a_sample_before_one_full_fallback_decode() -
 
 def test_failed_declared_codec_is_not_retried_after_a_clean_sample() -> None:
     """Requirement: a failed full decode is not retried from a clean bounded sample."""
-
-    class DecodeCountingBytes(bytes):
-        calls: list[str]
-        slices: list[slice]
-
-        def __new__(cls, value: bytes) -> Self:
-            instance = super().__new__(cls, value)
-            instance.calls = []
-            instance.slices = []
-            return instance
-
-        @overload
-        def __getitem__(self, key: SupportsIndex, /) -> int: ...
-
-        @overload
-        def __getitem__(self, key: slice, /) -> bytes: ...
-
-        def __getitem__(self, key: SupportsIndex | slice, /) -> int | bytes:
-            if isinstance(key, slice):
-                self.slices.append(key)
-            return super().__getitem__(key)
-
-        def decode(self, encoding: str = "utf-8", errors: str = "strict") -> str:
-            self.calls.append(encoding)
-            return super().decode(encoding, errors)
 
     half = DETECTION_SAMPLE_BYTES // 2
     body = DecodeCountingBytes(b"a" * half + b"\x92" + b"a" * half)

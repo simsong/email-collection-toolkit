@@ -25,7 +25,7 @@ from datetime import UTC, datetime, timedelta
 from email import policy
 from email.header import decode_header
 from email.message import Message
-from email.parser import BytesParser
+from email.parser import BytesHeaderParser, BytesParser
 from email.utils import getaddresses, parseaddr, parsedate_to_datetime
 from enum import StrEnum
 from pathlib import Path
@@ -35,6 +35,7 @@ from ftfy import fix_encoding
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from .encoding import decode_text
+from .mime_tree import decoded_leaf_payload, walk_mime
 
 YEAR = re.compile(r"^(19|20)\d{2}$")
 DATE_RECEIVED_TOLERANCE = timedelta(days=2)
@@ -120,12 +121,12 @@ def parse_date(value: str | None, earliest_year: int = 1900) -> datetime | None:
         return None
     try:
         parsed = parsedate_to_datetime(value)
+        if parsed is None:
+            return None
+        normalized = parsed.replace(tzinfo=UTC) if parsed.tzinfo is None else parsed.astimezone(UTC)
     except Exception:
         logging.getLogger(__name__).debug("Best-effort operation failed", exc_info=True)
         return None
-    if parsed is None:
-        return None
-    normalized = parsed.replace(tzinfo=UTC) if parsed.tzinfo is None else parsed.astimezone(UTC)
     return normalized if plausible_year(normalized.year, earliest_year) else None
 
 
@@ -155,20 +156,16 @@ def received_date(values: Sequence[object], earliest_year: int = 1900) -> dateti
 
 
 def _body_text(message: Message) -> str:
-    parts = message.walk() if message.is_multipart() else [message]
     text: list[str] = []
-    for part in parts:
-        if part.is_multipart() or part.get_content_disposition() == "attachment":
+    for node in walk_mime(message):
+        part = node.part
+        if part.is_multipart() or node.attachment:
             continue
         if part.get_content_maintype() != "text":
             continue
-        payload = part.get_payload(decode=True)
+        payload = decoded_leaf_payload(part)
         if isinstance(payload, bytes):
-            charset = part.get_content_charset() or "utf-8"
-            try:
-                text.append(payload.decode(charset, "replace"))
-            except LookupError:
-                text.append(payload.decode("utf-8", "replace"))
+            text.append(decode_text(payload, part.get_content_charset()).value)
         elif payload is not None:
             text.append(str(payload))
     return "\n".join(text)
@@ -296,7 +293,7 @@ def sender_identity(message: Message, defects: list[MetadataDefect], raw: bytes 
         header_end = separator.start() if separator is not None else len(raw)
         match = EMBEDDED_MBOX_ENVELOPE.search(raw, 0, header_end)
         if match is not None:
-            embedded = BytesParser(policy=policy.compat32).parsebytes(raw[match.end():])
+            embedded = BytesHeaderParser(policy=policy.compat32).parsebytes(raw[match.end():])
             embedded_values = header_values(embedded, "From", defects)
             try:
                 address = parseaddr(embedded_values[0] if embedded_values else "")[1].lower()
@@ -319,8 +316,9 @@ def sender_identity(message: Message, defects: list[MetadataDefect], raw: bytes 
         defects.append(MetadataDefect(field="From", detail="missing or invalid; used Sender header"))
         return SenderIdentity(value=address, source="sender")
 
-    if message.get("X-GM-THRID") is not None and not message.is_multipart():
-        payload = message.get_payload(decode=True)
+    if (message.get("X-GM-THRID") is not None and not message.is_multipart()
+            and message.get_content_maintype() not in ("multipart", "message")):
+        payload = decoded_leaf_payload(message)
         text = payload.decode("utf-8", "replace") if isinstance(payload, bytes) else str(message.get_payload())
         if "conversation_id:" in text and "event_id:" in text and (match := GOOGLE_CHAT_SENDER.search(text)):
             name = match.group(1).replace(r'\"', '"').replace(r"\\", "\\")
@@ -334,14 +332,20 @@ def sender_identity(message: Message, defects: list[MetadataDefect], raw: bytes 
 def recipient_identities(message: Message, defects: list[MetadataDefect]) -> list[RecipientIdentity]:
     """Return normalized recipients without losing their RFC header role."""
     recipients: set[tuple[str, RecipientRole]] = set()
-    try:
-        for role in RecipientRole:
-            values = header_values(message, role.value, defects)
-            recipients.update((address.lower(), role) for _, address in getaddresses(values) if address)
-    except Exception as error:
-        logging.getLogger(__name__).debug("Best-effort operation failed", exc_info=True)
-        defects.append(MetadataDefect(field="recipients", detail=f"{type(error).__name__}: {error}"))
+    for role in RecipientRole:
+        recipients.update((address.lower(), role) for _, address in header_addresses(message, role.value, defects) if address)
     return [RecipientIdentity(address=address, role=role) for address, role in sorted(recipients)]
+
+
+def header_addresses(message: Message, field: str, defects: list[MetadataDefect]) -> list[tuple[str, str]]:
+    """Parse each address header independently; malformed metadata never blocks filing."""
+    result: list[tuple[str, str]] = []
+    for value in header_values(message, field, defects):
+        try:
+            result.extend(getaddresses([value]))
+        except (RecursionError, ValueError, IndexError, TypeError) as error:
+            defects.append(MetadataDefect(field=field, detail=f"{type(error).__name__}: {error}"))
+    return result
 
 
 def parse_message(
@@ -351,7 +355,7 @@ def parse_message(
     source_date_utc: datetime | None = None,
     earliest_year: int = 1900,
 ) -> ParsedMessage:
-    message = BytesParser(policy=policy.compat32).parsebytes(raw)
+    message = BytesHeaderParser(policy=policy.compat32).parsebytes(raw)
     digest = hashlib.sha256(raw).hexdigest()
     defects: list[MetadataDefect] = []
     message_id_values = header_values(message, "Message-ID", defects)
@@ -362,7 +366,12 @@ def parse_message(
     date_value = date_values[0] if date_values else None
     date = parse_date(date_value, earliest_year)
     received = received_date(header_values(message, "Received", defects), earliest_year)
-    body_date = embedded_body_date(message, earliest_year) if received is None else None
+    body_date = None
+    if received is None and (date is None or date.year <= BODY_DATE_FALLBACK_MAX_YEAR):
+        try:
+            body_date = embedded_body_date(BytesParser(policy=policy.compat32).parsebytes(raw), earliest_year)
+        except (RecursionError, ValueError, LookupError) as error:
+            defects.append(MetadataDefect(field="body date", detail=f"{type(error).__name__}: {error}"))
     source_date = None
     if source_date_utc is not None:
         if source_date_utc.tzinfo is None or source_date_utc.utcoffset() is None:

@@ -24,13 +24,13 @@ import warnings
 from email import policy
 from email.message import Message
 from email.parser import BytesParser
-from email.utils import getaddresses
 
 from bs4 import BeautifulSoup, XMLParsedAsHTMLWarning
 from pydantic import BaseModel
 
 from .encoding import decode_text
-from .message import decoded_header, decoded_message_header
+from .message import MetadataDefect, decoded_header, decoded_message_header, header_addresses
+from .mime_tree import OriginalMimeParts, decoded_leaf_payload, is_attachment as is_attachment, walk_mime
 from .search_text import search_fold
 
 SEARCH_CATEGORIES = ("Archive", "Sent")
@@ -63,14 +63,8 @@ class PreparedSearchMessage(BaseModel):
 
 
 def decoded_part(part: Message) -> str:
-    payload = part.get_payload(decode=True) or b""
-    if not isinstance(payload, bytes):
-        return ""
-    return decode_text(payload, part.get_content_charset()).value
-
-
-def is_attachment(part: Message) -> bool:
-    return part.get_content_disposition() == "attachment" or part.get_filename() is not None
+    payload = decoded_leaf_payload(part) or b""
+    return decode_text(payload, part.get_content_charset()).value if isinstance(payload, bytes) else payload
 
 
 def html_text(value: str) -> str:
@@ -82,7 +76,7 @@ def html_text(value: str) -> str:
 
 def preferred_body_text(message: Message) -> str:
     """Extract the user-readable message body without attachment text."""
-    parts = list(message.walk()) if message.is_multipart() else [message]
+    parts = [node.part for node in walk_mime(message) if not node.attachment]
     plain = [decoded_part(part) for part in parts if part.get_content_type() == "text/plain" and not is_attachment(part)]
     html = [decoded_part(part) for part in parts if part.get_content_type() == "text/html" and not is_attachment(part)]
     if plain:
@@ -107,19 +101,19 @@ def parsed_message_text(
         decoded_message_header(raw, message, name) if raw is not None else decoded_header(str(message.get(name) or ""))
         for name in names
     )
-    parts = list(message.walk()) if message.is_multipart() else [message]
     body = preferred_body_text(message) if body is None else body
     if index_attachments:
-        attachments = [decoded_part(part) for part in parts if is_attachment(part) and part.get_content_maintype() == "text"]
-        body = "\n".join([body, *attachments])
+        attachments = attachment_text(message, raw)
+        if attachments:
+            body = "\n".join((body, attachments))
     return f"{headers}\n{body}"
 
 
-def attachment_text(message: Message) -> str:
+def attachment_text(message: Message, raw: bytes | None = None) -> str:
     """Return decoded text from MIME attachments, excluding binary payloads."""
-    parts = list(message.walk()) if message.is_multipart() else [message]
     return "\n".join(
-        decoded_part(part) for part in parts if is_attachment(part) and part.get_content_maintype() == "text"
+        decoded_part(node.part) for node in walk_mime(message, OriginalMimeParts(entity=raw) if raw is not None else None)
+        if node.attachment and node.part.get_content_maintype() == "text"
     )
 
 
@@ -135,12 +129,12 @@ def message_text(raw: bytes, index_attachments: bool) -> str:
     return parsed_message_text(message, index_attachments, raw=raw)
 
 
-def indexed_attachments(message: Message) -> list[IndexedAttachment]:
+def indexed_attachments(message: Message, raw: bytes) -> list[IndexedAttachment]:
     """Return stable metadata for MIME parts treated as attachments."""
-    parts = list(message.walk()) if message.is_multipart() else [message]
     attachments: list[IndexedAttachment] = []
-    for part_id, part in enumerate(parts):
-        if not is_attachment(part):
+    for node in walk_mime(message, OriginalMimeParts(entity=raw)):
+        part_id, part = node.part_id, node.part
+        if node.ancestor_attachment or not is_attachment(part):
             continue
         ordinal = len(attachments) + 1
         supplied_name = part.get_filename()
@@ -156,11 +150,12 @@ def indexed_attachments(message: Message) -> list[IndexedAttachment]:
     return attachments
 
 
-def suggested_addresses(message: Message) -> list[SuggestedAddress]:
+def suggested_addresses(message: Message, defects: list[MetadataDefect] | None = None) -> list[SuggestedAddress]:
     """Return one decoded display name for every address present in the message headers."""
     identities: dict[str, str] = {}
-    values = [str(value) for name in ("From", "To", "Cc", "Bcc") for value in message.get_all(name, [])]
-    for supplied_name, supplied_address in getaddresses(values):
+    values = (address for field in ("From", "To", "Cc", "Bcc")
+              for address in header_addresses(message, field, defects if defects is not None else []))
+    for supplied_name, supplied_address in values:
         address = supplied_address.strip().lower()
         if not address:
             continue
@@ -206,12 +201,12 @@ def prepare_search_message(
     """Read, hash, and MIME-parse one message without touching SQLite."""
     digest = hashlib.sha256(raw).hexdigest() if sha256 is None else sha256
     message = BytesParser(policy=policy.compat32).parsebytes(raw)
-    attachments = indexed_attachments(message)
+    attachments = indexed_attachments(message, raw)
     body = preferred_body_text(message)
     return PreparedSearchMessage(
         sha256=digest,
         content=parsed_message_text(message, False, body, raw),
-        attachment_content=attachment_text(message) if index_attachments else "",
+        attachment_content=attachment_text(message, raw) if index_attachments else "",
         attachments=attachments,
         suggestions=suggested_addresses(message),
         preview=body_preview(body),

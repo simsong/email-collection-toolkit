@@ -104,6 +104,27 @@ def configured_workers(command_line: int | None = None, store: ApplicationPrefer
     return preferences.resolve()
 
 
+def validate_source_destination(source: Path, destination: Path) -> None:
+    """Reject filesystem aliases/containment before any destination state is created."""
+    source = source.expanduser().resolve(strict=True)
+    destination = destination.expanduser().resolve()
+    destination_contains_source = destination.exists() and any(
+        destination.samefile(parent) for parent in (source, *source.parents)
+    )
+    source_contains_destination = any(
+        parent.exists() and source.samefile(parent) for parent in (destination, *destination.parents)
+    )
+    if destination_contains_source or source_contains_destination:
+        raise ValueError("Choose separate source and archive folders; neither may contain the other.")
+
+
+def validate_ingest_paths(roots: list[str], destination: Path) -> None:
+    """Validate existing local sources before either host creates writer/settings state."""
+    for root in roots:
+        if "://" not in root and Path(root).exists():
+            validate_source_destination(Path(root), destination)
+
+
 class SetupSelection(BaseModel):
     """The two explicitly selected setup folders; validation never writes to them."""
 
@@ -115,14 +136,7 @@ class SetupSelection(BaseModel):
         destination = self.destination.expanduser().resolve()
         if not source.is_dir():
             raise ValueError("Select a root folder containing mail to import.")
-        destination_contains_source = destination.exists() and any(
-            destination.samefile(parent) for parent in (source, *source.parents)
-        )
-        source_contains_destination = any(
-            parent.exists() and source.samefile(parent) for parent in (destination, *destination.parents)
-        )
-        if destination_contains_source or source_contains_destination:
-            raise ValueError("Choose separate source and archive folders; neither may contain the other.")
+        validate_source_destination(source, destination)
 
 
 class ArchiveDescriptor(BaseModel):

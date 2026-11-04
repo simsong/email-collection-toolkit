@@ -16,14 +16,11 @@ Fundamental dependents:
 from __future__ import annotations
 
 import argparse
-import ctypes
-import errno
 import importlib
 import logging
 import os
 import shutil
 import subprocess
-import sys
 import tempfile
 from contextlib import contextmanager
 from collections.abc import Callable
@@ -39,6 +36,7 @@ from pydantic import BaseModel
 from .clamav_definitions import DATABASE_ENV, DEVELOPMENT_DATABASE, PREFIXES, ActiveDefinitions, DefinitionSet, certificates_path, read_definitions, selected_definitions, update_root, updater_path
 from .scanner import ClamScanner
 from .owned_command import run_owned_command
+from .storage_sync import publish_exclusive as publish_definition_directory
 from .writer_lock import application_write_activity
 
 EICAR = b"X5O!P%@AP[4\\PZX54(P^)7CC)7}$EICAR-STANDARD-ANTIVIRUS-TEST-FILE!$H+H*"
@@ -175,27 +173,6 @@ def run_freshclam(staging: Path, configuration: Path,
     if result.returncode or "cool-down until" in diagnostics:
         raise RuntimeError(f"Definition update failed ({result.returncode}): {diagnostics[-4096:]}")
     return diagnostics
-
-
-def publish_definition_directory(staging: Path, destination: Path) -> None:
-    """Atomically publish a directory without replacing even an empty existing destination."""
-    if os.name == "nt":
-        staging.rename(destination)  # Windows rename refuses an existing destination.
-        return
-    native = ctypes.CDLL(None, use_errno=True)
-    if sys.platform == "darwin":
-        rename = native.renamex_np
-        rename.argtypes = [ctypes.c_char_p, ctypes.c_char_p, ctypes.c_uint]
-        result = rename(os.fsencode(staging), os.fsencode(destination), 4)  # RENAME_EXCL
-    elif sys.platform.startswith("linux"):
-        rename = native.renameat2
-        rename.argtypes = [ctypes.c_int, ctypes.c_char_p, ctypes.c_int, ctypes.c_char_p, ctypes.c_uint]
-        result = rename(-100, os.fsencode(staging), -100, os.fsencode(destination), 1)  # AT_FDCWD, RENAME_NOREPLACE
-    else:
-        raise OSError(errno.ENOTSUP, "Exclusive directory publication is unsupported")
-    if result:
-        error = ctypes.get_errno()
-        raise OSError(error, os.strerror(error), str(destination))
 
 
 def download_definitions(destination: Path, *, state_directory: Path | None = None) -> UpdateResult:

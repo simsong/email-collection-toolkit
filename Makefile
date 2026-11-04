@@ -312,17 +312,12 @@ sparkle-tools:
 	@printf '%s  %s\n' "$(SPARKLE_SHA256)" "$(SPARKLE_ARCHIVE)" | shasum -a 256 -c -
 	@if test -e "$(SPARKLE_DIR)"; then \
 		test -x "$(SPARKLE_DIR)/bin/generate_keys" -a -x "$(SPARKLE_DIR)/bin/sign_update" || { echo "incomplete Sparkle tools directory: $(SPARKLE_DIR)" >&2; exit 1; }; \
-		verified=$$(mktemp "$(SPARKLE_DOWNLOAD_DIR)/.sparkle-verify.XXXXXX") || exit 1; \
-		trap 'rm -f "$$verified"' 0; \
-		for tool in generate_keys sign_update; do \
-			tar -xOf "$(SPARKLE_ARCHIVE)" "./bin/$$tool" > "$$verified" || { echo "verified Sparkle archive is missing tool: $$tool" >&2; exit 1; }; \
-			cmp "$$verified" "$(SPARKLE_DIR)/bin/$$tool" || { echo "cached Sparkle tool differs from verified archive: $$tool" >&2; exit 1; }; \
-		done; \
 	else \
 		mkdir -p "$(SPARKLE_DIR)"; \
 		tar -xJf "$(SPARKLE_ARCHIVE)" --strip-components=1 -C "$(SPARKLE_DIR)"; \
 		test -x "$(SPARKLE_DIR)/bin/generate_keys" -a -x "$(SPARKLE_DIR)/bin/sign_update"; \
 	fi
+	uv run --locked python scripts/sparkle_bundle.py "$(SPARKLE_ARCHIVE)" "$(SPARKLE_DIR)"
 
 sparkle-keys: sparkle-tools
 	"$(SPARKLE_DIR)/bin/generate_keys"
@@ -526,6 +521,7 @@ test-matcher-prototype: ruff
 
 gui-smoke: test-native-gui
 
+# Native focus/menu checks require a logged-in, unlocked desktop.
 .PHONY: test-native-application
 test-native-application: ruff
 	MAILARCHIVER_NATIVE_APPLICATION_E2E=1 uv run pytest -q e2e_tests/test_ingest_verify.py::test_native_application_lifecycle

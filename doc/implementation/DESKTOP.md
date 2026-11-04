@@ -1049,3 +1049,55 @@ Cocoa Open, About and Setup commands and startup export cleanup share named
 futures, command admission, error collection and bounded shutdown. Native UI
 marshaling and source-preservation rules remain. Dedicated-thread exceptions
 are documented in the [threading audit](../THREADING.md).
+
+## Function audit repairs
+
+`original_part_payload` navigates boundaries in the original RFC bytes and decodes
+only the selected entity's transfer encoding; it never serializes parsed headers.
+The viewer retains raw bytes and a part path alongside an attachment descriptor.
+`safe_filename` removes forbidden characters, handles reserved Windows devices and
+bounds encoded length, then repeats trailing-character/device checks after
+truncation. Attachment opens use separate UUID directories.
+Standalone viewers request a fresh `asset_url` bootstrap ticket. Reusing the
+parent's final URL fails when a new private webview clears or isolates cookies.
+JavaScript request generations reject stale preview/confirmation and options
+responses. Ingest/graph reuse releases the application lock before synchronous
+native calls; menu/focus code snapshots registered windows under that lock.
+
+Attachment description catches transfer/locator failures per attachment and
+returns unknown size plus a diagnostic. The UI keeps that row visible without
+preview/open/save controls; whole-message export stays available. Explicit
+attachment APIs keep strict decoding. Boundary location recognizes CR, LF and
+CRLF without reserializing the selected entity.
+
+Standalone message windows receive the application menu at creation and remain
+in the shared native window snapshot and Window menu. Native Close remains
+available when a standalone viewer is focused, including on macOS. Native
+acceptance checks actual File/Window/Help headings and Close enabled state.
+
+Raw payload location scans physical header lines using the standard parser's
+header/continuation boundary, rather than assuming every body starts after a
+blank line. This retains malformed first body lines and nested headers. All
+explicit attachment extraction uses original bytes and strict transfer decoding,
+including ordinary binary attachments; CID-only display retains best-effort parsing.
+Misplaced Unix envelopes inside headers are rejected as ambiguous. The public `uu`
+codec retains legacy uuencode aliases; only its ASCII transport line endings are
+normalized, preserving decoded bytes and reporting malformed/truncated input.
+`OriginalMimeParts` lazily caches each container's header and child-boundary
+traversal. One instance serves the complete description; HTML preference selection
+also reuses its existing parsed-node list. Explicit single-part exports use the
+same locator. Encoded RFC child trees retain production's depth-first IDs.
+`parsed_message` falls back to header-only parsing on MIME recursion/value failure;
+Raw Source requests select header-only parsing immediately. Hash-verified retrieval
+occurs before this fallback, so integrity errors still propagate.
+The reader footer describes extracted-text availability rather than a stale
+`.txt`-only restriction; attachment MIME type and selected extraction policy govern
+actual text availability.
+Reader limits use the shared `MimeLimits` model, re-exported from `processing.mime`
+for compatibility. `MimeReaderBudget` bounds retained decodes and checks transport
+size before copying/decoding; uuencode declared lengths are checked before the
+stdlib codec can pad malformed short lines. Raw containers share backing-byte
+spans, and decoded children reuse their parent's cached bytes. `walk_mime` checks
+depth/counts before scheduling children and propagates resource exhaustion rather
+than silently skipping IDs. The GUI discards the incomplete traversal/caches and
+offers Raw Source; raw reads and the initial stdlib parse still occur in memory.

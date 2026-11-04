@@ -26,6 +26,7 @@ from mailarchiver.layout import mbox_directory
 from mailarchiver.owner_rules import OwnerRules
 from mailarchiver.standalone_verify import verify_archive
 from mailarchiver.writer_lock import WriterLease
+from tests.process_output import assert_process_exited
 
 
 def run_quit_probe(root: Path, mode: str) -> float:
@@ -69,20 +70,15 @@ def test_quit_exits_despite_stranded_callbacks(tmp_path: Path, mode: str) -> Non
     if mode == "writer":
         assert (tmp_path / "saved").read_text() == "completed"
     if mode == "startup":
+        assert (tmp_path / "startup-stopped").exists()
+        assert not (tmp_path / "startup-error").exists()
         archive = tmp_path / "startup-archive"
         assert DocumentOptions(archive).defaults().include == ["owner@example.test"]
         with WriterLease.acquire(archive, str(archive), "startup release", "probe", "test"):
             pass
     if mode == "definitions":
         pid = int((tmp_path / "updater-pid").read_text())
-        deadline = monotonic() + 5
-        while monotonic() < deadline:
-            state = subprocess.run(["ps", "-o", "stat=", "-p", str(pid)], capture_output=True, text=True, check=False).stdout.strip()
-            if not state or state.startswith("Z"):
-                break
-            sleep(0.05)
-        else:
-            pytest.fail("definition updater survived its GUI owner")
+        assert_process_exited(pid)
     if mode in {"exports", "blocked-exports"}:
         exported = Path((tmp_path / "export-path").read_text())
         if mode == "blocked-exports":

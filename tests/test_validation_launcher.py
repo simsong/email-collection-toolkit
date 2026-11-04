@@ -7,6 +7,8 @@ from __future__ import annotations
 import importlib.util
 import subprocess
 import sys
+import base64
+from urllib.parse import parse_qs
 from pathlib import Path
 
 import pytest
@@ -56,8 +58,44 @@ def test_worker_script_runs_pipeline_uploads_evidence_and_always_shuts_down() ->
     assert "trap finish EXIT" in script
     assert "shutdown -h now" in script
     assert "sshd" not in script
+    assert "clamav-daemon" not in script and "CLAMD" not in script
+    assert "MAILARCHIVER_CLAMAV_DATABASE=/var/lib/clamav" in script
     syntax = subprocess.run(["bash", "-n"], input=script, text=True, capture_output=True, check=False)
     assert syntax.returncode == 0, syntax.stderr
+
+
+def test_ec2_sdk_encodes_user_data_exactly_once(monkeypatch: pytest.MonkeyPatch) -> None:
+    """AWS: actual botocore request serialization must deliver an executable shell script."""
+    import boto3
+    client = boto3.client("ec2", region_name="us-east-1", aws_access_key_id="fixture", aws_secret_access_key="fixture")
+    bodies: list[str] = []
+
+    class WireCaptured(Exception):
+        pass
+
+    def capture(request, **_unused):
+        bodies.append(request.body.decode() if isinstance(request.body, bytes) else request.body)
+        raise WireCaptured
+
+    client.meta.events.register("before-send.ec2.RunInstances", capture)
+    # Intercept only network delivery; boto3 validation, handlers and encoding are real.
+    monkeypatch.setattr(boto3, "client", lambda _service: client)
+    values = {"AMI_ID": "ami-12345678", "OUTPUT_BUCKET": "validation-bucket", "OUTPUT_PREFIX": "validation",
+        "REPOSITORY_URL": "https://github.com/simsong/email-collection-toolkit.git", "REPOSITORY_REF": "fix-docs",
+        "INSTANCE_PROFILE_ARN": "arn:aws:iam::123456789012:instance-profile/fixture", "SECURITY_GROUP_ID": "sg-12345678",
+        "SUBNET_ID": "subnet-12345678"}
+    for name, value in values.items():
+        monkeypatch.setenv(name, value)
+    try:
+        with pytest.raises(WireCaptured):
+            launcher.lambda_handler(request(), None)
+    finally:
+        client.close()
+    assert len(bodies) == 1
+    encoded, = parse_qs(bodies[0])["UserData"]
+    expected = launcher.worker_script(launcher.parse_request(request()), values["OUTPUT_BUCKET"], values["OUTPUT_PREFIX"],
+        values["REPOSITORY_URL"], values["REPOSITORY_REF"])
+    assert base64.b64decode(encoded).decode() == expected
 
 
 def test_sam_control_plane_uses_real_terminating_ec2_and_external_bucket() -> None:

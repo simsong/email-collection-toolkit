@@ -59,6 +59,8 @@ failed pending ingest must not starve the existing archive's search reconstructi
 Explicit deferred-content and content-job limits retain their existing behavior.
 Failed archived extraction remains durable and reportable, but the preliminary
 recovery pass must not prevent unrelated new mail from reaching canonical storage.
+Saved metadata replay must preserve that isolation when content is deferred or
+bounded; failure records remain visible and unpublished ingest errors still stop.
 Independent healthy archived jobs must continue after a failed job. Descendants
 of a failed prerequisite remain blocked; explicit `fail-import` and cancellation
 still stop the run.

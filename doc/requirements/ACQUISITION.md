@@ -35,8 +35,9 @@ Development-app credential reads retain the existing interpreter's Keychain trus
 without changing vault access rules. Report native failure status without exposing
 passwords or raw private backend exception text.
 
-Each invocation synchronizes once and exits. Eight download workers are the default;
-`--workers` sets a positive count. Generic IMAP includes every selectable mailbox
+Each invocation synchronizes once and exits. Download workers use the shared
+preference (half CPUs by default, at least one); `--workers` overrides it with
+a positive count no greater than twice the detected CPU count. Generic IMAP includes every selectable mailbox
 except names containing `spam`, case-insensitively. Gmail discovers special-use
 All Mail, fetches bodies only there, and obtains message identities and label
 membership through `X-GM-MSGID` and `X-GM-LABELS`; other folders are not fetched.
@@ -384,3 +385,16 @@ or count read-ahead scan offsets as additional source bytes.
 
 Network sources retain one pending message per container: finish processing the
 current message before requesting another. Local MBOX sources use bounded read-ahead.
+
+## Function audit repairs
+
+IMAP capability negotiation must recognize the standard-library string
+`AUTH=PLAIN` value, including Unicode credentials, while failed authentication
+remains a real error. PST traversal excludes virtual search folders before
+selection/counting. Converter evidence destinations cannot alias each other or
+the source through hardlinks. Invalid reconstructed Message-ID values remain
+separate evidence; inherited importer headers are retained after the converter's
+own provenance, long subjects may use folded encoded words, and DEL/C1 controls
+are rejected. Validate with `make test-imap`, `make test-pst` and `make test-pff`.
+PDF-derived MBOX publication must atomically refuse a racing destination without
+requiring hardlink-capable storage; existing output remains untouched.

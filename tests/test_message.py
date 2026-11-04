@@ -3,13 +3,58 @@
 """Verify malformed metadata is recorded while message identity and dates stay stable."""
 
 import hashlib
+import quopri
 from datetime import UTC, datetime, timedelta, timezone
 from email import policy
 from email.header import Header
 from email.parser import BytesParser
 from pathlib import Path
 
+import pytest
+
 from mailarchiver.message import parse_message
+
+
+def deeply_nested_message(headers: bytes, newline: bytes = b"\n") -> bytes:
+    """ARCHIVE fixture: exceed parser recursion with small, deterministic original bytes."""
+    opening = b"".join(f"Content-Type: multipart/mixed; boundary=b{level}\n\n--b{level}\n".encode() for level in range(1100))
+    closing = b"".join(f"\n--b{level}--\n".encode() for level in reversed(range(1100)))
+    return headers + (opening + b"Content-Type: text/plain\n\noriginalbody\n" + closing).replace(b"\n", newline)
+
+
+def encoded_nested_message(depth: int, body: bytes = b"body\n") -> bytes:
+    """Reader fixture: each parse is shallow while decoded attached-message depth grows."""
+    raw = b"From: child@example.test\nSubject: leaf\n\n" + body
+    for _ in range(depth):
+        raw = (b"Content-Type: message/rfc822\nContent-Transfer-Encoding: quoted-printable\n\n"
+               + quopri.encodestring(raw).replace(b":", b"=3A"))
+    return raw
+
+
+@pytest.mark.parametrize("received", [False, True])
+def test_utc_date_overflow_uses_valid_fallback(tmp_path: Path, received: bool) -> None:
+    """Out-of-range UTC conversion is invalid metadata, never a reason to lose mail."""
+    raw = (b"From: sender@example.test\nDate: Fri, 31 Dec 9999 23:59:59 -0100\n"
+           + (b"Received: by fixture; Thu, 1 Feb 2024 12:00:00 +0000\n" if received else b"")
+           + b"Subject: date fallback\n\nunchanged original\n")
+    parsed = parse_message(raw, tmp_path / "2024" / "message.eml", None)
+    assert parsed.sha256 == hashlib.sha256(raw).hexdigest()
+    assert parsed.date_source == ("received" if received else "path-year")
+    assert parsed.date_utc == ("2024-02-01T12:00:00+00:00" if received else "2024-01-01T00:00:00+00:00")
+    assert any(defect.field == "Date" and "invalid" in defect.detail for defect in parsed.defects)
+
+
+@pytest.mark.parametrize("quoted_envelope", [False, True])
+def test_deep_mime_cannot_prevent_header_metadata_and_identity(tmp_path: Path, quoted_envelope: bool) -> None:
+    """ARCHIVE: derived MIME recursion must not reject a small deeply nested original."""
+    raw = deeply_nested_message(b"From: sender@example.test\nDate: Mon, 1 Jan 2024 00:00:00 +0000\nSubject: deep MIME\n")
+    if quoted_envelope:
+        raw = (b"Date: Mon, 1 Jan 2024 00:00:00 +0000\nSubject: deep MIME\n"
+               b">From sender@example.test Mon Jan 1 00:00:00 2024\n" + raw)
+    parsed = parse_message(raw, tmp_path / "2024" / "message.eml", None)
+    assert parsed.sha256 == hashlib.sha256(raw).hexdigest()
+    assert parsed.subject == "deep MIME" and parsed.date_source == "date"
+    assert parsed.sender == "sender@example.test"
 
 
 def test_received_fallback_uses_trimmed_utc_median() -> None:
@@ -319,6 +364,17 @@ def test_arbitrary_body_sender_text_is_not_treated_as_identity() -> None:
     parsed = parse_message(raw, Path("/input/2024/message.eml"), None)
 
     assert parsed.sender == ""
+
+
+@pytest.mark.parametrize("content_type", ["multipart/mixed; boundary=x", "message/rfc822"])
+def test_attached_chat_actor_cannot_supply_parent_sender(content_type: str) -> None:
+    """ARCHIVE: header-only admission must not promote an attached actor into its parent's identity."""
+    child = (b'Content-Type: text/plain\n\nsender { full_name: "Wrong Person" }\n'
+             b'conversation_id: "conversation"\nevent_id: "event"\n')
+    payload = b"--x\n" + child + b"\n--x--\n" if content_type.startswith("multipart/") else child
+    raw = b"X-GM-THRID: 1234\nContent-Type: " + content_type.encode() + b"\n\n" + payload
+    parsed = parse_message(raw, Path("/input/2024/message.eml"), None)
+    assert parsed.sender == "" and parsed.sha256 == hashlib.sha256(raw).hexdigest()
 
 
 def test_quoted_nested_mbox_from_header_is_recovered() -> None:
