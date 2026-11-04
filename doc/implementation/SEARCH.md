@@ -121,7 +121,11 @@ numbered quarantine MBOX filenames.
 `refresh-index` first renders terminal progress for the finite canonical-MBOX
 validation phase weighted by catalogued message counts, then renders
 message-count progress and an elapsed-rate ETA
-while building the replacement database. Its replacement file is never opened
+while building the replacement database. After committing, it closes the staging
+SQLite connection before atomic replacement so Windows can rename the file.
+CLI permission errors retain macOS Full Disk Access guidance only on macOS;
+other hosts advise checking permissions and competing open-file handles.
+Its replacement file is never opened
 as the live index; a `KeyboardInterrupt` rolls back catalog subject updates,
 removes the incomplete replacement, and reports that the existing index is
 unchanged. A bounded, ordered worker pool verifies source hashes and parses

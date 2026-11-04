@@ -9,7 +9,6 @@
 from __future__ import annotations
 
 import os
-import faulthandler
 from pathlib import Path
 import sqlite3
 import subprocess
@@ -63,8 +62,8 @@ def test_threaded_storage_profile_and_stack_evidence(tmp_path: Path) -> None:
         assert report.total.io is None
 
 
-@pytest.mark.parametrize("fail", [False, True])
-def test_real_pytest_plugin_preserves_outcomes(tmp_path: Path, fail: bool) -> None:
+@pytest.mark.parametrize("fail,native_timeout", [(False, False), (True, False), (False, True)])
+def test_real_pytest_plugin_preserves_outcomes(tmp_path: Path, fail: bool, native_timeout: bool) -> None:
     fixture = tmp_path / "test_profile_fixture.py"
     fixture.write_text(
         "# This generated test exercises the real opt-in diagnostic plugin.\n"
@@ -78,10 +77,15 @@ def test_real_pytest_plugin_preserves_outcomes(tmp_path: Path, fail: bool) -> No
         "        (tmp_path / 'synthetic').write_bytes(b'fixture')\n"
         f"        assert not {fail!r}\n", encoding="utf-8")
     directory = tmp_path / "evidence"
+    options = ["-o", "faulthandler_timeout=30"] if native_timeout else []
     result = subprocess.run([sys.executable, "-m", "pytest", "-q", "-p", "scripts.ci_diagnostics",
-        f"--ci-diagnostics-dir={directory}", "--ci-diagnostics-test=test_synthetic", str(fixture)],
+        f"--ci-diagnostics-dir={directory}", "--ci-diagnostics-test=test_synthetic", *options, str(fixture)],
         capture_output=True, text=True, check=False, timeout=30)
-    assert result.returncode == (1 if fail else 0), result.stdout + result.stderr
+    assert result.returncode == (1 if fail or native_timeout else 0), result.stdout + result.stderr
+    if native_timeout:
+        assert "cannot run with native timed traceback dumps" in result.stdout + result.stderr
+        assert not list(directory.glob("*/report.json"))
+        return
     report_path, = directory.glob("*/report.json")
     report = DiagnosticReport.model_validate_json(report_path.read_text())
     assert report.state == ("failed" if fail else "passed")
@@ -185,14 +189,33 @@ def test_independently_profiled_worker_keeps_its_hook(tmp_path: Path) -> None:
 
 
 def test_existing_native_watchdog_keeps_running(tmp_path: Path) -> None:
-    external = tmp_path / "external-watchdog.txt"
-    with external.open("w", encoding="utf-8") as output:
-        faulthandler.dump_traceback_later(0.02, repeat=True, file=output)
-        try:
-            with ProfileSession(tmp_path, "native-watchdog", stack_interval=0.02).recording():
-                sleep(0.08)
-            before = external.stat().st_size
-            sleep(0.08)
-            assert before > 0 and external.stat().st_size > before
-        finally:
-            faulthandler.cancel_dump_traceback_later()
+    code = '''# This disposable child checks ownership of an existing native watchdog.
+# Its timer is scheduled to fire after the short diagnostic session ends.
+# Repeated output proves collector setup and teardown leave it registered.
+# The parent enforces a deadline because native traceback code can crash or hang.
+# Only synthetic paths and frame locations are written; no real mail is used.
+import faulthandler
+from pathlib import Path
+import sys
+import time
+from scripts.ci_diagnostics import ProfileSession
+root = Path(sys.argv[1])
+external = root / 'external-watchdog.txt'
+with external.open('w', encoding='utf-8') as output:
+    faulthandler.dump_traceback_later(3, repeat=True, file=output)
+    try:
+        with ProfileSession(root, 'native-watchdog', stack_interval=0.02).recording():
+            time.sleep(0.05)
+        deadline = time.monotonic() + 9
+        while external.stat().st_size == 0 and time.monotonic() < deadline:
+            time.sleep(0.05)
+        before = external.stat().st_size
+        while external.stat().st_size <= before and time.monotonic() < deadline:
+            time.sleep(0.05)
+        assert before > 0 and external.stat().st_size > before
+    finally:
+        faulthandler.cancel_dump_traceback_later()
+'''
+    result = subprocess.run([sys.executable, "-c", code, str(tmp_path)],
+                            capture_output=True, text=True, check=False, timeout=15)
+    assert result.returncode == 0, result.stdout + result.stderr

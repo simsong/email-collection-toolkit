@@ -106,7 +106,10 @@ An indexing failure is recorded as a metadata defect and does not reject mail;
 Index-only repair must not resume pending ingestion, contact mail sources, or
 modify canonical MBOX bytes or the durable processing queue. Rebuild searchable
 non-quarantine mail from verified canonical locations and publish the replacement
-atomically. `make test-ingest-recovery` verifies repair beside a failed ingest root.
+atomically, closing the staging SQLite connection before replacement on Windows.
+Filesystem-error guidance must match the host platform; macOS Full Disk Access
+instructions must not be shown on Windows. `make test-ingest-recovery` verifies
+repair beside a failed ingest root.
 
 
 ## Manual name expansion

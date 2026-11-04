@@ -158,8 +158,13 @@ CLI appears as a parent subprocess wait; the report does not profile its interna
 Profiling adds overhead and cannot by itself prove a disk or antivirus cause.
 Call timings cover the calling thread and new workers. Existing threads remain
 visible in stack dumps without replacing their profiler hooks. The stack sampler
-needs Python thread scheduling; it does not replace or cancel a native watchdog
-such as pytest's `faulthandler_timeout` for a C call that holds the GIL.
+needs Python thread scheduling and serializes Python frame locations without
+calling the native traceback dumper. It does not replace or cancel a native watchdog
+such as pytest's `faulthandler_timeout` for a C call that holds the GIL. Do not combine
+native timed dumps with profiling: that combination crashed Windows and hung a
+local diagnostic test, with no proven underlying CPython cause. The plugin rejects
+that pytest setting. The ownership regression uses a bounded child and fires its
+native timer after collection ends; it does not establish safe simultaneous dumping.
 It does not change synchronization/durability settings or record mail bodies,
 credentials, SQL text or frame locals. Use purpose-made fixtures only.
 

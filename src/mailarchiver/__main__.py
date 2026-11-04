@@ -2619,6 +2619,7 @@ def _rebuild_search_index(
             with RefreshIndexPublication():
                 search.commit()
                 catalog.commit()
+                search.close()
                 os.replace(temporary, archive / "search.sqlite3")
                 published = True
         finally:
@@ -2753,8 +2754,11 @@ def main() -> int:
         print(f"unsupported source: {error}", file=sys.stderr, flush=True)
         return 1
     except PermissionError as error:
+        guidance = ("grant Full Disk Access to the terminal or application running mailarchiver"
+                    if sys.platform == "darwin" else
+                    "check file permissions and whether another process has the file open")
         print(
-            f"source access denied: {error}; grant Full Disk Access to the terminal or application running mailarchiver",
+            f"source access denied: {error}; {guidance}",
             file=sys.stderr,
             flush=True,
         )

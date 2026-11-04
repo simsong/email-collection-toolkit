@@ -12,7 +12,6 @@ from __future__ import annotations
 from collections.abc import Iterator
 from contextlib import contextmanager
 import ctypes
-import faulthandler
 import hashlib
 import io
 import os
@@ -236,7 +235,19 @@ class ProfileSession:
         while not self.stop.wait(self.stack_interval):
             self.write_report("running")
             with (self.directory / "threads.txt").open("a", encoding="utf-8") as stacks:
-                faulthandler.dump_traceback(file=stacks)
+                # Avoid concurrent native traceback dumping with an external watchdog.
+                # Serialize code locations only, never frame locals or source lines.
+                for identity, frame in sys._current_frames().items():
+                    stacks.write(f"Thread 0x{identity:x} (most recent call first):\n")
+                    current: FrameType | None = frame
+                    depth = 0
+                    while current is not None and depth < 256:
+                        stacks.write(f"  File {current.f_code.co_filename!r}, line {current.f_lineno}, "
+                                     f"in {current.f_code.co_name}\n")
+                        current = current.f_back
+                        depth += 1
+                    if current is not None:
+                        stacks.write("  ... stack truncated at 256 frames\n")
 
     @contextmanager
     def recording(self) -> Iterator[None]:
@@ -315,5 +326,8 @@ def pytest_runtest_call(item: pytest.Item) -> Iterator[None]:
     if directory is None or item.name.split("[", 1)[0] not in selected:
         yield
         return
+    if item.config.getini("faulthandler_timeout"):
+        raise pytest.UsageError("CI profiling cannot run with native timed traceback dumps; "
+                                "use the owned Python stack sampler instead")
     with ProfileSession(directory, item.nodeid).recording():
         yield

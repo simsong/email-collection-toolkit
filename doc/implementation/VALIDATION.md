@@ -79,14 +79,23 @@ stop/restart and OST CLI fixtures. The caller and subsequently created workers g
 profiling hook timing selected storage/SQLite/file/sleep operations; `calls.txt`
 ranks total/max completed-call time by caller and thread. `report.json` records named phases,
 elapsed and process CPU time, thread names and native process I/O deltas on Windows.
-`threads.txt` receives all-thread stack dumps every 30 seconds from an owned sampler.
+`threads.txt` receives all-thread code-location stacks every 30 seconds from an
+owned sampler using `sys._current_frames`. It never invokes a concurrent native
+traceback dump. Windows crashed and a local run hung during the watchdog test;
+concurrent native dumping was suspected, but the underlying cause is unproven.
+Only filenames, line numbers and function names are serialized, with a 256-frame
+limit per thread; source lines and frame locals remain excluded.
 Phase-start JSON remains available before a test completes; completed failures
 also retain profiles. Windows uploads this directory with its always-run build logs.
 Profiling is opt-in, uses only synthetic tests and refuses an existing caller/default
 profiler. Existing worker hooks and native faulthandler watchdog timers remain untouched.
 Owned callbacks self-disable after collection, including in surviving workers.
 The sampler requires Python thread scheduling; pre-existing threads appear in stacks,
-not call timing. Native watchdogs can separately diagnose a C call holding the GIL.
+not call timing. Pytest's native timed dumps are rejected in profiling mode because
+firing one during collection has not completed safely. Native timer ownership is
+checked in a 15-second-bounded child: its timer fires after collector cleanup and
+continues repeating. This proves registration is preserved, not safe simultaneous
+native dumping. A native watchdog alone remains available for a C call holding the GIL.
 Cumulative call times include nesting and parallel overlap; process counters
 exclude children and do not establish physical disk/antivirus causation.
 

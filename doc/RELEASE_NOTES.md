@@ -8,6 +8,9 @@ Rust delivery plans and historical package checks are not current acceptance.
 
 ## Windows desktop parity
 
+Close the rebuilt search database before replacing the live index on Windows,
+and keep macOS Full Disk Access instructions out of Windows file-error guidance.
+
 Windows CI separates stage durations and retains opt-in phase, thread-profile,
 CPU/I/O and stack evidence for the slow synthetic writer and OST tests.
 

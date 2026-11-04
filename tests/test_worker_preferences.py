@@ -115,6 +115,7 @@ def test_cli_preferences_and_explicit_overrides_drive_actual_pool(tmp_path: Path
                                 env=environment, capture_output=True, text=True, check=False, timeout=30)
         assert result.returncode == 0, result.stdout + result.stderr
         assert read_ingest_history(archive).statuses[0].configured_workers == count
+    # Windows must close the rebuilt SQLite handle before replacing the live index.
     refreshed = subprocess.run([sys.executable, "-m", "mailarchiver", "--archive", str(archive), "refresh-index"],
                                env=environment, capture_output=True, text=True, check=False, timeout=30)
     assert refreshed.returncode == 0, refreshed.stdout + refreshed.stderr
