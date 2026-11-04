@@ -8,6 +8,7 @@
 """Desktop/CLI worker-preference requirements and continuation regressions."""
 from __future__ import annotations
 
+from contextlib import closing
 import os
 import sqlite3
 import subprocess
@@ -81,7 +82,7 @@ def test_gui_continuation_uses_current_preferences_or_cli_override(tmp_path: Pat
         if override is not None:
             with pytest.raises(ValueError, match="on command line"):
                 app.save_preferences("release", True, WorkerPreferences(mode="all"))
-        with sqlite3.connect(archive / "search.sqlite3") as database:
+        with closing(sqlite3.connect(archive / "search.sqlite3")) as database:
             assert database.execute("SELECT count(*) FROM message_fts WHERE message_fts MATCH 'parenttoken'").fetchone() == (1,)
     finally:
         api.close()
@@ -122,7 +123,8 @@ def test_cli_preferences_and_explicit_overrides_drive_actual_pool(tmp_path: Path
     assert "Refreshing search index (1 workers)" in refreshed.stderr
     # An import's obsolete-index repair must also honor the explicit override.
     (archive / "search.sqlite3").unlink()
-    with sqlite3.connect(archive / "search.sqlite3") as database:
+    # A transaction context commits; it does not close the Windows file handle.
+    with closing(sqlite3.connect(archive / "search.sqlite3")) as database, database:
         database.execute("CREATE TABLE message_metadata (sha256 TEXT PRIMARY KEY, fts_rowid INTEGER NOT NULL)")
     repaired = subprocess.run([sys.executable, "-m", "mailarchiver", "--archive", str(archive), "process", "--workers", "2"],
                               env=environment, capture_output=True, text=True, check=False, timeout=30)

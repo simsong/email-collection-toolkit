@@ -39,6 +39,10 @@ Windows also runs `test-worker-preferences` (including override/persistence and
 asynchronous-save cases) and `test-ingest-progress-service` (live worker-pool and
 backlog checks). `test-ingest-progress` adds its browser-history case, already
 covered in Windows by `test-gui-processing`, without repeating it in the service target.
+The worker-preference CLI fixture explicitly closes its obsolete-index setup
+connection before starting repair. A SQLite transaction context does not close
+the connection; leaving that fixture handle alive caused Windows replacement
+to fail even after the application closed its own staging connection.
 
 `test_reserved_characters_and_read_only_attachments` checks SQLite URI handling;
 `test_reader_archive_under_uri_reserved_path` runs the complete shared reader

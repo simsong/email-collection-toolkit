@@ -33,6 +33,8 @@ Relocated PST/OST retries must each have enough bounded time to complete the sam
 real scanning/import checks, with phase evidence and an encompassing CI deadline.
 Windows acceptance must execute the shared worker-policy/preferences and live
 saved-content pool/backlog regressions, beyond rendering recorded snapshots.
+Fixtures that hand a disposable index to a rebuild subprocess must close their
+SQLite connections first; ending a transaction alone must not hold Windows files open.
 
 Reader acceptance must retain search, Unicode rendering, exact export and source
 immutability under URI-reserved archive paths. Shared scanner checks must cover
