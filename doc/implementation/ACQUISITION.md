@@ -415,6 +415,9 @@ INTERNALDATE is an explicit source-date fallback, not a rewrite of RFC 5322 head
 
 `ImapSession` translates socket timeouts, connection loss and IMAP aborts into
 `ImapPaused`, including discovery and authentication transport interruptions.
+The connection-loss errno set includes `EHOSTDOWN` where available. Its fallback
+reuses `EHOSTUNREACH`, so platforms without that optional constant cannot mistake
+an unclassified `OSError` with no errno for a resumable interruption.
 Rejected credentials and invalid TLS certificates remain failures. Exceptional
 session teardown closes the socket directly without issuing LOGOUT on a damaged
 buffered stream; cleanup cannot replace the original error. Ingest commits saved

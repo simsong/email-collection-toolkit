@@ -13,6 +13,7 @@ from collections.abc import Iterator
 from contextlib import closing
 from datetime import UTC, datetime
 from email.parser import BytesParser
+import errno
 import hashlib
 import imaplib
 import json
@@ -37,7 +38,7 @@ from mailarchiver.imap_credentials import PASSWORD_KEY, password_for, _developme
 from keyring.errors import KeyringError
 from mailarchiver.imap_models import ImapAccount, ImapDownload, ImapMailbox, ImapMessageMetadata
 from mailarchiver.imap_cli import prompt_account
-from mailarchiver.imap_protocol import ImapPaused, ImapSession, body_literal, decode_mailbox, message_metadata, response_tokens, selected_mailboxes
+from mailarchiver.imap_protocol import ImapPaused, ImapSession, body_literal, connection_interrupted, decode_mailbox, message_metadata, response_tokens, selected_mailboxes
 from mailarchiver.imap_state import initialize_state, known_observation, record_download, refresh_observation, totals
 from mailarchiver.gui_processing import resume_request, unfinished_work
 from mailarchiver.gui_app import IngestWindowApi
@@ -465,6 +466,32 @@ def test_invalid_imap_response_remains_a_failure(imap_archive: Path, imap_inbox:
     imap_inbox.fault = None
     assert synchronize(args) == 0
     assert totals(imap_archive).archived == 3 and totals(imap_archive).duplicates == 0
+
+
+@pytest.mark.parametrize("wrapped", [False, True], ids=["direct", "imaplib-wrapped"])
+def test_host_down_is_a_resumable_transport_interruption(wrapped: bool) -> None:
+    """ACQUISITION: host-down socket failures pause instead of recording a failed ingest."""
+    host_down = getattr(errno, "EHOSTDOWN", None)
+    if host_down is None:
+        pytest.skip("This platform does not expose EHOSTDOWN")
+    session = ImapSession(ImapAccount(server="fixture.example.test", username="fixture"), "unused")
+    try:
+        try:
+            raise OSError(host_down, "Host is down")
+        except OSError:
+            if wrapped:
+                raise imaplib.IMAP4.abort("socket error: Host is down")
+            raise
+    except (OSError, imaplib.IMAP4.abort) as error:
+        assert connection_interrupted(error)
+        with pytest.raises(ImapPaused, match="IMAP connection was interrupted.*use Resume"):
+            session.__exit__(type(error), error, error.__traceback__)
+
+
+@pytest.mark.parametrize("error", [OSError("Host is down"), OSError(errno.EACCES, "Host is down")])
+def test_host_down_handling_requires_a_transport_errno(error: OSError) -> None:
+    """ACQUISITION: host-down-looking text alone must not hide genuine failures."""
+    assert not connection_interrupted(error)
 
 
 def test_imaplib_wrapped_send_timeout_retains_timeout_presentation() -> None:

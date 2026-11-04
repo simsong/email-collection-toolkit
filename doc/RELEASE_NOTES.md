@@ -8,6 +8,8 @@ Rust delivery plans and historical package checks are not current acceptance.
 
 ## 1.0.0a54 — toolkit audit repairs
 
+- Treat direct and imaplib-wrapped host-down socket errors as resumable IMAP pauses
+  on platforms that expose `EHOSTDOWN`.
 - Retain mail with malformed address metadata, unusual charset labels, overflowed
   dates or deeply nested MIME. Historical metadata failures no longer starve new
   mail, including deferred content runs; explicit processor stops remain effective.

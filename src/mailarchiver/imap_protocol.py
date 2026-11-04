@@ -51,7 +51,8 @@ def connection_interrupted(error: BaseException) -> bool:
     return isinstance(error, (TimeoutError, ConnectionError,
                               ssl.SSLEOFError, ssl.SSLZeroReturnError)) or (
         isinstance(error, OSError) and error.errno in {
-            errno.ENETDOWN, errno.ENETRESET, errno.ENETUNREACH, errno.EHOSTUNREACH}) or (
+            errno.ENETDOWN, errno.ENETRESET, errno.ENETUNREACH, errno.EHOSTUNREACH,
+            getattr(errno, "EHOSTDOWN", errno.EHOSTUNREACH)}) or (
         isinstance(error, imaplib.IMAP4.abort) and str(error) == "socket error: EOF")
 
 

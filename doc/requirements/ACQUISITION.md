@@ -78,8 +78,9 @@ returning 130; network operations retain a 30-second socket timeout. Reruns resu
 committed progress. Workers shall close source iterators on their owning threads;
 terminal process-group interrupts shall not abort scanner children mid-message.
 IMAP timeouts and lost connections, including after laptop sleep, shall record a
-**paused** run rather than a failure. Retain committed per-message progress and
-accepted settings, release the connection and writer lease, and offer **Resume**
+**paused** run rather than a failure, including host-down socket errors where the
+platform exposes them. Retain committed per-message progress and accepted
+settings, release the connection and writer lease, and offer **Resume**
 in Ingests. Resume reconnects and downloads missing checkpoints without repeating
 committed bodies. Incomplete literals must never become successful checkpoints.
 The CLI reports the pause and exits 75 (temporary interruption); rerunning resumes.

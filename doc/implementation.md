@@ -105,7 +105,8 @@ platform acceptance and deferred work.
   See [desktop](implementation/DESKTOP.md).
 
 - IMAP transport interruptions publish `paused` runs and reuse saved-request
-  recovery through **Resume**; see [acquisition](implementation/ACQUISITION.md).
+  recovery through **Resume**, including direct and imaplib-wrapped `EHOSTDOWN`
+  errors where available; see [acquisition](implementation/ACQUISITION.md).
 
 - About shares one bounded plugin-settings read and defers only busy inventories;
   see [desktop](implementation/DESKTOP.md).

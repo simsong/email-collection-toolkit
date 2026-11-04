@@ -94,7 +94,8 @@ platform acceptance and deferred work.
   loading and retry feedback. See [desktop](requirements/DESKTOP.md).
 
 - IMAP connection timeouts and disconnects pause downloads with saved progress and
-  a **Resume** button; see [acquisition](requirements/ACQUISITION.md).
+  a **Resume** button, including host-down socket errors where the platform exposes
+  them; see [acquisition](requirements/ACQUISITION.md).
 
 - About status remains available during import writer locks; plugin inventory
   retries separately. See [desktop](requirements/DESKTOP.md).
