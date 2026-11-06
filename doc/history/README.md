@@ -18,6 +18,7 @@ are retained rather than silently presented as current bugs or fixed claims.
 | [2026-09-09 competitive analysis](2026-09-09-competitive-analysis.md) | Dated ecosystem research; recheck external facts before reuse |
 | [2026-09-21 alpha scope](2026-09-21-alpha-scope.md) | Historical release priorities and deferred work |
 | [Delivery sequence archived October 16](2026-10-16-delivery-sequence.md) | Superseded sequence that mixed completed and planned work |
+| [2026-11-06 msgvault evaluation](2026-11-06-msgvault-evaluation.md) | Pinned feature comparison and selective-adoption recommendation |
 
 The [Rust GUI retrospective](../RUST_GUI_EXPERIMENTS.md) remains the single home
 for retired migration experiments. Research run logs remain beside their
