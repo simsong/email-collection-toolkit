@@ -4,6 +4,11 @@ description = "Changes to the Email Collection Toolkit website, separate from ap
 +++
 <!-- Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved. -->
 
+## 2026-11-07
+
+- Explain window-specific import notices and dismissible extra-file warnings.
+  Refresh the synthetic search and import screenshots for alpha 56.
+
 ## 2026-11-04
 
 - Label the homepage downloads as signed Windows and macOS installers and clarify

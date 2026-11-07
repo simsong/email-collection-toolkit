@@ -14,6 +14,7 @@ from mailarchiver.archive_integrity import (
     PAYLOAD_MANIFEST_CONTROL,
     TAG_MANIFEST_CONTROL,
     ArchiveIntegrityError,
+    ArchiveIntegrityWarning,
     MailbagArchiveIntegrityControls,
 )
 from mailarchiver.catalog import create_catalog
@@ -47,3 +48,23 @@ def test_mailbag_controls_publish_and_independently_verify_a_checkpoint(tmp_path
     (tmp_path / "bagit.txt").write_bytes(b"damaged\n")
     with pytest.raises(ArchiveIntegrityError, match="unsupported BagIt declaration"):
         list(controls.verify(archive))
+
+
+def test_extra_file_is_a_nonfatal_framework_warning(tmp_path: Path) -> None:
+    """ARCHIVE: typed extra-file warnings reach consumers while checkpoint evidence remains available."""
+    archive = ArchiveReference(format_id="mailbag-1.0", archive_id="extra-test", root=tmp_path)
+    controls = MailbagArchiveIntegrityControls()
+    list(controls.initialize(archive))
+    extra = tmp_path / "data/mbox/#INFECTED1.mbox#"
+    extra.write_bytes(b"synthetic editor backup\n")
+    catalog = create_catalog(tmp_path / "archive.sqlite3")
+    try:
+        published = list(controls.checkpoint(archive, catalog))
+    finally:
+        catalog.close()
+    verified = list(controls.verify(archive))
+    for events in (published, verified):
+        warnings = [event for event in events if isinstance(event, ArchiveIntegrityWarning)]
+        assert len(warnings) == 1 and "Extra file detected: data/mbox/#INFECTED1.mbox#" in warnings[0].message
+        assert any(isinstance(event, IntegrityEvidence) for event in events)
+    assert extra.read_bytes() == b"synthetic editor backup\n"

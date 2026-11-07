@@ -15,7 +15,9 @@ or phrase, then narrow the collection by person, date, subject, or source folder
 
 Warnings and errors collapse to a **Messages** pill near the bottom. Click it
 to read the full text and earlier messages from the same window; **Collapse
-messages** returns to the pill. Native application notices are also in About.
+messages** returns to the pill. Warning-only messages use yellow. **Dismiss
+messages** clears both the banner and pill without reopening them on the next
+status refresh. Native application notices are also in About.
 
 ## Words, phrases, and selectors
 

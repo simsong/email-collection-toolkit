@@ -94,6 +94,9 @@ pill, rather than disappearing. The pill reopens all messages received in that
 window; reopening leaves the text visible until manually collapsed. Messages are
 plain text in a scrollable region, including earlier warnings after another
 arrives. Native application notices also remain in About during the session.
+Warnings use a yellow banner. **Dismiss messages** hides both the banner and pill;
+later status refreshes must not replay dismissed notices. Newly issued notices
+remain eligible for display, even when their text matches an earlier notice.
 Import warnings, errors and completion notices must reach only the search window
 owning the operation, not another archive or sibling search window. When Close
 transfers an active import, subsequent notices follow its new owner. The same

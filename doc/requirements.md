@@ -25,6 +25,10 @@ platform acceptance and deferred work.
 
 ## Shared boundaries
 
+- Extra non-mail files found during archive checks produce dismissible warnings
+  and do not fail imports. Missing or changed preserved email remains an error.
+  See [archive](requirements/ARCHIVE.md) and [desktop](requirements/DESKTOP.md).
+
 - Import notices belong only to the search window owning that operation, including
   ownership transfer on Close; application-wide notices retain global scope.
   See [desktop](requirements/DESKTOP.md).

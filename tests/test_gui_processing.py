@@ -75,9 +75,6 @@ def test_import_failure_stays_in_owning_window(tmp_path: Path, transfer_owner: s
     second.mkdir()
     archive = build_deferred_archive(first)
     other_archive = build_deferred_archive(second)
-    # Reproduce the reported integrity failure using only a synthetic archive.
-    unexpected = archive / "data/mbox/#INFECTED1.mbox#"
-    unexpected.write_bytes(b"synthetic editor auto-save\n")
     app, owner = open_headless(archive, tmp_path / "preferences.json")
     assert owner.document is not None and owner.search_window is not None
     sibling = GuiApi(archive, application=app, document=owner.document,
@@ -85,6 +82,9 @@ def test_import_failure_stays_in_owning_window(tmp_path: Path, transfer_owner: s
     other_document = app.controller.open_document(other_archive)
     other = GuiApi(other_archive, application=app, document=other_document,
                    search_window=app.controller.new_search_window(other_document))
+    # Genuine corruption remains an error; editor backups have a separate nonfatal regression.
+    damaged = archive / "bagit.txt"
+    damaged.write_bytes(b"synthetic damaged declaration\n")
     occupied, release = Barrier(9), Event()
     finishing, finish_release = Event(), Event()
     original_finish = app.controller.finish_ingest
@@ -143,13 +143,13 @@ def test_import_failure_stays_in_owning_window(tmp_path: Path, transfer_owner: s
         failures = [notice for notice in app.notices() if notice.severity == "error"]
         assert len(failures) == 1
         failure = failures[0]
-        expected = "native refresh fixture" if refresh_failure else "unsupported native archive payload: data/mbox/#INFECTED1.mbox#"
+        expected = "native refresh fixture" if refresh_failure else "unsupported BagIt declaration"
         assert expected in failure.message
         assert failure.window_id == target.search_window.window_id
         for api in (owner, sibling, other):
             errors = [notice for notice in api.status()["notices"] if notice["severity"] == "error"]
             assert bool(errors) == (api is target)
-        assert unexpected.read_bytes() == b"synthetic editor auto-save\n"
+        assert damaged.read_bytes() == b"synthetic damaged declaration\n"
 
         # Exercise immediate delivery independently of later status polling, including dedup scope.
         windows = []

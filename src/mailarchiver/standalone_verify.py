@@ -37,12 +37,15 @@ RESULTS
   message-count progress bars on stderr. Bars update in place on a terminal;
   redirected output uses periodic lines. Percentages describe each pass, not
   the entire archive. Use --quiet (or -q) to suppress informational output.
-  Errors and interruptions are always reported on stderr.
+  Warnings, errors and interruptions are always reported on stderr.
   Prints "Archive integrity verified."
   when all checks pass (exit status 0). Reports integrity errors and returns
   exit status 1 when checks fail; invalid command-line usage returns status 2.
   Ctrl-C stops gracefully with exit status 130 and no traceback.
   An interrupted or failed run is not a successful verification.
+  Extra non-mail files under data/ produce warnings, not email integrity errors.
+  They are left untouched and excluded from new email payload manifests. An
+  external strict BagIt validator may report these unlisted files separately.
 
   This is read-only: it does not repair, rewrite, or delete archive files.
   It does not consult or validate SQLite databases, rebuild search indexes,
@@ -78,7 +81,7 @@ import os
 import re
 import sys
 import time
-from collections.abc import Generator, Iterable
+from collections.abc import Callable, Generator, Iterable
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path, PurePosixPath
@@ -104,6 +107,7 @@ MAILBAG_ID_PATTERN = re.compile(r"[A-Za-z0-9._-]+")
 SPLIT_CSV_PATTERN = re.compile(r"mailbag-([1-9][0-9]*)\.csv")
 MAILBAG_ROW_LIMIT = 100_000
 MAX_AMBIGUOUS_FROM_LINES = 12
+EXTRA_FILE_WARNING = "Extra file detected: {path}. This file was ignored."
 FIELD_NAME_PATTERN = re.compile(rb"[!-9;-~]+")
 ALGORITHMS = {"sha256": 64, "sha512": 128}
 T = TypeVar("T")
@@ -822,7 +826,7 @@ def _payload_files(archive: Path) -> tuple[list[Path], list[str]]:
     return files, errors
 
 
-def verify_archive(archive: Path, quiet: bool = False) -> list[str]:
+def verify_archive(archive: Path, quiet: bool = False, *, on_warning: Callable[[str], None] | None = None) -> list[str]:
     progress = _Progress(quiet)
     errors: list[str] = []
     legacy = sorted((*archive.glob("*.mbox"), *archive.glob("*.mbox.integrity")))
@@ -855,19 +859,23 @@ def verify_archive(archive: Path, quiet: bool = False) -> list[str]:
     payload_hash_errors, declared_payloads = _verify_bagit_manifest(payload_manifest, archive, True, progress)
     errors.extend(payload_hash_errors)
     actual_payloads = {path.relative_to(archive).as_posix() for path in payloads}
+    mailboxes = sorted((archive / "data" / "mbox").glob("*.mbox"))
+    native_payloads = {path.relative_to(archive).as_posix() for path in mailboxes}
+    unexpected_payloads = actual_payloads - native_payloads
     if declared_payloads != actual_payloads:
-        missing = sorted(actual_payloads - declared_payloads)
+        missing = sorted(actual_payloads - declared_payloads - unexpected_payloads)
         extra = sorted(declared_payloads - actual_payloads)
         if missing:
             errors.append(f"{PAYLOAD_MANIFEST}: missing payload entries: {', '.join(missing)}")
         if extra:
             errors.append(f"{PAYLOAD_MANIFEST}: nonexistent payload entries: {', '.join(extra)}")
 
-    mailboxes = sorted((archive / "data" / "mbox").glob("*.mbox"))
-    native_payloads = {path.relative_to(archive).as_posix() for path in mailboxes}
-    unexpected_payloads = sorted(actual_payloads - native_payloads)
-    if unexpected_payloads:
-        errors.append(f"unsupported native archive payloads: {', '.join(unexpected_payloads)}")
+    for pathname in sorted(unexpected_payloads):
+        warning = EXTRA_FILE_WARNING.format(path=pathname)
+        if on_warning is not None:
+            on_warning(warning)
+        else:
+            print(f"WARNING {warning}", file=sys.stderr)
     for path in mailboxes:
         errors.extend(verify_mbox(path, archive / "integrity" / f"{path.name}{INTEGRITY_SUFFIX}", progress))
     mailbox_names = {path.name for path in mailboxes}
@@ -885,7 +893,7 @@ def verify_archive(archive: Path, quiet: bool = False) -> list[str]:
             box.close()
     csv_errors, csv_paths = _verify_mailbag_csv(archive, expected_mailboxes, progress)
     errors.extend(csv_errors)
-    errors.extend(_bag_info(archive, payloads, progress))
+    errors.extend(_bag_info(archive, [path for path in payloads if path.relative_to(archive).as_posix() in declared_payloads], progress))
 
     tag_manifest = archive / TAG_MANIFEST
     tag_hash_errors, declared_tags = _verify_bagit_manifest(tag_manifest, archive, False, progress)
@@ -934,23 +942,27 @@ def main() -> int:
         "directory containing this script, not the current working directory",
     )
     parser.add_argument("-q", "--quiet", action="store_true",
-                        help="suppress filenames, progress bars, and success output; still report errors")
+                        help="suppress filenames, progress bars, and success output; still report warnings and errors")
     args = parser.parse_args()
     archive = args.archive
     if not archive.is_dir():
         parser.error(f"not a directory: {archive}")
     try:
-        errors = verify_archive(archive, quiet=args.quiet)
+        warnings: list[str] = []
+        errors = verify_archive(archive, quiet=args.quiet, on_warning=warnings.append)
     except KeyboardInterrupt:
         print("Interrupted: archive verification incomplete.", file=sys.stderr)
         return 130
+    for warning in warnings:
+        print(f"WARNING {warning}", file=sys.stderr)
     for error in errors:
         print(f"ERROR {error}", file=sys.stderr)
     if errors:
         print(f"FAILED: {len(errors)} integrity error(s)", file=sys.stderr)
         return 1
     if not args.quiet:
-        print("Archive integrity verified.")
+        print("Archived email integrity verified with warnings; extra files were ignored."
+              if warnings else "Archive integrity verified.")
     return 0
 
 

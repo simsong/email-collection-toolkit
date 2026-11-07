@@ -89,7 +89,8 @@ window.addEventListener("resize", () => {
 });
 window.addEventListener("focus", () => { void window.pywebview?.api?.activate?.(); });
 window.addEventListener("pywebviewready", initialize);
-window.mailArchiverNotice = message => showError(message);
+window.mailArchiverNotice = notice => typeof notice === "string"
+  ? showError(notice) : showError(notice.message, notice.severity, notice.created_at);
 window.archiveDidChange = async () => {
   const status = await call(() => window.pywebview.api.status());
   if (!status) return;
@@ -478,8 +479,9 @@ function applyStatus(status) {
   elements["result-status"].textContent = status.ready ? "Enter a search." : "Use File → New or Open to begin.";
   elements["archive-status-banner"].hidden = !status.ready;
   renderArchiveStatus(status.ready ? status.archive_status_messages || [] : []);
-  const notice = status.notices?.at(-1);
-  if (notice && notice.severity !== "information") showError(notice.message);
+  for (const notice of status.notices || []) {
+    if (notice.severity !== "information") showError(notice.message, notice.severity, notice.created_at);
+  }
   if (status.ready) elements.search.focus();
 }
 
@@ -2216,18 +2218,23 @@ async function call(operation) {
   catch (error) { showError(String(error?.message || error)); return null; }
 }
 
-function showError(message) {
+function showError(message, severity = "error", noticeId = null) {
   const panel = byId("error");
   const pill = byId("notice-pill");
   if (!showError.messages) showError.messages = [];
-  if (showError.messages.at(-1) === message) return;
-  showError.messages.push(message);
+  if (!showError.seen) showError.seen = new Set();
+  if (noticeId ? showError.seen.has(noticeId) : showError.messages.at(-1)?.message === message) return;
+  if (noticeId) showError.seen.add(noticeId);
+  showError.messages.push({message, severity});
+  const warningOnly = showError.messages.every(item => item.severity === "warning");
+  panel.classList.toggle("warning", warningOnly);
+  pill.classList.toggle("warning", warningOnly);
   panel.replaceChildren();
   const history = document.createElement("div");
   history.className = "notice-history";
-  for (const text of showError.messages) {
+  for (const notice of showError.messages) {
     const item = document.createElement("p");
-    item.textContent = text;
+    item.textContent = notice.message;
     history.append(item);
   }
   const collapse = document.createElement("button");
@@ -2239,7 +2246,17 @@ function showError(message) {
     pill.setAttribute("aria-expanded", "false");
   };
   collapse.addEventListener("click", () => { clearTimeout(showError.timer); hide(); pill.focus(); });
-  panel.append(history, collapse);
+  const dismiss = document.createElement("button");
+  dismiss.type = "button";
+  dismiss.textContent = "Dismiss messages";
+  dismiss.addEventListener("click", () => {
+    clearTimeout(showError.timer);
+    showError.messages = [];
+    panel.hidden = true;
+    pill.hidden = true;
+    elements.search.focus();
+  });
+  panel.append(history, collapse, dismiss);
   panel.hidden = false;
   pill.hidden = true;
   pill.textContent = `Messages (${showError.messages.length})`;

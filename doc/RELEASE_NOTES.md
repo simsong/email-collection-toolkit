@@ -6,6 +6,14 @@ Entries describe their recorded revisions. For current behavior use the
 [user manual](USER_MANUAL.md) and [CLI reference](CLI_REFERENCE.md). Retired
 Rust delivery plans and historical package checks are not current acceptance.
 
+## 1.0.0a56 — nonfatal extra-file warnings
+
+- Report extra non-mail files, such as editor backups, as warnings and continue
+  importing. Leave the files untouched and retain failures for damaged or missing
+  archived mail. Standalone email verification reports the same distinction.
+- Show warnings in yellow and add **Dismiss messages**; later status refreshes
+  do not reopen dismissed messages.
+
 ## 1.0.0a55 — import notice ownership
 
 - Keep import warnings and errors in the search window owning the operation.

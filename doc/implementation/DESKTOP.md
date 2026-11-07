@@ -124,10 +124,13 @@ IDs in `processing_settings` and changes outstanding jobs to the existing
 message admission retries user-cancelled unpublished ingest roots; cancelled
 derived jobs remain aborted until explicit reprocessing regenerates their inputs.
 
-`app.js` retains distinct consecutive notice text in window memory, rendered with
+`app.js` retains notice text in window memory, rendered with
 `textContent`. After six seconds the banner becomes a keyboard-operable message
 pill; hover/focus keeps it expanded. Reopening shows scrollable history and a
-Collapse button without a timeout. New warnings retain previous text. Native
+Collapse button without a timeout. Warning-only history uses yellow. Dismiss
+clears the visible history and pill while retaining seen backend notice timestamps,
+so status refreshes cannot replay them; a newly issued timestamp remains visible.
+Native pushes carry the same serialized notice as status polling. New warnings retain previous text. Native
 notices also remain in About for the application session. Bridge-start and
 processing errors use the same banner. `make test-gui-processing` exercises real
 archive/bridge continuation, deferral, lease conflicts, stale abort rejection,

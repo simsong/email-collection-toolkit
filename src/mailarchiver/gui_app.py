@@ -1962,7 +1962,7 @@ class PyWebViewApplication:
         if severity != "information" and not self._quitting:
             for api in self._search_apis():
                 if api.window is not None and (window_id is None or (api.search_window and api.search_window.window_id == window_id)):
-                    api.window.run_js(f"window.mailArchiverNotice?.({json.dumps(message)});")
+                    api.window.run_js(f"window.mailArchiverNotice?.({notice.model_dump_json()});")
 
     def window_notices(self, window_id: str | None) -> list[ApplicationNotice]:
         return [notice for notice in self.notices() if notice.window_id is None or notice.window_id == window_id]
@@ -2476,6 +2476,8 @@ class PyWebViewApplication:
             if not self._quitting:
                 self._refresh_search_windows(refresh)
                 self._refresh_menus()
+        for warning in outcome.warnings:
+            notice("warning", warning)
         if isinstance(error, ImapPaused):
             notice("information", f"Import paused for {document.display_path}: {error}")
         elif isinstance(error, IngestInterrupted):

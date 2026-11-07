@@ -47,20 +47,24 @@ def expose(page: Page, api: object, names: tuple[str, ...]) -> None:
         window.addEventListener('DOMContentLoaded', () => window.dispatchEvent(new Event('pywebviewready')));""")
 
 
-def test_import_error_banner_is_private_to_its_search_window(tmp_path: Path, page: Page) -> None:
-    """DESKTOP: a real import error cannot reappear in sibling or unrelated window startup status."""
+@pytest.mark.parametrize("extra_file", [False, True])
+def test_import_error_banner_is_private_to_its_search_window(tmp_path: Path, page: Page, extra_file: bool) -> None:
+    """DESKTOP: real errors and dismissible extra-file warnings belong only to the importing window."""
     roots = [tmp_path / name for name in ("importing", "other")]
     for root in roots:
         root.mkdir()
     archive, other_archive = [build_deferred_archive(root) for root in roots]
-    (archive / "data/mbox/#INFECTED1.mbox#").write_bytes(b"synthetic auto-save\n")
     app, owner = open_headless(archive, tmp_path / "preferences.json")
-    assert owner.document is not None
+    assert owner.document is not None and owner.search_window is not None
     sibling = GuiApi(archive, application=app, document=owner.document,
                      search_window=app.controller.new_search_window(owner.document))
     other_document = app.controller.open_document(other_archive)
     other = GuiApi(other_archive, application=app, document=other_document,
                    search_window=app.controller.new_search_window(other_document))
+    if extra_file:
+        (archive / "data/mbox/#INFECTED1.mbox#").write_bytes(b"synthetic auto-save\n")
+    else:
+        (archive / "bagit.txt").write_bytes(b"synthetic damaged declaration\n")
     pages = [page, page.context.new_page(), page.context.new_page()]
     try:
         assert app.start_import(owner, [roots[0] / "input.eml"], scan_policy="not-scanned",
@@ -73,12 +77,28 @@ def test_import_error_banner_is_private_to_its_search_window(tmp_path: Path, pag
             expose(window, api, SEARCH_BRIDGE_METHODS)
             window.goto((GUI_DIRECTORY / "index.html").as_uri() + "?query=subject:Parent")
             expect(window.locator("#result-list .tabulator-row")).to_have_count(1)
-        expect(page.locator("#error")).to_contain_text("unsupported native archive payload: data/mbox/#INFECTED1.mbox#")
+        expected = "Extra file detected: data/mbox/#INFECTED1.mbox#" if extra_file else "unsupported BagIt declaration"
+        expect(page.locator("#error")).to_contain_text(expected)
+        if extra_file:
+            expect(page.locator("#error")).to_have_class("warning")
+            assert not any(notice.severity == "error" for notice in app.notices())
+            assert any(notice.message.startswith("Import completed") for notice in app.notices())
         for unrelated in pages[1:]:
             expect(unrelated.locator("#error")).to_be_hidden()
             expect(unrelated.locator("#notice-pill")).to_be_hidden()
         for number, window in enumerate(pages):
             window.screenshot(path=str(tmp_path / f"import-notice-window-{number}.png"))
+        if extra_file:
+            page.get_by_role("button", name="Dismiss messages", exact=True).click()
+            expect(page.locator("#error")).to_be_hidden()
+            expect(page.locator("#notice-pill")).to_be_hidden()
+            # A real subsequent status refresh must not resurrect dismissed warnings.
+            page.evaluate("window.archiveDidChange()")
+            expect(page.locator("#error")).to_be_hidden()
+            expect(page.locator("#notice-pill")).to_be_hidden()
+            app.add_notice("warning", "A new warning", window_id=owner.search_window.window_id)
+            page.evaluate("window.archiveDidChange()")
+            expect(page.locator("#error")).to_contain_text("A new warning")
     finally:
         for window in pages[1:]:
             window.close()

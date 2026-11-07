@@ -2,6 +2,10 @@
 
 # Mail archive normalizer implementation
 
+Checkpoint and standalone verification distinguish extra non-mail files from
+damaged canonical payloads. Typed warnings reach the import owner's dismissible
+banner without failing the operation. See [archive](implementation/ARCHIVE.md).
+
 Import commands retain their owning search-window ID in typed notices and tasks.
 Both native delivery and status polling filter by that ID; About retains the
 session-wide history. See [desktop](implementation/DESKTOP.md).

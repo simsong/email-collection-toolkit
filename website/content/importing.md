@@ -32,6 +32,11 @@ imports; correcting old Sent/Archive classifications requires a fresh archive.
 *The owner-rule editor, shown here with synthetic examples. macOS uses a native
 dialog with the same two fields.*
 
+Import notices stay in the window owning that import. A yellow **Extra file
+detected** warning means an unrelated file, such as an editor backup, was found;
+importing continues and the file is left alone. Choose **Dismiss messages** to
+clear the warning. Missing or changed archived mail still produces an error.
+
 The **Ingests** window shows retained runs, source paths, message counts,
 progress, worker activity, and failures. Open it from **Window → Ingests** or
 click the status line; **Import Directory…** starts another import into that

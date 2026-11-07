@@ -46,6 +46,51 @@ def test_new_bag_records_the_installed_application_version(tmp_path: Path) -> No
     assert verify_archive(archive) == []
 
 
+def test_checkpoint_ignores_extra_files_without_changing_them(tmp_path: Path) -> None:
+    """ARCHIVE: editor backups warn without failing checkpoint publication or becoming email payload."""
+    initialize_bag(tmp_path)
+    extras = [tmp_path / "data/mbox/#INFECTED1.mbox#", tmp_path / "data/notes/backup.txt"]
+    for extra in extras:
+        extra.parent.mkdir(exist_ok=True)
+        extra.write_bytes(b"synthetic user-owned backup\n")
+    catalog = create_catalog(tmp_path / "archive.sqlite3")
+    try:
+        warnings = write_bag_checkpoint(tmp_path, catalog)
+    finally:
+        catalog.close()
+    assert len(warnings) == 2 and all(warning.startswith("Extra file detected:") for warning in warnings)
+    assert (tmp_path / "manifest-sha256.txt").read_bytes() == b""
+    verified_warnings: list[str] = []
+    assert verify_archive(tmp_path, on_warning=verified_warnings.append) == []
+    assert verified_warnings == warnings
+    assert all(extra.read_bytes() == b"synthetic user-owned backup\n" for extra in extras)
+
+
+def test_extra_file_warning_does_not_hide_actual_mail_corruption(tmp_path: Path) -> None:
+    """ARCHIVE: extras are ignored; canonical missing/changed mail must still fail verification."""
+    archive = copytree(FIXTURE, tmp_path / "extra-bag")
+    extra = archive / "data/mbox/#INFECTED1.mbox#"
+    extra.write_bytes(b"synthetic editor backup\n")
+    warnings: list[str] = []
+    assert verify_archive(archive, on_warning=warnings.append) == []
+    assert warnings == ["Extra file detected: data/mbox/#INFECTED1.mbox#. This file was ignored."]
+    result = subprocess.run([sys.executable, "-I", str(Path(standalone_verify.__file__)), "-q", str(archive)],
+                            capture_output=True, text=True, check=False)
+    assert result.returncode == 0 and "WARNING Extra file detected:" in result.stderr
+    assert "ERROR" not in result.stderr
+    extra.write_bytes(b"a changed backup is still not preserved email\n")
+    assert verify_archive(archive, on_warning=warnings.append) == []
+    payload = archive / "data/mbox/three-messages.mbox"
+    original = payload.read_bytes()
+    payload.write_bytes(original + b"damage")
+    assert any("SHA-256 mismatch" in error for error in verify_archive(archive, on_warning=warnings.append))
+    payload.unlink()
+    assert verify_archive(archive, on_warning=warnings.append)
+    payload.write_bytes(original)
+    extra.unlink()
+    assert verify_archive(archive, on_warning=warnings.append) == []
+
+
 def test_checked_in_three_message_mailbag_validates_without_sqlite() -> None:
     """Requirement: the preservation package validates using only its BagIt tags and payload."""
     result = subprocess.run(

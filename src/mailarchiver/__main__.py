@@ -51,7 +51,7 @@ from .scan_evidence import ScanEvidence, ScanFailure
 from .future_coordinator import BoundedWorkers, FutureCoordinator, WORKER_NUMBER
 from .application import configured_workers, validate_ingest_paths
 from .worker_preferences import half_cpus, worker_argument
-from .archive_integrity import MailbagArchiveIntegrityControls
+from .archive_integrity import ArchiveIntegrityWarning, MailbagArchiveIntegrityControls
 from .archive_path import add_archive_argument, require_archive
 from .contacts import contacts, load_owner_addresses, print_contacts
 from .document_options import DocumentOptions, read_owner_names
@@ -156,6 +156,7 @@ class IngestOutcome(BaseModel):
 
     published: bool = False
     accepted_request: IngestRequest | None = None
+    warnings: list[str] = Field(default_factory=list)
 
 
 class ContactInputError(ValueError):
@@ -1429,6 +1430,9 @@ def _run_ingest(request: IngestRequest, writer_lease: WriterLease, outcome: Inge
 
     def checkpoint_archive() -> None:
         for event in archive_integrity.checkpoint(archive_reference, catalog):
+            if isinstance(event, ArchiveIntegrityWarning) and event.message not in outcome.warnings:
+                outcome.warnings.append(event.message)
+                print(f"Warning: {safe_status_text(event.message)}", file=sys.stderr)
             if not isinstance(event, ProgressEvent) or not progress_started:
                 continue
             if re.fullmatch(r"mailfile_\d+", threading.current_thread().name):

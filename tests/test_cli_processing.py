@@ -62,6 +62,18 @@ HEADER = (b"From: Sender <sender@lab.example.ac.uk>\r\nTo: owner@example.test\r\
           b"Subject: Parent\r\nMIME-Version: 1.0\r\n")
 
 
+def test_cli_extra_archive_file_warns_and_completes_import(tmp_path: Path) -> None:
+    """ARCHIVE: a real CLI import exits successfully with a warning and never changes an editor backup."""
+    archive, source = ingest(tmp_path, HEADER + b"\r\noriginal\r\n")
+    extra = archive / "data/mbox/#INFECTED1.mbox#"
+    extra.write_bytes(b"synthetic editor backup\n")
+    result = cli(archive, "ingest", "--no-scan", str(source))
+    assert "Warning: Extra file detected: data/mbox/#INFECTED1.mbox#" in result.stderr
+    assert "Traceback" not in result.stderr
+    assert extra.read_bytes() == b"synthetic editor backup\n"
+    assert "#INFECTED1.mbox#" not in (archive / "manifest-sha256.txt").read_text(encoding="utf-8")
+
+
 @pytest.mark.parametrize("relationship", ["source-is-destination", "source-parent", "source-child", "symlink"])
 def test_shared_ingest_rejects_source_destination_overlap_before_writes(tmp_path: Path, relationship: str) -> None:
     """SOURCES: CLI and desktop admission share the same source-preservation boundary."""
