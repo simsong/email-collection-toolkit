@@ -19,13 +19,13 @@
       <p class="lede">Collect, preserve, search, and understand email across old computers, backup drives, and exported accounts — while keeping the archive local and verifiable.</p>
       {% if not releases.stable.tag and releases.preview.tag %}<p><strong>Preview release:</strong> alpha/beta software for testing.</p>{% endif %}
       <div class="actions">
-        <a class="button primary" id="download-windows" href="{% if primary.windows_url %}{{ primary.windows_url }}{% else %}{{ config.extra.releases }}/{% endif %}">Download Windows installer</a>
-        <a class="button primary" id="download-macos" href="{% if primary.mac_url %}{{ primary.mac_url }}{% else %}{{ config.extra.releases }}/{% endif %}">Download macOS installer</a>
+        <a class="button primary" id="download-windows" href="{% if primary.windows_url %}{{ primary.windows_url }}{% else %}{{ config.extra.releases }}/{% endif %}">Signed Windows Installers</a>
+        <a class="button primary" id="download-macos" href="{% if primary.mac_url %}{{ primary.mac_url }}{% else %}{{ config.extra.releases }}/{% endif %}">Signed macOS Installer</a>
         <a class="button secondary" href="{{ config.extra.releases }}/">Show all installers</a>
       </div>
       {% if not primary.windows_url %}<p>No published Windows installer is available for this release; the Windows button opens all releases.</p>{% endif %}
       {% if not primary.mac_url %}<p>No published macOS installer is available for this release; the macOS button opens all releases.</p>{% endif %}
-      <p>macOS installers require Apple Silicon; Windows installers require x64.
+      <p>macOS installers require Apple Silicon; Windows installers run on x64 or ARM.
         Choose your update stream in the application's Preferences panel.</p>
       <p>Current release: <a href="{{ releases.current_url }}">{{ releases.current_version }}</a>{% if not releases.stable.tag and releases.preview.tag %} (preview){% endif %}</p>
       <details><summary>Platform downloads</summary>

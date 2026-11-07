@@ -638,8 +638,9 @@ def test_static_platform_downloads_render_without_javascript(tmp_path: Path, tag
     assert "Windows installation instructions" not in html
     assert "test-signed" not in html
     assert "Current release:" in html
-    assert "Download Windows installer" in html
-    assert "Download macOS installer" in html
+    assert "Signed Windows Installers" in html
+    assert "Signed macOS Installer" in html
+    assert "Windows installers run on x64 or ARM." in html
     assert "Show all installers" in html
     if tags == ("v2.0.0a1",):
         assert "Windows (.msixbundle)" not in html

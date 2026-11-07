@@ -85,8 +85,8 @@ def test_static_downloads(browser: Browser, download_site: tuple[str, list[Publi
         selected = selected or next(iter(publications), None)
         links = installer_links(selected) if selected else None
         for label, asset, platform in (
-            ("Download Windows installer", links.windows_url if links else "", "Windows"),
-            ("Download macOS installer", links.mac_url if links else "", "macOS"),
+            ("Signed Windows Installers", links.windows_url if links else "", "Windows"),
+            ("Signed macOS Installer", links.mac_url if links else "", "macOS"),
         ):
             button = page.get_by_role("link", name=label, exact=True)
             expect(button).to_be_visible()
@@ -116,7 +116,7 @@ def test_download_controls_fit_the_viewport(browser: Browser, download_site: tup
     with browser.new_context(viewport={"width": width, "height": 960}) as context:
         page = context.new_page()
         page.goto(url)
-        expect(page.get_by_role("link", name="Download macOS installer", exact=True)).to_be_visible()
+        expect(page.get_by_role("link", name="Signed macOS Installer", exact=True)).to_be_visible()
         for control in ("#download-windows", "#download-macos", ".actions .secondary"):
             bounds = page.locator(control).bounding_box()
             assert bounds is not None
