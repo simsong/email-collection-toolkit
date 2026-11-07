@@ -163,8 +163,12 @@ def test_import_failure_stays_in_owning_window(tmp_path: Path, transfer_owner: s
             assert api.search_window is not None
             app.add_notice("error", "Identical import error", window_id=api.search_window.window_id)
         assert [len(window.scripts) for window in windows] == [1, 1, 0]
+        assert sibling.search_window is not None
+        app.add_notice("error", "Identical import error", window_id=sibling.search_window.window_id)
+        assert [len(window.scripts) for window in windows] == [1, 2, 0]
+        assert len([notice for notice in app.notices() if notice.message == "Identical import error"]) == 3
         app.add_notice("warning", "Application-wide warning")
-        assert [len(window.scripts) for window in windows] == [2, 2, 1]
+        assert [len(window.scripts) for window in windows] == [2, 3, 1]
         assert all(any(notice["message"] == "Application-wide warning" for notice in api.status()["notices"])
                    for api in (owner, sibling, other))
         # An untitled/non-owning viewer must not inherit either scoped error on startup.

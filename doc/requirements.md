@@ -31,6 +31,7 @@ platform acceptance and deferred work.
 
 - Import notices belong only to the search window owning that operation, including
   ownership transfer on Close; application-wide notices retain global scope.
+  Each newly issued notice remains eligible after dismissal, even with identical text.
   See [desktop](requirements/DESKTOP.md).
 
 - Desktop timeout status uses a yellow circle with a horizontal dash and no

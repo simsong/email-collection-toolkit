@@ -7,7 +7,7 @@ description = "Changes to the Email Collection Toolkit website, separate from ap
 ## 2026-11-07
 
 - Explain window-specific import notices and dismissible extra-file warnings.
-  Refresh the synthetic search and import screenshots for alpha 56.
+  Refresh the synthetic search and import screenshots for alpha 57.
 
 ## 2026-11-04
 

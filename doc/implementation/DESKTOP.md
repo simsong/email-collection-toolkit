@@ -128,8 +128,9 @@ derived jobs remain aborted until explicit reprocessing regenerates their inputs
 `textContent`. After six seconds the banner becomes a keyboard-operable message
 pill; hover/focus keeps it expanded. Reopening shows scrollable history and a
 Collapse button without a timeout. Warning-only history uses yellow. Dismiss
-clears the visible history and pill while retaining seen backend notice timestamps,
-so status refreshes cannot replay them; a newly issued timestamp remains visible.
+clears the visible history and pill while retaining seen backend notice IDs,
+so status refreshes cannot replay them; a newly issued UUID remains visible even
+if its timestamp matches an earlier notice.
 Native pushes carry the same serialized notice as status polling. New warnings retain previous text. Native
 notices also remain in About for the application session. Bridge-start and
 processing errors use the same banner. `make test-gui-processing` exercises real
@@ -145,7 +146,10 @@ The import worker shares its mutable `ApplicationTask` notice scope with the fut
 registry and updates it from completion before refreshing native windows, so an
 escaping refresh error is reaped for the transferred owner as well.
 `add_notice` filters native pushes, and `GuiApi.status` uses `window_notices` so later polls cannot leak
-another window's history. Deduplication includes the scope. Unscoped warnings and
+another window's history. Every issuance is retained and pushed even when severity,
+text and scope match the previous notice. The frontend deduplicates repeated
+delivery by the notice UUID, so retrying an identical blocked import remains
+visible after dismissal. Unscoped warnings and
 About's aggregate history remain application-wide. Synthetic import failures and
 three real browser pages exercise owner, sibling and unrelated archive isolation.
 

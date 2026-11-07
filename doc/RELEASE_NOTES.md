@@ -6,6 +6,12 @@ Entries describe their recorded revisions. For current behavior use the
 [user manual](USER_MANUAL.md) and [CLI reference](CLI_REFERENCE.md). Retired
 Rust delivery plans and historical package checks are not current acceptance.
 
+## 1.0.0a57 — repeated import warnings
+
+- Display a newly issued warning even when its text matches a dismissed notice,
+  including retrying an import against the same busy archive. Repeated delivery
+  of the same notice remains deduplicated by its ID, even when timestamps match.
+
 ## 1.0.0a56 — nonfatal extra-file warnings
 
 - Report extra non-mail files, such as editor backups, as warnings and continue

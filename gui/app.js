@@ -90,7 +90,7 @@ window.addEventListener("resize", () => {
 window.addEventListener("focus", () => { void window.pywebview?.api?.activate?.(); });
 window.addEventListener("pywebviewready", initialize);
 window.mailArchiverNotice = notice => typeof notice === "string"
-  ? showError(notice) : showError(notice.message, notice.severity, notice.created_at);
+  ? showError(notice) : showError(notice.message, notice.severity, notice.notice_id);
 window.archiveDidChange = async () => {
   const status = await call(() => window.pywebview.api.status());
   if (!status) return;
@@ -480,7 +480,7 @@ function applyStatus(status) {
   elements["archive-status-banner"].hidden = !status.ready;
   renderArchiveStatus(status.ready ? status.archive_status_messages || [] : []);
   for (const notice of status.notices || []) {
-    if (notice.severity !== "information") showError(notice.message, notice.severity, notice.created_at);
+    if (notice.severity !== "information") showError(notice.message, notice.severity, notice.notice_id);
   }
   if (status.ready) elements.search.focus();
 }

@@ -14,7 +14,7 @@ from playwright.sync_api import Dialog, Page, expect
 
 from mailarchiver.__main__ import IngestRequest, load_processing_request, run_ingest
 from mailarchiver.application import IngestJob
-from mailarchiver.gui_app import AboutApi, DocumentOptionsApi, GUI_DIRECTORY, SEARCH_BRIDGE_METHODS, GuiApi, IdentityPickerApi, IngestWindowApi
+from mailarchiver.gui_app import AboutApi, ApplicationNotice, DocumentOptionsApi, GUI_DIRECTORY, SEARCH_BRIDGE_METHODS, GuiApi, IdentityPickerApi, IngestWindowApi
 from mailarchiver.gui_processing import PickerPage, connection, resume_request, unfinished_work
 from mailarchiver.ingest_status import IngestStatusFile, read_ingest_history
 from mailarchiver.owner_rules import OwnerRules
@@ -104,6 +104,57 @@ def test_import_error_banner_is_private_to_its_search_window(tmp_path: Path, pag
             window.close()
         for api in (owner, sibling, other):
             api.close()
+        app.shutdown()
+
+
+def test_identical_busy_import_warning_reappears_after_dismissal(tmp_path: Path, page: Page) -> None:
+    """DESKTOP: retrying the same blocked import issues a new visible notice after dismissal."""
+    archive = build_deferred_archive(tmp_path)
+    app, owner = open_headless(archive, tmp_path / "preferences.json")
+    assert owner.document is not None
+    sibling = GuiApi(archive, application=app, document=owner.document,
+                     search_window=app.controller.new_search_window(owner.document))
+    other_page = page.context.new_page()
+    try:
+        for window, api in ((page, owner), (other_page, sibling)):
+            expose(window, api, SEARCH_BRIDGE_METHODS)
+            window.goto((GUI_DIRECTORY / "index.html").as_uri() + "?query=subject:Parent")
+            expect(window.locator("#result-list .tabulator-row")).to_have_count(1)
+        with WriterLease.acquire(archive, str(archive), "busy import fixture", "busy-notice", "test"):
+            assert not app.start_import(owner, [tmp_path / "input.eml"], scan_policy="not-scanned")
+            page.evaluate("window.archiveDidChange()")
+            expect(page.locator("#error")).to_contain_text("Import did not start:")
+            first = owner.status()["notices"][-1]
+            page.get_by_role("button", name="Dismiss messages", exact=True).click()
+            expect(page.locator("#error")).to_be_hidden()
+            page.evaluate("window.archiveDidChange()")
+            expect(page.locator("#error")).to_be_hidden()
+            assert not app.start_import(owner, [tmp_path / "input.eml"], scan_policy="not-scanned")
+            page.evaluate("window.archiveDidChange()")
+            expect(page.locator("#error")).to_be_visible()
+            expect(page.locator("#error")).to_contain_text(first["message"])
+            notices = owner.status()["notices"]
+            assert len(notices) == 2 and notices[0]["message"] == notices[1]["message"]
+            assert notices[0]["notice_id"] != notices[1]["notice_id"]
+            page.evaluate("window.archiveDidChange()")
+            expect(page.locator(".notice-history p")).to_have_count(1)
+            other_page.evaluate("window.archiveDidChange()")
+            expect(other_page.locator("#error")).to_be_hidden()
+            expect(other_page.locator("#notice-pill")).to_be_hidden()
+            # Distinct events may share a wall-clock timestamp; duplicate delivery is still one event.
+            page.get_by_role("button", name="Dismiss messages", exact=True).click()
+            issued = ApplicationNotice.model_validate(notices[-1])
+            repeated = ApplicationNotice(created_at=issued.created_at, severity=issued.severity,
+                                         message=issued.message, window_id=issued.window_id)
+            assert repeated.created_at == issued.created_at and repeated.notice_id != issued.notice_id
+            for _ in range(2):
+                page.evaluate("notice => window.mailArchiverNotice(notice)", repeated.model_dump(mode="json"))
+            expect(page.locator("#error")).to_be_visible()
+            expect(page.locator(".notice-history p")).to_have_count(1)
+    finally:
+        other_page.close()
+        sibling.close()
+        owner.close()
         app.shutdown()
 
 

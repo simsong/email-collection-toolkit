@@ -8,7 +8,10 @@ banner without failing the operation. See [archive](implementation/ARCHIVE.md).
 
 Import commands retain their owning search-window ID in typed notices and tasks.
 Both native delivery and status polling filter by that ID; About retains the
-session-wide history. See [desktop](implementation/DESKTOP.md).
+session-wide history. Every issued notice is retained; the frontend deduplicates
+repeat delivery by the notice UUID rather than suppressing identical new messages
+or depending on wall-clock timestamp uniqueness.
+See [desktop](implementation/DESKTOP.md).
 
 Native reader acceptance normalizes JavaScript evaluations to Promises before
 waiting for pywebview callbacks, including scalar selections and false/null results.

@@ -174,6 +174,7 @@ class ApplicationMetadata(BaseModel):
 class ApplicationNotice(BaseModel):
     """One startup, warning, import, or failure message retained for About."""
 
+    notice_id: str = Field(default_factory=lambda: uuid4().hex)
     created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     severity: Literal["information", "warning", "error"]
     message: str
@@ -1954,9 +1955,6 @@ class PyWebViewApplication:
     def add_notice(self, severity: Literal["information", "warning", "error"], message: str, *, window_id: str | None = None) -> None:
         notice = ApplicationNotice(severity=severity, message=message, window_id=window_id)
         with self._lock:
-            if (self._notices and self._notices[-1].severity == severity and self._notices[-1].message == message
-                    and self._notices[-1].window_id == window_id):
-                return
             self._notices.append(notice)
             self._notices = self._notices[-100:]
         if severity != "information" and not self._quitting:
