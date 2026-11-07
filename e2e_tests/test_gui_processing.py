@@ -47,6 +47,46 @@ def expose(page: Page, api: object, names: tuple[str, ...]) -> None:
         window.addEventListener('DOMContentLoaded', () => window.dispatchEvent(new Event('pywebviewready')));""")
 
 
+def test_import_error_banner_is_private_to_its_search_window(tmp_path: Path, page: Page) -> None:
+    """DESKTOP: a real import error cannot reappear in sibling or unrelated window startup status."""
+    roots = [tmp_path / name for name in ("importing", "other")]
+    for root in roots:
+        root.mkdir()
+    archive, other_archive = [build_deferred_archive(root) for root in roots]
+    (archive / "data/mbox/#INFECTED1.mbox#").write_bytes(b"synthetic auto-save\n")
+    app, owner = open_headless(archive, tmp_path / "preferences.json")
+    assert owner.document is not None
+    sibling = GuiApi(archive, application=app, document=owner.document,
+                     search_window=app.controller.new_search_window(owner.document))
+    other_document = app.controller.open_document(other_archive)
+    other = GuiApi(other_archive, application=app, document=other_document,
+                   search_window=app.controller.new_search_window(other_document))
+    pages = [page, page.context.new_page(), page.context.new_page()]
+    try:
+        assert app.start_import(owner, [roots[0] / "input.eml"], scan_policy="not-scanned",
+                                owner_rules=OwnerRules(include=["owner@example.test"]))
+        futures = tuple(app._import_futures)
+        assert futures
+        for future in futures:
+            future.result(timeout=10)
+        for window, api in zip(pages, (owner, sibling, other), strict=True):
+            expose(window, api, SEARCH_BRIDGE_METHODS)
+            window.goto((GUI_DIRECTORY / "index.html").as_uri() + "?query=subject:Parent")
+            expect(window.locator("#result-list .tabulator-row")).to_have_count(1)
+        expect(page.locator("#error")).to_contain_text("unsupported native archive payload: data/mbox/#INFECTED1.mbox#")
+        for unrelated in pages[1:]:
+            expect(unrelated.locator("#error")).to_be_hidden()
+            expect(unrelated.locator("#notice-pill")).to_be_hidden()
+        for number, window in enumerate(pages):
+            window.screenshot(path=str(tmp_path / f"import-notice-window-{number}.png"))
+    finally:
+        for window in pages[1:]:
+            window.close()
+        for api in (owner, sibling, other):
+            api.close()
+        app.shutdown()
+
+
 def test_picker_loading_keeps_rows_and_ignores_obsolete_responses(tmp_path: Path, page: Page) -> None:
     """Desktop: pending bridge requests show progress, preserve rows, and never look empty."""
     api = IdentityPickerApi(build_deferred_archive(tmp_path), "name")

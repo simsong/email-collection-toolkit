@@ -164,6 +164,14 @@ class IngestJob(BaseModel):
     finished: Event = Field(default_factory=Event, exclude=True)
 
 
+class IngestCompletion(BaseModel):
+    """The owner and refresh targets captured when an operation releases its reservation."""
+
+    model_config = ConfigDict(frozen=True)
+    owner_window_id: str
+    refresh_window_ids: tuple[str, ...]
+
+
 class WindowGeometry(BaseModel):
     x: int | None = None
     y: int | None = None
@@ -405,18 +413,20 @@ class ArchiveDocument:
             self._ingest_job = job
             self._writer_lease = lease
 
-    def finish_ingest(self, operation_id: str, *, published: bool) -> tuple[str, ...]:
-        """Clear the matching job and return windows that should refresh."""
+    def finish_ingest(self, operation_id: str, *, published: bool) -> IngestCompletion:
+        """Capture ownership and refresh targets atomically with clearing the matching job."""
         with self._lock:
             if self._ingest_job is None or self._ingest_job.operation_id != operation_id:
                 raise ValueError(f"archive has no ingest {operation_id}")
+            owner_window_id = self._ingest_job.owner_window_id
             self._ingest_job = None
             lease, self._writer_lease = self._writer_lease, None
             if lease is not None:
                 lease.release()
             if published:
                 self._generation += 1
-            return tuple(self._window_ids) if published else ()
+            return IngestCompletion(owner_window_id=owner_window_id,
+                                    refresh_window_ids=tuple(self._window_ids) if published else ())
 
     def releasable(self) -> bool:
         with self._lock:
@@ -600,12 +610,12 @@ class ApplicationController:
     def begin_ingest(self, document_id: str, job: IngestJob, lease: WriterLease) -> None:
         self.document(document_id).begin_ingest(job, lease)
 
-    def finish_ingest(self, document_id: str, operation_id: str, *, published: bool) -> tuple[str, ...]:
+    def finish_ingest(self, document_id: str, operation_id: str, *, published: bool) -> IngestCompletion:
         document = self.document(document_id)
-        windows = document.finish_ingest(operation_id, published=published)
+        completion = document.finish_ingest(operation_id, published=published)
         with self._lock:
             self._release_if_unused(document)
-        return windows
+        return completion
 
     def attach_child_window(self, document_id: str, window_id: str) -> None:
         self.document(document_id).attach_child_window(window_id)

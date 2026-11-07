@@ -177,6 +177,12 @@ class ApplicationNotice(BaseModel):
     created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     severity: Literal["information", "warning", "error"]
     message: str
+    window_id: str | None = None
+
+
+class ApplicationTask(BaseModel):
+    name: str
+    window_id: str | None = None
 
 
 class GuiStatus(BaseModel):
@@ -909,7 +915,8 @@ class GuiApi:
             generation=self.document.generation if self.document else 0,
             opened_in_new_window=opened_in_new_window,
             configuration=application_configuration().gui,
-            notices=self.application.notices() if self.application else [],
+            notices=self.application.window_notices(self.search_window.window_id if self.search_window else None)
+                if self.application else [],
             archive_status_messages=["Attachment searches use extracted text when available."] if ready else [],
         ).model_dump(mode="json")
 
@@ -1657,7 +1664,7 @@ class PyWebViewApplication:
         self._quitting = False
         self._quit_done = Event()
         self._task_executor = ThreadPoolExecutor(max_workers=8, thread_name_prefix="mailarchiver-command")
-        self._tasks: dict[Future[None], str] = {}
+        self._tasks: dict[Future[None], ApplicationTask] = {}
         self._import_futures: set[Future[None]] = set()
         self._writers: set[Event] = set()
         self._updates_started = False
@@ -1675,33 +1682,34 @@ class PyWebViewApplication:
 
         self._submit_task("stale export cleanup", cleanup_stale_exports)
 
-    def _submit_task(self, name: str, operation: Callable[[], None]) -> Future[None] | None:
+    def _submit_task(self, name: str | ApplicationTask, operation: Callable[[], None], *, window_id: str | None = None) -> Future[None] | None:
         """Retain finite command futures; deadline/owner monitors remain independent."""
+        task = ApplicationTask(name=name, window_id=window_id) if isinstance(name, str) else name
         with self._lock:
             if self._quitting:
                 return None
             future = self._task_executor.submit(operation)
-            self._tasks[future] = name
+            self._tasks[future] = task
             return future
 
     def _reap_tasks(self) -> None:
         with self._lock:
             completed = [(future, self._tasks.pop(future)) for future in tuple(self._tasks) if future.done()]
             self._import_futures.difference_update(future for future, _name in completed)
-        for future, name in completed:
+        for future, task in completed:
             try:
                 future.result()
             except CancelledError:
                 pass
             except BaseException as error:  # pylint: disable=broad-exception-caught
-                self.add_notice("error", f"{name} failed: {type(error).__name__}: {error}")
+                self.add_notice("error", f"{task.name} failed: {type(error).__name__}: {error}", window_id=task.window_id)
         # Search ingest_overview polls this too, even when no About window exists.
         while True:
             try:
                 notice = self._pending_notices.get_nowait()
             except Empty:
                 break
-            self.add_notice(notice.severity, notice.message)
+            self.add_notice(notice.severity, notice.message, window_id=notice.window_id)
 
     @contextmanager
     def writer_activity(self) -> Iterator[None]:
@@ -1943,17 +1951,21 @@ class PyWebViewApplication:
         self._refresh_menus()
         return True
 
-    def add_notice(self, severity: Literal["information", "warning", "error"], message: str) -> None:
-        notice = ApplicationNotice(severity=severity, message=message)
+    def add_notice(self, severity: Literal["information", "warning", "error"], message: str, *, window_id: str | None = None) -> None:
+        notice = ApplicationNotice(severity=severity, message=message, window_id=window_id)
         with self._lock:
-            if self._notices and self._notices[-1].severity == severity and self._notices[-1].message == message:
+            if (self._notices and self._notices[-1].severity == severity and self._notices[-1].message == message
+                    and self._notices[-1].window_id == window_id):
                 return
             self._notices.append(notice)
             self._notices = self._notices[-100:]
         if severity != "information" and not self._quitting:
             for api in self._search_apis():
-                if api.window is not None:
+                if api.window is not None and (window_id is None or (api.search_window and api.search_window.window_id == window_id)):
                     api.window.run_js(f"window.mailArchiverNotice?.({json.dumps(message)});")
+
+    def window_notices(self, window_id: str | None) -> list[ApplicationNotice]:
+        return [notice for notice in self.notices() if notice.window_id is None or notice.window_id == window_id]
 
     def notices(self) -> list[ApplicationNotice]:
         self._reap_tasks()
@@ -2189,14 +2201,14 @@ class PyWebViewApplication:
         self, api: GuiApi, *, directory_only: bool = False, dialog_window: Any = None,
         selected_roots: list[Path] | None = None,
     ) -> bool:
-        if api.window is None or api.document is None or api.document.path is None:
+        if api.window is None or api.document is None or api.document.path is None or api.search_window is None:
             return False
-        if api.search_window is not None:
-            self.controller.activate_window(api.search_window.window_id)
+        window_id = api.search_window.window_id
+        self.controller.activate_window(window_id)
         try:
             document = self.controller.import_document()
         except (ArchiveBusyError, ValueError) as error:
-            self.add_notice("warning", str(error))
+            self.add_notice("warning", str(error), window_id=window_id)
             return False
         anchor = dialog_window or api.window
         if document.path is None:
@@ -2208,7 +2220,7 @@ class PyWebViewApplication:
             try:
                 picker_directory = configured_import_directory(document.path)
             except ValueError as error:
-                self.add_notice("warning", str(error))
+                self.add_notice("warning", str(error), window_id=window_id)
                 picker_directory = destination.parent
             if sys.platform == "darwin":
                 selected_sources = macos_import_picker(
@@ -2252,7 +2264,7 @@ class PyWebViewApplication:
             if owner_rules is None:
                 return False
         except (OSError, ValueError) as error:
-            self.add_notice("error", f"Could not load owner email rules: {error}")
+            self.add_notice("error", f"Could not load owner email rules: {error}", window_id=window_id)
             if sys.platform == "darwin":
                 macos_alert(title, str(error), ("OK",))
             return False
@@ -2263,7 +2275,7 @@ class PyWebViewApplication:
             f"Exclude: {', '.join(owner_rules.exclude) or '(none)'}\n\n{antivirus.detail}"
         )
         if not antivirus.configured:
-            self.add_notice("warning", f"{destination}: antivirus unavailable; scanner errors will be recorded while importing continues.")
+            self.add_notice("warning", f"{destination}: antivirus unavailable; scanner errors will be recorded while importing continues.", window_id=window_id)
         confirmed = (
             macos_alert(title, confirmation, ("Import", "Cancel"), body_width=IMPORT_CONFIRMATION_WIDTH) == 0
             if sys.platform == "darwin" else anchor.create_confirmation_dialog(title, confirmation)
@@ -2314,15 +2326,16 @@ class PyWebViewApplication:
                         lease.release()
                     raise
         except (OSError, ArchiveBusyError, ValueError) as error:
-            self.add_notice("warning", f"Import did not start: {error}")
+            self.add_notice("warning", f"Import did not start: {error}", window_id=session.window_id)
             return False
-        self.add_notice("information", f"Import started for {document.display_path}")
+        self.add_notice("information", f"Import started for {document.display_path}", window_id=session.window_id)
         if (processing_request.scan_policy if processing_request else scan_policy) == "not-scanned":
-            self.add_notice("warning", f"{document.display_path}: importing WITHOUT antivirus scanning.")
+            self.add_notice("warning", f"{document.display_path}: importing WITHOUT antivirus scanning.", window_id=session.window_id)
         self._refresh_menus()
+        task = ApplicationTask(name=f"Import for {document.display_path}", window_id=session.window_id)
         def import_worker() -> None:
             try:
-                self._run_import(document, operation_id, lease, request, job.stop)
+                self._run_import(document, operation_id, lease, request, job.stop, task=task)
             finally:
                 job.finished.set()
 
@@ -2338,7 +2351,7 @@ class PyWebViewApplication:
 
         with self._lock:
             try:
-                future = self._submit_task(f"Import for {document.display_path}", import_worker)
+                future = self._submit_task(task, import_worker)
                 if future is None:
                     self.controller.finish_ingest(document.descriptor.document_id, operation_id, published=False)
                     job.finished.set()
@@ -2374,13 +2387,14 @@ class PyWebViewApplication:
     def reprocess_active_document(self) -> bool:
         """Confirm a curator-requested replay, targeting the archive selected at invocation."""
         api = self.active_api()
-        if api is None or api.document is None or api.document.path is None or api.window is None:
+        if api is None or api.document is None or api.document.path is None or api.window is None or api.search_window is None:
             return False
         document = api.document
         archive = document.path
         assert archive is not None
         if document.ingest_job is not None:
-            self.add_notice("warning", "Suspend the active import or processing before reprocessing saved mail.")
+            self.add_notice("warning", "Suspend the active import or processing before reprocessing saved mail.",
+                            window_id=api.search_window.window_id)
             return False
 
         def reprocess() -> None:
@@ -2397,7 +2411,7 @@ class PyWebViewApplication:
             if confirmed and self.start_import(api, [], processing_request=request):
                 self.open_ingest_window(document)
 
-        return self._submit_task("Reprocess saved mail", reprocess) is not None
+        return self._submit_task("Reprocess saved mail", reprocess, window_id=api.search_window.window_id) is not None
 
     def stop_imports_for_quit(self) -> tuple[IngestJob, ...]:
         """Called only after confirmation; prevent new imports and stop all existing jobs."""
@@ -2417,16 +2431,27 @@ class PyWebViewApplication:
         lease: WriterLease,
         request: IngestRequest,
         stop: Event,
+        *, task: ApplicationTask | None = None,
     ) -> None:
         error: BaseException | None = None
         outcome = IngestOutcome()
+        job = document.ingest_job
+        notice_task = task or ApplicationTask(name=f"Import for {document.display_path}")
+        notice_task.window_id = job.owner_window_id if job is not None else ""
+
+        def notice(severity: Literal["information", "warning", "error"], message: str) -> None:
+            current = document.ingest_job
+            if current is not None and current.operation_id == operation_id:
+                notice_task.window_id = current.owner_window_id
+            self.add_notice(severity, message, window_id=notice_task.window_id)
+
         try:
             run_ingest(request, lease, stop_event=stop, outcome=outcome, terminal=False)
             try:
                 if request.roots:
                     remember_import_directory(request.archive, [Path(root) for root in request.roots])
             except (OSError, ValueError) as config_error:
-                self.add_notice("warning", f"Import completed but the source directory could not be saved: {config_error}")
+                notice("warning", f"Import completed but the source directory could not be saved: {config_error}")
         except BaseException as caught:  # pylint: disable=broad-exception-caught
             logging.getLogger(__name__).debug("Best-effort operation failed", exc_info=True)
             error = caught
@@ -2436,27 +2461,29 @@ class PyWebViewApplication:
                         raise ValueError("Import stopped before its settings were accepted.")
                     remember_interrupted_request(outcome.accepted_request)
                 except (OSError, sqlite3.Error, ValueError) as save_error:
-                    self.add_notice("error", f"Could not save suspended import settings: {save_error}")
+                    notice("error", f"Could not save suspended import settings: {save_error}")
         finally:
             try:
-                refresh = self.controller.finish_ingest(
+                completion = self.controller.finish_ingest(
                     document.descriptor.document_id,
                     operation_id,
                     published=outcome.published,
                 )
+                notice_task.window_id = completion.owner_window_id
+                refresh = completion.refresh_window_ids
             except ValueError:
                 refresh = ()
             if not self._quitting:
                 self._refresh_search_windows(refresh)
                 self._refresh_menus()
         if isinstance(error, ImapPaused):
-            self.add_notice("information", f"Import paused for {document.display_path}: {error}")
+            notice("information", f"Import paused for {document.display_path}: {error}")
         elif isinstance(error, IngestInterrupted):
-            self.add_notice("information", f"Import suspended for {document.display_path}; use Continue Import in Ingests to resume.")
+            notice("information", f"Import suspended for {document.display_path}; use Continue Import in Ingests to resume.")
         elif error is None:
-            self.add_notice("information", f"Import completed for {document.display_path}")
+            notice("information", f"Import completed for {document.display_path}")
         else:
-            self.add_notice(
+            notice(
                 "error",
                 f"Import failed for {document.display_path}: {type(error).__name__}: {error}",
             )
@@ -2829,7 +2856,7 @@ class PyWebViewApplication:
             # The next status poll delivers this without a UI lock or import worker.
             shortcut = " (⌘ Q)" if sys.platform == "darwin" else ""
             self._pending_notices.put(ApplicationNotice(severity="warning", message=
-                f"Cannot close window when import is running. Use Quit{shortcut} to suspend import and exit program."))
+                f"Cannot close window when import is running. Use Quit{shortcut} to suspend import and exit program.", window_id=window_id))
             return False
         except ValueError:
             pass  # A repeated native callback may refer to an already reserved close.

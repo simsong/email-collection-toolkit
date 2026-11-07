@@ -6,6 +6,12 @@ Entries describe their recorded revisions. For current behavior use the
 [user manual](USER_MANUAL.md) and [CLI reference](CLI_REFERENCE.md). Retired
 Rust delivery plans and historical package checks are not current acceptance.
 
+## 1.0.0a55 — import notice ownership
+
+- Keep import warnings and errors in the search window owning the operation.
+  Closing that window transfers subsequent notices with the active import;
+  unrelated windows no longer receive or replay its error banner.
+
 ## 1.0.0a54 — toolkit audit repairs
 
 - Treat direct and imaplib-wrapped host-down socket errors as resumable IMAP pauses

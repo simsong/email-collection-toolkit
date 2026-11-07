@@ -25,6 +25,10 @@ platform acceptance and deferred work.
 
 ## Shared boundaries
 
+- Import notices belong only to the search window owning that operation, including
+  ownership transfer on Close; application-wide notices retain global scope.
+  See [desktop](requirements/DESKTOP.md).
+
 - Desktop timeout status uses a yellow circle with a horizontal dash and no
   traceback; native macOS and Windows window bars show the launch version
   at the top right.

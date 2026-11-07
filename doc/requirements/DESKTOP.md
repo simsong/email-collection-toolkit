@@ -94,6 +94,11 @@ pill, rather than disappearing. The pill reopens all messages received in that
 window; reopening leaves the text visible until manually collapsed. Messages are
 plain text in a scrollable region, including earlier warnings after another
 arrives. Native application notices also remain in About during the session.
+Import warnings, errors and completion notices must reach only the search window
+owning the operation, not another archive or sibling search window. When Close
+transfers an active import, subsequent notices follow its new owner. The same
+scope applies to retained startup status and unexpected background-command errors.
+Application-wide warnings remain shared, and About may retain the aggregate history.
 
 ## Shutdown feedback
 

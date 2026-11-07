@@ -344,10 +344,13 @@ def test_one_ingest_is_shared_per_document_and_requires_a_writer_lease(tmp_path:
         first_document.descriptor.document_id, "first-ingest", published=True
     )
 
-    assert set(refreshed) == {first_window.window_id, second_window.window_id}
+    assert set(refreshed.refresh_window_ids) == {first_window.window_id, second_window.window_id}
+    assert refreshed.owner_window_id == first_job.owner_window_id
     assert first_document.generation == 1
     assert second_document.ingest_job == second_job
-    assert application.finish_ingest(second_document.descriptor.document_id, "second-ingest", published=False) == ()
+    completion = application.finish_ingest(second_document.descriptor.document_id, "second-ingest", published=False)
+    assert completion.refresh_window_ids == ()
+    assert completion.owner_window_id == second_job.owner_window_id
     assert second_document.generation == 0
 
 
@@ -379,7 +382,8 @@ def test_closing_ingest_owner_transfers_shared_job_without_releasing_lease(tmp_p
         assert {window.window_id for window in application.windows()} == {sibling.window_id, unrelated.window_id}
     finally:
         refreshed = application.finish_ingest(document.descriptor.document_id, job.operation_id, published=True)
-    assert refreshed == (sibling.window_id,)
+    assert refreshed.refresh_window_ids == (sibling.window_id,)
+    assert refreshed.owner_window_id == sibling.window_id
     assert not lease.acquired
     assert application.can_close_window(sibling.window_id)
     application.close_window(sibling.window_id)

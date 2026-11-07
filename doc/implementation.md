@@ -2,6 +2,10 @@
 
 # Mail archive normalizer implementation
 
+Import commands retain their owning search-window ID in typed notices and tasks.
+Both native delivery and status polling filter by that ID; About retains the
+session-wide history. See [desktop](implementation/DESKTOP.md).
+
 Native reader acceptance normalizes JavaScript evaluations to Promises before
 waiting for pywebview callbacks, including scalar selections and false/null results.
 An explicit result envelope retains synchronous errors and rejected Promises as failures.

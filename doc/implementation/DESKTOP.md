@@ -134,6 +134,18 @@ archive/bridge continuation, deferral, lease conflicts, stale abort rejection,
 recorded crash snapshots and browser interactions. `make test-imap` checks the
 summary against a real interrupted disposable TLS IMAP download.
 
+`ApplicationNotice.window_id` optionally scopes a notice to a logical search
+window. Import preflight, command failures and results retain that scope;
+`IngestCompletion` captures the final owner and refresh targets under the same
+document lock that clears the job, serializing concurrent Close transfer.
+The import worker shares its mutable `ApplicationTask` notice scope with the future
+registry and updates it from completion before refreshing native windows, so an
+escaping refresh error is reaped for the transferred owner as well.
+`add_notice` filters native pushes, and `GuiApi.status` uses `window_notices` so later polls cannot leak
+another window's history. Deduplication includes the scope. Unscoped warnings and
+About's aggregate history remain application-wide. Synthetic import failures and
+three real browser pages exercise owner, sibling and unrelated archive isolation.
+
 ## Controller, search UI and message viewing
 
 `mailarchiver.application` is the platform-neutral desktop lifecycle layer.
