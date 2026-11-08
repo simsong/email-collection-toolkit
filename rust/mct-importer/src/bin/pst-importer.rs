@@ -73,12 +73,28 @@ fn main() -> ExitCode {
         eprintln!("Usage: pst-importer [--only-invalid] [--offset N] [--limit N] [--] FILENAME");
         return ExitCode::from(2);
     }
-    match mct_importer::pst::import_selected(
+    let activity = match std::env::var_os(mct_importer::pst::ACTIVITY_ENV)
+        .map(|path| {
+            std::fs::File::options()
+                .write(true)
+                .create_new(true)
+                .open(path)
+        })
+        .transpose()
+    {
+        Ok(activity) => activity,
+        Err(error) => {
+            eprintln!("pst-importer: cannot create private activity snapshot: {error}");
+            return ExitCode::FAILURE;
+        }
+    };
+    match mct_importer::pst::import_selected_with_activity(
         Path::new(&args[0]),
         &mut io::BufWriter::new(io::stdout().lock()),
         &mut io::stderr().lock(),
         only_invalid,
         mct_importer::pst::ImportSelection { offset, limit },
+        activity,
     ) {
         Ok(report) if report.errors == 0 => ExitCode::SUCCESS,
         Ok(_) => ExitCode::FAILURE,

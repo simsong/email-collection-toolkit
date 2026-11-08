@@ -18,7 +18,6 @@ import shutil
 import subprocess
 import sys
 import tempfile
-import time
 from contextlib import contextmanager
 from collections.abc import Mapping
 from importlib.metadata import distribution, version
@@ -199,7 +198,6 @@ def mounted_image(dmg: Path):
                                         capture_output=True, text=True, check=False, env=environment)
                 if result.returncode == 0:
                     break
-                time.sleep(1)
             else:
                 assert result is not None
                 raise RuntimeError(f"Could not eject test volume {mount}: {result.stderr}")

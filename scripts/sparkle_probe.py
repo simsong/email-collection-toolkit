@@ -8,7 +8,6 @@ import argparse
 import plistlib
 import subprocess
 import sys
-import time
 from importlib import import_module
 from pathlib import Path
 from uuid import uuid4
@@ -16,6 +15,7 @@ from uuid import uuid4
 from pydantic import BaseModel
 
 from mailarchiver.sparkle import start_installed_updater
+from mailarchiver.native_events import run_native_until
 from mailarchiver.macos_preferences import MacOSPreferences
 from mailarchiver.update_metadata import SPARKLE_FEED_URL, SPARKLE_PUBLIC_KEY, SPARKLE_VERSION
 from mailarchiver.updates import UpdateService, UpdateStatus
@@ -52,16 +52,36 @@ class ProbeReport(BaseModel):
     continuation_error_recovered: bool = False
 
 
+def exercise_failed_install(service: UpdateService) -> None:
+    """Exercise the probe's expected exception and verify exactly-once recovery."""
+    failures: list[bool] = []
+    failure = RuntimeError("synthetic native-event installation failure")
+
+    def failed_install() -> None:
+        failures.append(True)
+        raise failure
+
+    service.defer_install(failed_install)
+    try:
+        service.resume_install()
+    except RuntimeError as error:
+        if error is not failure:
+            raise
+    else:
+        raise AssertionError("Deferred installation did not propagate its expected failure")
+    if failures != [True] or service.status.phase != "error" or service.resume_install():
+        raise AssertionError("Native continuation did not recover from the install failure exactly once")
+
+
 def exercise_preferences(service: UpdateService) -> None:
     """Operate actual Cocoa controls and apply the user choice through the production pane."""
     appkit = import_module("AppKit")
-    foundation = import_module("Foundation")
     saved: list[tuple[str, bool]] = []
     from mailarchiver.worker_preferences import WorkerPreferences, WorkerSettings
     pane = MacOSPreferences(service, lambda channel, automatic, _workers: saved.append((channel, automatic)))
     pane.screen = min(appkit.NSScreen.screens(), key=lambda screen: screen.frame().origin.x)
     pane.show(WorkerSettings(preferences=WorkerPreferences()))
-    foundation.NSRunLoop.currentRunLoop().runUntilDate_(foundation.NSDate.dateWithTimeIntervalSinceNow_(0.1))
+    run_native_until(pane.window.isVisible, "Preferences did not become visible")
     assert appkit.NSApplication.sharedApplication().modalWindow() is None
     assert pane.check.isEnabled(), "Installed Sparkle backend did not enable manual checks"
     assert pane.channel.itemTitles() == ["Release only", "Alpha / beta / development and release"]
@@ -99,12 +119,11 @@ def exercise(feed_check: bool) -> None:
         windows: list[str] = []
         if feed_check:
             service.check()
-            deadline = time.monotonic() + 20
-            while service.status.phase == "checking" and time.monotonic() < deadline:
-                foundation.NSRunLoop.currentRunLoop().runUntilDate_(foundation.NSDate.dateWithTimeIntervalSinceNow_(0.1))
+            run_native_until(lambda: service.status.phase != "checking", "HTTPS update check did not finish", 20)
             if service.status.phase != "available":
                 raise AssertionError(f"HTTPS preview update check failed: {service.status.model_dump_json()}")
-            foundation.NSRunLoop.currentRunLoop().runUntilDate_(foundation.NSDate.dateWithTimeIntervalSinceNow_(1))
+            run_native_until(lambda: any(window.isVisible() for window in appkit.NSApplication.sharedApplication().windows()),
+                             "Sparkle's update UI did not become visible")
             windows = [str(window.title()) for window in appkit.NSApplication.sharedApplication().windows() if window.isVisible()]
             if not windows:
                 raise AssertionError("Sparkle's standard update UI was not displayed")
@@ -114,16 +133,7 @@ def exercise(feed_check: bool) -> None:
         postponed = bool(helper.probe_postpone(delegate))
         if not service.resume_install() or service.resume_install():
             raise AssertionError("Deferred native continuation must run exactly once")
-        failures: list[bool] = []
-
-        def failed_install() -> None:
-            failures.append(True)
-            raise RuntimeError("synthetic native-timer installation failure")
-
-        service.defer_install(failed_install)
-        foundation.NSRunLoop.currentRunLoop().runUntilDate_(foundation.NSDate.dateWithTimeIntervalSinceNow_(1.1))
-        if failures != [True] or service.status.phase != "error":
-            raise AssertionError("Cocoa timer did not recover from the install failure exactly once")
+        exercise_failed_install(service)
         report = ProbeReport(frozen=bool(getattr(sys, "frozen", False)), controller=backend.controller.className(),
                              framework_path=str(framework),
                              build=service.status.build, preview_channels=preview, release_channels=release,

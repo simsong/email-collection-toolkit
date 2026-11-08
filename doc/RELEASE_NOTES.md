@@ -6,6 +6,74 @@ Entries describe their recorded revisions. For current behavior use the
 [user manual](USER_MANUAL.md) and [CLI reference](CLI_REFERENCE.md). Retired
 Rust delivery plans and historical package checks are not current acceptance.
 
+## 1.0.0a61 — enforce event-wait failure boundaries
+
+- Enforce filesystem predicate deadlines even while file notifications remain ready.
+- Enforce suggestion/preview wait deadlines even during unrelated result activity.
+- Explicitly acknowledge test-owned attachment confirmation, clipboard and link
+  callback state; quiet pages no longer need unrelated DOM activity to wake acceptance.
+
+## 1.0.0a60 — review follow-up for completion boundaries
+
+- Keep PST progress diagnostics batched by work count, with a bounded private
+  activity counter so slow work remains observable without a scheduling timer.
+- Reap PST/OST children even if native event subscription cannot initialize;
+  use scalable descriptor waits on Linux.
+- Avoid JavaScript argument limits when appending large search results.
+- Return explicit, retryable result-wait errors through typed GUI responses.
+- Acknowledge complete updater results and verify expected probe failures;
+  make the retained-find acceptance barrier explicit and bounded.
+- Wake silent PST/OST children on import cancellation, surface suggestion wait
+  errors immediately, publish Close warnings without unrelated activity, retire
+  released-document watches, and keep About disk failures from refreshing themselves.
+
+## 1.0.0a59 — event-driven coordination
+
+- Replace first-party scheduling timers with work, filesystem, future, native-window
+  and DOM notifications. Keep only explicit failure deadlines.
+- Search typing starts immediately; notices remain expanded until manually collapsed
+  or dismissed. Automatic updater checks run when the installed application opens.
+- Preserve live import status during blocked work without periodic heartbeats.
+  Use explicit cancellation wakeups for scanner startup and cooperative processors.
+- Bound native JavaScript replies by completion, Close or a failure deadline;
+  acknowledge standalone IMAP interruption before waiting for download cleanup.
+- Windows metadata readers permit atomic replacement while open; external sharing
+  denial fails explicitly and preserves files instead of waiting and retrying.
+- ABBYY's research helper rejects an asynchronous command reply without completion
+  evidence; it no longer polls the external application's busy flag.
+- See [timing audit](TIMING_AUDIT.md) for measured validation and platform limits.
+
+## 1.0.0a58 — explicit timing and completion
+
+- Keep slow About, Ingests and options status reads ordered, including fresh reads
+  after import commands. Use actual focus and paint events for search/viewer updates.
+- Report incomplete worker cleanup and forced Quit deadlines as failures while
+  retaining existing recovery state. Preserve original errors when diagnostics fail.
+- Replace test/acceptance sleep assumptions with barriers, completed operations,
+  native events and acknowledged stack samples. Record sampler timing and failures.
+- Document the [timing audit](TIMING_AUDIT.md), intentional scheduling and remaining
+  platform acceptance limits.
+
+## 1.0.0a57 — repeated import warnings
+
+- Display a newly issued warning even when its text matches a dismissed notice,
+  including retrying an import against the same busy archive. Repeated delivery
+  of the same notice remains deduplicated by its ID, even when timestamps match.
+
+## 1.0.0a56 — nonfatal extra-file warnings
+
+- Report extra non-mail files, such as editor backups, as warnings and continue
+  importing. Leave the files untouched and retain failures for damaged or missing
+  archived mail. Standalone email verification reports the same distinction.
+- Show warnings in yellow and add **Dismiss messages**; later status refreshes
+  do not reopen dismissed messages.
+
+## 1.0.0a55 — import notice ownership
+
+- Keep import warnings and errors in the search window owning the operation.
+  Closing that window transfers subsequent notices with the active import;
+  unrelated windows no longer receive or replay its error banner.
+
 ## 1.0.0a54 — toolkit audit repairs
 
 - Treat direct and imaplib-wrapped host-down socket errors as resumable IMAP pauses

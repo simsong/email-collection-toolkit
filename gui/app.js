@@ -3,7 +3,7 @@
 /* Drive the read-only pywebview mail browser while rejecting stale async responses. */
 "use strict";
 
-const state = {
+const state = new Proxy({
   query: "",
   offset: 0,
   sortBy: "date",
@@ -13,7 +13,7 @@ const state = {
   resultPreviews: new Map(),
   resultPreviewPending: new Set(),
   resultPreviewBatch: new Set(),
-  resultPreviewTimer: null,
+  resultPreviewTask: null,
   resultSelection: new Set(),
   resultTable: null,
   highlightTerms: [],
@@ -22,7 +22,7 @@ const state = {
   messageFindIndex: -1,
   messageFindRender: Promise.resolve(false),
   messageFindRenderRequest: 0,
-  messageFindTimer: null,
+  messageFindTask: null,
   messageFindMarker: 0,
   commandAContext: "",
   highlightBackground: "transparent",
@@ -59,10 +59,13 @@ const state = {
   searchFilters: [],
   identityMessages: null,
   suggestionRequest: 0,
-  suggestionTimer: null,
   suggestionItems: [],
   suggestionIndex: -1,
-};
+}, {set(target, name, value) {
+  target[name] = value;
+  window.dispatchEvent(new Event("mailarchiver-state-changed"));
+  return true;
+}});
 
 const elements = {};
 const byId = id => document.getElementById(id);
@@ -75,21 +78,19 @@ window.mailArchiverProcessingStarting = starting => {
 let initialized = false;
 let previewQueue = Promise.resolve();
 const SUGGESTION_MINIMUM = 3;
-const SUGGESTION_DELAY_MS = 120;
-const MESSAGE_FIND_DELAY_MS = 120;
 const FRAME_LOAD_TIMEOUT_MS = 10_000;
 const SUGGESTION_LIMIT = 20;
-const INGEST_REFRESH_MS = 1000;
 const RESULT_INITIAL_LIMIT = 2_000;
 const PLAIN_LINK_PATTERN = /(?:https?:\/\/|mailto:)[^\s<>"']+/giu;
 
 window.addEventListener("resize", () => {
   const frame = elements["body-view"]?.querySelector(".html-frame");
-  if (frame) window.setTimeout(() => refreshHtmlFrameLayout(frame), 0);
+  if (frame) window.requestAnimationFrame(() => refreshHtmlFrameLayout(frame));
 });
 window.addEventListener("focus", () => { void window.pywebview?.api?.activate?.(); });
 window.addEventListener("pywebviewready", initialize);
-window.mailArchiverNotice = message => showError(message);
+window.mailArchiverNotice = notice => typeof notice === "string"
+  ? showError(notice) : showError(notice.message, notice.severity, notice.notice_id);
 window.archiveDidChange = async () => {
   const status = await call(() => window.pywebview.api.status());
   if (!status) return;
@@ -99,8 +100,7 @@ window.archiveDidChange = async () => {
   if (state.query.trim() || state.identityMessages || (state.showTree && state.mailboxSelections.size)) await runSearch();
 };
 window.setTimeout(() => {
-  if (window.pywebview?.api?.status) initialize();
-  else if (!initialized) showBridgeFailure();
+  if (!initialized) showBridgeFailure();
 }, 1500);
 
 async function initialize() {
@@ -129,9 +129,8 @@ async function initialize() {
   });
   elements.search.addEventListener("input", scheduleSuggestions);
   elements.search.addEventListener("keydown", navigateSuggestions);
-  elements.search.addEventListener("blur", () => window.setTimeout(() => {
-    if (document.activeElement !== elements.search) closeSuggestions();
-  }, 150));
+  // Suggestion mousedown prevents focus loss; any actual blur retires suggestions.
+  elements.search.addEventListener("blur", closeSuggestions);
   elements["sort-by"].addEventListener("change", () => runSearch());
   elements["sort-direction"].addEventListener("click", toggleSortDirection);
   elements["search-attachments"].addEventListener("change", () => runSearch());
@@ -171,7 +170,7 @@ async function initialize() {
   await loadFilterSets();
   applyStatus(status);
   await refreshIngestOverview();
-  window.setInterval(refreshIngestOverview, INGEST_REFRESH_MS);
+
   if (parameters.has("identity-messages")) {
     state.identityMessages = JSON.parse(parameters.get("identity-messages"));
     renderSearchFilters();
@@ -217,32 +216,33 @@ function frameDocumentIsReady(frame) {
 
 function waitForFrameDocument(frame) {
   return new Promise((resolve, reject) => {
-    let settled = false;
-    let timer = null;
-    const deadline = Date.now() + FRAME_LOAD_TIMEOUT_MS;
-    const complete = (callback, value) => {
-      if (settled) return;
-      settled = true;
-      if (timer !== null) window.clearTimeout(timer);
+    const observer = new MutationObserver(check);
+    let timer;
+    function finish(callback, value) {
+      observer.disconnect();
+      clearTimeout(timer);
       frame.removeEventListener("load", check);
       callback(value);
-    };
-    const schedule = () => {
-      if (timer === null) timer = window.setTimeout(() => { timer = null; check(); }, 10);
-    };
-    const check = () => {
-      if (frameDocumentIsReady(frame)) { complete(resolve); return; }
-      if (!frame.isConnected) { complete(reject, new Error("message HTML iframe was removed before it initialized")); return; }
-      if (Date.now() >= deadline) { complete(reject, new Error("message HTML iframe did not initialize")); return; }
-      schedule();
-    };
-    frame.addEventListener("load", check, {once: true});
+    }
+    function check() {
+      if (frameDocumentIsReady(frame)) finish(resolve);
+      else if (!frame.isConnected) finish(reject, new Error("message HTML iframe was removed before it initialized"));
+    }
+    observer.observe(document, {subtree:true, childList:true});
+    frame.addEventListener("load", check);
+    timer = setTimeout(() => finish(reject, new Error("message HTML iframe did not initialize")), FRAME_LOAD_TIMEOUT_MS);
     check();
   });
 }
 
 function waitForFrameLayout() {
-  return new Promise(resolve => window.setTimeout(resolve, 75));
+  return new Promise((resolve, reject) => {
+    const deadline = window.setTimeout(() => reject(new Error("message layout did not reach a paint frame")), FRAME_LOAD_TIMEOUT_MS);
+    window.requestAnimationFrame(() => window.requestAnimationFrame(() => {
+      window.clearTimeout(deadline);
+      resolve();
+    }));
+  });
 }
 
 function installFrameFindShortcuts(frame) {
@@ -478,8 +478,9 @@ function applyStatus(status) {
   elements["result-status"].textContent = status.ready ? "Enter a search." : "Use File → New or Open to begin.";
   elements["archive-status-banner"].hidden = !status.ready;
   renderArchiveStatus(status.ready ? status.archive_status_messages || [] : []);
-  const notice = status.notices?.at(-1);
-  if (notice && notice.severity !== "information") showError(notice.message);
+  for (const notice of status.notices || []) {
+    if (notice.severity !== "information") showError(notice.message, notice.severity, notice.notice_id);
+  }
   if (status.ready) elements.search.focus();
 }
 
@@ -817,7 +818,7 @@ function scheduleSuggestions() {
   const query = elements.search.value.trim();
   if (query.length < SUGGESTION_MINIMUM) return;
   const request = ++state.suggestionRequest;
-  state.suggestionTimer = window.setTimeout(() => loadSuggestions(query, request), SUGGESTION_DELAY_MS);
+  void loadSuggestions(query, request);
 }
 
 async function loadSuggestions(query, request) {
@@ -826,14 +827,13 @@ async function loadSuggestions(query, request) {
     if (window.pywebview.api.suggestions_start) {
       const {generation} = await window.pywebview.api.suggestions_start(query, SUGGESTION_LIMIT);
       while (request === state.suggestionRequest && elements.search.value.trim() === query) {
-        const status = await window.pywebview.api.suggestions_status(generation);
+        const status = await window.pywebview.api.suggestions_status(generation, true);
         if (status.stale) return;
+        if (status.error) throw new Error(status.error);
         if (status.complete) {
-          if (status.error) throw new Error(status.error);
           suggestions = status.result;
           break;
         }
-        await new Promise(resolve => window.setTimeout(resolve, 75));
       }
     } else suggestions = await window.pywebview.api.suggestions(query, SUGGESTION_LIMIT);
     if (!suggestions || request !== state.suggestionRequest || elements.search.value.trim() !== query) return;
@@ -910,7 +910,6 @@ function closeSuggestions() {
   if (window.pywebview?.api?.suggestions_cancel) {
     void window.pywebview.api.suggestions_cancel().catch(() => {});
   }
-  window.clearTimeout(state.suggestionTimer);
   state.suggestionRequest += 1;
   state.suggestionItems = [];
   state.suggestionIndex = -1;
@@ -1039,10 +1038,6 @@ async function runCompleteSearch(context) {
   const {query, sortBy, sortDirection, searchAttachments, mailboxSelections, request, identityMessages} = context;
   Object.assign(state, {query, sortBy, sortDirection, searchAttachments, offset: 0});
   clearResultViewport();
-  if (window.pywebview.api.search_start && !identityMessages) {
-    await runIncrementalSearch(context);
-    return;
-  }
   const first = await call(() => window.pywebview.api.search(
     query, 0, sortBy, sortDirection, searchAttachments, mailboxSelections, RESULT_INITIAL_LIMIT, ...(identityMessages ? [identityMessages] : []),
   ));
@@ -1072,41 +1067,6 @@ async function runCompleteSearch(context) {
   updateResultStatus();
 }
 
-async function runIncrementalSearch(context) {
-  const {query, sortBy, sortDirection, searchAttachments, mailboxSelections, request} = context;
-  try {
-    const started = await window.pywebview.api.search_start(query, sortBy, sortDirection, searchAttachments, mailboxSelections);
-    if (request !== state.searchRequest) return;
-    state.highlightTerms = started.highlight_terms;
-    const search = {request, generation: started.generation, count: 0, complete: false, loading: false, error: null};
-    state.rustSearch = search;
-    elements["result-status"].classList.add("background-search");
-    let acknowledged = 0;
-    while (request === state.searchRequest) {
-      const status = await window.pywebview.api.search_status(search.generation);
-      if (request !== state.searchRequest || status.stale) return;
-      Object.assign(search, {count: status.count, complete: status.complete, error: status.error || search.error});
-      // Paint the first two full matching batches before continuing the ID stream.
-      // Once complete, fetch additional display pages only as the user scrolls.
-      if (state.offset < Math.min(search.count, 1024)) await loadRustSearchPage(search, Math.min(512, 1024 - state.offset));
-      if (request !== state.searchRequest) return;
-      updateRustSearchStatus(search);
-      if (search.error || status.complete) { if (status.complete && !search.error) showResultTable(); return; }
-      if (status.window > acknowledged && state.offset >= search.count) {
-        await new Promise(resolve => window.requestAnimationFrame(() => window.setTimeout(resolve, 0)));
-        if (request !== state.searchRequest) return;
-        acknowledged = status.window;
-        await window.pywebview.api.search_advance(search.generation, acknowledged);
-      }
-      await new Promise(resolve => window.setTimeout(resolve, 75));
-    }
-  } catch (error) {
-    if (request !== state.searchRequest) return;
-    elements["result-status"].classList.remove("background-search");
-    elements["result-status"].textContent = `${state.offset.toLocaleString()} messages shown; search incomplete: ${error.message}`;
-  }
-}
-
 async function loadRustSearchPage(search, limit = 512) {
   if (search !== state.rustSearch || search.loading || state.offset >= search.count) return;
   search.loading = true;
@@ -1114,7 +1074,7 @@ async function loadRustSearchPage(search, limit = 512) {
     const page = await window.pywebview.api.search_page(search.generation, state.offset, limit);
     if (search !== state.rustSearch || page.stale) return;
     if (!page.results.length) return;
-    state.results.push(...page.results);
+  state.results = state.results.concat(page.results);
     showResultTable();
     await state.resultTable.addData(page.results, false);
     if (search !== state.rustSearch) return;
@@ -1147,7 +1107,7 @@ function renderSearchHelp() {
 
 function appendResults(results, request) {
   if (request !== state.searchRequest) return;
-  state.results.push(...results);
+  state.results = state.results.concat(results);
   showResultTable();
   void state.resultTable.replaceData(state.results);
 }
@@ -1157,8 +1117,7 @@ function clearResultViewport() {
   state.resultPreviews.clear();
   state.resultPreviewPending.clear();
   state.resultPreviewBatch.clear();
-  if (state.resultPreviewTimer !== null) window.clearTimeout(state.resultPreviewTimer);
-  state.resultPreviewTimer = null;
+  state.resultPreviewTask = null;
   state.resultSelection.clear();
   state.resultTable?.clearData();
 }
@@ -1325,13 +1284,16 @@ function queueResultPreview(messagePk, request) {
   if (state.resultPreviews.has(messagePk) || state.resultPreviewPending.has(messagePk)) return;
   state.resultPreviewPending.add(messagePk);
   state.resultPreviewBatch.add(messagePk);
-  if (state.resultPreviewTimer !== null) return;
-  state.resultPreviewTimer = window.setTimeout(() => {
-    state.resultPreviewTimer = null;
+  if (state.resultPreviewTask !== null) return;
+  const task = {};
+  state.resultPreviewTask = task;
+  window.queueMicrotask(() => {
+    if (state.resultPreviewTask !== task) return;
+    state.resultPreviewTask = null;
     const messagePks = [...state.resultPreviewBatch];
     state.resultPreviewBatch.clear();
     queuePreviews(messagePks, request);
-  }, 0);
+  });
 }
 
 function updateResultStatus() {
@@ -1351,7 +1313,7 @@ function toggleSortDirection() {
 function selectResultRow(event, row) {
   const request = state.searchRequest;
   const messagePk = row.getData().message_pk;
-  window.setTimeout(() => {
+  window.queueMicrotask(() => {
     if (request !== state.searchRequest || state.resultTable?.getRow(messagePk) !== row) return;
     let selected = state.resultTable?.getSelectedRows() || [];
     if (!event.shiftKey && !event.metaKey && !event.ctrlKey && selected.length !== 1) {
@@ -1361,7 +1323,7 @@ function selectResultRow(event, row) {
     }
     if (selected.length !== 1 || selected[0] !== row || state.selectionRequest === messagePk) return;
     void selectMessage(messagePk);
-  }, 0);
+  });
 }
 
 async function openResultWindow(_event, row) {
@@ -1378,7 +1340,7 @@ async function requestPreviews(messagePks, request) {
     return;
   }
   while (true) {
-    const batch = await call(() => window.pywebview.api.take_previews(messagePks));
+    const batch = await call(() => window.pywebview.api.take_previews(messagePks, true));
     if (request !== state.searchRequest) return;
     if (!batch) {
       messagePks.forEach(messagePk => state.resultPreviewPending.delete(messagePk));
@@ -1394,7 +1356,6 @@ async function requestPreviews(messagePks, request) {
       messagePks.forEach(messagePk => state.resultPreviewPending.delete(messagePk));
       return;
     }
-    await new Promise(resolve => setTimeout(resolve, 75));
   }
 }
 
@@ -1626,19 +1587,21 @@ async function closeMessageFind() {
 
 function scheduleMessageFindUpdate() {
   clearMessageFindUpdate();
-  state.messageFindTimer = window.setTimeout(() => {
-    state.messageFindTimer = null;
+  const task = {};
+  state.messageFindTask = task;
+  window.queueMicrotask(() => {
+    if (state.messageFindTask !== task) return;
+    state.messageFindTask = null;
     void updateMessageFind();
-  }, MESSAGE_FIND_DELAY_MS);
+  });
 }
 
 function clearMessageFindUpdate() {
-  if (state.messageFindTimer !== null) window.clearTimeout(state.messageFindTimer);
-  state.messageFindTimer = null;
+  state.messageFindTask = null;
 }
 
 async function flushMessageFindUpdate() {
-  if (state.messageFindTimer === null) return false;
+  if (state.messageFindTask === null) return false;
   clearMessageFindUpdate();
   await updateMessageFind();
   return true;
@@ -1780,7 +1743,6 @@ function scrollHtmlFindTarget(frame, mark) {
     pane.scrollTo({top: pane.scrollTop + frameBounds.top - paneBounds.top + markBounds.top - pane.clientHeight / 2});
   };
   scroll();
-  window.setTimeout(scroll, 50);
   requestAnimationFrame(() => requestAnimationFrame(scroll));
 }
 
@@ -2149,7 +2111,7 @@ function showSingleMessageSelection() {
 
 function invalidateDragExports() {
   state.dragEpoch += 1;
-  state.dragExports.clear();
+  state.dragExports = new Map();
   state.dragPreparing.clear();
   if (elements["message-file-well"]) updateMessageFileWell();
 }
@@ -2206,7 +2168,7 @@ async function prepareDrag(messagePks) {
   if (epoch !== state.dragEpoch) return;
   state.dragPreparing.delete(key);
   if (info) {
-    state.dragExports.set(key, info);
+    state.dragExports = new Map(state.dragExports).set(key, info);
     if (dragExportKey(selectedDragMessagePks()) === key) updateMessageFileWell();
   }
 }
@@ -2216,18 +2178,23 @@ async function call(operation) {
   catch (error) { showError(String(error?.message || error)); return null; }
 }
 
-function showError(message) {
+function showError(message, severity = "error", noticeId = null) {
   const panel = byId("error");
   const pill = byId("notice-pill");
   if (!showError.messages) showError.messages = [];
-  if (showError.messages.at(-1) === message) return;
-  showError.messages.push(message);
+  if (!showError.seen) showError.seen = new Set();
+  if (noticeId ? showError.seen.has(noticeId) : showError.messages.at(-1)?.message === message) return;
+  if (noticeId) showError.seen.add(noticeId);
+  showError.messages.push({message, severity});
+  const warningOnly = showError.messages.every(item => item.severity === "warning");
+  panel.classList.toggle("warning", warningOnly);
+  pill.classList.toggle("warning", warningOnly);
   panel.replaceChildren();
   const history = document.createElement("div");
   history.className = "notice-history";
-  for (const text of showError.messages) {
+  for (const notice of showError.messages) {
     const item = document.createElement("p");
-    item.textContent = text;
+    item.textContent = notice.message;
     history.append(item);
   }
   const collapse = document.createElement("button");
@@ -2238,23 +2205,28 @@ function showError(message) {
     pill.hidden = false;
     pill.setAttribute("aria-expanded", "false");
   };
-  collapse.addEventListener("click", () => { clearTimeout(showError.timer); hide(); pill.focus(); });
-  panel.append(history, collapse);
+  collapse.addEventListener("click", () => { hide(); pill.focus(); });
+  const dismiss = document.createElement("button");
+  dismiss.type = "button";
+  dismiss.textContent = "Dismiss messages";
+  dismiss.addEventListener("click", () => {
+    showError.messages = [];
+    panel.hidden = true;
+    pill.hidden = true;
+    elements.search.focus();
+  });
+  panel.append(history, collapse, dismiss);
   panel.hidden = false;
   pill.hidden = true;
   pill.textContent = `Messages (${showError.messages.length})`;
   pill.setAttribute("aria-expanded", "true");
   pill.onclick = () => {
-    clearTimeout(showError.timer);
     panel.hidden = false;
     pill.hidden = true;
     pill.setAttribute("aria-expanded", "true");
     collapse.focus();
   };
-  clearTimeout(showError.timer);
-  showError.timer = setTimeout(() => {
-    if (!panel.contains(document.activeElement) && !panel.matches(":hover")) hide();
-  }, 6000);
+
 }
 
 function formatDate(value) {
@@ -2267,3 +2239,6 @@ function byteSize(value) {
   if (value < 1024 * 1024) return `${(value / 1024).toFixed(1)} KB`;
   return `${(value / 1024 / 1024).toFixed(1)} MB`;
 }
+
+window.addEventListener("mailarchiver-status-changed", () => { if (initialized) void refreshIngestOverview(); });
+if (window.pywebview?.api?.status) initialize();

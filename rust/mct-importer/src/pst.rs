@@ -1,6 +1,12 @@
 // Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved.
 
 //! Read-only Microsoft outlook-pst adapter. Requirements: doc/PST_IMPORTER.md.
+//! Walk source folders and MAPI properties without acquiring write access.
+//! Reconstruct byte-preserving available mail into the shared importer stream.
+//! Keep canonical output independent of progress and diagnostic reporting.
+//! Optional private eight-byte snapshots acknowledge every actual work checkpoint.
+//! Work-batched diagnostic history remains separate from that bounded liveness signal.
+//! The Python owner enforces resource limits, interruption and child cleanup.
 use anyhow::{bail, ensure, Context, Result};
 use base64::{engine::general_purpose::STANDARD, Engine};
 use chrono::{DateTime, FixedOffset, SecondsFormat, Utc};
@@ -23,7 +29,7 @@ use std::{
     io::{self, BufRead, BufReader, Read, Seek, Write},
     path::Path,
     rc::Rc,
-    time::{Duration, Instant, SystemTime},
+    time::SystemTime,
 };
 use url::Url;
 
@@ -33,14 +39,23 @@ fn timestamp() -> String {
 
 struct ImportProgress<'a, W: Write> {
     diagnostics: &'a mut W,
-    last: Instant,
     completed: u64,
+    last_phase: Option<&'static str>,
+    activity: Option<File>,
 }
 
+pub const ACTIVITY_ENV: &str = "MAILARCHIVER_PST_ACTIVITY_FILE";
+
 impl<W: Write> ImportProgress<'_, W> {
-    fn tick(&mut self, phase: &str) -> Result<()> {
+    fn tick(&mut self, phase: &'static str) -> Result<()> {
         self.completed += 1;
-        if self.last.elapsed() >= Duration::from_secs(1) {
+        if let Some(activity) = &mut self.activity {
+            // An owned fixed-size snapshot records every actual work checkpoint.
+            // It is liveness evidence, never a source or canonical archive file.
+            activity.rewind()?;
+            activity.write_all(&self.completed.to_le_bytes())?;
+        }
+        if self.last_phase != Some(phase) || self.completed.is_power_of_two() {
             writeln!(
                 self.diagnostics,
                 "progress time={} phase={phase} completed={}",
@@ -48,7 +63,7 @@ impl<W: Write> ImportProgress<'_, W> {
                 self.completed
             )?;
             self.diagnostics.flush()?;
-            self.last = Instant::now();
+            self.last_phase = Some(phase);
         }
         Ok(())
     }
@@ -554,10 +569,23 @@ pub fn import_selected(
     only_invalid: bool,
     selection: ImportSelection,
 ) -> Result<ImportReport> {
+    import_selected_with_activity(path, output, diagnostics, only_invalid, selection, None)
+}
+
+/// Retain a bounded private liveness snapshot independently of diagnostic history.
+pub fn import_selected_with_activity(
+    path: &Path,
+    output: &mut impl Write,
+    diagnostics: &mut impl Write,
+    only_invalid: bool,
+    selection: ImportSelection,
+    activity: Option<File>,
+) -> Result<ImportReport> {
     let mut progress = ImportProgress {
         diagnostics,
-        last: Instant::now(),
         completed: 0,
+        last_phase: None,
+        activity,
     };
     let scanner = crate::antivirus::Scanner::from_environment()?;
     let path = path.canonicalize().context("resolve source filename")?;
@@ -1515,19 +1543,25 @@ mod tests {
     use super::*;
 
     #[test]
-    fn progress_reports_elapsed_work_without_changing_mail_output() {
-        // ACQUISITION: periodic diagnostics describe actual work, with UTC timestamps.
+    fn progress_retains_every_work_checkpoint_without_unbounded_diagnostics() {
+        // ACQUISITION: work, not elapsed time, advances the bounded activity snapshot.
         let mut diagnostics = Vec::new();
         let mut progress = ImportProgress {
             diagnostics: &mut diagnostics,
-            last: Instant::now() - Duration::from_secs(2),
             completed: 0,
+            last_phase: None,
+            activity: None,
         };
         progress.tick("source-hash").unwrap();
-        progress.tick("source-hash").unwrap();
+        for _ in 1..900_000 {
+            progress.tick("source-hash").unwrap();
+        }
+        drop(progress);
         let diagnostic = String::from_utf8(diagnostics).unwrap();
-        assert_eq!(diagnostic.lines().count(), 1);
+        assert!(diagnostic.len() < 16 * 1024);
+        assert_eq!(diagnostic.lines().count(), 20);
         assert!(diagnostic.contains("phase=source-hash completed=1"));
+        assert!(diagnostic.contains("phase=source-hash completed=524288"));
         let time = diagnostic
             .split_whitespace()
             .find_map(|word| word.strip_prefix("time="))
@@ -1539,6 +1573,30 @@ mod tests {
                 .local_minus_utc(),
             0
         );
+    }
+
+    #[test]
+    fn activity_snapshot_changes_for_work_without_growing() {
+        // ACQUISITION: liveness must not depend on a diagnostic batch filling.
+        let mut diagnostics = Vec::new();
+        let activity = tempfile::tempfile().unwrap();
+        let mut reader = activity.try_clone().unwrap();
+        let mut progress = ImportProgress {
+            diagnostics: &mut diagnostics,
+            completed: 0,
+            last_phase: None,
+            activity: Some(activity),
+        };
+        for expected in 1..=3u64 {
+            progress.tick("source-hash").unwrap();
+            reader.rewind().unwrap();
+            let mut counter = [0; 8];
+            reader.read_exact(&mut counter).unwrap();
+            assert_eq!(u64::from_le_bytes(counter), expected);
+            assert_eq!(reader.metadata().unwrap().len(), 8);
+        }
+        drop(progress);
+        assert_eq!(String::from_utf8(diagnostics).unwrap().lines().count(), 2);
     }
 
     #[test]
@@ -1555,8 +1613,9 @@ mod tests {
         let mut diagnostics = Vec::new();
         let mut progress = ImportProgress {
             diagnostics: &mut diagnostics,
-            last: Instant::now(),
             completed: 0,
+            last_phase: None,
+            activity: None,
         };
         let directory = exchange_directory(&pst, &mut progress).unwrap();
         assert!(directory.failures.is_empty(), "{:?}", directory.failures);

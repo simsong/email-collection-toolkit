@@ -21,7 +21,9 @@ from datetime import UTC, datetime
 from typing import Literal, Protocol
 
 from packaging.version import Version
-from pydantic import BaseModel
+from pydantic import BaseModel, PrivateAttr
+
+from .change_signal import ChangeSignal
 
 UpdateChannel = Literal["release", "preview"]
 RELEASE_STREAM_LABEL = "Release only"
@@ -40,6 +42,14 @@ def allowed_channels(channel: UpdateChannel) -> frozenset[str]:
 
 
 class UpdateStatus(BaseModel):
+    _changed: Callable[[], None] | None = PrivateAttr(default=None)
+
+    def __setattr__(self, name: str, value: object) -> None:
+        prior = getattr(self, name, None)
+        super().__setattr__(name, value)
+        if name in self.__class__.__pydantic_fields__ and prior != value and self._changed is not None:
+            self._changed()
+
     available: bool = False
     phase: Literal["unavailable", "idle", "checking", "available", "deferred", "installing", "error"] = "unavailable"
     version: str
@@ -62,13 +72,16 @@ class UpdateService:
 
     def __init__(self, status: UpdateStatus, reserve_install: Callable[[], bool],
                  cancel_install: Callable[[], None] = lambda: None,
-                 notify_deferred: Callable[[str], None] = lambda _detail: None) -> None:
+                 notify_deferred: Callable[[str], None] = lambda _detail: None,
+                 changed: Callable[[], None] = lambda: None) -> None:
         self.status = status
+        self.status._changed = changed
         self.backend: UpdateBackend | None = None
         self.reserve_install = reserve_install
         self.cancel_install = cancel_install
         self.notify_deferred = notify_deferred
         self._pending_install: Callable[[], None] | None = None
+        self.check_finished = ChangeSignal()
 
     def attach(self, backend: UpdateBackend, build: str) -> None:
         self.backend = backend
@@ -93,15 +106,18 @@ class UpdateService:
         self.status.last_checked = datetime.now(UTC)
         if error:
             self.fail(error)
+            return
         elif self.status.phase == "checking":
             self.status.phase = "idle"
             self.status.detail = "Update check completed."
+        self.check_finished.notify()
 
     def fail(self, detail: str) -> None:
         self.cancel_install()
         self._pending_install = None
         self.status.phase = "error"
         self.status.detail = detail[:2048]
+        self.check_finished.notify()
 
     def defer_install(self, continuation: Callable[[], None]) -> None:
         self._pending_install = continuation

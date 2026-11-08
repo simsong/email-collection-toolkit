@@ -8,7 +8,7 @@
 
 from concurrent.futures import ThreadPoolExecutor
 from multiprocessing import get_context
-from threading import Event, Thread, Timer
+from threading import Event, Thread
 
 import pytest
 
@@ -21,12 +21,10 @@ def _exercise_shutdown(blocked: bool) -> None:
     name = "blocked-gui-worker" if blocked else "finishing-gui-worker"
     worker = Thread(target=release.wait, name=name)
     daemon = Thread(target=daemon_release.wait, daemon=True)
-    timer = Timer(0.05, release.set)
-    timer.daemon = True
     worker.start()
     daemon.start()
     if not blocked:
-        timer.start()
+        release.set()
     try:
         assert pending_gui_workers(timeout=0.01 if blocked else 2) == ((name,) if blocked else ())
         assert worker.is_alive() == blocked
@@ -34,11 +32,8 @@ def _exercise_shutdown(blocked: bool) -> None:
     finally:
         release.set()
         daemon_release.set()
-        timer.cancel()
         worker.join()
         daemon.join()
-        if not blocked:
-            timer.join()
 
 
 @pytest.mark.parametrize("blocked", (False, True))

@@ -37,12 +37,15 @@ RESULTS
   message-count progress bars on stderr. Bars update in place on a terminal;
   redirected output uses periodic lines. Percentages describe each pass, not
   the entire archive. Use --quiet (or -q) to suppress informational output.
-  Errors and interruptions are always reported on stderr.
+  Warnings, errors and interruptions are always reported on stderr.
   Prints "Archive integrity verified."
   when all checks pass (exit status 0). Reports integrity errors and returns
   exit status 1 when checks fail; invalid command-line usage returns status 2.
   Ctrl-C stops gracefully with exit status 130 and no traceback.
   An interrupted or failed run is not a successful verification.
+  Extra non-mail files under data/ produce warnings, not email integrity errors.
+  They are left untouched and excluded from new email payload manifests. An
+  external strict BagIt validator may report these unlisted files separately.
 
   This is read-only: it does not repair, rewrite, or delete archive files.
   It does not consult or validate SQLite databases, rebuild search indexes,
@@ -72,17 +75,54 @@ import csv
 import ctypes
 import hashlib
 import io
+from importlib import import_module
 import json
 import mailbox
 import os
 import re
 import sys
-import time
-from collections.abc import Generator, Iterable
+from collections.abc import Callable, Generator, Iterable
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path, PurePosixPath
 from typing import Any, BinaryIO, TypeVar
+
+def open_shared_read(path: Path) -> BinaryIO:
+    """Read existing bytes while allowing Windows atomic publication to replace their name."""
+    if os.name != "nt":
+        return path.open("rb")
+    native = ctypes.WinDLL("kernel32", use_last_error=True)
+    native.CreateFileW.argtypes = [ctypes.c_wchar_p, ctypes.c_uint32, ctypes.c_uint32, ctypes.c_void_p,
+                                  ctypes.c_uint32, ctypes.c_uint32, ctypes.c_void_p]
+    native.CreateFileW.restype = ctypes.c_void_p
+    native.CloseHandle.argtypes = [ctypes.c_void_p]
+    native.CloseHandle.restype = ctypes.c_int
+    name = str(path.resolve())
+    if not name.startswith("\\\\?\\"):
+        name = "\\\\?\\UNC\\" + name[2:] if name.startswith("\\\\") else "\\\\?\\" + name
+    handle = native.CreateFileW(name, 0x80000000, 7, None, 3, 0x80, None)
+    if handle in (None, ctypes.c_void_p(-1).value):
+        raise ctypes.WinError(ctypes.get_last_error())
+    try:
+        descriptor = import_module("msvcrt").open_osfhandle(handle, os.O_RDONLY | os.O_BINARY)
+    except BaseException:
+        native.CloseHandle(handle)
+        raise
+    try:
+        return os.fdopen(descriptor, "rb")
+    except BaseException:
+        os.close(descriptor)
+        raise
+
+
+def open_shared_text(path: Path, encoding: str = "utf-8") -> io.TextIOWrapper:
+    return io.TextIOWrapper(open_shared_read(path), encoding=encoding)
+
+
+def read_shared_text(path: Path, encoding: str = "utf-8") -> str:
+    with open_shared_text(path, encoding) as source:
+        return source.read()
+
 
 BUFFER_SIZE = 1024 * 1024
 FORMAT_ID = "tag:simson.net,2026:mailarchiver/integrity"
@@ -104,6 +144,7 @@ MAILBAG_ID_PATTERN = re.compile(r"[A-Za-z0-9._-]+")
 SPLIT_CSV_PATTERN = re.compile(r"mailbag-([1-9][0-9]*)\.csv")
 MAILBAG_ROW_LIMIT = 100_000
 MAX_AMBIGUOUS_FROM_LINES = 12
+EXTRA_FILE_WARNING = "Extra file detected: {path}. This file was ignored."
 FIELD_NAME_PATTERN = re.compile(rb"[!-9;-~]+")
 ALGORITHMS = {"sha256": 64, "sha512": 128}
 T = TypeVar("T")
@@ -154,7 +195,7 @@ class PreservingMbox(mailbox.mbox):
 
 
 class _Progress:
-    """Dependency-free, throttled reporting; never opens or changes archive files."""
+    """Dependency-free milestone reporting; never opens or changes archive files."""
 
     def __init__(self, quiet: bool = False) -> None:
         self.quiet = quiet
@@ -170,7 +211,7 @@ class _Progress:
             return
         completed = 0
         terminal = sys.stderr.isatty()
-        last_update = time.monotonic()
+        last_percent = -1
 
         def render() -> None:
             fraction = min(completed / total, 1.0) if total else 1.0
@@ -187,10 +228,10 @@ class _Progress:
             for item in items:
                 yield item
                 completed += len(item) if unit == "bytes" and isinstance(item, bytes) else 1
-                now = time.monotonic()
-                if now - last_update >= (0.2 if terminal else 5.0):
+                percent = completed * 100 // max(total, 1)
+                if percent != last_percent:
                     render()
-                    last_update = now
+                    last_percent = percent
         finally:
             render()
             if terminal:
@@ -397,12 +438,8 @@ def write_integrity_file(
             native = ctypes.WinDLL("kernel32", use_last_error=True)
             native.MoveFileExW.argtypes = [ctypes.c_wchar_p, ctypes.c_wchar_p, ctypes.c_uint32]
             native.MoveFileExW.restype = ctypes.c_int
-            deadline = time.monotonic() + 2
-            while not native.MoveFileExW(str(temporary), str(destination), 0x9):
-                error = ctypes.get_last_error()
-                if error not in {5, 32, 33} or time.monotonic() >= deadline:
-                    raise ctypes.WinError(error)
-                time.sleep(0.01)
+            if not native.MoveFileExW(str(temporary), str(destination), 0x9):
+                raise ctypes.WinError(ctypes.get_last_error())
         else:
             temporary.replace(destination)
         _sync_directory(destination.parent)
@@ -822,7 +859,7 @@ def _payload_files(archive: Path) -> tuple[list[Path], list[str]]:
     return files, errors
 
 
-def verify_archive(archive: Path, quiet: bool = False) -> list[str]:
+def verify_archive(archive: Path, quiet: bool = False, *, on_warning: Callable[[str], None] | None = None) -> list[str]:
     progress = _Progress(quiet)
     errors: list[str] = []
     legacy = sorted((*archive.glob("*.mbox"), *archive.glob("*.mbox.integrity")))
@@ -855,19 +892,23 @@ def verify_archive(archive: Path, quiet: bool = False) -> list[str]:
     payload_hash_errors, declared_payloads = _verify_bagit_manifest(payload_manifest, archive, True, progress)
     errors.extend(payload_hash_errors)
     actual_payloads = {path.relative_to(archive).as_posix() for path in payloads}
+    mailboxes = sorted((archive / "data" / "mbox").glob("*.mbox"))
+    native_payloads = {path.relative_to(archive).as_posix() for path in mailboxes}
+    unexpected_payloads = actual_payloads - native_payloads
     if declared_payloads != actual_payloads:
-        missing = sorted(actual_payloads - declared_payloads)
+        missing = sorted(actual_payloads - declared_payloads - unexpected_payloads)
         extra = sorted(declared_payloads - actual_payloads)
         if missing:
             errors.append(f"{PAYLOAD_MANIFEST}: missing payload entries: {', '.join(missing)}")
         if extra:
             errors.append(f"{PAYLOAD_MANIFEST}: nonexistent payload entries: {', '.join(extra)}")
 
-    mailboxes = sorted((archive / "data" / "mbox").glob("*.mbox"))
-    native_payloads = {path.relative_to(archive).as_posix() for path in mailboxes}
-    unexpected_payloads = sorted(actual_payloads - native_payloads)
-    if unexpected_payloads:
-        errors.append(f"unsupported native archive payloads: {', '.join(unexpected_payloads)}")
+    for pathname in sorted(unexpected_payloads):
+        warning = EXTRA_FILE_WARNING.format(path=pathname)
+        if on_warning is not None:
+            on_warning(warning)
+        else:
+            print(f"WARNING {warning}", file=sys.stderr)
     for path in mailboxes:
         errors.extend(verify_mbox(path, archive / "integrity" / f"{path.name}{INTEGRITY_SUFFIX}", progress))
     mailbox_names = {path.name for path in mailboxes}
@@ -885,7 +926,7 @@ def verify_archive(archive: Path, quiet: bool = False) -> list[str]:
             box.close()
     csv_errors, csv_paths = _verify_mailbag_csv(archive, expected_mailboxes, progress)
     errors.extend(csv_errors)
-    errors.extend(_bag_info(archive, payloads, progress))
+    errors.extend(_bag_info(archive, [path for path in payloads if path.relative_to(archive).as_posix() in declared_payloads], progress))
 
     tag_manifest = archive / TAG_MANIFEST
     tag_hash_errors, declared_tags = _verify_bagit_manifest(tag_manifest, archive, False, progress)
@@ -934,23 +975,27 @@ def main() -> int:
         "directory containing this script, not the current working directory",
     )
     parser.add_argument("-q", "--quiet", action="store_true",
-                        help="suppress filenames, progress bars, and success output; still report errors")
+                        help="suppress filenames, progress bars, and success output; still report warnings and errors")
     args = parser.parse_args()
     archive = args.archive
     if not archive.is_dir():
         parser.error(f"not a directory: {archive}")
     try:
-        errors = verify_archive(archive, quiet=args.quiet)
+        warnings: list[str] = []
+        errors = verify_archive(archive, quiet=args.quiet, on_warning=warnings.append)
     except KeyboardInterrupt:
         print("Interrupted: archive verification incomplete.", file=sys.stderr)
         return 130
+    for warning in warnings:
+        print(f"WARNING {warning}", file=sys.stderr)
     for error in errors:
         print(f"ERROR {error}", file=sys.stderr)
     if errors:
         print(f"FAILED: {len(errors)} integrity error(s)", file=sys.stderr)
         return 1
     if not args.quiet:
-        print("Archive integrity verified.")
+        print("Archived email integrity verified with warnings; extra files were ignored."
+              if warnings else "Archive integrity verified.")
     return 0
 
 

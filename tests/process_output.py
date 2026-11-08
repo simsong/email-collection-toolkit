@@ -15,9 +15,9 @@ import os
 import signal
 import subprocess
 import sys
-import ctypes
 from threading import Thread
-from time import monotonic, sleep
+from concurrent.futures import Future
+from mailarchiver.file_events import wait_process_exit
 from typing import BinaryIO, Self
 
 from pydantic import BaseModel
@@ -25,35 +25,38 @@ from pydantic import BaseModel
 INTERRUPT_SETUP = "import signal\nif hasattr(signal, 'SIGBREAK'): signal.signal(signal.SIGBREAK, signal.default_int_handler)\n"
 
 
+def open_fifo_writer(path: Path, timeout: float = 10) -> int:
+    """A blocking FIFO open acknowledges its reader; expiry unblocks and joins the opener."""
+    result: Future[int] = Future()
+
+    def open_writer() -> None:
+        try:
+            result.set_result(os.open(path, os.O_WRONLY))
+        except BaseException as error:
+            result.set_exception(error)
+
+    worker = Thread(target=open_writer, daemon=True)
+    worker.start()
+    try:
+        descriptor = result.result(timeout=timeout)
+    except TimeoutError:
+        release = os.open(path, os.O_RDWR | os.O_NONBLOCK)
+        try:
+            os.close(result.result(timeout=5))
+        finally:
+            os.close(release)
+        raise
+    finally:
+        worker.join(timeout=5)
+    if worker.is_alive():
+        os.close(descriptor)
+        raise TimeoutError("FIFO opener did not finish")
+    return descriptor
+
+
 def assert_process_exited(pid: int, timeout: float = 5) -> None:
     """Observe real process termination, including a reparented POSIX zombie."""
-    if os.name == "nt":
-        native = ctypes.WinDLL("kernel32", use_last_error=True)
-        native.OpenProcess.argtypes = [ctypes.c_uint32, ctypes.c_int, ctypes.c_uint32]
-        native.OpenProcess.restype = ctypes.c_void_p
-        native.WaitForSingleObject.argtypes = [ctypes.c_void_p, ctypes.c_uint32]
-        native.WaitForSingleObject.restype = ctypes.c_uint32
-        native.CloseHandle.argtypes = [ctypes.c_void_p]
-        native.CloseHandle.restype = ctypes.c_int
-        handle = native.OpenProcess(0x100000, False, pid)
-        if not handle:
-            error = ctypes.get_last_error()
-            if error == 87:  # An exited PID is no longer a process object.
-                return
-            raise ctypes.WinError(error)
-        try:
-            assert native.WaitForSingleObject(handle, int(timeout * 1000)) == 0, f"process {pid} survived its owner"
-        finally:
-            native.CloseHandle(handle)
-        return
-    deadline = monotonic() + timeout
-    while monotonic() < deadline:
-        state = subprocess.run(["ps", "-o", "stat=", "-p", str(pid)], capture_output=True, text=True,
-                               check=False, timeout=2).stdout.strip()
-        if not state or state.startswith("Z"):
-            return
-        sleep(0.05)
-    raise AssertionError(f"process {pid} survived its owner")
+    wait_process_exit(pid, timeout)
 
 
 def python_module(module: str, arguments: Sequence[str]) -> list[str]:

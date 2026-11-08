@@ -16,7 +16,6 @@ import signal
 import sqlite3
 import subprocess
 import sys
-import time
 from contextlib import closing
 from pathlib import Path
 
@@ -24,6 +23,7 @@ import pytest
 from playwright.sync_api import Page, expect
 from pydantic import BaseModel
 
+from e2e_tests.browser_notifications import notify_status
 from e2e_tests.eicar_fixture import write_eicar_emlx
 from e2e_tests.generate_corpus import RICH_MESSAGE
 from mailarchiver.application import ApplicationController, ApplicationPreferencesStore
@@ -337,12 +337,14 @@ def test_about_window_displays_version_disk_and_warnings(tmp_path: Path, page: P
     assert first.path is not None
     with closing(connect_processing(first.path, create=True, production=True)) as writer:
         writer.execute("BEGIN EXCLUSIVE")
+        notify_status(page)
         expect(page.locator("#plugin-inventory-error")).to_contain_text("archive is busy")
         expect(page.locator("#plugin-inventory-error")).to_be_visible()
         expect(page.locator("#error")).to_be_hidden()
         assert "available on" in page.locator("#disk").inner_text()
         assert "invalid" in page.locator("#notices").inner_text()
         writer.rollback()
+    notify_status(page)
     expect(page.locator("#plugin-inventory-error")).to_be_hidden()
     expect(page.locator("#processors")).to_contain_text("clamav")
     expect(page.locator("#acquisition-plugins")).to_contain_text(inventory.acquisition_plugins[0].name)
@@ -445,9 +447,9 @@ def test_gui_import_uses_typed_ingest_service_without_a_subprocess(tmp_path: Pat
     try:
         # Storage acceptance is unscanned; real ClamAV routing has its own corpus.
         assert application.start_import(api, [source], owner_names, scan_policy="not-scanned")
-        deadline = time.monotonic() + 90
-        while document.ingest_job is not None and time.monotonic() < deadline:
-            time.sleep(0.05)
+        job = document.ingest_job
+        if job is not None:
+            assert job.finished.wait(90), "GUI import did not finish"
         assert document.ingest_job is None
         assert document.path is not None
         database = sqlite3.connect(document.path / "archive.sqlite3")

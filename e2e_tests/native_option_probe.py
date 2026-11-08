@@ -23,6 +23,7 @@ from mailarchiver.gui_app import (
     install_macos_document_events, macos_option_pressed,
 )
 from mailarchiver.loopback import LoopbackAssetServer
+from mailarchiver.native_events import ModalObserver, wait_native_state
 
 
 def main() -> None:
@@ -30,7 +31,6 @@ def main() -> None:
     faulthandler.dump_traceback_later(45)
     appkit = import_module("AppKit")
     helper = import_module("PyObjCTools.AppHelper")
-    foundation = import_module("Foundation")
     fixture = Path(os.environ["MAILARCHIVER_SETUP_FIXTURE"])
     store = ApplicationPreferencesStore(fixture / "preferences.json")
     controller = ApplicationController(store)
@@ -107,7 +107,6 @@ def main() -> None:
                     assert api._lock.locked()  # pylint: disable=protected-access
                     application._refresh_menus()  # pylint: disable=protected-access
                     refreshed = True
-                    return
                 close = native.mainMenu().itemWithTitle_("File").submenu().itemWithTitle_("Close")
                 assert not close.isEnabled(), "Search fallback enabled Close during a setup picker"
                 assert not application.close_active_window()
@@ -117,8 +116,7 @@ def main() -> None:
             native.stopModalWithCode_(0)
 
         def schedule() -> None:
-            timer = foundation.NSTimer.timerWithTimeInterval_repeats_block_(0.2, True, inspect)
-            foundation.NSRunLoop.mainRunLoop().addTimer_forMode_(timer, appkit.NSModalPanelRunLoopMode)
+            ModalObserver(inspect, failures)
         helper.callAfter(schedule)
         assert api.choose_source() == str(fixture)
         assert refreshed and not failures, failures
@@ -131,20 +129,14 @@ def main() -> None:
             assert len(webview.windows) == 1 and not application._setup_visible  # pylint: disable=protected-access
             reopen(appkit.NSEventModifierFlagOption)
             # A barrier on the native loop alone does not join the setup worker.
-            for _ in range(100):
-                if len(webview.windows) == 2:
-                    break
-                Event().wait(0.05)
+            wait_native_state(lambda: len(webview.windows) == 2, "Setup window was not created")
             assert len(webview.windows) == 2
             setup = webview.windows[-1]
             assert setup.events.loaded.wait(10)
             assert setup.native is not None and setup.native.isVisible()
             setup.hide()
             reopen(appkit.NSEventModifierFlagOption | appkit.NSEventModifierFlagShift)
-            for _ in range(100):
-                if setup.native.isVisible():
-                    break
-                Event().wait(0.05)
+            wait_native_state(setup.native.isVisible, "Setup window was not restored")
             assert setup.native.isVisible() and len(webview.windows) == 2
             check_modal_close_fallback()
             assert store.path.read_bytes() == preferences

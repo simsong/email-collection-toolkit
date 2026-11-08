@@ -7,6 +7,7 @@ use std::{
     net::{TcpListener, TcpStream},
     sync::{
         atomic::{AtomicBool, AtomicUsize, Ordering},
+        mpsc::{self, Receiver},
         Arc,
     },
     thread,
@@ -16,24 +17,25 @@ struct Server {
     url: String,
     stop: Arc<AtomicBool>,
     hits: Arc<AtomicUsize>,
+    request_lines: Receiver<()>,
     worker: Option<thread::JoinHandle<()>>,
 }
 impl Server {
     /// Start a loopback HTTP server serving fixture bytes and deliberate failure responses.
     fn new(files: BTreeMap<String, Vec<u8>>) -> Self {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
-        listener.set_nonblocking(true).unwrap();
         let url = format!("http://{}", listener.local_addr().unwrap());
         let stop = Arc::new(AtomicBool::new(false));
         let quit = stop.clone();
         let hits = Arc::new(AtomicUsize::new(0));
         let counter = hits.clone();
+        let (line_read, request_lines) = mpsc::channel();
         let worker = thread::spawn(move || {
             while !quit.load(Ordering::Relaxed) {
-                let Ok((mut socket, _)) = listener.accept() else {
-                    thread::sleep(Duration::from_millis(5));
-                    continue;
-                };
+                let (mut socket, _) = listener.accept().unwrap();
+                if quit.load(Ordering::Relaxed) {
+                    break;
+                }
                 // Accepted sockets may inherit nonblocking mode. A packet gap
                 // must not be interpreted as the end of the HTTP request.
                 socket.set_nonblocking(false).unwrap();
@@ -47,6 +49,9 @@ impl Server {
                         break;
                     }
                     input.push(byte[0]);
+                    if input.ends_with(b"\r\n") && !input[..input.len() - 2].contains(&b'\n') {
+                        let _ = line_read.send(());
+                    }
                 }
                 let request = String::from_utf8_lossy(&input);
                 let path = request.split_whitespace().nth(1).unwrap_or("");
@@ -76,6 +81,7 @@ impl Server {
             url,
             stop,
             hits,
+            request_lines,
             worker: Some(worker),
         }
     }
@@ -84,6 +90,7 @@ impl Drop for Server {
     /// Stop and join the local server so no service survives its test.
     fn drop(&mut self) {
         self.stop.store(true, Ordering::Relaxed);
+        let _ = TcpStream::connect(self.url.trim_start_matches("http://"));
         self.worker.take().unwrap().join().unwrap();
     }
 }
@@ -97,7 +104,10 @@ fn fixture_server_waits_for_complete_request() {
         .set_read_timeout(Some(Duration::from_secs(5)))
         .unwrap();
     socket.write_all(b"GET /split.pst HTTP/1.1\r\n").unwrap();
-    thread::sleep(Duration::from_millis(50));
+    server
+        .request_lines
+        .recv_timeout(Duration::from_secs(5))
+        .unwrap();
     socket
         .write_all(b"Host: localhost\r\nConnection: close\r\n\r\n")
         .unwrap();

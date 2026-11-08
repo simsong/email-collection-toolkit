@@ -13,8 +13,8 @@ import sys
 import traceback
 from importlib import import_module
 from pathlib import Path
-from threading import Event, enumerate as active_threads
-from time import monotonic, sleep
+from threading import Event, Thread, enumerate as active_threads
+from time import monotonic
 from typing import Any, cast
 
 import webview
@@ -32,14 +32,13 @@ from mailarchiver.imap_credentials import password_for
 from mailarchiver.imap_models import ImapAccount
 from mailarchiver.__main__ import IngestRequest, run_ingest
 from mailarchiver.ingest_status import read_ingest_history
+from mailarchiver.file_events import wait_for_path_state
+from mailarchiver.native_events import ModalObserver, wait_native_state
 
 AppHelper = import_module("PyObjCTools.AppHelper")
 NSApplication = import_module("AppKit").NSApplication
 NSRunningApplication = import_module("AppKit").NSRunningApplication
-NSModalPanelRunLoopMode = import_module("AppKit").NSModalPanelRunLoopMode
 NSTextView = import_module("AppKit").NSTextView
-NSRunLoop = import_module("Foundation").NSRunLoop
-NSTimer = import_module("Foundation").NSTimer
 PROBE_ARCHIVE_ENV = "MAILARCHIVER_NATIVE_PROBE_ARCHIVE"
 PROBE_PREFERENCES_ENV = "MAILARCHIVER_NATIVE_PROBE_PREFERENCES"
 
@@ -58,23 +57,56 @@ def evaluate_async(window: webview.Window, expression: str):
     return results[0]
 
 
-def drain_bridge_calls() -> bool:
-    """Keep Cocoa alive until fixture requests and their chained JS returns settle."""
-    deadline, idle = monotonic() + 5, False
-    while monotonic() < deadline:
-        calls = [thread for thread in active_threads() if thread.name.endswith(" (_call)")]
-        if not calls and idle:
+def drain_bridge_calls(window: webview.Window | None = None) -> bool:
+    """Join actual in-flight framework callbacks; timer gaps never establish completion.
+
+    This is a snapshot of callbacks, not a fence against future page polling.
+    Callers must await their own JavaScript operations before closing a window.
+    """
+    deadline = monotonic() + 5
+    frames = sys._current_frames()
+
+    def owns_window(thread: Thread) -> bool:
+        if window is None:
             return True
-        idle = not calls
-        for thread in calls:
-            thread.join(timeout=max(0, deadline - monotonic()))
-        sleep(0.02)
-    return False
+        identity = thread.ident
+        frame = frames.get(identity) if identity is not None else None
+        while frame is not None:
+            if frame.f_code.co_name == "_call" and frame.f_locals.get("window") is window:
+                return True
+            frame = frame.f_back
+        return False
+
+    calls = [thread for thread in active_threads() if thread.name.endswith(" (_call)") and owns_window(thread)]
+    frames.clear()
+    for thread in calls:
+        thread.join(timeout=max(0, deadline - monotonic()))
+    unfinished = [thread for thread in calls if thread.is_alive()]
+    if unfinished:
+        current = sys._current_frames()
+        try:
+            for thread in unfinished:
+                print(f"Unfinished native bridge thread: {thread.name}", file=sys.stderr)
+                if thread.ident in current:
+                    traceback.print_stack(current[thread.ident], file=sys.stderr)
+        finally:
+            current.clear()
+    return not unfinished
+
+
+def wait_native(predicate, label: str, timeout: float = 5) -> None:
+    """Use Cocoa notifications, never an elapsed readiness interval."""
+    wait_native_state(predicate, label, timeout)
+
+
+def inspect_modal(callback, errors: list[str]) -> None:
+    """Subscribe before opening a native modal panel."""
+    ModalObserver(callback, errors)
 
 
 def close_window(window: webview.Window) -> None:
     """Finish bridge replies before destroying the WKWebView that receives them."""
-    assert drain_bridge_calls(), "Native bridge callback did not finish before window closure"
+    assert drain_bridge_calls(window), "Native bridge callback did not finish before window closure"
     window.destroy()
     assert window.events.closed.wait(5)
 
@@ -151,9 +183,7 @@ def check_antivirus_menu(application: PyWebViewApplication, about: webview.Windo
         assert evaluate_async(about, """(async () => {
             const button = document.getElementById('update-definitions');
             const status = document.getElementById('definition-update-status');
-            const deadline = Date.now() + 5000;
-            while (!status.textContent.includes('Update failed') && Date.now() < deadline)
-                await new Promise(resolve => setTimeout(resolve, 20));
+            await waitForDomState(() => !(!status.textContent.includes('Update failed')), "native UI readiness", 5000);
             return button.textContent === 'Check for Anti-Virus Updates' && !button.disabled &&
                 status.textContent.includes('Existing definitions were retained.');
         })()""") is True
@@ -214,8 +244,7 @@ def check_reprocess_menu(application: PyWebViewApplication, api) -> None:
                 native = NSApplication.sharedApplication()
                 native.activateIgnoringOtherApps_(True)
                 api.window.native.makeKeyAndOrderFront_(None)
-                timer = NSTimer.timerWithTimeInterval_repeats_block_(0.05, True, answer)
-                NSRunLoop.mainRunLoop().addTimer_forMode_(timer, NSModalPanelRunLoopMode)
+                ModalObserver(answer, errors)
                 item = native.mainMenu().itemWithTitle_("File").submenu().itemWithTitle_("Reprocess Saved Mail…")
                 assert item is not None and item.isEnabled(), "Reprocessing menu is missing"
                 assert native.sendAction_to_from_(item.action(), item.target(), item)
@@ -228,13 +257,10 @@ def check_reprocess_menu(application: PyWebViewApplication, api) -> None:
         assert triggered.wait(3) and not errors, errors
         assert handled.wait(5) and not errors, errors
         if accepted:
-            deadline = monotonic() + 10
+            wait_for_path_state([archive / "status"], lambda: (
+                len(read_ingest_history(archive).statuses) > before and
+                read_ingest_history(archive).statuses[0].state == "completed"), timeout=10)
             history = read_ingest_history(archive).statuses
-            while monotonic() < deadline:
-                history = read_ingest_history(archive).statuses
-                if len(history) > before and history[0].state == "completed":
-                    break
-                sleep(0.02)
             assert len(history) == before + 1 and history[0].state == "completed", history
             assert not history[0].source_roots, "Replay must not download mail"
         else:
@@ -316,15 +342,11 @@ def main() -> None:
             assert about.evaluate_js("document.getElementById('error').hidden")
             # Processing requirement: About opens a separate offline DAG window.
             about.evaluate_js("document.getElementById('show-processor-graph').click()")
-            deadline = monotonic() + 5
-            while len(webview.windows) < 2 and monotonic() < deadline:
-                sleep(0.02)
+            wait_native(lambda: len(webview.windows) >= 2, "Processor graph window was not created")
             graph = next(window for window in webview.windows if window is not about)
             assert graph.events.loaded.wait(10), "Processor graph window failed to load"
             assert evaluate_async(graph, """(async () => {
-                const deadline = Date.now() + 5000;
-                while (!document.querySelector('svg .node') && Date.now() < deadline)
-                    await new Promise(resolve => setTimeout(resolve, 20));
+                await waitForDomState(() => !(!document.querySelector('svg .node')), "native UI readiness", 5000);
                 if (document.querySelectorAll('svg').length !== 3 || !document.getElementById('error').hidden)
                     throw new Error('Native DAG did not render all three stages');
                 return true;
@@ -362,7 +384,8 @@ def main() -> None:
                 finally:
                     dismissed.set()
 
-            AppHelper.callLater(1.2, inspect_dismissed)
+            wait_native(lambda: not native_about.isVisible(), "About did not become hidden")
+            AppHelper.callAfter(inspect_dismissed)
             assert dismissed.wait(5), "About dismissal check timed out"
             reopened = Event()
 
@@ -375,18 +398,16 @@ def main() -> None:
                 finally:
                     reopened.set()
 
-            AppHelper.callLater(0.3, inspect_reopened)
+            wait_native(native_about.isVisible, "About menu did not restore the window")
+            AppHelper.callAfter(inspect_reopened)
             assert reopened.wait(5), "About menu reopening check timed out"
             check_document_path(about, None)
             check_antivirus_menu(application, about)
             # Disabling command-line reinterpretation must retain genuine Finder opens.
             native = NSApplication.sharedApplication()
             AppHelper.callAfter(native.delegate().application_openFiles_, native, [str(archive)])
-            deadline = monotonic() + 10
+            wait_native(lambda: application.active_api() is not None, "Finder open was not acknowledged", 10)
             api = application.active_api()
-            while api is None and monotonic() < deadline:
-                sleep(0.01)
-                api = application.active_api()
             assert api is not None, "Finder document-open event did not open the archive"
             document = api.document
             assert document is not None and document.path is not None and document.display_path is not None
@@ -424,15 +445,14 @@ def main() -> None:
                     app = NSApplication.sharedApplication()
                     app.activateIgnoringOtherApps_(True)
                     standalone.native.makeKeyAndOrderFront_(None)
-                    assert webview.active_window() is standalone, f"Standalone focus unavailable; active={app.isActive()}"
                     application._refresh_macos_menu()
-                    # Inspect after the queued native refresh actually executes.
-                    AppHelper.callAfter(check_reader_menu)
                 except Exception:  # pylint: disable=broad-exception-caught
                     failures.append(traceback.format_exc())
                     reader_menu_checked.set()
 
             AppHelper.callAfter(inspect_reader_menu)
+            wait_native(lambda: webview.active_window() is standalone, "Standalone reader did not receive focus")
+            AppHelper.callAfter(check_reader_menu)
             assert reader_menu_checked.wait(5), "Standalone native menu inspection timed out"
             assert not failures, failures
             close_window(standalone)
@@ -465,9 +485,7 @@ def main() -> None:
             picker = next(window for window in webview.windows if " — Name matcher — " in window.title)
             assert picker.events.loaded.wait(10), "Name picker bridge failed to load"
             evaluate_async(picker, """(async () => {
-                const deadline = Date.now() + 5000;
-                while (!window.archivePicker?.model.groups.length && Date.now() < deadline)
-                    await new Promise(resolve => setTimeout(resolve, 20));
+                await waitForDomState(() => !(!window.archivePicker?.model.groups.length), "native UI readiness", 5000);
                 if (!window.archivePicker?.model.groups.length) throw new Error('No picker identities');
                 return true;
             })()""")
@@ -484,16 +502,13 @@ def main() -> None:
                 before = {window.uid for window in webview.windows}
                 target = "window.targetGroup.nextElementSibling.querySelector('.message-count')" if selector == "address" else f"window.targetGroup.querySelector('{selector}')"
                 picker.evaluate_js(f"{target}.dispatchEvent(new MouseEvent('{event}', {{bubbles:true}}))")
-                deadline = monotonic() + 10
-                while not any(window.uid not in before for window in webview.windows) and monotonic() < deadline:
-                    sleep(0.02)
+                wait_native(lambda: any(window.uid not in before for window in webview.windows),
+                            "Picker search window was not created", 10)
                 opened = next(window for window in webview.windows if window.uid not in before)
                 assert opened.events.loaded.wait(10), "Picker search failed to load"
                 assert evaluate_async(opened, "window.pywebview.api.status()")['document_id'] == picker_document.descriptor.document_id
                 assert evaluate_async(opened, """(async () => {
-                    const deadline = Date.now() + 5000;
-                    while (document.getElementById('result-status').textContent !== '10 messages' && Date.now() < deadline)
-                        await new Promise(resolve => setTimeout(resolve, 20));
+                    await waitForDomState(() => !(document.getElementById('result-status').textContent !== '10 messages'), "native UI readiness", 5000);
                     const subjects = [...document.querySelectorAll('.result-subject')];
                     if (subjects.length !== 10 || subjects.some(row => !row.textContent.startsWith('Picker navigation ')))
                         throw new Error('Picker search did not return exactly the clicked identity’s ten messages');
@@ -538,8 +553,7 @@ def main() -> None:
                     app.stopModalWithCode_(0)
 
             def schedule_inspection() -> None:
-                timer = NSTimer.timerWithTimeInterval_repeats_block_(0.1, False, inspect_import_picker)
-                NSRunLoop.mainRunLoop().addTimer_forMode_(timer, NSModalPanelRunLoopMode)
+                inspect_modal(inspect_import_picker, failures)
 
             AppHelper.callAfter(schedule_inspection)
             assert not application._import_document(api)  # pylint: disable=protected-access
@@ -559,8 +573,7 @@ def main() -> None:
                     NSApplication.sharedApplication().stopModalWithCode_(0)
 
             def schedule_directory_selection() -> None:
-                timer = NSTimer.timerWithTimeInterval_repeats_block_(0.2, False, accept_directory)
-                NSRunLoop.mainRunLoop().addTimer_forMode_(timer, NSModalPanelRunLoopMode)
+                inspect_modal(accept_directory, failures)
 
             AppHelper.callAfter(schedule_directory_selection)
             selected = macos_import_picker(
@@ -600,8 +613,7 @@ def main() -> None:
                         app.stopModalWithCode_(1000 if accept else 1001)
 
                 def schedule_owner_entry() -> None:
-                    timer = NSTimer.timerWithTimeInterval_repeats_block_(0.1, False, enter_owner_names)
-                    NSRunLoop.mainRunLoop().addTimer_forMode_(timer, NSModalPanelRunLoopMode)
+                    inspect_modal(enter_owner_names, failures)
 
                 AppHelper.callAfter(schedule_owner_entry)
                 entered = macos_owner_rules(document.display_path, OwnerRules(include=["slg"], exclude=["*david*"]))
@@ -612,35 +624,16 @@ def main() -> None:
             assert application.open_default_lists(personal=True)
             lists = next(window for window in webview.windows if window.title.endswith(" — Customizable Default Lists"))
             assert lists.events.loaded.wait(10), "List editor bridge failed to load"
-            evaluate_async(lists, "(async () => { while(document.getElementById('save').disabled) "
-                "await new Promise(resolve => setTimeout(resolve, 10)); return true; })()")
+            evaluate_async(lists, "waitForDomState(() => !document.getElementById('save').disabled, 'list editor readiness').then(() => true)")
             assert lists.evaluate_js("document.getElementById('list').options.length") == 8
             native_lists = lists.native
             assert native_lists is not None
-            focused_list = Event()
-            focus_deadline = monotonic() + 3
-            focus_diagnostics: list[str] = []
-
-            def wait_for_list_focus() -> None:
-                if webview.active_window() == lists:
-                    focused_list.set()
-                elif monotonic() < focus_deadline:
-                    AppHelper.callLater(0.02, wait_for_list_focus)
-                else:
-                    app = NSApplication.sharedApplication()
-                    key, modal = app.keyWindow(), app.modalWindow()
-                    focus_diagnostics.append(f"active={app.isActive()} key={key.title() if key else None!r} "
-                        f"modal={modal.title() if modal else None!r} windows=" + repr([
-                            (window.title(), window.isKeyWindow(), window.isVisible(), window.level())
-                            for window in app.windows()]))
-
             def focus_list() -> None:
                 NSApplication.sharedApplication().activateIgnoringOtherApps_(True)
                 native_lists.makeKeyAndOrderFront_(None)
-                wait_for_list_focus()
 
             AppHelper.callAfter(focus_list)
-            assert focused_list.wait(5), focus_diagnostics
+            wait_native(lambda: webview.active_window() == lists, "List editor did not receive focus")
             closed_menu = Event()
 
             def check_list_close() -> None:
@@ -665,8 +658,7 @@ def main() -> None:
             assert application.open_default_lists(api.document)
             lists = next(window for window in webview.windows if " — Customizable Default Lists — " in window.title)
             assert lists.events.loaded.wait(10)
-            evaluate_async(lists, "(async () => { while(document.getElementById('save').disabled) "
-                "await new Promise(resolve => setTimeout(resolve, 10)); return true; })()")
+            evaluate_async(lists, "waitForDomState(() => !document.getElementById('save').disabled, 'list editor readiness').then(() => true)")
             lists.evaluate_js("document.getElementById('list').value = 'reply-addresses'; document.getElementById('scope').value = 'archive'")
             evaluate_async(lists, "load().then(() => true)")
             lists.evaluate_js("document.getElementById('yaml').value = " + json.dumps("version: 1\nrules: []\n"))
@@ -722,11 +714,9 @@ def main() -> None:
             # Shared-document Close must never wait for an import or a Cocoa dialog.
             sibling = application.create_search_window(controller.new_search_window(document))
             assert sibling.window.events.loaded.wait(10), "Second search bridge failed to load"
-            # Windows has no persistent About: only the search timer may deliver notices.
-            about.load_html("<p id='search-only-probe'>About polling paused for the search-only regression.</p>")
-            deadline = monotonic() + 3
-            while not about.evaluate_js("Boolean(document.getElementById('search-only-probe'))") and monotonic() < deadline:
-                sleep(0.02)
+            # Windows has no persistent About: the search must receive the native status notification.
+            about.load_html("<p id='search-only-probe'>About notifications disabled for the search-only regression.</p>")
+            assert about.events.loaded.wait(5), "Replacement About document did not load"
             assert about.evaluate_js("Boolean(document.getElementById('search-only-probe'))")
             job = IngestJob(operation_id="shared-close", owner_window_id=api.search_window.window_id)
             lease = WriterLease.acquire(document.path, document.descriptor.identity, "test", job.operation_id, "test")
@@ -760,10 +750,8 @@ def main() -> None:
                 assert sibling.window.evaluate_js("document.readyState") == "complete"
                 assert not sibling.window.events.closed.is_set()
                 evaluate_async(sibling.window, """(async () => {
-                    const deadline = Date.now() + 3000;
                     const message = 'Cannot close window when import is running. Use Quit (⌘ Q) to suspend import and exit program.';
-                    while (!document.body.textContent.includes(message) && Date.now() < deadline)
-                        await new Promise(resolve => setTimeout(resolve, 20));
+                    await waitForDomState(() => !(!document.body.textContent.includes(message)), "native UI readiness", 5000);
                     if (!document.body.textContent.includes(message))
                         throw new Error('Last-window Close did not explain Quit');
                     return true;
@@ -776,9 +764,10 @@ def main() -> None:
             failures.append(traceback.format_exc())
         finally:
             application.stop_imports_for_quit()
+            application.shutdown()
             for window in list(webview.windows):
                 if window is not about:
-                    if not drain_bridge_calls():
+                    if not drain_bridge_calls(window):
                         failures.append("Native bridge callback did not finish before teardown")
                     window.destroy()
                     window.events.closed.wait(3)

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import sqlite3
-import time
 from pathlib import Path
 
 import pytest
@@ -105,10 +104,7 @@ def test_gui_autocomplete_supersedes_queries_and_exposes_only_current_results(tm
         old = bridge.suggestions_start("simson")["generation"]
         current = bridge.suggestions_start("bcc:Hidden")["generation"]
         assert bridge.suggestions_status(old)["stale"]
-        deadline = time.monotonic() + 5
-        while not (status := bridge.suggestions_status(current))["complete"]:
-            assert time.monotonic() < deadline
-            time.sleep(0.01)
+        status = bridge.suggestions_status(current, True)
         assert not status["error"]
         results = SearchSuggestions.model_validate(status["result"])
         assert results.query == "bcc:Hidden"

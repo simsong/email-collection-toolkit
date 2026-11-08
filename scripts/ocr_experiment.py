@@ -13,6 +13,7 @@ import hashlib
 import json
 import os
 import re
+import shutil
 import sqlite3
 import subprocess
 import tempfile
@@ -342,10 +343,19 @@ def tesseract_text(source: Path, destination: Path) -> None:
 
 def abbyy_text(source: Path, destination: Path) -> None:
     script = Path(__file__).with_name("ocr_abbyy.applescript")
-    with tempfile.TemporaryDirectory(prefix="mailarchiver-abbyy-") as directory:
-        recognized = Path(directory) / "recognized.pdf"
-        command_output(["osascript", str(script), str(source), str(recognized)], timeout=3600)
+    directory = Path(tempfile.mkdtemp(prefix="mailarchiver-abbyy-"))
+    try:
+        # External application preferences must never be able to remove the input.
+        copied = directory / "input.pdf"
+        shutil.copyfile(source, copied)
+        recognized = directory / "recognized.pdf"
+        command_output(["osascript", str(script), str(copied), str(recognized)], timeout=3600)
         native_text(recognized, destination)
+    except BaseException as error:
+        error.add_note(f"ABBYY working files retained at {directory}; external work may still be active.")
+        raise
+    else:
+        shutil.rmtree(directory)
 
 
 def word_text(source: Path, destination: Path) -> None:

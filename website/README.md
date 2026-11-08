@@ -10,8 +10,9 @@ select **Settings → Pages → Build and deployment → Source: GitHub Actions*
 The workflow resolves canonical stable, alpha and beta release assets into
 `data/releases.toml` during the build.
 The committed data file is the no-release fallback used for local previews.
-The homepage always displays **Download Windows installer** and **Download macOS
-installer**, beside **Show all installers**. These static links use published
+The homepage always displays **Signed Windows Installers** and **Signed macOS
+Installer**, beside **Show all installers**. Windows installers run on x64 or ARM;
+macOS installers require Apple Silicon. These static links use published
 asset URLs without browser detection or JavaScript.
 The update-stream preference belongs in the installed app's Preferences panel,
 where Sparkle and WinSparkle use the saved release/preview channel. The website

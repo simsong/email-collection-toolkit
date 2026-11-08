@@ -39,6 +39,7 @@ from .plugin_api import (
     PluginRegistry,
     PluginType,
 )
+from .change_signal import ChangeEvent
 
 
 class PluginDiscoveryError(RuntimeError):
@@ -60,10 +61,11 @@ def builtin_plugin_directory() -> Path:
 
 
 def load_plugins(extra_dirs: Iterable[Path] = (), *, archive: Path | None = None,
-                 installation_config: Path | None = None, scan_policy: Literal["clamav", "not-scanned"] = "not-scanned") -> PluginRegistry:
+                 installation_config: Path | None = None, scan_policy: Literal["clamav", "not-scanned"] = "not-scanned",
+                 cancellation: ChangeEvent | None = None) -> PluginRegistry:
     """Validate, load, and freeze built-in and explicitly trusted plug-ins."""
     candidates = _candidates(extra_dirs)
-    context = PluginContext(archive=archive, installation_config=installation_config, scan_policy=scan_policy)
+    context = PluginContext(archive=archive, installation_config=installation_config, scan_policy=scan_policy, cancellation=cancellation)
     files = tuple(_load(candidate, context) for candidate in candidates if candidate.manifest.plugin_type == "file")
     context = context.model_copy(update={"files": files})
     sources = tuple(

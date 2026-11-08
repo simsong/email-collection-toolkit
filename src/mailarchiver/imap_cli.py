@@ -24,8 +24,9 @@ from pathlib import Path
 import signal
 import sqlite3
 import sys
-from threading import Event, Thread
-import time
+from threading import Event
+from .change_signal import ChangeEvent
+from .file_events import PathObserver
 from uuid import uuid4
 
 from .__main__ import IngestRequest, run_ingest, safe_status_text
@@ -41,7 +42,6 @@ from .owner_rules import OwnerRules
 from .sqlite_paths import sqlite_uri
 from .writer_lock import WriterLease
 
-STATUS_SECONDS = 300
 
 
 def prompt_account(existing: ImapAccount | None = None, *,
@@ -67,19 +67,22 @@ def prompt_account(existing: ImapAccount | None = None, *,
 
 
 class SyncReporter:
-    def __init__(self, archive: Path, show_messages: bool, *, interval: float = STATUS_SECONDS) -> None:
+    def __init__(self, archive: Path, show_messages: bool) -> None:
         self.archive = archive
         self.show_messages = show_messages
-        self.interval = interval
         self.baseline = totals(archive)
         with closing(sqlite3.connect(sqlite_uri(archive / "archive.sqlite3"), uri=True)) as database:
             self.cursor = int(database.execute("SELECT coalesce(max(observation_pk),0) FROM observations").fetchone()[0])
         self.finished = Event()
-        self.thread = Thread(target=self._run, name="imap-status", daemon=True)
+        self.observer: PathObserver | None = None
+        self.last_running: ImapTotals | None = None
         self.failure: Exception | None = None
 
     def display(self, status: str) -> None:
         current = totals(self.archive)
+        if status == "running" and current == self.last_running:
+            return
+        self.last_running = current
         difference = ImapTotals(archived=current.archived - self.baseline.archived,
             duplicates=current.duplicates - self.baseline.duplicates,
             excluded=current.excluded - self.baseline.excluded, errors=current.errors - self.baseline.errors)
@@ -101,25 +104,25 @@ class SyncReporter:
                       file=sys.stderr, flush=True)
                 self.cursor = observation
 
-    def _run(self) -> None:
-        next_report = time.monotonic() + self.interval
+    def _changed(self) -> None:
+        if self.failure is not None:
+            return
         try:
-            while not self.finished.wait(min(1.0, self.interval)):
-                self._messages()
-                if time.monotonic() >= next_report:
-                    self.display("running")
-                    next_report = time.monotonic() + self.interval
+            self._messages()
+            self.display("running")
         except Exception as error:  # Progress failure must not cancel canonical publication.
             self.failure = error
             print(f"IMAP status reporting failed: {error}", file=sys.stderr, flush=True)
 
     def start(self) -> None:
         self.display("starting")
-        self.thread.start()
+        self.observer = PathObserver([self.archive / "status", self.archive / "archive.sqlite3",
+                                      self.archive / "archive.sqlite3-wal"], self._changed)
 
     def finish(self, status: str) -> None:
         self.finished.set()
-        self.thread.join()
+        if self.observer is not None:
+            self.observer.close()
         self._messages()
         self.display(status)
 
@@ -151,7 +154,7 @@ def synchronize(args: argparse.Namespace) -> int:
     lease = WriterLease.acquire(path, os.path.normcase(str(path.resolve())), "IMAP synchronization", uuid4().hex,
                                 version("mailarchiver"))
     reporter: SyncReporter | None = None
-    stop = Event()
+    stop = ChangeEvent()
     previous = signal.getsignal(signal.SIGINT)
     result = "failed"
     try:
@@ -182,7 +185,11 @@ def synchronize(args: argparse.Namespace) -> int:
             raise ValueError("No enabled IMAP sources match the requested source ID")
         for account in selected:
             password_for(account)  # Fail before starting ingest if a secret is absent or inaccessible.
-        signal.signal(signal.SIGINT, lambda _signal, _frame: stop.set())
+        def interrupt(_signal: int, _frame: object) -> None:
+            if not stop.is_set():
+                stop.set()
+                print("Interrupted; stopping downloads and saving progress…", file=sys.stderr, flush=True)
+        signal.signal(signal.SIGINT, interrupt)
         reporter = SyncReporter(path, args.show_messages)
         reporter.start()
         request = IngestRequest(archive=path, roots=[imap_locator(path, source, workers) for source in selected],

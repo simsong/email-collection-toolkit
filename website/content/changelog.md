@@ -4,6 +4,24 @@ description = "Changes to the Email Collection Toolkit website, separate from ap
 +++
 <!-- Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved. -->
 
+## 2026-11-08
+
+- Refresh synthetic search/import screenshots for alpha 60 after review repairs.
+
+## 2026-11-07
+
+- Refresh synthetic search/import screenshots for alpha 59 after timing repairs.
+- Explain that warning banners stay expanded until manually collapsed or dismissed.
+
+
+- Explain window-specific import notices and dismissible extra-file warnings.
+  Refresh the synthetic search and import screenshots for alpha 57.
+
+## 2026-11-04
+
+- Label the homepage downloads as signed Windows and macOS installers and clarify
+  that Windows installers run on x64 or ARM.
+
 ## 2026-10-30
 
 - Remove the Windows certificate-trust notice and installation-guide links now

@@ -5,6 +5,9 @@
 const byId = id => document.getElementById(id);
 let ready = false;
 let busy = false;
+let pendingAction = Promise.resolve();
+window.setupWhenIdle = () => pendingAction;
+function launch(action) { pendingAction = perform(action); return pendingAction; }
 
 function updateButtons() {
   byId("cancel").disabled = !ready || busy;
@@ -35,7 +38,7 @@ function initialize() {
   ready = true;
   byId("status").textContent = "You can change either folder before starting.";
   for (const [name, method] of [["source", "choose_source"], ["destination", "choose_destination"]]) {
-    byId(`choose-${name}`).addEventListener("click", () => perform(async () => {
+    byId(`choose-${name}`).addEventListener("click", () => launch(async () => {
       const path = await window.pywebview.api[method]();
       if (path) {
         byId(`${name}-path`).value = path;
@@ -43,13 +46,13 @@ function initialize() {
       }
     }));
   }
-  byId("cancel").addEventListener("click", () => perform(async () => {
+  byId("cancel").addEventListener("click", () => launch(async () => {
     await window.pywebview.api.cancel();
   }));
   window.addEventListener("keydown", event => {
     if (event.key === "Escape" && !busy) byId("cancel").click();
   });
-  byId("start-import").addEventListener("click", () => perform(async () => {
+  byId("start-import").addEventListener("click", () => launch(async () => {
     byId("status").textContent = "Review the import settings in the dialog…";
     const started = await window.pywebview.api.start_import();
     if (started) resetSelection();
@@ -67,8 +70,4 @@ function resetSelection() {
 }
 
 window.addEventListener("pywebviewready", initialize);
-const bridgeRetry = window.setInterval(() => {
-  initialize();
-  if (ready) window.clearInterval(bridgeRetry);
-}, 250);
 initialize();

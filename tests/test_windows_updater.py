@@ -203,7 +203,7 @@ def test_native_sdk_initialization_and_source_install_fence() -> None:
         assert service.status.channel == "release" and not service.status.automatic_checks
     finally:
         backend.close()
-    assert not backend.scheduler.is_alive() and not backend.gateway.thread.is_alive()
+    assert backend.stopped.is_set() and not backend.gateway.thread.is_alive()
 
 @pytest.mark.skipif(os.name != "nt", reason="Actual WinSparkle shutdown callback")
 @pytest.mark.parametrize("already_quitting", [False, True])
@@ -231,7 +231,7 @@ backend = WinSparkleBackend(app.updates, library, app.request_update_quit, insta
 assert backend.ready_callback() == 1
 app._quitting = sys.argv[3] == 'True'
 backend.callbacks[0]()  # Registered native shutdown_request callback.
-time.sleep(15)
+__import__("threading").Event().wait()
 raise AssertionError('native shutdown callback did not exit')
 '''
     library = Path(__file__).parents[1] / ".tmp/winsparkle/WinSparkle.dll"

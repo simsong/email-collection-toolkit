@@ -37,3 +37,4 @@ validation/samconfig.toml
 
 /etc/clamdb/
 .tools/
+/macroscope_evaluation

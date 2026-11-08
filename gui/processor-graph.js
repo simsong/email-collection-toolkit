@@ -122,7 +122,7 @@ async function refreshProcessorGraph() {
 
 function initialize() {
   if (initialized || !window.pywebview?.api?.status) return;
-  initialized = true; window.clearInterval(bridgeTimer);
+  initialized = true;
   byId("refresh").addEventListener("click", refreshProcessorGraph);
   byId("fit").addEventListener("click", () => { zoom = null; resize(); });
   byId("actual-size").addEventListener("click", () => { zoom = 1; resize(); });
@@ -134,7 +134,7 @@ function initialize() {
 window.refreshProcessorGraph = refreshProcessorGraph;
 window.addEventListener("resize", resize);
 window.addEventListener("pywebviewready", initialize);
-const bridgeTimer = window.setInterval(initialize, 250);
+initialize();
 window.setTimeout(() => {
   if (!initialized) byId("status").textContent = "Waiting for the application bridge. Close and reopen this window if it does not connect.";
 }, 10000);

@@ -13,6 +13,7 @@ import sqlite3
 import pytest
 from playwright.sync_api import Page, expect
 
+from e2e_tests.browser_notifications import notify_status
 from mailarchiver.__main__ import IngestRequest
 from mailarchiver.gui_app import GUI_DIRECTORY, IngestWindowApi
 from mailarchiver.gui_processing import unfinished_work
@@ -100,6 +101,8 @@ def test_network_pause_and_resume_through_real_ingest_window(imap_archive: Path,
         server.fault = None
         server.commands.clear()
         resume.click()
+        wait_for_import(api)
+        notify_status(page)
         expect(page.locator(".state-badge")).to_have_text("completed", timeout=30000)
         assert totals(imap_archive).archived == 3 and totals(imap_archive).duplicates == 0
         assert not unfinished_work(imap_archive).incomplete

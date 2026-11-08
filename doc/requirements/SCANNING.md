@@ -31,8 +31,9 @@ recorded in THIRD_PARTY_NOTICES.md.
   validated generation. Stop/Quit must remain effective during the update.
   Explicit `MAILARCHIVER_CLAMAV_DATABASE` overrides and caller-supplied definition
   sets remain pinned without network checks, including candidate validation engines.
-  Definition checking, copying, updating and engine initialization must keep the
-  import heartbeat current, including blocking steps that emit no callbacks.
+  Definition checking, copying, updating and engine initialization must retain
+  running status for a live producer, including blocking steps without callbacks.
+  Status publication follows actual work and cancellation notifications.
   Definition age or normal preflight waits must not produce a stale/failure X.
   No resident updater or scheduled job is created.
 * Python and Rust scanners disable ClamAV's URL-phishing module, including

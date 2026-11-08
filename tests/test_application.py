@@ -8,10 +8,10 @@ import sqlite3
 import hashlib
 from pathlib import Path
 from threading import Event, Thread
-from time import monotonic, sleep
 
 import pytest
 
+from mailarchiver.file_events import wait_for_path_state
 from mailarchiver.application import (
     ApplicationController,
     ApplicationPreferences,
@@ -27,6 +27,7 @@ from mailarchiver.catalog import create_catalog, create_search
 from mailarchiver.__main__ import IngestInterrupted, IngestRequest, run_ingest
 from mailarchiver.ingest_status import read_ingest_history
 from mailarchiver.standalone_verify import verify_archive
+from tests.test_processing import plugin
 
 
 def make_archive(path: Path) -> Path:
@@ -56,7 +57,17 @@ def test_gui_stop_checkpoints_partial_import_and_reimport_has_no_duplicates(tmp_
     owners = tmp_path / "owners.txt"
     owners.write_text("sender@example.test\n", encoding="utf-8")
     archive = tmp_path / "archive"
-    request = IngestRequest(archive=archive, roots=[str(source)], owner_names_file=owners, scan_policy="not-scanned")
+    # Hold the second message at a real processor boundary. Seeing one commit
+    # must not depend on reacting faster than all 64 messages can finish.
+    plugin(tmp_path, "stop-boundary", 'import sqlite3\nfrom contextlib import closing\n'
+           'with closing(sqlite3.connect(item.archive.path / "archive.sqlite3")) as database:\n'
+           '    count = database.execute("SELECT count(*) FROM messages").fetchone()[0]\n'
+           'release = item.archive.path / "release-test-processor"\n'
+           'if count and not release.exists():\n'
+           '    (item.archive.path / "processor-held").touch()\n'
+           '    item.wait_for_files((item.archive.path,), release.exists)\nreturn ProcessingResult()')
+    request = IngestRequest(archive=archive, roots=[str(source)], owner_names_file=owners,
+                            scan_policy="not-scanned", plugin_dir=[tmp_path])
     stop = Event()
     errors: list[BaseException] = []
     from scripts.ci_diagnostics import phase
@@ -71,19 +82,15 @@ def test_gui_stop_checkpoints_partial_import_and_reimport_has_no_duplicates(tmp_
     worker = Thread(target=import_mail, daemon=True)
     worker.start()
     count = 0
-    deadline = monotonic() + 20
     try:
-        while worker.is_alive() and monotonic() < deadline:
-            try:
-                with sqlite3.connect(f"{archive.as_uri()}/archive.sqlite3?mode=ro", uri=True) as catalog:
-                    count = catalog.execute("SELECT COUNT(*) FROM messages").fetchone()[0]
-            except sqlite3.OperationalError:
-                pass  # The worker may not have created the catalog yet.
-            if count:
-                break
-            sleep(0.005)
+        wait_for_path_state([archive / "processor-held"], (archive / "processor-held").exists, timeout=20)
+        from contextlib import closing
+        with closing(sqlite3.connect(archive / "archive.sqlite3")) as catalog:
+            count = catalog.execute("SELECT COUNT(*) FROM messages").fetchone()[0]
+        assert count > 0
     finally:
         stop.set()
+        (archive / "release-test-processor").touch()
         worker.join(timeout=30)
     if errors and not isinstance(errors[0], IngestInterrupted):
         raise errors[0]
@@ -344,10 +351,13 @@ def test_one_ingest_is_shared_per_document_and_requires_a_writer_lease(tmp_path:
         first_document.descriptor.document_id, "first-ingest", published=True
     )
 
-    assert set(refreshed) == {first_window.window_id, second_window.window_id}
+    assert set(refreshed.refresh_window_ids) == {first_window.window_id, second_window.window_id}
+    assert refreshed.owner_window_id == first_job.owner_window_id
     assert first_document.generation == 1
     assert second_document.ingest_job == second_job
-    assert application.finish_ingest(second_document.descriptor.document_id, "second-ingest", published=False) == ()
+    completion = application.finish_ingest(second_document.descriptor.document_id, "second-ingest", published=False)
+    assert completion.refresh_window_ids == ()
+    assert completion.owner_window_id == second_job.owner_window_id
     assert second_document.generation == 0
 
 
@@ -379,7 +389,8 @@ def test_closing_ingest_owner_transfers_shared_job_without_releasing_lease(tmp_p
         assert {window.window_id for window in application.windows()} == {sibling.window_id, unrelated.window_id}
     finally:
         refreshed = application.finish_ingest(document.descriptor.document_id, job.operation_id, published=True)
-    assert refreshed == (sibling.window_id,)
+    assert refreshed.refresh_window_ids == (sibling.window_id,)
+    assert refreshed.owner_window_id == sibling.window_id
     assert not lease.acquired
     assert application.can_close_window(sibling.window_id)
     application.close_window(sibling.window_id)

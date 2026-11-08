@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from threading import Barrier, Event, Thread
+from threading import Barrier, Event
 from datetime import UTC, datetime
 from urllib.parse import urlencode
 from pathlib import Path
@@ -12,9 +12,10 @@ import pytest
 
 from playwright.sync_api import Dialog, Page, expect
 
+from e2e_tests.browser_notifications import notify_status
 from mailarchiver.__main__ import IngestRequest, load_processing_request, run_ingest
 from mailarchiver.application import IngestJob
-from mailarchiver.gui_app import AboutApi, DocumentOptionsApi, GUI_DIRECTORY, SEARCH_BRIDGE_METHODS, GuiApi, IdentityPickerApi, IngestWindowApi
+from mailarchiver.gui_app import AboutApi, ApplicationNotice, DocumentOptionsApi, GUI_DIRECTORY, SEARCH_BRIDGE_METHODS, GuiApi, IdentityPickerApi, IngestWindowApi
 from mailarchiver.gui_processing import PickerPage, connection, resume_request, unfinished_work
 from mailarchiver.ingest_status import IngestStatusFile, read_ingest_history
 from mailarchiver.owner_rules import OwnerRules
@@ -45,6 +46,176 @@ def expose(page: Page, api: object, names: tuple[str, ...]) -> None:
     page.add_init_script(f"""window.pywebview = {{api: {{}}}};
         for (const name of {json.dumps(names)}) window.pywebview.api[name] = (...args) => window[`bridge_${{name}}`](...args);
         window.addEventListener('DOMContentLoaded', () => window.dispatchEvent(new Event('pywebviewready')));""")
+
+
+def test_result_append_exceeds_javascript_argument_limit_without_losing_rows(tmp_path: Path, page: Page) -> None:
+    """SEARCH: append a constructed volume batch to the real widget without replacing the backend."""
+    api = GuiApi(build_deferred_archive(tmp_path))
+    try:
+        expose(page, api, SEARCH_BRIDGE_METHODS)
+        page.goto((GUI_DIRECTORY / "index.html").as_uri() + "?query=subject:Parent")
+        expect(page.locator(".result-subject")).to_have_count(1)
+        # One real typed search row supplies the shape. The volume batch tests
+        # widget append logic only; it does not claim a 150,001-message archive.
+        page.evaluate("""() => {
+            const template = state.results[0];
+            appendResults(Array.from({length:150000}, (_, index) => ({...template,
+                message_pk:index + 1000, subject:`Volume row ${index}`})), state.searchRequest);
+        }""")
+        page.wait_for_function("state.results.length === 150001 && state.resultTable.getDataCount() === 150001")
+        assert page.evaluate("state.results.at(-1).subject") == "Volume row 149999"
+        page.evaluate("state.resultTable.scrollToRow(150999, 'top', false)")
+        expect(page.locator(".result-subject").filter(has_text="Volume row 149999")).to_be_visible()
+        page.evaluate("appendResults([state.results[0]], state.searchRequest - 1)")
+        assert page.evaluate("state.results.length") == 150001
+    finally:
+        api.close()
+
+
+@pytest.mark.parametrize("extra_file", [False, True])
+def test_import_error_banner_is_private_to_its_search_window(tmp_path: Path, page: Page, extra_file: bool) -> None:
+    """DESKTOP: real errors and dismissible extra-file warnings belong only to the importing window."""
+    roots = [tmp_path / name for name in ("importing", "other")]
+    for root in roots:
+        root.mkdir()
+    archive, other_archive = [build_deferred_archive(root) for root in roots]
+    app, owner = open_headless(archive, tmp_path / "preferences.json")
+    assert owner.document is not None and owner.search_window is not None
+    sibling = GuiApi(archive, application=app, document=owner.document,
+                     search_window=app.controller.new_search_window(owner.document))
+    other_document = app.controller.open_document(other_archive)
+    other = GuiApi(other_archive, application=app, document=other_document,
+                   search_window=app.controller.new_search_window(other_document))
+    if extra_file:
+        (archive / "data/mbox/#INFECTED1.mbox#").write_bytes(b"synthetic auto-save\n")
+    else:
+        (archive / "bagit.txt").write_bytes(b"synthetic damaged declaration\n")
+    pages = [page, page.context.new_page(), page.context.new_page()]
+    try:
+        assert app.start_import(owner, [roots[0] / "input.eml"], scan_policy="not-scanned",
+                                owner_rules=OwnerRules(include=["owner@example.test"]))
+        futures = tuple(app._import_futures)
+        assert futures
+        for future in futures:
+            future.result(timeout=10)
+        for window, api in zip(pages, (owner, sibling, other), strict=True):
+            expose(window, api, SEARCH_BRIDGE_METHODS)
+            window.goto((GUI_DIRECTORY / "index.html").as_uri() + "?query=subject:Parent")
+            expect(window.locator("#result-list .tabulator-row")).to_have_count(1)
+        expected = "Extra file detected: data/mbox/#INFECTED1.mbox#" if extra_file else "unsupported BagIt declaration"
+        expect(page.locator("#error")).to_contain_text(expected)
+        if extra_file:
+            expect(page.locator("#error")).to_have_class("warning")
+            assert not any(notice.severity == "error" for notice in app.notices())
+            assert any(notice.message.startswith("Import completed") for notice in app.notices())
+        for unrelated in pages[1:]:
+            expect(unrelated.locator("#error")).to_be_hidden()
+            expect(unrelated.locator("#notice-pill")).to_be_hidden()
+        for number, window in enumerate(pages):
+            window.screenshot(path=str(tmp_path / f"import-notice-window-{number}.png"))
+        if extra_file:
+            page.get_by_role("button", name="Dismiss messages", exact=True).click()
+            expect(page.locator("#error")).to_be_hidden()
+            expect(page.locator("#notice-pill")).to_be_hidden()
+            # A real subsequent status refresh must not resurrect dismissed warnings.
+            page.evaluate("window.archiveDidChange()")
+            expect(page.locator("#error")).to_be_hidden()
+            expect(page.locator("#notice-pill")).to_be_hidden()
+            app.add_notice("warning", "A new warning", window_id=owner.search_window.window_id)
+            page.evaluate("window.archiveDidChange()")
+            expect(page.locator("#error")).to_contain_text("A new warning")
+    finally:
+        for window in pages[1:]:
+            window.close()
+        for api in (owner, sibling, other):
+            api.close()
+        app.shutdown()
+
+
+def test_identical_busy_import_warning_reappears_after_dismissal(tmp_path: Path, page: Page) -> None:
+    """DESKTOP: retrying the same blocked import issues a new visible notice after dismissal."""
+    archive = build_deferred_archive(tmp_path)
+    app, owner = open_headless(archive, tmp_path / "preferences.json")
+    assert owner.document is not None
+    sibling = GuiApi(archive, application=app, document=owner.document,
+                     search_window=app.controller.new_search_window(owner.document))
+    other_page = page.context.new_page()
+    try:
+        for window, api in ((page, owner), (other_page, sibling)):
+            expose(window, api, SEARCH_BRIDGE_METHODS)
+            window.goto((GUI_DIRECTORY / "index.html").as_uri() + "?query=subject:Parent")
+            expect(window.locator("#result-list .tabulator-row")).to_have_count(1)
+        with WriterLease.acquire(archive, str(archive), "busy import fixture", "busy-notice", "test"):
+            assert not app.start_import(owner, [tmp_path / "input.eml"], scan_policy="not-scanned")
+            page.evaluate("window.archiveDidChange()")
+            expect(page.locator("#error")).to_contain_text("Import did not start:")
+            first = owner.status()["notices"][-1]
+            page.get_by_role("button", name="Dismiss messages", exact=True).click()
+            expect(page.locator("#error")).to_be_hidden()
+            page.evaluate("window.archiveDidChange()")
+            expect(page.locator("#error")).to_be_hidden()
+            assert not app.start_import(owner, [tmp_path / "input.eml"], scan_policy="not-scanned")
+            page.evaluate("window.archiveDidChange()")
+            expect(page.locator("#error")).to_be_visible()
+            expect(page.locator("#error")).to_contain_text(first["message"])
+            notices = owner.status()["notices"]
+            assert len(notices) == 2 and notices[0]["message"] == notices[1]["message"]
+            assert notices[0]["notice_id"] != notices[1]["notice_id"]
+            page.evaluate("window.archiveDidChange()")
+            expect(page.locator(".notice-history p")).to_have_count(1)
+            other_page.evaluate("window.archiveDidChange()")
+            expect(other_page.locator("#error")).to_be_hidden()
+            expect(other_page.locator("#notice-pill")).to_be_hidden()
+            # Distinct events may share a wall-clock timestamp; duplicate delivery is still one event.
+            page.get_by_role("button", name="Dismiss messages", exact=True).click()
+            issued = ApplicationNotice.model_validate(notices[-1])
+            repeated = ApplicationNotice(created_at=issued.created_at, severity=issued.severity,
+                                         message=issued.message, window_id=issued.window_id)
+            assert repeated.created_at == issued.created_at and repeated.notice_id != issued.notice_id
+            for _ in range(2):
+                page.evaluate("notice => window.mailArchiverNotice(notice)", repeated.model_dump(mode="json"))
+            expect(page.locator("#error")).to_be_visible()
+            expect(page.locator(".notice-history p")).to_have_count(1)
+    finally:
+        other_page.close()
+        sibling.close()
+        owner.close()
+        app.shutdown()
+
+
+def test_refreshes_join_actual_completion_and_read_fresh_state_after_commands(page: Page) -> None:
+    """DESKTOP: polling joins in-flight reads, while post-command refresh waits and reads again."""
+    page.add_script_tag(path=str(GUI_DIRECTORY / "coordination.js"))
+    result = page.evaluate("""async () => {
+      const exercise = async () => {
+      const gate = () => { let resolve; const promise = new Promise(done => { resolve = done; }); return {promise, resolve}; };
+      const entered = [gate(), gate()], releases = [gate(), gate()];
+      let calls = 0;
+      const task = new RefreshTask(() => { const index = calls++; entered[index].resolve(); return releases[index].promise; });
+      const first = task.run(), duplicate = task.run();
+      if (first !== duplicate) throw new Error('concurrent callers did not share completion');
+      await entered[0].promise;
+      const fresh = task.fresh();
+      if (calls !== 1) throw new Error('fresh read started before its predecessor finished');
+      releases[0].resolve('old');
+      await entered[1].promise;
+      if (await first !== 'old' || await duplicate !== 'old') throw new Error('joined callers lost their result');
+      releases[1].resolve('new');
+      if (await fresh !== 'new' || calls !== 2) throw new Error('post-command read reused old state');
+      let failures = 0;
+      const retry = new RefreshTask(() => { if (!failures++) throw new Error('original failure'); return 'recovered'; });
+      try { await retry.run(); throw new Error('expected rejection'); }
+      catch (error) { if (error.message !== 'original failure') throw error; }
+      return [calls, await retry.fresh()];
+      };
+      let timer;
+      try {
+        return await Promise.race([exercise(), new Promise((_, reject) => {
+          timer = setTimeout(() => reject(new Error('refresh coordination did not finish')), 5000);
+        })]);
+      } finally { clearTimeout(timer); }
+    }""")
+    assert result == [2, "recovered"]
 
 
 def test_picker_loading_keeps_rows_and_ignores_obsolete_responses(tmp_path: Path, page: Page) -> None:
@@ -89,7 +260,7 @@ def test_ingest_suspend_and_continue_controls_keep_application_open(tmp_path: Pa
 
     def block() -> None:
         occupied.wait(timeout=5)
-        release.wait(10)
+        assert release.wait(10), "fixture release deadline expired"
 
     try:
         for _ in range(8):
@@ -97,6 +268,8 @@ def test_ingest_suspend_and_continue_controls_keep_application_open(tmp_path: Pa
         occupied.wait(timeout=5)
         assert api.resume_processing(False, True)
         assert api.document is not None
+        suspended_job = api.document.ingest_job
+        assert suspended_job is not None
         controls = IngestWindowApi(archive, application=app, document=api.document)
         expose(page, controls, ("history", "suspend_import", "resume_import"))
         page.goto((GUI_DIRECTORY / "ingests.html").as_uri())
@@ -108,8 +281,12 @@ def test_ingest_suspend_and_continue_controls_keep_application_open(tmp_path: Pa
         previews.mkdir(parents=True, exist_ok=True)
         page.screenshot(path=str(previews / "import-suspending.png"), full_page=True)
         release.set()
+        assert suspended_job.finished.wait(10), "Suspended work did not finish"
+        notify_status(page)
         expect(page.locator("#resume-import")).to_be_enabled()
         page.locator("#resume-import").click()
+        wait_for_import(api)
+        notify_status(page)
         expect(page.locator(".state-badge")).to_have_text("completed", timeout=15000)
         assert not unfinished_work(archive).incomplete
         expect(page.locator("#suspend-import")).to_be_disabled()
@@ -186,9 +363,7 @@ def test_incomplete_dialog_resumes_content_without_sources(tmp_path: Path, page:
 
 def test_continue_processing_disabled_until_background_work_finishes(tmp_path: Path, page: Page) -> None:
     """Desktop processing: resume disables immediately and every window tracks real active work."""
-    plugin(tmp_path, "pause-content", '(item.archive.path / "processor-entered").touch()\n'
-           'while not (item.archive.path / "release-processor").exists():\n'
-           '    item.check_cancelled()\n    time.sleep(0.01)\nreturn ProcessingResult()')
+    plugin(tmp_path, "pause-content", '(item.archive.path / "processor-entered").touch()\nitem.wait_for_files((item.archive.path,), lambda: not (not (item.archive.path / "release-processor").exists()))\nreturn ProcessingResult()')
     manifest = tmp_path / "processors/pause-content/plugin.toml"
     manifest.write_text(manifest.read_text().replace('pipeline="ingest"', 'pipeline="content"'))
     source, archive = tmp_path / "input.eml", tmp_path / "archive"
@@ -217,6 +392,7 @@ def test_continue_processing_disabled_until_background_work_finishes(tmp_path: P
         })""")
         page.locator("#processing-continue").click()
         assert page.evaluate("window.resumeDisabledAtClick") is True
+        notify_status(page, observer)
         expect(page.locator("#processing-dialog")).not_to_be_visible()
         expect(page.locator("#processing-open")).to_be_disabled()
         expect(observer.locator("#processing-open")).to_be_disabled()
@@ -236,14 +412,25 @@ def test_continue_processing_disabled_until_background_work_finishes(tmp_path: P
                 const result = await overview();
                 return new Promise(resolve => window.overviewDeliveries.push({result, resolve}));
             };
+            window.olderOverview = refreshIngestOverview();
         }""")
+        observer.wait_for_function("window.overviewDeliveries.some(item => item.result.active)")
         (archive / "release-processor").touch()
         assert job.finished.wait(30), "GUI processing did not finish"
+        notify_status(page)
         expect(page.locator("#processing-open")).to_be_enabled()
-        observer.wait_for_function("window.overviewDeliveries.filter(item => !item.result.active).length >= 2")
-        observer.evaluate("""() => {
+        observer.evaluate("() => { window.newerOverview = refreshIngestOverview(); }")
+        observer.wait_for_function("window.overviewDeliveries.some(item => !item.result.active)")
+        observer.evaluate("""async () => {
             const delivery = window.overviewDeliveries.find(item => !item.result.active);
             delivery.resolve(delivery.result);
+            await window.newerOverview;
+        }""")
+        expect(observer.locator("#processing-open")).to_be_enabled()
+        observer.evaluate("""async () => {
+            const delivery = window.overviewDeliveries.find(item => item.result.active);
+            delivery.resolve(delivery.result);
+            await window.olderOverview;
         }""")
         expect(observer.locator("#processing-open")).to_be_enabled()
         assert not unfinished_work(archive).incomplete
@@ -357,20 +544,10 @@ def test_processing_history_shows_jobs_instead_of_zero_source_progress(tmp_path:
     expect(page.locator(".history-row.selected .history-summary")).to_contain_text("25 source messages")
     app, api = open_headless(archive, tmp_path / "preferences.json")
     search_page, about_page = page.context.new_page(), page.context.new_page()
-    heartbeat_stop = Event()
-    heartbeat_errors: list[BaseException] = []
-
-    def keep_running_snapshot_current() -> None:
-        try:
-            while not heartbeat_stop.is_set():
-                status_file.write(status.model_copy(update={"updated_at": datetime.now(UTC)}))
-                heartbeat_stop.wait(0.1)
-        except BaseException as error:
-            heartbeat_errors.append(error)
-
-    heartbeat = Thread(target=keep_running_snapshot_current, daemon=True)
-    heartbeat.start()
     try:
+        # Reinstall the intended running snapshot explicitly; no background
+        # heartbeat may overwrite the completed snapshot checked above.
+        status_file.write(status)
         expose(search_page, api, SEARCH_BRIDGE_METHODS)
         search_page.goto((GUI_DIRECTORY / "index.html").as_uri())
         expect(search_page.locator("#ingest-status-line")).to_contain_text("1,701 processing tasks finished · mime")
@@ -380,14 +557,10 @@ def test_processing_history_shows_jobs_instead_of_zero_source_progress(tmp_path:
         expect(about_page.locator(".activity")).to_contain_text("1,701 processing tasks finished · mime")
         expect(about_page.locator(".activity")).not_to_contain_text("0.0%")
     finally:
-        heartbeat_stop.set()
-        heartbeat.join(timeout=5)
         search_page.close()
         about_page.close()
         api.close()
         app.shutdown()
-        assert not heartbeat.is_alive(), "fixture heartbeat did not stop"
-        assert not heartbeat_errors, heartbeat_errors
     (archive / "status" / f"{status.status_id}.json").write_text(
         status.model_copy(update={"state": "failed"}).model_dump_json(), encoding="utf-8")
     page.reload()
@@ -490,7 +663,9 @@ def test_resume_summary_suspended_stop_and_retained_notices(tmp_path: Path, page
         expect(dialog).to_contain_text("keeps messages already archived")
         page.get_by_role("button", name="Leave import suspended", exact=True).click()
         expect(dialog).not_to_be_visible()
-        expect(page.locator("#notice-pill")).to_be_visible(timeout=9000)
+        expect(page.locator("#error")).to_contain_text("Synthetic startup warning")
+        page.get_by_role("button", name="Collapse messages", exact=True).click()
+        expect(page.locator("#notice-pill")).to_be_visible()
         page.screenshot(path=str(previews / "notice-pill.png"))
         page.get_by_role("button", name="Messages (1)", exact=True).click()
         expect(page.locator("#error")).to_contain_text("Synthetic startup warning")
@@ -563,6 +738,77 @@ def test_selector_tiles_roles_dates_and_preserved_terms(tmp_path: Path, page: Pa
         expect(page.locator(".result-subject")).to_have_count(1)
     finally:
         api.close()
+
+
+def test_suggestion_timeout_is_visible_and_requires_an_explicit_retry(
+    tmp_path: Path, page: Page, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """DESKTOP: an actual pending/error reply ends the consumer instead of starting another wait."""
+    import mailarchiver.gui_app as gui_module
+    from tests.test_search_completion import completion_archive
+
+    api = GuiApi(completion_archive(tmp_path))
+    occupied, release = Barrier(api._suggestion_executor._max_workers + 1), Event()
+
+    def hold() -> None:
+        occupied.wait(timeout=10)
+        assert release.wait(10), "Suggestion fixture was not released"
+
+    blockers = [api._suggestion_executor.submit(hold) for _ in range(api._suggestion_executor._max_workers)]
+    timeout = gui_module.WORK_RESULT_TIMEOUT_SECONDS
+    try:
+        occupied.wait(timeout=10)
+        monkeypatch.setattr(gui_module, "WORK_RESULT_TIMEOUT_SECONDS", 0)
+        expose(page, api, SEARCH_BRIDGE_METHODS)
+        page.goto((GUI_DIRECTORY / "index.html").as_uri())
+        page.locator("#processing-later").click()
+        page.evaluate("""() => {
+            const original = window.pywebview.api.suggestions_status;
+            window.suggestionWaitCalls = 0;
+            window.pywebview.api.suggestions_status = (...args) => {
+                window.suggestionWaitCalls++;
+                return original(...args);
+            };
+        }""")
+        page.locator("#search").fill("simson")
+        expect(page.locator("#error")).to_contain_text("Timed out")
+        assert page.evaluate("window.suggestionWaitCalls") == 1
+        future = api._suggestion_future
+        assert future is not None and not future.done()
+        release.set()
+        for blocker in blockers:
+            blocker.result(timeout=5)
+        future.result(timeout=5)
+        monkeypatch.setattr(gui_module, "WORK_RESULT_TIMEOUT_SECONDS", timeout)
+        page.locator("#search").fill("simson ")
+        expect(page.locator(".suggestion-option").first).to_contain_text("any:")
+        assert page.evaluate("window.suggestionWaitCalls") == 2
+    finally:
+        release.set()
+        api.close()
+
+
+def test_about_disconnected_archive_is_observational_and_displays_health_failure(tmp_path: Path, page: Page) -> None:
+    """DESKTOP: unavailable disk health is displayed without creating a notice/refresh feedback loop."""
+    from mailarchiver.application import ApplicationController, ApplicationPreferencesStore
+    from mailarchiver.gui_app import PyWebViewApplication
+
+    controller = ApplicationController(ApplicationPreferencesStore(tmp_path / "preferences.json"))
+    document = controller.create_document(tmp_path / "archive")
+    controller.new_search_window(document)
+    app = PyWebViewApplication(controller)
+    assert document.path is not None
+    document.path.rename(tmp_path / "disconnected")
+    try:
+        expose(page, AboutApi(app), ("status",))
+        page.goto((GUI_DIRECTORY / "about.html").as_uri())
+        expect(page.locator("#disk")).to_contain_text("Free disk space unavailable")
+        for _ in range(3):
+            page.evaluate("refresh()")
+        assert app.about_status().disk_error
+        assert app.notices() == []
+    finally:
+        app.shutdown()
 
 
 def test_archive_name_picker_saves_filtered_merge_and_rename(tmp_path: Path, page: Page) -> None:

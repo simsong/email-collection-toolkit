@@ -31,6 +31,5 @@ for attempt in 1 2 3 4 5 6; do
     break
   fi
   if [[ "$attempt" -eq 6 ]]; then exit 1; fi
-  sleep "$attempt"
 done
 make check-appcast APPCAST="$output" RELEASE_TAG="$previous_tag" ARGS=--require-signed-feed

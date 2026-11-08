@@ -13,10 +13,11 @@ import sqlite3
 import subprocess
 import sys
 from pathlib import Path
-from time import monotonic, sleep
+from time import monotonic
 
 import pytest
 
+from mailarchiver.file_events import wait_for_path_state
 from mailarchiver.__main__ import IngestRequest, run_ingest
 from mailarchiver.application import ApplicationController, ApplicationPreferencesStore, InvalidArchiveError, validate_archive
 from mailarchiver.gui_app import DocumentOptionsApi, GuiApi, PyWebViewApplication, QUIT_TIMEOUT_SECONDS, cleanup_stale_exports
@@ -34,23 +35,16 @@ def run_quit_probe(root: Path, mode: str) -> float:
     with (root / "stdout").open("w+") as output, (root / "stderr").open("w+") as errors:
         child = subprocess.Popen([sys.executable, "-m", "tests.quit_probe", mode, str(root)], stdout=output, stderr=errors)
         try:
-            deadline = monotonic() + 30
-            # A file marker avoids an unbounded blocking pipe read on startup failure.
-            while monotonic() < deadline:
+            def ready() -> bool:
                 output.seek(0)
-                if "ready\n" in output.read():
-                    break
-                if child.poll() is not None:
-                    errors.seek(0)
-                    pytest.fail(f"Quit probe failed before readiness: {errors.read()}")
-                sleep(0.01)
-            else:
-                pytest.fail("Quit probe did not reach readiness")
+                return "ready\n" in output.read()
+            wait_for_path_state([root / "stdout"], ready, timeout=30)
             started = monotonic()
             child.wait(timeout=QUIT_TIMEOUT_SECONDS + 4)
             elapsed = monotonic() - started
             errors.seek(0)
-            assert child.returncode == 0, errors.read()
+            incomplete = mode in {"blocked", "blocked-exports", "lock", "controller-lock", "document-lock", "setup-lock", "definitions", "failed-exports"}
+            assert child.returncode == (1 if incomplete else 0), errors.read()
             return elapsed
         finally:
             if child.poll() is None:
@@ -155,3 +149,17 @@ def test_native_quit_during_status_polling(tmp_path: Path, mode: str) -> None:
     assert run_quit_probe(tmp_path, mode) < 2
     if mode == "native-overlay":
         assert (tmp_path / "overlay-verified").exists()
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX symlink cleanup-denial fixture")
+def test_quit_reports_failed_cleanup_and_still_removes_other_private_exports(tmp_path: Path) -> None:
+    """DESKTOP: completed-but-failed cleanup cannot return success or skip another window."""
+    assert run_quit_probe(tmp_path, "failed-exports") < 2
+    failed = Path((tmp_path / "export-path").read_text())
+    try:
+        assert failed.is_symlink()
+        assert (tmp_path / "external-target/untouched").read_bytes() == b"synthetic external file"
+        assert (tmp_path / "retained-private-exports/private.eml").read_bytes() == b"synthetic private mail"
+        assert not Path((tmp_path / "second-export-path").read_text()).exists()
+    finally:
+        failed.unlink(missing_ok=True)

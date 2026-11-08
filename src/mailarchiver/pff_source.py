@@ -25,6 +25,8 @@ from pathlib import Path
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from .file_events import ProcessActivity
+from .change_signal import ChangeEvent
 from .clamav_definitions import LIBRARY_ENV, DATABASE_ENV, CERTIFICATES_ENV, library_path, selected_definitions, certificates_path
 from .plugin_api import FileProbe, MailContainer, MailObject, PluginContext, ProgressEvent
 from .pst_source import file_hash, validate_record
@@ -59,7 +61,8 @@ class PffReceipt(BaseModel):
 
 
 def run_converter(command: list[str], output: Path, diagnostics: Path, settings: PffSettings,
-                  work_id: str, environment: dict[str, str], evidence: tuple[Path, ...] = ()) -> Generator[ProgressEvent, None, int]:
+                  work_id: str, environment: dict[str, str], evidence: tuple[Path, ...] = (),
+                  cancellation: ChangeEvent | None = None) -> Generator[ProgressEvent, None, int]:
     """Bound a child process and its files, including when it dies or the iterator closes."""
     limits = ((output, settings.max_output_bytes), (diagnostics, settings.max_diagnostics_bytes),
               *((path, settings.max_diagnostics_bytes) for path in evidence))
@@ -67,17 +70,18 @@ def run_converter(command: list[str], output: Path, diagnostics: Path, settings:
         with output.open("wb") as stdout, diagnostics.open("wb") as stderr:
             with subprocess.Popen(command, stdout=stdout, stderr=stderr, env=environment) as process:
                 try:
-                    deadline = time.monotonic() + settings.timeout_seconds
-                    while process.poll() is None:
-                        if time.monotonic() >= deadline:
-                            raise TimeoutError("libpff extraction timeout")
-                        if any(path.exists() and path.stat().st_size > limit for path, limit in limits):
-                            raise ValueError("libpff converter output limit exceeded")
-                        yield ProgressEvent(work_id=work_id, phase="extracting Outlook", completed=output.stat().st_size, unit="bytes")
-                        try:
-                            process.wait(timeout=0.05)
-                        except subprocess.TimeoutExpired:
-                            pass
+                    with ProcessActivity(process, [path for path, _limit in limits], cancellation) as activity:
+                        deadline = time.monotonic() + settings.timeout_seconds
+                        while process.poll() is None:
+                            if time.monotonic() >= deadline:
+                                raise TimeoutError("libpff extraction timeout")
+                            if any(path.exists() and path.stat().st_size > limit for path, limit in limits):
+                                raise ValueError("libpff converter output limit exceeded")
+                            yield ProgressEvent(work_id=work_id, phase="extracting Outlook", completed=output.stat().st_size, unit="bytes")
+                            try:
+                                activity.wait(max(0, deadline - time.monotonic()))
+                            except TimeoutError as error:
+                                raise TimeoutError("libpff extraction timeout") from error
                 finally:
                     if process.poll() is None:
                         process.kill()
@@ -128,7 +132,7 @@ class PffFileParser:
                 "--diagnostics", str(diagnostics), "--timeout-seconds", str(settings.timeout_seconds),
                 "--max-message-bytes", str(settings.max_message_bytes),
                 "--max-folder-depth", str(settings.max_folder_depth), "--", str(source.path)],
-                output, workspace / "stderr.txt", settings, container.work_id, environment, (receipt_path, diagnostics))
+                output, workspace / "stderr.txt", settings, container.work_id, environment, (receipt_path, diagnostics), self.context.cancellation)
             if code not in (0, 3):
                 raise RuntimeError(f"libpff extraction incomplete (exit {code}); evidence at {workspace}")
             receipt = PffReceipt.model_validate_json(receipt_path.read_text())
@@ -142,7 +146,7 @@ class PffFileParser:
                     environment[CERTIFICATES_ENV] = str(certs)
                 scanned = workspace / "scanned.mboxrd"
                 scan_code = yield from run_converter([str(executable("mcti-scan")), str(output)], scanned,
-                    workspace / "scanner-stderr.txt", settings, container.work_id, environment)
+                    workspace / "scanner-stderr.txt", settings, container.work_id, environment, cancellation=self.context.cancellation)
                 if scan_code:
                     raise RuntimeError(f"libpff producer scan failed (exit {scan_code}); evidence at {workspace}")
                 output = scanned

@@ -7,14 +7,17 @@ from email.header import Header
 import os
 from collections.abc import Callable
 from pathlib import Path
+import sys
 from threading import Barrier, Event
 from time import monotonic
 from datetime import UTC, datetime, timedelta
 
 import pytest
+from pydantic import BaseModel, Field
 
+from mailarchiver.file_events import wait_for_path_state
 from mailarchiver.__main__ import IngestRequest, run_ingest
-from mailarchiver.application import ApplicationController, ApplicationPreferencesStore
+from mailarchiver.application import ApplicationController, ApplicationPreferencesStore, IngestCompletion
 from mailarchiver.document_options import DocumentOptions
 from mailarchiver.gui_app import GuiApi, GuiIngestHistory, GuiIngestOverview, IdentityPickerApi, IngestWindowApi, PyWebViewApplication
 from mailarchiver.gui_processing import PickerPage, PickerSearch, abort_processing, plugin_inventory, registered_processors, resume_request, unfinished_work
@@ -62,6 +65,306 @@ def wait_for_import(api: GuiApi) -> None:
         assert job.finished.wait(30), "GUI background processing did not finish"
     # A quick successful job may already have released its document reservation.
     # Callers still assert durable completion, output and application notices.
+
+
+@pytest.mark.parametrize("child", [False, True])
+def test_status_observers_follow_document_and_child_ownership(tmp_path: Path, child: bool) -> None:
+    """DESKTOP: real watches survive a child owner and are joined before repeated reopen accumulates resources."""
+    archive = build_deferred_archive(tmp_path)
+    app, api = open_headless(archive, tmp_path / "preferences.json")
+    try:
+        for _ in range(2):
+            document = app.controller.open_document(archive)
+            session = app.controller.new_search_window(document)
+            app._watch_status(document)
+            observer = app._status_observers[document.descriptor.document_id]
+            if api.search_window is not None:
+                app.controller.close_window(api.search_window.window_id)
+                api.search_window = None
+            if child:
+                app.controller.attach_child_window(document.descriptor.document_id, "fixture-child")
+            app.controller.close_window(session.window_id)
+            app._refresh_menus()
+            if child:
+                assert observer.thread.is_alive()
+                app.controller.close_child_window(document.descriptor.document_id, "fixture-child")
+                app._refresh_menus()
+            assert not observer.thread.is_alive() and not app._status_observers
+    finally:
+        api.close()
+        app.shutdown()
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="Windows uses the reader welcome window instead of Setup")
+def test_reused_setup_retires_observer_without_holding_its_callback_lock(tmp_path: Path) -> None:
+    """DESKTOP: real observer callbacks can finish while reused Setup retires their released document."""
+    from mailarchiver.gui_app import SetupApi
+    archive = build_deferred_archive(tmp_path)
+    app, api = open_headless(archive, tmp_path / "preferences.json")
+    entered, release, completed = Event(), Event(), Event()
+
+    class SetupWindow:
+        # Native-window protocol boundary only; real controller, locks and kernel watches remain in use.
+        uid = "setup-observer-fixture"
+
+        def restore(self) -> None:
+            release.set()
+
+        def show(self) -> None:
+            pass
+
+        def run_js(self, _script: str) -> None:
+            pass
+
+    pane = SetupApi(app)
+    pane.window = SetupWindow()
+    app._setup_api = pane
+    assert api.document is not None and api.search_window is not None
+
+    def changed() -> None:
+        entered.set()
+        assert release.wait(5), "Observer fixture was not released"
+        app._status_changed()  # Acquires the actual application registry lock.
+        completed.set()
+
+    app._watch_status(api.document)
+    observer = app._status_observers[api.document.descriptor.document_id]
+    observer.changed = changed
+    try:
+        (archive / "status" / "observer-ready").write_bytes(b"ready")
+        assert entered.wait(5), "Actual filesystem notification did not enter the callback"
+        app.controller.close_window(api.search_window.window_id)
+        app.show_setup()
+        assert completed.is_set() and not observer.thread.is_alive()
+        assert not app._status_observers
+    finally:
+        release.set()
+        app._setup_api = None
+        api.close()
+        app.shutdown()
+
+
+def test_failed_observer_retirement_keeps_ownership_for_retry(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """DESKTOP: an actual join deadline cannot discard the only owner of still-open native watches."""
+    archive = build_deferred_archive(tmp_path)
+    app, api = open_headless(archive, tmp_path / "preferences.json")
+    assert api.document is not None and api.search_window is not None
+    entered, release = Event(), Event()
+
+    def changed() -> None:
+        entered.set()
+        assert release.wait(5), "Blocked observer fixture was not released"
+
+    app._watch_status(api.document)
+    key = api.document.descriptor.document_id
+    observer = app._status_observers[key]
+    observer.changed = changed
+    join = observer.thread.join
+    try:
+        (archive / "status" / "observer-ready").write_bytes(b"ready")
+        assert entered.wait(5)
+        app.controller.close_window(api.search_window.window_id)
+        # Force only the failing join budget to zero; the native thread stays genuinely blocked.
+        with monkeypatch.context() as deadline:
+            deadline.setattr(observer.thread, "join", lambda timeout=None: join(timeout=0))
+            with pytest.raises(TimeoutError, match="observer did not stop"):
+                app._retire_status_observers()
+        assert app._status_observers[key] is observer and not observer.changes._closed
+        release.set()
+        app._retire_status_observers()
+        assert not observer.thread.is_alive() and observer.changes._closed
+        assert not app._status_observers
+    finally:
+        release.set()
+        api.close()
+        app.shutdown()
+
+
+def test_busy_close_publishes_warning_without_status_read_or_command_worker(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """DESKTOP: native Close remains nonblocking and its queued explanation has an independent wakeup."""
+    from mailarchiver.application import IngestJob
+    app, api = open_headless(build_deferred_archive(tmp_path), tmp_path / "preferences.json")
+    assert api.document is not None and api.document.path is not None and api.search_window is not None
+    for future in tuple(app._tasks):
+        future.result(timeout=5)
+    occupied, release, published = Barrier(9), Event(), Event()
+
+    def hold() -> None:
+        occupied.wait(timeout=10)
+        assert release.wait(10), "Busy command fixture was not released"
+
+    commands = [app._submit_task("quiet command", hold) for _ in range(8)]
+    occupied.wait(timeout=10)
+    original = app._status_changed
+
+    def delivered() -> None:
+        original()
+        published.set()
+
+    monkeypatch.setattr(app, "_status_changed", delivered)  # Acknowledge the real delivery boundary, without replacing state.
+    job = IngestJob(operation_id="quiet-import", owner_window_id=api.search_window.window_id)
+    lease = WriterLease.acquire(api.document.path, api.document.descriptor.identity, "test", job.operation_id, "fixture")
+    app.controller.begin_ingest(api.document.descriptor.document_id, job, lease)
+    try:
+        with app._lock:
+            assert not app._can_close_search_window(api.search_window.window_id)
+            assert not published.is_set(), "Native Close waited for the application lock"
+        assert published.wait(5), "Close warning required unrelated progress or a status read"
+        with app._lock:
+            assert len(app._notices) == 1 and app._notices[0].window_id == api.search_window.window_id
+            assert "Cannot close window" in app._notices[0].message
+    finally:
+        release.set()
+        for command in commands:
+            assert command is not None
+            command.result(timeout=5)
+        app.controller.finish_ingest(api.document.descriptor.document_id, job.operation_id, published=False)
+        api.close()
+        app.shutdown()
+
+
+@pytest.mark.parametrize("transfer_owner", ["none", "queued", "finishing"])
+@pytest.mark.parametrize("refresh_failure", [False, True])
+def test_import_failure_stays_in_owning_window(tmp_path: Path, transfer_owner: str,
+                                            refresh_failure: bool, monkeypatch: pytest.MonkeyPatch) -> None:
+    """DESKTOP: real import failures stay with their owner, including same-archive ownership transfer."""
+    first, second = tmp_path / "first", tmp_path / "second"
+    first.mkdir()
+    second.mkdir()
+    archive = build_deferred_archive(first)
+    other_archive = build_deferred_archive(second)
+    app, owner = open_headless(archive, tmp_path / "preferences.json")
+    assert owner.document is not None and owner.search_window is not None
+    sibling = GuiApi(archive, application=app, document=owner.document,
+                     search_window=app.controller.new_search_window(owner.document))
+    other_document = app.controller.open_document(other_archive)
+    other = GuiApi(other_archive, application=app, document=other_document,
+                   search_window=app.controller.new_search_window(other_document))
+    # Genuine corruption remains an error; editor backups have a separate nonfatal regression.
+    damaged = archive / "bagit.txt"
+    damaged.write_bytes(b"synthetic damaged declaration\n")
+    occupied, release = Barrier(9), Event()
+    finishing, finish_release = Event(), Event()
+    original_finish = app.controller.finish_ingest
+
+    def gated_finish(document_id: str, operation_id: str, *, published: bool) -> IngestCompletion:
+        # Pause only this concurrency boundary; the real finalizer still owns the lock, lease and result.
+        finishing.set()
+        assert finish_release.wait(10)
+        return original_finish(document_id, operation_id, published=published)
+
+    def fail_native_refresh(_window_ids: tuple[str, ...]) -> None:
+        # Simulate only a native refresh failure after the real finalizer released the import lease.
+        raise RuntimeError("native refresh fixture")
+
+    def block() -> None:
+        occupied.wait(timeout=5)
+        assert release.wait(30)
+
+    # Only the native injection boundary is recorded; import, files, futures and controller remain real.
+    class NoticeWindow(BaseModel):
+        scripts: list[str] = Field(default_factory=list)
+
+        def run_js(self, script: str) -> None:
+            self.scripts.append(script)
+
+    try:
+        if transfer_owner == "finishing":
+            monkeypatch.setattr(app.controller, "finish_ingest", gated_finish)
+        if refresh_failure:
+            monkeypatch.setattr(app, "_refresh_search_windows", fail_native_refresh)
+        for _ in range(8):
+            assert app._submit_task("notice fixture", block) is not None
+        occupied.wait(timeout=5)
+        assert app.start_import(owner, [first / "input.eml"], scan_policy="not-scanned",
+                                owner_rules=OwnerRules(include=["owner@example.test"]))
+        job = owner.document.ingest_job
+        assert job is not None
+        futures = tuple(app._import_futures)
+        assert len(futures) == 1
+        if transfer_owner == "queued":
+            app.controller.close_window(owner.search_window.window_id)
+        release.set()
+        if transfer_owner == "finishing":
+            assert finishing.wait(10)
+            app.controller.close_window(owner.search_window.window_id)
+            finish_release.set()
+        assert job.finished.wait(30)
+        for future in futures:
+            if refresh_failure:
+                with pytest.raises(RuntimeError, match="native refresh fixture"):
+                    future.result(timeout=10)
+            else:
+                future.result(timeout=10)
+        target = owner if transfer_owner == "none" else sibling
+        assert target.search_window is not None
+        failures = [notice for notice in app.notices() if notice.severity == "error"]
+        assert len(failures) == 1
+        failure = failures[0]
+        expected = "native refresh fixture" if refresh_failure else "unsupported BagIt declaration"
+        assert expected in failure.message
+        assert failure.window_id == target.search_window.window_id
+        for api in (owner, sibling, other):
+            errors = [notice for notice in api.status()["notices"] if notice["severity"] == "error"]
+            assert bool(errors) == (api is target)
+        assert damaged.read_bytes() == b"synthetic damaged declaration\n"
+
+        # Exercise immediate delivery independently of later status polling, including dedup scope.
+        windows = []
+        for api in (owner, sibling, other):
+            assert api.search_window is not None
+            window = NoticeWindow()
+            windows.append(window)
+            api.set_window(window)
+            app._apis[api.search_window.window_id] = api
+        for api in (owner, sibling):
+            assert api.search_window is not None
+            app.add_notice("error", "Identical import error", window_id=api.search_window.window_id)
+        assert [sum(script.startswith("window.mailArchiverNotice?.(") for script in window.scripts) for window in windows] == [1, 1, 0]
+        assert all("Identical import error" not in script for script in windows[2].scripts)
+        assert sibling.search_window is not None
+        app.add_notice("error", "Identical import error", window_id=sibling.search_window.window_id)
+        assert [sum(script.startswith("window.mailArchiverNotice?.(") for script in window.scripts) for window in windows] == [1, 2, 0]
+        assert len([notice for notice in app.notices() if notice.message == "Identical import error"]) == 3
+        app.add_notice("warning", "Application-wide warning")
+        assert [sum(script.startswith("window.mailArchiverNotice?.(") for script in window.scripts) for window in windows] == [2, 3, 1]
+        assert all(any(notice["message"] == "Application-wide warning" for notice in api.status()["notices"])
+                   for api in (owner, sibling, other))
+        # An untitled/non-owning viewer must not inherit either scoped error on startup.
+        untitled = GuiApi(None, application=app)
+        try:
+            assert [notice["message"] for notice in untitled.status()["notices"]] == ["Application-wide warning"]
+        finally:
+            untitled.close()
+    finally:
+        release.set()
+        finish_release.set()
+        app._apis.clear()
+        for api in (owner, sibling, other):
+            api.close()
+        app.shutdown()
+
+
+def test_background_failure_retains_window_scope(tmp_path: Path) -> None:
+    """DESKTOP: reaping a scoped command failure must not turn it into a global warning."""
+    app, api = open_headless(build_deferred_archive(tmp_path), tmp_path / "preferences.json")
+    assert api.search_window is not None
+
+    def fail() -> None:
+        raise ValueError("scoped command fixture")
+
+    try:
+        future = app._submit_task("Scoped command", fail, window_id=api.search_window.window_id)
+        assert future is not None
+        with pytest.raises(ValueError, match="scoped command fixture"):
+            future.result(timeout=5)
+        assert any(notice["severity"] == "error" for notice in api.status()["notices"])
+        assert not app.window_notices(None)
+    finally:
+        api.close()
+        app.shutdown()
 
 
 def test_gui_resumes_cli_content_and_displays_attached_provenance(tmp_path: Path) -> None:
@@ -300,7 +603,7 @@ def test_plugin_inventory_does_not_hide_database_errors(tmp_path: Path) -> None:
 
 def test_content_only_quit_is_nonblocking_and_leaves_resumable_work(tmp_path: Path) -> None:
     """Skipping ingest must not produce an ingest warning or block the GUI while stopping content."""
-    from time import monotonic, sleep
+    from time import monotonic
 
     plugins = tmp_path / "plugins"
     plugin = plugins / "processors" / "wait-for-cancel"
@@ -315,16 +618,7 @@ pipeline="content"
 subscribes=["text/plain"]
 rank=60
 ''')
-    (plugin / "processor.py").write_text('''from pathlib import Path
-from time import sleep
-
-class Processor:
-    def process(self, item):
-        Path(__file__).with_name("entered").touch()
-        while True:
-            item.check_cancelled()
-            sleep(0.01)
-''')
+    (plugin / "processor.py").write_text('from pathlib import Path\n\nclass Processor:\n    def process(self, item):\n        Path(__file__).with_name("entered").touch()\n        item.wait_for_cancellation()\n')
     source = tmp_path / "message.eml"
     source.write_bytes(HEADER + b"\r\nContent\r\n")
     archive = tmp_path / "archive"
@@ -338,9 +632,7 @@ class Processor:
         assert api.resume_processing(False, True)
         job = api.document.ingest_job
         assert job is not None and job.kind == "content"
-        deadline = monotonic() + 10
-        while not (plugin / "entered").exists() and monotonic() < deadline:
-            sleep(0.01)
+        wait_for_path_state([plugin / "entered"], (plugin / "entered").exists, timeout=10)
         assert (plugin / "entered").exists()
         assert not app.has_active_ingest()
         started = monotonic()
@@ -676,7 +968,7 @@ def test_quit_cancels_queued_import_and_releases_its_lease(tmp_path: Path) -> No
 
     def block() -> None:
         occupied.wait(timeout=5)
-        release.wait(10)
+        assert release.wait(10), "fixture release deadline expired"
 
     try:
         for _ in range(8):

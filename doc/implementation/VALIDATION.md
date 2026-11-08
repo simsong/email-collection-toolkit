@@ -2,6 +2,14 @@
 
 # Validation implementation
 
+The search acceptance driver publishes `mailarchiver-state-changed` after its own
+confirmation, clipboard and link callbacks update private state. Its DOM waiter
+otherwise cannot observe those assignments; a confirmation timeout now reports
+the observed callback count. The filesystem predicate and GUI suggestion/preview
+loops check positive remaining time before each event/future wait. Real ready-file
+activity and deliberately ordered actual `ChangeSignal` notifications cover expiry;
+the queued GUI work remains available for explicit retrieval after completion.
+
 Current implementation and validation boundaries. Deferred feature designs
 live in [plans](../plans/README.md); historical evidence does not validate this revision.
 
@@ -93,7 +101,7 @@ stop/restart and OST CLI fixtures. The caller and subsequently created workers g
 profiling hook timing selected storage/SQLite/file/sleep operations; `calls.txt`
 ranks total/max completed-call time by caller and thread. `report.json` records named phases,
 elapsed and process CPU time, thread names and native process I/O deltas on Windows.
-`threads.txt` receives all-thread code-location stacks every 30 seconds from an
+`threads.txt` receives all-thread code-location stacks on phase changes or explicit requests from an
 owned sampler using `sys._current_frames`. It never invokes a concurrent native
 traceback dump. Windows crashed and a local run hung during the watchdog test;
 concurrent native dumping was suspected, but the underlying cause is unproven.
@@ -518,7 +526,32 @@ catalog/search rows alone cannot support standalone viewing or export acceptance
 This distinguishes an inactive/locked desktop from an assumed menu regression;
 non-interactive reprocessing and Quit checks remain separate evidence.
 
-The processing-history browser fixture refreshes its typed status snapshot while
-checking live search/About footers. Cleanup stops and joins the heartbeat and
-propagates producer failures. Full Make validation batches run serially to retain
+The processing-history browser fixture uses a live-process typed snapshot while
+checking search/About footers; it requires no heartbeat producer. Full Make validation batches run serially to retain
 the real installation-guard assertions, not concurrent writers from another batch.
+
+## Timing audit repairs
+
+`ProfileSession.wait_for_stack_sample` uses a condition and sample sequence:
+completion follows closed-file stack publication, and sampler errors wake waiters.
+Reports retain each sample's monotonic start/end and thread count. Frame capture
+precedes report serialization; report snapshots are copied under the data lock
+and written atomically under a separate publisher lock. Final/phase publication
+failures cannot replace an existing source failure. Real obstructed paths test
+both failure cases. Native watchdog ownership remains checked in a bounded child.
+
+Concurrency fixtures use barriers and explicit release/acknowledgement markers.
+Windows replacement regressions hold actual readers open with and without
+delete sharing, requiring immediate replacement or explicit preservation on denial;
+standalone verification keeps its stdlib-only implementation. The Rust downloader's
+split-header fixture acknowledges consumption of its first line through a channel.
+No fixture assumes that a producer ran because a fixed sleep ended.
+
+`make check` remains the aggregate gate; opt-in native GUI and Windows-only cases
+remain separate acceptance. See [full audit](../TIMING_AUDIT.md).
+
+A real POSIX worker acknowledges SIGTERM and remains alive until explicitly
+released. Concurrent scanner-close acceptance observes exclusive teardown ownership
+and verifies that runtime storage remains until worker termination. Scanner teardown
+uses a dedicated lock; a concurrent close that cannot acquire it by its failure
+budget does not release another closer's resources.

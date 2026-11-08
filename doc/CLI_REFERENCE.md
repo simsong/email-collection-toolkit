@@ -143,7 +143,7 @@ Do not combine `--source` with `--new` or `--add-source`.
 One invocation scans once and exits; there is no scheduler or background agent.
 The saved worker preference defaults to half the logical CPUs (at least one).
 Explicit `--workers` values must be positive whole numbers and cannot exceed twice
-the logical CPU count; unavailable CPU detection counts as one. Status prints at startup, every five minutes and
+the logical CPU count; unavailable CPU detection counts as one. Status prints at startup, on committed progress changes and
 on exit; `--show-messages` adds disposition and subject for each download.
 Ctrl-C checkpoints and exits 130; a blocked network operation has a 30-second
 socket timeout. Rerunning resumes committed progress.

@@ -34,7 +34,7 @@ from pydantic import BaseModel
 
 from .layout import integrity_directory, mbox_directory
 from .mbox import IntegrityMessage, write_integrity_files
-from .standalone_verify import INSTALLED_NAME
+from .standalone_verify import EXTRA_FILE_WARNING, INSTALLED_NAME
 from .storage_sync import replace_file, sync_directory
 
 BAGIT_DECLARATION = "BagIt-Version: 1.0\nTag-File-Character-Encoding: UTF-8\n"
@@ -251,22 +251,23 @@ def _sha256_file(path: Path) -> str:
     return digest.hexdigest()
 
 
-def _payload_files(archive: Path) -> list[Path]:
+def _payload_files(archive: Path, warnings: list[str]) -> list[Path]:
     payloads: list[Path] = []
     for path in sorted((archive / "data").rglob("*")):
         if path.is_symlink():
             raise ValueError(f"payload symlink is not supported: {path.relative_to(archive)}")
         if path.is_file():
             if path.parent != mbox_directory(archive) or path.suffix != ".mbox":
-                raise ValueError(f"unsupported native archive payload: {path.relative_to(archive)}")
+                warnings.append(EXTRA_FILE_WARNING.format(path=path.relative_to(archive).as_posix()))
+                continue
             payloads.append(path)
     return payloads
 
 
-def _write_payload_manifest(archive: Path, mbox_digests: dict[str, str]) -> tuple[int, int]:
+def _write_payload_manifest(archive: Path, mbox_digests: dict[str, str], warnings: list[str]) -> tuple[int, int]:
     entries: list[tuple[str, str]] = []
     byte_count = 0
-    payloads = _payload_files(archive)
+    payloads = _payload_files(archive, warnings)
     for path in payloads:
         byte_count += path.stat().st_size
         digest = mbox_digests.get(path.name) if path.parent == mbox_directory(archive) else None
@@ -338,8 +339,8 @@ def write_bag_checkpoint(
     archive: Path,
     catalog: sqlite3.Connection,
     packaged_at: datetime | None = None,
-) -> None:
-    """Publish Mailbag metadata, payload fixity, and tag fixity in dependency order."""
+) -> list[str]:
+    """Publish fixity in dependency order; return warnings for untouched non-mail extras."""
     initialize_bag(archive)
     count_row = catalog.execute("SELECT COUNT(*) FROM messages").fetchone()
     assert count_row is not None
@@ -350,6 +351,8 @@ def write_bag_checkpoint(
     except BaseException:
         writer.abort()
         raise
-    byte_count, file_count = _write_payload_manifest(archive, mbox_digests)
+    warnings: list[str] = []
+    byte_count, file_count = _write_payload_manifest(archive, mbox_digests, warnings)
     _write_bag_info(archive, byte_count, file_count, packaged_at or datetime.now(UTC))
     _write_tag_manifest(archive, csv_paths)
+    return warnings

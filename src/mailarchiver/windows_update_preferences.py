@@ -39,14 +39,16 @@ PAGE = """<!doctype html><html><head><meta charset="utf-8"><title>Preferences</t
 <p id="workers-note"></p><p id="workers-help"></p></section><h2>Updates</h2><p id="version"></p>
 <label>Update stream <select id="channel"><option value="release">__RELEASE_STREAM_LABEL__</option><option value="preview">__PREVIEW_STREAM_LABEL__</option></select></label>
 <p>__UPDATE_STREAM_HELP__</p>
-<label><input type="checkbox" id="automatic"> Check automatically each day</label>
+<label><input type="checkbox" id="automatic"> Check when the application opens</label>
 <p>Downloading and installation require confirmation.</p>
 <p>Valid changes save automatically. Close this window when finished.</p>
 <button id="check" disabled>Check for Program Updates</button>
 <p id="update-status" role="status"></p><p id="status" role="status"></p><script>
 const status = document.getElementById('status');
-let workerSettings=null, ready=false, closing=false, saveQueue=Promise.resolve(), saveRevision=0;
-async function refresh(){const s=await pywebview.api.state();
+let workerSettings=null, ready=false, closing=false, saveQueue=Promise.resolve(), saveRevision=0, statusRead=null;
+function refresh(){if(!statusRead)statusRead=readState().finally(()=>{statusRead=null});return statusRead;}
+async function refreshFresh(){if(statusRead)await statusRead.catch(()=>{});return refresh();}
+async function readState(){const s=await pywebview.api.state();
 if(!ready){
 if(s.workers){workerSettings=s.workers;const w=workerSettings;
 document.getElementById('workers-section').hidden=false;
@@ -82,11 +84,13 @@ try {if(!ready)await refresh();const pending=savePreferences();revision=saveRevi
 enabled=[...document.querySelectorAll('input,select,button')].filter(control=>!control.disabled);
 enabled.forEach(control=>{control.disabled=true;});await pending;await pywebview.api.close_saved();}
 catch(error){closing=false;enabled.forEach(control=>{control.disabled=false;});if(revision===saveRevision)showError(error);}};
-window.addEventListener('pywebviewready',()=>{refresh().catch(showError);setInterval(()=>refresh().catch(showError),10000)});
+window.addEventListener('pywebviewready',()=>refresh().catch(showError));
+window.addEventListener('mailarchiver-status-changed',()=>refreshFresh().catch(showError));
+window.addEventListener('focus',()=>refreshFresh().catch(showError));
 document.querySelectorAll('input,select').forEach(control=>control.addEventListener('change',()=>{
 savePreferences().catch(()=>{});}));
 document.getElementById('check').onclick=async()=>{const revision=saveRevision+1;
-try{await savePreferences();if(revision!==saveRevision)return;await pywebview.api.check();await refresh()}
+try{await savePreferences();if(revision!==saveRevision)return;await pywebview.api.check();await refreshFresh()}
 catch(error){if(revision===saveRevision)showError(error)}};
 </script></body></html>""".replace("__RELEASE_STREAM_LABEL__", RELEASE_STREAM_LABEL).replace(
     "__PREVIEW_STREAM_LABEL__", PREVIEW_STREAM_LABEL).replace("__UPDATE_STREAM_HELP__", UPDATE_STREAM_HELP)

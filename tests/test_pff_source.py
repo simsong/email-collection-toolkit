@@ -8,13 +8,17 @@ import shutil
 import sqlite3
 import subprocess
 import sys
+from concurrent.futures import CancelledError, ThreadPoolExecutor
 from email import policy
 from email.parser import BytesParser
 from pathlib import Path
+from threading import Event, Timer
 
 import pytest
 
 from mailarchiver.pff_source import PffReceipt
+from mailarchiver.change_signal import ChangeEvent
+from mailarchiver.file_events import ProcessActivity, wait_for_path_state
 from mailarchiver.plugin_api import MailContainer, MailObject, SourceSpec
 from mailarchiver.plugin_loader import load_plugins
 from mailarchiver.pst_source import validate_record
@@ -28,12 +32,150 @@ PST = ROOT / "rust/mct-importer/tests/fixtures/mail.pst"
 EMPTY_PST = ROOT / "rust/mct-importer/tests/fixtures/empty.pst"
 
 
+@pytest.mark.parametrize("kind", ["pst", "pff", "pst-ingest"])
+def test_cancellation_reaps_silent_acknowledged_importer(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, kind: str,
+) -> None:
+    """ACQUISITION: a real stop wakes silent extraction and reaps its child before the failure watchdog."""
+    import mailarchiver.pff_source as pff_module
+    import mailarchiver.pst_source as pst_module
+    from mailarchiver.__main__ import IngestInterrupted, IngestRequest, run_ingest
+    from mailarchiver.owner_rules import OwnerRules
+
+    cancellation, entered, expired = ChangeEvent(), Event(), Event()
+    children: list[subprocess.Popen[bytes]] = []
+
+    class ObservedActivity(ProcessActivity):
+        def __init__(self, child: subprocess.Popen[bytes], paths: list[Path], stop: ChangeEvent | None = None) -> None:
+            children.append(child)  # Observe real ownership, not a fake child or readiness result.
+            super().__init__(child, paths, stop)
+
+        def wait(self, timeout: float) -> bool:
+            entered.set()
+            return super().wait(timeout)
+
+    def contain_failure() -> None:
+        expired.set()
+        for child in children:
+            if child.poll() is None:
+                child.kill()
+
+    watchdog = Timer(10, contain_failure)
+    ready, producer = tmp_path / "ready", tmp_path / "silent.pst"
+    producer.write_text(
+        "# Run a real silent extraction fixture until its owner cancels.\n"
+        "# Publish readiness once, before waiting on an actual flag.\n"
+        "# This script never reads or rewrites a real mailbox.\n"
+        "# The parent checks child ownership and source byte preservation.\n"
+        "# Only a separate failing watchdog bounds broken cleanup.\n"
+        "import os\nfrom pathlib import Path\nfrom threading import Event\n"
+        f"Path({str(ready)!r}).write_text(str(os.getpid()))\nEvent().wait()\n", encoding="utf-8")
+    original = producer.read_bytes()
+    archive = tmp_path / "archive"
+    archive.mkdir()
+    configure(archive, "pst", pst_module.PstSettings(executable=sys.executable).model_dump(mode="json"))
+    monkeypatch.setattr(pst_module if kind != "pff" else pff_module, "ProcessActivity", ObservedActivity)
+
+    def extract() -> None:
+        if kind == "pst-ingest":
+            run_ingest(IngestRequest(archive=archive, roots=[str(producer)], scan_policy="not-scanned",
+                owner_rules=OwnerRules(include=["owner@example.test"])), stop_event=cancellation, terminal=False)
+        elif kind == "pff":
+            list(pff_module.run_converter([sys.executable, str(producer)], tmp_path / "output", tmp_path / "stderr",
+                pff_module.PffSettings(), "fixture", os.environ.copy(), cancellation=cancellation))
+        else:
+            registry = load_plugins(archive=archive, scan_policy="not-scanned", cancellation=cancellation)
+            source = next(item.implementation for item in registry.sources if item.manifest.kind == "file-folder")
+            container, = (item for item in source.discover(SourceSpec(locator=str(producer))) if isinstance(item, MailContainer))
+            list(source.messages(container, None))
+
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        watchdog.start()
+        future = pool.submit(extract)
+        try:
+            wait_for_path_state([ready], lambda: ready.exists() and ready.read_text(), timeout=5)
+            assert entered.wait(5), "Importer did not enter its actual activity wait"
+            cancellation.set()
+            with pytest.raises(IngestInterrupted if kind == "pst-ingest" else CancelledError):
+                future.result(timeout=5)
+            assert len(children) == 1 and children[0].poll() is not None
+            assert children[0].pid == int(ready.read_text())
+            assert not expired.is_set(), "Cancellation required the containment deadline"
+            assert producer.read_bytes() == original
+        finally:
+            cancellation.set()
+            for child in children:
+                if child.poll() is None:
+                    child.kill()
+                child.wait(timeout=5)
+            watchdog.cancel()
+            watchdog.join(timeout=5)
+
+
+@pytest.mark.parametrize("kind", ["pst", "pff"])
+def test_failed_activity_initialization_kills_and_reaps_owned_importer(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, kind: str,
+) -> None:
+    """ACQUISITION: unavailable notification resources cannot bypass child ownership cleanup."""
+    import mailarchiver.pff_source as pff_module
+    import mailarchiver.pst_source as pst_module
+    children: list[subprocess.Popen[bytes]] = []
+    expired = Event()
+
+    def contain_failure() -> None:
+        expired.set()
+        for child in children:
+            if child.poll() is None:
+                child.kill()
+
+    watchdog = Timer(5, contain_failure)
+
+    def unavailable(child: subprocess.Popen[bytes], _paths: object, _cancellation: object = None) -> None:
+        # Only native resource acquisition is faulted; execution and cleanup remain real.
+        children.append(child)
+        watchdog.start()
+        raise OSError("notification resource unavailable")
+
+    monkeypatch.setattr(pff_module if kind == "pff" else pst_module, "ProcessActivity", unavailable)
+    try:
+        with pytest.raises(OSError, match="notification resource unavailable"):
+            if kind == "pff":
+                list(pff_module.run_converter([sys.executable, "-c", "from threading import Event; Event().wait()"],
+                    tmp_path / "output", tmp_path / "stderr", pff_module.PffSettings(), "fixture", os.environ.copy()))
+            else:
+                producer = tmp_path / "blocked.pst"
+                producer.write_text(
+                    "# Run only in this fixture's private importer child.\n"
+                    "# The host must reap it if native event initialization fails.\n"
+                    "# No source archive or user mailbox is read or changed.\n"
+                    "# This wait requires parent cancellation, never elapsed-time success.\n"
+                    "# A separate failure watchdog contains broken cleanup during regression.\n"
+                    "from threading import Event\nEvent().wait()\n", encoding="utf-8")
+                archive = tmp_path / "archive"
+                archive.mkdir()
+                configure(archive, "pst", pst_module.PstSettings(executable=sys.executable).model_dump(mode="json"))
+                registry = load_plugins(archive=archive, scan_policy="not-scanned")
+                source = next(item.implementation for item in registry.sources if item.manifest.kind == "file-folder")
+                container, = (item for item in source.discover(SourceSpec(locator=str(producer))) if isinstance(item, MailContainer))
+                list(source.messages(container, None))
+        assert len(children) == 1 and children[0].poll() is not None
+        assert not expired.is_set(), "Failed ownership cleanup reached its containment deadline"
+    finally:
+        watchdog.cancel()
+        if watchdog.ident is not None:
+            watchdog.join(timeout=5)
+        for child in children:
+            if child.poll() is None:
+                child.kill()
+            child.wait(timeout=5)
+
+
 @pytest.mark.skipif(os.name == "nt", reason="POSIX process liveness uses kill(pid, 0)")
 def test_host_kills_and_reaps_stuck_converter(tmp_path: Path) -> None:
     """A blocked native child cannot outlive the host's extraction deadline."""
     from mailarchiver.pff_source import PffSettings, run_converter
     output = tmp_path / "output"
-    command = [sys.executable, "-c", "import os,time; print(os.getpid(), flush=True); time.sleep(60)"]
+    command = [sys.executable, "-c", "import os,time; print(os.getpid(), flush=True); __import__('threading').Event().wait()"]
     with pytest.raises(TimeoutError):
         list(run_converter(command, output, tmp_path / "stderr", PffSettings(timeout_seconds=1),
                            "fixture", os.environ.copy()))

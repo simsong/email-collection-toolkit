@@ -76,6 +76,12 @@ accept `--workers N` and otherwise use the saved choice.
 
 ## Downloading and processing progress
 
+Import warnings and errors appear only in the window owning that import.
+An **Extra file detected** warning means an unrelated file, such as an editor
+backup, was found in the archive. Importing continues and the file is left alone.
+Warnings appear in yellow. Choose **Dismiss messages** to clear them; they remain
+available in About. Missing or changed archived mail still produces an error.
+
 The Ingests window distinguishes downloading/importing source mail from processing
 saved messages and MIME parts. **Processing saved mail** finishes queued metadata,
 body extraction and search-index work before source downloads resume. During that

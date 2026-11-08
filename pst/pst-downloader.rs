@@ -18,11 +18,12 @@ use std::{
 use tempfile::NamedTempFile;
 
 static INTERRUPTED: AtomicBool = AtomicBool::new(false);
+static INTERRUPT: tokio::sync::Notify = tokio::sync::Notify::const_new();
 
 /// Stop buffered work at a cancellation boundary so temporary files unwind normally.
 fn check_interrupted() -> Result<()> {
     ensure!(
-        !INTERRUPTED.load(Ordering::Relaxed),
+        !INTERRUPTED.load(Ordering::Acquire),
         "interrupted; rerun to finish remaining downloads"
     );
     Ok(())
@@ -578,10 +579,11 @@ fn acquire(
 
 /// Cancel pending connection, response-header or body waits without waiting for HTTP timeout.
 async fn wait_for_interrupt() -> Result<String> {
-    loop {
-        check_interrupted()?;
-        tokio::time::sleep(Duration::from_millis(50)).await;
-    }
+    // A stored permit covers interruption before this future is first polled.
+    check_interrupted()?;
+    INTERRUPT.notified().await;
+    check_interrupted()?;
+    unreachable!("interrupt notification always publishes the cancellation flag first")
 }
 
 /// Copy one complete HTTP response to a bounded temporary file; validation hashes it later.
@@ -912,13 +914,14 @@ fn run(args: Args) -> Result<bool> {
 fn main() -> std::process::ExitCode {
     let args = Args::parse();
     if let Err(error) = ctrlc::set_handler(|| {
-        INTERRUPTED.store(true, Ordering::Relaxed);
+        INTERRUPTED.store(true, Ordering::Release);
+        INTERRUPT.notify_one();
     }) {
         eprintln!("pst-downloader: could not install Ctrl+C handler: {error}");
         return std::process::ExitCode::FAILURE;
     }
     let result = run(args);
-    if INTERRUPTED.load(Ordering::Relaxed) {
+    if INTERRUPTED.load(Ordering::Acquire) {
         eprintln!("pst-downloader: interrupted; verified downloads retained; rerun to finish");
         return std::process::ExitCode::from(130);
     }

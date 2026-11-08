@@ -163,7 +163,18 @@ plugins:
 ```
 
 `plugins.pst` accepts `executable`, `timeout_seconds`, `max_output_bytes`, and
-`max_diagnostics_bytes`. The timeout is an inactivity limit: stdout or stderr growth renews it, so an active long extraction can finish. Uncommenting `plugins.ost` configures the libpff
+`max_diagnostics_bytes`. The timeout is an inactivity limit: stdout/stderr growth
+or a changed work-counter snapshot renews it. The host sets
+`MAILARCHIVER_PST_ACTIVITY_FILE` to a new private workspace file. The Rust helper
+creates it without overwriting an existing path and updates its eight-byte
+little-endian work counter at every actual checkpoint. Diagnostic history emits
+phase changes and power-of-two work counts, without elapsed-time scheduling.
+There are at most 64 count-triggered progress records for a 64-bit work counter;
+ordinary error diagnostics remain subject to their separate configured bound.
+This keeps healthy large imports below diagnostic bounds while retaining liveness
+through slow hashing or address-book work. Custom helpers may ignore the optional
+environment variable and retain stdout/stderr activity semantics.
+Uncommenting `plugins.ost` configures the libpff
 converter for OST; it does not select a PST importer. Archive values override
 installation values.
 

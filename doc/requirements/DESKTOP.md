@@ -2,6 +2,12 @@
 
 # Desktop requirements
 
+Suggestion wait errors end the current request even when work is still pending;
+only a new explicit request retries. Native Close veto warnings publish without
+unrelated progress or status reads. Document watches live only while their document
+retains a window, child or job. Unavailable disk health is observational About
+status, not a newly issued notice on each read.
+
 Current subsystem contract and acceptance boundaries. This is not a claim of
 platform/release acceptance. Deferred features live in [plans](../plans/README.md).
 
@@ -38,7 +44,7 @@ for the active saved archive, disabled when no document is active.
 During saved-mail processing, show **Messages requiring processing**. Count each
 canonical archived email once across its pending, running or failed jobs,
 including body/attachment work and blocked dependencies. Exclude unpublished
-inputs and future downloads. Refresh about once per second and at completion;
+inputs and future downloads. Refresh on committed work/status changes and at completion;
 zero means no known unfinished saved-message work, not that future downloads
 are complete. Explain that an email leaves the count only when all its tasks finish;
 the count may stay level while earlier processing stages complete tasks.
@@ -89,11 +95,19 @@ source checkpoints and run history. A changed source history blocks a stale stop
 A later explicit import can begin a new continuation; cancelled derived work may
 be regenerated with explicit reprocessing.
 
-Search-window warnings and errors collapse after six seconds to a bottom message
-pill, rather than disappearing. The pill reopens all messages received in that
+Search-window warnings and errors stay expanded until the user selects Collapse
+messages or Dismiss messages. Collapse leaves a bottom message pill. The pill reopens all messages received in that
 window; reopening leaves the text visible until manually collapsed. Messages are
 plain text in a scrollable region, including earlier warnings after another
 arrives. Native application notices also remain in About during the session.
+Warnings use a yellow banner. **Dismiss messages** hides both the banner and pill;
+later status refreshes must not replay dismissed notices. Newly issued notices
+remain eligible for display, even when their text matches an earlier notice.
+Import warnings, errors and completion notices must reach only the search window
+owning the operation, not another archive or sibling search window. When Close
+transfers an active import, subsequent notices follow its new owner. The same
+scope applies to retained startup status and unexpected background-command errors.
+Application-wide warnings remain shared, and About may retain the aggregate history.
 
 ## Shutdown feedback
 
@@ -310,12 +324,12 @@ until the user chooses the application menu's About command; status updates and
 Dock activation must not reopen it. Closing the last visible window keeps the
 application running with About and File New/Open available. It displays the installed version, current
 free space on the active archive's filesystem (or the user's home filesystem),
-live Internet reachability, startup errors, warnings, and each open archive's
+Internet reachability checked when About opens, startup errors, warnings, and each open archive's
 latest ingest status.
-About populates through the real native status bridge and polls once per second.
+About populates through the real native status bridge on application, filesystem and focus events.
 An import writer's SQLite lock must not fail the whole status response. About
 bounds its plugin-settings lock wait to 50 ms, marks both inventories temporarily
-unavailable, and retries on the next poll without hiding other database errors.
+unavailable, and retries on the next status event or explicit reopen without hiding other database errors.
 Its script policy must permit pywebview's dynamic bridge functions, as the search
 and ingest pages do. A delayed bridge retries and clears its warning on recovery.
 Only explicitly selected window methods are exposed to JavaScript; application
@@ -471,7 +485,7 @@ check filtering searches rather than accepting any mention of an index. Execute
 the same statements to verify results and bound work on sparse large fixtures.
 
 After three characters of the completion value (excluding its selector prefix)
-and a 120-millisecond debounce, the GUI searches Any, Subject, and recognized
+the GUI immediately searches Any, Subject, and recognized
 Date values. One Any lookup matches email substrings, original header names,
 and current authoritative names, then derives From/To/Cc/Bcc choices and distinct
 message counts from the matching header occurrences. It must work before content
@@ -789,11 +803,11 @@ checks grouping, search expansion, count projections, pagination and browser
 navigation with purpose-made archives.
 
 Preview workers return results without mutating window state. GUI preview requests
-and polls consume completed futures, reject obsolete archive generations, surface
+and completion notifications consume futures, reject obsolete archive generations, surface
 reader failures and allow retry. Closing prevents new preview submissions.
 
-Application imports use retained futures. Application polling
-consumes unexpected command failures into visible notices. Quit cancels queued
+Application imports use retained futures. Application completion handling
+turns unexpected command failures into visible notices. Quit cancels queued
 imports without starting processing and releases their writer leases; running
 imports retain cooperative cancellation and the shared five-second deadline.
 Watchdogs and shutdown cleanup never depend on available command-pool capacity.
@@ -842,3 +856,23 @@ Standalone message windows receive the application menu at creation and remain
 in the shared native window snapshot and Window menu. Native Close remains
 available when a standalone viewer is focused, including on macOS. Native
 acceptance checks actual File/Window/Help headings and Close enabled state.
+
+## Status ordering and cleanup deadlines
+
+Slow status replies must not overlap and regress About, Ingests, document options
+or Windows Preferences. A refresh after an import/update command must read state
+after any older request finishes.
+HTML message layout follows actual animation frames, document/font/load events
+and current-message identity; elapsed layout time alone does not establish readiness.
+Expired shutdown joins are failures. Ordinary Quit still exits successfully when
+its tracked work finishes; forced deadline expiry exits nonzero and retains the
+existing recovery/checkpoint contract, rather than claiming completed cleanup.
+Native JavaScript replies must settle on completion, execution error, window Close
+or a failure deadline. A closed webview must not leave its caller blocked forever;
+synchronous native evaluations must not wait on their own UI thread.
+Collection-only completion, including a drag export for an unselected row, must
+notify state observers even when it changes no visible DOM.
+Large search batches must append without depending on JavaScript's function
+argument limit. Suggestion/preview wait expiry returns a typed error with current
+pending state; it is not a successful polling tick, and explicit retries may read
+later actual completion.

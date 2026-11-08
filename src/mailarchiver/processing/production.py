@@ -24,6 +24,7 @@ from pathlib import Path
 from uuid import uuid4
 
 from pydantic import BaseModel
+from ..change_signal import ChangeSignal
 from ..public_suffix import registrable_domain
 
 from ..catalog import address_pk
@@ -62,7 +63,7 @@ class ProductionPipeline:
     def __init__(self, archive: Path, catalog: sqlite3.Connection, search: sqlite3.Connection,
                  policy: ProcessingPolicy, publish: Publisher, *, plugin_dirs: tuple[Path, ...] = (),
                  installation_config: Path | None = None, cancelled: Callable[[], None] | None = None,
-                 heartbeat: Callable[[], None] | None = None) -> None:
+                 heartbeat: Callable[[], None] | None = None, signals: tuple[ChangeSignal, ...] = ()) -> None:
         self.archive = archive.resolve()
         self.catalog = catalog
         self.search = search
@@ -71,6 +72,7 @@ class ProductionPipeline:
         self.installation_config = installation_config
         self.cancelled = cancelled
         self.heartbeat = heartbeat
+        self.signals = signals
         self._ingesting = False
         self.plugins = load_processors((builtin_plugin_directory(), *plugin_dirs))
         self.registry_hash = fingerprint(self.plugins)
@@ -220,7 +222,7 @@ class ProductionPipeline:
             failures: list[Exception] = []
             dispatch(self.database, self.plugins, pipelines=("ingest", "message"),
                      installation_config=self.installation_config, services=self, failures=failures, message_id=message_id,
-                     progress=progress, heartbeat=self.heartbeat, continue_after_failure=not fail_on_error)
+                     progress=progress, heartbeat=self.heartbeat, signals=self.signals, continue_after_failure=not fail_on_error)
             if fail_on_error:
                 self._raise_failures(("ingest", "message"), failures, message_id=message_id)
         finally:
@@ -232,7 +234,7 @@ class ProductionPipeline:
         failures: list[Exception] = []
         result = run(self.database, self.plugins, retry=True, pipelines=pipelines, max_jobs=max_jobs,
                      installation_config=self.installation_config, services=self, cancelled=self.cancelled, failures=failures,
-                     message_id=message_id, continue_after_failure=True, progress=progress, workers=workers, heartbeat=self.heartbeat)
+                     message_id=message_id, continue_after_failure=True, progress=progress, workers=workers, heartbeat=self.heartbeat, signals=self.signals)
         if fail_on_error:
             self._raise_failures(pipelines, failures, message_id=message_id)
         return result

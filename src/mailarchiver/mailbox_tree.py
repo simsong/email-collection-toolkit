@@ -31,6 +31,7 @@ from urllib.parse import unquote
 
 from pydantic import BaseModel, Field, field_validator
 
+from .standalone_verify import read_shared_text
 from .sqlite_paths import sqlite_uri
 
 FILTER_SET_VERSION = 1
@@ -140,7 +141,7 @@ class FilterSetStore:
     def read(self) -> FilterSetPreferences:
         if not self.path.exists():
             return FilterSetPreferences()
-        preferences = FilterSetPreferences.model_validate_json(self.path.read_text(encoding="utf-8"))
+        preferences = FilterSetPreferences.model_validate_json(read_shared_text(self.path))
         if preferences.version != FILTER_SET_VERSION:
             raise ValueError(f"unsupported filter-set preferences version {preferences.version}")
         return preferences

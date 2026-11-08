@@ -2,6 +2,12 @@
 
 # Validation requirements
 
+Acceptance callbacks that change private JavaScript values must publish an explicit
+notification; unrelated DOM mutations cannot acknowledge confirmation or clipboard
+work. Predicate/result waits enforce their failure deadline before waiting again,
+even when other ready notifications keep arriving. Expiry retains typed pending
+state for an explicit retry, rather than extending the request indefinitely.
+
 Current subsystem contract and acceptance boundaries. This is not a claim of
 platform/release acceptance. Deferred features live in [plans](../plans/README.md).
 
@@ -9,7 +15,7 @@ platform/release acceptance. Deferred features live in [plans](../plans/README.m
 
 Windows CI shall expose separate build, reader/scanner, writer, Outlook, GUI/native
 and relocated-package stage durations. Selected slow synthetic ingest tests shall
-retain phase wall/CPU timings, thread call profiles, periodic stack dumps and
+retain phase wall/CPU timings, thread call profiles, phase-triggered and explicitly acknowledged stack samples and
 Windows process I/O counts, including evidence after test failure. Diagnostics
 must preserve assertions and storage durability and must not record mail bodies,
 credentials or frame locals. Profiles add overhead and cannot alone attribute a
@@ -303,6 +309,17 @@ verified against their unchanged synthetic source before the GUI runs.
 Application-writing test batches share the real cross-process installation guard.
 Run them serially unless that entire guard boundary is explicitly isolated;
 otherwise update-reservation assertions can correctly fail on another test writer.
-A synthetic running-status UI fixture must supply a live heartbeat through page
-startup and assertions, then stop and join its producer without changing the
-production stale deadline.
+A synthetic running-status UI fixture must identify a live producer through page
+startup and assertions. Its owned work must then stop and join without changing
+the production recovery grace period.
+
+## Timing and synchronization
+
+A readiness assertion must observe the required operation, not infer it from a
+sleep or a timed-out join. Producer failures, expired fixture gates and sampler
+failures fail validation. Diagnostics must retain the original source failure
+when evidence publication also fails. Periodic sampling is not guaranteed to
+catch short-lived workers; stack tests hold a real worker until a completed,
+subsequently started sample is acknowledged. Native callback joins cover actual
+in-flight calls, not future polling admission. The [timing audit](../TIMING_AUDIT.md)
+records active-code scope, retained failure deadlines and platform validation limits.

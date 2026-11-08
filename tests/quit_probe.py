@@ -14,7 +14,8 @@ import sqlite3
 import sys
 from pathlib import Path
 from threading import Event, Thread
-from time import monotonic, sleep
+from mailarchiver.file_events import wait_for_path_state
+from tests.process_output import open_fifo_writer
 
 import webview
 
@@ -72,7 +73,6 @@ def start_job(app: PyWebViewApplication, root: Path, number: int, blocked: bool)
         if blocked:
             Event().wait()
         else:
-            sleep(0.1)
             app.controller.finish_ingest(document.descriptor.document_id, job.operation_id, published=False)
             job.finished.set()
 
@@ -104,20 +104,32 @@ def main() -> None:
     if mode in {"blocked", "cooperative"}:
         for number in range(2):
             start_job(app, root, number, mode == "blocked")
-    if mode in {"exports", "blocked-exports"}:
+    if mode in {"exports", "blocked-exports", "failed-exports"}:
         api = GuiApi(None)
         app._apis["fixture"] = api
         (api.temporary_directory / "private.eml").write_bytes(b"synthetic private mail")
         (root / "export-path").write_text(str(api.temporary_directory))
         if mode == "blocked-exports":
             api._drag_lock.acquire()
+        if mode == "failed-exports":
+            # Real rmtree refuses a substituted symlink; preserve its external target.
+            retained = root / "retained-private-exports"
+            api.temporary_directory.rename(retained)
+            external = root / "external-target"
+            external.mkdir()
+            (external / "untouched").write_bytes(b"synthetic external file")
+            api.temporary_directory.symlink_to(external, target_is_directory=True)
+            second = GuiApi(None)
+            app._apis["second"] = second
+            (second.temporary_directory / "private.eml").write_bytes(b"second synthetic mail")
+            (root / "second-export-path").write_text(str(second.temporary_directory))
     if mode == "writer":
         entered = Event()
 
         def save() -> None:
             with app.writer_activity():
                 entered.set()
-                sleep(0.3)
+                assert app.quit_requested.wait(5), "Quit was not requested while the writer was active"
                 (root / "saved").write_text("completed")
 
         Thread(target=save, daemon=True).start()
@@ -166,9 +178,7 @@ def main() -> None:
                 startup_finished.set()
 
         def finish_settings() -> None:
-            deadline = monotonic() + 5
-            while not app._quitting and monotonic() < deadline:
-                sleep(0.01)
+            assert app.quit_requested.wait(5), "Quit was not requested during startup"
             release.set()
 
         Thread(target=start_import, daemon=True).start()
@@ -183,10 +193,7 @@ def main() -> None:
                     str(root / "updater-pid")], timeout=60)
 
         Thread(target=update_definitions, daemon=True).start()
-        for _ in range(500):
-            if (root / "updater-pid").exists():
-                break
-            sleep(0.01)
+        wait_for_path_state([root / "updater-pid"], lambda: (root / "updater-pid").exists(), timeout=5)
         assert (root / "updater-pid").exists()
     if mode == "scanner":
         if sys.platform == "win32":
@@ -207,7 +214,10 @@ def main() -> None:
                 done.set()
 
         Thread(target=scan, daemon=True).start()
-        assert not done.wait(0.3), "the native scan must still be blocked when its owner exits"
+        writer = open_fifo_writer(fifo)
+        assert writer >= 0
+        # Keep the paired writer open without data until this disposable process exits.
+        assert not done.is_set(), "the native scan must still be blocked when its owner exits"
 
     def quit_app() -> None:
         print("ready", flush=True)
@@ -228,20 +238,25 @@ def main() -> None:
         def native_quit() -> None:
             for native_window in tuple(webview.windows):
                 assert native_window.events.loaded.wait(15)
-            # Exercise real periodic status traffic before requesting Quit.
-            sleep(1.2)
+            # Await actual status operations instead of guessing when a polling timer fires.
+            for native_window in tuple(webview.windows):
+                done, results = Event(), []
+
+                def received(value: object) -> None:
+                    results.append(value)
+                    done.set()
+
+                expression = "refreshHistory().then(() => true)" if " — Ingests — " in native_window.title else "refresh().then(() => true)"
+                native_window.evaluate_js(expression, callback=received)
+                assert done.wait(10) and results == [True], "Native status read did not finish"
             if mode == "native-overlay":
                 # Keep the real Quit waiter alive until both webviews paint.
                 with app.writer_activity():
                     quit_app()
                     for native_window in tuple(webview.windows):
-                        visible = False
-                        for _attempt in range(100):
-                            visible = native_window.evaluate_js("Boolean(document.querySelector('#shutdown-overlay[open]'))")
-                            if visible:
-                                break
-                            sleep(0.01)
-                        assert visible, "Confirmed Quit did not paint its shutdown overlay"
+                        from e2e_tests.native_application_probe import evaluate_async  # pylint: disable=import-outside-toplevel
+                        assert evaluate_async(native_window,
+                            "waitForDomState(() => Boolean(document.querySelector('#shutdown-overlay[open]')), 'shutdown overlay').then(() => true)")
                         assert native_window.evaluate_js("document.querySelector('#shutdown-overlay').textContent") == "Shutting down…"
                         backdrop = native_window.evaluate_js("getComputedStyle(document.querySelector('#shutdown-overlay'), '::backdrop').backgroundColor")
                         (root / f"overlay-backdrop-{native_window.uid}").write_text(str(backdrop))

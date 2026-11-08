@@ -206,6 +206,8 @@ pst-input-check:
 	@test -n "$$PST" || { echo "usage: make pst-import PST='/path/archive.pst' (or make pst-smoke PST=...)" >&2; exit 2; }
 	@test -f "$$PST" -a -r "$$PST" || { printf 'PST must be a readable file: %s\n' "$$PST" >&2; exit 2; }
 
+# MAILARCHIVER_PST_ACTIVITY_FILE optionally creates a private eight-byte work snapshot;
+# the application sets its own per-run path. Existing paths are never overwritten.
 pst-import: pst-input-check
 	@$(MAKE) --no-print-directory pst-importer >&2
 	@"$(RUST_TARGET_DIR)/release/pst-importer$(RUST_EXE_SUFFIX)" $(ARGS) -- "$$PST"

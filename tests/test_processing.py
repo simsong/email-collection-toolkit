@@ -11,6 +11,7 @@ from pathlib import Path
 
 import pytest
 
+from mailarchiver.file_events import wait_for_path_state
 from mailarchiver.processing.api import RAW_MESSAGE, ProcessingObject
 from mailarchiver.processing.registry import fingerprint, load_processors
 from mailarchiver.processing.runtime import run
@@ -119,7 +120,7 @@ def test_message_and_import_aborts(tmp_path: Path, outcome: str) -> None:
 def test_timeout_rejects_result_and_retry_reuses_checkpoint(tmp_path: Path) -> None:
     """Deadline blocks publication and previous successful rank is reused."""
     plugin(tmp_path, "first", 'return ProcessingResult()')
-    plugin(tmp_path, "slow", 'time.sleep(10)\nreturn ProcessingResult()', rank=2, timeout=0.2)
+    plugin(tmp_path, "slow", '__import__("threading").Event().wait(item.remaining_seconds)\nreturn ProcessingResult()', rank=2, timeout=0.2)
     plugins = load_processors((tmp_path,))
     with connect(tmp_path / "archive", create=True) as database:
         submit(database, tmp_path / "archive", MESSAGE, fingerprint(plugins))
@@ -293,15 +294,13 @@ def test_mime_tokens_are_validated_before_plugin_execution(tmp_path: Path, conte
 
 
 def test_timeout_cannot_write_late_result(tmp_path: Path) -> None:
-    import time
     # PROCESSING: portable workers must check cancellation before side effects.
-    plugin(tmp_path, "late", 'time.sleep(1)\nitem.check_cancelled()\n(item.archive.path / "late-write").write_text("bad")\nreturn ProcessingResult()', timeout=0.3)
+    plugin(tmp_path, "late", '__import__("threading").Event().wait(item.remaining_seconds)\nitem.check_cancelled()\n(item.archive.path / "late-write").write_text("bad")\nreturn ProcessingResult()', timeout=0.3)
     plugins = load_processors((tmp_path,))
     archive = tmp_path / "archive"
     with connect(archive, create=True) as database:
         submit(database, archive, MESSAGE, fingerprint(plugins))
         assert run(database, plugins).failed == 1
-        time.sleep(1.1)
         assert not (archive / "late-write").exists()
 
 
@@ -354,16 +353,10 @@ def test_cli_interrupt_exits_host_and_resumes_completed_rank(tmp_path: Path) -> 
     """Real SIGINT must release the lease and retry only interrupted invocations."""
     import os
     import signal
-    import time
     from mailarchiver.processing.api import RunReport
 
     plugin(tmp_path, "first", 'return ProcessingResult()')
-    plugin(tmp_path, "interrupt", 'marker = item.archive.path / "worker-pid"\n'
-           'if not marker.exists():\n'
-           '    marker.write_text(str(__import__("os").getpid()))\n'
-           '    time.sleep(30)\n'
-           '    (item.archive.path / "late-write").write_text("bad")\n'
-           'return ProcessingResult()', rank=2)
+    plugin(tmp_path, "interrupt", 'marker = item.archive.path / "worker-pid"\nif not marker.exists():\n    marker.write_text(str(__import__("os").getpid()))\n    __import__("threading").Event().wait()\n    (item.archive.path / "late-write").write_text("bad")\nreturn ProcessingResult()', rank=2)
     archive = tmp_path / "archive"
     plugins = load_processors((tmp_path,))
     database = connect(archive, create=True)
@@ -373,12 +366,8 @@ def test_cli_interrupt_exits_host_and_resumes_completed_rank(tmp_path: Path) -> 
                "--plugin-dir", str(tmp_path), "run"]
     with subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True) as process:
         try:
-            deadline = time.monotonic() + 15
             marker = archive / "worker-pid"
-            while not marker.exists() or not marker.read_text():
-                assert process.poll() is None
-                assert time.monotonic() < deadline
-                time.sleep(0.01)
+            wait_for_path_state([marker], lambda: marker.exists() and bool(marker.read_text()), timeout=15)
             worker_pid = int(marker.read_text())
             assert worker_pid == process.pid  # Plugin runs in its CLI host, not a child Python process.
             process.send_signal(signal.SIGINT)
@@ -533,18 +522,12 @@ def test_signature_phone_lists_keep_both_numbers_and_internal_slashes(separator:
 
 def test_parallel_dispatch_drains_independent_messages_with_one_global_budget(tmp_path: Path) -> None:
     """PROCESSING: concurrent consumers preserve message barriers, exactly-once claims and global limits."""
-    plugin(tmp_path, "gate", 'marker = item.archive.path / ("entered-" + item.message_id)\n'
-           'marker.touch()\n'
-           'while len(list(item.archive.path.glob("entered-*"))) < 2:\n'
-           '    item.check_cancelled()\n    time.sleep(0.01)\n'
-           'return ProcessingResult(emissions=tuple(Emission(content_ref=item.content_ref, '
-           'content_type="text/plain", part_path=(part,)) for part in (1, 2)))', emits='"text/plain"', timeout=5)
-    plugin(tmp_path, "child", 'active = item.archive.path / ("active-" + item.message_id)\n'
-           'with active.open("x"):\n    time.sleep(0.01)\n'
-           'active.unlink()\nreturn ProcessingResult()', subscribes="text/plain")
+    plugin(tmp_path, "gate", 'marker = item.archive.path / ("entered-" + item.message_id)\nmarker.touch()\nitem.wait_for_files((item.archive.path,), lambda: not (len(list(item.archive.path.glob("entered-*"))) < 2))\nreturn ProcessingResult(emissions=tuple(Emission(content_ref=item.content_ref, content_type="text/plain", part_path=(part,)) for part in (1, 2)))', emits='"text/plain"', timeout=5)
+    plugin(tmp_path, "child", 'return ProcessingResult()', subscribes="text/plain")
     plugins = load_processors((tmp_path,))
     archive = tmp_path / "archive"
     active: set[int] = set()
+    active_messages: set[str] = set()
     finished: list[int] = []
     peak = 0
     owner_thread = threading.get_ident()
@@ -562,7 +545,11 @@ def test_parallel_dispatch_drains_independent_messages_with_one_global_budget(tm
                 assert item.job_id not in finished
                 finished.append(item.job_id)
                 active.remove(item.job_id)
+                active_messages.remove(item.message_id)
             else:
+                if item.job_id not in active:
+                    assert item.message_id not in active_messages
+                    active_messages.add(item.message_id)
                 active.add(item.job_id)
                 peak = max(peak, len(active))
                 assert database.execute("SELECT count(*) FROM jobs child JOIN jobs parent "
@@ -584,8 +571,7 @@ def test_parallel_dispatch_drains_independent_messages_with_one_global_budget(tm
 def test_parallel_cancellation_retains_checkpoints_and_clears_each_worker(tmp_path: Path) -> None:
     """PROCESSING: cancelling concurrent invocations leaves retries without repeating completed ranks."""
     plugin(tmp_path, "first", 'return ProcessingResult()')
-    plugin(tmp_path, "gate", 'while not (item.archive.path / "resume").exists():\n'
-           '    item.check_cancelled()\n    time.sleep(0.01)\nreturn ProcessingResult()', rank=2, timeout=5)
+    plugin(tmp_path, "gate", 'item.wait_for_files((item.archive.path,), lambda: not (not (item.archive.path / "resume").exists()))\nreturn ProcessingResult()', rank=2, timeout=5)
     plugins = load_processors((tmp_path,))
     archive = tmp_path / "archive"
     stop = threading.Event()
@@ -625,13 +611,7 @@ def test_parallel_import_stop_preserves_inflight_checkpoints_and_blocks_remainin
     tmp_path: Path, continue_after_failure: bool, later_rank: int,
 ) -> None:
     """PROCESSING: fail-import stops new invocations while preserving another worker's completed checkpoint."""
-    plugin(tmp_path, "gate", 'if item.content_ref.path.read_bytes().startswith(b"blocked"):\n'
-           '    while not (item.archive.path / "healthy-entered").exists():\n'
-           '        item.check_cancelled()\n        time.sleep(0.01)\n'
-           '    return ProcessingResult(outcome="fail-import")\n'
-           '(item.archive.path / "healthy-entered").touch()\n'
-           'while not (item.archive.path / "release-healthy").exists():\n'
-           '    item.check_cancelled()\n    time.sleep(0.01)\nreturn ProcessingResult()', timeout=5)
+    plugin(tmp_path, "gate", 'if item.content_ref.path.read_bytes().startswith(b"blocked"):\n    item.wait_for_files((item.archive.path,), lambda: not (not (item.archive.path / "healthy-entered").exists()))\n    return ProcessingResult(outcome="fail-import")\n(item.archive.path / "healthy-entered").touch()\nitem.wait_for_files((item.archive.path,), lambda: not (not (item.archive.path / "release-healthy").exists()))\nreturn ProcessingResult()', timeout=5)
     plugin(tmp_path, "later", 'with (item.archive.path / ("later-" + item.message_id)).open("x"):\n'
            '    pass\nreturn ProcessingResult()', rank=later_rank)
     plugins = load_processors((tmp_path,))

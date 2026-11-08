@@ -9,8 +9,12 @@ import signal
 import subprocess
 import sys
 from concurrent.futures import ThreadPoolExecutor
+from multiprocessing import get_context
+from multiprocessing.synchronize import Event as ProcessEvent
+from threading import Event
+import tempfile
 from pathlib import Path
-from time import monotonic, sleep
+from tests.process_output import assert_process_exited
 
 import pytest
 
@@ -28,13 +32,7 @@ def test_scanner_exits_with_owner_during_blocked_native_scan(tmp_path: Path) -> 
     try:
         assert run_quit_probe(tmp_path, "scanner") < 2
         pid = int((tmp_path / "scanner-pid").read_text())
-        deadline = monotonic() + 5
-        while monotonic() < deadline:
-            state = subprocess.run(["ps", "-o", "stat=", "-p", str(pid)], capture_output=True, text=True, check=False).stdout.strip()
-            if not state or state.startswith("Z"):
-                return
-            sleep(0.05)
-        pytest.fail("native scanner survived its owner's immediate process exit")
+        assert_process_exited(pid)
     finally:
         if (tmp_path / "scanner-pid").exists():
             try:
@@ -77,6 +75,10 @@ def test_scanner_duplex_backpressure_does_not_block_result_delivery(tmp_path: Pa
     """SCANNING: saturated request/response pipes still drain tracked scan futures."""
     # An external deadline also bounds a blocked send before the per-scan timer.
     program = """from concurrent.futures import ThreadPoolExecutor
+from multiprocessing import get_context
+from multiprocessing.synchronize import Event as ProcessEvent
+from threading import Event
+import tempfile
 from threading import Barrier
 from mailarchiver.scanner import ClamScanner
 
@@ -206,3 +208,57 @@ def test_api_headers_route_without_host_scanner(tmp_path: Path, infected: bool) 
         assert result.scan.engine_version is None and result.scan.signature_version is None
         assert result.filing is None
     assert path.read_bytes() == raw
+
+
+def _hold_worker_during_teardown(ready: ProcessEvent, terminating: ProcessEvent, release: ProcessEvent) -> None:
+    """Keep a real worker alive after acknowledging termination until explicitly released."""
+    signal.signal(signal.SIGTERM, lambda *_: terminating.set())
+    ready.set()
+    assert release.wait(15), "teardown fixture did not release its worker"
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX acknowledged SIGTERM fixture")
+def test_concurrent_scanner_teardowns_retain_runtime_until_the_worker_exits(tmp_path: Path) -> None:
+    """SCANNING: an empty detached process slot must not let another closer free live resources."""
+    context = get_context("spawn")
+    ready, terminating, release = context.Event(), context.Event(), context.Event()
+    worker = context.Process(target=_hold_worker_during_teardown, args=(ready, terminating, release))
+    scanner = ClamScanner()
+    scanner.runtime = tempfile.TemporaryDirectory(dir=tmp_path)
+    runtime = Path(scanner.runtime.name)
+    scanner.process = worker
+    second_started = Event()
+
+    def close_second() -> None:
+        second_started.set()
+        scanner.__exit__()
+        assert not worker.is_alive(), "concurrent cleanup returned while its worker survived"
+        assert scanner.runtime is None and not runtime.exists()
+
+    worker.start()
+    try:
+        assert ready.wait(5), "teardown worker did not start"
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            first = executor.submit(scanner.__exit__)
+            try:
+                assert terminating.wait(5), "first closer did not request termination"
+                # Observe actual exclusive teardown ownership, not a guessed overlap duration.
+                acquired = scanner.close_lock.acquire(blocking=False)
+                if acquired:
+                    scanner.close_lock.release()
+                assert not acquired, "teardown did not retain exclusive ownership while joining"
+                assert worker.is_alive() and runtime.is_dir() and scanner.runtime is not None
+                second = executor.submit(close_second)
+                assert second_started.wait(5), "second closer did not start"
+            finally:
+                release.set()
+            first.result(timeout=10)
+            second.result(timeout=10)
+        assert scanner.process is None and scanner.runtime is None and not runtime.exists()
+    finally:
+        release.set()
+        if worker.is_alive():
+            worker.kill()
+        worker.join(timeout=5)
+        scanner.__exit__()
+        worker.close()

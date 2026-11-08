@@ -25,6 +25,7 @@ from typing import Any, Literal, TYPE_CHECKING
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from .mbox_framing import MboxNormalization, is_complete_envelope
+from .change_signal import ChangeEvent
 
 if TYPE_CHECKING:
     from .plugin_configuration import ConfigScope, ConfigValues, ReadScope
@@ -290,11 +291,14 @@ class LoadedPlugin(FrozenModel):
 class PluginContext(FrozenModel):
     """Read-only framework services supplied while constructing a source plug-in."""
 
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+
     files: tuple[LoadedPlugin, ...] = ()
     archive: Path | None = None
     installation_config: Path | None = None
     plugin_name: str | None = None
     scan_policy: Literal["clamav", "not-scanned"] = "not-scanned"
+    cancellation: ChangeEvent | None = Field(default=None, exclude=True)
 
     def get_my_config(self, *, scope: ReadScope = "effective") -> ConfigValues:
         from .plugin_configuration import read_plugin_configuration

@@ -29,6 +29,9 @@ The canonical mailarchiver directory is a native
 [Mailbag 1.0](https://archives.albany.edu/mailbag/spec/) profile. The archive is
 appendable working storage, so its manifests describe the last published
 checkpoint rather than promising that the directory is immutable.
+An unrelated non-mail file left under `data/` produces a warning and is excluded
+from new email payload manifests. Email checks can pass with this warning;
+strict external BagIt completeness checks may still report the unlisted file.
 
 This program is under development. Only the layout and integrity formats in
 this document are supported; there is no legacy root-level MBOX layout or
@@ -336,7 +339,7 @@ Tag-File-Character-Encoding: UTF-8
 
 It is UTF-8 without a byte-order mark and uses LF line endings.
 
-`manifest-sha256.txt` lists every regular payload file exactly once. Entries
+`manifest-sha256.txt` lists every canonical email payload file exactly once. Entries
 use lowercase SHA-256, two spaces, a path relative to the bag root, and LF:
 
 ```text
@@ -346,8 +349,10 @@ use lowercase SHA-256, two spaces, a path relative to the bag root, and LF:
 The slash is the path separator. Percent, CR, and LF in pathnames use the
 BagIt `%25`, `%0D`, and `%0A` encodings. Mailarchiver-generated payload names
 do not contain those characters, but the validator implements the BagIt rule.
-Absolute paths, `..`, symlinks, missing files, duplicate entries, unlisted
-payload files, and non-payload paths are errors.
+Absolute paths, `..`, symlinks, missing declared files, duplicate entries,
+unlisted canonical MBOX files, and non-payload manifest paths are errors.
+Extra regular non-mail files, including editor backups, are warning-only and
+left untouched. Their bytes are not incorporated into email preservation records.
 
 `tagmanifest-sha256.txt` is generated last. It uses the same grammar and
 hashes:
@@ -668,6 +673,8 @@ It is strictly read-only. It validates:
 Unknown required standards or algorithms cause a nonzero result. A validator
 must never report unqualified success after checking only the BagIt layer or
 only some declared message hashes.
+Extra-file warnings do not conceal declared-file mismatches. Warning-only runs
+return zero and explicitly qualify success as email integrity with warnings.
 
 The checked-in `tests/data/three-message-mailbag/` fixture contains three
 messages, including a MIME attachment. It is a complete database-independent

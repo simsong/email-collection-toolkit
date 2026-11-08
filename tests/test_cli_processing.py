@@ -12,11 +12,11 @@ import re
 import sqlite3
 import subprocess
 import sys
-import time
 from pathlib import Path
 
 import pytest
 
+from mailarchiver.file_events import wait_for_path_state
 from mailarchiver.layout import mbox_directory
 from mailarchiver.standalone_verify import verify_archive
 from mailarchiver.pst_source import ImportActivity, ImportReceipt, PstSettings
@@ -32,6 +32,16 @@ from mailarchiver.document_options import DocumentOptions
 from mailarchiver.owner_rules import OwnerRules
 from mailarchiver.writer_lock import WriterLease
 from tests.test_end_to_end import mailbox_message_bytes
+
+
+def test_pst_activity_counter_renews_without_growing_output() -> None:
+    """ACQUISITION: fixed-size progress changes renew liveness; repeated counters do not."""
+    activity = ImportActivity(deadline=60)
+    assert not activity.observe(20, (0, 0), 60, work_counter=1)
+    assert activity.deadline == 80
+    assert not activity.observe(75, (0, 0), 60, work_counter=2)
+    assert activity.deadline == 135
+    assert activity.observe(135, (0, 0), 60, work_counter=2)
 
 
 def cli(archive: Path, *arguments: str, timeout: float = 60) -> subprocess.CompletedProcess[str]:
@@ -60,6 +70,18 @@ def ingest(tmp_path: Path, raw: bytes, *arguments: str) -> tuple[Path, Path]:
 HEADER = (b"From: Sender <sender@lab.example.ac.uk>\r\nTo: owner@example.test\r\n"
           b"Date: Tue, 02 Jan 2024 10:00:00 +0000\r\nMessage-ID: <parent@example.test>\r\n"
           b"Subject: Parent\r\nMIME-Version: 1.0\r\n")
+
+
+def test_cli_extra_archive_file_warns_and_completes_import(tmp_path: Path) -> None:
+    """ARCHIVE: a real CLI import exits successfully with a warning and never changes an editor backup."""
+    archive, source = ingest(tmp_path, HEADER + b"\r\noriginal\r\n")
+    extra = archive / "data/mbox/#INFECTED1.mbox#"
+    extra.write_bytes(b"synthetic editor backup\n")
+    result = cli(archive, "ingest", "--no-scan", str(source))
+    assert "Warning: Extra file detected: data/mbox/#INFECTED1.mbox#" in result.stderr
+    assert "Traceback" not in result.stderr
+    assert extra.read_bytes() == b"synthetic editor backup\n"
+    assert "#INFECTED1.mbox#" not in (archive / "manifest-sha256.txt").read_text(encoding="utf-8")
 
 
 @pytest.mark.parametrize("relationship", ["source-is-destination", "source-parent", "source-child", "symlink"])
@@ -106,7 +128,7 @@ def test_pst_supervisor_kills_silent_producer_and_retains_receipt(tmp_path: Path
         "# It uses only pytest-owned files and never changes a mail store.\n"
         "import os\nfrom pathlib import Path\nimport time\n"
         "Path(__file__).with_suffix('.pid').write_text(str(os.getpid()), encoding='ascii')\n"
-        "time.sleep(60)\n"
+        "__import__('threading').Event().wait()\n"
         "Path(__file__).with_suffix('.completed').write_text('natural exit', encoding='ascii')\n",
         encoding="utf-8")
     original = producer.read_bytes()
@@ -122,9 +144,7 @@ def test_pst_supervisor_kills_silent_producer_and_retains_receipt(tmp_path: Path
     with closing(events):
         assert isinstance(next(events), ProgressEvent)
         marker = producer.with_suffix(".pid")
-        deadline = time.monotonic() + 10
-        while (not marker.exists() or not marker.stat().st_size) and time.monotonic() < deadline:
-            time.sleep(0.01)
+        wait_for_path_state([marker], lambda: marker.exists() and bool(marker.stat().st_size), timeout=10)
         assert marker.exists() and marker.stat().st_size, "Configured producer did not start"
         pid = int(marker.read_text(encoding="ascii"))
         if sys.platform == "win32":
@@ -435,6 +455,8 @@ def test_cli_pst_partial_import_preserves_evidence_and_valid_records(tmp_path: P
         assert receipt.source_sha256 == hashlib.sha256(fixture.read_bytes()).hexdigest()
         assert path.with_name("output.mboxrd").exists()
         assert "errors=2" in path.with_name("stderr.txt").read_text()
+        counter = path.with_name("activity.bin").read_bytes()
+        assert len(counter) == 8 and int.from_bytes(counter, "little") > 0
     cli(archive, "process", "--phase", "content")
     assert source.read_bytes() == fixture.read_bytes()
     assert not verify_archive(archive)

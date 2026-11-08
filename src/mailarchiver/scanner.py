@@ -21,7 +21,7 @@ import signal
 import tempfile
 import time
 from collections.abc import Callable
-from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait as wait_for_scans
+from concurrent.futures import Future, ThreadPoolExecutor
 from contextlib import AbstractContextManager
 from datetime import UTC, datetime
 from multiprocessing.connection import wait
@@ -33,6 +33,8 @@ from uuid import uuid4
 
 from pydantic import BaseModel, Field
 
+from .change_signal import ChangeSignal, await_activity
+from queue import SimpleQueue, Empty
 from .clamav_definitions import DefinitionSet, definition_selection, library_path, selected_definitions, three_months_after
 from .libclamav import Engine, engine_version
 from .scan_evidence import ScanEvidence, ScanFailure
@@ -120,24 +122,48 @@ def engine_worker(connection: ScannerConnection, library: Path, definitions: Def
                 evidence = ScanEvidence(status="scanner-error", detail=f"{type(error).__name__}: {error}",
                                         engine_version=engine.version, signature_version=definitions.versions)
             return ScanResponse(request_id=request.request_id, evidence=evidence)
+        requests: SimpleQueue[ScanRequest | None | BaseException] = SimpleQueue()
+        changed = ChangeSignal()
+
+        def receive_requests() -> None:
+            try:
+                while True:
+                    request = connection.recv()
+                    if request is not None and not isinstance(request, ScanRequest):
+                        raise ValueError("Invalid scanner request")
+                    requests.put(request)
+                    changed.notify()
+                    if request is None:
+                        return
+            except BaseException as error:
+                requests.put(error)
+                changed.notify()
+
+        Thread(target=receive_requests, name="libclamav-requests", daemon=True).start()
         with ThreadPoolExecutor(max_workers=workers, thread_name_prefix="libclamav") as pool:
             pending: set[Future[ScanResponse]] = set()
             accepting = True
             while accepting or pending:
-                if accepting and (not pending or connection.poll(0.01)):
-                    request = connection.recv()
+                ready = changed.ready
+                while accepting:
+                    try:
+                        request = requests.get_nowait()
+                    except Empty:
+                        break
                     if request is None:
                         accepting = False
-                    elif isinstance(request, ScanRequest):
-                        pending.add(pool.submit(scan, request))
+                    elif isinstance(request, BaseException):
+                        raise request
                     else:
-                        raise ValueError("Invalid scanner request")
-                completed = {future for future in pending if future.done()}
-                if not accepting and pending and not completed:
-                    completed, _running = wait_for_scans(pending, return_when=FIRST_COMPLETED)
-                for future in completed:
-                    pending.remove(future)
-                    connection.send(future.result())
+                        future = pool.submit(scan, request)
+                        pending.add(future)
+                        future.add_done_callback(lambda _future: changed.notify())
+                for future in tuple(pending):
+                    if future.done():
+                        pending.remove(future)
+                        connection.send(future.result())
+                if accepting or pending:
+                    ready.result()
     except (EOFError, BrokenPipeError):
         pass
     except Exception as error:
@@ -183,8 +209,10 @@ class ClamScanner(AbstractContextManager["ClamScanner"]):
         self.connection: ScannerConnection | None = None
         self.lock = RLock()
         self.send_lock = RLock()
+        self.close_lock = RLock()
         self.pending: dict[str, Future[ScanEvidence]] = {}
         self.reader: Thread | None = None
+        self.startup_reader: Thread | None = None
         self.runtime: tempfile.TemporaryDirectory[str] | None = None
         self.evidence = ScanEvidence(status="not-scanned")
 
@@ -222,17 +250,30 @@ class ClamScanner(AbstractContextManager["ClamScanner"]):
 
     def _receive(self, deadline: float, *, startup: bool = False) -> ScanEvidence:
         assert self.connection is not None
+        if startup:
+            received: Future[ScanEvidence] = Future()
+
+            def receive() -> None:
+                try:
+                    received.set_result(self._receive(deadline))
+                except BaseException as error:
+                    received.set_exception(error)
+
+            self.startup_reader = Thread(target=receive, name="clamav-startup-result", daemon=True)
+            self.startup_reader.start()
+            try:
+                return await_activity(received, self.status_callback, max(0, deadline - time.monotonic()))
+            except TimeoutError as error:
+                raise TimeoutError("ClamAV startup timed out") from error
         while True:
             remaining = deadline - time.monotonic()
             if remaining <= 0:
                 raise TimeoutError("ClamAV startup timed out" if startup else "ClamAV scan timed out")
-            if self.connection.poll(min(remaining, 0.25)):
+            if self.connection.poll(remaining):
                 result = self.connection.recv()
                 if not isinstance(result, ScanEvidence):
                     raise RuntimeError("Invalid native scanner response")
                 return result
-            if startup and self.status_callback is not None:
-                self.status_callback()
             if self.process is None or not self.process.is_alive():
                 raise RuntimeError("ClamAV worker exited without a result")
 
@@ -296,6 +337,16 @@ class ClamScanner(AbstractContextManager["ClamScanner"]):
         return evidence.status == "infected"
 
     def __exit__(self, *_: object) -> None:
+        # Detaching a local process is not completion: concurrent failures must
+        # join this entire teardown before they can release its runtime.
+        if not self.close_lock.acquire(timeout=15):
+            raise TimeoutError("Concurrent ClamAV teardown did not finish")
+        try:
+            self._close_owned_resources()
+        finally:
+            self.close_lock.release()
+
+    def _close_owned_resources(self) -> None:
         with _SESSIONS_LOCK:
             _SESSIONS.pop(self.session, None)
         with self.lock:
@@ -303,21 +354,39 @@ class ClamScanner(AbstractContextManager["ClamScanner"]):
             connection, self.connection = self.connection, None
             pending = tuple(self.pending.values())
             self.pending.clear()
+        cleanup_errors: list[Exception] = []
         if process is not None:
-            if process.is_alive():
-                process.terminate()
-            process.join(timeout=5)
-            if process.is_alive():
-                process.kill()
+            try:
+                if process.is_alive():
+                    process.terminate()
                 process.join(timeout=5)
+                if process.is_alive():
+                    process.kill()
+                    process.join(timeout=5)
+                if process.is_alive():
+                    raise TimeoutError("ClamAV worker did not stop after termination")
+            except Exception as error:  # pylint: disable=broad-exception-caught
+                cleanup_errors.append(error)
+                if process.is_alive():
+                    with self.lock:
+                        self.process = process
         if connection is not None:
             connection.close()
         for future in pending:
             if not future.done():
                 future.set_exception(RuntimeError("ClamAV session ended before scan completion"))
+        if self.startup_reader is not None and self.startup_reader is not current_thread():
+            self.startup_reader.join(timeout=5)
+            if self.startup_reader.is_alive():
+                raise TimeoutError("ClamAV startup result reader did not stop")
         if self.reader is not None and self.reader is not current_thread():
             self.reader.join(timeout=5)
-        self.reader = None
-        if self.runtime is not None:
+            if self.reader.is_alive():
+                cleanup_errors.append(TimeoutError("ClamAV response reader did not stop"))
+            else:
+                self.reader = None
+        if self.runtime is not None and self.process is None and (self.reader is None or self.reader is current_thread()):
             self.runtime.cleanup()
             self.runtime = None
+        if cleanup_errors:
+            raise ExceptionGroup("ClamAV session shutdown failed; live resources retained", cleanup_errors)

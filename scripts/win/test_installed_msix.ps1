@@ -98,25 +98,14 @@ try {
             $guiPid=[ECTActivation]::Launch($appId, ('--archive "'+$archive+'"'))
             $process=Get-Process -Id $guiPid
             try {
-                $deadline=[DateTime]::UtcNow.AddSeconds(45)
-                do {
-                    Start-Sleep -Milliseconds 500
-                    $process.Refresh()
-                    if ($process.HasExited) { throw 'Installed GUI exited before opening a window' }
-                } until ($process.MainWindowHandle -ne 0 -or [DateTime]::UtcNow -gt $deadline)
-                if ($process.MainWindowHandle -eq 0) { throw 'Installed GUI did not open a native window' }
+                [void][ECTNativeMenu]::WaitForWindow($guiPid,45000)
+                $process.Refresh()
                 $process.MainWindowTitle | Set-Content (Join-Path $evidence "$kind-$closeAction-window.txt")
                 if ($closeAction -eq 'close') {
                     if (-not $process.CloseMainWindow()) { throw 'Installed GUI rejected ordinary Close' }
                 } else {
                     # WinForms MenuStrip exposes MSAA even when UIA omits its items.
-                    $invoked=$false
-                    $quitDeadline=[DateTime]::UtcNow.AddSeconds(10)
-                    do {
-                        $invoked=[ECTNativeMenu]::InvokeQuit($process.MainWindowHandle)
-                        if (-not $invoked) { Start-Sleep -Milliseconds 100 }
-                    } until ($invoked -or [DateTime]::UtcNow -gt $quitDeadline)
-                    if (-not $invoked) { throw 'Installed Python GUI File/Quit command is missing' }
+                    [ECTNativeMenu]::WaitAndInvokeQuit($guiPid,$process.MainWindowHandle,10000)
                 }
                 if (-not $process.WaitForExit(15000)) { throw 'Installed GUI did not quit' }
             } finally { if (-not $process.HasExited) { $process.Kill(); $process.WaitForExit() } }

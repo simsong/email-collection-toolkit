@@ -67,7 +67,7 @@ def test_quit_waits_for_archive_creation(tmp_path: Path, monkeypatch: pytest.Mon
     try:
         assert entered.wait(3)
         app.request_quit(confirm_ingest=False)
-        assert not exited.wait(0.1), "Quit exited between database initializations"
+        assert not exited.is_set(), "Quit exited between database initializations"
     finally:
         release.set()
         worker.join(3)
@@ -129,7 +129,7 @@ def test_quit_waits_for_explicit_save(tmp_path: Path, monkeypatch: pytest.Monkey
     try:
         assert entered.wait(3)
         app.request_quit(confirm_ingest=False)
-        assert not exited.wait(0.1), "Quit exited before atomic export replacement"
+        assert not exited.is_set(), "Quit exited before atomic export replacement"
     finally:
         release.set()
         worker.join(3)
@@ -167,7 +167,7 @@ def test_cancel_quit_with_contended_state(tmp_path: Path, monkeypatch: pytest.Mo
     def hold() -> None:
         with lock:
             entered.set()
-            release.wait(3)
+            assert release.wait(3), "writer fixture release deadline expired"
 
     worker = Thread(target=hold)
     worker.start()
@@ -223,7 +223,7 @@ def test_quit_waits_for_filter_preferences(tmp_path: Path, monkeypatch: pytest.M
     try:
         assert entered.wait(3)
         app.request_quit(confirm_ingest=False)
-        assert not exited.wait(0.1)
+        assert not exited.is_set()
     finally:
         release.set()
         worker.join(3)

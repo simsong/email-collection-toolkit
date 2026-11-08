@@ -78,6 +78,8 @@ class LoopbackAssetServer:
         with self._lock:
             self._tickets.clear()
         self._session = ""
+        if self._thread.is_alive():
+            raise TimeoutError("GUI asset server did not stop")
 
     def _get(self, request: BaseHTTPRequestHandler, *, head: bool = False) -> None:
         if request.headers.get("Host") != self.authority:

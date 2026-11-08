@@ -151,10 +151,18 @@ directory, and a `data/mbox/` payload directory.
   `h2` as SHA-256 over each recovered original RFC 5322 message, and `h3` as
   SHA-256 over semantic-message standard version 1. Its TSV region records
   ordered message identifiers and tagged `h2:` and `h3:` digests.
-* `manifest-sha256.txt` lists every payload file exactly once. Its MBOX digest
+* `manifest-sha256.txt` lists every canonical email payload file exactly once. Its MBOX digest
   equals that file's `h1` digest. `tagmanifest-sha256.txt` hashes the BagIt and
   Mailbag metadata, every integrity tag, the payload manifest, and the
   installed validator; it is published last.
+* Extra regular non-mail files under `data/`, including editor backup files in
+  `data/mbox/`, are left untouched and reported as **Extra file detected** warnings.
+  They do not fail imports or email integrity checks and are excluded from new
+  payload manifests and payload totals. Removing or changing such an unlisted
+  file must not invalidate preserved email. This tolerance does not certify a
+  directory with unlisted extras as strictly complete BagIt; external BagIt
+  validators may still report them. Missing/changed declared payloads, invalid
+  metadata and symlinks retain their error behavior.
 * `mailbag.csv` has one row per canonical message and uses a stable,
   case-insensitively unique Mailbag Message ID derived from the normalized
   Message-ID and raw SHA-256. It records the containing MBOX and MIME attachment
@@ -400,7 +408,8 @@ table also stores explicitly labeled non-email Google Chat identities.
   standard-library-only tool is strictly read-only: it verifies BagIt payload
   and tag manifests, required Mailbag structure, and every declared
   complete-MBOX, raw-message, and semantic-message digest without consulting
-  SQLite. It exits nonzero after reporting any mismatch.
+  SQLite. It exits nonzero after reporting any integrity mismatch; extra non-mail
+  files produce warnings with exit status zero when email integrity passes.
   Its source header and `--help` explain prerequisites, macOS/Linux and Windows
   commands, the default archive directory, checks performed, exit status, and
   read-only limitations. Instructions travel with every installed copy.

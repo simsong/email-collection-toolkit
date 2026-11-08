@@ -26,7 +26,7 @@ from types import FrameType
 from typing import Literal
 from uuid import uuid4
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 import pytest
 
 PROFILE_TESTS = ("test_gui_stop_checkpoints_partial_import_and_reimport_has_no_duplicates",
@@ -108,6 +108,15 @@ class _ThreadState(threading.local):
         self.timings: ThreadTimings | None = None
 
 
+class StackSample(BaseModel):
+    """Completed stack-file publication, ordered independently of wall-clock time."""
+
+    number: int
+    started_seconds: float
+    finished_seconds: float
+    threads: int
+
+
 class DiagnosticReport(BaseModel):
     test: str
     process_id: int
@@ -120,6 +129,8 @@ class DiagnosticReport(BaseModel):
     phases: list[Measurement]
     threads: list[ThreadTimings]
     stack_sampler_stopped: bool
+    stack_samples: list[StackSample] = Field(default_factory=list)
+    stack_sampler_error: str | None = None
     limitation: str = ("Profiles include overlapping/nested wall time; do not sum cumulative entries. "
                       "CPU/I/O counters exclude child processes; profiling adds overhead. "
                       "Only the caller and subsequently started threading workers are timed. "
@@ -133,18 +144,21 @@ _active: list[ProfileSession] = []
 class ProfileSession:
     """Own and restore diagnostic hooks for one explicitly selected test call."""
 
-    def __init__(self, directory: Path, nodeid: str, *, stack_interval: float = 30) -> None:
+    def __init__(self, directory: Path, nodeid: str) -> None:
         name = hashlib.sha256(nodeid.encode()).hexdigest()[:12]
         self.directory = directory / f"{os.getpid()}-{name}-{uuid4().hex[:8]}"
         self.nodeid = nodeid
-        self.stack_interval = stack_interval
-        if stack_interval <= 0:
-            raise ValueError("Stack sampling interval must be positive")
         self.stop = threading.Event()
         self.sampler: threading.Thread | None = None
         self.threads: list[ThreadTimings] = []
         self.local = _ThreadState()
         self.lock = threading.RLock()
+        self.report_lock = threading.Lock()
+        self.sample_changed = threading.Condition(self.lock)
+        self.samples_started = 0
+        self.samples_requested = 0
+        self.stack_samples: list[StackSample] = []
+        self.stack_sampler_error: str | None = None
         self.closed = False
         self.phases: list[Measurement] = []
         self.current_phase: str | None = None
@@ -219,35 +233,84 @@ class ProfileSession:
                            io=current.since(prior_io) if current is not None and prior_io is not None else None)
 
     def write_report(self, state: Literal["running", "passed", "failed"]) -> None:
-        with self.lock:
-            if self.closed and state == "running":
-                return
-            report = DiagnosticReport(test=self.nodeid.split("[", 1)[0], process_id=os.getpid(), python=platform.python_version(),
-                platform=platform.platform(), cpus=os.cpu_count(), state=state, current_phase=self.current_phase,
-                total=self.measurement("test", self.started, self.cpu_started, self.io_started),
-                phases=self.phases, threads=self.threads,
-                stack_sampler_stopped=self.sampler is None or not self.sampler.is_alive())
-            (self.directory / "report.json").write_text(report.model_dump_json(indent=2) + "\n", encoding="utf-8")
+        # Serialize publishers without holding the profiler's data lock during disk I/O.
+        if not self.report_lock.acquire(timeout=5):
+            raise TimeoutError("CI diagnostic report publication did not finish")
+        try:
+            with self.lock:
+                if self.closed and state == "running":
+                    return
+                report = DiagnosticReport(test=self.nodeid.split("[", 1)[0], process_id=os.getpid(), python=platform.python_version(),
+                    platform=platform.platform(), cpus=os.cpu_count(), state=state, current_phase=self.current_phase,
+                    total=self.measurement("test", self.started, self.cpu_started, self.io_started),
+                    phases=self.phases, threads=self.threads, stack_samples=self.stack_samples,
+                    stack_sampler_error=self.stack_sampler_error,
+                    stack_sampler_stopped=self.sampler is None or not self.sampler.is_alive()).model_copy(deep=True)
+            temporary = self.directory / ".report.json.tmp"
+            temporary.write_text(report.model_dump_json(indent=2) + "\n", encoding="utf-8")
+            temporary.replace(self.directory / "report.json")
+        finally:
+            self.report_lock.release()
+
+    def wait_for_stack_sample(self, timeout: float) -> StackSample:
+        """Request a subsequent sample and acknowledge its publication; expiry is a failure."""
+        with self.sample_changed:
+            target = max(self.samples_started, self.samples_requested) + 1
+            self.samples_requested = target
+            self.sample_changed.notify_all()
+            ready = self.sample_changed.wait_for(
+                lambda: len(self.stack_samples) >= target or self.stack_sampler_error is not None or self.closed,
+                timeout=timeout,
+            )
+            if not ready:
+                raise TimeoutError("CI stack sampler did not publish the requested sample")
+            if self.stack_sampler_error is not None:
+                raise RuntimeError(f"CI stack sampler failed: {self.stack_sampler_error}")
+            if len(self.stack_samples) < target:
+                raise RuntimeError("CI diagnostics closed before publishing the requested sample")
+            return self.stack_samples[target - 1].model_copy(deep=True)
 
     def _sample_stacks(self) -> None:
         if sys.getprofile() == self._profile:
             sys.setprofile(None)
-        while not self.stop.wait(self.stack_interval):
-            self.write_report("running")
-            with (self.directory / "threads.txt").open("a", encoding="utf-8") as stacks:
+        try:
+            while True:
+                with self.sample_changed:
+                    self.sample_changed.wait_for(lambda: self.stop.is_set() or self.samples_requested > self.samples_started)
+                    if self.stop.is_set():
+                        return
+                    self.samples_started += 1
+                    number = self.samples_started
+                started = perf_counter() - self.started
                 # Avoid concurrent native traceback dumping with an external watchdog.
                 # Serialize code locations only, never frame locals or source lines.
-                for identity, frame in sys._current_frames().items():
-                    stacks.write(f"Thread 0x{identity:x} (most recent call first):\n")
-                    current: FrameType | None = frame
-                    depth = 0
-                    while current is not None and depth < 256:
-                        stacks.write(f"  File {current.f_code.co_filename!r}, line {current.f_lineno}, "
-                                     f"in {current.f_code.co_name}\n")
-                        current = current.f_back
-                        depth += 1
-                    if current is not None:
-                        stacks.write("  ... stack truncated at 256 frames\n")
+                frames = sys._current_frames()
+                try:
+                    with (self.directory / "threads.txt").open("a", encoding="utf-8") as stacks:
+                        stacks.write(f"Sample {number} started at {started:.6f}s:\n")
+                        for identity, frame in frames.items():
+                            stacks.write(f"Thread 0x{identity:x} (most recent call first):\n")
+                            current: FrameType | None = frame
+                            depth = 0
+                            while current is not None and depth < 256:
+                                stacks.write(f"  File {current.f_code.co_filename!r}, line {current.f_lineno}, "
+                                             f"in {current.f_code.co_name}\n")
+                                current = current.f_back
+                                depth += 1
+                            if current is not None:
+                                stacks.write("  ... stack truncated at 256 frames\n")
+                    sample = StackSample(number=number, started_seconds=started,
+                                         finished_seconds=perf_counter() - self.started, threads=len(frames))
+                finally:
+                    del frames
+                with self.sample_changed:
+                    self.stack_samples.append(sample)
+                    self.sample_changed.notify_all()
+                self.write_report("running")
+        except Exception as error:  # pylint: disable=broad-exception-caught
+            with self.sample_changed:
+                self.stack_sampler_error = f"{type(error).__name__}: {error}"
+                self.sample_changed.notify_all()
 
     @contextmanager
     def recording(self) -> Iterator[None]:
@@ -267,24 +330,48 @@ class ProfileSession:
             yield
             state = "passed"
         finally:
-            with self.lock:
+            primary_error = sys.exc_info()[0] is not None
+            with self.sample_changed:
+                target = self.samples_requested
+                if not self.sample_changed.wait_for(
+                    lambda: len(self.stack_samples) >= target or self.stack_sampler_error is not None, timeout=5,
+                ):
+                    self.stack_sampler_error = "requested stack evidence did not finish before shutdown"
                 self.closed = True
+                self.sample_changed.notify_all()
             if sys.getprofile() == self._profile:
                 sys.setprofile(None)
             if threading.getprofile() == self._profile:
                 threading.setprofile(None)
-            self.stop.set()
+            with self.sample_changed:
+                self.stop.set()
+                self.sample_changed.notify_all()
             if self.sampler is not None and self.sampler.ident is not None:
                 self.sampler.join(timeout=1)
+                if self.sampler.is_alive() and self.stack_sampler_error is None:
+                    self.stack_sampler_error = "sampler did not stop before its shutdown deadline"
             _active.pop()
-            self.write_report(state)
-            lines = ["Completed operation wall time; nested/parallel entries overlap.",
-                     "seconds  maximum  calls  exceptions  thread  operation  caller"]
-            entries = [(thread.name, entry) for thread in self.threads for entry in thread.operations]
-            for name, entry in sorted(entries, key=lambda pair: pair[1].total_seconds, reverse=True):
-                lines.append(f"{entry.total_seconds:.6f} {entry.max_seconds:.6f} {entry.calls} "
-                             f"{entry.exceptions} {name} {entry.operation} {entry.caller}")
-            (self.directory / "calls.txt").write_text("\n".join(lines) + "\n", encoding="utf-8")
+            if self.stack_sampler_error is not None:
+                state = "failed"
+            try:
+                lines = ["Completed operation wall time; nested/parallel entries overlap.",
+                         "seconds  maximum  calls  exceptions  thread  operation  caller"]
+                entries = [(thread.name, entry) for thread in self.threads for entry in thread.operations]
+                for name, entry in sorted(entries, key=lambda pair: pair[1].total_seconds, reverse=True):
+                    lines.append(f"{entry.total_seconds:.6f} {entry.max_seconds:.6f} {entry.calls} "
+                                 f"{entry.exceptions} {name} {entry.operation} {entry.caller}")
+                (self.directory / "calls.txt").write_text("\n".join(lines) + "\n", encoding="utf-8")
+                self.write_report(state)
+            except Exception:  # pylint: disable=broad-exception-caught
+                try:
+                    self.write_report("failed")
+                except Exception:  # pylint: disable=broad-exception-caught
+                    print("CI diagnostics could not publish the failed report", file=sys.stderr)
+                if not primary_error:
+                    raise
+                print("CI diagnostics could not publish final evidence; retaining the original failure", file=sys.stderr)
+            if self.stack_sampler_error is not None and not primary_error:
+                raise RuntimeError(f"CI stack sampler failed: {self.stack_sampler_error}")
 
 
 @contextmanager
@@ -299,17 +386,26 @@ def phase(name: str) -> Iterator[None]:
         if not session.closed:
             session.current_phase = name
     wall, cpu, counters = perf_counter(), process_time(), process_io()
+    with session.sample_changed:
+        session.samples_requested = max(session.samples_requested, session.samples_started) + 1
+        session.sample_changed.notify_all()
     session.write_report("running")
     print(f"CI phase started: {name}", flush=True)
     try:
         yield
     finally:
+        primary_error = sys.exc_info()[0] is not None
         measured = session.measurement(name, wall, cpu, counters)
         with session.lock:
             if not session.closed:
                 session.phases.append(measured)
                 session.current_phase = prior
-                session.write_report("running")
+        try:
+            session.write_report("running")
+        except Exception:  # pylint: disable=broad-exception-caught
+            if not primary_error:
+                raise
+            print("CI diagnostics could not publish phase evidence; retaining the original failure", file=sys.stderr)
         print(f"CI phase finished: {name}: wall={measured.wall_seconds:.3f}s CPU={measured.cpu_seconds:.3f}s", flush=True)
 
 

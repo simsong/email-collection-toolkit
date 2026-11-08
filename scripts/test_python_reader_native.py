@@ -26,6 +26,8 @@ from pydantic import BaseModel
 
 from mailarchiver.reader_fixture import NATIVE_DESKTOP_TIMEOUT, RAW_MESSAGE, check_reader, inventory
 from mailarchiver.clamav_definitions import UPDATE_ENV, UPDATER_ENV
+from mailarchiver.file_events import wait_for_path_state
+from mailarchiver.ingest_status import read_ingest_history
 
 
 class DesktopResult(BaseModel):
@@ -49,6 +51,19 @@ class NativeDragGeometry(BaseModel):
     working_area: tuple[int, int, int, int]
     source_screen: tuple[int, int]
     target_screen: tuple[int, int]
+
+
+def wait_application(application, condition: Callable[[], bool], label: str, timeout: float = 20) -> None:
+    """Read published registry state after each real application notification."""
+    deadline = monotonic() + timeout
+    while True:
+        changed = application.state_changed.ready
+        if condition():
+            return
+        remaining = deadline - monotonic()
+        if remaining <= 0:
+            raise TimeoutError(label)
+        changed.result(timeout=remaining)
 
 
 def check_windows_antivirus_menu(application, search, evaluate, progress: Callable[[str], None], output: Path) -> None:
@@ -77,19 +92,14 @@ def check_windows_antivirus_menu(application, search, evaluate, progress: Callab
                     item.PerformClick()
 
             search.native.Invoke(system.Action(burst))
-            deadline = monotonic() + 20
-            about = None
-            while monotonic() < deadline:
-                about = application._about_window
-                if about is not None and not about.events.closed.is_set():
-                    break
-                Event().wait(0.025)
+            wait_application(application, lambda: (application._about_window is not None and
+                not application._about_window.events.closed.is_set()), "About was not created")
+            about = application._about_window
             if about is None or about.events.closed.is_set() or not about.events.loaded.wait(20):
                 raise TimeoutError("Anti-virus command did not create and load About")
-            answer = evaluate("(async () => { const deadline=Date.now()+10000; "
+            answer = evaluate("(async () => { const deadline=performance.now()+10000; "
                               "const status=document.getElementById('definition-update-status'); "
-                              "while (!status.textContent.includes('Update failed') && Date.now()<deadline) "
-                              "await new Promise(resolve=>setTimeout(resolve,25)); "
+                              "await waitForDomState(() => status.textContent.includes('Update failed'), 'anti-virus update result'); "
                               "return status.textContent.includes('Existing definitions were retained.') && "
                               "!document.getElementById('update-definitions').disabled && "
                               "document.getElementById('update-definitions').textContent === 'Check for Anti-Virus Updates'; })()", about)
@@ -109,6 +119,12 @@ def check_windows_antivirus_menu(application, search, evaluate, progress: Callab
                 os.environ[key] = value
 
 
+def wait_windows_preferences(window: Any, evaluate: Callable[[str, Any], Any]) -> None:
+    """Join the standalone page's real refresh; it does not load the shared DOM waiter."""
+    if not evaluate("refresh().then(() => document.body.dataset.ready === 'true')", window):
+        raise AssertionError("Preferences refresh did not publish ready state")
+
+
 def check_windows_preferences(application, search, evaluate, progress: Callable[[str], None]) -> None:
     """Native Close flushes active edits, and reopening restores the saved settings."""
     progress("Preferences loading")
@@ -116,8 +132,7 @@ def check_windows_preferences(application, search, evaluate, progress: Callable[
     window = application._windows_preferences_window
     if not window.events.loaded.wait(25):
         raise TimeoutError("Preferences did not load")
-    evaluate("(async () => { while (document.body.dataset.ready !== 'true') "
-             "await new Promise(resolve => setTimeout(resolve, 25)); return true; })()", window)
+    wait_windows_preferences(window, evaluate)
     check_windows_version(window)
     check_windows_document_menu(search)
     application.show_update_preferences()
@@ -143,9 +158,8 @@ def check_windows_preferences(application, search, evaluate, progress: Callable[
     reopened = application._windows_preferences_window
     if not reopened.events.loaded.wait(25):
         raise TimeoutError("Preferences did not reopen")
-    answer = evaluate("(async () => { while (document.body.dataset.ready !== 'true') "
-                      "await new Promise(resolve => setTimeout(resolve, 25)); "
-                      "return document.getElementById('worker-count').value; })()", reopened)
+    wait_windows_preferences(reopened, evaluate)
+    answer = evaluate("document.getElementById('worker-count').value", reopened)
     if answer != "2":
         raise AssertionError("Reopened Preferences lost the saved worker count")
     check_windows_version(reopened)
@@ -217,11 +231,9 @@ def check_windows_message_commands(application, parent, child, progress: Callabl
     progress("Standalone New Search command")
     before = {api.window.uid for api in application._search_apis()}
     invoke("New Search Window")
-    deadline = monotonic() + 20
-    opened = []
-    while not opened and monotonic() < deadline:
-        opened = [api for api in application._search_apis() if api.window.uid not in before]
-        Event().wait(0.025)
+    wait_application(application, lambda: any(api.window.uid not in before for api in application._search_apis()),
+                     "Standalone search window was not created")
+    opened = [api for api in application._search_apis() if api.window.uid not in before]
     if len(opened) != 1 or opened[0].document is not parent.document:
         raise AssertionError("Standalone New Search lost its archive context")
     extra = opened[0].window
@@ -233,9 +245,8 @@ def check_windows_message_commands(application, parent, child, progress: Callabl
     progress("Standalone archive default-list command")
     invoke("Customizable Default Lists…")
     document_id = parent.document.descriptor.document_id
-    deadline = monotonic() + 20
-    while document_id not in application._default_lists_apis and monotonic() < deadline:
-        Event().wait(0.025)
+    wait_application(application, lambda: document_id in application._default_lists_apis,
+                     "Standalone default-list editor was not created")
     editor = application._default_lists_apis.get(document_id)
     if editor is None or editor.archive != parent.archive:
         raise AssertionError("Standalone default-list command opened personal or another archive's defaults")
@@ -261,12 +272,13 @@ def check_windows_file_drag(api, evaluate, progress: Callable[[str], None], outp
                      "await new Promise(requestAnimationFrame); "
                      "const r=elements['message-file-well'].getBoundingClientRect(); "
                      "return [r.x+r.width/2,r.y+r.height/2,window.devicePixelRatio]; })()")
-    dropped = Event()
+    entered, dropped = Event(), Event()
     targets, points, paths = [], [], []
 
     def enter(_sender, event) -> None:
         if event.Data.GetDataPresent(forms.DataFormats.FileDrop):
             event.Effect = forms.DragDropEffects.Copy
+            entered.set()
 
     def receive(_sender, event) -> None:
         paths.extend(str(path) for path in event.Data.GetData(forms.DataFormats.FileDrop))
@@ -308,13 +320,20 @@ def check_windows_file_drag(api, evaluate, progress: Callable[[str], None], outp
                                    ctypes.c_uint32, ctypes.c_size_t]
     try:
         start, finish = points
+        evaluate("window.nativePointerDown = new Promise(resolve => "
+                 "elements['message-file-well'].addEventListener('mousedown', () => resolve(true), {once:true})); "
+                 "window.nativeDragStarted = new Promise(resolve => "
+                 "elements['message-file-well'].addEventListener('dragstart', () => resolve(true), {once:true})); true")
         user32.SetCursorPos(start.X, start.Y)
         user32.mouse_event(0x0002, 0, 0, 0, 0)
-        Event().wait(0.1)
+        if evaluate("window.nativePointerDown") is not True:
+            raise AssertionError("Native mouse press did not reach the file-drag source")
         user32.SetCursorPos(start.X - 20, start.Y)
-        Event().wait(0.3)
+        if evaluate("window.nativeDragStarted") is not True:
+            raise AssertionError("Native movement did not start a file drag")
         user32.SetCursorPos(finish.X, finish.Y)
-        Event().wait(0.3)
+        if not entered.wait(10):
+            raise AssertionError("Native OLE drag did not enter its file-drop target")
         user32.mouse_event(0x0004, 0, 0, 0, 0)
         if not dropped.wait(10):
             raise AssertionError("Native Windows file drag did not reach its OLE drop target")
@@ -363,9 +382,11 @@ def check_native_import(application, output: Path) -> None:
                                     scan_policy="clamav" if sys.platform == "win32" else "not-scanned"):
         raise AssertionError("Native desktop import did not start")
     application.open_ingest_window(document)
-    deadline = monotonic() + 120
-    while document.ingest_job is not None and monotonic() < deadline:
-        Event().wait(0.05)
+    wait_for_path_state([destination / "status"], lambda: any(
+        item.state == "completed" for item in read_ingest_history(destination).statuses), timeout=120)
+    job = document.ingest_job
+    if job is not None and not job.finished.wait(10):
+        raise TimeoutError("Native import owner did not finish")
     if document.ingest_job is not None:
         raise TimeoutError("Native import did not finish")
     if api.status()["message_count"] != 1:
@@ -467,8 +488,7 @@ def desktop_check(output: Path) -> None:
                     raise AssertionError("Native JavaScript error was mistaken for a successful result")
             progress("JavaScript values and errors verified")
             progress("Search and message rendering")
-            answer = evaluate("(async () => { while (!document.title.includes('synthetic.mailarchive')) "
-                              "await new Promise(resolve => setTimeout(resolve, 25)); elements.search.value='observatory'; "
+            answer = evaluate("(async () => { await waitForDomState(() => document.title.includes('synthetic.mailarchive'), 'search title'); elements.search.value='observatory'; "
                               "await runSearch(); await selectMessage(state.results[0].message_pk); "
                               "return {count: state.results.length, subject: state.view.subject}; })()")
             if answer != {"count": 1, "subject": "Portable message viewer"}:

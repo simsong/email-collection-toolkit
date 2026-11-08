@@ -16,11 +16,12 @@ from mailarchiver.application import ApplicationController, ApplicationPreferenc
 from mailarchiver.gui_app import PyWebViewApplication, build_parser, configure_macos_application
 from mailarchiver.worker_preferences import WorkerPreferences
 from mailarchiver.macos_preferences import MacOSPreferences
+from mailarchiver.native_events import run_native_until
 
 
 def main() -> None:
     """Operate a real modeless window and verify traffic-light Close persists edits."""
-    appkit, foundation = import_module("AppKit"), import_module("Foundation")
+    appkit = import_module("AppKit")
     native = appkit.NSApplication.sharedApplication()
     configure_macos_application()
     native.setActivationPolicy_(appkit.NSApplicationActivationPolicyRegular)
@@ -36,9 +37,6 @@ def main() -> None:
     store.write(ApplicationPreferences(workers=WorkerPreferences(mode="custom", custom_count=1)))
     override = build_parser().parse_args(sys.argv[2:]).workers
     application = PyWebViewApplication(ApplicationController(store), workers_override=override)
-    def pump() -> None:
-        foundation.NSRunLoop.currentRunLoop().runUntilDate_(foundation.NSDate.dateWithTimeIntervalSinceNow_(0.3))
-
     def controls_for(window):
         controls, views = {}, [window.contentView()]
         while views:
@@ -55,12 +53,12 @@ def main() -> None:
     application._preferences_window = MacOSPreferences(application.updates, application.save_preferences)
     application._preferences_window.screen = screen
     try:
-        pump()
+        run_native_until(anchor.isVisible, "Preference probe anchor did not open")
         application.show_update_preferences()
         pane = application._preferences_window
         assert pane is not None
         window = pane.window
-        pump()
+        run_native_until(window.isVisible, "Preferences did not open")
         assert native.modalWindow() is None, "Preferences still blocks the application"
         assert window.isVisible(), "Preferences did not open"
         assert window.screen() == screen
@@ -80,7 +78,6 @@ def main() -> None:
             choices.selectCellAtRow_column_(1, 0)
             assert native.sendAction_to_from_("changed:", choices.target(), choices)
             assert store.read().workers.mode == "all", "Radio changes were not saved immediately"
-        pump()
         output = Path.cwd() / ".tmp/gui-previews" / f"native-worker-preferences-{'locked' if override else 'all'}.png"
         output.parent.mkdir(parents=True, exist_ok=True)
         view = window.contentView().superview()
@@ -99,12 +96,11 @@ def main() -> None:
             assert window.makeFirstResponder_(count)
             count.currentEditor().setString_("1")
         close.performClick_(None)
-        pump()
+        run_native_until(lambda: not window.isVisible(), "Preferences did not close")
         assert not window.isVisible() and anchor.isVisible()
-        assert pane.timer is None
         assert store.read().workers == WorkerPreferences(mode="custom", custom_count=1)
         application.show_update_preferences()
-        pump()
+        run_native_until(window.isVisible, "Preferences did not reopen")
         assert application._preferences_window is pane and window.isVisible()
         assert str(count.stringValue()) == "1"
         window.standardWindowButton_(appkit.NSWindowCloseButton).performClick_(None)

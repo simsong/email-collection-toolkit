@@ -28,6 +28,7 @@ from threading import Barrier, Event
 
 import pytest
 
+from mailarchiver.file_events import wait_for_path_state
 from mailarchiver.__main__ import IngestRequest
 from mailarchiver.application import create_empty_archive
 from mailarchiver.archive_config import load_archive_config, save_archive_config
@@ -373,7 +374,7 @@ def test_gui_background_ingests_three_inbox_messages_and_indexes_them(imap_archi
 
     def block() -> None:
         occupied.wait(timeout=5)
-        release.wait(10)
+        assert release.wait(10), "fixture release deadline expired"
 
     try:
         # Suspend before preflight has saved processing settings, then resume the
@@ -686,21 +687,26 @@ def test_gmail_checkpoint_is_account_scoped_refreshes_labels_and_counts_atomical
 
 
 def test_reporter_updates_while_sync_is_running(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
-    """Periodic reporting reads current committed totals instead of waiting for run completion."""
+    """File events publish committed totals before sync completes, without a periodic timer."""
     archive = tmp_path / "archive"
     create_empty_archive(archive)
-    reporter = SyncReporter(archive, False, interval=0.02)
+    reported = Event()
+
+    class ObservedReporter(SyncReporter):
+        def display(self, status: str) -> None:
+            super().display(status)
+            if status == "running" and self.last_running is not None and self.last_running.archived == 10:
+                reported.set()
+
+    reporter = ObservedReporter(archive, False)
     reporter.start()
     try:
         with closing(sqlite3.connect(archive / "archive.sqlite3")) as database:
             initialize_state(database)
             database.execute("INSERT INTO imap_hourly(source_id,hour_utc,archived,duplicates) VALUES ('fixture','hour',10,2)")
             database.commit()
-        deadline = time.monotonic() + 2
-        output = ""
-        while "running: newly archived=10 duplicate downloads=2" not in output and time.monotonic() < deadline:
-            time.sleep(0.01)
-            output += capsys.readouterr().err
+        assert reported.wait(2), "Archive commit did not wake the reporter"
+        output = capsys.readouterr().err
         assert "running: newly archived=10 duplicate downloads=2" in output
     finally:
         reporter.finish("completed")
@@ -735,20 +741,27 @@ def test_cli_ctrl_c_checkpoints_and_next_invocation_resumes(tmp_path: Path, imap
                 for index in range(10):
                     raw = f"From: fixture@example.org\r\nSubject: {mailbox}-{index}\r\n\r\n".encode() + b"preserved\r\n" * 500
                     assert client.append(name, None, None, raw)[0] == "OK"
+        server.pause_after_bodies(1)
         with (tmp_path / "interrupted.log").open("wb") as log:
             process = subprocess.Popen(command, cwd=ROOT, env=environment, stdout=log, stderr=log, start_new_session=True)
-            deadline = time.monotonic() + 120
-            released = False
-            while process.poll() is None and time.monotonic() < deadline:
+            def released_first() -> bool:
+                # A committed progress snapshot acknowledges catalog startup;
+                # inspecting its SQLite files before that boundary can race setup.
+                snapshots = read_ingest_history(archive).statuses
+                if not snapshots or snapshots[0].processed_messages == 0:
+                    return False
                 with closing(sqlite3.connect(archive / "archive.sqlite3")) as database:
                     row = database.execute("SELECT sha256 FROM messages ORDER BY message_pk LIMIT 1").fetchone()
-                if row and not (archive / "objects" / row[0]).exists():
-                    released = True
-                    break
-                time.sleep(0.01)
+                return bool(row and not (archive / "objects" / row[0]).exists())
+            released = wait_for_path_state([archive / "status", archive / "objects"],
+                                           released_first, timeout=120)
             assert 0 < totals(archive).archived < 80, (tmp_path / "interrupted.log").read_text()
             assert released, "first committed message remained cached while download continued"
+            assert server.fetch_paused.wait(10), "No real body request reached the server gate"
             os.killpg(process.pid, signal.SIGINT)
+            wait_for_path_state([tmp_path / "interrupted.log"], lambda: "Interrupted; stopping downloads and saving progress…" in
+                                (tmp_path / "interrupted.log").read_text(), timeout=10)
+            server.release_bodies()
             assert process.wait(timeout=30) == 130, (tmp_path / "interrupted.log").read_text()
         interrupted_log = (tmp_path / "interrupted.log").read_text()
         assert "Traceback" not in interrupted_log and "Exception ignored" not in interrupted_log

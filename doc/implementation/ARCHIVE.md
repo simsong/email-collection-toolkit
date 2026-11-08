@@ -181,6 +181,16 @@ hashes, `bag-info.txt`, and the tag manifest last. Successful completion,
 controlled interruption, and publication recovery all use this path. A
 validator never treats an in-progress mismatch as valid.
 
+Checkpoint discovery leaves extra regular non-mail files untouched, omits them
+from the email payload manifest and oxum, and returns warnings. The integrity
+adapter yields typed `ArchiveIntegrityWarning` events; ingest records each distinct
+warning in `IngestOutcome`, prints it for CLI callers and routes it to the owning
+window. The standalone verifier still verifies every declared hash and requires
+all canonical MBOX entries, but warns about unlisted non-mail extras instead of
+failing. Oxum uses declared payloads. A warning-only result confirms email
+integrity, not strict BagIt completeness while foreign files remain under `data/`.
+Declared missing/changed files, metadata corruption and symlinks remain errors.
+
 `bag-info.txt` gets `Mailbag-Agent-Version` from installed package metadata,
 the same version source used by the application. PyInstaller includes that
 metadata with `--copy-metadata mailarchiver`; historical fixture bags retain

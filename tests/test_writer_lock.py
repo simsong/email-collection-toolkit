@@ -83,7 +83,7 @@ def test_writer_lease_releases_after_forced_process_death(tmp_path: Path) -> Non
         "p=Path(sys.argv[1]); i=os.path.normcase(str(p.resolve()))\n"
         "lease=WriterLease.acquire(p,i,'crash test','crash','test')\n"
         "print('locked',flush=True)\n"
-        "time.sleep(60)\n"
+        "__import__('threading').Event().wait()\n"
     )
     child = subprocess.Popen(
         [sys.executable, "-c", script, str(archive)],

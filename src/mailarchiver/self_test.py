@@ -233,8 +233,8 @@ def exercise_gui(archive: Path, directory: Path, report: SelfTestReport) -> None
                     native.stopModalWithCode_(0)
 
             def schedule_picker_check():
-                timer = foundation.NSTimer.timerWithTimeInterval_repeats_block_(0.2, False, inspect_picker)
-                foundation.NSRunLoop.mainRunLoop().addTimer_forMode_(timer, appkit.NSModalPanelRunLoopMode)
+                from .native_events import ModalObserver  # pylint: disable=import-outside-toplevel
+                ModalObserver(inspect_picker, failures)
 
             AppHelper.callAfter(schedule_picker_check)
             if application._import_document(api):  # pylint: disable=protected-access

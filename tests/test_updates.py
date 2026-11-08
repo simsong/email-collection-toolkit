@@ -2,6 +2,7 @@
 
 """Issue #91: persistent tracks and installation exclude all application writers."""
 
+from importlib.metadata import version
 from pathlib import Path
 from threading import enumerate as running_threads
 
@@ -12,6 +13,55 @@ from mailarchiver.gui_app import PyWebViewApplication
 from mailarchiver.release_versions import release_metadata
 from mailarchiver.updates import UpdateService, UpdateStatus, allowed_channels, default_channel
 from mailarchiver.writer_lock import ArchiveBusyError, WriterLease
+
+
+@pytest.mark.parametrize("found,error", [(True, None), (False, None), (False, "fixture network failure")])
+def test_check_completion_follows_full_result_publication(found: bool, error: str | None) -> None:
+    """DELIVERY: phase changes alone cannot acknowledge a native check before its timestamp/detail."""
+    installed = version("mailarchiver")
+    service = UpdateService(UpdateStatus(version=installed, channel=default_channel(installed)), lambda: False)
+    completed = service.check_finished.ready
+    service.status.phase = "available" if found else "checking"
+    assert not completed.done() and service.status.last_checked is None
+    service.finish_check(error)
+    completed.result(timeout=0)
+    assert service.status.last_checked is not None
+    assert service.status.phase == ("error" if error else "available" if found else "idle")
+    if error:
+        assert service.status.detail == error
+    elif not found:
+        assert service.status.detail == "Update check completed."
+    assert not service.check_finished.ready.done(), "One check must publish one completion"
+
+
+def test_sparkle_probe_consumes_only_its_expected_install_failure(tmp_path: Path) -> None:
+    """DELIVERY: the actual probe reaches recovery verification after a raised continuation."""
+    from scripts.sparkle_probe import exercise_failed_install
+    host = PyWebViewApplication(ApplicationController(ApplicationPreferencesStore(tmp_path / "preferences.json")))
+    try:
+        exercise_failed_install(host.updates)
+        assert host.updates.status.phase == "error"
+        assert "synthetic native-event installation failure" in host.updates.status.detail
+        assert not host._updating and not host.updates.resume_install()
+        with host.writer_activity():
+            pass  # Failure must release the real installation reservation.
+    finally:
+        host.shutdown()
+
+
+def test_update_status_notifications_are_instance_owned() -> None:
+    """DESKTOP: unbound status is usable and a bound observer receives actual field changes."""
+    installed = version("mailarchiver")
+    status = UpdateStatus(version=installed, channel=default_channel(installed))
+    status.phase = "idle"
+    changes: list[str] = []
+    service = UpdateService(status, lambda: False, changed=lambda: changes.append(status.phase))
+    service.status.phase = "checking"
+    service.status.phase = "checking"
+    assert changes == ["checking"]
+    independent = UpdateStatus(version=installed, channel=default_channel(installed))
+    independent.phase = "idle"
+    assert changes == ["checking"]
 
 
 @pytest.mark.parametrize("installed,expected", [("1.0.0a10", "preview"), ("1.0.0b1", "preview"), ("1.0.0", "release")])

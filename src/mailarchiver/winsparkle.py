@@ -17,10 +17,9 @@ from __future__ import annotations
 
 from collections.abc import Callable
 import ctypes as c
-from datetime import UTC, datetime
 from pathlib import Path
 import sys
-from threading import Event, Thread
+from threading import Event, RLock, Thread
 
 from .identity import APPLICATION_NAME
 from .release_versions import release_metadata
@@ -43,6 +42,9 @@ class WinSparkleBackend:
         self.service = service
         self.installed = installed
         self.stopped = Event()
+        self._close_lock = RLock()
+        self._native_cleaned = False
+        self._launch_checked = False
         self.gateway = FeedGateway(SPARKLE_FEED_URL, SPARKLE_PUBLIC_KEY,
                                    lambda: service.status.channel, service.fail)
         try:
@@ -123,36 +125,31 @@ class WinSparkleBackend:
             if not installed:
                 service.status.automatic_checks = False
                 service.status.detail = "Source checkout: manual update checks only; installation is disabled."
-            self.scheduler = Thread(target=self._schedule, name="winsparkle-checks", daemon=True)
-            self.scheduler.start()
+            self.configure(service.status.channel, service.status.automatic_checks)
         except BaseException:
             self.gateway.close()
             raise
 
-    def _schedule(self) -> None:
-        while not self.stopped.wait(60):
-            status = self.service.status
-            elapsed = (datetime.now(UTC) - status.last_checked).total_seconds() if status.last_checked else 86400
-            if self.installed and status.automatic_checks and elapsed >= 86400 and status.phase in {"idle", "error"}:
-                status.phase = "checking"
-                status.last_checked = datetime.now(UTC)
-                self.native.win_sparkle_check_update_without_ui()
-
     def check(self) -> None:
-        if not self.stopped.is_set():
-            self.native.win_sparkle_check_update_with_ui()
+        with self._close_lock:
+            if not self.stopped.is_set():
+                self.native.win_sparkle_check_update_with_ui()
 
     def configure(self, channel: UpdateChannel, automatic_checks: bool) -> None:
         self.service.status.channel = channel
         self.service.status.automatic_checks = automatic_checks and self.installed
+        if self.service.status.automatic_checks and not self._launch_checked:
+            self._launch_checked = True
+            self.service.status.phase = "checking"
+            self.native.win_sparkle_check_update_without_ui()
 
     def close(self) -> None:
-        if self.stopped.is_set():
-            return
-        self.stopped.set()
-        self.scheduler.join(timeout=2)
-        self.native.win_sparkle_cleanup()
-        self.gateway.close()
+        with self._close_lock:
+            self.stopped.set()
+            if not self._native_cleaned:
+                self.native.win_sparkle_cleanup()
+                self._native_cleaned = True
+            self.gateway.close()
 
 
 def start_windows_updater(service: UpdateService, quit_application: Callable[[], None]) -> WinSparkleBackend:

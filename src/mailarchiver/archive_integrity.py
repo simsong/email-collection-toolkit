@@ -21,6 +21,7 @@ from abc import ABC, abstractmethod
 from collections.abc import Iterator
 from datetime import datetime
 from pathlib import Path
+from pydantic import BaseModel, ConfigDict
 
 from .bagit import initialize_bag, write_bag_checkpoint
 from .plugin_api import ArchiveReference, IntegrityEvidence, ProgressEvent
@@ -31,7 +32,14 @@ STANDALONE_VERIFIER_CONTROL = "mailarchiver.archive.standalone-verifier.v1"
 PAYLOAD_MANIFEST_CONTROL = "mailarchiver.archive.payload-manifest.v1"
 TAG_MANIFEST_CONTROL = "mailarchiver.archive.tag-manifest.v1"
 
-ArchiveIntegrityEvent = IntegrityEvidence | ProgressEvent
+class ArchiveIntegrityWarning(BaseModel):
+    """Nonfatal archive observations that do not invalidate preserved email."""
+
+    model_config = ConfigDict(frozen=True)
+    message: str
+
+
+ArchiveIntegrityEvent = IntegrityEvidence | ProgressEvent | ArchiveIntegrityWarning
 
 
 class ArchiveIntegrityError(ValueError):
@@ -114,7 +122,8 @@ class MailbagArchiveIntegrityControls(ArchiveIntegrityControls):
             total=1,
             unit="checkpoint",
         )
-        write_bag_checkpoint(archive.root, catalog, packaged_at)
+        for warning in write_bag_checkpoint(archive.root, catalog, packaged_at):
+            yield ArchiveIntegrityWarning(message=warning)
         yield _file_evidence(PAYLOAD_MANIFEST_CONTROL, archive, archive.root / "manifest-sha256.txt")
         yield _file_evidence(TAG_MANIFEST_CONTROL, archive, archive.root / "tagmanifest-sha256.txt")
         yield ProgressEvent(
@@ -133,7 +142,10 @@ class MailbagArchiveIntegrityControls(ArchiveIntegrityControls):
             total=1,
             unit="checkpoint",
         )
-        errors = verify_archive(archive.root)
+        warnings: list[str] = []
+        errors = verify_archive(archive.root, on_warning=warnings.append)
+        for warning in warnings:
+            yield ArchiveIntegrityWarning(message=warning)
         if errors:
             raise ArchiveIntegrityError(errors)
         yield _file_evidence(PAYLOAD_MANIFEST_CONTROL, archive, archive.root / "manifest-sha256.txt")

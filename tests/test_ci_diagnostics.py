@@ -15,7 +15,6 @@ import subprocess
 import sys
 from threading import Event, Thread
 import threading
-from time import sleep
 
 import pytest
 
@@ -24,8 +23,10 @@ from mailarchiver.storage_sync import replace_file
 
 
 def test_threaded_storage_profile_and_stack_evidence(tmp_path: Path) -> None:
-    session = ProfileSession(tmp_path, "synthetic-storage", stack_interval=0.02)
+    """VALIDATION: capture a real worker through an explicit sampling request, independent of storage duration."""
+    session = ProfileSession(tmp_path, "synthetic-storage")
     payload = tmp_path / "payload"
+    stored, release = Event(), Event()
 
     def durable_write() -> None:
         with payload.open("wb") as stream:
@@ -36,18 +37,26 @@ def test_threaded_storage_profile_and_stack_evidence(tmp_path: Path) -> None:
             database.execute("CREATE TABLE measurements(value INTEGER)")
             database.execute("INSERT INTO measurements VALUES (1)")
             database.commit()
-        sleep(0.08)
+        stored.set()
+        assert release.wait(10), "stack evidence collection did not release the worker"
 
     with session.recording(), phase("durable-storage"):
         worker = Thread(target=durable_write, name="storage-worker")
         worker.start()
-        worker.join(timeout=5)
+        try:
+            assert stored.wait(5), "storage worker did not finish its writes"
+            sample = session.wait_for_stack_sample(timeout=5)
+            assert sample.finished_seconds >= sample.started_seconds and sample.threads >= 2
+        finally:
+            release.set()
+            worker.join(timeout=5)
         assert not worker.is_alive()
     report = DiagnosticReport.model_validate_json((session.directory / "report.json").read_text())
     assert report.state == "passed" and report.current_phase is None
     assert report.stack_sampler_stopped
-    assert report.total.wall_seconds >= 0.08 and report.total.cpu_seconds >= 0
-    assert report.phases[0].name == "durable-storage" and report.phases[0].wall_seconds >= 0.08
+    assert report.total.wall_seconds > 0 and report.total.cpu_seconds >= 0
+    assert report.phases[0].name == "durable-storage" and report.phases[0].wall_seconds > 0
+    assert report.stack_samples and report.stack_sampler_error is None
     thread, = [entry for entry in report.threads if entry.name == "storage-worker"]
     assert any(entry.operation == "os.fsync" and entry.calls == 1 for entry in thread.operations)
     assert any(entry.operation == "sqlite.commit" for entry in thread.operations)
@@ -103,6 +112,34 @@ def test_existing_profiler_is_not_replaced(tmp_path: Path) -> None:
         assert sys.getprofile() is existing
     finally:
         sys.setprofile(None)
+
+
+@pytest.mark.parametrize("primary_failure", [False, True])
+def test_sampler_failure_is_reported_without_hiding_a_test_failure(tmp_path: Path, primary_failure: bool) -> None:
+    """VALIDATION: real output obstruction fails sampling and cannot replace an existing assertion failure."""
+    session = ProfileSession(tmp_path, "blocked-stack-output")
+    expected = AssertionError if primary_failure else RuntimeError
+    message = "original test failure" if primary_failure else "CI stack sampler failed"
+    with pytest.raises(expected, match=message), session.recording():
+        (session.directory / "threads.txt").unlink()
+        (session.directory / "threads.txt").mkdir()
+        if primary_failure:
+            try:
+                session.wait_for_stack_sample(timeout=5)
+            except RuntimeError:
+                raise AssertionError("original test failure") from None
+            pytest.fail("the obstructed output must fail sampling")
+        session.wait_for_stack_sample(timeout=5)
+    report = DiagnosticReport.model_validate_json((session.directory / "report.json").read_text())
+    assert report.state == "failed" and report.stack_sampler_stopped
+    assert report.stack_sampler_error is not None
+
+
+def test_stack_sample_timeout_is_a_failure(tmp_path: Path) -> None:
+    """VALIDATION: waiting for evidence cannot succeed on elapsed time alone."""
+    session = ProfileSession(tmp_path, "sample-deadline")
+    with session.recording(), pytest.raises(TimeoutError, match="did not publish"):
+        session.wait_for_stack_sample(timeout=0)
 
 
 def test_late_worker_preserves_final_failure(tmp_path: Path) -> None:
@@ -163,7 +200,10 @@ def test_independently_profiled_worker_keeps_its_hook(tmp_path: Path) -> None:
         sys.setprofile(existing)
         try:
             ready.set()
-            while probe.wait(5) and not stop.is_set():
+            while not stop.is_set():
+                assert probe.wait(5), "profiler ownership probe was not released"
+                if stop.is_set():
+                    break
                 probe.clear()
                 observed.append(sys.getprofile() is existing)
                 checked.set()
@@ -195,27 +235,58 @@ def test_existing_native_watchdog_keeps_running(tmp_path: Path) -> None:
 # The parent enforces a deadline because native traceback code can crash or hang.
 # Only synthetic paths and frame locations are written; no real mail is used.
 import faulthandler
+import os
 from pathlib import Path
 import sys
-import time
+from threading import Event, Thread
 from scripts.ci_diagnostics import ProfileSession
 root = Path(sys.argv[1])
-external = root / 'external-watchdog.txt'
-with external.open('w', encoding='utf-8') as output:
+read_fd, write_fd = os.pipe()
+observed = Event()
+closed = Event()
+lines = []
+def receive():
+    with os.fdopen(read_fd, 'rb') as reader:
+        count = 0
+        for line in reader:
+            lines.append(line)
+            if line.startswith(b'Timeout '):
+                assert closed.is_set(), 'watchdog fired during the diagnostic session'
+                count += 1
+                if count == 2:
+                    observed.set()
+receiver = Thread(target=receive, daemon=True)
+receiver.start()
+with os.fdopen(write_fd, 'wb', buffering=0) as output:
     faulthandler.dump_traceback_later(3, repeat=True, file=output)
     try:
-        with ProfileSession(root, 'native-watchdog', stack_interval=0.02).recording():
-            time.sleep(0.05)
-        deadline = time.monotonic() + 9
-        while external.stat().st_size == 0 and time.monotonic() < deadline:
-            time.sleep(0.05)
-        before = external.stat().st_size
-        while external.stat().st_size <= before and time.monotonic() < deadline:
-            time.sleep(0.05)
-        assert before > 0 and external.stat().st_size > before
+        with ProfileSession(root, 'native-watchdog').recording():
+            pass
+        closed.set()
+        assert observed.wait(9), 'existing watchdog was lost during collector teardown'
     finally:
         faulthandler.cancel_dump_traceback_later()
+receiver.join(timeout=2)
+assert not receiver.is_alive()
+(root / 'external-watchdog.txt').write_bytes(b''.join(lines))
 '''
     result = subprocess.run([sys.executable, "-c", code, str(tmp_path)],
                             capture_output=True, text=True, check=False, timeout=15)
     assert result.returncode == 0, result.stdout + result.stderr
+
+
+@pytest.mark.parametrize("output", ["report", "calls"])
+@pytest.mark.parametrize("primary_failure", [False, True])
+def test_diagnostic_publication_cannot_mask_the_source_failure(
+    tmp_path: Path, output: str, primary_failure: bool,
+) -> None:
+    """VALIDATION: real obstructed report/summary paths fail without replacing a source assertion."""
+    session = ProfileSession(tmp_path, "obstructed-report")
+    expected = AssertionError if primary_failure else OSError
+    with pytest.raises(expected, match="original source failure" if primary_failure else None), session.recording(), phase("publication"):
+        target = session.directory / ("calls.txt" if output == "calls" else ".report.json.tmp")
+        with session.report_lock:
+            target.mkdir()
+        if primary_failure:
+            raise AssertionError("original source failure")
+    assert sys.getprofile() is None and threading.getprofile() is None

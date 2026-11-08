@@ -11,6 +11,10 @@ Its local search index can be discarded and rebuilt.
 **This program is under active development. Do not use it operationally until
 version 1.0 ships.**
 
+Progress and window updates follow actual work and native change notifications.
+Warnings stay expanded until you collapse or dismiss them. When enabled, installed
+application update checks run when the application opens; manual checks remain available.
+
 ## Desktop application
 
 We build traditional desktop applications for Windows and macOS. Both include
@@ -167,6 +171,7 @@ reference; their workflows are in [For developers](doc/FOR_DEVELOPERS.md).
 | `UV_PROJECT_ENVIRONMENT`, `PYTHONPATH` | Isolated packaging environment and repository-local test import path |
 | `FQDN` | Disposable IMAP tests use `localhost` to avoid reverse DNS |
 | `CI_DIAGNOSTICS`, `CI_DIAGNOSTICS_DIRECTORY` | Opt-in synthetic writer/OST test profiles (`1` enables); output directory, default `dist/ci-diagnostics` |
+| `MAILARCHIVER_PST_ACTIVITY_FILE` | Host-owned, newly created eight-byte PST work-counter snapshot; separates extraction liveness from batched diagnostic history |
 | `MAILARCHIVER_NATIVE_APPLICATION_E2E`, `MAILARCHIVER_NATIVE_GUI_E2E` | Opt into visible native tests; focus/menu acceptance requires an unlocked desktop |
 | `GITHUB_ENV`, `RUNNER_TEMP` | GitHub Actions environment handoff file and temporary area |
 | `GITHUB_REPOSITORY`, `GH_TOKEN`, `GITHUB_REF_NAME` | Release repository, API authorization, and tag being validated |
