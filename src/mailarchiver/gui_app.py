@@ -1117,7 +1117,10 @@ class GuiApi:
                 if generation != self._suggestion_generation or future is None or future.done():
                     break
             try:
-                changed.result(timeout=max(0, deadline - time.monotonic()))
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise TimeoutError("Result wait deadline expired")
+                changed.result(timeout=remaining)
             except TimeoutError:
                 wait_error = "Timed out waiting for search suggestions; retry the search."
                 break
@@ -1199,7 +1202,10 @@ class GuiApi:
                 if not requested & self._preview_pending:
                     break
             try:
-                changed.result(timeout=max(0, deadline - time.monotonic()))
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise TimeoutError("Result wait deadline expired")
+                changed.result(timeout=remaining)
             except TimeoutError:
                 wait_error = "Timed out waiting for message previews; retry the search."
                 break

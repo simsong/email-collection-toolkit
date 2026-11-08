@@ -8,6 +8,7 @@
 (() => {
   "use strict";
   const checks = [];
+  const publishState = () => window.dispatchEvent(new Event("mailarchiver-state-changed"));
   const assert = (condition, label) => {
     if (!condition) throw new Error(label);
     checks.push(label);
@@ -172,7 +173,7 @@
       const response = await realPart(...args);
       if (args[0] === firstBeth) {
         partEntered = true;
-        window.dispatchEvent(new Event("mailarchiver-state-changed"));
+        publishState();
         await partRelease;
       }
       return response;
@@ -351,8 +352,8 @@
       "hovering a message link shows its destination in the bottom status bar");
     let copiedLink = "";
     let openedLink = "";
-    window.pywebview.api.copy_link = destination => { copiedLink = destination; return destination; };
-    window.pywebview.api.open_link = destination => { openedLink = destination; return destination; };
+    window.pywebview.api.copy_link = destination => { copiedLink = destination; publishState(); return destination; };
+    window.pywebview.api.open_link = destination => { openedLink = destination; publishState(); return destination; };
     const firstLinkClick = new MouseEvent("click", {bubbles: true, cancelable: true});
     externalLink.dispatchEvent(firstLinkClick);
     const linkDialog = document.getElementById("link-dialog");
@@ -376,7 +377,7 @@
     assert(htmlCurrentStyle.backgroundColor === "rgb(255, 159, 10)" && htmlCurrentStyle.color === "rgb(0, 0, 0)",
       `HTML current match has an explicit high-contrast highlight (${htmlCurrent.outerHTML})`);
     let copiedMessageText = "";
-    window.pywebview.api.copy_visible_text = text => { copiedMessageText = text; };
+    window.pywebview.api.copy_visible_text = text => { copiedMessageText = text; publishState(); };
     document.getElementById("copy-message-text").click();
     await waitFor(() => copiedMessageText.includes("Subject: Rich UI message") && copiedMessageText.includes("HTML E2E body for the message viewer"),
       "copy control includes displayed HTML and viewer headers");
@@ -507,9 +508,13 @@
     [...imageRow.querySelectorAll("button")].find(button => button.textContent.startsWith("Save")).click();
     const riskyRow = attachmentRows.find(row => row.textContent.includes("review.command"));
     let confirmations = 0;
-    window.confirm = () => { confirmations += 1; return false; };
+    window.confirm = () => { confirmations += 1; publishState(); return false; };
     [...riskyRow.querySelectorAll("button")].find(button => button.textContent === "Open").click();
-    await waitFor(() => confirmations === 1, "risky attachment requires confirmation");
+    try {
+      await waitFor(() => confirmations === 1, "risky attachment requires confirmation");
+    } catch (error) {
+      throw new Error(`${error.message}; confirmation callbacks observed: ${confirmations}`);
+    }
     [...riskyRow.querySelectorAll("button")].find(button => button.textContent.startsWith("Save")).click();
 
     document.getElementById("save-message").click();

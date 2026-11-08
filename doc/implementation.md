@@ -48,6 +48,11 @@ platform acceptance and deferred work.
 
 ## Shared boundaries
 
+- Filesystem predicate waits check the remaining deadline before each native wait;
+  a ready notification cannot extend an expired budget. Browser acceptance callbacks
+  publish `mailarchiver-state-changed` when changing private counters or captured
+  clipboard/link values, because those changes are not DOM mutations.
+
 - Updater completion signals follow all result fields. PST supervisors observe a
   bounded private work counter while diagnostic records are batched by work;
   notification initialization remains inside child kill/reap ownership. Linux

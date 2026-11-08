@@ -2,6 +2,14 @@
 
 # Validation implementation
 
+The search acceptance driver publishes `mailarchiver-state-changed` after its own
+confirmation, clipboard and link callbacks update private state. Its DOM waiter
+otherwise cannot observe those assignments; a confirmation timeout now reports
+the observed callback count. The filesystem predicate and GUI suggestion/preview
+loops check positive remaining time before each event/future wait. Real ready-file
+activity and deliberately ordered actual `ChangeSignal` notifications cover expiry;
+the queued GUI work remains available for explicit retrieval after completion.
+
 Current implementation and validation boundaries. Deferred feature designs
 live in [plans](../plans/README.md); historical evidence does not validate this revision.
 

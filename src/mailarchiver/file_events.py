@@ -238,7 +238,10 @@ def wait_for_path_state[T](paths: Sequence[Path], condition: Callable[[], T], ti
     deadline = monotonic() + timeout
     with PathChanges(paths) as changes:
         while not (result := condition()):
-            changes.wait(max(0, deadline - monotonic()))
+            remaining = deadline - monotonic()
+            if remaining <= 0:
+                raise TimeoutError("Filesystem predicate deadline expired")
+            changes.wait(remaining)
         return result
 
 

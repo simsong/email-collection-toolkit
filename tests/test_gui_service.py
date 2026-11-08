@@ -14,7 +14,7 @@ import time
 import zipfile
 from importlib.metadata import version
 from webview.menu import MenuAction, MenuSeparator
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import Future, ThreadPoolExecutor
 from pathlib import Path
 from threading import Barrier, Event
 
@@ -678,15 +678,32 @@ def test_gui_loads_indexed_previews_on_its_background_worker(tmp_path: Path) -> 
 
 
 @pytest.mark.parametrize("kind", ["suggestions", "previews"])
+@pytest.mark.parametrize("busy", [False, True])
 def test_result_wait_deadline_reports_failure_and_explicit_retry_can_complete(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, kind: str,
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, kind: str, busy: bool,
 ) -> None:
     """DESKTOP: a failed wait remains a typed error, not a timer tick; actual work stays retryable."""
     import mailarchiver.gui_app as gui_module
     from mailarchiver.gui_app import SuggestionStatus
     from mailarchiver.gui_service import PreviewBatch
+    from mailarchiver.change_signal import ChangeSignal
+
+    class BusySignal(ChangeSignal):
+        captures = 0
+
+        @property
+        def ready(self) -> Future[None]:
+            # Publish a real unrelated notification exactly after the waiter captures its future.
+            self.captures += 1
+            assert self.captures <= 2, "Ready notifications extended an expired result deadline"
+            changed = super().ready
+            self.notify()
+            return changed
+
     monkeypatch.setattr(gui_module, "WORK_RESULT_TIMEOUT_SECONDS", 0)
     api = GuiApi(make_gui_archive(tmp_path))
+    if busy:
+        api._work_changed = BusySignal()
     executor = api._suggestion_executor if kind == "suggestions" else api._preview_executor
     occupied, release = Barrier(executor._max_workers + 1), Event()
 

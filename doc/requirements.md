@@ -33,7 +33,8 @@ platform acceptance and deferred work.
 
 - Completion and readiness require observable state, Events, futures or native
   callbacks; a fixed delay never establishes success. Elapsed deadlines use
-  monotonic clocks and expiry reports failure. No first-party non-timeout
+  monotonic clocks and expiry reports failure even while notifications remain ready.
+  Non-DOM test state must explicitly notify its event-driven observers. No first-party non-timeout
   scheduling timers are used: status, sampling and retries follow actual events. See [timing audit](TIMING_AUDIT.md).
 
 

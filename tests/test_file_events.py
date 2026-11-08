@@ -131,6 +131,24 @@ def test_expired_notification_deadline_is_a_failure(tmp_path: Path) -> None:
         changes.wait(0)
 
 
+def test_predicate_deadline_cannot_be_extended_by_ready_notifications(tmp_path: Path) -> None:
+    """VALIDATION: actual file activity cannot turn an expired predicate deadline into another wait."""
+    target = tmp_path / "busy"
+    target.write_bytes(b"initial")
+    checks = 0
+
+    def still_pending() -> bool:
+        nonlocal checks
+        checks += 1
+        assert checks == 1, "Expired predicate deadline was extended by file activity"
+        target.write_bytes(b"actual publication")
+        return False
+
+    with pytest.raises(TimeoutError, match="deadline"):
+        wait_for_path_state([target], still_pending, timeout=0)
+    assert checks == 1
+
+
 @pytest.mark.skipif(sys.platform != "darwin", reason="Cocoa host uses kqueue vnode subscriptions")
 @pytest.mark.parametrize("nested", [False, True])
 def test_file_created_during_parent_registration_remains_watched(tmp_path: Path, monkeypatch: pytest.MonkeyPatch,

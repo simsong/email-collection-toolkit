@@ -2,6 +2,12 @@
 
 # Validation requirements
 
+Acceptance callbacks that change private JavaScript values must publish an explicit
+notification; unrelated DOM mutations cannot acknowledge confirmation or clipboard
+work. Predicate/result waits enforce their failure deadline before waiting again,
+even when other ready notifications keep arriving. Expiry retains typed pending
+state for an explicit retry, rather than extending the request indefinitely.
+
 Current subsystem contract and acceptance boundaries. This is not a claim of
 platform/release acceptance. Deferred features live in [plans](../plans/README.md).
 

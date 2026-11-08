@@ -6,6 +6,13 @@ Entries describe their recorded revisions. For current behavior use the
 [user manual](USER_MANUAL.md) and [CLI reference](CLI_REFERENCE.md). Retired
 Rust delivery plans and historical package checks are not current acceptance.
 
+## 1.0.0a61 — enforce event-wait failure boundaries
+
+- Enforce filesystem predicate deadlines even while file notifications remain ready.
+- Enforce suggestion/preview wait deadlines even during unrelated result activity.
+- Explicitly acknowledge test-owned attachment confirmation, clipboard and link
+  callback state; quiet pages no longer need unrelated DOM activity to wake acceptance.
+
 ## 1.0.0a60 — review follow-up for completion boundaries
 
 - Keep PST progress diagnostics batched by work count, with a bounded private

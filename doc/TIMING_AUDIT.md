@@ -5,10 +5,48 @@
 This audit covers active application, importer, helper, build and test code.
 Baseline: `5334c6a041a77d26994332973da9f4abdff1f082`; working branch:
 `codex/signed-installer-labels`; existing PR #195. Alpha 59 was published as
-commit `2d28c4b00ba4aa4edc3e5c11da07f547027a8230`; the local review follow-up is
-**1.0.0a60**. Neither statement is a published-release acceptance claim.
+commit `2d28c4b00ba4aa4edc3e5c11da07f547027a8230`; alpha 60 followed in
+`99b6cdbae94d9550574fceb76f23d5fb5e91612e`. The current reported-CI repair is
+**1.0.0a61**. These statements do not establish release acceptance. Sections after
+the alpha 61 repair retain the earlier audit's recorded revision boundaries.
 The user's final policy replaces **all first-party non-timeout timers**,
 including scheduling, debounce, sampling and retry delays.
+
+## Alpha 61 — reported CI and deadline repair
+
+Baseline for this new reported failure repair is published alpha 60 commit
+`99b6cdbae94d9550574fceb76f23d5fb5e91612e`, tested by
+[CI run 42515468486](https://github.com/simsong/email-collection-toolkit/actions/runs/42515468486).
+Its Python assertion relays the JavaScript driver's `passed=false` result and
+`Timed out: risky attachment requires confirmation` message. This is not itself
+proof that the application failed to request confirmation.
+
+The driver's confirmation callback increments a private counter without changing
+the DOM or publishing an event; its waiter observes DOM mutations and explicit
+state events. The retained CI trace contains no counter value. A local full-driver
+baseline run passed, demonstrating that the failure is schedule-sensitive. A
+quiet-page diagnostic using the shipped waiter and real browser confirm callback
+recorded **one callback, zero DOM mutations, timeout** without publication; with
+explicit publication it completed. The driver now publishes its confirmation,
+clipboard and captured-link changes and includes the observed confirmation count
+in any future failure. Attachment safety/confirmation policy is unchanged.
+
+A separate real-file regression reproduced Macroscope's deadline finding before
+repair: a false predicate publishing file activity caused a second predicate call
+after a zero deadline, because the ready native wait succeeded. The helper now
+rejects expired remaining time before waiting. The same pattern was found in
+suggestion and preview waits sharing a notification signal; both failed a bounded
+busy-notification regression before repair. Their loops now enforce expiry while
+preserving typed pending/error state and explicit retry.
+
+Ordered Ruff/Pylint/ty/Pyright passed, followed by 171 affected unit tests and
+18 converter tests. The complete browser suite passed 105 tests with 10 explicit
+native opt-in skips, plus both end-to-end imports. A fresh Sol High completion
+review cleared this entire new 13-file diff in round 1/3. Evidence is retained in
+`.tmp/ci-425154-repair/`, including original CI logs/trace, baseline failures and
+the quiet-page negative control. This new repair's local
+review does not clear the earlier observer-lock repair's independent-review gap or
+establish Windows/Linux native acceptance. No CI monitor or release job is started.
 
 ## Original failure and diagnosis
 
