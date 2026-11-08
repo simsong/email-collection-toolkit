@@ -508,8 +508,8 @@ def export_ambiguous_h3_examples(
     return review
 
 
-def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description=__doc__)
+def main(argv: list[str] | None = None, *, prog: str | None = None) -> int:
+    parser = argparse.ArgumentParser(prog=prog, description=__doc__)
     parser.add_argument("--apple-mail", type=Path, default=Path.home() / "Library/Mail")
     parser.add_argument("--archive", type=Path, default=Path.home() / "mail-archive")
     parser.add_argument("--output", type=Path, required=True)

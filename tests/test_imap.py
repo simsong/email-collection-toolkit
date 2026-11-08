@@ -280,6 +280,23 @@ def assert_imap_searchable(archive: Path) -> None:
         assert database.execute("SELECT count(*) FROM invocations WHERE kind='text-index' AND status='completed'").fetchone()[0] > 0
 
 
+def test_ect_import_uses_saved_imap_sources(imap_archive: Path, imap_inbox: DisposableImap) -> None:
+    """ACQUISITION: the unified CLI runs real TLS IMAP and resumes without duplicate messages."""
+    from mailarchiver.cli import main as ect_main  # pylint: disable=import-outside-toplevel
+    arguments = ["import", "--archive", str(imap_archive), "--imap", "--no-scan", "--workers", "1"]
+    with imap_inbox.connect() as client:
+        client.select("INBOX", readonly=True)
+        flags = client.uid("FETCH", "1:*", "(UID FLAGS RFC822.SIZE)")[1]
+    assert ect_main(arguments) == 0
+    assert_imap_searchable(imap_archive)
+    before = totals(imap_archive)
+    assert ect_main(arguments) == 0
+    assert totals(imap_archive) == before
+    with imap_inbox.connect() as client:
+        client.select("INBOX", readonly=True)
+        assert client.uid("FETCH", "1:*", "(UID FLAGS RFC822.SIZE)")[1] == flags
+
+
 @pytest.mark.parametrize("imap_server", ["implicit", "starttls"], indirect=True)
 def test_cli_real_server_normalizes_crlf_skips_spam_and_resumes(imap_archive: Path,
         imap_inbox: DisposableImap, imap_messages: tuple[bytes, ...], capsys: pytest.CaptureFixture[str]) -> None:

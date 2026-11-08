@@ -6,6 +6,18 @@ Entries describe their recorded revisions. For current behavior use the
 [user manual](USER_MANUAL.md) and [CLI reference](CLI_REFERENCE.md). Retired
 Rust delivery plans and historical package checks are not current acceptance.
 
+## 1.0.0a63 — unified CLI and organized documentation
+
+- Install `ect`, `ect-create`, `ect-import` and `ect-search`; remove the former
+  console-script names. Both command forms reuse the existing application engines.
+- Create an empty archive with optional owner rules, then import local files or
+  read-only IMAP sources. Antivirus scanning is enabled by default.
+- Make developer targets invoke the ECT commands. Keep user examples independent
+  of Make, with build, signing and diagnostic recipes in a separate developer guide.
+- Reorganize the documentation index and subsystem overviews, correct stale Gmail
+  and source-configuration guidance, consolidate duplicate forwarding documents,
+  and separate historical machine-specific measurements from current instructions.
+
 ## 1.0.0a62 — clarify alpha testing and archive verification
 
 - Label local archive checkpoint work **Verifying archived messages and saving

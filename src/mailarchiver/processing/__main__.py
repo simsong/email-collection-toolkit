@@ -24,8 +24,8 @@ from .store import connect, report, reprocess, submit
 from ..writer_lock import WriterLease
 
 
-def main() -> None:
-    parser = argparse.ArgumentParser(description=__doc__)
+def main(argv: list[str] | None = None, *, prog: str | None = None) -> None:
+    parser = argparse.ArgumentParser(prog=prog, description=__doc__)
     parser.add_argument("--installation-config", type=Path, help="installation YAML settings path")
     parser.add_argument("--archive", type=Path, required=True)
     parser.add_argument("--plugin-dir", type=Path, action="append", default=[])
@@ -39,7 +39,7 @@ def main() -> None:
     execute = commands.add_parser("run")
     execute.add_argument("--retry", action="store_true")
     execute.add_argument("--max-jobs", type=int)
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
     plugins = load_processors(tuple(args.plugin_dir))
     if args.command == "plugins":
         for plugin in plugins:

@@ -1,6 +1,6 @@
 +++
 title = "Plugin system"
-description = "Existing source and file plugins, and the proposed ranked mailbox, message, and content processing graphs."
+description = "Source and file plugins, ranked message/content processing, and resumable handoffs."
 +++
 <!-- Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved. -->
 
@@ -8,7 +8,7 @@ Production CLI import uses source/file adapters followed by API v2 ingest,
 message and content pipelines. Python plugins run through the interface in the
 host interpreter; the Rust PST importer is an external executable. The diagram
 shows those pipelines and their GUI controls.
-[![Proposed container, message, and content processing DAGs, with ranked scanning, MIME dispatch, transactional publication, and resumable handoffs](../images/processor-dag.svg)](../images/processor-dag.svg)
+[![Container, message, and content processing pipelines, with ranked scanning, MIME dispatch, transactional publication, and resumable handoffs](../images/processor-dag.svg)](../images/processor-dag.svg)
 
 Open the graphic for a larger view. The file-parser layer is a subtree of local
 container acquisition, which supplies the three pipelines below. Planned
@@ -90,7 +90,7 @@ will store tag IDs, names, nullable background/text colors, crosshatching, and
 font choices in SQLite, with configurable tagged-message display.
 
 See the [full plugin contract](https://github.com/simsong/email-collection-toolkit/blob/main/doc/PLUGINS.md)
-for the implemented API and the proposed extension.
+for the implemented APIs and remaining extension plans.
 
 ## Writing a processor
 
@@ -104,7 +104,7 @@ to inspect the production registry, saved work, and picker data, or resume
 content processing without source files. Plugins use cooperative cancellation
 and I/O deadlines; late results are rejected before publication.
 
-The complete design checkpoints plugin versions, configuration and input identity so retries
-can skip completed work. Publication and queue handoff share a recovery
+Durable jobs checkpoint completed work; plugin or configuration changes do not
+automatically reprocess archived mail. Use an explicit reprocessing request. Publication and queue handoff share a recovery
 protocol. Scanner failure never counts as clean; child messages retain parent
 scan provenance. Manual identity edits and tags survive processing reruns.

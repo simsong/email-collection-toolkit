@@ -2648,33 +2648,39 @@ def refresh_index(args: argparse.Namespace) -> None:
     rebuild_search_index(Path(args.archive), args.index_attachments, configured_workers(args.workers))
 
 
-def main() -> int:
-    parser = argparse.ArgumentParser()
-    add_archive_argument(parser, "canonical archive directory")
-    commands = parser.add_subparsers(dest="command", required=True)
-    ingest_parser = commands.add_parser("ingest")
-    ingest_parser.add_argument("--owner-names-file", help="Legacy include-rule file; otherwise use archive config.yaml")
-    ingest_parser.add_argument(
+def add_ingest_arguments(parser: argparse.ArgumentParser, *, require_scan: bool = True,
+                         require_roots: bool = True) -> None:
+    """Share local import options between the public CLI and the archive engine."""
+    parser.add_argument("--owner-names-file", help="Legacy include-rule file; otherwise use archive config.yaml")
+    parser.add_argument(
         "--earliest-year",
         type=positive_integer,
         default=1900,
         help="reject earlier message dates and use normal fallbacks (default: 1900)",
     )
-    scanning = ingest_parser.add_mutually_exclusive_group(required=True)
+    scanning = parser.add_mutually_exclusive_group(required=require_scan)
     scanning.add_argument("--clamav", action="store_true", help="scan new messages with on-demand ClamAV")
     scanning.add_argument("--no-scan", action="store_true", help="explicitly import without antivirus; record messages as not scanned")
-    ingest_parser.add_argument("--workers", type=worker_argument, help="override worker preferences (default: half CPUs; maximum: twice CPUs)")
-    ingest_parser.add_argument(
+    parser.add_argument("--workers", type=worker_argument, help="override worker preferences (default: half CPUs; maximum: twice CPUs)")
+    parser.add_argument(
         "--plugin-dir",
         action="append",
         type=Path,
         default=[],
         help="trusted plug-in root to load (repeatable; Python code in this directory will execute)",
     )
-    ingest_parser.add_argument("--index-attachments", action="store_true", help="index text attachments; non-text attachments require the planned Tika extractor")
-    ingest_parser.add_argument("--defer-content", action="store_true", help="file messages and extract headers; leave content jobs pending")
-    ingest_parser.add_argument("--installation-config", type=Path, help="installation plugin settings override")
-    ingest_parser.add_argument("roots", nargs="+", metavar="ROOT")
+    parser.add_argument("--index-attachments", action="store_true", help="index text attachments; non-text attachments require the planned Tika extractor")
+    parser.add_argument("--defer-content", action="store_true", help="file messages and extract headers; leave content jobs pending")
+    parser.add_argument("--installation-config", type=Path, help="installation plugin settings override")
+    parser.add_argument("roots", nargs="+" if require_roots else "*", metavar="SOURCE")
+
+
+def build_parser(prog: str | None = None) -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(prog=prog)
+    add_archive_argument(parser, "canonical archive directory")
+    commands = parser.add_subparsers(dest="command", required=True)
+    ingest_parser = commands.add_parser("ingest")
+    add_ingest_arguments(ingest_parser)
     ingest_parser.set_defaults(function=ingest)
     processing = commands.add_parser("process", help="resume saved processing jobs without rereading source mailboxes")
     processing.add_argument("--phase", choices=("ingest", "content", "all"), default="content")
@@ -2720,7 +2726,19 @@ def main() -> int:
         help="verified-message workers; override preferences (default: half CPUs; maximum: twice CPUs)",
     )
     refresh_parser.set_defaults(function=refresh_index)
-    args = parser.parse_args()
+    for child in commands.choices.values():
+        child.add_argument("--archive", type=Path, default=argparse.SUPPRESS,
+                           help="archive directory; defaults to $MAIL_ARCHIVE_DIR")
+    return parser
+
+
+def main(argv: list[str] | None = None, *, prog: str | None = None) -> int:
+    parser = build_parser(prog)
+    return execute(parser.parse_args(argv), parser)
+
+
+def execute(args: argparse.Namespace, parser: argparse.ArgumentParser) -> int:
+    """Run a parsed archive command with the shared error and interruption policy."""
     args.archive = require_archive(parser, args.archive)
     try:
         args.function(args)

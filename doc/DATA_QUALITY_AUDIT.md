@@ -13,7 +13,7 @@ early source tree. `audit_babyl.py` exercises the Babyl reader across a source
 tree. `summarize_evidence.py` prints compact aggregates from the generated CSV
 files.
 
-Invocation and parameters are in [CLI_REFERENCE.md](CLI_REFERENCE.md#research-and-diagnostic-commands).
+Invocation and parameters are in [CLI_REFERENCE.md](DEVELOPER_COMMANDS.md#research-and-diagnostic-commands).
 
 The Makefile's default is also an ignored checkout-local directory. Override it
 with `AUDIT_OUTPUT=/private/path` when needed. The output includes complete RFC 5322

@@ -5,7 +5,7 @@
 The supported workspace contains the independent archive verifier, MCT importer
 tools, PST tools, MIME transfer decoder and build runner. Use `make rust-programs`
 to build and `make rust-check` to validate them. See the
-[CLI reference](../doc/CLI_REFERENCE.md#rust-tools) and
+[CLI reference](../doc/DEVELOPER_COMMANDS.md#rust-tools) and
 [MCT contract](../doc/MCT_IMPORTER_API.md).
 
 The experimental desktop UI and its helper/tests have been removed from this

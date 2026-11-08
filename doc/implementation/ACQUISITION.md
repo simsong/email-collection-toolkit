@@ -12,6 +12,19 @@ checked at host boundaries; GUI/standalone CLI use the notifying `ChangeEvent`.
 Current implementation and validation boundaries. Deferred feature designs
 live in [plans](../plans/README.md); historical evidence does not validate this revision.
 
+## Public command-line entry points
+
+`cli.py` dispatches `ect` and the create/import/search executable names from one
+implementation. It passes argument lists directly to the existing engines;
+there is no Make or shell dependency. Local imports reuse `add_ingest_arguments`
+and the shared command error policy; IMAP imports reuse `synchronize` and its
+native credential store. Archive creation uses `create_empty_archive`, including
+optional owner rules saved under the creation lease. Local import requires an
+existing archive. Console metadata registers only the four ECT names.
+`make test-cli` exercises installed scripts, byte preservation, deduplication,
+search/display, verification and refusal to overwrite existing content; the IMAP
+suite exercises ECT against a disposable TLS server.
+
 ## Provider implementation boundaries
 
 `imap_credentials` uses the native vault directly for CLI and packaged apps.
@@ -305,7 +318,7 @@ Date sorting/repacking, integrated verification, richer
 text extraction, Eudora, working IMAP cache directories, direct Gmail API/OAuth,
 redaction, and research-oriented metadata remain planned work. The standalone
 password-based IMAP CLI is described below. The delivered
-`mailsearch` command reads both databases without writing:
+`ect-search` command reads both databases without writing:
 it applies `to:`/`from:`/`subject:` catalog filters, worldwide calendar-date
 `date:`/`before:`/`after:` filters, and ANDed FTS5 terms; it prints stable
 `message_pk` header lines and reads a numbered message directly from its
@@ -380,7 +393,9 @@ command is currently implemented.
 
 ## Standalone IMAP CLI
 
-`imap_cli` exposes `mailarchiver-imap` and `make imap IMAP_ARGS=...`. It reuses
+`cli.py` exposes `ect import --imap`; `imap_cli` owns account setup and
+synchronization. `make imap` invokes `ect imap` for the advanced combined setup
+flow. It reuses
 `create_empty_archive`, archive validation, the writer lease and `run_ingest`,
 with the shared worker preference and terminal scoreboard output disabled. A separate
 catalog reader prints committed totals on native archive/status change notifications and optional message lines.
@@ -573,7 +588,7 @@ Native initialization has a 120-second deadline; production scans retain a
 reaped. Owned extraction/message temporaries are removed. Scan threads persist
 typed evidence directly, and processor invocation history retains it too.
 
-The h3 review prototype (see [CLI limitations](../CLI_REFERENCE.md#research-and-diagnostic-commands))
+The h3 review prototype (see [CLI limitations](../DEVELOPER_COMMANDS.md#research-and-diagnostic-commands))
 writes hash-verified ambiguous classes to a new private directory outside both
 source stores. Refresh validates manifest paths and hashes; it does not import
 or deduplicate. Its writable SQLite comparison index enables URI handling and

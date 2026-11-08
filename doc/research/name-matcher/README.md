@@ -42,7 +42,7 @@ an explicit, separately authorized run and a documented disclosure policy.
 
 The current prototype performs read-only evidence extraction:
 
-See the [CLI reference](../../CLI_REFERENCE.md#research-and-diagnostic-commands) for invocation.
+See the [CLI reference](../../DEVELOPER_COMMANDS.md#research-and-diagnostic-commands) for invocation.
 
 It writes a private SQLite database plus a YAML summary and refuses to overwrite
 an existing output. It extracts all display-name/address observations from

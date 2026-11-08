@@ -1,50 +1,52 @@
 +++
 title = "Archive Gmail"
-description = "Import a Gmail snapshot using Google Takeout and MBOX."
+description = "Use Google Takeout or read-only IMAP to preserve Gmail."
 +++
 <!-- Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved. -->
 
+## Google Takeout
 
-## END USER
-
-Use [Google Takeout](https://takeout.google.com/) today. This does not grant Email Collection Toolkit access to Gmail and does not require an OAuth client.
+Use [Google Takeout](https://takeout.google.com/) for an offline snapshot. This
+does not grant Email Collection Toolkit access to your Google account.
 
 1. Choose **Deselect all**, then select **Mail**.
-2. Retain all mail data for the strongest completeness evidence.
-3. Choose a one-time ZIP export and **Create export**.
-4. Download every part when Google emails you, then extract the files beneath
-   one directory.
-5. Import the extracted directory into Email Collection Toolkit.
+2. Select the mailboxes to preserve, then create a one-time export.
+3. Download every ZIP part and extract them under one directory.
+4. Import that directory with the application or `ect-import`.
+5. Verify the resulting archive and retain the original export as a backup.
 
-Google exports message content, headers, attachments, and labels. Takeout is a
-snapshot rather than an incremental service, and large exports may be divided
-into several ZIP files. Keep the ZIP files until the resulting archive passes
-verification.
+```sh
+ect-create gmail.mailarchive --owner sam@gmail.com
+ect-import --archive gmail.mailarchive /path/to/extracted-takeout
+ect verify gmail.mailarchive
+```
 
-For best-effort updates between Takeout snapshots, an account already
-synchronized with Apple Mail can be ingested through its local cache. This can
-be rerun as more complete messages arrive, but it is not proof of server
-completeness. See [Advanced](../advanced/) for cache limits, exact
-deduplication, and semantic-message reconciliation.
+See [CLI installation and prerequisites](https://github.com/simsong/email-collection-toolkit/blob/main/doc/CLI_REFERENCE.md#install)
+before using these terminal commands. Large exports can be split across ZIP files;
+direct ZIP import and automatic Takeout creation/download are not implemented.
 
-## DEVELOPER
+## Read-only IMAP
 
-The canonical [Gmail design and operations document](https://github.com/simsong/email-collection-toolkit/blob/main/doc/GMAIL.md)
-covers Takeout ingestion, the future Gmail API adapter, shared Desktop OAuth
-clients, Testing versus production, personal-use exceptions, restricted-scope
-verification, annual assessments when server-side data handling makes one
-necessary, and why IMAP is not an authentication shortcut.
+For accounts that permit app-password IMAP access:
 
-The illustrated [one-time registration reference](../oauth-client-registration/)
-remains available for maintainers experimenting with the future API adapter.
+```sh
+ect-import --archive gmail.mailarchive --imap
+```
 
-## Current acquisition boundaries
+The first run prompts for connection settings and a hidden app password. The
+password stays in the native operating-system credential store. Later runs
+resume saved progress and download new messages without changing Gmail flags.
+Gmail acquisition downloads All Mail and records labels; messages found only in
+Spam or Trash are outside this mode. Google controls app-password availability;
+check its [current account guidance](https://support.google.com/accounts/answer/185833).
 
-The Google authorization prototype and its developer client override have
-been removed. The current application contains no OAuth client and performs no
-Google account authorization; use Google Takeout.
+## Other acquisition paths
 
-Directory import reports and skips `.partial.emlx` records and imports complete
-supported messages. Direct selection of a partial record is rejected. Detached
-content is not reconstructed, so this remains best-effort cache recovery rather
-than complete provider acquisition.
+A synchronized Apple Mail cache is a best-effort source. Complete `.emlx` messages
+can be imported, but partial records and missing detached attachments prevent a
+completeness claim. See [Apple Mail cache limits](@/advanced.md#apple-mail-as-a-temporary-provider-adapter).
+
+Direct Gmail API and OAuth acquisition are not available. End users do not need
+to register a Google application. The [provider guide](https://github.com/simsong/email-collection-toolkit/blob/main/doc/GMAIL.md)
+describes the current boundaries; future OAuth work belongs to the
+[acquisition plan](https://github.com/simsong/email-collection-toolkit/blob/main/doc/plans/ACQUISITION.md).

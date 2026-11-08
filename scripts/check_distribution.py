@@ -33,16 +33,18 @@ REQUIRED_PACKAGE_MEMBERS = (
     "mailarchiver/sql/V1__search.sql",
 )
 SMOKE_COMMANDS = (
-    ("mailarchiver-compare-apple-mail", ("--help",), 0),
-    ("mailarchiver-h3-review", ("--help",), 0),
-    ("mailarchiver", ("--help",), 0),
-    ("mailarchiver", ("--archive", ".", "processors"), 0),
-    ("mailsearch", ("--help",), 0),
-    ("mailsearch-gui", ("--help",), 0),
-    ("summarize", (), 2),
-    ("verify-mail-archive", ("--help",), 0),
-    ("mailarchiver-validation", ("--help",), 0),
-    ("extract-pdf-mail", ("--help",), 0),
+    ("ect", ("--help",), 0),
+    ("ect", ("processors", "--archive", "."), 0),
+    ("ect", ("compare-apple-mail", "--help"), 0),
+    ("ect", ("h3-review", "--help"), 0),
+    ("ect", ("gui", "--help"), 0),
+    ("ect", ("summarize",), 2),
+    ("ect", ("verify", "--help"), 0),
+    ("ect", ("validation", "--help"), 0),
+    ("ect", ("extract-pdf-mail", "--help"), 0),
+    ("ect-create", ("--help",), 0),
+    ("ect-import", ("--help",), 0),
+    ("ect-search", ("--help",), 0),
 )
 
 

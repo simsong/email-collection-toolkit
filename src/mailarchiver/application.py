@@ -36,6 +36,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from .sqlite_paths import sqlite_uri
 
+from .owner_rules import OwnerRules
 from .identity import application_data_directory
 
 from .bagit import initialize_bag
@@ -280,7 +281,7 @@ def validate_archive(path: Path, *, recover: bool = False) -> tuple[Path, Path, 
     return display, canonical, identity
 
 
-def create_empty_archive(path: Path) -> ArchiveDocument:
+def create_empty_archive(path: Path, *, owner_rules: OwnerRules | None = None) -> ArchiveDocument:
     """Initialize a selected new or empty destination while holding its writer lease."""
     display = Path(os.path.abspath(path.expanduser()))
     if display.is_symlink() or (display.exists() and not display.is_dir()):
@@ -305,6 +306,9 @@ def create_empty_archive(path: Path) -> ArchiveDocument:
         initialize_bag(canonical)
         create_catalog(canonical / "archive.sqlite3").close()
         create_search(canonical / "search.sqlite3").close()
+        if owner_rules is not None:
+            from .archive_config import ArchiveConfig, save_archive_config  # pylint: disable=import-outside-toplevel
+            save_archive_config(canonical, ArchiveConfig(owner=owner_rules))
     finally:
         lease.release()
     return ArchiveDocument.open(display)

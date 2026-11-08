@@ -26,9 +26,18 @@ library unless another dependency is explicitly approved.
 
 ## Standalone IMAP download CLI
 
-`mailarchiver-imap` is a Python CLI independent of the desktop UI, targeting macOS
-and Windows. `--new ARCHIVE` initializes only a new/empty destination; `--archive
-ARCHIVE` validates and opens an existing archive. Initial setup prompts for server,
+`ect-create ARCHIVE` initializes a new/empty destination without importing mail.
+`ect-import --archive ARCHIVE SOURCE...` imports local files/directories into an
+existing archive. `ect-import --archive ARCHIVE --imap` synchronizes saved accounts
+independently of the desktop on macOS and Windows. The generic `ect create`,
+`ect import` and `ect search` commands share the shortcut implementations.
+`ect imap --new ARCHIVE` retains the advanced combined creation/setup flow.
+The previous console-script names are removed; Make targets invoke ECT commands.
+Source selection errors must be rejected before changing an archive.
+Antivirus is enabled by default; `--no-scan` explicitly records unscanned mail.
+`ect-create --owner ADDRESS` persists owner include rules under the creation lease.
+
+Initial IMAP setup prompts for server,
 port, verified TLS mode, username and hidden password/app password, saves and runs.
 Configuration uses `config.yaml` version 3's typed `imap_sources`, with unique source
 IDs; passwords remain exclusively in the native OS keyring. Existing local-only

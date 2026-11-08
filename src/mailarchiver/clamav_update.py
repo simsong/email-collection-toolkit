@@ -283,8 +283,8 @@ def _refresh_development() -> UpdateResult:
     return UpdateResult(versions=definitions.versions, published=definitions.daily.published, directory=directory)
 
 
-def main(argv: list[str] | None = None, *, require_directory: bool = False) -> int:
-    parser = argparse.ArgumentParser(description=__doc__)
+def main(argv: list[str] | None = None, *, prog: str | None = None, require_directory: bool = False) -> int:
+    parser = argparse.ArgumentParser(prog=prog, description=__doc__)
     modes = parser.add_mutually_exclusive_group()
     modes.add_argument("--seed", type=Path, help="verify and copy an existing local definition set into application storage")
     modes.add_argument("--development", action="store_true", help="update etc/clamdb for development")

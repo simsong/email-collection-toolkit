@@ -295,12 +295,12 @@ job wins that race, present the normal stop confirmation and apply the shared
 five-second deadline. Setup Cancel must not wait for its JavaScript reply before
 requesting Quit.
 
-When launched through `mailsearch-gui`, macOS must not reinterpret the Python
+When launched through `ect gui`, macOS must not reinterpret the Python
 launcher or command-line option values as documents. Explicit `--archive`
 handling and genuine Finder document-open events remain supported. Configure
 this behavior for the running process without writing system or user defaults.
 
-`mailsearch-gui --new` forces this setup for one launch, bypassing both remembered
+`ect gui --new` forces this setup for one launch, bypassing both remembered
 and environment-selected archives without clearing preferences or altering old
 archives. `--new` and `--archive` are mutually exclusive. On macOS, holding
 Option (Alt) while launching the app invokes the same setup; keep it held until
@@ -441,7 +441,7 @@ import and exits the program, including the ⌘ Q shortcut on macOS.
 Other archives and child windows remain independently closeable. The Window menu
 lists the About, search, and Ingests windows and brings a selected window forward.
 
-`mailsearch` is a read-only command-line consumer of both databases.  It
+`ect-search` is a read-only command-line consumer of both databases.  It
 accepts ordinary full-text terms plus `any:ADDRESS`, `from:ADDRESS`,
 role-specific `to:ADDRESS`, `cc:ADDRESS`, and `bcc:ADDRESS`, `subject:TEXT`,
 `date:YYYY-MM-DD`, `before:YYYY-MM-DD`, and
@@ -463,7 +463,7 @@ plain text with Beautiful Soup. `--headers` includes every header; `--html`
 prints decoded HTML parts; `--mime` prints the original RFC 5322/MIME source,
 including all MIME parts and attachment encodings.
 
-`mailsearch-gui` is a macOS-first, read-only pywebview consumer of the same
+`ect gui` is the macOS/Windows pywebview desktop consumer of the same
 search and verified-message retrieval functions.  A single search field uses
 the CLI selectors and ordinary ANDed terms; shell-style quotes group spaces,
 so `subject:"annual report"` is one selector while `subject:annual report`

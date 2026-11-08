@@ -51,15 +51,15 @@ Start each comparison from a clean Mailbag result while retaining the download
 cache. Run one dataset or the complete suite:
 
 ```console
-make validation-run DATASET=spamassassin
-make validation-run-all
+ect validation run spamassassin
+ect validation run-all
 ```
 
 For AWS, deploy the SAM control plane and launch one worker or all workers:
 
 ```console
-make validation-aws-start DATASET=spamassassin STACK=mailarchiver-validation
-make validation-aws-start-all STACK=mailarchiver-validation
+ect validation aws-start spamassassin --stack mailarchiver-validation
+ect validation aws-start-all --stack mailarchiver-validation
 ```
 
 ## Metrics inventory

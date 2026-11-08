@@ -47,5 +47,4 @@ Gmail API, OAuth IMAP and provider history integration remain unimplemented. A
 future distributed client needs a maintainer-owned public-client registration,
 local private token storage and a fresh review of Google's scope/verification
 requirements. End users should not be asked to register their own application.
-[OAUTH_CLIENT_REGISTRATION.md](OAUTH_CLIENT_REGISTRATION.md) records the absence
-of current registration; it is not an onboarding procedure.
+No current client-registration or OAuth onboarding command exists.
