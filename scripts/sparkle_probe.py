@@ -52,6 +52,27 @@ class ProbeReport(BaseModel):
     continuation_error_recovered: bool = False
 
 
+def exercise_failed_install(service: UpdateService) -> None:
+    """Exercise the probe's expected exception and verify exactly-once recovery."""
+    failures: list[bool] = []
+    failure = RuntimeError("synthetic native-event installation failure")
+
+    def failed_install() -> None:
+        failures.append(True)
+        raise failure
+
+    service.defer_install(failed_install)
+    try:
+        service.resume_install()
+    except RuntimeError as error:
+        if error is not failure:
+            raise
+    else:
+        raise AssertionError("Deferred installation did not propagate its expected failure")
+    if failures != [True] or service.status.phase != "error" or service.resume_install():
+        raise AssertionError("Native continuation did not recover from the install failure exactly once")
+
+
 def exercise_preferences(service: UpdateService) -> None:
     """Operate actual Cocoa controls and apply the user choice through the production pane."""
     appkit = import_module("AppKit")
@@ -112,17 +133,7 @@ def exercise(feed_check: bool) -> None:
         postponed = bool(helper.probe_postpone(delegate))
         if not service.resume_install() or service.resume_install():
             raise AssertionError("Deferred native continuation must run exactly once")
-        failures: list[bool] = []
-
-        def failed_install() -> None:
-            failures.append(True)
-            raise RuntimeError("synthetic native-event installation failure")
-
-        service.defer_install(failed_install)
-        if not service.resume_install():
-            raise AssertionError("Deferred installation did not resume at the explicit idle boundary")
-        if failures != [True] or service.status.phase != "error":
-            raise AssertionError("Native continuation did not recover from the install failure exactly once")
+        exercise_failed_install(service)
         report = ProbeReport(frozen=bool(getattr(sys, "frozen", False)), controller=backend.controller.className(),
                              framework_path=str(framework),
                              build=service.status.build, preview_channels=preview, release_channels=release,

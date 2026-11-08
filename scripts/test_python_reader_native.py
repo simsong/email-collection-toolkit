@@ -119,6 +119,12 @@ def check_windows_antivirus_menu(application, search, evaluate, progress: Callab
                 os.environ[key] = value
 
 
+def wait_windows_preferences(window: Any, evaluate: Callable[[str, Any], Any]) -> None:
+    """Join the standalone page's real refresh; it does not load the shared DOM waiter."""
+    if not evaluate("refresh().then(() => document.body.dataset.ready === 'true')", window):
+        raise AssertionError("Preferences refresh did not publish ready state")
+
+
 def check_windows_preferences(application, search, evaluate, progress: Callable[[str], None]) -> None:
     """Native Close flushes active edits, and reopening restores the saved settings."""
     progress("Preferences loading")
@@ -126,7 +132,7 @@ def check_windows_preferences(application, search, evaluate, progress: Callable[
     window = application._windows_preferences_window
     if not window.events.loaded.wait(25):
         raise TimeoutError("Preferences did not load")
-    evaluate("waitForDomState(() => document.body.dataset.ready === 'true', 'Preferences readiness').then(() => true)", window)
+    wait_windows_preferences(window, evaluate)
     check_windows_version(window)
     check_windows_document_menu(search)
     application.show_update_preferences()
@@ -152,8 +158,8 @@ def check_windows_preferences(application, search, evaluate, progress: Callable[
     reopened = application._windows_preferences_window
     if not reopened.events.loaded.wait(25):
         raise TimeoutError("Preferences did not reopen")
-    answer = evaluate("(async () => { await waitForDomState(() => document.body.dataset.ready === 'true', 'Preferences readiness'); "
-                      "return document.getElementById('worker-count').value; })()", reopened)
+    wait_windows_preferences(reopened, evaluate)
+    answer = evaluate("document.getElementById('worker-count').value", reopened)
     if answer != "2":
         raise AssertionError("Reopened Preferences lost the saved worker count")
     check_windows_version(reopened)

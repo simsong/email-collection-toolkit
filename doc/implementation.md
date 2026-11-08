@@ -48,6 +48,14 @@ platform acceptance and deferred work.
 
 ## Shared boundaries
 
+- Updater completion signals follow all result fields. PST supervisors observe a
+  bounded private work counter while diagnostic records are batched by work;
+  notification initialization remains inside child kill/reap ownership. Linux
+  descriptor waits use scalable selectors. See the [review follow-up](TIMING_AUDIT.md).
+  The run-owned cancellation signal reaches both converter stages through
+  `PluginContext`; document watches retire with their last owner. Close vetoes
+  publish notices off the native thread, independently of occupied command workers.
+
 - Native filesystem/task notices trigger coalesced About/Ingests/options reads; post-command
   reads join old work and then request fresh state. Native probes await actual
   visibility, drag events and callbacks. Diagnostic sampling acknowledges complete

@@ -34,6 +34,16 @@ from mailarchiver.writer_lock import WriterLease
 from tests.test_end_to_end import mailbox_message_bytes
 
 
+def test_pst_activity_counter_renews_without_growing_output() -> None:
+    """ACQUISITION: fixed-size progress changes renew liveness; repeated counters do not."""
+    activity = ImportActivity(deadline=60)
+    assert not activity.observe(20, (0, 0), 60, work_counter=1)
+    assert activity.deadline == 80
+    assert not activity.observe(75, (0, 0), 60, work_counter=2)
+    assert activity.deadline == 135
+    assert activity.observe(135, (0, 0), 60, work_counter=2)
+
+
 def cli(archive: Path, *arguments: str, timeout: float = 60) -> subprocess.CompletedProcess[str]:
     result = subprocess.run([sys.executable, "-m", "mailarchiver", "--archive", str(archive), *arguments],
                             capture_output=True, text=True, check=False, timeout=timeout)
@@ -445,6 +455,8 @@ def test_cli_pst_partial_import_preserves_evidence_and_valid_records(tmp_path: P
         assert receipt.source_sha256 == hashlib.sha256(fixture.read_bytes()).hexdigest()
         assert path.with_name("output.mboxrd").exists()
         assert "errors=2" in path.with_name("stderr.txt").read_text()
+        counter = path.with_name("activity.bin").read_bytes()
+        assert len(counter) == 8 and int.from_bytes(counter, "little") > 0
     cli(archive, "process", "--phase", "content")
     assert source.read_bytes() == fixture.read_bytes()
     assert not verify_archive(archive)

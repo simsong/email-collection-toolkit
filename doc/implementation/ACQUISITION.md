@@ -2,6 +2,13 @@
 
 # Acquisition implementation
 
+The ingest run passes a private `ChangeEvent` through `PluginContext` to both
+PST/OST owners and the external scanning stage. `ProcessActivity` subscribes before
+waiting, checks already-set cancellation, and wakes its native wait so protected
+child cleanup runs. The cancellation hook holds only a weak reference to the wait
+resources. Ordinary external `threading.Event` callers remain cooperatively
+checked at host boundaries; GUI/standalone CLI use the notifying `ChangeEvent`.
+
 Current implementation and validation boundaries. Deferred feature designs
 live in [plans](../plans/README.md); historical evidence does not validate this revision.
 
@@ -727,8 +734,14 @@ release, source concurrency, real IMAP ingestion and current-message interruptio
 
 ## PST activity and parallel mailbox scanning
 
-`ImportProgress` emits timestamped stderr status at actual work checkpoints
-in source hashing, address lookup and extraction. A blocking native call emits
+`ImportProgress` writes an eight-byte little-endian counter to its host-owned
+activity file at every actual work checkpoint; `MAILARCHIVER_PST_ACTIVITY_FILE`
+selects a new private path. It emits timestamped stderr status on phase changes
+and power-of-two checkpoint counts in source hashing, address lookup and extraction.
+This bounds count-triggered progress history to 64 records independently of input
+size; the activity snapshot still changes at every checkpoint.
+The parent renews inactivity on counter changes as well as stdout/stderr growth.
+A blocking native call emits
 no fabricated heartbeat. `PstFileParser` observes spool and diagnostics sizes to
 renew its inactivity deadline; silent expiry retains its workspace path in the
 error. Item/folder/address-book library errors include UTC RFC3339 times.

@@ -23,6 +23,8 @@ from typing import Literal, Protocol
 from packaging.version import Version
 from pydantic import BaseModel, PrivateAttr
 
+from .change_signal import ChangeSignal
+
 UpdateChannel = Literal["release", "preview"]
 RELEASE_STREAM_LABEL = "Release only"
 PREVIEW_STREAM_LABEL = "Alpha / beta / development and release"
@@ -79,6 +81,7 @@ class UpdateService:
         self.cancel_install = cancel_install
         self.notify_deferred = notify_deferred
         self._pending_install: Callable[[], None] | None = None
+        self.check_finished = ChangeSignal()
 
     def attach(self, backend: UpdateBackend, build: str) -> None:
         self.backend = backend
@@ -103,15 +106,18 @@ class UpdateService:
         self.status.last_checked = datetime.now(UTC)
         if error:
             self.fail(error)
+            return
         elif self.status.phase == "checking":
             self.status.phase = "idle"
             self.status.detail = "Update check completed."
+        self.check_finished.notify()
 
     def fail(self, detail: str) -> None:
         self.cancel_install()
         self._pending_install = None
         self.status.phase = "error"
         self.status.detail = detail[:2048]
+        self.check_finished.notify()
 
     def defer_install(self, continuation: Callable[[], None]) -> None:
         self._pending_install = continuation

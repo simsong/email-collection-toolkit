@@ -25,6 +25,12 @@ platform acceptance and deferred work.
 
 ## Shared boundaries
 
+- Result-wait expiry remains an explicit typed GUI error; later actual completion
+  can be retrieved on an explicit retry. Importer ownership begins before native
+  notification setup, and PST work liveness is independent of diagnostic history.
+  Actual stop notifications must wake silent importer waits and reap their children.
+  Status reads must not issue notices that trigger their own refresh loop.
+
 - Completion and readiness require observable state, Events, futures or native
   callbacks; a fixed delay never establishes success. Elapsed deadlines use
   monotonic clocks and expiry reports failure. No first-party non-timeout

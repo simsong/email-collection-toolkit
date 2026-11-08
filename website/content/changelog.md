@@ -4,6 +4,10 @@ description = "Changes to the Email Collection Toolkit website, separate from ap
 +++
 <!-- Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved. -->
 
+## 2026-11-08
+
+- Refresh synthetic search/import screenshots for alpha 60 after review repairs.
+
 ## 2026-11-07
 
 - Refresh synthetic search/import screenshots for alpha 59 after timing repairs.

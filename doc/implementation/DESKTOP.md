@@ -2,6 +2,19 @@
 
 # Desktop implementation
 
+Suggestion consumers handle error fields before completion. Native Close queues a
+scoped notice and starts an off-main drain independent of the command executor.
+Menu/ownership refresh retires unused document watches under the registry lock and
+joins them after releasing it. Setup reuse performs native actions and menu
+refresh outside its outer application lock. Watch ownership is removed only after
+cleanup succeeds; shutdown uses the same boundary from a stable snapshot, and
+quitting rejects new watches. About reports disk measurement errors in the typed
+`disk_error` field and renders unavailable space without creating refresh notices.
+The native Preferences probe checks actual visibility and uses Cocoa's display
+capture for its image; no fixed-duration run-loop pump establishes readiness.
+The standalone Windows Preferences probe joins that page's own `refresh()`
+completion rather than assuming shared-page JavaScript helpers are loaded.
+
 Current implementation and validation boundaries. Deferred feature designs
 live in [plans](../plans/README.md); historical evidence does not validate this revision.
 
@@ -1124,6 +1137,12 @@ than silently skipping IDs. The GUI discards the incomplete traversal/caches and
 offers Raw Source; raw reads and the initial stdlib parse still occur in memory.
 
 ## Timing and status ownership
+
+`UpdateService.check_finished` publishes after the complete timestamp/phase/detail
+result, including failures. The native Windows feed probe captures that future
+before starting discovery. Suggestion/preview failure deadlines return their
+typed error fields while retaining running work for an explicit retry. Result
+arrays append through `concat` rather than a function-argument spread.
 
 The search state proxy publishes assignments to its state-change event. Completed
 and invalidated drag exports replace their Map so observers are awakened even

@@ -829,8 +829,8 @@ async function loadSuggestions(query, request) {
       while (request === state.suggestionRequest && elements.search.value.trim() === query) {
         const status = await window.pywebview.api.suggestions_status(generation, true);
         if (status.stale) return;
+        if (status.error) throw new Error(status.error);
         if (status.complete) {
-          if (status.error) throw new Error(status.error);
           suggestions = status.result;
           break;
         }
@@ -1074,7 +1074,7 @@ async function loadRustSearchPage(search, limit = 512) {
     const page = await window.pywebview.api.search_page(search.generation, state.offset, limit);
     if (search !== state.rustSearch || page.stale) return;
     if (!page.results.length) return;
-    state.results.push(...page.results);
+  state.results = state.results.concat(page.results);
     showResultTable();
     await state.resultTable.addData(page.results, false);
     if (search !== state.rustSearch) return;
@@ -1107,7 +1107,7 @@ function renderSearchHelp() {
 
 function appendResults(results, request) {
   if (request !== state.searchRequest) return;
-  state.results.push(...results);
+  state.results = state.results.concat(results);
   showResultTable();
   void state.resultTable.replaceData(state.results);
 }

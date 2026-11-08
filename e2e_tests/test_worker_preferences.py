@@ -22,6 +22,7 @@ from mailarchiver.gui_app import PyWebViewApplication
 from mailarchiver.windows_update_preferences import PAGE, UpdatePreferencesApi
 from mailarchiver.worker_preferences import WorkerPreferences, logical_cpus
 from e2e_tests.test_gui_processing import expose
+from scripts.test_python_reader_native import wait_windows_preferences
 
 
 @pytest.mark.parametrize("override", [None, 2])
@@ -35,7 +36,8 @@ def test_worker_preferences_controls_persist_and_respect_cli(tmp_path: Path, pag
     expose(page, api, ("state", "save", "check", "close_saved"))
     try:
         page.goto("data:text/html," + quote(PAGE))
-        page.wait_for_function("document.body.dataset.ready === 'true'")
+        assert page.evaluate("typeof waitForDomState") == "undefined"
+        wait_windows_preferences(page, lambda expression, window: window.evaluate(expression))
         expect(page.get_by_role("button", name="Save settings")).to_have_count(0)
         expect(page.locator("#check")).to_be_disabled()
         half = page.locator('input[value="half"]')
@@ -65,6 +67,7 @@ def test_worker_preferences_controls_persist_and_respect_cli(tmp_path: Path, pag
             page.evaluate("savePreferences()")
             assert store.read().workers == WorkerPreferences(mode="custom", custom_count=1)
             page.reload()
+            wait_windows_preferences(page, lambda expression, window: window.evaluate(expression))
             expect(page.locator('input[value="custom"]')).to_be_checked()
             expect(count).to_have_value("1")
             # Delay only delivery of a real saved result to exercise newer invalid edits.

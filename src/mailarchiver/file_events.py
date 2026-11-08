@@ -11,17 +11,21 @@ from __future__ import annotations
 
 from collections.abc import Callable, Iterator, Sequence
 from contextlib import AbstractContextManager
+from concurrent.futures import CancelledError
 import ctypes
 from importlib import import_module
 import math
 import os
 from pathlib import Path
-import select
+from selectors import DefaultSelector, EVENT_READ
 import sys
 from threading import Event, Lock, Thread
 from time import monotonic
 from typing import Any, Self
 import subprocess
+from weakref import ref
+
+from .change_signal import ChangeEvent
 
 
 def _existing_parent(path: Path) -> Path:
@@ -31,6 +35,14 @@ def _existing_parent(path: Path) -> Path:
             raise FileNotFoundError(path)
         parent = parent.parent
     return parent
+
+
+def _readable(descriptors: Sequence[int], timeout: float | None) -> bool:
+    """Wait without select's descriptor-number limit; expiry is never readiness."""
+    with DefaultSelector() as selector:
+        for descriptor in descriptors:
+            selector.register(descriptor, EVENT_READ)
+        return bool(selector.select(timeout))
 
 
 class PathChanges(AbstractContextManager["PathChanges"]):
@@ -175,7 +187,7 @@ class PathChanges(AbstractContextManager["PathChanges"]):
             elif self._queue is not None:
                 changed = bool(self._queue.control(None, 64, timeout))
             else:
-                changed = bool(select.select([self._read, self._fds[0]], [], [], timeout)[0])
+                changed = _readable((self._read, self._fds[0]), timeout)
             if self.cancelled.is_set():
                 return False
             if not changed:
@@ -238,7 +250,11 @@ class PathObserver:
         self.changed = changed
         self.failure: Exception | None = None
         self.thread = Thread(target=self._run, name="filesystem-changes", daemon=True)
-        self.thread.start()
+        try:
+            self.thread.start()
+        except BaseException:
+            self.changes.close()
+            raise
 
     def __enter__(self) -> Self:
         return self
@@ -266,12 +282,27 @@ class PathObserver:
 class ProcessActivity(AbstractContextManager["ProcessActivity"]):
     """Wake on actual output changes or child exit, and reap the owned child on failure."""
 
-    def __init__(self, process: subprocess.Popen[bytes], paths: Sequence[Path]) -> None:
+    def __init__(self, process: subprocess.Popen[bytes], paths: Sequence[Path], cancellation: ChangeEvent | None = None) -> None:
         self.process = process
         self.changes = PathChanges(paths)
+        self.cancellation = cancellation
+        if cancellation is not None:
+            changes = ref(self.changes)
+
+            def cancelled(_future: object) -> None:
+                if current := changes():
+                    current.cancel()
+
+            cancellation.changed.ready.add_done_callback(cancelled)
+            if cancellation.is_set():
+                self.changes.cancel()
         self.failure: Exception | None = None
         self.thread = Thread(target=self._exited, name="process-exit", daemon=True)
-        self.thread.start()
+        try:
+            self.thread.start()
+        except BaseException:
+            self.changes.close()
+            raise
 
     def _exited(self) -> None:
         try:
@@ -285,7 +316,11 @@ class ProcessActivity(AbstractContextManager["ProcessActivity"]):
         return self
 
     def wait(self, timeout: float) -> bool:
+        if self.cancellation is not None and self.cancellation.is_set():
+            raise CancelledError("Importer cancelled")
         changed = self.changes.wait(timeout)
+        if self.cancellation is not None and self.cancellation.is_set():
+            raise CancelledError("Importer cancelled")
         if self.failure is not None:
             raise RuntimeError("Child exit observation failed") from self.failure
         return changed
@@ -365,7 +400,7 @@ def wait_process_exit(pid: int, timeout: float = 5) -> None:
         except ProcessLookupError:
             return
         try:
-            if not select.select([descriptor], [], [], timeout)[0]:
+            if not _readable((descriptor,), timeout):
                 raise TimeoutError(f"Process {pid} did not exit")
         finally:
             os.close(descriptor)

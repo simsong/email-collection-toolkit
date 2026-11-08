@@ -6,6 +6,20 @@ Entries describe their recorded revisions. For current behavior use the
 [user manual](USER_MANUAL.md) and [CLI reference](CLI_REFERENCE.md). Retired
 Rust delivery plans and historical package checks are not current acceptance.
 
+## 1.0.0a60 — review follow-up for completion boundaries
+
+- Keep PST progress diagnostics batched by work count, with a bounded private
+  activity counter so slow work remains observable without a scheduling timer.
+- Reap PST/OST children even if native event subscription cannot initialize;
+  use scalable descriptor waits on Linux.
+- Avoid JavaScript argument limits when appending large search results.
+- Return explicit, retryable result-wait errors through typed GUI responses.
+- Acknowledge complete updater results and verify expected probe failures;
+  make the retained-find acceptance barrier explicit and bounded.
+- Wake silent PST/OST children on import cancellation, surface suggestion wait
+  errors immediately, publish Close warnings without unrelated activity, retire
+  released-document watches, and keep About disk failures from refreshing themselves.
+
 ## 1.0.0a59 — event-driven coordination
 
 - Replace first-party scheduling timers with work, filesystem, future, native-window

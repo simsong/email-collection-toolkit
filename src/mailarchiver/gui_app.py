@@ -123,6 +123,7 @@ APPLICATION_VERSION = version("mailarchiver")
 EXTERNAL_LINK_SCHEMES = frozenset({"http", "https", "mailto"})
 INTERNET_CHECK_URL = "https://www.example.com/"
 QUIT_TIMEOUT_SECONDS = 5.0
+WORK_RESULT_TIMEOUT_SECONDS = 30.0
 HELP_LINKS = (
     ("Community Forum", "https://github.com/simsong/email-collection-toolkit/discussions"),
     ("Contact Support", "https://github.com/simsong/email-collection-toolkit/issues"),
@@ -265,6 +266,7 @@ class AboutStatus(BaseModel):
     metadata: ApplicationMetadata
     disk_path: str
     disk_free_bytes: int
+    disk_error: str | None = None
     internet: InternetStatus
     notices: list[ApplicationNotice]
     ingests: list[AboutIngestStatus]
@@ -1106,19 +1108,27 @@ class GuiApi:
             return SuggestionStatus(generation=self._suggestion_generation).model_dump(mode="json")
 
     def suggestions_status(self, generation: int, wait_for_result: bool = False) -> dict[str, Any]:
-        deadline = time.monotonic() + 30
+        deadline = time.monotonic() + WORK_RESULT_TIMEOUT_SECONDS
+        wait_error: str | None = None
         while wait_for_result:
             changed = self._work_changed.ready
             with self._suggestion_lock:
                 future = self._suggestion_future
                 if generation != self._suggestion_generation or future is None or future.done():
                     break
-            changed.result(timeout=max(0, deadline - time.monotonic()))
+            try:
+                changed.result(timeout=max(0, deadline - time.monotonic()))
+            except TimeoutError:
+                wait_error = "Timed out waiting for search suggestions; retry the search."
+                break
         with self._suggestion_lock:
             status = SuggestionStatus(generation=generation, stale=generation != self._suggestion_generation)
             future = self._suggestion_future
+            if not status.stale:
+                status.error = wait_error
             if not status.stale and future is not None and future.done():
                 status.complete = True
+                status.error = None
                 try:
                     status.result = future.result()
                 except Exception as error:
@@ -1180,19 +1190,25 @@ class GuiApi:
 
     def take_previews(self, message_pks: list[int], wait_for_result: bool = False) -> dict[str, Any]:
         requested = set(message_pks)
-        deadline = time.monotonic() + 30
+        deadline = time.monotonic() + WORK_RESULT_TIMEOUT_SECONDS
+        wait_error: str | None = None
         while wait_for_result:
             changed = self._work_changed.ready
             with self._preview_lock:
                 self._collect_previews()
                 if not requested & self._preview_pending:
                     break
-            changed.result(timeout=max(0, deadline - time.monotonic()))
+            try:
+                changed.result(timeout=max(0, deadline - time.monotonic()))
+            except TimeoutError:
+                wait_error = "Timed out waiting for message previews; retry the search."
+                break
         with self._preview_lock:
             self._collect_previews()
             previews = [self._preview_cache[message_pk] for message_pk in message_pks if message_pk in self._preview_cache]
-            batch = PreviewBatch(previews=previews, pending=bool(requested & self._preview_pending),
-                                 error=self._preview_error)
+            pending = bool(requested & self._preview_pending)
+            batch = PreviewBatch(previews=previews, pending=pending,
+                                 error=self._preview_error or (wait_error if pending else None))
         return batch.model_dump(mode="json")
 
     def _collect_previews(self) -> None:
@@ -1749,7 +1765,10 @@ class PyWebViewApplication:
                 pass
             except BaseException as error:  # pylint: disable=broad-exception-caught
                 self.add_notice("error", f"{task.name} failed: {type(error).__name__}: {error}", window_id=task.window_id)
-        # Search ingest_overview polls this too, even when no About window exists.
+        self._drain_pending_notices()
+
+    def _drain_pending_notices(self) -> None:
+        """Publish queued native-callback notices away from Cocoa's event thread."""
         while True:
             try:
                 notice = self._pending_notices.get_nowait()
@@ -2028,11 +2047,12 @@ class PyWebViewApplication:
             (document.path for document in documents if document.path), Path.home()
         )
         assert disk_path is not None
+        disk_error = None
         try:
             free = shutil.disk_usage(disk_path).free
         except OSError as error:
             free = 0
-            self.add_notice("warning", f"Could not read free disk space for {disk_path}: {error}")
+            disk_error = str(error)
         ingests = []
         for document in documents:
             if document.path is None:
@@ -2052,6 +2072,7 @@ class PyWebViewApplication:
             metadata=application_metadata(),
             disk_path=str(disk_path),
             disk_free_bytes=free,
+            disk_error=disk_error,
             internet=self._connectivity.status() if self._connectivity else InternetStatus(),
             notices=self.notices(),
             ingests=ingests,
@@ -2105,9 +2126,23 @@ class PyWebViewApplication:
             return
         key = document.descriptor.document_id
         with self._lock:
-            if key not in self._status_observers:
+            if not self._quitting and key not in self._status_observers:
                 self._status_observers[key] = PathObserver(
                     [document.path / "status", document.path / "config.yaml"], self._status_changed)
+
+    def _retire_status_observers(self) -> None:
+        """Release unused document watches outside locks needed by their callbacks."""
+        with self._lock:
+            live = {document.descriptor.document_id for document in self.controller.documents()}
+            retired = [(key, observer) for key, observer in self._status_observers.items() if key not in live]
+        for key, observer in retired:
+            self._close_status_observer(key, observer)
+
+    def _close_status_observer(self, key: str, observer: PathObserver) -> None:
+        observer.close()
+        with self._lock:
+            if self._status_observers.get(key) is observer:
+                self._status_observers.pop(key)
 
     def _status_changed(self) -> None:
         if self._quitting:
@@ -2195,32 +2230,32 @@ class PyWebViewApplication:
             self.show_reader_start()
             return
         with self._lock:
-            if self._setup_api is not None:
-                self._setup_visible = True
-                self._setup_api.window.restore()
-                self._setup_api.window.show()
-                self._refresh_menus()
-                return
-            api = SetupApi(self)
-            window = webview.create_window(
-                f"{APPLICATION_NAME} — Get started", self.asset_url("setup.html"),
-                js_api=WindowBridge(api, ("choose_source", "choose_destination", "start_import", "cancel")),
-                width=760, height=650, min_size=(560, 580), text_select=True, menu=self.menu(),
-            )
-            if window is None:
-                raise RuntimeError("pywebview failed to create a setup window")
-            api.window = window
-            self._setup_api = api
+            api = self._setup_api
+            reused = api is not None
+            if api is None:
+                api = SetupApi(self)
+                window = webview.create_window(
+                    f"{APPLICATION_NAME} — Get started", self.asset_url("setup.html"),
+                    js_api=WindowBridge(api, ("choose_source", "choose_destination", "start_import", "cancel")),
+                    width=760, height=650, min_size=(560, 580), text_select=True, menu=self.menu(),
+                )
+                if window is None:
+                    raise RuntimeError("pywebview failed to create a setup window")
+                api.window = window
+                self._setup_api = api
+
+                def closed(*_args: object) -> None:
+                    with self._lock:
+                        self._setup_api = None
+                        self._setup_visible = False
+                    self._refresh_menus()
+
+                window.events.closing += lambda *_args: not api._lock.locked()
+                window.events.closed += closed
             self._setup_visible = True
-
-            def closed(*_args: object) -> None:
-                with self._lock:
-                    self._setup_api = None
-                    self._setup_visible = False
-                self._refresh_menus()
-
-            window.events.closing += lambda *_args: not api._lock.locked()
-            window.events.closed += closed
+        if reused:
+            api.window.restore()
+            api.window.show()
         self._refresh_menus()
 
     def show_reader_start(self) -> None:
@@ -2932,10 +2967,11 @@ class PyWebViewApplication:
         try:
             self.controller.close_window(window_id)
         except ArchiveBusyError:
-            # The next status poll delivers this without a UI lock or import worker.
+            # A native Close must not wait for an application lock or busy import pool.
             shortcut = " (⌘ Q)" if sys.platform == "darwin" else ""
             self._pending_notices.put(ApplicationNotice(severity="warning", message=
                 f"Cannot close window when import is running. Use Quit{shortcut} to suspend import and exit program.", window_id=window_id))
+            Thread(target=self._drain_pending_notices, name="mailarchiver-notice", daemon=True).start()
             return False
         except ValueError:
             pass  # A repeated native callback may refer to an already reserved close.
@@ -3100,9 +3136,10 @@ class PyWebViewApplication:
         # Keep the OS guard until process exit once Sparkle has begun relaunch.
         if self.updates.status.phase != "installing":
             release(self.cancel_update_install)
-        for observer in self._status_observers.values():
-            release(observer.close)
-        self._status_observers.clear()
+        with self._lock:
+            observers = tuple(self._status_observers.items())
+        for key, observer in observers:
+            release(lambda key=key, observer=observer: self._close_status_observer(key, observer))
         if self._connectivity is not None:
             release(self._connectivity.close)
         if self.asset_server is not None:
@@ -3128,6 +3165,7 @@ class PyWebViewApplication:
                 api.window.run_js("window.archiveDidChange?.();")
 
     def _refresh_menus(self) -> None:
+        self._retire_status_observers()
         menu = self.menu()
         windows = list(self._registered_windows())
         if sys.platform == "win32":

@@ -1374,7 +1374,13 @@ def _run_ingest(request: IngestRequest, writer_lease: WriterLease, outcome: Inge
         "plugin_dir": [path.resolve() for path in request.plugin_dir],
         "installation_config": request.installation_config.resolve() if request.installation_config else None})
     outcome.accepted_request = saved_request
-    plugins = load_plugins(request.plugin_dir, archive=request.archive, installation_config=request.installation_config, scan_policy=request.scan_policy)
+    stop = ChangeEvent()
+    if isinstance(stop_event, ChangeEvent):
+        stop_event.changed.ready.add_done_callback(lambda _future: stop.set())
+        if stop_event.is_set():
+            stop.set()
+    plugins = load_plugins(request.plugin_dir, archive=request.archive, installation_config=request.installation_config,
+                           scan_policy=request.scan_policy, cancellation=stop)
     source_specs = [SourceSpec(locator=str(Path(root).resolve())
                               if "://" not in root and Path(root).exists() else root) for root in request.roots]
     selected_sources: list[tuple[SourceSpec, LoadedPlugin]] = []
@@ -1487,7 +1493,6 @@ def _run_ingest(request: IngestRequest, writer_lease: WriterLease, outcome: Inge
     source_file_pks: dict[tuple[str, str, str], int] = {}
     source_volume_pks: dict[str, int] = {}
     coordinator = FutureCoordinator()
-    stop = threading.Event()
     progress_signals = (progress.changed, *((stop_event.changed,) if isinstance(stop_event, ChangeEvent) else ()))
 
     def check_interrupted() -> None:

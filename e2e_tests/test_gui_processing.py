@@ -48,6 +48,30 @@ def expose(page: Page, api: object, names: tuple[str, ...]) -> None:
         window.addEventListener('DOMContentLoaded', () => window.dispatchEvent(new Event('pywebviewready')));""")
 
 
+def test_result_append_exceeds_javascript_argument_limit_without_losing_rows(tmp_path: Path, page: Page) -> None:
+    """SEARCH: append a constructed volume batch to the real widget without replacing the backend."""
+    api = GuiApi(build_deferred_archive(tmp_path))
+    try:
+        expose(page, api, SEARCH_BRIDGE_METHODS)
+        page.goto((GUI_DIRECTORY / "index.html").as_uri() + "?query=subject:Parent")
+        expect(page.locator(".result-subject")).to_have_count(1)
+        # One real typed search row supplies the shape. The volume batch tests
+        # widget append logic only; it does not claim a 150,001-message archive.
+        page.evaluate("""() => {
+            const template = state.results[0];
+            appendResults(Array.from({length:150000}, (_, index) => ({...template,
+                message_pk:index + 1000, subject:`Volume row ${index}`})), state.searchRequest);
+        }""")
+        page.wait_for_function("state.results.length === 150001 && state.resultTable.getDataCount() === 150001")
+        assert page.evaluate("state.results.at(-1).subject") == "Volume row 149999"
+        page.evaluate("state.resultTable.scrollToRow(150999, 'top', false)")
+        expect(page.locator(".result-subject").filter(has_text="Volume row 149999")).to_be_visible()
+        page.evaluate("appendResults([state.results[0]], state.searchRequest - 1)")
+        assert page.evaluate("state.results.length") == 150001
+    finally:
+        api.close()
+
+
 @pytest.mark.parametrize("extra_file", [False, True])
 def test_import_error_banner_is_private_to_its_search_window(tmp_path: Path, page: Page, extra_file: bool) -> None:
     """DESKTOP: real errors and dismissible extra-file warnings belong only to the importing window."""
@@ -714,6 +738,77 @@ def test_selector_tiles_roles_dates_and_preserved_terms(tmp_path: Path, page: Pa
         expect(page.locator(".result-subject")).to_have_count(1)
     finally:
         api.close()
+
+
+def test_suggestion_timeout_is_visible_and_requires_an_explicit_retry(
+    tmp_path: Path, page: Page, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """DESKTOP: an actual pending/error reply ends the consumer instead of starting another wait."""
+    import mailarchiver.gui_app as gui_module
+    from tests.test_search_completion import completion_archive
+
+    api = GuiApi(completion_archive(tmp_path))
+    occupied, release = Barrier(api._suggestion_executor._max_workers + 1), Event()
+
+    def hold() -> None:
+        occupied.wait(timeout=10)
+        assert release.wait(10), "Suggestion fixture was not released"
+
+    blockers = [api._suggestion_executor.submit(hold) for _ in range(api._suggestion_executor._max_workers)]
+    timeout = gui_module.WORK_RESULT_TIMEOUT_SECONDS
+    try:
+        occupied.wait(timeout=10)
+        monkeypatch.setattr(gui_module, "WORK_RESULT_TIMEOUT_SECONDS", 0)
+        expose(page, api, SEARCH_BRIDGE_METHODS)
+        page.goto((GUI_DIRECTORY / "index.html").as_uri())
+        page.locator("#processing-later").click()
+        page.evaluate("""() => {
+            const original = window.pywebview.api.suggestions_status;
+            window.suggestionWaitCalls = 0;
+            window.pywebview.api.suggestions_status = (...args) => {
+                window.suggestionWaitCalls++;
+                return original(...args);
+            };
+        }""")
+        page.locator("#search").fill("simson")
+        expect(page.locator("#error")).to_contain_text("Timed out")
+        assert page.evaluate("window.suggestionWaitCalls") == 1
+        future = api._suggestion_future
+        assert future is not None and not future.done()
+        release.set()
+        for blocker in blockers:
+            blocker.result(timeout=5)
+        future.result(timeout=5)
+        monkeypatch.setattr(gui_module, "WORK_RESULT_TIMEOUT_SECONDS", timeout)
+        page.locator("#search").fill("simson ")
+        expect(page.locator(".suggestion-option").first).to_contain_text("any:")
+        assert page.evaluate("window.suggestionWaitCalls") == 2
+    finally:
+        release.set()
+        api.close()
+
+
+def test_about_disconnected_archive_is_observational_and_displays_health_failure(tmp_path: Path, page: Page) -> None:
+    """DESKTOP: unavailable disk health is displayed without creating a notice/refresh feedback loop."""
+    from mailarchiver.application import ApplicationController, ApplicationPreferencesStore
+    from mailarchiver.gui_app import PyWebViewApplication
+
+    controller = ApplicationController(ApplicationPreferencesStore(tmp_path / "preferences.json"))
+    document = controller.create_document(tmp_path / "archive")
+    controller.new_search_window(document)
+    app = PyWebViewApplication(controller)
+    assert document.path is not None
+    document.path.rename(tmp_path / "disconnected")
+    try:
+        expose(page, AboutApi(app), ("status",))
+        page.goto((GUI_DIRECTORY / "about.html").as_uri())
+        expect(page.locator("#disk")).to_contain_text("Free disk space unavailable")
+        for _ in range(3):
+            page.evaluate("refresh()")
+        assert app.about_status().disk_error
+        assert app.notices() == []
+    finally:
+        app.shutdown()
 
 
 def test_archive_name_picker_saves_filtered_merge_and_rename(tmp_path: Path, page: Page) -> None:

@@ -16,7 +16,7 @@ from importlib.metadata import version
 from webview.menu import MenuAction, MenuSeparator
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
-from threading import Event
+from threading import Barrier, Event
 
 import pytest
 from pydantic import ValidationError
@@ -675,6 +675,56 @@ def test_gui_loads_indexed_previews_on_its_background_worker(tmp_path: Path) -> 
         (1, "The report is ready."),
         (2, "Plain version."),
     ]
+
+
+@pytest.mark.parametrize("kind", ["suggestions", "previews"])
+def test_result_wait_deadline_reports_failure_and_explicit_retry_can_complete(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, kind: str,
+) -> None:
+    """DESKTOP: a failed wait remains a typed error, not a timer tick; actual work stays retryable."""
+    import mailarchiver.gui_app as gui_module
+    from mailarchiver.gui_app import SuggestionStatus
+    from mailarchiver.gui_service import PreviewBatch
+    monkeypatch.setattr(gui_module, "WORK_RESULT_TIMEOUT_SECONDS", 0)
+    api = GuiApi(make_gui_archive(tmp_path))
+    executor = api._suggestion_executor if kind == "suggestions" else api._preview_executor
+    occupied, release = Barrier(executor._max_workers + 1), Event()
+
+    def hold() -> None:
+        occupied.wait(timeout=5)
+        assert release.wait(5), "Queued-work fixture was not released"
+
+    blockers = [executor.submit(hold) for _ in range(executor._max_workers)]
+    request: SuggestionStatus | None = None
+    try:
+        occupied.wait(timeout=5)
+        if kind == "suggestions":
+            request = SuggestionStatus.model_validate(api.suggestions_start("sender"))
+            future = api._suggestion_future
+            response = SuggestionStatus.model_validate(api.suggestions_status(request.generation, True))
+            assert not response.complete and response.error and "Timed out" in response.error
+        else:
+            api.request_previews([1])
+            future = next(iter(api._preview_futures))
+            batch = PreviewBatch.model_validate(api.take_previews([1], True))
+            assert batch.pending and batch.error and "Timed out" in batch.error
+        assert future is not None and not future.done()
+        release.set()
+        for blocker in blockers:
+            blocker.result(timeout=5)
+        future.result(timeout=5)
+        if kind == "suggestions":
+            assert request is not None
+            response = SuggestionStatus.model_validate(api.suggestions_status(request.generation, True))
+            assert response.complete and response.error is None and response.result is not None
+            assert response.result.query == "sender"
+        else:
+            batch = PreviewBatch.model_validate(api.take_previews([1], True))
+            assert not batch.pending and batch.error is None
+            assert batch.previews[0].preview == "The report is ready."
+    finally:
+        release.set()
+        api.close()
 
 
 def test_preview_futures_ignore_old_archive_and_observe_reader_failures(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

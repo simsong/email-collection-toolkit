@@ -31,8 +31,10 @@ from .clamav_definitions import LIBRARY_ENV, DATABASE_ENV, CERTIFICATES_ENV, lib
 from .plugin_api import FileProbe, MailContainer, MailObject, PluginContext, ProgressEvent
 from .sources import LocalSourcePlugin, MboxFileParser
 from .importer_tools import importer_executable
+from .standalone_verify import open_shared_read
 
 IMPORT_HEADERS = (b"X-Imported-URI: ", b"X-Importer-Name: ", b"X-Importer-Version: ")
+PST_ACTIVITY_ENV = "MAILARCHIVER_PST_ACTIVITY_FILE"
 
 
 class PstSettings(BaseModel):
@@ -60,10 +62,12 @@ class ImportReceipt(BaseModel):
 class ImportActivity(BaseModel):
     deadline: float
     sizes: tuple[int, int] = (0, 0)
+    work_counter: int | None = None
 
-    def observe(self, now: float, sizes: tuple[int, int], timeout: float) -> bool:
-        if sizes != self.sizes:
+    def observe(self, now: float, sizes: tuple[int, int], timeout: float, work_counter: int | None = None) -> bool:
+        if sizes != self.sizes or (work_counter is not None and work_counter != self.work_counter):
             self.sizes = sizes
+            self.work_counter = work_counter
             self.deadline = now + timeout
         return now >= self.deadline
 
@@ -116,6 +120,8 @@ class PstFileParser:
         receipt = ImportReceipt(executable=program, executable_sha256=file_hash(program),
                                 source=source.path, source_sha256=file_hash(source.path))
         environment = os.environ.copy()
+        activity_path = workspace / "activity.bin"
+        environment[PST_ACTIVITY_ENV] = str(activity_path)
         environment.pop("MAILARCHIVER_SCAN", None)
         if self.context.scan_policy == "clamav":
             environment["MAILARCHIVER_SCAN"] = "1"
@@ -126,21 +132,29 @@ class PstFileParser:
         completed = False
         try:
             with output_path.open("wb") as output, diagnostics_path.open("wb") as diagnostics:
-                with subprocess.Popen([str(program), "--", str(source.path)], stdout=output, stderr=diagnostics, env=environment) as process, ProcessActivity(
-                    process, [output_path, diagnostics_path]) as changes:
+                with subprocess.Popen([str(program), "--", str(source.path)], stdout=output, stderr=diagnostics, env=environment) as process:
                     try:
-                        activity = ImportActivity(deadline=time.monotonic() + settings.timeout_seconds)
-                        while process.poll() is None:
-                            sizes = (output_path.stat().st_size, diagnostics_path.stat().st_size)
-                            if activity.observe(time.monotonic(), sizes, settings.timeout_seconds):
-                                raise TimeoutError(f"PST importer timeout: no activity for {settings.timeout_seconds:g} seconds; evidence retained at {workspace}")
-                            if output_path.stat().st_size > settings.max_output_bytes or diagnostics_path.stat().st_size > settings.max_diagnostics_bytes:
-                                raise ValueError("PST importer output limit exceeded")
-                            yield ProgressEvent(work_id=container.work_id, phase="extracting PST", completed=output_path.stat().st_size, unit="bytes")
-                            try:
-                                changes.wait(max(0, activity.deadline - time.monotonic()))
-                            except TimeoutError as error:
-                                raise TimeoutError(f"PST importer timeout: no activity for {settings.timeout_seconds:g} seconds; evidence retained at {workspace}") from error
+                        with ProcessActivity(process, [output_path, diagnostics_path, activity_path], self.context.cancellation) as changes:
+                            activity = ImportActivity(deadline=time.monotonic() + settings.timeout_seconds)
+                            while process.poll() is None:
+                                sizes = (output_path.stat().st_size, diagnostics_path.stat().st_size)
+                                work_counter = None
+                                if activity_path.exists():
+                                    if activity_path.stat().st_size > 8:
+                                        raise ValueError("PST activity snapshot exceeds its bound")
+                                    with open_shared_read(activity_path) as counter:
+                                        snapshot = counter.read(8)
+                                    if len(snapshot) == 8:
+                                        work_counter = int.from_bytes(snapshot, "little")
+                                if activity.observe(time.monotonic(), sizes, settings.timeout_seconds, work_counter):
+                                    raise TimeoutError(f"PST importer timeout: no activity for {settings.timeout_seconds:g} seconds; evidence retained at {workspace}")
+                                if output_path.stat().st_size > settings.max_output_bytes or diagnostics_path.stat().st_size > settings.max_diagnostics_bytes:
+                                    raise ValueError("PST importer output limit exceeded")
+                                yield ProgressEvent(work_id=container.work_id, phase="extracting PST", completed=output_path.stat().st_size, unit="bytes")
+                                try:
+                                    changes.wait(max(0, activity.deadline - time.monotonic()))
+                                except TimeoutError as error:
+                                    raise TimeoutError(f"PST importer timeout: no activity for {settings.timeout_seconds:g} seconds; evidence retained at {workspace}") from error
                     finally:
                         if process.poll() is None:
                             process.kill()
@@ -181,7 +195,8 @@ class PstFileParser:
             receipt.output_truncated = receipt.output_bytes > settings.max_output_bytes
             receipt.diagnostics_truncated = receipt.diagnostics_bytes > settings.max_diagnostics_bytes
             for path, size, limit in ((output_path, receipt.output_bytes, settings.max_output_bytes),
-                                       (diagnostics_path, receipt.diagnostics_bytes, settings.max_diagnostics_bytes)):
+                                       (diagnostics_path, receipt.diagnostics_bytes, settings.max_diagnostics_bytes),
+                                       (activity_path, activity_path.stat().st_size if activity_path.exists() else 0, 8)):
                 if size > limit:
                     with path.open("r+b") as retained:
                         retained.truncate(limit)

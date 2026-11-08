@@ -2,6 +2,12 @@
 
 # Desktop requirements
 
+Suggestion wait errors end the current request even when work is still pending;
+only a new explicit request retries. Native Close veto warnings publish without
+unrelated progress or status reads. Document watches live only while their document
+retains a window, child or job. Unavailable disk health is observational About
+status, not a newly issued notice on each read.
+
 Current subsystem contract and acceptance boundaries. This is not a claim of
 platform/release acceptance. Deferred features live in [plans](../plans/README.md).
 
@@ -866,3 +872,7 @@ or a failure deadline. A closed webview must not leave its caller blocked foreve
 synchronous native evaluations must not wait on their own UI thread.
 Collection-only completion, including a drag export for an unselected row, must
 notify state observers even when it changes no visible DOM.
+Large search batches must append without depending on JavaScript's function
+argument limit. Suggestion/preview wait expiry returns a typed error with current
+pending state; it is not a successful polling tick, and explicit retries may read
+later actual completion.

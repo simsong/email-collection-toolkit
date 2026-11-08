@@ -714,8 +714,8 @@ def main() -> None:
             # Shared-document Close must never wait for an import or a Cocoa dialog.
             sibling = application.create_search_window(controller.new_search_window(document))
             assert sibling.window.events.loaded.wait(10), "Second search bridge failed to load"
-            # Windows has no persistent About: only the search timer may deliver notices.
-            about.load_html("<p id='search-only-probe'>About polling paused for the search-only regression.</p>")
+            # Windows has no persistent About: the search must receive the native status notification.
+            about.load_html("<p id='search-only-probe'>About notifications disabled for the search-only regression.</p>")
             assert about.events.loaded.wait(5), "Replacement About document did not load"
             assert about.evaluate_js("Boolean(document.getElementById('search-only-probe'))")
             job = IngestJob(operation_id="shared-close", owner_window_id=api.search_window.window_id)

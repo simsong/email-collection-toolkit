@@ -39,7 +39,9 @@ function render(status) {
   byId("git-commit").textContent = build?.git_commit
     ? `${build.git_commit}${build.dirty ? " (local changes)" : ""}` : "Unavailable";
   byId("copyright").textContent = status.metadata.copyright;
-  byId("disk").textContent = `${formatBytes(status.disk_free_bytes)} available on ${status.disk_path}`;
+  byId("disk").textContent = status.disk_error
+    ? `Free disk space unavailable on ${status.disk_path}: ${status.disk_error}`
+    : `${formatBytes(status.disk_free_bytes)} available on ${status.disk_path}`;
   byId("internet").textContent = status.internet.detail;
   if (byId("antivirus")) byId("antivirus").textContent = status.antivirus?.detail || "Unknown";
   const av = status.antivirus;

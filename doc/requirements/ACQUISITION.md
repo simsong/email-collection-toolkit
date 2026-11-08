@@ -2,6 +2,9 @@
 
 # Acquisition requirements
 
+Silent PST/OST extraction must wake on actual import cancellation and kill/reap
+its child, without waiting for output or the extraction failure deadline.
+
 Current subsystem contract and acceptance boundaries. This is not a claim of
 platform/release acceptance. Deferred features live in [plans](../plans/README.md).
 
@@ -366,7 +369,10 @@ No publication mutex is needed.
 ## PST liveness and mailbox message concurrency
 
 PST `timeout_seconds` bounds inactivity rather than total extraction time. New
-stdout or stderr bytes renew the deadline; a silent stuck child is killed and
+stdout/stderr bytes or a changed bounded private work counter renew the deadline;
+diagnostic batching must not suppress actual work liveness. Notification setup
+failure must still kill and reap the already-started PST/OST child.
+A silent stuck child is killed and
 reaped, retaining diagnostics and its receipt. Report actual hashing, address-book
 and extraction progress at actual work checkpoints, never
 manufacture activity while blocked inside a reader call. `LIBRARY ERROR` records

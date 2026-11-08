@@ -160,22 +160,28 @@
     // Preview delivery reformats cards; locate the live card by its stable ID.
     const bethRow = messagePk => rows().find(row => Number(row.dataset.messagePk) === messagePk);
     bethRow(firstBeth).click();
-    await waitFor(() => isSelected(bethRow(firstBeth)) && state.selected === firstBeth,
+    await waitFor(() => isSelected(bethRow(firstBeth)) && state.selected === firstBeth &&
+      state.view?.message_pk === firstBeth && state.selectionRequest === firstBeth,
       "first full-text result selected");
+    await renderMessageFindHighlights();
     const realPart = window.pywebview.api.part;
     let releasePart;
     const partRelease = new Promise(resolve => { releasePart = resolve; });
-    let enteredPart;
-    const partEntered = new Promise(resolve => { enteredPart = resolve; });
+    let partEntered = false;
     window.pywebview.api.part = async (...args) => {
       const response = await realPart(...args);
-      if (args[0] === firstBeth) { enteredPart(); await partRelease; }
+      if (args[0] === firstBeth) {
+        partEntered = true;
+        window.dispatchEvent(new Event("mailarchiver-state-changed"));
+        await partRelease;
+      }
       return response;
     };
+    let staleFind = [];
     try {
       // Keyboard translation is checked above; retain these actual consumer Promises to join stale work.
-      const staleFind = [openMessageFind(), moveMessageFind(1)];
-      await partEntered;
+      staleFind = [renderMessageFindHighlights(), openMessageFind(), moveMessageFind(1)];
+      await waitFor(() => partEntered, "wrapped old-message render reaches its delivery barrier");
       checks.push("old-message part delivery is blocked before changing selection");
       await waitFor(() => messageFind.value === "beth", "find starts from the new full-text archive search");
       bethRow(secondBeth).click();
@@ -188,7 +194,11 @@
       assert(isSelected(bethRow(secondBeth)) && state.messageFindIndex === 0 &&
         document.getElementById("message-find-status").textContent.startsWith("1/"),
       "completed stale find work cannot advance the newly selected message");
-    } finally { releasePart(); window.pywebview.api.part = realPart; }
+    } finally {
+      releasePart();
+      window.pywebview.api.part = realPart;
+      await Promise.allSettled(staleFind);
+    }
     document.getElementById("message-find-close").click();
     await waitFor(() => document.getElementById("message-find").hidden && !messageFind.value && !state.messageFindQuery,
       "closing find clears its retained text");

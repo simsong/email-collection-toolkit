@@ -4,8 +4,9 @@
 
 This audit covers active application, importer, helper, build and test code.
 Baseline: `5334c6a041a77d26994332973da9f4abdff1f082`; working branch:
-`codex/signed-installer-labels`; existing PR #195. The local candidate advances
-from alpha 57 through alpha 58 to **1.0.0a59**. It is not a published release.
+`codex/signed-installer-labels`; existing PR #195. Alpha 59 was published as
+commit `2d28c4b00ba4aa4edc3e5c11da07f547027a8230`; the local review follow-up is
+**1.0.0a60**. Neither statement is a published-release acceptance claim.
 The user's final policy replaces **all first-party non-timeout timers**,
 including scheduling, debounce, sampling and retry delays.
 
@@ -31,7 +32,7 @@ search are listed below.
 
 ## Scope and method
 
-The working-tree inventory includes 381 owned code/configuration files across
+The alpha 59 inventory included 381 owned code/configuration files across
 Python, stubs, JavaScript, Rust, PowerShell, C#, shell, workflows, Make, HTML,
 AppleScript, Swift and YAML. Python syntax traversal counted 3,059 function and
 method definitions. These are inventory counts, not proof of every possible
@@ -91,6 +92,75 @@ Changing multiple tests does not establish that each one had independently faile
 | Headless browser fixtures | Removed polling/collapse timers had been supplying unacknowledged refreshes and overwriting recorded states. | Join real job completion, deliver the native event explicitly at the headless transport boundary, hold/reorder actual replies, and collapse notices through their real button. Native transport remains separately tested. |
 | Collection-only completion | An unselected row's completed drag export changed a Map without a DOM mutation or state notification. | Replace the cache Map on completion/invalidation to publish the state assignment; the actual reader/export driver retains per-message and copy-only checks. |
 
+## Macroscope review follow-up — local alpha 60
+
+The forwarded comments are from Macroscope, not Copilot. Eight findings refer to
+published commit `2d28c4b`; its ordinary CI passed while release-candidate packaging
+was skipped. Those checks missed the interleavings/volumes below and do not cover
+this uncommitted follow-up. The fixes preserve the user policy: no timed progress
+throttle and no successful polling tick on a result-wait timeout.
+
+| Review thread | Assessment and local repair |
+| --- | --- |
+| [Retained find barrier](https://github.com/simsong/email-collection-toolkit/pull/195#discussion_r4506376732) | Valid schedule-dependent fixture defect. First join a real retained render, then explicitly start a wrapped render, bound barrier entry and join all old consumer Promises even on failure. |
+| [Windows update completion](https://github.com/simsong/email-collection-toolkit/pull/195#discussion_r4506376733) | Valid partial-publication race. Capture `UpdateService.check_finished` before SDK discovery; completion follows the timestamp, phase and detail, including error state. |
+| [PST diagnostic volume](https://github.com/simsong/email-collection-toolkit/pull/195#discussion_r4506376735) | Valid output-limit regression. A new eight-byte private counter changes at every work checkpoint; progress history emits only phase changes and power-of-two counts. At most 64 count-triggered records are needed; error diagnostics retain their independent limit. No elapsed-time throttle is restored. |
+| [Sparkle probe exception](https://github.com/simsong/email-collection-toolkit/pull/195#discussion_r4506376744) | Valid probe failure. Catch only the exact expected synthetic exception, then verify error recovery, cleared reservation and exactly-once continuation consumption. |
+| [Large result arrays](https://github.com/simsong/email-collection-toolkit/pull/195#discussion_r4506376753) | Valid JavaScript argument-limit defect. Append with `concat`; preserve request-generation checks. The new widget test admits 150,000 constructed rows beyond a real result and scrolls to the last row. It does not claim a 150,001-message archive or bounded total result memory. |
+| [Linux descriptor limits](https://github.com/simsong/email-collection-toolkit/pull/195#discussion_r4506376766) | Valid API limit in both inotify and pidfd waits. A shared scalable selector replaces `select()`. The real high-descriptor pipe regression is portable; Linux kernel-specific acceptance remains separate from Mac results. |
+| [Importer initialization cleanup](https://github.com/simsong/email-collection-toolkit/pull/195#discussion_r4506376768) | Valid in both libpff and PST supervision. Native activity initialization now occurs inside the already-started child's kill/reap `finally`. Failed observer-thread creation also closes real subscriptions. Fault injection is confined to unavailable native-resource admission; child execution and cleanup remain real. |
+| [Result-wait timeout state](https://github.com/simsong/email-collection-toolkit/pull/195#discussion_r4506376771) | The lost structured response is repaired, while timeout remains an explicit failure as required. Return typed error plus actual pending state; an explicit retry may read later completion. Silently returning normal pending state every 30 seconds would recreate a timer-driven polling cadence. |
+
+The first 32 focused regressions passed, including real PST imports with and
+without scanning. Rust workspace checks and all 14 real scanner/importer tests
+passed. Both selected browser cases passed: the actual retained-find driver and
+the 150,001-row widget test, which scrolls to and displays its last row. Ten native
+Mac cases passed on the unlocked desktop: lifecycle, HTML find, four setup cases,
+two Preferences cases and two Quit cases. The full aggregate subsequently passed;
+the broader counts and final-repair evidence boundary appear below. The user explicitly restarted independent review and authorized publication on
+November 8. Restarted round 1 found the six additional defects below; the changed
+candidate requires another review. Earlier exhausted rounds remain recorded.
+These repairs are not yet independently cleared or published.
+
+## Restarted completion review — alpha 60
+
+The fresh Sol High reviewer examined the complete 145-file task patch, not only
+the eight-thread follow-up. Round 1 reported six findings; all were accepted.
+
+| Finding | Repair and regression evidence |
+| --- | --- |
+| Silent PST/OST waits missed cancellation | Pass run-owned `ChangeEvent` through plug-in context to both converter owners/stages; wake native waits and kill/reap. Three regressions use acknowledged silent children, including the full ingest path, with failure-only containment deadlines. |
+| Suggestions ignored pending/error replies | Handle error before completion in the actual browser consumer; a blocked real request shows failure after one wait, then an explicit new input retrieves completion. |
+| Close veto warning had no wakeup | Drain queued scoped notices off the native thread without the occupied command executor. A contended-lock/all-workers-busy regression requires publication without any status read. |
+| Released-document watches accumulated | Reconcile watches with controller ownership; close outside the registry lock and remove ownership only after success. Real repeated reopen/close tests preserve child ownership, then require watcher exit. Also release native subscriptions if observer thread admission fails. |
+| Preferences probe retained a 300 ms pump | Check actual native visibility, use Cocoa display capture, and retain only failure deadlines. |
+| About disk failure generated refresh notices | Return typed `disk_error` and display unavailable health observationally. Real disconnected-fixture browser reads must not issue new notices. |
+
+Focused validation passed nine Python cases and two browser cases, plus both
+end-to-end import prerequisites. Ordered lint/type checks passed after correcting
+a precise unsupported typed native method; no rule was suppressed. The two native
+Preferences cases and full native lifecycle also passed after these repairs
+(`restart-r1-native.log`). The broader aggregate then passed as recorded below.
+
+Round 2 examined the complete 147-file patch and found the six repairs addressed,
+then identified one additional Windows probe defect: Preferences is standalone
+HTML and never loaded the `waitForDomState` helper called by its acceptance probe.
+The probe now joins the page's real `refresh()` Promise before reading readiness
+and reopened controls. Existing real-bridge browser Preferences cases invoke that
+exact helper against the standalone page, explicitly verifying the missing shared
+DOM helper.
+
+Restarted round 3 found a remaining lock interleaving: Setup reuse called menu
+refresh while holding the outer application lock, and observer retirement could
+join a callback waiting for that lock. Setup now restores/shows and refreshes
+outside the lock. Retirement retains registry ownership until close succeeds;
+shutdown snapshots the registry and uses the same close/remove boundary, and
+quitting prevents new watches. Two real-observer regressions cover the Setup
+interleaving and failed-join ownership/retry. These last repairs were made after
+the final review and are **not independently reviewed**. No fourth round has
+started. The user subsequently requested commit and push explicitly; this
+publishes the prepared repairs in draft without representing review clearance.
+
 ## What remains timed
 
 Only failure limits remain in first-party scheduling sites: socket/HTTP, subprocess,
@@ -123,52 +193,63 @@ observability tradeoff of removing periodic sampling, not proof that hangs vanis
 
 ## Validation and evidence boundaries
 
-The final local checks below are separate from native/package acceptance. Logs,
-including earlier failures, are retained under `.tmp/timing-audit/no-timers/`.
-The table above contains 35 repair/change groups, not 35 independently reproduced
-production races.
+The final Setup/observer retirement repair follows the broader aggregate below;
+its ordered checks, focused application/shutdown tests and pending native Setup
+acceptance are tracked separately. Do not interpret that earlier aggregate as execution of
+the final repair. The final Windows Preferences helper was collected and exercised
+in the aggregate browser stage; ordered checks were rerun after its change.
 
-- **Ordered static checks passed:** Ruff, Pylint, ty and Pyright, including the
-  converter project (`static-28.log`). No rules were suppressed.
-- **Full Python suite passed:** 1,401 tests, 19 skips, 493.61 seconds
-  (`make-check-3.log`). The skips were 13 Windows-specific cases, three isolated
-  research cases, two native Quit cases and one isolated-runner Keychain case.
-  Converter prerequisite: 18 passed. Later changes were confined to browser
-  fixtures/transport and the JavaScript drag-cache notification.
-- **Rust checks passed:** workspace formatting, Clippy and tests; the real embedded
-  scanner test stage also passed (`make-check-3.log`). The final PST progress
-  regression reports two actual ticks without changing mail output.
-- **Full browser stage passed:** 102 tests, 10 native opt-in skips, 69.95 seconds;
-  both real corpus/lifecycle imports also passed (`browser-final-6.log`). The
-  focused notification/TLS pause-resume batch passed all 14 selected cases first
-  (`browser-focused-4.log`).
-- **Interruption/reply regressions passed:** both real TLS Ctrl-C/resume modes,
-  including real scanning, and three future ownership races passed
-  (`interrupt-replies-3.log`, five tests; converter prerequisite: 18 passed).
+Final repair evidence: ordered Ruff/Pylint/ty/Pyright passed; the application,
+updates and shutdown batch passed 123 tests with two native Quit opt-in skips
+(`post-cap-repair-validation.log`). Its two new fixtures initially used directory
+timestamp changes, which are not the watched content-publication contract; both
+passed after publishing actual directory content (`post-cap-repair-focused-2.log`,
+two tests, 0.47 seconds). No scheduling delay was added. The Mac is locked again,
+so the final native Setup/lifecycle rerun is pending; earlier native results do
+not establish this last repair. Final `make ruff` and `git diff --check` pass.
+
+The original repair table contains 35 change groups; the follow-up table assesses
+eight review threads. These are not counts of independently reproduced production
+races. Current alpha 60 logs, including earlier failures, are retained under
+`.tmp/timing-audit/review-followup/`.
+
+- **Broader `make check` passed before the final observer-lock repair** (`restart-r1-make-check.log`): ordered Ruff, Pylint,
+  ty and Pyright; Rust workspace formatting, Clippy and tests; 14 real embedded
+  scanner/importer tests; runtime-license validation; 18 converter tests;
+  **1,418 Python tests** in 502.59 seconds; two end-to-end imports in 12.76
+  seconds; **105 browser tests** in 69.72 seconds; website assets/link validation.
+- **Skipped checks remain explicit:** 19 Python skips (13 Windows-specific,
+  three isolated research, two native Quit opt-ins, one isolated Keychain case)
+  and 10 browser native opt-ins. Native Quit was exercised separately below.
+- **Focused regressions passed:** 32 Python cases, including real PST imports
+  with and without scanning (`focused-1.log`), and two browser cases using the
+  actual retained-find driver and the 150,001-row widget (`browser-focused-1.log`).
+  The Rust progress test exercises 900,000 checkpoints with 20 diagnostic records
+  below 16 KiB; separate real file writes verify the eight-byte work counter.
+- **Native Mac checks passed:** lifecycle/menu, HTML find, four setup cases,
+  two Preferences and two Quit cases: 10 tests total (`native-1.log`). These
+  ran on the unlocked desktop with rebuilt release helpers. They establish
+  source execution, not a signed/frozen installer. The restarted lifecycle rerun retains
+  `.tmp/timing-audit/review-followup/native-ingests-titlebar-alpha60.png`, visibly
+  showing `(1.0.0a60)` at the right. Its blank content proves the native frame only;
+  lifecycle/interaction assertions are separate.
 - **Website checks passed:** synthetic search/import images were regenerated
-  (`website-screenshots-final.log`); source/assets validation and Zola build passed
-  (`website-build-final-2.log`). The rendered homepage, Searching and Importing
-  pages were captured and visually inspected (`website-site-final-2.log` and
-  `.tmp/website-previews/`). The Searching instructions now describe manual
-  collapse. These are browser captures, not native frame/version evidence.
-- **Native Mac evidence has a revision boundary:** real setup import/Cancel/race
-  passed three tests (`native-setup-2.log`); reply/filesystem tests plus the actual
-  native lifecycle passed nine (`native-lifecycle-5.log`). These preceded the
-  final shared reply-registry and drag-cache edits. Final focus/menu/setup/HTML-find
-  acceptance could not be rerun after the desktop locked again; it is pending,
-  not implied by the browser results.
+  (`website-screenshots.log`), then source/assets validation and the Zola build
+  passed (`website-build-final.log`). Browser images and the rendered homepage,
+  Searching and Importing pages were visually inspected (`website-site-final.log`
+  and `.tmp/website-previews/`). Browser captures do not establish native frames.
 
-The single aggregate `make check` was not reported as green: after its Python/Rust
-stages passed, the browser stage exposed remaining fixture assumptions. Its owned
-run was stopped and verified terminated; logs and the interrupt stack were kept.
-After the fixture repairs, a full browser rerun exposed one missing collection
-notification. That source repair passed the full rerun above. Final stages were
-completed separately without rerunning the unchanged eight-minute Python suite.
-Final `make ruff` and `git diff --check` also passed (`ruff-final.log`).
+Historical alpha 59 evidence remains in `.tmp/timing-audit/no-timers/`. Its
+Python stage passed 1,401 tests and its final browser rerun passed 102 tests;
+the earlier aggregate was interrupted after exposing additional fixture and
+notification defects. Those logs are preserved. The current alpha 60 aggregate
+above subsequently passed all stages; it does not inherit a green claim from
+the interrupted earlier run.
 
-No current-head GitHub CI, signed package, installer, appcast or live release
-acceptance is claimed. The checks above were local. Results for a subsequently
-published commit must be verified separately; no merge, tag or release is authorized.
+Published alpha 59 passed ordinary CI; its release-candidate job was skipped.
+That result does not cover the local alpha 60 follow-up. No signed package,
+installer, appcast or live release acceptance is claimed; no merge, tag or release
+is authorized.
 
 ## Remaining limits and acceptance
 
@@ -198,16 +279,22 @@ published commit must be verified separately; no merge, tag or release is author
 7. Event-driven progress changes I/O frequency and profiles add overhead. This
    audit proves no speedup, original Windows 600-message cause, antivirus/disk
    attribution or root cause of the earlier native crash.
-8. **Independent review is not cleared.** Three completion-review rounds were
-   exhausted before the final scanner repair and strict timer-policy changes.
-   No fourth round was started; explicit restart is needed for further independent
-   review. The November 8 commit-and-push request authorizes publication to the
-   existing draft PR without claiming review clearance. Tests do not substitute
-   for that review.
+8. **Independent review is not yet cleared.** The original three rounds were
+   exhausted before the strict timer-policy rewrite. The user explicitly restarted
+   the capped cycle on November 8; new round 1 found six valid defects, repaired
+   above. Round 2 identified an unavailable helper in the Windows Preferences
+   probe; it now joins actual refresh completion. Round 3 found one remaining
+   Setup/observer lock defect. Its prepared repair is unreviewed; no fourth round
+   is authorized. The user subsequently explicitly requested publication; the
+   prepared repairs are committed in draft without claiming review clearance.
+   Tests do not substitute for independent review.
 
 ## Handoff
 
-Canonical alpha 59 and its lockfile are prepared for publication to draft PR #195.
+Alpha 60 and its lockfile are included in the user-requested repair commit for
+draft PR #195. The final observer-lock repair is locally tested but not
+independently re-reviewed. The final unlocked-Mac native check and Windows/Linux
+runtime acceptance remain pending. Publication does not establish readiness.
 The unrelated `macroscope_evaluation` remains untouched and excluded. Implementation,
 local checks, native/Windows acceptance and independent review are separate states.
 
