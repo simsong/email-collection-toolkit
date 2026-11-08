@@ -145,7 +145,7 @@ make test-pff CI_DIAGNOSTICS=1
 `CI_DIAGNOSTICS_DIRECTORY` defaults to `dist/ci-diagnostics`. Each selected test
 gets its own directory with `report.json` (phase wall/CPU time, Windows process I/O
 counts and per-thread operation timings), `calls.txt` (ranked operations/callers),
-and `threads.txt` (all-thread stacks every 30 seconds). The always-run
+and `threads.txt` (all-thread stacks on phase changes or explicit acknowledged requests). The always-run
 `msix-build-logs-x64` artifact retains these files after test failures. Phase start
 and finish markers also stream to the CI log.
 
@@ -161,8 +161,8 @@ visible in stack dumps without replacing their profiler hooks. The stack sampler
 needs Python thread scheduling and serializes Python frame locations without
 calling the native traceback dumper. It does not replace or cancel a native watchdog
 such as pytest's `faulthandler_timeout` for a C call that holds the GIL. Do not combine
-native timed dumps with profiling: that combination crashed Windows and hung a
-local diagnostic test, with no proven underlying CPython cause. The plugin rejects
+native timed dumps with profiling: an earlier Windows crash and local diagnostic
+hang occurred with both enabled; their underlying cause is unproven. The plugin rejects
 that pytest setting. The ownership regression uses a bounded child and fires its
 native timer after collection ends; it does not establish safe simultaneous dumping.
 It does not change synchronization/durability settings or record mail bodies,
@@ -211,7 +211,7 @@ Preferences window, traffic-light Close, saved edits and CLI-locked worker contr
 Its windows appear on the leftmost attached display.
 
 `make test-native-quit` uses `MAILARCHIVER_NATIVE_GUI_E2E=1` to exercise Quit
-during status polling in a real macOS Cocoa window; it requires a GUI session.
+during status delivery in a real macOS Cocoa window; it requires a GUI session.
 Idle Quit exits after bounded private-export cleanup. Active imports finish their
 current message and checkpoint; imports, settings saves, definition updates, and cleanup share one
 five-second deadline. Forced exit can leave stale manifests or an

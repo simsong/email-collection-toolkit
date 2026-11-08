@@ -75,17 +75,54 @@ import csv
 import ctypes
 import hashlib
 import io
+from importlib import import_module
 import json
 import mailbox
 import os
 import re
 import sys
-import time
 from collections.abc import Callable, Generator, Iterable
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path, PurePosixPath
 from typing import Any, BinaryIO, TypeVar
+
+def open_shared_read(path: Path) -> BinaryIO:
+    """Read existing bytes while allowing Windows atomic publication to replace their name."""
+    if os.name != "nt":
+        return path.open("rb")
+    native = ctypes.WinDLL("kernel32", use_last_error=True)
+    native.CreateFileW.argtypes = [ctypes.c_wchar_p, ctypes.c_uint32, ctypes.c_uint32, ctypes.c_void_p,
+                                  ctypes.c_uint32, ctypes.c_uint32, ctypes.c_void_p]
+    native.CreateFileW.restype = ctypes.c_void_p
+    native.CloseHandle.argtypes = [ctypes.c_void_p]
+    native.CloseHandle.restype = ctypes.c_int
+    name = str(path.resolve())
+    if not name.startswith("\\\\?\\"):
+        name = "\\\\?\\UNC\\" + name[2:] if name.startswith("\\\\") else "\\\\?\\" + name
+    handle = native.CreateFileW(name, 0x80000000, 7, None, 3, 0x80, None)
+    if handle in (None, ctypes.c_void_p(-1).value):
+        raise ctypes.WinError(ctypes.get_last_error())
+    try:
+        descriptor = import_module("msvcrt").open_osfhandle(handle, os.O_RDONLY | os.O_BINARY)
+    except BaseException:
+        native.CloseHandle(handle)
+        raise
+    try:
+        return os.fdopen(descriptor, "rb")
+    except BaseException:
+        os.close(descriptor)
+        raise
+
+
+def open_shared_text(path: Path, encoding: str = "utf-8") -> io.TextIOWrapper:
+    return io.TextIOWrapper(open_shared_read(path), encoding=encoding)
+
+
+def read_shared_text(path: Path, encoding: str = "utf-8") -> str:
+    with open_shared_text(path, encoding) as source:
+        return source.read()
+
 
 BUFFER_SIZE = 1024 * 1024
 FORMAT_ID = "tag:simson.net,2026:mailarchiver/integrity"
@@ -158,7 +195,7 @@ class PreservingMbox(mailbox.mbox):
 
 
 class _Progress:
-    """Dependency-free, throttled reporting; never opens or changes archive files."""
+    """Dependency-free milestone reporting; never opens or changes archive files."""
 
     def __init__(self, quiet: bool = False) -> None:
         self.quiet = quiet
@@ -174,7 +211,7 @@ class _Progress:
             return
         completed = 0
         terminal = sys.stderr.isatty()
-        last_update = time.monotonic()
+        last_percent = -1
 
         def render() -> None:
             fraction = min(completed / total, 1.0) if total else 1.0
@@ -191,10 +228,10 @@ class _Progress:
             for item in items:
                 yield item
                 completed += len(item) if unit == "bytes" and isinstance(item, bytes) else 1
-                now = time.monotonic()
-                if now - last_update >= (0.2 if terminal else 5.0):
+                percent = completed * 100 // max(total, 1)
+                if percent != last_percent:
                     render()
-                    last_update = now
+                    last_percent = percent
         finally:
             render()
             if terminal:
@@ -401,12 +438,8 @@ def write_integrity_file(
             native = ctypes.WinDLL("kernel32", use_last_error=True)
             native.MoveFileExW.argtypes = [ctypes.c_wchar_p, ctypes.c_wchar_p, ctypes.c_uint32]
             native.MoveFileExW.restype = ctypes.c_int
-            deadline = time.monotonic() + 2
-            while not native.MoveFileExW(str(temporary), str(destination), 0x9):
-                error = ctypes.get_last_error()
-                if error not in {5, 32, 33} or time.monotonic() >= deadline:
-                    raise ctypes.WinError(error)
-                time.sleep(0.01)
+            if not native.MoveFileExW(str(temporary), str(destination), 0x9):
+                raise ctypes.WinError(ctypes.get_last_error())
         else:
             temporary.replace(destination)
         _sync_directory(destination.parent)

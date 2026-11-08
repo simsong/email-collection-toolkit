@@ -17,10 +17,12 @@ import multiprocessing
 import os
 import signal
 import subprocess
-import time
 from collections.abc import Callable
 from multiprocessing.connection import Connection, wait
 from threading import Thread
+from concurrent.futures import Future
+
+from .change_signal import await_activity
 
 from pydantic import BaseModel
 
@@ -72,16 +74,21 @@ def run_owned_command(command: list[str], *, timeout: float,
     context = multiprocessing.get_context("spawn")
     receiver, sender = context.Pipe(duplex=False)
     worker = context.Process(target=_run, args=(sender, command, timeout), daemon=True)
+    received: Future[object] = Future()
+    reader: Thread | None = None
+
+    def receive() -> None:
+        try:
+            received.set_result(receiver.recv())
+        except BaseException as error:
+            received.set_exception(error)
+
     try:
         worker.start()
         sender.close()
-        deadline = time.monotonic() + timeout + 5
-        while not receiver.poll(min(0.25, max(0, deadline - time.monotonic()))):
-            if time.monotonic() >= deadline:
-                raise TimeoutError("command supervisor timed out")
-            if status_callback is not None:
-                status_callback()
-        result = receiver.recv()
+        reader = Thread(target=receive, name="command-result", daemon=True)
+        reader.start()
+        result = await_activity(received, status_callback, timeout + 5)
         if not isinstance(result, CommandResult):
             raise RuntimeError("invalid command supervisor response")
         if result.error:
@@ -89,7 +96,6 @@ def run_owned_command(command: list[str], *, timeout: float,
         return result
     finally:
         sender.close()
-        receiver.close()
         if worker.pid is not None:
             worker.join(timeout=1)
             if worker.is_alive():
@@ -101,3 +107,10 @@ def run_owned_command(command: list[str], *, timeout: float,
                 except ProcessLookupError:
                     worker.kill()
                 worker.join(timeout=1)
+            if worker.is_alive():
+                raise TimeoutError("command supervisor did not stop after termination")
+        receiver.close()
+        if reader is not None:
+            reader.join(timeout=5)
+            if reader.is_alive():
+                raise TimeoutError("command result reader did not stop")

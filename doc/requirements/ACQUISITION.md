@@ -72,11 +72,13 @@ transaction; failed attempts cannot become successful checkpoints. Downloaded
 duplicates retain observations but add no canonical copy. Nested attached-message
 promotions are not counted as separate network downloads.
 
-Status prints at startup, every 300 seconds and on exit. `--show-messages` adds
+Status prints at startup, on committed progress changes and on exit. `--show-messages` adds
 per-download dispositions and subjects. Ctrl-C cooperatively stops and checkpoints,
 returning 130; network operations retain a 30-second socket timeout. Reruns resume
 committed progress. Workers shall close source iterators on their owning threads;
 terminal process-group interrupts shall not abort scanner children mid-message.
+The standalone IMAP CLI acknowledges Ctrl-C immediately, before waiting for active
+downloads to stop and their checkpoint to finish.
 IMAP timeouts and lost connections, including after laptop sleep, shall record a
 **paused** run rather than a failure, including host-down socket errors where the
 platform exposes them. Retain committed per-message progress and accepted
@@ -357,7 +359,8 @@ They submit typed publication operations as tracked futures; the owning driver
 alone mutates shared catalog, processing and search state and publishes
 MBOX checkpoints. Driver failure releases every queued waiter before joining
 workers. Progress retains the originating worker identity, and processor waits
-continue publishing status heartbeats, including one-worker message dispatch.
+publish actual work/cancellation changes, including one-worker message dispatch.
+Blocked work retains running status while its producer PID is live.
 No publication mutex is needed.
 
 ## PST liveness and mailbox message concurrency
@@ -365,7 +368,7 @@ No publication mutex is needed.
 PST `timeout_seconds` bounds inactivity rather than total extraction time. New
 stdout or stderr bytes renew the deadline; a silent stuck child is killed and
 reaped, retaining diagnostics and its receipt. Report actual hashing, address-book
-and extraction progress at one-second intervals between work checkpoints, never
+and extraction progress at actual work checkpoints, never
 manufacture activity while blocked inside a reader call. `LIBRARY ERROR` records
 include an ISO8601 UTC time. Stdout remains exclusively mboxrd.
 

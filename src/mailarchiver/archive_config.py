@@ -27,6 +27,7 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field, JsonValue, model_validator
 from yaml import YAMLError, safe_dump, safe_load
 
+from .standalone_verify import open_shared_text
 from .owner_rules import OwnerRules
 from .imap_models import ImapAccount
 from .mbox import DEFAULT_MBOX_MAX_BYTES
@@ -59,7 +60,7 @@ def config_path(archive: Path) -> Path:
 def load_archive_config(archive: Path) -> ArchiveConfig:
     path = config_path(archive)
     try:
-        with path.open(encoding="utf-8") as source:
+        with open_shared_text(path) as source:
             value = safe_load(source)
         return ArchiveConfig.model_validate(value or {})
     except FileNotFoundError:

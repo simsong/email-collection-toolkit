@@ -30,6 +30,8 @@ from threading import Event, RLock
 from typing import Literal
 from uuid import uuid4
 
+from .standalone_verify import read_shared_text
+from .change_signal import ChangeEvent
 from pydantic import BaseModel, ConfigDict, Field
 
 from .sqlite_paths import sqlite_uri
@@ -70,7 +72,7 @@ class ApplicationPreferencesStore:
     def read(self) -> ApplicationPreferences:
         if not self.path.exists():
             return ApplicationPreferences()
-        return ApplicationPreferences.model_validate_json(self.path.read_text(encoding="utf-8"))
+        return ApplicationPreferences.model_validate_json(read_shared_text(self.path))
 
     def write(self, preferences: ApplicationPreferences) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
@@ -160,7 +162,7 @@ class IngestJob(BaseModel):
     owner_window_id: str
     started_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     kind: Literal["ingest", "content"] = "ingest"
-    stop: Event = Field(default_factory=Event, exclude=True)
+    stop: Event = Field(default_factory=ChangeEvent, exclude=True)
     finished: Event = Field(default_factory=Event, exclude=True)
 
 

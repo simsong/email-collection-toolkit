@@ -65,8 +65,9 @@ from .catalog import (
     create_catalog,
     create_search,
 )
+from .change_signal import ActivityCallback, ChangeEvent, ChangeSignal
+from .console_events import console_signal
 from .ingest_status import (
-    STATUS_REFRESH_SECONDS,
     IngestCounts,
     IngestState,
     IngestStatus,
@@ -134,7 +135,6 @@ from .writer_lock import ArchiveBusyError, WriterLease
 from .imap_state import initialize_state, record_download, refresh_observation
 
 DEFAULT_REPORT_TOP = 10
-PROGRESS_REFRESH_SECONDS = 0.25
 REFRESH_INDEX_DEFAULT_WORKERS = half_cpus()
 REFRESH_INDEX_MAX_IN_FLIGHT_BYTES = 256 * 1024 * 1024
 CLAMAV_START_PHASE = "waiting for ClamAV startup"
@@ -367,20 +367,19 @@ class RefreshIndexReporter:
     def __init__(self, phase: str, total: int, unit: str) -> None:
         self.progress = RefreshIndexProgress(phase=phase, total=total, unit=unit)
         self.tty = sys.stderr.isatty()
-        self.last_display_monotonic: float | None = None
 
     def display(self, *, force: bool = False) -> None:
         now = time.monotonic()
-        interval = PROGRESS_REFRESH_SECONDS if self.tty else 5.0
-        if not force and self.last_display_monotonic is not None and now - self.last_display_monotonic < interval:
+        percent = self.progress.completed * 100 // max(self.progress.total, 1)
+        if not force and getattr(self, "last_percent", None) == percent:
             return
+        self.last_percent = percent
         line = refresh_index_line(self.progress, now)
         if self.tty:
             sys.stderr.write(f"\r\x1b[2K{line}")
         else:
             print(line, file=sys.stderr)
         sys.stderr.flush()
-        self.last_display_monotonic = now
 
     def advance(self, amount: int = 1) -> None:
         self.progress.completed += amount
@@ -540,6 +539,8 @@ class ProgressReporter:
             workers=[WorkerProgress(worker=worker, processing_jobs_completed=0) for worker in range(1, worker_count + 1)],
         )
         self.updates: queue.SimpleQueue[ProgressUpdate] = queue.SimpleQueue()
+        self.changed = ChangeSignal()
+        self.last_status_payload: str | None = None
         self.processing_workers: list[ProgressUpdate | None] = [None] * worker_count
         self.scan_workers: list[ProgressUpdate | None] = [None] * worker_count
         self.driver_thread = threading.get_ident()
@@ -550,7 +551,6 @@ class ProgressReporter:
         self.base_phase = "started"
         self.phase = "started"
         self.phase_started_monotonic = self.state.started_monotonic
-        self.last_display_monotonic = self.state.started_monotonic
         self.notices: set[tuple[str, str, str]] = set()
         self.emitted_notices: set[tuple[str, str, str]] = set()
         self.status_file = status_file
@@ -558,12 +558,14 @@ class ProgressReporter:
         self.status_run_pk = run_pk
         self.status_source_roots = source_roots or []
         self.status_write_error: str | None = None
-        self.last_status_monotonic: float | None = None
         self.scan_policy: Literal["clamav", "not-scanned", "unknown"] = "unknown"
         self.interrupt_announced = False
         self.activity_kind: Literal["source", "processing"] = "source"
         self.saved_message_counter: Callable[[], int] | None = None
-        self.last_remaining_monotonic: float | None = None
+
+    def _queue_update(self, update: ProgressUpdate) -> None:
+        self.updates.put(update)
+        self.changed.notify()
 
     def start(self) -> None:
         self.display(self.phase)
@@ -583,7 +585,6 @@ class ProgressReporter:
     def set_phase(self, phase: str, *, activity_kind: Literal["source", "processing"] = "source") -> None:
         self._assert_driver_thread()
         self.state.saved_messages_remaining = None
-        self.last_remaining_monotonic = None
         self.activity_kind = activity_kind
         self.base_phase = phase
         self.phase = phase
@@ -644,9 +645,7 @@ class ProgressReporter:
         self._assert_driver_thread()
         self.state.source_files_total = file_count
         self.state.source_bytes_total = byte_count
-        now = time.monotonic()
-        if now - self.last_display_monotonic >= PROGRESS_REFRESH_SECONDS:
-            self.display(DISCOVERY_PHASE)
+        self.display(DISCOVERY_PHASE)
 
     def finish_inventory(self, inventory: SourceInventory) -> None:
         self._assert_driver_thread()
@@ -675,7 +674,7 @@ class ProgressReporter:
 
     def record_unchanged_source(self, path: Path | str, reason: str) -> None:
         """Queue one integrity skip from a worker without printing from that worker."""
-        self.updates.put(
+        self._queue_update(
             ProgressUpdate(
                 worker=self._worker_number(),
                 disposition="unchanged-source",
@@ -692,10 +691,10 @@ class ProgressReporter:
         self._send("idle", path, 0, 0)
 
     def record_disposition(self, disposition: str) -> None:
-        self.updates.put(ProgressUpdate(worker=self._worker_number(), disposition=disposition))
+        self._queue_update(ProgressUpdate(worker=self._worker_number(), disposition=disposition))
 
     def record_scan(self, source: MailObject, active: bool) -> None:
-        self.updates.put(ProgressUpdate(worker=self._worker_number(), scan_active=active,
+        self._queue_update(ProgressUpdate(worker=self._worker_number(), scan_active=active,
             path=source.source.display_name, activity_total=len(source.raw)))
 
     def visible_workers(self) -> list[WorkerProgress]:
@@ -707,18 +706,17 @@ class ProgressReporter:
 
     def record_processing(self, item: ProcessingObject, processor: str, finished: bool, worker: int | None = None) -> None:
         """Queue actual processor activity without counting recovered jobs as new mail."""
-        self.updates.put(ProgressUpdate(worker=worker or self._worker_number(), phase="idle" if finished else f"processing {processor}",
+        self._queue_update(ProgressUpdate(worker=worker or self._worker_number(), phase="idle" if finished else f"processing {processor}",
             path=f"{item.pipeline} job {item.job_id}", activity_unit="jobs", processing_active=not finished,
             processing_finished=finished, processing_job_id=item.job_id, processing_processor=processor))
 
     def finish_processing(self) -> None:
-        self.updates.put(ProgressUpdate(worker=self._worker_number(), phase="idle", processing_active=False))
+        self._queue_update(ProgressUpdate(worker=self._worker_number(), phase="idle", processing_active=False))
 
     def track_saved_messages(self, counter: Callable[[], int]) -> None:
         """Bind a read-only queue counter owned by this status driver."""
         self._assert_driver_thread()
         self.saved_message_counter = counter
-        self.last_remaining_monotonic = None
 
     def _send(
         self,
@@ -731,7 +729,7 @@ class ProgressReporter:
         file_complete: bool = False,
         operation: WorkerOperation = "importing",
     ) -> None:
-        self.updates.put(
+        self._queue_update(
             ProgressUpdate(
                 worker=self._worker_number(),
                 phase=phase,
@@ -755,7 +753,7 @@ class ProgressReporter:
         message_date: datetime | None = None,
         operation: WorkerOperation = "importing",
     ) -> None:
-        self.updates.put(
+        self._queue_update(
             ProgressUpdate(
                 worker=self._worker_number(),
                 phase=phase,
@@ -952,13 +950,8 @@ class ProgressReporter:
     ) -> None:
         self._drain_updates()
         now = time.monotonic()
-        if self.activity_kind == "processing" and self.saved_message_counter is not None and (
-            ingest_state != "running" or self.last_remaining_monotonic is None
-            or now - self.last_remaining_monotonic >= STATUS_REFRESH_SECONDS
-        ):
+        if self.activity_kind == "processing" and self.saved_message_counter is not None:
             self.state.saved_messages_remaining = self.saved_message_counter()
-            self.last_remaining_monotonic = time.monotonic()
-        self.last_display_monotonic = now
         display_label = label or self._worker_phase()
         if display_label != self.phase:
             self.phase = display_label
@@ -1040,13 +1033,6 @@ class ProgressReporter:
     ) -> None:
         if self.status_file is None:
             return
-        now = state.started_monotonic + elapsed
-        if (
-            ingest_state == "running"
-            and self.last_status_monotonic is not None
-            and now - self.last_status_monotonic < STATUS_REFRESH_SECONDS
-        ):
-            return
         assert self.status_archive is not None and self.status_run_pk is not None
         updated_at = datetime.now(UTC)
         status = IngestStatus(
@@ -1089,9 +1075,12 @@ class ProgressReporter:
             activity_kind=self.activity_kind,
             saved_messages_remaining=state.saved_messages_remaining,
         )
+        payload = status.model_dump_json(exclude={"updated_at", "elapsed_seconds", "phase_elapsed_seconds", "message_rate", "eta"})
+        if ingest_state == "running" and payload == self.last_status_payload:
+            return
         try:
             self.status_file.write(status)
-            self.last_status_monotonic = now
+            self.last_status_payload = payload
         except OSError as error:
             self.status_write_error = f"cannot update {self.status_file.path}: {error}"
             self.status_file = None
@@ -1115,8 +1104,12 @@ def run_file_workers[WorkerItem](
     concurrency: Callable[[WorkerItem], tuple[str, int | None]] | None = None,
     on_interrupt: Callable[[], None] | None = None,
     coordinator: FutureCoordinator | None = None,
+    signals: tuple[ChangeSignal, ...] = (),
 ) -> None:
     """Run framework workers with optional source-declared per-key concurrency limits."""
+    console = console_signal()
+    if console is not None:
+        signals = (*signals, console)
     iterator = iter(items)
     pool = ThreadPoolExecutor(max_workers=worker_count, thread_name_prefix="mailfile")
     pending: dict[Future[None], str | None] = {}
@@ -1176,9 +1169,10 @@ def run_file_workers[WorkerItem](
                 if exhausted:
                     break
                 continue
+            changed = tuple(signal.ready for signal in signals)
+            status_driver()
             completed, _unfinished = wait(
-                (*pending, coordinator.ready) if coordinator is not None else pending.keys(),
-                timeout=PROGRESS_REFRESH_SECONDS,
+                (*pending, *changed, *((coordinator.ready,) if coordinator is not None else ())),
                 return_when=FIRST_COMPLETED,
             )
             if coordinator is not None:
@@ -1211,15 +1205,16 @@ def run_file_workers[WorkerItem](
 
 
 def start_ingest_scanner(status_driver: Callable[[], None], workers: int, *,
-                         on_interrupt: Callable[[], None] | None = None) -> ClamScanner:
+                         on_interrupt: Callable[[], None] | None = None,
+                         signals: tuple[ChangeSignal, ...] = ()) -> ClamScanner:
     """Keep the owner heartbeat alive throughout blocking scanner preflight."""
     coordinator = FutureCoordinator()
-    scanner = ClamScanner(lambda: coordinator.call(status_driver), workers=workers)
+    scanner = ClamScanner(ActivityCallback(lambda: coordinator.call(status_driver), signals), workers=workers)
     def start(_item: int) -> None:
         scanner.__enter__()
     try:
         run_file_workers([0], 1, start, threading.Event(),
-                         status_driver, on_interrupt=on_interrupt, coordinator=coordinator)
+                         status_driver, on_interrupt=on_interrupt, coordinator=coordinator, signals=signals)
     except BaseException:
         scanner.__exit__()
         raise
@@ -1493,6 +1488,7 @@ def _run_ingest(request: IngestRequest, writer_lease: WriterLease, outcome: Inge
     source_volume_pks: dict[str, int] = {}
     coordinator = FutureCoordinator()
     stop = threading.Event()
+    progress_signals = (progress.changed, *((stop_event.changed,) if isinstance(stop_event, ChangeEvent) else ()))
 
     def check_interrupted() -> None:
         if stop_event is not None and stop_event.is_set():
@@ -2223,7 +2219,7 @@ def _run_ingest(request: IngestRequest, writer_lease: WriterLease, outcome: Inge
             progress.set_phase(CLAMAV_START_PHASE)
             try:
                 scanner = start_ingest_scanner(refresh_import, request.workers,
-                                               on_interrupt=progress.announce_interrupt)
+                                               on_interrupt=progress.announce_interrupt, signals=progress_signals)
             except ClamScannerStartupError as error:
                 scanner_failure = ScanEvidence(status="scanner-error", detail=f"ClamAV startup failed: {error}")
                 print(f"{scanner_failure.detail}; retaining mail and recording scanner errors.", file=sys.stderr)
@@ -2236,7 +2232,7 @@ def _run_ingest(request: IngestRequest, writer_lease: WriterLease, outcome: Inge
             scanner_session=scanner.session if scanner is not None else None, scanner_failure=scanner_failure),
             publish_processed, plugin_dirs=tuple(request.effective_processors.plugin_dir),
             installation_config=request.effective_processors.installation_config,
-            cancelled=check_processor_cancelled, heartbeat=progress.refresh)
+            cancelled=check_processor_cancelled, heartbeat=progress.refresh, signals=progress_signals)
         progress.track_saved_messages(partial(saved_messages_remaining, pipeline.database))
         with pipeline.database:
             save_processing_request(pipeline.database, saved_request)
@@ -2257,7 +2253,7 @@ def _run_ingest(request: IngestRequest, writer_lease: WriterLease, outcome: Inge
             # roots; a new source/scanner failure must not starve this work.
             progress.set_phase("Processing saved mail", activity_kind="processing")
             run_file_workers([0], 1, partial(process_content, fail_on_error=False), stop, refresh_import,
-                             on_interrupt=progress.announce_interrupt, coordinator=coordinator)
+                             on_interrupt=progress.announce_interrupt, coordinator=coordinator, signals=progress_signals)
         if request.continue_ingest:
             progress.set_phase("Finishing saved imports", activity_kind="processing")
             def resume_ingest(_unused: int) -> None:
@@ -2266,7 +2262,7 @@ def _run_ingest(request: IngestRequest, writer_lease: WriterLease, outcome: Inge
                     coordinator.call(partial(pipeline.resume_ingest, progress=progress.record_processing))
                 finally:
                     progress.finish_processing()
-            run_file_workers([0], 1, resume_ingest, stop, refresh_import, on_interrupt=progress.announce_interrupt, coordinator=coordinator)
+            run_file_workers([0], 1, resume_ingest, stop, refresh_import, on_interrupt=progress.announce_interrupt, coordinator=coordinator, signals=progress_signals)
         progress.set_phase("checking sources")
         with BoundedWorkers(request.workers) as message_workers:
             run_file_workers(
@@ -2280,12 +2276,12 @@ def _run_ingest(request: IngestRequest, writer_lease: WriterLease, outcome: Inge
                     work.plugin.implementation.capabilities.max_concurrency,
                 ),
                 on_interrupt=progress.announce_interrupt,
-                coordinator=coordinator,
+                coordinator=coordinator, signals=progress_signals,
             )
         check_interrupted()
         if request.continue_content:
             progress.set_phase("Processing message bodies and attachments", activity_kind="processing")
-            run_file_workers([0], 1, process_content, stop, refresh_import, on_interrupt=progress.announce_interrupt, coordinator=coordinator)
+            run_file_workers([0], 1, process_content, stop, refresh_import, on_interrupt=progress.announce_interrupt, coordinator=coordinator, signals=progress_signals)
         catalog.commit()
         search.commit()
         succeeded = True

@@ -6,7 +6,7 @@ Purpose: Publish flushed files with platform-appropriate rename durability.
 
 How it works:
 Replace files atomically, exclusively rename new files/directories, flush POSIX directories
-and use Windows write-through replacement with bounded retries.
+and use Windows write-through replacement with explicit reader sharing.
 
 Fundamental dependents:
 
@@ -21,7 +21,6 @@ import errno
 import os
 import sys
 from pathlib import Path
-from time import monotonic, sleep
 
 
 def publish_exclusive(source: Path, destination: Path) -> None:
@@ -62,14 +61,8 @@ def replace_file(source: Path, destination: Path) -> None:
         native = ctypes.WinDLL("kernel32", use_last_error=True)
         native.MoveFileExW.argtypes = [ctypes.c_wchar_p, ctypes.c_wchar_p, ctypes.c_uint32]
         native.MoveFileExW.restype = ctypes.c_int
-        deadline = monotonic() + 2
-        while not native.MoveFileExW(str(source), str(destination), 0x9):
-            error = ctypes.get_last_error()
-            # Windows readers and antivirus may briefly deny DELETE sharing.
-            # Keep the complete temporary file and retry only these native errors.
-            if error not in {5, 32, 33} or monotonic() >= deadline:
-                raise ctypes.WinError(error)
-            sleep(0.01)
+        if not native.MoveFileExW(str(source), str(destination), 0x9):
+            raise ctypes.WinError(ctypes.get_last_error())
     else:
         source.replace(destination)
         sync_directory(destination.parent)

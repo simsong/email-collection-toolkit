@@ -10,7 +10,6 @@ import os
 from pathlib import Path
 import sqlite3
 from threading import Event, Thread
-import time
 import traceback
 
 import webview
@@ -20,6 +19,8 @@ from mailarchiver.gui_app import GUI_DIRECTORY, PyWebViewApplication, configure_
 from mailarchiver.document_options import DocumentOptions
 from mailarchiver.ingest_status import read_ingest_history
 from mailarchiver.loopback import LoopbackAssetServer
+from mailarchiver.native_events import ModalObserver, wait_native_state
+from mailarchiver.file_events import wait_for_path_state
 from mailarchiver.scanner import scanner_availability
 from mailarchiver.writer_lock import WriterLease
 
@@ -86,7 +87,6 @@ def main() -> None:
     """Drive accepted/cancelled native selections and import through production JS handlers."""
     faulthandler.dump_traceback_later(90)
     appkit = import_module("AppKit")
-    foundation = import_module("Foundation")
     app_helper = import_module("PyObjCTools.AppHelper")
     fixture = Path(os.environ["MAILARCHIVER_SETUP_FIXTURE"])
     action = os.environ.get("MAILARCHIVER_SETUP_ACTION", "import")
@@ -127,11 +127,11 @@ def main() -> None:
                 api._source = directory  # pylint: disable=protected-access
 
         def inspect(timer) -> None:
-            timer.invalidate()
             native = appkit.NSApplication.sharedApplication()
             panel = native.modalWindow()
+            timer.invalidate()
             try:
-                assert panel is not None
+                assert panel is not None, "Setup picker did not appear before its deadline"
                 accessory = panel.accessoryView()
                 if warning is None:
                     assert accessory is None, "Folder picker retained the previous warning"
@@ -152,21 +152,16 @@ def main() -> None:
                 native.stopModalWithCode_(0)
 
         def schedule() -> None:
-            timer = foundation.NSTimer.timerWithTimeInterval_repeats_block_(0.3, False, inspect)
-            foundation.NSRunLoop.mainRunLoop().addTimer_forMode_(timer, appkit.NSModalPanelRunLoopMode)
+            ModalObserver(inspect, errors)
         app_helper.callAfter(schedule)
 
     def check_close_enabled() -> None:
         inspected = Event()
-        deadline = time.monotonic() + 4
 
         def inspect() -> None:
             try:
                 native = appkit.NSApplication.sharedApplication()
                 enabled = native.mainMenu().itemWithTitle_("File").submenu().itemWithTitle_("Close").isEnabled()
-                if not enabled and time.monotonic() < deadline:
-                    app_helper.callLater(0.05, inspect)
-                    return
                 active = webview.active_window()
                 assert enabled, (f"Close stayed disabled: active={active.uid if active else None}, "
                     f"setup={setup.uid}, key={setup.native.isKeyWindow() if setup.native else None}, "
@@ -183,15 +178,16 @@ def main() -> None:
             assert native_window is not None
             native_window.makeKeyAndOrderFront_(None)
             application._refresh_menus()  # pylint: disable=protected-access
-            app_helper.callAfter(inspect)
 
         app_helper.callAfter(focus)
+        wait_native_state(lambda: setup.native is not None and setup.native.isKeyWindow(), "Setup did not receive native focus")
+        app_helper.callAfter(inspect)
         assert inspected.wait(5)
         assert not errors, errors
 
     def click(identifier: str) -> None:
         setup.evaluate_js(f"document.getElementById('{identifier}').click()")
-        evaluate_async(setup, "new Promise(resolve => {const t = setInterval(() => {if (!busy) {clearInterval(t); resolve(true);}}, 25);})")
+        evaluate_async(setup, "setupWhenIdle().then(() => true)")
 
     def probe() -> None:
         nonlocal race_job, race_worker, preferences_before_cancel
@@ -280,11 +276,10 @@ def main() -> None:
                             native.stopModalWithCode_(1001)
 
                     def schedule_quit_confirmation() -> None:
-                        timer = foundation.NSTimer.timerWithTimeInterval_repeats_block_(0.1, True, confirm_quit)
-                        foundation.NSRunLoop.mainRunLoop().addTimer_forMode_(timer, appkit.NSModalPanelRunLoopMode)
+                        ModalObserver(confirm_quit, errors)
                     app_helper.callAfter(schedule_quit_confirmation)
                 application.observe_cancel = not quit_race
-                setup.evaluate_js("document.getElementById('cancel').click()")
+                click("cancel")
                 assert application.exit_requested.wait(10), "Cancel did not request process exit"
                 if not quit_race:
                     assert application.cancel_menu_states == [False, True], application.cancel_menu_states
@@ -335,8 +330,7 @@ def main() -> None:
                     confirmed.set()
 
             def schedule_confirmation() -> None:
-                timer = foundation.NSTimer.timerWithTimeInterval_repeats_block_(0.2, True, confirm)
-                foundation.NSRunLoop.mainRunLoop().addTimer_forMode_(timer, appkit.NSModalPanelRunLoopMode)
+                ModalObserver(confirm, errors)
             app_helper.callAfter(schedule_confirmation)
             click("start-import")
             assert confirmed.wait(10)
@@ -347,9 +341,12 @@ def main() -> None:
             assert setup.evaluate_js("document.getElementById('destination-path').value") == ""
             ingest = next(window for window in webview.windows if " — Ingests — " in window.title)
             assert ingest.events.loaded.wait(10)
-            deadline = time.monotonic() + 70
-            while any(doc.ingest_job for doc in controller.documents()) and time.monotonic() < deadline:
-                time.sleep(0.1)
+            wait_for_path_state([destination / "status"], lambda: (
+                bool(read_ingest_history(destination).statuses) and
+                read_ingest_history(destination).statuses[0].state == "completed"), timeout=70)
+            for doc in controller.documents():
+                if doc.ingest_job is not None:
+                    assert doc.ingest_job.finished.wait(10), "Import owner did not finish"
             history = read_ingest_history(destination)
             assert history.statuses[0].state == "completed", history
             with sqlite3.connect(destination / "archive.sqlite3") as catalog:

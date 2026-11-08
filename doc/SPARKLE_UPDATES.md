@@ -22,7 +22,7 @@ Stable installations
 initially use Release updates. Alpha/beta installations initially use Preview
 updates, which adds alpha/beta items to Sparkle's always-included stable track.
 An explicit choice survives subsequent upgrades, including preview-to-stable.
-Daily checks are enabled initially. Download and installation require confirmation;
+Checks when the application opens are enabled initially. Native periodic scheduling is disabled. Download and installation require confirmation;
 automatic-update offers are disabled. Sparkle supplies the standard release-note,
 download, error, and Install and Relaunch UI.
 
@@ -38,7 +38,7 @@ controller and delegate and deferring installation while archive work is active.
 
 `winsparkle.py` loads the packaged WinSparkle DLL, supplies the mapped
 version/build and Ed25519 key, and installs shutdown/cancel/error callbacks.
-Python schedules daily checks for installed builds. Native callbacks remain
+Python requests one check when an installed application opens and automatic checking is enabled. Native callbacks remain
 retained because SDK cleanup does not join every worker. `windows_update_feed.py`
 fetches the shared HTTPS feed with size/time bounds, authenticates its complete
 XML signature, and supplies only eligible `ECT.PythonReader` x64 MSIX items over
@@ -190,7 +190,7 @@ uninstall. This does not prove a complete WinSparkle-driven update; the publishe
 feed does not yet contain a Python Windows release.
 
 Issue #91 remains subject to a signed/notarized older-to-newer application test
-using a controlled HTTPS feed. Cover release/preview eligibility, manual/daily
+using a controlled HTTPS feed. Cover release/preview eligibility, manual/launch
 checks, tampered feed/notes/archive, unsupported macOS, interrupted downloads,
 busy-archive deferral, relaunch, and unchanged archive/settings/credentials/
 definition bytes. The unsigned controller probe and source tests do not prove

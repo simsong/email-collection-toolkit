@@ -25,6 +25,7 @@ from pathlib import Path
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from .file_events import ProcessActivity
 from .clamav_definitions import LIBRARY_ENV, DATABASE_ENV, CERTIFICATES_ENV, library_path, selected_definitions, certificates_path
 from .plugin_api import FileProbe, MailContainer, MailObject, PluginContext, ProgressEvent
 from .pst_source import file_hash, validate_record
@@ -65,7 +66,8 @@ def run_converter(command: list[str], output: Path, diagnostics: Path, settings:
               *((path, settings.max_diagnostics_bytes) for path in evidence))
     try:
         with output.open("wb") as stdout, diagnostics.open("wb") as stderr:
-            with subprocess.Popen(command, stdout=stdout, stderr=stderr, env=environment) as process:
+            with subprocess.Popen(command, stdout=stdout, stderr=stderr, env=environment) as process, ProcessActivity(
+                process, [path for path, _limit in limits]) as activity:
                 try:
                     deadline = time.monotonic() + settings.timeout_seconds
                     while process.poll() is None:
@@ -75,9 +77,9 @@ def run_converter(command: list[str], output: Path, diagnostics: Path, settings:
                             raise ValueError("libpff converter output limit exceeded")
                         yield ProgressEvent(work_id=work_id, phase="extracting Outlook", completed=output.stat().st_size, unit="bytes")
                         try:
-                            process.wait(timeout=0.05)
-                        except subprocess.TimeoutExpired:
-                            pass
+                            activity.wait(max(0, deadline - time.monotonic()))
+                        except TimeoutError as error:
+                            raise TimeoutError("libpff extraction timeout") from error
                 finally:
                     if process.poll() is None:
                         process.kill()

@@ -275,10 +275,9 @@ missing processing database. Unsupported/missing saved policy reports an error.
 and **Stop import**, without phase checkboxes. It provides an explicit
 **Continue Processing** action to reopen the dialog. The action starts disabled until status
 is known, stays disabled during the resume bridge request, and follows the shared
-ingest-overview poll afterward. The overview includes the document's accepted
+ingest-overview notifications afterward. The overview includes the document's accepted
 job before a status file exists. Resume generations reject replies started before
-a transition, while monotonically applied request numbers reject reordered polls
-without starving responses slower than the polling interval.
+a transition, while monotonically applied request numbers reject reordered replies while preserving actual completion.
 Completion or rejection refreshes its state in every window.
 `identity.html` and `identity.js` subclass the shared
 matcher widgets with database queries, distinct per-group counts and immediate

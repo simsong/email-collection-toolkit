@@ -26,6 +26,7 @@ from urllib.parse import urlsplit
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from .file_events import ProcessActivity
 from .clamav_definitions import LIBRARY_ENV, DATABASE_ENV, CERTIFICATES_ENV, library_path, selected_definitions, certificates_path
 from .plugin_api import FileProbe, MailContainer, MailObject, PluginContext, ProgressEvent
 from .sources import LocalSourcePlugin, MboxFileParser
@@ -125,7 +126,8 @@ class PstFileParser:
         completed = False
         try:
             with output_path.open("wb") as output, diagnostics_path.open("wb") as diagnostics:
-                with subprocess.Popen([str(program), "--", str(source.path)], stdout=output, stderr=diagnostics, env=environment) as process:
+                with subprocess.Popen([str(program), "--", str(source.path)], stdout=output, stderr=diagnostics, env=environment) as process, ProcessActivity(
+                    process, [output_path, diagnostics_path]) as changes:
                     try:
                         activity = ImportActivity(deadline=time.monotonic() + settings.timeout_seconds)
                         while process.poll() is None:
@@ -136,9 +138,9 @@ class PstFileParser:
                                 raise ValueError("PST importer output limit exceeded")
                             yield ProgressEvent(work_id=container.work_id, phase="extracting PST", completed=output_path.stat().st_size, unit="bytes")
                             try:
-                                process.wait(timeout=0.05)
-                            except subprocess.TimeoutExpired:
-                                pass
+                                changes.wait(max(0, activity.deadline - time.monotonic()))
+                            except TimeoutError as error:
+                                raise TimeoutError(f"PST importer timeout: no activity for {settings.timeout_seconds:g} seconds; evidence retained at {workspace}") from error
                     finally:
                         if process.poll() is None:
                             process.kill()

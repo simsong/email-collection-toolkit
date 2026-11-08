@@ -42,11 +42,6 @@ def preferences_delegate() -> Any:
             self.pane.window.makeFirstResponder_(None)
             return self.pane.commit()
 
-        def windowWillClose_(self, _notification):
-            if self.pane.timer is not None:
-                self.pane.timer.invalidate()
-                self.pane.timer = None
-
         def checkUpdates_(self, _sender):
             if self.pane.commit():
                 self.pane.service.check()
@@ -70,7 +65,6 @@ class MacOSPreferences:
         self.service, self.save = service, save
         self.workers: WorkerSettings
         self.saved: tuple[UpdateChannel, bool, WorkerPreferences | None] | None = None
-        self.timer: Any = None
         appkit = import_module("AppKit")
         parent = appkit.NSApplication.sharedApplication().keyWindow()
         self.screen = parent.screen() if parent is not None else appkit.NSScreen.mainScreen()
@@ -115,7 +109,7 @@ class MacOSPreferences:
         self.channel.setAction_("changed:")
         view.addSubview_(self.channel)
         self.automatic = appkit.NSButton.checkboxWithTitle_target_action_(
-            "Check for updates automatically (daily)", self.delegate, "changed:")
+            "Check when the application opens", self.delegate, "changed:")
         self.automatic.setFrame_(((24, 224), (532, 28)))
         view.addSubview_(self.automatic)
         label(f"Downloading and installation always require confirmation.\n{UPDATE_STREAM_HELP}", 150, 64)
@@ -155,10 +149,6 @@ class MacOSPreferences:
         self.window.setFrameOrigin_((area.origin.x + (area.size.width - size.width) / 2,
                                      area.origin.y + (area.size.height - size.height) / 2))
         self.window.makeKeyAndOrderFront_(None)
-        if self.timer is not None:
-            self.timer.invalidate()
-        self.timer = import_module("Foundation").NSTimer.scheduledTimerWithTimeInterval_repeats_block_(
-            0.5, True, lambda _timer: self.refresh_status())
 
     def worker_note(self) -> str:
         return self.workers.override_note or (

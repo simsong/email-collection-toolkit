@@ -28,6 +28,7 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field, JsonValue, PrivateAttr, TypeAdapter
 from yaml import YAMLError, safe_dump, safe_load
 
+from .standalone_verify import read_shared_text
 from .application import application_preferences_path
 from .archive_config import config_path, load_archive_config
 from .storage_sync import replace_file, sync_directory
@@ -116,7 +117,7 @@ def installation_config_path() -> Path:
 
 def load_installation_config(path: Path) -> InstallationConfig:
     try:
-        value = safe_load(path.read_text(encoding="utf-8"))
+        value = safe_load(read_shared_text(path))
         return InstallationConfig.model_validate(value if value is not None else {})
     except FileNotFoundError:
         return InstallationConfig()

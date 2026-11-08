@@ -30,11 +30,13 @@ from contextlib import contextmanager, nullcontext
 from collections.abc import Callable, Generator
 from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
 from pathlib import Path
-from typing import Protocol
+from typing import Protocol, cast
 from types import CodeType
 
 from pydantic import BaseModel, ConfigDict, InstanceOf
 
+from ..change_signal import ActivityCallback, ChangeSignal
+from ..console_events import console_signal
 from ..plugin_configuration import PluginConfiguration, NamespaceWrites, apply_config_batch, read_plugin_configuration, recover_config_transaction
 
 from .api import (
@@ -285,7 +287,7 @@ def run(database: sqlite3.Connection, plugins: tuple[PluginSpec, ...], *, retry:
         services: ProcessorServices | None = None, cancelled: Callable[[], None] | None = None,
         failures: list[Exception] | None = None, message_id: str | None = None,
         continue_after_failure: bool = False, progress: ProcessingProgress | None = None, workers: int = 1,
-        heartbeat: Callable[[], None] | None = None) -> RunReport:
+        heartbeat: Callable[[], None] | None = None, signals: tuple[ChangeSignal, ...] = ()) -> RunReport:
     """Caller holds the archive writer lease. Atomic output release follows each barrier."""
     if workers < 1:
         raise ValueError("processing workers must be positive")
@@ -293,7 +295,7 @@ def run(database: sqlite3.Connection, plugins: tuple[PluginSpec, ...], *, retry:
     try:
         dispatch(database, plugins, max_jobs=max_jobs, installation_config=installation_config,
                  pipelines=pipelines, services=services, cancelled=cancelled, failures=failures, message_id=message_id,
-                 continue_after_failure=continue_after_failure, progress=progress, workers=workers, heartbeat=heartbeat)
+                 continue_after_failure=continue_after_failure, progress=progress, workers=workers, heartbeat=heartbeat, signals=signals)
     finally:
         if services is None:
             # Production owns cleanup after canonical publication/checkpointing;
@@ -318,10 +320,26 @@ def dispatch(database: sqlite3.Connection, plugins: tuple[PluginSpec, ...], *,
         services: ProcessorServices | None = None, cancelled: Callable[[], None] | None = None,
         failures: list[Exception] | None = None, message_id: str | None = None,
         continue_after_failure: bool = False, progress: ProcessingProgress | None = None, workers: int = 1,
-        heartbeat: Callable[[], None] | None = None) -> None:
+        heartbeat: Callable[[], None] | None = None, signals: tuple[ChangeSignal, ...] = ()) -> None:
     """Workers return results; this coordinator alone advances jobs and commits SQL."""
     if workers < 1:
         raise ValueError("processing workers must be positive")
+    console = console_signal()
+    if console is not None:
+        signals = (*signals, console)
+    invocation_changed = ChangeSignal()
+    original_progress = progress
+
+    def report_progress(item: ProcessingObject, processor: str, finished: bool, worker: int) -> None:
+        try:
+            if original_progress is not None:
+                original_progress(item, processor, finished, worker)
+        finally:
+            invocation_changed.notify()
+
+    progress = report_progress
+    if cancelled is not None:
+        cancelled = ActivityCallback(cancelled, (*signals, invocation_changed))
     failures = failures if failures is not None else []
     active: list[ActiveJob] = []
     processed = 0
@@ -388,8 +406,11 @@ def dispatch(database: sqlite3.Connection, plugins: tuple[PluginSpec, ...], *,
                         advance(job)
                     if not active:
                         break
-                    completed, _pending = wait([job.future for job in active if job.future is not None],
-                                               timeout=0.25 if heartbeat is not None else None, return_when=FIRST_COMPLETED)
+                    changed = tuple(signal.ready for signal in signals)
+                    if heartbeat is not None:
+                        heartbeat()
+                    completed, _pending = wait(cast(list[Future[object]], [*(job.future for job in active if job.future is not None), *changed]),
+                                               return_when=FIRST_COMPLETED)
                     if heartbeat is not None:
                         heartbeat()
                     for job in tuple(active):

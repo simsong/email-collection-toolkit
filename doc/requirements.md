@@ -25,6 +25,12 @@ platform acceptance and deferred work.
 
 ## Shared boundaries
 
+- Completion and readiness require observable state, Events, futures or native
+  callbacks; a fixed delay never establishes success. Elapsed deadlines use
+  monotonic clocks and expiry reports failure. No first-party non-timeout
+  scheduling timers are used: status, sampling and retries follow actual events. See [timing audit](TIMING_AUDIT.md).
+
+
 - Extra non-mail files found during archive checks produce dismissible warnings
   and do not fail imports. Missing or changed preserved email remains an error.
   See [archive](requirements/ARCHIVE.md) and [desktop](requirements/DESKTOP.md).
@@ -83,7 +89,7 @@ platform acceptance and deferred work.
   worker task totals in the table and no worker-count summary cards.
   See [desktop](requirements/DESKTOP.md).
 
-- Scanner preflight keeps publishing import heartbeats even during blocking
+- Scanner preflight retains live process status and wakes the owner on cancellation during blocking
   definition checks and updates. See [scanning](requirements/SCANNING.md).
 
 - The macOS development launcher seals its bundle identity and preserves the
@@ -134,18 +140,18 @@ platform acceptance and deferred work.
   with `make test-frozen-source-plugins` before packaging handoff.
 - Signature display-name recursion retains observed addresses and a diagnostic;
   failed content jobs do not starve unrelated mail. See [processing](requirements/PROCESSING.md).
-- PST extraction publishes timed progress and uses an inactivity deadline. Single
+- PST extraction publishes output-change progress and uses an inactivity deadline. Single
   mailbox sources stream bounded parallel scans with ordered publication. Autocomplete
   cancels stale requests and retains legacy subject-index performance. See
   [acquisition](requirements/ACQUISITION.md) and [search](requirements/SEARCH.md).
 - Source workers retain thread-bound input handles and return publication requests
   through futures; only their owner commits durable state. Single-worker processor
-  waits retain live status heartbeats. See [acquisition](requirements/ACQUISITION.md).
+  waits retain live process status without periodic heartbeats. See [acquisition](requirements/ACQUISITION.md).
 - The experimental Rust UI, helper and obsolete build/test paths are removed from
   the active checkout. The signed `experimental-rust-ui` tag preserves the
   October 10, 2026 retirement snapshot; see the [archive note](RUST_GUI_EXPERIMENTS.md).
-- Preview workers return tracked results; current-generation GUI polling alone
-  updates preview caches. See [desktop](requirements/DESKTOP.md).
+- Preview workers return tracked results; current-generation completion replies alone
+  update preview caches. See [desktop](requirements/DESKTOP.md).
 - Original IMAP folder labels decode percent escapes once while retaining stored
   selection paths; see [desktop](requirements/DESKTOP.md).
 - Natural search preserves quoted symbols and works with existing indexes;

@@ -78,6 +78,8 @@ def windows_webview() -> str:
     backend = import_module("webview.guilib").initialize("edgechromium")
     if backend.renderer != "edgechromium":
         raise RuntimeError("Microsoft Edge WebView2 Runtime is required. Install it from Microsoft and retry.")
+    from .native_javascript import install_windows_reply_boundary  # pylint: disable=import-outside-toplevel
+    install_windows_reply_boundary()
     return str(backend.renderer)
 
 
@@ -165,3 +167,25 @@ def open_external_url(destination: str) -> None:
     """Open a URL already validated by the reader's shared scheme allowlist."""
     if not webbrowser.open(destination):
         raise ValueError("could not open external link")
+
+
+def post_window_event(window: Any, event: str) -> None:
+    """Post a state-change event without making a producer wait for a webview reply."""
+    import json  # pylint: disable=import-outside-toplevel
+    script = f"window.dispatchEvent(new Event({json.dumps(event)}));"
+    if not isinstance(window, import_module("webview").Window):
+        window.run_js(script)  # Non-native protocol consumers retain their own delivery boundary.
+    elif window.events.loaded.is_set() and not window.events.closed.is_set():
+        if sys.platform == "darwin":
+            from webview.platforms.cocoa import BrowserView  # pylint: disable=import-outside-toplevel,import-error
+            view = BrowserView.instances.get(window.uid)
+            if view is not None:
+                import_module("PyObjCTools.AppHelper").callAfter(
+                    lambda: None if window.events.closed.is_set() else view.webview.evaluateJavaScript_completionHandler_(script, None))
+        elif sys.platform == "win32":
+            native = window.native
+            if native is not None and not native.IsDisposed:
+                native.BeginInvoke(import_module("System").Action(
+                    lambda: None if native.IsDisposed else native.webview.ExecuteScriptAsync(script)))
+        else:
+            window.run_js(script)

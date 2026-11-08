@@ -6,12 +6,10 @@
 # These unscanned fixtures test storage; real ClamAV acceptance is separate.
 """Cross-platform writer preservation and source-safety regressions."""
 from contextlib import closing
-from concurrent.futures import ThreadPoolExecutor
 import hashlib
 import os
 from pathlib import Path
 import sqlite3
-from threading import Event
 
 import pytest
 
@@ -23,34 +21,25 @@ from mailarchiver.owner_rules import OwnerRules
 from mailarchiver.reader_fixture import inventory
 from mailarchiver.standalone_verify import verify_archive
 from mailarchiver.storage_sync import replace_file
+from mailarchiver.standalone_verify import open_shared_read
 
 
 @pytest.mark.skipif(os.name != "nt", reason="Windows DELETE-sharing publication semantics")
-@pytest.mark.parametrize("release_reader", [True, False])
-def test_atomic_publication_waits_for_readers_without_losing_files(tmp_path: Path, release_reader: bool) -> None:
-    """GUI status polling may briefly block replacement; persistent denial must still fail."""
+@pytest.mark.parametrize("share_delete", [True, False])
+def test_atomic_publication_uses_explicit_reader_sharing_without_timed_retries(tmp_path: Path, share_delete: bool) -> None:
+    """ARCHIVE: compatible readers retain old bytes; explicit denial preserves both files."""
     source, destination = tmp_path / "complete.tmp", tmp_path / "status.json"
     source.write_bytes(b"complete replacement")
     destination.write_bytes(b"previous status")
-    started = Event()
-    def publish() -> None:
-        started.set()
-        replace_file(source, destination)
-    with destination.open("rb") as reader, ThreadPoolExecutor(max_workers=1) as executor:
-        future = executor.submit(publish)
-        assert started.wait(2)
-        if release_reader:
-            Event().wait(0.05)
-            assert not future.done()
-            assert reader.read() == b"previous status"
-            reader.close()
-            future.result(timeout=4)
+    with open_shared_read(destination) if share_delete else destination.open("rb") as reader:
+        if share_delete:
+            replace_file(source, destination)
             assert destination.read_bytes() == b"complete replacement" and not source.exists()
         else:
             with pytest.raises(PermissionError):
-                future.result(timeout=4)
+                replace_file(source, destination)
             assert source.read_bytes() == b"complete replacement"
-            assert reader.read() == b"previous status"
+        assert reader.read() == b"previous status"
 
 
 def test_create_import_preserves_original_bytes_and_source_idempotence(tmp_path: Path) -> None:

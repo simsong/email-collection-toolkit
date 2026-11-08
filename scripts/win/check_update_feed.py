@@ -8,8 +8,7 @@
 from __future__ import annotations
 
 from importlib.metadata import version
-from threading import Event
-from time import monotonic
+from threading import Condition
 
 from mailarchiver.updates import UpdateService, UpdateStatus, default_channel
 from mailarchiver.winsparkle import start_windows_updater
@@ -17,16 +16,23 @@ from mailarchiver.winsparkle import start_windows_updater
 
 def main() -> None:
     current = version("mailarchiver")
-    service = UpdateService(UpdateStatus(version=current, channel=default_channel(current)), lambda: False)
+    changed = Condition()
+
+    def notify() -> None:
+        with changed:
+            changed.notify_all()
+
+    service = UpdateService(UpdateStatus(version=current, channel=default_channel(current)), lambda: False,
+                            changed=notify)
     backend = start_windows_updater(service, lambda: None)
     try:
         if backend.installed:
             raise RuntimeError("Run this check from the source environment")
         service.status.phase = "checking"
         backend.native.win_sparkle_check_update_without_ui()
-        deadline = monotonic() + 45
-        while service.status.phase == "checking" and monotonic() < deadline:
-            Event().wait(0.05)
+        with changed:
+            if not changed.wait_for(lambda: service.status.phase != "checking", timeout=45):
+                raise TimeoutError("Live native update discovery did not complete")
         if service.status.phase not in {"idle", "available"} or service.status.last_checked is None:
             raise RuntimeError(f"Live native update check failed: {service.status.model_dump_json()}")
         print(service.status.model_dump_json(indent=2))

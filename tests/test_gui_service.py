@@ -665,9 +665,7 @@ def test_gui_loads_indexed_previews_on_its_background_worker(tmp_path: Path) -> 
     api = GuiApi(archive)
     try:
         assert api.request_previews([1, 2])
-        deadline = time.monotonic() + 2
-        while (batch := api.take_previews([1, 2]))["pending"] and time.monotonic() < deadline:
-            time.sleep(0.01)
+        batch = api.take_previews([1, 2], True)
     finally:
         api.close()
 
@@ -679,7 +677,7 @@ def test_gui_loads_indexed_previews_on_its_background_worker(tmp_path: Path) -> 
     ]
 
 
-def test_preview_futures_ignore_old_archive_and_observe_reader_failures(tmp_path: Path) -> None:
+def test_preview_futures_ignore_old_archive_and_observe_reader_failures(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Desktop previews: only current-generation results publish; failures are consumed and retryable."""
     first = make_gui_archive(tmp_path / "first")
     second = make_gui_archive(tmp_path / "second")
@@ -690,11 +688,19 @@ def test_preview_futures_ignore_old_archive_and_observe_reader_failures(tmp_path
     release = Event()
     api = GuiApi(first)
     try:
+        import mailarchiver.gui_app as gui_module
+        started = Event()
+        real_read = gui_module.message_previews
+
+        def observed_read(archive: Path, keys: list[int]):
+            # Acknowledge entry only; this remains the actual blocked SQLite reader.
+            started.set()
+            return real_read(archive, keys)
+
+        monkeypatch.setattr(gui_module, "message_previews", observed_read)
         api.request_previews([1])
         old_future = next(iter(api._preview_futures))
-        deadline = time.monotonic() + 2
-        while not old_future.running() and time.monotonic() < deadline:
-            time.sleep(0.001)
+        assert started.wait(2), "Preview reader did not enter"
         assert old_future.running()
         queued_gate = api._preview_executor.submit(release.wait)
         api.archive = second

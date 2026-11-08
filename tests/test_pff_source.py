@@ -33,7 +33,7 @@ def test_host_kills_and_reaps_stuck_converter(tmp_path: Path) -> None:
     """A blocked native child cannot outlive the host's extraction deadline."""
     from mailarchiver.pff_source import PffSettings, run_converter
     output = tmp_path / "output"
-    command = [sys.executable, "-c", "import os,time; print(os.getpid(), flush=True); time.sleep(60)"]
+    command = [sys.executable, "-c", "import os,time; print(os.getpid(), flush=True); __import__('threading').Event().wait()"]
     with pytest.raises(TimeoutError):
         list(run_converter(command, output, tmp_path / "stderr", PffSettings(timeout_seconds=1),
                            "fixture", os.environ.copy()))

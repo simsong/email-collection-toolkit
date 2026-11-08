@@ -16,7 +16,7 @@ from functools import partial
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from threading import Event, Thread
-from time import monotonic, sleep
+from mailarchiver.file_events import wait_for_path_state
 
 import pytest
 
@@ -32,16 +32,18 @@ GUIDE = """# Synthetic acquisition/processor fixture for bounded Quit tests.
 # No source messages or external accounts are modified.
 """
 PROCESSOR = '''from pathlib import Path
-from time import sleep
 from mailarchiver.processing.api import ProcessingResult
 
 class Processor:
     def process(self, item):
         root = Path(__file__).parents[3]
         (root / "entered").touch()
-        while not (root / "release").exists():
+        def released():
             item.check_cancelled()
-            sleep(0.01)
+            if (root / "stop-requested").exists():
+                (root / "checked-after-stop").touch()
+            return (root / "release").exists()
+        item.wait_for_files((root,), released)
         return ProcessingResult()
 '''
 API_SOURCE = '''from pathlib import Path
@@ -144,30 +146,21 @@ entrypoint="plugin:create_plugin"
             (tmp_path / "request.json").write_text(request.model_dump_json())
             with subprocess.Popen([sys.executable, "-m", "tests.quit_probe", "replay", str(tmp_path)]) as child:
                 try:
-                    deadline = monotonic() + 20
-                    while not (tmp_path / "entered").exists() and child.poll() is None and monotonic() < deadline:
-                        sleep(0.01)
+                    wait_for_path_state([tmp_path / "entered"], (tmp_path / "entered").exists, timeout=20)
                     assert (tmp_path / "entered").exists()
                 finally:
                     child.kill()
                     child.wait(5)
             (tmp_path / "entered").unlink()
         worker.start()
-        deadline = monotonic() + 15
-        while not (tmp_path / "entered").exists() and worker.is_alive() and monotonic() < deadline:
-            sleep(0.01)
-        assert (tmp_path / "entered").exists(), errors
-        # Source publication owns SQL, but a blocked processor must not prevent
-        # its coordinator from refreshing the GUI-visible status heartbeat.
-        before = read_ingest_history(archive).statuses[0]
-        deadline = monotonic() + 3
-        while (current := read_ingest_history(archive).statuses[0]).updated_at <= before.updated_at:
-            assert worker.is_alive(), errors
-            assert monotonic() < deadline, "Active processor blocked the status heartbeat"
-            sleep(0.01)
-        assert current.state == "running"
+        wait_for_path_state([tmp_path / "entered"], (tmp_path / "entered").exists, timeout=15)
+        assert worker.is_alive(), errors
+        current = read_ingest_history(archive).statuses[0]
+        assert current.effective().state == "running"
         stop.set()
-        sleep(0.1)  # The processor actively checks cancellation during this interval.
+        (tmp_path / "stop-requested").touch()
+        wait_for_path_state([tmp_path / "checked-after-stop"],
+                            (tmp_path / "checked-after-stop").exists, timeout=5)
         (tmp_path / "release").touch()
         if worker.ident is not None:
             worker.join(20)

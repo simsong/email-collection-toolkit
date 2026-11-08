@@ -94,7 +94,7 @@ def test_real_cli_writes_only_own_namespace_and_selected_scopes(tmp_path: Path) 
 
 @pytest.mark.parametrize("failure", ["timeout", "abort", "exception"])
 def test_unsuccessful_plugin_never_commits_configuration(tmp_path: Path, failure: str) -> None:
-    ending = {"timeout": "time.sleep(10)\nreturn ProcessingResult()",
+    ending = {"timeout": '__import__("threading").Event().wait(item.remaining_seconds)\nreturn ProcessingResult()',
               "abort": 'return ProcessingResult(outcome="abort-message")',
               "exception": 'raise ValueError("fixture failure")'}[failure]
     config_plugin(tmp_path, 'item.write_my_config({"new": True})\n' + ending,

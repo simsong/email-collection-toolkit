@@ -10,11 +10,9 @@ import os
 import signal
 import subprocess
 import sys
-import time
-from concurrent.futures import ThreadPoolExecutor
-from threading import Event
-from array import array
-from importlib import import_module
+from concurrent.futures import Future
+from threading import Thread
+from tests.process_output import open_fifo_writer
 
 import pytest
 from datetime import UTC, datetime
@@ -28,6 +26,7 @@ from mailarchiver.bagit import (
 from mailarchiver.catalog import address_pk, create_catalog
 from mailarchiver.layout import integrity_path, mbox_directory
 from mailarchiver.mbox import add_message
+from mailarchiver.standalone_verify import open_shared_read
 from mailarchiver.standalone_verify import (
     PreservingMbox,
     INSTALLED_NAME,
@@ -328,10 +327,6 @@ def test_installed_verifier_sigint_is_graceful(tmp_path: Path, quiet: bool, phas
     """Requirement: real Ctrl-C during archive I/O exits 130, including quiet mode."""
     if sys.platform == "win32":
         pytest.skip("POSIX FIFO and SIGINT synchronization")
-    # The test is POSIX-only; load those native APIs only on its supported host.
-    fcntl = import_module("fcntl")
-    termios = import_module("termios")
-
     initialize_bag(tmp_path)
     script = install_archive_verifier(tmp_path)
     manifest = tmp_path / "manifest-sha256.txt"
@@ -343,26 +338,26 @@ def test_installed_verifier_sigint_is_graceful(tmp_path: Path, quiet: bool, phas
     command = [sys.executable, "-I", str(script), *(["--quiet"] if quiet else [])]
     with subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True) as process:
         writer: int | None = None
+        transfer_worker: Thread | None = None
         try:
-            deadline = time.monotonic() + 10
-            while writer is None:
+            writer = open_fifo_writer(blocked)
+            transferred: Future[None] = Future()
+            descriptor = writer
+
+            def transfer() -> None:
                 try:
-                    writer = os.open(blocked, os.O_WRONLY | os.O_NONBLOCK)
-                except OSError:
-                    assert process.poll() is None, "verifier exited before opening the input"
-                    assert time.monotonic() < deadline, "verifier did not open the input"
-                    time.sleep(0.01)
-            # Opening the FIFO only proves that open(2) has paired its endpoints.
-            # Wait until the verifier consumes data, so SIGINT interrupts reading
-            # rather than racing CPython's buffered-file initialization.
-            os.write(writer, b"\n")
-            remaining = array("i", [1])
-            while remaining[0]:
-                fcntl.ioctl(writer, termios.FIONREAD, remaining)
-                assert process.poll() is None, "verifier exited before reading the input"
-                assert time.monotonic() < deadline, "verifier did not read the input"
-                if remaining[0]:
-                    time.sleep(0.01)
+                    # More than pipe capacity forces actual reader consumption,
+                    # after buffered-file construction, before acknowledging.
+                    data = memoryview(b"\n" * (1024 * 1024))
+                    while data:
+                        data = data[os.write(descriptor, data):]
+                    transferred.set_result(None)
+                except BaseException as error:
+                    transferred.set_exception(error)
+
+            transfer_worker = Thread(target=transfer, daemon=True)
+            transfer_worker.start()
+            transferred.result(timeout=10)
             process.send_signal(signal.SIGINT)
             # Buffered reads may defer a pending Python signal until I/O returns.
             # EOF releases that read; exit 130 still proves SIGINT was handled.
@@ -375,6 +370,9 @@ def test_installed_verifier_sigint_is_graceful(tmp_path: Path, quiet: bool, phas
             if process.poll() is None:
                 process.kill()
                 process.communicate(timeout=10)
+            if transfer_worker is not None:
+                transfer_worker.join(timeout=5)
+                assert not transfer_worker.is_alive(), "FIFO writer did not stop"
     assert process.returncode == 130
     assert "verification incomplete" in stderr
     assert "Traceback" not in stderr and "KeyboardInterrupt" not in stderr
@@ -403,27 +401,20 @@ def test_preserving_mbox_bytes_keep_mixed_original_newlines(tmp_path: Path, from
     assert path.read_bytes() == original
 
 @pytest.mark.skipif(os.name != "nt", reason="Windows DELETE-sharing semantics")
-@pytest.mark.parametrize("release_reader", [True, False])
-def test_integrity_publication_handles_windows_readers(tmp_path: Path, release_reader: bool) -> None:
-    """Integrity publication retries transient denial and preserves old bytes on failure."""
+@pytest.mark.parametrize("share_delete", [True, False])
+def test_integrity_publication_obeys_reader_sharing_without_timed_retries(tmp_path: Path, share_delete: bool) -> None:
+    """ARCHIVE: shared-reader publication succeeds; denied replacement preserves old integrity."""
     path, integrity, raw = make_integrity_archive(tmp_path)
     original = integrity.read_bytes()
-    started = Event()
-    def publish() -> None:
-        started.set()
-        write_integrity_file(path, integrity,
-            (IntegrityMessage("verify@example", hashlib.sha256(raw).hexdigest(), raw),), 1)
-    with integrity.open("rb") as reader, ThreadPoolExecutor(max_workers=1) as executor:
-        future = executor.submit(publish)
-        assert started.wait(2)
-        if release_reader:
-            Event().wait(0.05)
-            assert not future.done()
-            reader.close()
-            future.result(timeout=4)
+    with open_shared_read(integrity) if share_delete else integrity.open("rb") as reader:
+        def publish() -> None:
+            write_integrity_file(path, integrity,
+                (IntegrityMessage("verify@example", hashlib.sha256(raw).hexdigest(), raw),), 1)
+        if share_delete:
+            publish()
         else:
             with pytest.raises(PermissionError):
-                future.result(timeout=4)
-            assert reader.read() == original
+                publish()
+        assert reader.read() == original
     assert integrity.read_bytes() == original
     assert not integrity.with_name(f".{integrity.name}.tmp").exists()

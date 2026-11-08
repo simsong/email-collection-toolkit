@@ -365,11 +365,13 @@ fn deadline_terminates_stuck_subprocess() -> Result<()> {
     let work = tempfile::tempdir()?;
     let start = std::time::Instant::now();
     let error = command(
-        Command::new("sleep").arg("60"),
+        Command::new("sh")
+            .args(["-c", "read value"])
+            .stdin(std::process::Stdio::piped()),
         &work.path().join("stuck.log"),
         Duration::from_millis(100),
     )
-    .expect_err("sleep must time out");
+    .expect_err("blocked child must time out");
     ensure!(
         error.to_string().contains("did not terminate") && start.elapsed() < Duration::from_secs(5),
         "deadline failed: {error}"

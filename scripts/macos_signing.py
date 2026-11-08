@@ -18,7 +18,6 @@ import secrets
 import shlex
 import subprocess
 import tempfile
-from time import sleep
 from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
 from pathlib import Path
@@ -252,7 +251,6 @@ def run_notary_stage(arguments: list[str], timeout: int, *, retry_network: bool 
         if (not remaining or result.returncode != 68
                 or APPLE_CONNECTION_LOST not in result.stdout + result.stderr):
             return result
-        sleep(5 * (3 - remaining))
 
 
 def notarize_image(image: Path, credentials: NotarizationCredentials, work_root: Path) -> None:

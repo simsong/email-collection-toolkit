@@ -368,8 +368,7 @@ def test_processor_scan_deadline_is_recorded_without_blocking_filing(tmp_path: P
 
 def test_scan_result_survives_a_post_result_deadline(tmp_path: Path) -> None:
     """SCANNING: a deadline after a known positive cannot erase the detection and allow ordinary filing."""
-    plugin(tmp_path, "clamav", 'from mailarchiver.scan_evidence import ScanEvidence\n'
-           'time.sleep(0.03)\nreturn ProcessingResult(scan=ScanEvidence(status="infected", detail="recorded detection"))', timeout=0.005)
+    plugin(tmp_path, "clamav", 'from mailarchiver.scan_evidence import ScanEvidence\n__import__("threading").Event().wait(item.remaining_seconds)\nreturn ProcessingResult(scan=ScanEvidence(status="infected", detail="recorded detection"))', timeout=0.005)
     spec, = load_processors((tmp_path,))
     reference = content_reference(Path(__file__).parent / "data/credible_date_with_quoted_body.eml")
     item = ProcessingObject(archive=ArchiveContext(path=tmp_path), message_id=reference.sha256,
@@ -779,9 +778,7 @@ def test_cli_saved_content_uses_worker_pool_and_preserves_search_and_bytes(tmp_p
     with connect(archive) as database:
         assert saved_messages_remaining(database) == 3
     canonical = [(path, hashlib.sha256(path.read_bytes()).hexdigest()) for path in mbox_directory(archive).glob("*.mbox")]
-    plugin(tmp_path, "parallel-gate", '(item.archive.path / ("entered-" + item.message_id)).touch()\n'
-           'while len(list(item.archive.path.glob("entered-*"))) < 2:\n'
-           '    item.check_cancelled()\n    time.sleep(0.01)\nreturn ProcessingResult()', timeout=5)
+    plugin(tmp_path, "parallel-gate", '(item.archive.path / ("entered-" + item.message_id)).touch()\nitem.wait_for_files((item.archive.path,), lambda: not (len(list(item.archive.path.glob("entered-*"))) < 2))\nreturn ProcessingResult()', timeout=5)
     manifest = tmp_path / "processors/parallel-gate/plugin.toml"
     manifest.write_text(manifest.read_text().replace('pipeline="ingest"', 'pipeline="message"'))
     cli(archive, "process", "--reprocess", "--workers", "2", "--phase", "all", "--plugin-dir", str(tmp_path))

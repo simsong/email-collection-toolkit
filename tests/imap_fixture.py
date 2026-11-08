@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+from collections.abc import Awaitable, Callable
 import base64
 from concurrent.futures import Future
 import imaplib
@@ -18,12 +19,13 @@ from pathlib import Path
 import shutil
 import ssl
 import subprocess
-from threading import Event, Thread
+from threading import Event, Lock, Thread
 from typing import Literal
 
 from keyring.backend import KeyringBackend
 from jaraco.classes.properties import classproperty
 from proxyprotocol.reader import ProxyProtocolReader
+from proxyprotocol.sock import SocketInfo
 from pymap.backend.dict import DictBackend
 from pymap.imap import IMAPServer
 from pydantic import BaseModel
@@ -56,6 +58,23 @@ class FixtureKeyring(KeyringBackend):
         self.secrets.append(Secret(service=service, username=username, password=password))
 
 
+class AcknowledgedReader(asyncio.StreamReader):
+    """Retain the real TLS stream while gating complete synthetic body-fetch commands."""
+
+    def __init__(self, reader: asyncio.StreamReader, before: Callable[[bytes], Awaitable[None]]) -> None:
+        super().__init__()
+        self.source = reader
+        self.before = before
+
+    async def readline(self) -> bytes:
+        line = await self.source.readline()
+        await self.before(line)
+        return line
+
+    async def readexactly(self, n: int) -> bytes:
+        return await self.source.readexactly(n)
+
+
 class DisposableImap:
     def __init__(self, directory: Path, tls: Literal["implicit", "starttls"]) -> None:
         self.tls: Literal["implicit", "starttls"] = tls
@@ -72,6 +91,36 @@ class DisposableImap:
         self.stop = Event()
         self.thread = Thread(target=self._thread, name="disposable-imap", daemon=True)
         self.account: ImapAccount | None = None
+        self._gate_lock = Lock()
+        self._body_limit: int | None = None
+        self._bodies = 0
+        self.fetch_paused = Event()
+        self.fetch_release = Event()
+
+    def pause_after_bodies(self, count: int) -> None:
+        """Keep downloads incomplete until the parent acknowledges the stop notice."""
+        if count < 1:
+            raise ValueError("At least one body must be allowed before pausing")
+        with self._gate_lock:
+            self._body_limit, self._bodies = count, 0
+            self.fetch_paused.clear()
+            self.fetch_release.clear()
+
+    def release_bodies(self) -> None:
+        with self._gate_lock:
+            self._body_limit = None
+        self.fetch_release.set()
+
+    async def _before_command(self, line: bytes) -> None:
+        command = line.upper()
+        if b" UID FETCH " not in command or b"BODY.PEEK[]" not in command:
+            return
+        with self._gate_lock:
+            self._bodies += 1
+            pause = self._body_limit is not None and self._bodies > self._body_limit
+        if pause:
+            self.fetch_paused.set()
+            await asyncio.to_thread(self.fetch_release.wait)
 
     def _thread(self) -> None:
         try:
@@ -88,7 +137,12 @@ class DisposableImap:
             passlib_cfg=None, proxy_protocol="noop")
         backend, config = await DictBackend.init(args)
         config.apply_context()
-        callback = ProxyProtocolReader(config.proxy_protocol).get_callback(IMAPServer(backend.login, config))
+        protocol = IMAPServer(backend.login, config)
+
+        async def connection(reader: asyncio.StreamReader, writer: asyncio.StreamWriter, info: SocketInfo) -> None:
+            await protocol(AcknowledgedReader(reader, self._before_command), writer, info)
+
+        callback = ProxyProtocolReader(config.proxy_protocol).get_callback(connection)
         server_context = config.ssl_context if self.tls == "implicit" else None
         server = await asyncio.start_server(callback, host="127.0.0.1", port=0, ssl=server_context)
         async with server:
@@ -113,6 +167,7 @@ class DisposableImap:
         return client
 
     def close(self) -> None:
+        self.release_bodies()
         self.stop.set()
         self.thread.join(timeout=10)
         if self.thread.is_alive():

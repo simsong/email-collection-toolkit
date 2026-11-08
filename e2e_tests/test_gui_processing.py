@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from threading import Barrier, Event, Thread
+from threading import Barrier, Event
 from datetime import UTC, datetime
 from urllib.parse import urlencode
 from pathlib import Path
@@ -12,6 +12,7 @@ import pytest
 
 from playwright.sync_api import Dialog, Page, expect
 
+from e2e_tests.browser_notifications import notify_status
 from mailarchiver.__main__ import IngestRequest, load_processing_request, run_ingest
 from mailarchiver.application import IngestJob
 from mailarchiver.gui_app import AboutApi, ApplicationNotice, DocumentOptionsApi, GUI_DIRECTORY, SEARCH_BRIDGE_METHODS, GuiApi, IdentityPickerApi, IngestWindowApi
@@ -158,6 +159,41 @@ def test_identical_busy_import_warning_reappears_after_dismissal(tmp_path: Path,
         app.shutdown()
 
 
+def test_refreshes_join_actual_completion_and_read_fresh_state_after_commands(page: Page) -> None:
+    """DESKTOP: polling joins in-flight reads, while post-command refresh waits and reads again."""
+    page.add_script_tag(path=str(GUI_DIRECTORY / "coordination.js"))
+    result = page.evaluate("""async () => {
+      const exercise = async () => {
+      const gate = () => { let resolve; const promise = new Promise(done => { resolve = done; }); return {promise, resolve}; };
+      const entered = [gate(), gate()], releases = [gate(), gate()];
+      let calls = 0;
+      const task = new RefreshTask(() => { const index = calls++; entered[index].resolve(); return releases[index].promise; });
+      const first = task.run(), duplicate = task.run();
+      if (first !== duplicate) throw new Error('concurrent callers did not share completion');
+      await entered[0].promise;
+      const fresh = task.fresh();
+      if (calls !== 1) throw new Error('fresh read started before its predecessor finished');
+      releases[0].resolve('old');
+      await entered[1].promise;
+      if (await first !== 'old' || await duplicate !== 'old') throw new Error('joined callers lost their result');
+      releases[1].resolve('new');
+      if (await fresh !== 'new' || calls !== 2) throw new Error('post-command read reused old state');
+      let failures = 0;
+      const retry = new RefreshTask(() => { if (!failures++) throw new Error('original failure'); return 'recovered'; });
+      try { await retry.run(); throw new Error('expected rejection'); }
+      catch (error) { if (error.message !== 'original failure') throw error; }
+      return [calls, await retry.fresh()];
+      };
+      let timer;
+      try {
+        return await Promise.race([exercise(), new Promise((_, reject) => {
+          timer = setTimeout(() => reject(new Error('refresh coordination did not finish')), 5000);
+        })]);
+      } finally { clearTimeout(timer); }
+    }""")
+    assert result == [2, "recovered"]
+
+
 def test_picker_loading_keeps_rows_and_ignores_obsolete_responses(tmp_path: Path, page: Page) -> None:
     """Desktop: pending bridge requests show progress, preserve rows, and never look empty."""
     api = IdentityPickerApi(build_deferred_archive(tmp_path), "name")
@@ -200,7 +236,7 @@ def test_ingest_suspend_and_continue_controls_keep_application_open(tmp_path: Pa
 
     def block() -> None:
         occupied.wait(timeout=5)
-        release.wait(10)
+        assert release.wait(10), "fixture release deadline expired"
 
     try:
         for _ in range(8):
@@ -208,6 +244,8 @@ def test_ingest_suspend_and_continue_controls_keep_application_open(tmp_path: Pa
         occupied.wait(timeout=5)
         assert api.resume_processing(False, True)
         assert api.document is not None
+        suspended_job = api.document.ingest_job
+        assert suspended_job is not None
         controls = IngestWindowApi(archive, application=app, document=api.document)
         expose(page, controls, ("history", "suspend_import", "resume_import"))
         page.goto((GUI_DIRECTORY / "ingests.html").as_uri())
@@ -219,8 +257,12 @@ def test_ingest_suspend_and_continue_controls_keep_application_open(tmp_path: Pa
         previews.mkdir(parents=True, exist_ok=True)
         page.screenshot(path=str(previews / "import-suspending.png"), full_page=True)
         release.set()
+        assert suspended_job.finished.wait(10), "Suspended work did not finish"
+        notify_status(page)
         expect(page.locator("#resume-import")).to_be_enabled()
         page.locator("#resume-import").click()
+        wait_for_import(api)
+        notify_status(page)
         expect(page.locator(".state-badge")).to_have_text("completed", timeout=15000)
         assert not unfinished_work(archive).incomplete
         expect(page.locator("#suspend-import")).to_be_disabled()
@@ -297,9 +339,7 @@ def test_incomplete_dialog_resumes_content_without_sources(tmp_path: Path, page:
 
 def test_continue_processing_disabled_until_background_work_finishes(tmp_path: Path, page: Page) -> None:
     """Desktop processing: resume disables immediately and every window tracks real active work."""
-    plugin(tmp_path, "pause-content", '(item.archive.path / "processor-entered").touch()\n'
-           'while not (item.archive.path / "release-processor").exists():\n'
-           '    item.check_cancelled()\n    time.sleep(0.01)\nreturn ProcessingResult()')
+    plugin(tmp_path, "pause-content", '(item.archive.path / "processor-entered").touch()\nitem.wait_for_files((item.archive.path,), lambda: not (not (item.archive.path / "release-processor").exists()))\nreturn ProcessingResult()')
     manifest = tmp_path / "processors/pause-content/plugin.toml"
     manifest.write_text(manifest.read_text().replace('pipeline="ingest"', 'pipeline="content"'))
     source, archive = tmp_path / "input.eml", tmp_path / "archive"
@@ -328,6 +368,7 @@ def test_continue_processing_disabled_until_background_work_finishes(tmp_path: P
         })""")
         page.locator("#processing-continue").click()
         assert page.evaluate("window.resumeDisabledAtClick") is True
+        notify_status(page, observer)
         expect(page.locator("#processing-dialog")).not_to_be_visible()
         expect(page.locator("#processing-open")).to_be_disabled()
         expect(observer.locator("#processing-open")).to_be_disabled()
@@ -347,14 +388,25 @@ def test_continue_processing_disabled_until_background_work_finishes(tmp_path: P
                 const result = await overview();
                 return new Promise(resolve => window.overviewDeliveries.push({result, resolve}));
             };
+            window.olderOverview = refreshIngestOverview();
         }""")
+        observer.wait_for_function("window.overviewDeliveries.some(item => item.result.active)")
         (archive / "release-processor").touch()
         assert job.finished.wait(30), "GUI processing did not finish"
+        notify_status(page)
         expect(page.locator("#processing-open")).to_be_enabled()
-        observer.wait_for_function("window.overviewDeliveries.filter(item => !item.result.active).length >= 2")
-        observer.evaluate("""() => {
+        observer.evaluate("() => { window.newerOverview = refreshIngestOverview(); }")
+        observer.wait_for_function("window.overviewDeliveries.some(item => !item.result.active)")
+        observer.evaluate("""async () => {
             const delivery = window.overviewDeliveries.find(item => !item.result.active);
             delivery.resolve(delivery.result);
+            await window.newerOverview;
+        }""")
+        expect(observer.locator("#processing-open")).to_be_enabled()
+        observer.evaluate("""async () => {
+            const delivery = window.overviewDeliveries.find(item => item.result.active);
+            delivery.resolve(delivery.result);
+            await window.olderOverview;
         }""")
         expect(observer.locator("#processing-open")).to_be_enabled()
         assert not unfinished_work(archive).incomplete
@@ -468,20 +520,10 @@ def test_processing_history_shows_jobs_instead_of_zero_source_progress(tmp_path:
     expect(page.locator(".history-row.selected .history-summary")).to_contain_text("25 source messages")
     app, api = open_headless(archive, tmp_path / "preferences.json")
     search_page, about_page = page.context.new_page(), page.context.new_page()
-    heartbeat_stop = Event()
-    heartbeat_errors: list[BaseException] = []
-
-    def keep_running_snapshot_current() -> None:
-        try:
-            while not heartbeat_stop.is_set():
-                status_file.write(status.model_copy(update={"updated_at": datetime.now(UTC)}))
-                heartbeat_stop.wait(0.1)
-        except BaseException as error:
-            heartbeat_errors.append(error)
-
-    heartbeat = Thread(target=keep_running_snapshot_current, daemon=True)
-    heartbeat.start()
     try:
+        # Reinstall the intended running snapshot explicitly; no background
+        # heartbeat may overwrite the completed snapshot checked above.
+        status_file.write(status)
         expose(search_page, api, SEARCH_BRIDGE_METHODS)
         search_page.goto((GUI_DIRECTORY / "index.html").as_uri())
         expect(search_page.locator("#ingest-status-line")).to_contain_text("1,701 processing tasks finished · mime")
@@ -491,14 +533,10 @@ def test_processing_history_shows_jobs_instead_of_zero_source_progress(tmp_path:
         expect(about_page.locator(".activity")).to_contain_text("1,701 processing tasks finished · mime")
         expect(about_page.locator(".activity")).not_to_contain_text("0.0%")
     finally:
-        heartbeat_stop.set()
-        heartbeat.join(timeout=5)
         search_page.close()
         about_page.close()
         api.close()
         app.shutdown()
-        assert not heartbeat.is_alive(), "fixture heartbeat did not stop"
-        assert not heartbeat_errors, heartbeat_errors
     (archive / "status" / f"{status.status_id}.json").write_text(
         status.model_copy(update={"state": "failed"}).model_dump_json(), encoding="utf-8")
     page.reload()
@@ -601,7 +639,9 @@ def test_resume_summary_suspended_stop_and_retained_notices(tmp_path: Path, page
         expect(dialog).to_contain_text("keeps messages already archived")
         page.get_by_role("button", name="Leave import suspended", exact=True).click()
         expect(dialog).not_to_be_visible()
-        expect(page.locator("#notice-pill")).to_be_visible(timeout=9000)
+        expect(page.locator("#error")).to_contain_text("Synthetic startup warning")
+        page.get_by_role("button", name="Collapse messages", exact=True).click()
+        expect(page.locator("#notice-pill")).to_be_visible()
         page.screenshot(path=str(previews / "notice-pill.png"))
         page.get_by_role("button", name="Messages (1)", exact=True).click()
         expect(page.locator("#error")).to_contain_text("Synthetic startup warning")

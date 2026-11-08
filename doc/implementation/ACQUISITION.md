@@ -376,8 +376,9 @@ command is currently implemented.
 `imap_cli` exposes `mailarchiver-imap` and `make imap IMAP_ARGS=...`. It reuses
 `create_empty_archive`, archive validation, the writer lease and `run_ingest`,
 with the shared worker preference and terminal scoreboard output disabled. A separate
-catalog reader prints committed totals every 300 seconds and optional message lines.
-The SIGINT handler requests cooperative cancellation and retains the lease until
+catalog reader prints committed totals on native archive/status change notifications and optional message lines.
+The SIGINT handler acknowledges interruption immediately, requests cooperative
+cancellation and retains the lease until
 the ingest engine has stopped and checkpointed. No desktop window or OS scheduler
 is started. Setup is interactive; subsequent invocations can be unattended.
 
@@ -726,7 +727,7 @@ release, source concurrency, real IMAP ingestion and current-message interruptio
 
 ## PST activity and parallel mailbox scanning
 
-`ImportProgress` emits timestamped stderr status at one-second work checkpoints
+`ImportProgress` emits timestamped stderr status at actual work checkpoints
 in source hashing, address lookup and extraction. A blocking native call emits
 no fabricated heartbeat. `PstFileParser` observes spool and diagnostics sizes to
 renew its inactivity deadline; silent expiry retains its workspace path in the

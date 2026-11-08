@@ -27,7 +27,7 @@ A successful build does not establish these manual checks.
   Reject zero, fractions and more than twice the CPUs. For a separate source/CLI
   launch with an explicit worker flag, confirm greyed worker controls and the
   command-line note without overwriting the saved preference.
-- Check the preview/release choice and daily-check preference survive restart.
+- Check the preview/release choice and automatic launch-check preference survive restart.
   An unavailable updater must explain why; an available installed backend must
   permit a manual check. Decline any proposed installation for this initial test.
 - Import three distinctive messages from a test IMAP inbox. Find and display all

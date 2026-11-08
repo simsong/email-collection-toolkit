@@ -99,7 +99,7 @@ class SparkleBackend:
             False, self.delegate, None,
         )
         self.updater = self.controller.updater()
-        self.updater.setAutomaticallyChecksForUpdates_(service.status.automatic_checks)
+        self.updater.setAutomaticallyChecksForUpdates_(False)
         self.updater.setAutomaticallyDownloadsUpdates_(False)
         success, error = self.updater.startUpdater_(None)
         if not success:
@@ -107,27 +107,32 @@ class SparkleBackend:
         checked = self.updater.lastUpdateCheckDate()
         if checked is not None:
             service.status.last_checked = datetime.fromtimestamp(float(checked.timeIntervalSince1970()), UTC)
-        def resume(_timer: object) -> None:
+        def resume() -> None:
             try:
                 service.resume_install()
             except (OSError, RuntimeError, ValueError, objc.error) as error:
-                # Report native install errors without unwinding Cocoa's timer callback.
+                # Report native install errors without unwinding Cocoa's event callback.
                 service.fail(f"Update installation failed: {error}")
-        self.timer = import_module("Foundation").NSTimer.scheduledTimerWithTimeInterval_repeats_block_(
-            0.5, True, resume,
-        )
+        self._resume_pending = resume
+        self._launch_checked = False
 
     def check(self) -> None:
         self.controller.checkForUpdates_(None)
 
     def configure(self, channel: UpdateChannel, automatic_checks: bool) -> None:
         self.service.status.channel = channel
-        self.updater.setAutomaticallyChecksForUpdates_(automatic_checks)
+        self.updater.setAutomaticallyChecksForUpdates_(False)
         self.updater.setAutomaticallyDownloadsUpdates_(False)
-        self.updater.resetUpdateCycleAfterShortDelay()
+        if automatic_checks and not self._launch_checked:
+            self._launch_checked = True
+            self.service.status.phase = "checking"
+            self.updater.checkForUpdateInformation()
+
+    def activity_changed(self) -> None:
+        import_module("PyObjCTools.AppHelper").callAfter(self._resume_pending)
 
     def close(self) -> None:
-        self.timer.invalidate()
+        self.updater.setAutomaticallyChecksForUpdates_(False)
 
 
 def start_installed_updater(service: UpdateService) -> SparkleBackend | None:

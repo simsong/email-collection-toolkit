@@ -8,6 +8,7 @@ let selectedStatusId = new URLSearchParams(window.location.search).get("status")
 let initialized = false;
 let importing = false;
 let starting = false;
+const historyRefresh = new RefreshTask(readHistory);
 const byId = id => document.getElementById(id);
 const integer = value => Number(value || 0).toLocaleString();
 const stateLabel = status => status.timed_out ? "Timeout" : status.state;
@@ -30,8 +31,7 @@ const processorLabel = processor => ({
 
 window.addEventListener("pywebviewready", initialize);
 window.setTimeout(() => {
-  if (window.pywebview?.api?.history) initialize();
-  else if (!initialized) showError("The native application bridge did not start.");
+  if (!initialized) showError("The native application bridge did not start.");
 }, 1500);
 
 async function initialize() {
@@ -42,7 +42,7 @@ async function initialize() {
   byId("resume-import").addEventListener("click", () => controlImport("resume_import"));
   byId("install-antivirus").addEventListener("click", () => window.pywebview.api.install_antivirus());
   await refreshHistory();
-  window.setInterval(refreshHistory, 1000);
+
 }
 
 window.refreshHistory = refreshHistory;
@@ -51,12 +51,15 @@ window.selectIngest = statusId => {
   render();
 };
 
-async function refreshHistory() {
+function refreshHistory() { return historyRefresh.run(); }
+
+async function readHistory() {
   try {
     const antivirus = await window.pywebview.api.antivirus?.();
+    const history = await window.pywebview.api.history();
+    const canImport = await window.pywebview.api.can_import_directory?.();
     byId("antivirus-warning").hidden = !antivirus || antivirus.configured;
     byId("antivirus-detail").textContent = antivirus?.detail || "";
-    const history = await window.pywebview.api.history();
     const previousLatestId = statuses[0]?.status_id;
     statuses = history.statuses || [];
     const newRun = previousLatestId && statuses[0] && previousLatestId !== statuses[0].status_id;
@@ -74,7 +77,6 @@ async function refreshHistory() {
     byId("import-control-status").hidden = !byId("import-control-status").textContent;
     byId("starting-import").hidden = !starting;
     render(history.errors || []);
-    const canImport = await window.pywebview.api.can_import_directory?.();
     byId("import-directory").disabled = importing || !canImport;
   } catch (error) {
     showError(`Could not read ingest history: ${error}`);
@@ -92,7 +94,7 @@ async function importDirectory() {
     showError(`Could not import directory: ${String(error?.message || error)}`);
   } finally {
     importing = false;
-    await refreshHistory();
+    await historyRefresh.fresh();
   }
 }
 
@@ -107,7 +109,7 @@ async function controlImport(method) {
   try {
     if (!await window.pywebview.api[method]()) throw new Error("The import state changed. Please try again.");
   } catch (error) { showError(String(error?.message || error)); }
-  finally { importing = false; await refreshHistory(); }
+  finally { importing = false; await historyRefresh.fresh(); }
 }
 
 function render(errors = []) {
@@ -340,3 +342,7 @@ function showError(message) {
   error.textContent = message;
   error.hidden = false;
 }
+
+window.addEventListener("mailarchiver-status-changed", () => historyRefresh.changed());
+window.addEventListener("focus", () => { if (initialized) historyRefresh.changed(); });
+if (window.pywebview?.api?.history) initialize();

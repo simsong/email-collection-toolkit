@@ -24,14 +24,15 @@ from uuid import uuid4
 
 from pydantic import BaseModel, Field, field_validator
 
+from .standalone_verify import read_shared_text
 from .storage_sync import replace_file
+from .file_events import process_alive
 
 STATUS_FORMAT = "tag:simson.net,2026:mailarchiver/ingest-status"
 STATUS_VERSION = 1
 STATUS_DIRECTORY = "status"
 STATUS_PREFIX = "ingest-"
 STALE_AFTER_SECONDS = 5
-STATUS_REFRESH_SECONDS = 1
 IngestState = Literal["running", "completed", "paused", "interrupted", "disk-full", "failed", "stale"]
 WorkerOperation = Literal["downloading", "importing", "processing"]
 
@@ -135,7 +136,7 @@ class IngestStatus(BaseModel):
         if self.state != "running":
             return self
         checked_at = now or datetime.now(UTC)
-        if (checked_at - self.updated_at).total_seconds() <= STALE_AFTER_SECONDS:
+        if process_alive(self.process_id) or (checked_at - self.updated_at).total_seconds() <= STALE_AFTER_SECONDS:
             return self
         return self.model_copy(update={"state": "stale", "phase": "status heartbeat lost"})
 
@@ -202,7 +203,7 @@ class IngestStatusFile:
 
 
 def read_ingest_status(path: Path, now: datetime | None = None) -> IngestStatus:
-    status = IngestStatus.model_validate_json(path.read_text(encoding="utf-8"))
+    status = IngestStatus.model_validate_json(read_shared_text(path))
     if path.stem != status.status_id:
         raise ValueError("status identifier does not match filename")
     return status.effective(now)

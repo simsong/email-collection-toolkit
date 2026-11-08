@@ -159,3 +159,50 @@ def test_native_worker_preferences(tmp_path: Path, override: bool) -> None:
                             env=development_environment(), capture_output=True, text=True, timeout=40, check=False)
     assert result.returncode == 0, result.stdout + result.stderr
     assert "Native worker preferences passed" in result.stdout, result.stdout + result.stderr
+
+
+def test_check_updates_reads_new_state_after_a_delayed_precommand_snapshot(tmp_path: Path, page: Page) -> None:
+    """DESKTOP: Windows Preferences joins old delivery, then reads the actual post-check state."""
+    # A native-driver boundary is necessary here: WinSparkle is unavailable on macOS.
+    # Real UpdateService, preferences persistence, bridge snapshots and shipped JS remain in use.
+    class ManualDriver:
+        checks = 0
+
+        def check(self) -> None:
+            self.checks += 1
+
+        def configure(self, channel: str, automatic_checks: bool) -> None:
+            self.channel = channel
+            self.automatic_checks = automatic_checks
+
+    store = ApplicationPreferencesStore(tmp_path / "preferences.json")
+    controller = ApplicationController(store)
+    app = PyWebViewApplication(controller)
+    driver = ManualDriver()
+    app.updates.attach(driver, "")
+    api = UpdatePreferencesApi(app.updates, controller.configure_updates, app.worker_settings, app.save_preferences)
+    expose(page, api, ("state", "save", "check", "close_saved"))
+    try:
+        page.goto("data:text/html," + quote(PAGE))
+        expect(page.locator("#check")).to_be_enabled()
+        page.evaluate("""() => {
+          const actual = pywebview.api.state, check = pywebview.api.check;
+          window.stateReads = 0;
+          pywebview.api.state = async () => {
+            const snapshot = await actual();
+            if (++window.stateReads === 1) await new Promise(resolve => {window.releaseOldState = resolve;});
+            return snapshot;
+          };
+          pywebview.api.check = async () => {await check(); window.checkIssued = true;};
+          window.oldState = refresh();
+        }""")
+        page.wait_for_function("typeof window.releaseOldState === 'function'")
+        page.evaluate("window.pendingCheck = document.getElementById('check').onclick(); undefined")
+        page.wait_for_function("window.checkIssued === true")
+        assert driver.checks == 1 and app.updates.status.phase == "checking"
+        page.evaluate("async () => {window.releaseOldState(); await window.oldState; await window.pendingCheck;}")
+        assert page.evaluate("window.stateReads") >= 2
+        expect(page.locator("#check")).to_be_disabled()
+        expect(page.locator("#update-status")).to_contain_text("Checking for updates")
+    finally:
+        app.shutdown()

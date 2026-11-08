@@ -36,7 +36,13 @@ leaves other jobs pending. Unsubscribed objects complete without discarding byte
 Trusted processors execute synchronously through `process(item)` in the Python
 host. `item.check_cancelled()` checks cancellation and the manifest deadline;
 `item.remaining_seconds` supplies the remaining budget to blocking I/O. Long
-loops must cooperate. The POSIX main-thread harness also uses an alarm. A late
+loops must cooperate. `wait_for_cancellation()` blocks on host cancellation
+notifications until cancellation or the invocation deadline.
+`wait_for_files(paths, condition)` subscribes to native file changes before checking
+the predicate and retains that same cancellation/deadline behavior. Neither method
+uses a polling interval. Hosts with custom cancellation callbacks must supply
+`ActivityCallback` wakeup signals; an arbitrary opaque callable cannot itself
+provide a notification. The POSIX main-thread harness also uses an alarm. A late
 result is rejected before configuration, queue or catalog publication. Arbitrary
 native code that ignores deadlines cannot be force-stopped safely in process;
 this interface is not a security sandbox. The Python ClamAV plugin consumes
@@ -352,6 +358,7 @@ and methods.
 | `source_metadata`, `parent_message_id`, `part_path`, `scan_provenance` | Typed source occurrence and parent/scan provenance |
 | `content_metadata` | Charset, filename, MIME part ID, body alternatives and depth |
 | `synthetic`, `producer` | Derived status and generating plugin/version |
+| `wait_for_cancellation()`, `wait_for_files(paths, condition)` | Block on cancellation/file events with the invocation failure deadline |
 | `check_cancelled()`, `remaining_seconds` | Check cancellation/deadline; remaining invocation time for bounded native calls |
 
 References support bounded streaming; emitting an object does not require

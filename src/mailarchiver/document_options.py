@@ -25,6 +25,7 @@ import tempfile
 from pydantic import BaseModel, Field
 from yaml import safe_dump, safe_load
 
+from .standalone_verify import read_shared_text
 from .archive_config import load_archive_config
 from .owner_rules import OwnerRules, normalize_rules
 from .writer_lock import WriterLease
@@ -90,7 +91,7 @@ class DocumentOptions:
     def state(self, roots: list[Path] | None = None) -> OwnerRulesState:
         rules, revision = self._snapshot(roots)
         known = self.used_path.exists()
-        previous = OwnerRules.model_validate(safe_load(self.used_path.read_text(encoding="utf-8"))) if known else None
+        previous = OwnerRules.model_validate(safe_load(read_shared_text(self.used_path))) if known else None
         return OwnerRulesState(
             include=rules.include, exclude=rules.exclude,
             revision=revision,

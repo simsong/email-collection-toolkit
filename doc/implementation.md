@@ -7,7 +7,7 @@ damaged canonical payloads. Typed warnings reach the import owner's dismissible
 banner without failing the operation. See [archive](implementation/ARCHIVE.md).
 
 Import commands retain their owning search-window ID in typed notices and tasks.
-Both native delivery and status polling filter by that ID; About retains the
+Both native delivery and status reads filter by that ID; About retains the
 session-wide history. Every issued notice is retained; the frontend deduplicates
 repeat delivery by the notice UUID rather than suppressing identical new messages
 or depending on wall-clock timestamp uniqueness.
@@ -48,6 +48,13 @@ platform acceptance and deferred work.
 
 ## Shared boundaries
 
+- Native filesystem/task notices trigger coalesced About/Ingests/options reads; post-command
+  reads join old work and then request fresh state. Native probes await actual
+  visibility, drag events and callbacks. Diagnostic sampling acknowledges complete
+  stack publication through a condition and records timing/error metadata without
+  report I/O under its profiler data lock. See [timing audit](TIMING_AUDIT.md).
+
+
 - Display-only timeout normalization retains saved diagnostics, and a Cocoa
   title-bar accessory and right-aligned Windows menu label show the launch version. See [desktop](implementation/DESKTOP.md).
 
@@ -83,7 +90,7 @@ platform acceptance and deferred work.
   See [processing](implementation/PROCESSING.md) and [desktop](implementation/DESKTOP.md).
 
 - Native Close reserves logical closure and transfers shared ingest ownership
-  before delayed closed callbacks; status polls deliver queued last-window notices. See [desktop](implementation/DESKTOP.md).
+  before delayed closed callbacks; native status events deliver queued last-window notices. See [desktop](implementation/DESKTOP.md).
 
 - The owner status driver samples distinct saved-message backlog counts through
   an indexed read-only queue query; the UI explains final-task completion under
@@ -136,7 +143,7 @@ platform acceptance and deferred work.
 
 - Deferred message/content recovery uses the configured worker pool with ordered
   per-message checkpoints; see [processing](implementation/PROCESSING.md).
-  The resume button follows pending requests and the shared activity poll.
+  The resume button follows pending requests and shared activity notifications.
 
 - End-of-import stderr renders typed processor statistics in aligned columns;
   machine-readable status remains JSON. See [processing](implementation/PROCESSING.md).
@@ -151,12 +158,12 @@ platform acceptance and deferred work.
   uses cancellable generations and the existing subject expression index. See
   [acquisition](implementation/ACQUISITION.md) and [search](implementation/SEARCH.md).
 - Source ingestion uses owner-thread completion futures instead of a shared
-  publication mutex; one-worker processor futures keep its heartbeat live.
+  publication mutex; one-worker processor futures wake its owner on work/cancellation events.
   See [acquisition](implementation/ACQUISITION.md).
 - The experimental Rust UI, helper and obsolete build/test paths are removed from
   the active checkout. The signed `experimental-rust-ui` tag preserves the
   October 10, 2026 retirement snapshot; see the [archive note](RUST_GUI_EXPERIMENTS.md).
-- GUI preview polls collect typed future results and discard obsolete generations;
+- GUI preview completion replies collect typed future results and discard obsolete generations;
   see [desktop](implementation/DESKTOP.md).
 - Original-mailbox trees unquote IMAP display components once, preserving filter
   tokens and local filenames; see [desktop](implementation/DESKTOP.md).

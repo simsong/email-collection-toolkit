@@ -35,8 +35,9 @@ Tests use the checked-in fixture and require no qpdf installation.
 The Python session shares one compiled engine across concurrent native threads
 in a temporary worker process. Each scan future returns a typed `ScanResponse`;
 the process coordinator collects completed futures and alone sends responses.
-It polls incoming requests for at most 10ms while scans are outstanding and
-drains accepted work after the shutdown sentinel. `make test-clamav` exercises
+A dedicated reader queues incoming requests and wakes the coordinator; completed
+scan futures also wake that owner. It drains accepted work after the shutdown
+sentinel. `make test-clamav` exercises
 clean, infected and error responses with more callers than scan workers, plus
 a saturated duplex-pipe stress case in a subprocess with an external deadline.
 Parent request serialization uses a separate lock from pending-result state,
@@ -131,16 +132,16 @@ reselect definitions before loading the engine. Native startup retains its separ
 120-second deadline after this refresh.
 
 Ingest runs the complete scanner preflight in one tracked `run_file_workers`
-future. The owner refreshes status every 250 milliseconds even when resource
-selection, the network probe or definition copying emits no callback. Startup
+future. Producer/cancellation signals wake the owner without a refresh tick. Startup
 callbacks reach the owner through `FutureCoordinator`; cancellation drains the
-future and closes any initialized scanner before propagating. Saved abandoned
-run snapshots still become stale after five seconds. `make test-progress`
-exercises a six-second callback-free resource delay followed by real clean/EICAR
-scans, checking that status stays running throughout.
+future and closes any initialized scanner before propagating. A live producer PID
+retains running status during blocked work. Old snapshots with a dead producer
+become stale after the recovery grace period; PID reuse remains a documented limit.
+`make test-progress` holds real resource selection at an acknowledged gate before
+clean/EICAR scans and verifies status/cancellation without a successful delay.
 
-Updater polling and validation forward the scanner status callback, retaining
-progress refresh and cooperative Stop/Quit checks. Cancelled native startup reaps
+Updater command completion and validation forward the scanner status callback,
+retaining progress and cooperative Stop/Quit signals. Cancelled native startup reaps
 its candidate worker and temporary files before propagating cancellation. Explicit definition sets skip
 the automatic path, preventing recursive updates while validating a candidate.
 `MAILARCHIVER_CLAMAV_DATABASE` also pins development/test definitions. Running

@@ -19,6 +19,8 @@ import sys
 import pytest
 
 from mailarchiver import clamav_definitions, clamav_update
+from mailarchiver.change_signal import ActivityCallback, ChangeSignal
+from mailarchiver.file_events import PathObserver
 from mailarchiver.clamav_definitions import ActiveDefinitions, DATABASE_ENV, DefinitionSet, UPDATE_ENV, read_definitions, selected_definitions
 from mailarchiver.clamav_update import UpdateResult, definitions_for_scan, internet_available
 from mailarchiver.owned_command import run_owned_command
@@ -192,12 +194,13 @@ def test_owned_updater_callback_cancels_and_reaps_the_process(tmp_path: Path) ->
     """SCANNING: the updater stays cancellable and leaves no command running after cancellation."""
     marker = tmp_path / "pid"
     command = [sys.executable, "-c", "import os,sys,time; from pathlib import Path; "
-               "Path(sys.argv[1]).write_text(str(os.getpid())); time.sleep(30)", str(marker)]
+               "Path(sys.argv[1]).write_text(str(os.getpid())); __import__('threading').Event().wait()", str(marker)]
     def interrupt() -> None:
         if marker.exists():
             raise KeyboardInterrupt("cancel update")
-    with pytest.raises(KeyboardInterrupt, match="cancel update"):
-        run_owned_command(command, timeout=10, status_callback=interrupt)
+    changed = ChangeSignal()
+    with PathObserver([marker], changed.notify), pytest.raises(KeyboardInterrupt, match="cancel update"):
+        run_owned_command(command, timeout=10, status_callback=ActivityCallback(interrupt, (changed,)))
     if os.name != "nt":
         with pytest.raises(ProcessLookupError):
             os.kill(int(marker.read_text()), 0)

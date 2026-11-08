@@ -109,6 +109,9 @@ from .ingest_status import (
     read_ingest_history,
 )
 from .loopback import LoopbackAssetServer
+from .file_events import PathObserver
+from .change_signal import ChangeSignal
+from .desktop_platform import post_window_event
 from .mailbox_tree import FilterSet, FilterSetStore, MailboxSelection, mailbox_tree
 from .writer_lock import ArchiveBusyError, WriterLease
 
@@ -119,7 +122,6 @@ APPLICATION_ICON = GUI_DIRECTORY / "icons" / "rainbow-post-192.png"
 APPLICATION_VERSION = version("mailarchiver")
 EXTERNAL_LINK_SCHEMES = frozenset({"http", "https", "mailto"})
 INTERNET_CHECK_URL = "https://www.example.com/"
-INTERNET_CHECK_INTERVAL_SECONDS = 30.0
 QUIT_TIMEOUT_SECONDS = 5.0
 HELP_LINKS = (
     ("Community Forum", "https://github.com/simsong/email-collection-toolkit/discussions"),
@@ -272,8 +274,11 @@ class AboutStatus(BaseModel):
 class ConnectivityMonitor:
     """Refresh a bounded live Internet reachability probe away from GUI threads."""
 
-    def __init__(self, url: str = INTERNET_CHECK_URL) -> None:
+    def __init__(self, url: str = INTERNET_CHECK_URL, changed: Callable[[], None] = lambda: None) -> None:
         self.url = url
+        self._changed = changed
+        self._requested = Event()
+        self._requested.set()
         self._status = InternetStatus()
         self._lock = RLock()
         self._stop = Event()
@@ -286,10 +291,16 @@ class ConnectivityMonitor:
 
     def close(self) -> None:
         self._stop.set()
+        self._requested.set()
         self._thread.join(timeout=5)
+        if self._thread.is_alive():
+            raise TimeoutError("Internet connectivity monitor did not stop")
 
     def _run(self) -> None:
-        while not self._stop.is_set():
+        while self._requested.wait():
+            self._requested.clear()
+            if self._stop.is_set():
+                return
             try:
                 request = Request(self.url, method="HEAD")
                 with urlopen(request, timeout=3) as response:  # nosec B310 - fixed HTTPS health URL
@@ -304,7 +315,10 @@ class ConnectivityMonitor:
                     checked_at=datetime.now(UTC),
                     detail=detail,
                 )
-            self._stop.wait(INTERNET_CHECK_INTERVAL_SECONDS)
+            self._changed()
+
+    def request(self) -> None:
+        self._requested.set()
 
 
 class NativeSmokePhase(BaseModel):
@@ -392,8 +406,10 @@ class NativeSmokeController:
     def _watch(self) -> None:
         if not self._result.wait(self.RESULT_TIMEOUT_SECONDS):
             self.complete(False, f"native bridge did not finish within {self.RESULT_TIMEOUT_SECONDS:g} seconds")
-        self._window_ready.wait(2)
-        self._page_loaded.wait(2)
+        if not self._window_ready.wait(2):
+            self._abort("native smoke window did not become ready before its shutdown deadline")
+        elif not self._page_loaded.wait(2):
+            self._abort("native smoke page did not load before its shutdown deadline")
         self.mark("destroy-requested")
         if self._window is not None:
             try:
@@ -861,6 +877,7 @@ class GuiApi:
             self.temporary_directory.mkdir(parents=True, exist_ok=True)
         self.children: list[GuiApi] = []
         self._preview_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="mail-preview")
+        self._work_changed = ChangeSignal()
         self._preview_lock = Lock()
         self._preview_cache: dict[int, MessagePreview] = {}
         self._preview_pending: set[int] = set()
@@ -887,6 +904,7 @@ class GuiApi:
         self.suggestions_cancel()
         with self._preview_lock:
             self._preview_generation += 1
+            self._work_changed.notify()
             for future in self._preview_futures:
                 future.cancel()
             self._preview_cache.clear()
@@ -1014,6 +1032,7 @@ class GuiApi:
             self.archive = archive
             with self._preview_lock:
                 self._preview_generation += 1
+                self._work_changed.notify()
                 self._preview_cache.clear()
                 self._preview_pending.clear()
                 self._preview_error = None
@@ -1079,12 +1098,22 @@ class GuiApi:
             if self._suggestion_future is not None:
                 self._suggestion_future.cancel()
             self._suggestion_generation += 1
+            self._work_changed.notify()
             self._suggestion_stop = Event()
             self._suggestion_future = self._suggestion_executor.submit(
                 search_suggestions, archive, query, limit, cancelled=self._suggestion_stop.is_set)
+            self._suggestion_future.add_done_callback(lambda _future: self._work_changed.notify())
             return SuggestionStatus(generation=self._suggestion_generation).model_dump(mode="json")
 
-    def suggestions_status(self, generation: int) -> dict[str, Any]:
+    def suggestions_status(self, generation: int, wait_for_result: bool = False) -> dict[str, Any]:
+        deadline = time.monotonic() + 30
+        while wait_for_result:
+            changed = self._work_changed.ready
+            with self._suggestion_lock:
+                future = self._suggestion_future
+                if generation != self._suggestion_generation or future is None or future.done():
+                    break
+            changed.result(timeout=max(0, deadline - time.monotonic()))
         with self._suggestion_lock:
             status = SuggestionStatus(generation=generation, stale=generation != self._suggestion_generation)
             future = self._suggestion_future
@@ -1100,6 +1129,7 @@ class GuiApi:
         with self._suggestion_lock:
             self._suggestion_stop.set()
             self._suggestion_generation += 1
+            self._work_changed.notify()
             if self._suggestion_future is not None:
                 self._suggestion_future.cancel()
             self._suggestion_future = None
@@ -1145,10 +1175,19 @@ class GuiApi:
                 future = self._preview_executor.submit(message_previews, request.archive, request.message_pks)
                 self._preview_futures[future] = request
                 self._preview_pending.update(missing)
+                future.add_done_callback(lambda _future: self._work_changed.notify())
         return True
 
-    def take_previews(self, message_pks: list[int]) -> dict[str, Any]:
+    def take_previews(self, message_pks: list[int], wait_for_result: bool = False) -> dict[str, Any]:
         requested = set(message_pks)
+        deadline = time.monotonic() + 30
+        while wait_for_result:
+            changed = self._work_changed.ready
+            with self._preview_lock:
+                self._collect_previews()
+                if not requested & self._preview_pending:
+                    break
+            changed.result(timeout=max(0, deadline - time.monotonic()))
         with self._preview_lock:
             self._collect_previews()
             previews = [self._preview_cache[message_pk] for message_pk in message_pks if message_pk in self._preview_cache]
@@ -1442,6 +1481,7 @@ class GuiApi:
                 future.cancel()
             self._preview_futures.clear()
             self._preview_pending.clear()
+        self._work_changed.notify()
         self._preview_executor.shutdown(wait=False, cancel_futures=True)
         if self.application is None or self.document is None:
             with self._ingest_window_lock:
@@ -1660,10 +1700,13 @@ class PyWebViewApplication:
         self._notices: list[ApplicationNotice] = []
         self._pending_notices: SimpleQueue[ApplicationNotice] = SimpleQueue()
         self._connectivity: ConnectivityMonitor | None = None
+        self._status_observers: dict[str, PathObserver] = {}
         self._menu_observer: Any = None
         self._lock = RLock()
         self._quitting = False
+        self.state_changed = ChangeSignal()
         self._quit_done = Event()
+        self.quit_requested = Event()
         self._task_executor = ThreadPoolExecutor(max_workers=8, thread_name_prefix="mailarchiver-command")
         self._tasks: dict[Future[None], ApplicationTask] = {}
         self._import_futures: set[Future[None]] = set()
@@ -1679,6 +1722,7 @@ class PyWebViewApplication:
             UpdateStatus(version=installed_version, channel=controller.preferences.update_channel or default_channel(installed_version),
                          automatic_checks=controller.preferences.automatic_update_checks),
             self.reserve_update_install, self.cancel_update_install, self.notify_update_deferred,
+            changed=self._status_changed,
         )
 
         self._submit_task("stale export cleanup", cleanup_stale_exports)
@@ -1691,6 +1735,7 @@ class PyWebViewApplication:
                 return None
             future = self._task_executor.submit(operation)
             self._tasks[future] = task
+            future.add_done_callback(lambda _future: self._status_changed())
             return future
 
     def _reap_tasks(self) -> None:
@@ -1726,6 +1771,7 @@ class PyWebViewApplication:
             finished.set()
             with self._lock:
                 self._writers.discard(finished)
+            self._status_changed()
 
     def reserve_update_install(self) -> bool:
         """Prevent new writes only when all jobs, worker tails, and writer leases end."""
@@ -1752,11 +1798,13 @@ class PyWebViewApplication:
             finally:
                 with self._lock:
                     self._definition_updates -= 1
+                self._status_changed()
 
     def cancel_update_install(self) -> None:
         with self._lock:
             if self.updates.status.phase in {"deferred", "installing"}:
                 self._quitting = False
+                self.quit_requested.clear()
                 self._quit_done.set()
             self._updating = False
             WriterLease.cancel_update()
@@ -1862,11 +1910,12 @@ class PyWebViewApplication:
         """Serialize About creation without holding the general application lock across native UI calls."""
         with self._about_lock:
             if self._connectivity is None:
-                self._connectivity = ConnectivityMonitor()
+                self._connectivity = ConnectivityMonitor(changed=self._status_changed)
             if self._about_window is not None and not self._about_window.events.closed.is_set():
                 self._about_visible = True
                 self._about_window.restore()
                 self._about_window.show()
+                self._connectivity.request()
                 self._refresh_menus()
                 return self._about_window
             window = webview.create_window(
@@ -1883,6 +1932,7 @@ class PyWebViewApplication:
             if window is None:
                 raise RuntimeError("pywebview failed to create a window")
             self._about_window = window
+            self.state_changed.notify()
             self._about_visible = not hidden
             window.events.shown += lambda *_args: self._refresh_menus()
 
@@ -1957,6 +2007,7 @@ class PyWebViewApplication:
         with self._lock:
             self._notices.append(notice)
             self._notices = self._notices[-100:]
+        self._status_changed()
         if severity != "information" and not self._quitting:
             for api in self._search_apis():
                 if api.window is not None and (window_id is None or (api.search_window and api.search_window.window_id == window_id)):
@@ -2035,8 +2086,10 @@ class PyWebViewApplication:
         if window is None:
             raise RuntimeError("pywebview failed to create a window")
         api.set_window(window)
+        self._watch_status(document)
         with self._lock:
             self._apis[session.window_id] = api
+            self.state_changed.notify()
             self._native_search_ids[window.uid] = session.window_id
         window.events.shown += lambda *_args: self.activate_window(session.window_id)
         window.events.shown += lambda *_args: set_macos_document_path(window, document.display_path)
@@ -2047,9 +2100,33 @@ class PyWebViewApplication:
         self._refresh_menus()
         return api
 
+    def _watch_status(self, document: ArchiveDocument) -> None:
+        if document.path is None:
+            return
+        key = document.descriptor.document_id
+        with self._lock:
+            if key not in self._status_observers:
+                self._status_observers[key] = PathObserver(
+                    [document.path / "status", document.path / "config.yaml"], self._status_changed)
+
+    def _status_changed(self) -> None:
+        if self._quitting:
+            return
+        if self._preferences_window is not None and sys.platform == "darwin":
+            import_module("PyObjCTools.AppHelper").callAfter(self._preferences_window.refresh_status)
+        activity = getattr(self._sparkle, "activity_changed", None)
+        if activity is not None:
+            activity()
+        for window in self._registered_windows():
+            try:
+                post_window_event(window, "mailarchiver-status-changed")
+            except Exception:  # pylint: disable=broad-exception-caught
+                logging.getLogger(__name__).debug("Status change delivery failed", exc_info=True)
+
     def activate_window(self, window_id: str) -> None:
         self.controller.activate_window(window_id)
         self._refresh_menus()
+        self._status_changed()
 
     def document_for_native_window(self, uid: str) -> ArchiveDocument | None:
         """Resolve child windows even after the last search window has closed."""
@@ -2415,6 +2492,7 @@ class PyWebViewApplication:
         """Called only after confirmation; prevent new imports and stop all existing jobs."""
         with self._lock:
             self._quitting = True
+            self.quit_requested.set()
             jobs = tuple(job for document in self.controller.documents() if (job := document.ingest_job) is not None)
             for job in jobs:
                 job.stop.set()
@@ -2625,6 +2703,7 @@ class PyWebViewApplication:
                 raise RuntimeError("pywebview failed to create a window")
             editor.window = window
             self._default_lists_apis[document_id] = editor
+            self.state_changed.notify()
             if archive:
                 self._native_child_ids[window.uid] = document_id
                 self.controller.attach_child_window(document_id, window.uid)
@@ -2894,15 +2973,15 @@ class PyWebViewApplication:
         done = self._quit_done = Event()
         self._quitting = True
 
-        def exit_if_allowed() -> None:
+        def exit_if_allowed(code: int = 0) -> None:
             allowed = (self.updates.status.phase == "installing" and self._updating) if update_install else self.updates.status.phase not in {"deferred", "installing"}
             if not done.is_set() and self._quitting and allowed:
                 done.set()
-                self._exit_process(0)
+                self._exit_process(code)
 
         def enforce_deadline() -> None:
             if not done.wait(max(0.0, deadline - time.monotonic())):
-                exit_if_allowed()
+                exit_if_allowed(1)
 
         # Arm independently before any snapshot/stop lock can wait on Cocoa.
         Thread(target=enforce_deadline, name="mailarchiver-quit-deadline", daemon=True).start()
@@ -2921,31 +3000,38 @@ class PyWebViewApplication:
             exit_if_allowed()
             return
 
-        cleaned = Event()
+        cleaned, cleanup_failed = Event(), Event()
 
         def cleanup() -> None:
             try:
                 for api in apis:
-                    api.cleanup_exports(quitting=True)
+                    try:
+                        api.cleanup_exports(quitting=True)
+                    except BaseException:  # pylint: disable=broad-exception-caught
+                        cleanup_failed.set()
             finally:
                 cleaned.set()
 
         Thread(target=cleanup, name="mailarchiver-export-cleanup", daemon=True).start()
 
         def finish_quit() -> None:
+            complete = True
             for finished in writers:
-                finished.wait(max(0.0, deadline - time.monotonic()))
+                complete = finished.wait(max(0.0, deadline - time.monotonic())) and complete
             for job in jobs:
-                job.finished.wait(max(0.0, deadline - time.monotonic()))
+                complete = job.finished.wait(max(0.0, deadline - time.monotonic())) and complete
             for worker in workers:
                 try:
                     worker.result(timeout=max(0.0, deadline - time.monotonic()))
+                except TimeoutError:
+                    complete = False
                 except BaseException:  # pylint: disable=broad-exception-caught
                     logging.getLogger(__name__).debug("Background command ended during Quit", exc_info=True)
-            cleaned.wait(max(0.0, deadline - time.monotonic()))
+            complete = cleaned.wait(max(0.0, deadline - time.monotonic())) and complete
+            complete = complete and not cleanup_failed.is_set()
             # Do not acquire application/UI locks or enter interpreter finalization:
             # a stuck callback must not defeat the single shared quit deadline.
-            exit_if_allowed()
+            exit_if_allowed(0 if complete else 1)
 
         Thread(target=finish_quit, name="mailarchiver-quit", daemon=True).start()
 
@@ -2978,6 +3064,7 @@ class PyWebViewApplication:
             if self.controller.has_jobs(blocking=False) is not False:
                 return False
             self._quitting = True
+            self.quit_requested.set()
             return True
         finally:
             self._lock.release()
@@ -2994,21 +3081,34 @@ class PyWebViewApplication:
             except BaseException:  # pylint: disable=broad-exception-caught
                 logging.getLogger(__name__).debug("Background import ended during shutdown", exc_info=True)
         self._reap_tasks()
+        cleanup_errors: list[Exception] = []
+
+        def release(operation: Callable[[], object]) -> None:
+            try:
+                operation()
+            except Exception as error:  # pylint: disable=broad-exception-caught
+                cleanup_errors.append(error)
+
         if sys.platform == "darwin" and self._menu_observer is not None:
             from Foundation import NSNotificationCenter  # pylint: disable=import-outside-toplevel,no-name-in-module,import-error
-            NSNotificationCenter.defaultCenter().removeObserver_(self._menu_observer)
+            release(lambda: NSNotificationCenter.defaultCenter().removeObserver_(self._menu_observer))
             self._menu_observer = None
         if self._sparkle is not None:
-            self._sparkle.close()
+            release(self._sparkle.close)
         if self._preferences_window is not None:
-            self._preferences_window.window.close()
+            release(self._preferences_window.window.close)
         # Keep the OS guard until process exit once Sparkle has begun relaunch.
         if self.updates.status.phase != "installing":
-            self.cancel_update_install()
+            release(self.cancel_update_install)
+        for observer in self._status_observers.values():
+            release(observer.close)
+        self._status_observers.clear()
         if self._connectivity is not None:
-            self._connectivity.close()
+            release(self._connectivity.close)
         if self.asset_server is not None:
-            self.asset_server.close()
+            release(self.asset_server.close)
+        if cleanup_errors:
+            raise ExceptionGroup("Application resource shutdown failed", cleanup_errors)
 
     def _dialog_window(self) -> Any:
         return webview.active_window() or self._about_window or next(
@@ -3272,6 +3372,8 @@ def configure_macos_application() -> None:
     if icon is not None:
         NSApplication.sharedApplication().setApplicationIconImage_(icon)
     install_file_drag()
+    from .native_javascript import install_cocoa_reply_boundary  # pylint: disable=import-outside-toplevel
+    install_cocoa_reply_boundary()
 
 
 def install_macos_document_events(application: PyWebViewApplication) -> None:
@@ -3281,6 +3383,8 @@ def install_macos_document_events(application: PyWebViewApplication) -> None:
     from webview.platforms.cocoa import BrowserView  # pylint: disable=import-outside-toplevel
 
     install_file_drag()
+    from .native_javascript import install_cocoa_reply_boundary  # pylint: disable=import-outside-toplevel
+    install_cocoa_reply_boundary()
 
     class MailArchiverDelegate(BrowserView.AppDelegate):
         def applicationShouldTerminate_(self, app):

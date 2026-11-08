@@ -305,8 +305,11 @@ Platform packaging and publication follow the [delivery references](../requireme
 
 `updates.py` holds typed updater status and exactly-once installation deferral.
 `sparkle.py` retains a PyObjC standard controller, formal channel delegate, and
-explicit block ABI metadata; Cocoa's main-thread timer resumes an idle reserved
-installation. `gui_app.py` adds native menu/preferences controls and coordinates
+explicit block ABI metadata; application activity/focus notifications queue a
+main-thread attempt to resume an idle deferred installation. An unrelated CLI's
+guard release alone emits no application notification; refocusing a toolkit
+window or another application status event revisits that deferral. The exclusive
+guard still prevents installation while that CLI writes. `gui_app.py` adds native menu/preferences controls and coordinates
 quit, worker tails, and definition updates. `WriterLease` retains shared OS
 locks in a private same-user temporary guard directory for every writer,
 including CLI processes; definition refresh uses the same shared guard in both

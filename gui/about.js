@@ -5,11 +5,9 @@
 
 const byId = id => document.getElementById(id);
 let initialized = false;
+const statusRefresh = new RefreshTask(readStatus);
 
 window.addEventListener("pywebviewready", initialize);
-const bridgeTimer = window.setInterval(() => {
-  if (window.pywebview?.api?.status) initialize();
-}, 250);
 window.setTimeout(() => {
   if (!initialized) showError("Waiting for the native application bridge…");
 }, 10000);
@@ -17,14 +15,15 @@ window.setTimeout(() => {
 async function initialize() {
   if (initialized) return;
   initialized = true;
-  window.clearInterval(bridgeTimer);
   byId("update-definitions").addEventListener("click", updateDefinitions);
   byId("show-processor-graph").addEventListener("click", showProcessorGraph);
   await refresh();
-  window.setInterval(refresh, 1000);
+
 }
 
-async function refresh() {
+function refresh() { return statusRefresh.run(); }
+
+async function readStatus() {
   try {
     render(await window.pywebview.api.status());
     byId("error").hidden = true;
@@ -147,10 +146,14 @@ async function updateDefinitions() {
   try {
     const result = await window.pywebview.api.update_definitions();
     message.textContent = `Definitions updated (${result.versions}). New imports will use them.`;
-    await refresh();
+    await statusRefresh.fresh();
   } catch (error) {
     message.textContent = `Update failed: ${String(error?.message || error)}. Existing definitions were retained.`;
   } finally {
     button.disabled = false;
   }
 }
+
+window.addEventListener("mailarchiver-status-changed", () => statusRefresh.changed());
+window.addEventListener("focus", () => { if (initialized) statusRefresh.changed(); });
+if (window.pywebview?.api?.status) initialize();

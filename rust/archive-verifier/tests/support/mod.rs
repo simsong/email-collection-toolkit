@@ -13,7 +13,7 @@ use std::collections::BTreeSet;
 use std::fs::{self, File};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 pub fn root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -52,40 +52,41 @@ pub fn command(command: &mut Command, log: &Path, timeout: Duration) -> Result<(
     let mut child = command
         .spawn()
         .with_context(|| format!("spawn {command:?}"))?;
-    let deadline = Instant::now() + timeout;
-    loop {
-        if let Some(status) = child.try_wait()? {
-            ensure!(
-                status.success(),
-                "command failed ({status}); {}\n{}",
-                log.display(),
-                fs::read_to_string(log)?
-            );
-            return Ok(());
-        }
-        if Instant::now() >= deadline {
+    // Keep caller-owned piped input open; Child::wait otherwise closes it before waiting.
+    let _input = child.stdin.take();
+    let pid = child.id();
+    let (sender, receiver) = std::sync::mpsc::channel();
+    let waiter = std::thread::spawn(move || {
+        let _ = sender.send(child.wait());
+    });
+    let status = match receiver.recv_timeout(timeout) {
+        Ok(result) => result?,
+        Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
             #[cfg(unix)]
-            {
-                // The child started a new process group owned by this test.
-                unsafe {
-                    libc::kill(-(child.id() as i32), libc::SIGKILL);
-                }
+            unsafe {
+                libc::kill(-(pid as i32), libc::SIGKILL);
             }
             #[cfg(windows)]
-            {
-                let _ = Command::new("taskkill")
-                    .args(["/PID", &child.id().to_string(), "/T", "/F"])
-                    .status();
-            }
-            let _ = child.kill();
-            child.wait()?;
+            let _ = Command::new("taskkill")
+                .args(["/PID", &pid.to_string(), "/T", "/F"])
+                .status();
+            receiver.recv_timeout(Duration::from_secs(5))??;
+            waiter.join().expect("child waiter panicked");
             bail!(
                 "command did not terminate within {timeout:?}; log: {}",
                 log.display()
             );
         }
-        std::thread::sleep(Duration::from_millis(20));
-    }
+        Err(error) => return Err(error.into()),
+    };
+    waiter.join().expect("child waiter panicked");
+    ensure!(
+        status.success(),
+        "command failed ({status}); {}\n{}",
+        log.display(),
+        fs::read_to_string(log)?
+    );
+    Ok(())
 }
 
 pub fn ingest(source: &Path, archive: &Path, owners: &Path, log: &Path) -> Result<()> {

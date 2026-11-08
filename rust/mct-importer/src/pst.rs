@@ -23,7 +23,7 @@ use std::{
     io::{self, BufRead, BufReader, Read, Seek, Write},
     path::Path,
     rc::Rc,
-    time::{Duration, Instant, SystemTime},
+    time::SystemTime,
 };
 use url::Url;
 
@@ -33,23 +33,19 @@ fn timestamp() -> String {
 
 struct ImportProgress<'a, W: Write> {
     diagnostics: &'a mut W,
-    last: Instant,
     completed: u64,
 }
 
 impl<W: Write> ImportProgress<'_, W> {
     fn tick(&mut self, phase: &str) -> Result<()> {
         self.completed += 1;
-        if self.last.elapsed() >= Duration::from_secs(1) {
-            writeln!(
-                self.diagnostics,
-                "progress time={} phase={phase} completed={}",
-                timestamp(),
-                self.completed
-            )?;
-            self.diagnostics.flush()?;
-            self.last = Instant::now();
-        }
+        writeln!(
+            self.diagnostics,
+            "progress time={} phase={phase} completed={}",
+            timestamp(),
+            self.completed
+        )?;
+        self.diagnostics.flush()?;
         Ok(())
     }
 }
@@ -556,7 +552,6 @@ pub fn import_selected(
 ) -> Result<ImportReport> {
     let mut progress = ImportProgress {
         diagnostics,
-        last: Instant::now(),
         completed: 0,
     };
     let scanner = crate::antivirus::Scanner::from_environment()?;
@@ -1515,19 +1510,19 @@ mod tests {
     use super::*;
 
     #[test]
-    fn progress_reports_elapsed_work_without_changing_mail_output() {
-        // ACQUISITION: periodic diagnostics describe actual work, with UTC timestamps.
+    fn progress_reports_actual_work_without_changing_mail_output() {
+        // ACQUISITION: each actual work checkpoint reports progress with a UTC timestamp.
         let mut diagnostics = Vec::new();
         let mut progress = ImportProgress {
             diagnostics: &mut diagnostics,
-            last: Instant::now() - Duration::from_secs(2),
             completed: 0,
         };
         progress.tick("source-hash").unwrap();
         progress.tick("source-hash").unwrap();
         let diagnostic = String::from_utf8(diagnostics).unwrap();
-        assert_eq!(diagnostic.lines().count(), 1);
+        assert_eq!(diagnostic.lines().count(), 2);
         assert!(diagnostic.contains("phase=source-hash completed=1"));
+        assert!(diagnostic.contains("phase=source-hash completed=2"));
         let time = diagnostic
             .split_whitespace()
             .find_map(|word| word.strip_prefix("time="))
@@ -1555,7 +1550,6 @@ mod tests {
         let mut diagnostics = Vec::new();
         let mut progress = ImportProgress {
             diagnostics: &mut diagnostics,
-            last: Instant::now(),
             completed: 0,
         };
         let directory = exchange_directory(&pst, &mut progress).unwrap();

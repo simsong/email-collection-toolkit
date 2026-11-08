@@ -14,6 +14,7 @@ from datetime import UTC, datetime, timedelta
 import pytest
 from pydantic import BaseModel, Field
 
+from mailarchiver.file_events import wait_for_path_state
 from mailarchiver.__main__ import IngestRequest, run_ingest
 from mailarchiver.application import ApplicationController, ApplicationPreferencesStore, IngestCompletion
 from mailarchiver.document_options import DocumentOptions
@@ -162,13 +163,14 @@ def test_import_failure_stays_in_owning_window(tmp_path: Path, transfer_owner: s
         for api in (owner, sibling):
             assert api.search_window is not None
             app.add_notice("error", "Identical import error", window_id=api.search_window.window_id)
-        assert [len(window.scripts) for window in windows] == [1, 1, 0]
+        assert [sum(script.startswith("window.mailArchiverNotice?.(") for script in window.scripts) for window in windows] == [1, 1, 0]
+        assert all("Identical import error" not in script for script in windows[2].scripts)
         assert sibling.search_window is not None
         app.add_notice("error", "Identical import error", window_id=sibling.search_window.window_id)
-        assert [len(window.scripts) for window in windows] == [1, 2, 0]
+        assert [sum(script.startswith("window.mailArchiverNotice?.(") for script in window.scripts) for window in windows] == [1, 2, 0]
         assert len([notice for notice in app.notices() if notice.message == "Identical import error"]) == 3
         app.add_notice("warning", "Application-wide warning")
-        assert [len(window.scripts) for window in windows] == [2, 3, 1]
+        assert [sum(script.startswith("window.mailArchiverNotice?.(") for script in window.scripts) for window in windows] == [2, 3, 1]
         assert all(any(notice["message"] == "Application-wide warning" for notice in api.status()["notices"])
                    for api in (owner, sibling, other))
         # An untitled/non-owning viewer must not inherit either scoped error on startup.
@@ -442,7 +444,7 @@ def test_plugin_inventory_does_not_hide_database_errors(tmp_path: Path) -> None:
 
 def test_content_only_quit_is_nonblocking_and_leaves_resumable_work(tmp_path: Path) -> None:
     """Skipping ingest must not produce an ingest warning or block the GUI while stopping content."""
-    from time import monotonic, sleep
+    from time import monotonic
 
     plugins = tmp_path / "plugins"
     plugin = plugins / "processors" / "wait-for-cancel"
@@ -457,16 +459,7 @@ pipeline="content"
 subscribes=["text/plain"]
 rank=60
 ''')
-    (plugin / "processor.py").write_text('''from pathlib import Path
-from time import sleep
-
-class Processor:
-    def process(self, item):
-        Path(__file__).with_name("entered").touch()
-        while True:
-            item.check_cancelled()
-            sleep(0.01)
-''')
+    (plugin / "processor.py").write_text('from pathlib import Path\n\nclass Processor:\n    def process(self, item):\n        Path(__file__).with_name("entered").touch()\n        item.wait_for_cancellation()\n')
     source = tmp_path / "message.eml"
     source.write_bytes(HEADER + b"\r\nContent\r\n")
     archive = tmp_path / "archive"
@@ -480,9 +473,7 @@ class Processor:
         assert api.resume_processing(False, True)
         job = api.document.ingest_job
         assert job is not None and job.kind == "content"
-        deadline = monotonic() + 10
-        while not (plugin / "entered").exists() and monotonic() < deadline:
-            sleep(0.01)
+        wait_for_path_state([plugin / "entered"], (plugin / "entered").exists, timeout=10)
         assert (plugin / "entered").exists()
         assert not app.has_active_ingest()
         started = monotonic()
@@ -818,7 +809,7 @@ def test_quit_cancels_queued_import_and_releases_its_lease(tmp_path: Path) -> No
 
     def block() -> None:
         occupied.wait(timeout=5)
-        release.wait(10)
+        assert release.wait(10), "fixture release deadline expired"
 
     try:
         for _ in range(8):

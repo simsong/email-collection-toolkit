@@ -7,6 +7,7 @@ from __future__ import annotations
 import queue
 import os
 import re
+import subprocess
 import sys
 import textwrap
 import threading
@@ -15,7 +16,7 @@ import traceback
 from collections import Counter
 from collections.abc import Callable, Iterable
 from concurrent.futures import ThreadPoolExecutor
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -24,7 +25,6 @@ from mailarchiver.__main__ import (
     ANSI_RESET,
     CLAMAV_START_PHASE,
     IngestInterrupted,
-    PROGRESS_REFRESH_SECONDS,
     TOP_LINE_STYLE,
     ProgressReporter,
     ProgressUpdate,
@@ -278,7 +278,6 @@ def test_clamav_preflight_is_repeated_before_workers_start(capsys: pytest.Captur
 
     try:
         progress.set_phase(CLAMAV_START_PHASE)
-        time.sleep(PROGRESS_REFRESH_SECONDS)
         progress.refresh()
     finally:
         progress.finish("completed")
@@ -290,20 +289,22 @@ def test_clamav_preflight_is_repeated_before_workers_start(capsys: pytest.Captur
 
 
 def test_blocking_clamav_preflight_keeps_live_status(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """SCANNING: blocking preflight longer than the stale threshold retains a live heartbeat."""
+    """SCANNING: an acknowledged blocked preflight stays live without periodic heartbeats."""
     from mailarchiver import clamav_update
     from mailarchiver.clamav_definitions import DefinitionSet
     from mailarchiver.ingest_status import STALE_AFTER_SECONDS
+    from mailarchiver.change_signal import ChangeSignal
 
     original = clamav_update.definitions_for_scan
-    preparing = threading.Event()
-    started = time.monotonic()
+    preparing, release_preflight = threading.Event(), threading.Event()
+    changed = ChangeSignal()
     def delayed_definitions(definitions: DefinitionSet, *, now: datetime | None = None,
                             status_callback: Callable[[], None] | None = None) -> DefinitionSet:
-        # The external resource boundary can block without issuing callbacks.
+        # The owner is explicitly notified when the real preflight boundary is held.
         preparing.set()
+        changed.notify()
         try:
-            time.sleep(STALE_AFTER_SECONDS + 1)
+            assert release_preflight.wait(STALE_AFTER_SECONDS + 10), "owner did not acknowledge live preflight status"
             return original(definitions, now=now, status_callback=status_callback)
         finally:
             preparing.clear()
@@ -321,9 +322,14 @@ def test_blocking_clamav_preflight_keeps_live_status(tmp_path: Path, monkeypatch
         snapshot = read_ingest_history(archive).statuses[0]
         assert snapshot.state == "running"
         assert snapshot.phase.startswith(CLAMAV_START_PHASE)
-        if preparing.is_set() and time.monotonic() - started > STALE_AFTER_SECONDS:
+        if preparing.is_set():
+            assert snapshot.effective(snapshot.updated_at + timedelta(seconds=STALE_AFTER_SECONDS + 1)).state == "running"
             observed.append(snapshot.updated_at)
-    scanner = start_ingest_scanner(refresh, 2)
+            release_preflight.set()
+    try:
+        scanner = start_ingest_scanner(refresh, 2, signals=(changed,))
+    finally:
+        release_preflight.set()
     try:
         assert observed
         assert scanner.scan_sample(b"From: fixture@example.test\n\nClean fixture.\n").status == "clean"
@@ -381,8 +387,7 @@ def test_file_worker_pool_runs_no_more_than_requested_mailfiles() -> None:
     with ThreadPoolExecutor(max_workers=1) as scheduler:
         result = scheduler.submit(run_file_workers, range(6), 3, process, stop, lambda: None)
         first_wave = {started.get(timeout=5) for _ in range(3)}
-        with pytest.raises(queue.Empty):
-            started.get(timeout=0.1)
+        assert started.empty(), "A worker exceeded the held pool capacity"
         assert first_wave == {0, 1, 2}
         assert maximum_active == 3
         release.set()
@@ -399,15 +404,17 @@ def test_framework_enforces_source_plugin_concurrency_by_key() -> None:
     maximum: Counter[str] = Counter()
     maximum_total = 0
     lock = threading.Lock()
+    first_wave = threading.Barrier(3)
 
     def process(item: tuple[str, int]) -> None:
         nonlocal maximum_total
-        key, _number = item
+        key, number = item
         with lock:
             active[key] += 1
             maximum[key] = max(maximum[key], active[key])
             maximum_total = max(maximum_total, sum(active.values()))
-        time.sleep(0.02)
+        if (key, number) in {("account-a", 0), ("account-b", 0), ("account-b", 1)}:
+            first_wave.wait(timeout=5)
         with lock:
             active[key] -= 1
 
@@ -453,11 +460,8 @@ def test_interrupt_notice_precedes_worker_shutdown(tmp_path: Path) -> None:
         progress = ProgressReporter()
         def worker(_item):
             print('worker-ready', flush=True)
-            deadline = time.monotonic() + 15
-            while not release.exists():
-                if time.monotonic() > deadline:
-                    raise TimeoutError('test worker was not released')
-                time.sleep(0.01)
+            from mailarchiver.file_events import wait_for_path_state
+            wait_for_path_state([release], release.exists, timeout=15)
         try:
             run_file_workers([0], 1, worker, threading.Event(), progress.refresh,
                              on_interrupt=progress.announce_interrupt)
@@ -527,8 +531,7 @@ def test_numbered_worker_rows_are_main_rendered_without_wrapping(capsys: pytest.
 
 def test_processor_recovery_publishes_live_activity_and_finished_jobs(tmp_path: Path) -> None:
     """Recovery progress: real processor work appears before completion, without inventing imported mail."""
-    plugin(tmp_path, "gate", 'while not (item.archive.path / f"release-{item.job_id}").exists():\n'
-           '    item.check_cancelled()\n    time.sleep(0.01)\nreturn ProcessingResult()', timeout=5)
+    plugin(tmp_path, "gate", 'item.wait_for_files((item.archive.path,), lambda: not (not (item.archive.path / f"release-{item.job_id}").exists()))\nreturn ProcessingResult()', timeout=5)
     plugins = load_processors((tmp_path,))
     archive = tmp_path / "archive"
     with connect(archive, create=True) as database:
@@ -569,7 +572,7 @@ def test_processor_recovery_publishes_live_activity_and_finished_jobs(tmp_path: 
             partial_snapshots.append(status)
             (archive / "release-2").touch()
 
-    run_file_workers([0], 1, recover, threading.Event(), display)
+    run_file_workers([0], 1, recover, threading.Event(), display, signals=(progress.changed,))
     progress.finish("completed")
     assert snapshots
     active = snapshots[0]
@@ -630,7 +633,6 @@ def test_saved_message_backlog_deduplicates_parts_and_tracks_unfinished_work(tmp
             database.execute("UPDATE jobs SET status='completed' WHERE json_extract(item_json,'$.message_id')=?",
                              (items[3].message_id,))
         assert saved_messages_remaining(database) == 1
-        time.sleep(1.01)
         reporter.refresh()
         assert read_ingest_history(archive).statuses[0].saved_messages_remaining == 1
         with database:
@@ -723,7 +725,12 @@ def test_status_history_marks_an_abandoned_running_snapshot_stale(tmp_path: Path
         archive, now=datetime(2026, 8, 29, 12, 0, 1, tzinfo=UTC)
     ).statuses[0]
     assert status.state == "running"
-    status_file.write(status.model_copy(update={"state": "running", "updated_at": started_at}))
+    # An old timestamp alone cannot mark this still-running producer stale.
+    assert status.effective(started_at + timedelta(days=1)).state == "running"
+    with subprocess.Popen([sys.executable, "-c", "pass"]) as producer:
+        producer.wait(timeout=5)
+    status_file.write(status.model_copy(update={"state": "running", "updated_at": started_at,
+                                               "process_id": producer.pid}))
 
     expired = read_ingest_history(
         archive, now=datetime(2026, 8, 29, 12, 0, 6, tzinfo=UTC)

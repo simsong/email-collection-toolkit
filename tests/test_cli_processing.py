@@ -12,11 +12,11 @@ import re
 import sqlite3
 import subprocess
 import sys
-import time
 from pathlib import Path
 
 import pytest
 
+from mailarchiver.file_events import wait_for_path_state
 from mailarchiver.layout import mbox_directory
 from mailarchiver.standalone_verify import verify_archive
 from mailarchiver.pst_source import ImportActivity, ImportReceipt, PstSettings
@@ -118,7 +118,7 @@ def test_pst_supervisor_kills_silent_producer_and_retains_receipt(tmp_path: Path
         "# It uses only pytest-owned files and never changes a mail store.\n"
         "import os\nfrom pathlib import Path\nimport time\n"
         "Path(__file__).with_suffix('.pid').write_text(str(os.getpid()), encoding='ascii')\n"
-        "time.sleep(60)\n"
+        "__import__('threading').Event().wait()\n"
         "Path(__file__).with_suffix('.completed').write_text('natural exit', encoding='ascii')\n",
         encoding="utf-8")
     original = producer.read_bytes()
@@ -134,9 +134,7 @@ def test_pst_supervisor_kills_silent_producer_and_retains_receipt(tmp_path: Path
     with closing(events):
         assert isinstance(next(events), ProgressEvent)
         marker = producer.with_suffix(".pid")
-        deadline = time.monotonic() + 10
-        while (not marker.exists() or not marker.stat().st_size) and time.monotonic() < deadline:
-            time.sleep(0.01)
+        wait_for_path_state([marker], lambda: marker.exists() and bool(marker.stat().st_size), timeout=10)
         assert marker.exists() and marker.stat().st_size, "Configured producer did not start"
         pid = int(marker.read_text(encoding="ascii"))
         if sys.platform == "win32":

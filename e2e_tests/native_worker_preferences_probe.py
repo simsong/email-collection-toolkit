@@ -101,7 +101,6 @@ def main() -> None:
         close.performClick_(None)
         pump()
         assert not window.isVisible() and anchor.isVisible()
-        assert pane.timer is None
         assert store.read().workers == WorkerPreferences(mode="custom", custom_count=1)
         application.show_update_preferences()
         pump()

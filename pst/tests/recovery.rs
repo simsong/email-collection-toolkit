@@ -5,38 +5,32 @@ use sha2::{Digest, Sha256};
 use std::{
     fs,
     io::{Read, Write},
-    net::TcpListener,
+    net::{TcpListener, TcpStream},
     path::Path,
     process::{Child, Command, ExitStatus, Stdio},
     sync::{
         atomic::{AtomicBool, AtomicUsize, Ordering},
-        Arc,
+        mpsc::{self, Receiver},
+        Arc, Condvar, Mutex,
     },
     thread,
-    time::{Duration, Instant},
+    time::Duration,
 };
 
-struct Process(Child);
+struct Process(Option<Child>);
 impl Drop for Process {
     /// Reap even a stuck child when an assertion fails.
     fn drop(&mut self) {
-        let _ = self.0.kill();
-        let _ = self.0.wait();
-    }
-}
-
-/// Wait with a deadline so broken cancellation fails rather than hanging CI.
-fn wait_until(mut condition: impl FnMut() -> bool) {
-    let deadline = Instant::now() + Duration::from_secs(10);
-    while !condition() {
-        assert!(Instant::now() < deadline, "recovery test timed out");
-        thread::sleep(Duration::from_millis(20));
+        if let Some(child) = self.0.as_mut() {
+            let _ = child.kill();
+            let _ = child.wait();
+        }
     }
 }
 
 /// Start the actual executable against an isolated inventory and cache.
 fn start(root: &Path) -> Process {
-    Process(
+    Process(Some(
         Command::new(env!("CARGO_BIN_EXE_pst-downloader"))
             .arg("--inventory-dir")
             .arg(root.join("inventory"))
@@ -46,44 +40,64 @@ fn start(root: &Path) -> Process {
             .stdout(Stdio::null())
             .spawn()
             .unwrap(),
-    )
+    ))
 }
 
 /// Collect an exit status under the test deadline.
 fn finish(process: &mut Process) -> ExitStatus {
-    let mut status = None;
-    wait_until(|| {
-        status = process.0.try_wait().unwrap();
-        status.is_some()
+    let mut child = process.0.take().unwrap();
+    let pid = child.id();
+    let (sender, receiver) = mpsc::channel();
+    let worker = thread::spawn(move || {
+        let _ = sender.send(child.wait());
     });
-    status.unwrap()
+    let result = receiver.recv_timeout(Duration::from_secs(10));
+    if result.is_err() {
+        #[cfg(unix)]
+        let _ = Command::new("kill")
+            .args(["-KILL", &pid.to_string()])
+            .status();
+        #[cfg(windows)]
+        let _ = Command::new("taskkill")
+            .args(["/PID", &pid.to_string(), "/T", "/F"])
+            .status();
+        receiver
+            .recv_timeout(Duration::from_secs(5))
+            .expect("child did not reap")
+            .unwrap();
+        worker.join().unwrap();
+        panic!("recovery process exceeded its failure deadline");
+    }
+    worker.join().unwrap();
+    result.unwrap().unwrap()
 }
 
 struct Server {
     url: String,
     hits: Arc<AtomicUsize>,
     stop: Arc<AtomicBool>,
-    release: Arc<AtomicBool>,
+    release: Arc<(Mutex<bool>, Condvar)>,
+    requests: Receiver<()>,
     worker: Option<thread::JoinHandle<()>>,
 }
 impl Server {
     /// Serve one completed fixture, stall the second request, then permit a full retry.
     fn new(first: Vec<u8>, second: Vec<u8>) -> Self {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
-        listener.set_nonblocking(true).unwrap();
         let url = format!("http://{}", listener.local_addr().unwrap());
         let hits = Arc::new(AtomicUsize::new(0));
         let stop = Arc::new(AtomicBool::new(false));
         let counter = hits.clone();
         let quit = stop.clone();
-        let release = Arc::new(AtomicBool::new(false));
+        let release = Arc::new((Mutex::new(false), Condvar::new()));
+        let (requested, requests) = mpsc::channel();
         let resume = release.clone();
         let worker = thread::spawn(move || {
             while !quit.load(Ordering::Relaxed) {
-                let Ok((mut socket, _)) = listener.accept() else {
-                    thread::sleep(Duration::from_millis(5));
-                    continue;
-                };
+                let (mut socket, _) = listener.accept().unwrap();
+                if quit.load(Ordering::Relaxed) {
+                    break;
+                }
                 // Accepted sockets can inherit O_NONBLOCK on macOS/BSD.
                 socket.set_nonblocking(false).unwrap();
                 socket
@@ -119,10 +133,17 @@ impl Server {
                     );
                     let _ = socket.write_all(&body[..12]);
                     counter.fetch_add(1, Ordering::Relaxed);
-                    // Hold the connection open until the test has observed process exit.
-                    while !resume.load(Ordering::Relaxed) && !quit.load(Ordering::Relaxed) {
-                        thread::sleep(Duration::from_millis(5));
-                    }
+                    requested.send(()).unwrap();
+                    // The parent acknowledges process exit before releasing this response.
+                    let (lock, changed) = &*resume;
+                    let ready = changed
+                        .wait_timeout_while(
+                            lock.lock().unwrap(),
+                            Duration::from_secs(30),
+                            |ready| !*ready,
+                        )
+                        .unwrap();
+                    assert!(*ready.0, "response release deadline expired");
                 } else {
                     let _ = write!(
                         socket,
@@ -131,6 +152,7 @@ impl Server {
                     );
                     let _ = socket.write_all(body);
                     counter.fetch_add(1, Ordering::Relaxed);
+                    requested.send(()).unwrap();
                 }
             }
         });
@@ -139,6 +161,7 @@ impl Server {
             hits,
             stop,
             release,
+            requests,
             worker: Some(worker),
         }
     }
@@ -147,6 +170,9 @@ impl Drop for Server {
     /// Stop the fixture server without leaving a background service.
     fn drop(&mut self) {
         self.stop.store(true, Ordering::Relaxed);
+        *self.release.0.lock().unwrap() = true;
+        self.release.1.notify_all();
+        let _ = TcpStream::connect(self.url.trim_start_matches("http://"));
         self.worker.take().unwrap().join().unwrap();
     }
 }
@@ -176,7 +202,12 @@ fn recovery(interrupt: bool) {
     // The original existence-only lock must be taken over without manual removal.
     fs::write(cache.join(".download.lock"), b"stale legacy lock").unwrap();
     let mut first_run = start(root.path());
-    wait_until(|| server.hits.load(Ordering::Relaxed) == 2);
+    for _ in 0..2 {
+        server
+            .requests
+            .recv_timeout(Duration::from_secs(10))
+            .unwrap();
+    }
     let lock_handle = fs::OpenOptions::new()
         .read(true)
         .write(true)
@@ -193,14 +224,14 @@ fn recovery(interrupt: bool) {
     if interrupt {
         #[cfg(unix)]
         assert!(Command::new("kill")
-            .args(["-INT", &first_run.0.id().to_string()])
+            .args(["-INT", &first_run.0.as_mut().unwrap().id().to_string()])
             .status()
             .unwrap()
             .success());
         #[cfg(not(unix))]
         unreachable!("console Ctrl+C needs a native Windows console test");
     } else {
-        first_run.0.kill().unwrap();
+        first_run.0.as_mut().unwrap().kill().unwrap();
     }
     let status = finish(&mut first_run);
     if interrupt {
@@ -215,7 +246,8 @@ fn recovery(interrupt: bool) {
         assert!(!status.success());
         assert!(cache.join(".download.lock").exists());
     }
-    server.release.store(true, Ordering::Relaxed);
+    *server.release.0.lock().unwrap() = true;
+    server.release.1.notify_all();
     let mut restarted = start(root.path());
     assert!(finish(&mut restarted).success());
     assert_eq!(server.hits.load(Ordering::Relaxed), 3);

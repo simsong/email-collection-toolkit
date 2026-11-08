@@ -8,18 +8,13 @@
 (() => {
   "use strict";
   const checks = [];
-  const sleep = milliseconds => new Promise(resolve => setTimeout(resolve, milliseconds));
   const assert = (condition, label) => {
     if (!condition) throw new Error(label);
     checks.push(label);
   };
   const waitFor = async (condition, label, timeout = 10000) => {
-    const deadline = Date.now() + timeout;
-    while (Date.now() < deadline) {
-      if (condition()) { checks.push(label); return; }
-      await sleep(50);
-    }
-    throw new Error(`Timed out: ${label}; painted=${document.querySelectorAll("#result-list .result").length}; retained=${state.results.length}; status=${document.getElementById("result-status")?.textContent}`);
+    await waitForDomState(condition, label, timeout);
+    checks.push(label);
   };
   const assertFileTransfer = transfer => {
     assert(transfer.effectAllowed === "copy" && Object.keys(transfer.values).length === 1 &&
@@ -82,7 +77,7 @@
     if (box.checked !== attachments) {
       box.checked = attachments;
       box.dispatchEvent(new Event("change", {bubbles: true}));
-      await sleep(50);
+      await waitFor(() => state.searchAttachments === attachments, "attachment search setting is applied");
     }
     document.getElementById("search").value = query;
     document.getElementById("search-form").dispatchEvent(new Event("submit", {bubbles: true, cancelable: true}));
@@ -168,26 +163,32 @@
     await waitFor(() => isSelected(bethRow(firstBeth)) && state.selected === firstBeth,
       "first full-text result selected");
     const realPart = window.pywebview.api.part;
-    let delayedMessage = firstBeth;
+    let releasePart;
+    const partRelease = new Promise(resolve => { releasePart = resolve; });
+    let enteredPart;
+    const partEntered = new Promise(resolve => { enteredPart = resolve; });
     window.pywebview.api.part = async (...args) => {
       const response = await realPart(...args);
-      if (args[0] === delayedMessage) await sleep(300);
+      if (args[0] === firstBeth) { enteredPart(); await partRelease; }
       return response;
     };
-    document.dispatchEvent(new KeyboardEvent("keydown", {key: "f", metaKey: true, bubbles: true}));
-    document.dispatchEvent(new KeyboardEvent("keydown", {key: "g", metaKey: true, bubbles: true}));
-    await waitFor(() => messageFind.value === "beth", "find starts from the new full-text archive search");
-    bethRow(secondBeth).click();
-    await waitFor(() => isSelected(bethRow(secondBeth)) &&
-      document.querySelector(".message-find-current") &&
-      document.getElementById("message-find-status").textContent.startsWith("1/"),
-    "changing messages during pending find work retains text and restarts at its first match");
-    await sleep(350);
-    assert(isSelected(bethRow(secondBeth)) && state.messageFindIndex === 0 &&
-      document.getElementById("message-find-status").textContent.startsWith("1/"),
-    "stale Command-F and Command-G work cannot advance the newly selected message");
-    delayedMessage = null;
-    window.pywebview.api.part = realPart;
+    try {
+      // Keyboard translation is checked above; retain these actual consumer Promises to join stale work.
+      const staleFind = [openMessageFind(), moveMessageFind(1)];
+      await partEntered;
+      checks.push("old-message part delivery is blocked before changing selection");
+      await waitFor(() => messageFind.value === "beth", "find starts from the new full-text archive search");
+      bethRow(secondBeth).click();
+      await waitFor(() => isSelected(bethRow(secondBeth)) &&
+        document.querySelector(".message-find-current") &&
+        document.getElementById("message-find-status").textContent.startsWith("1/"),
+      "changing messages during pending find work retains text and restarts at its first match");
+      releasePart();
+      await Promise.all(staleFind);
+      assert(isSelected(bethRow(secondBeth)) && state.messageFindIndex === 0 &&
+        document.getElementById("message-find-status").textContent.startsWith("1/"),
+      "completed stale find work cannot advance the newly selected message");
+    } finally { releasePart(); window.pywebview.api.part = realPart; }
     document.getElementById("message-find-close").click();
     await waitFor(() => document.getElementById("message-find").hidden && !messageFind.value && !state.messageFindQuery,
       "closing find clears its retained text");
@@ -247,7 +248,7 @@
         state.resultSelection.size === 3 && !state.resultSelection.has(otherPk),
       "an unselected row exports its own file without changing the existing selection");
     }
-    await sleep(0);
+    await new Promise(requestAnimationFrame);
     rows()[0].click();
     await waitFor(() => state.selected === Number(rows()[0].dataset.messagePk) && selectionSummary.hidden &&
       document.getElementById("message-file-well").parentElement.classList.contains("message-summary"),
@@ -509,7 +510,6 @@
     const messageFileName = document.getElementById("message-file-name");
     const beforeHover = messageFileName.textContent;
     document.getElementById("message-file-well").dispatchEvent(new PointerEvent("pointerenter", {bubbles: true}));
-    await new Promise(resolve => setTimeout(resolve, 100));
     assert(messageFileName.textContent === beforeHover, "hovering does not prepare a message file");
     await assertSharedFileDrag(rows()[0], "single-message EML");
 
@@ -559,7 +559,6 @@
     await waitFor(() => rows().length === 0, "None disables the saved mailbox filter without running an empty search");
     filterSets.value = "Work";
     filterSets.dispatchEvent(new Event("change", {bubbles: true}));
-    await sleep(300);
     await waitFor(() => state.results.length === 204, "named filter set restores its complete selection");
     filterSets.value = "__save__";
     filterSets.dispatchEvent(new Event("change", {bubbles: true}));

@@ -6,6 +6,33 @@ Entries describe their recorded revisions. For current behavior use the
 [user manual](USER_MANUAL.md) and [CLI reference](CLI_REFERENCE.md). Retired
 Rust delivery plans and historical package checks are not current acceptance.
 
+## 1.0.0a59 — event-driven coordination
+
+- Replace first-party scheduling timers with work, filesystem, future, native-window
+  and DOM notifications. Keep only explicit failure deadlines.
+- Search typing starts immediately; notices remain expanded until manually collapsed
+  or dismissed. Automatic updater checks run when the installed application opens.
+- Preserve live import status during blocked work without periodic heartbeats.
+  Use explicit cancellation wakeups for scanner startup and cooperative processors.
+- Bound native JavaScript replies by completion, Close or a failure deadline;
+  acknowledge standalone IMAP interruption before waiting for download cleanup.
+- Windows metadata readers permit atomic replacement while open; external sharing
+  denial fails explicitly and preserves files instead of waiting and retrying.
+- ABBYY's research helper rejects an asynchronous command reply without completion
+  evidence; it no longer polls the external application's busy flag.
+- See [timing audit](TIMING_AUDIT.md) for measured validation and platform limits.
+
+## 1.0.0a58 — explicit timing and completion
+
+- Keep slow About, Ingests and options status reads ordered, including fresh reads
+  after import commands. Use actual focus and paint events for search/viewer updates.
+- Report incomplete worker cleanup and forced Quit deadlines as failures while
+  retaining existing recovery state. Preserve original errors when diagnostics fail.
+- Replace test/acceptance sleep assumptions with barriers, completed operations,
+  native events and acknowledged stack samples. Record sampler timing and failures.
+- Document the [timing audit](TIMING_AUDIT.md), intentional scheduling and remaining
+  platform acceptance limits.
+
 ## 1.0.0a57 — repeated import warnings
 
 - Display a newly issued warning even when its text matches a dismissed notice,

@@ -13,7 +13,8 @@ or phrase, then narrow the collection by person, date, subject, or source folder
 
 *The working interface with a synthetic collection. No private email is shown.*
 
-Warnings and errors collapse to a **Messages** pill near the bottom. Click it
+Warnings and errors stay expanded until you choose **Collapse messages** or
+**Dismiss messages**. Collapsing shows a **Messages** pill near the bottom. Click it
 to read the full text and earlier messages from the same window; **Collapse
 messages** returns to the pill. Warning-only messages use yellow. **Dismiss
 messages** clears both the banner and pill without reopening them on the next

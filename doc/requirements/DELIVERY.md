@@ -89,7 +89,7 @@ checkout. This preference is independent of website downloads.
 The frozen macOS app must use Sparkle's standard updater UI, with native
 Preferences… and Check for Program Updates commands. Stable installations default to
 release-only; alpha/beta installations default to preview plus stable. Explicit
-choices and daily-check preferences migrate outside archives and survive recent
+choices and launch-check preferences migrate outside archives and survive recent
 archive changes and upgrades. Download and installation require confirmation.
 The updater must wait for all jobs, worker tails, definition replacement, and
 writer leases and definition updates in the application and other same-user

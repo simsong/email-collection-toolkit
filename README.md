@@ -11,6 +11,10 @@ Its local search index can be discarded and rebuilt.
 **This program is under active development. Do not use it operationally until
 version 1.0 ships.**
 
+Progress and window updates follow actual work and native change notifications.
+Warnings stay expanded until you collapse or dismiss them. When enabled, installed
+application update checks run when the application opens; manual checks remain available.
+
 ## Desktop application
 
 We build traditional desktop applications for Windows and macOS. Both include

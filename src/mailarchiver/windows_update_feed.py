@@ -155,3 +155,5 @@ class FeedGateway:
         self.server.shutdown()
         self.server.server_close()
         self.thread.join(timeout=15)
+        if self.thread.is_alive():
+            raise TimeoutError("Windows update feed server did not stop")

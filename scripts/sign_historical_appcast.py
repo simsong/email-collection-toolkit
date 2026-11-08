@@ -19,7 +19,6 @@ import shutil
 import subprocess
 import sys
 import tempfile
-import time
 import xml.etree.ElementTree as xml
 from contextlib import contextmanager
 from collections.abc import Iterator
@@ -185,7 +184,6 @@ def mounted_historical_dmg(dmg: Path) -> Iterator[Path]:
                                           capture_output=True, text=True, check=False, env=environment)
                 if detached.returncode == 0:
                     break
-                time.sleep(1)
             if detached is None or detached.returncode:
                 raise RuntimeError(f"could not detach historical DMG: {detached.stderr if detached else ''}")
     finally:

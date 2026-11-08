@@ -25,6 +25,10 @@ from collections.abc import Callable
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, field_validator
+from concurrent.futures import Future
+
+from ..change_signal import ActivityCallback, ChangeSignal, await_activity
+from ..file_events import PathObserver
 
 from ..plugin_configuration import ConfigScope, ConfigValues, ConfigWrite, PluginConfiguration, ReadScope
 from ..layout import mbox_path
@@ -132,6 +136,22 @@ class ProcessingObject(Model):
             self._cancelled()
         if self._deadline is not None and time.monotonic() >= self._deadline:
             raise TimeoutError("processor timeout")
+
+    def wait_for_cancellation(self) -> None:
+        """Block cooperatively until cancellation or this invocation's failure deadline."""
+        await_activity(Future[None](), self._cancelled, self.remaining_seconds)
+
+    def wait_for_files(self, paths: tuple[Path, ...], condition: Callable[[], bool]) -> None:
+        """Wait for real file changes while still observing host cancellation and deadline."""
+        changed = ChangeSignal()
+        signals = self._cancelled.signals if isinstance(self._cancelled, ActivityCallback) else ()
+        with PathObserver(paths, changed.notify):
+            while True:
+                observed = changed.ready
+                self.check_cancelled()
+                if condition():
+                    return
+                await_activity(observed, ActivityCallback(self.check_cancelled, signals), self.remaining_seconds)
 
     @property
     def remaining_seconds(self) -> float:

@@ -53,8 +53,8 @@ checked through a real right-click during visual acceptance.
 `message_state` and counts distinct non-null catalog message IDs. The existing
 status/job index limits work to pending/running/failed queues; blocked jobs
 remain included. `ProgressReporter` samples this read-only query on its owner
-connection at most once per second during processing stages, resets between
-stages and forces the final sample. Optional `saved_messages_remaining` is
+connection on processing progress changes, resets between stages and forces
+the final sample. Optional `saved_messages_remaining` is
 persisted with each snapshot and renders as **Messages requiring processing**
 (Unavailable for old history). The explanation distinguishes finished tasks from
 emails whose final task has finished, including periods when the count stays level.
@@ -87,9 +87,8 @@ imported-message counters keep their original meaning; terminal/stale snapshots
 never use the active-processing bar.
 History uses 22-pixel circles with white check/X/pause symbols and visible state
 labels, so color is supplementary. `IngestJob.started_at` lets the history bridge
-expose accepted startup until a new run snapshot exists. The startup banner is
-polled each second. A newly appearing run is selected even if startup finishes
-between polls; further refreshes preserve manual history selection.
+expose accepted startup until a new run snapshot exists. The startup banner follows application and native filesystem notifications.
+A newly appearing run is selected even if startup finishes between notifications; further refreshes preserve manual history selection.
 Historical timeout display is normalized without rewriting saved failures. The finished-job card explains its unit.
 The main search status line and About activity cards likewise show finished
 processing jobs and the current processor instead of a source percentage/ETA.
@@ -125,13 +124,13 @@ message admission retries user-cancelled unpublished ingest roots; cancelled
 derived jobs remain aborted until explicit reprocessing regenerates their inputs.
 
 `app.js` retains notice text in window memory, rendered with
-`textContent`. After six seconds the banner becomes a keyboard-operable message
-pill; hover/focus keeps it expanded. Reopening shows scrollable history and a
+`textContent`. The banner stays expanded until the user selects Collapse or Dismiss;
+Collapse leaves a keyboard-operable message pill. Reopening shows scrollable history and a
 Collapse button without a timeout. Warning-only history uses yellow. Dismiss
 clears the visible history and pill while retaining seen backend notice IDs,
 so status refreshes cannot replay them; a newly issued UUID remains visible even
 if its timestamp matches an earlier notice.
-Native pushes carry the same serialized notice as status polling. New warnings retain previous text. Native
+Native pushes carry the same serialized notice as status-event refresh. New warnings retain previous text. Native
 notices also remain in About for the application session. Bridge-start and
 processing errors use the same banner. `make test-gui-processing` exercises real
 archive/bridge continuation, deferral, lease conflicts, stale abort rejection,
@@ -186,7 +185,7 @@ real saved-queue dispatch, CLI precedence and HTML controls; the opt-in
 delegate. Actions save valid preferences, and the close delegate finishes the field
 editor before saving. Invalid values veto that close with feedback; Quit retains
 previously saved choices. File Close recognizes the focused native preferences
-window. A visibility-scoped timer refreshes update status and stops on Close.
+window. Backend change notifications refresh visible update status; no refresh timer runs.
 The update button follows actual backend availability and explains source launches.
 Windows Preferences uses the same method-only `WindowBridge` as the other desktop
 APIs. Only state/save/check/close_saved are visible to pywebview discovery, so its
@@ -195,7 +194,7 @@ window-factory regression verifies this boundary and actual settings persistence
 Windows Preferences serializes bridge saves and reuses its existing WebView2
 window. Close temporarily disables editing while the current settings are saved;
 save responses and errors update feedback only for the newest request. Updater
-polling has a separate status field. Its closing handler vetoes the first Close,
+notifications have a separate status field. Its closing handler vetoes the first Close,
 schedules JavaScript through
 WinForms BeginInvoke, and destroys the window only after saving the active edit.
 It never synchronously waits for JavaScript on the native UI thread. Quit bypasses
@@ -241,7 +240,7 @@ operation ID, shared Events and writer lease. Native closing callbacks reserve
 logical closure immediately, so consecutive Close actions cannot transfer a job
 back to a disappearing window; the later closed event removes the native API.
 A last-window veto enqueues a typed notice without acquiring the application
-lock; normal search ingest-overview polling delivers it independently of import
+lock; normal search ingest-overview notifications delivers it independently of import
 worker capacity or the presence of About.
 The notice directs the user to Quit to suspend import and exit, with ⌘ Q on macOS.
 It returns without a synchronous dialog or waiting for import futures on Cocoa's
@@ -276,8 +275,8 @@ that replay does not scan/file/download saved messages again.
 
 The CLI and GUI construct the same Pydantic `IngestRequest` and call
 `run_ingest()`. The GUI acquires and publishes the per-document writer lease,
-runs the service on a non-daemon worker thread, leaves readers usable, polls the
-existing typed status files in every attached search window and the persistent
+runs the service on a non-daemon worker thread, leaves readers usable, observes
+changes to typed status files for every attached search window and the persistent
 About window, and invalidates view caches after the run. Startup and import
 errors are retained as typed notices instead of being available only on stderr.
 Before creating NSApplication, `configure_macos_application` registers the
@@ -291,7 +290,7 @@ fixture through the document-open delegate.
 The Ingests bridge exposes **Import Directory…** for its bound document. It
 reuses that document's search window (or opens one to own the job) and runs the
 normal confirmed import workflow.
-The UI polls import availability and prevents repeated clicks while dialogs are open.
+The UI refreshes import availability on application/status events and prevents repeated clicks while dialogs are open.
 Import's final confirmation uses an application-owned macOS NSAlert with the
 bundled icon, destination heading/path, and explicit Import/Cancel actions.
 The shared alert helper marshals presentation onto the Cocoa main thread and
@@ -320,7 +319,7 @@ revision captured before the dialog, and saves changed lists atomically.
 Sources and legacy owner files are never rewritten.
 
 The document-bound `DocumentOptionsApi` uses the same lists in an options child
-window. Save checks the lease and revision; status polling disables edits during
+window. Save checks the lease and revision; status-event refresh disables edits during
 ingest without clobbering unsaved text. The import snapshot is
 `status/owner-rules-used.yaml`, allowing change warnings across restarts.
 After workers stop and canonical checkpoint publication completes, a streaming catalog
@@ -411,12 +410,12 @@ activation does not. Quit permits its actual destruction. The native lifecycle
 probe exercises dismissal, background updates, and explicit menu reopening.
 `WindowBridge` restricts pywebview introspection to explicit callable names,
 excluding public controller and window object graphs. About allows the same
-dynamic bridge generation as the other pages, retries bridge readiness, polls
-status each second, and clears stale errors after successful refresh.
+dynamic bridge generation as the other pages, awaits bridge readiness, reads
+status on native status/focus events, and clears stale errors after successful refresh.
 About reads saved plugin roots once for both inventories, using a 50 ms SQLite
 busy timeout. Only `SQLITE_BUSY`/`SQLITE_LOCKED` defer the inventory with an
 explicit retry message; disk, scanner, notices and ingest status still return.
-The next poll reloads the full saved registry, including custom plugins, rather
+The next status event or explicit reopen reloads the full saved registry, including custom plugins, rather
 than substituting bundled defaults. Other database errors remain visible.
 Archive Open validates schema metadata without `PRAGMA quick_check`, which
 previously scanned multi-gigabyte databases before opening any window. Existing
@@ -464,14 +463,16 @@ evidence remains reachable.
 The headless regression explicitly makes the message taller than its viewport,
 then scrolls to and checks the visibility of source locations; it does not rely
 on font-dependent fixture height or iframe load timing to create overflow.
-The main window polls the latest shared `IngestStatus` once per second and
-renders it in a bottom status line. The separate `ingests.html` application
-polls all typed status files and presents run history beside aggregate and
+Native archive/status change notifications trigger the main window to read
+the latest shared `IngestStatus` into its bottom status line. The separate
+`ingests.html` application reads all typed status files on those same events and presents run history beside aggregate and
 per-worker detail. Both the status-line action and the native
 **Window → Ingests** menu route through a per-document singleton window owner: an existing
 window is restored and ordered to the front, while a closed one is recreated
-with its own normal close box. A running file whose heartbeat is older than
-five seconds is displayed as stale without rewriting its retained JSON.
+with its own normal close box. A running snapshot remains live while its producer PID is alive. After that
+process disappears and the five-second abandonment deadline has expired it is
+displayed as stale without rewriting retained JSON. PID reuse is not fenced by
+a stored process-start identity.
 
 The native shell loads the checked-in 192-pixel PNG derived from
 `gui/icons/rainbow-post.svg` before falling back to a system symbol, so the
@@ -570,8 +571,8 @@ Tabulator 6.5.2 is vendored under `gui/vendor/tabulator/` (MIT) so the desktop
 application remains offline-capable. Tabulator's virtual DOM paints only its
 viewport and buffer while retaining the complete result data. Its formatter
 queues preview IDs only when it paints a row through the Python bridge. A
-single-worker executor reads the indexed 18-word previews, and JavaScript polls
-the typed result batch until it can update visible rows. The result-table boundary
+single-worker executor reads the indexed 18-word previews. A blocking bridge
+reply wakes on future completion and returns the current-generation batch. The result-table boundary
 cancels native `selectstart`, and rows use `user-select: none` so file drags do
 not select card text. Tabulator handles modifier-click selection and virtual
 scrolling without custom pointer-range code. A single selected row displays its
@@ -587,9 +588,9 @@ predicate. Each accepted HTML render carries a viewer-generated per-render
 marker; cross-frame navigation keeps direct references only to marks bearing
 that marker, so email-provided IDs and CSS classes cannot redirect it. The
 current mark receives an inline, important orange style and scrolls immediately,
-after a short timer fallback, and after two animation frames. Image/font load,
+and after two actual animation frames, bounded by a failure deadline. Image/font load,
 error, and window-resize events remeasure the iframe and retain its active
-target in the outer message pane. Finder updates are debounced and re-render the
+target in the outer message pane. Finder updates coalesce in the same event turn and re-render the
 selected part with any existing part-local remote-content authorization. Finder,
 selection, part, and frame-identity generations discard stale responses and
 stale key continuations. The viewer waits for the parsed local iframe document,
@@ -626,8 +627,7 @@ packaged `configuration.yaml` is loaded into strict Pydantic models and exposes
 the initial `#fff59d` highlight background through the GUI status response;
 the color accepts only six-digit hexadecimal syntax before it reaches CSS.
 
-Search completion starts after three characters, waits 120 milliseconds after
-the latest keystroke, caps each address and subject group at 20 entries, and
+Search completion starts immediately after three characters, caps each address and subject group at 20 entries, and
 discards responses superseded by newer input. Address results rank by
 deduplicated message count and then last-seen date.
 
@@ -817,9 +817,11 @@ readers use `mode=ro` and recovery/editing explicitly request `mode=rw`.
 message through both display and canonical paths, without ingestion or recovery.
 New/Import, processing and identity controls now use the shared Python services.
 Windows leases use pinned non-reparse directory handles and LockFileEx; Windows
-publication flushes files and uses write-through renames with bounded retries for
-Windows sharing violations. Status writes use the same helper so GUI polling
-cannot permanently disable progress updates after a transient reader conflict.
+publication flushes files and uses write-through renames. Toolkit metadata
+readers request read/write/delete sharing so a held reader does not block
+replacement. An external reader denying that sharing causes explicit failure
+while preserving the old destination and replacement source; no retry delay
+is used. SQLite and canonical-mail readers retain their separate ownership rules.
 The stdlib MBOX subclass
 recognizes LF/CRLF separators independently of the host and writes framed bytes
 without stdlib newline translation. Temporary input files close before reopening.
@@ -850,8 +852,8 @@ The existing pinned certificate signer and bundle/install checks are adapted to
 x64. The Windows WinSparkle adapter shares update state/preferences and writer
 reservation with macOS Sparkle. A private tokenized loopback gateway validates
 complete feed signatures and selects only the Python x64 package identity.
-The SDK handles installer verification and confirmation; the app schedules daily
-checks in installed builds. Source launches permit manual checks only and refuse
+The SDK handles installer verification and confirmation; the app requests a check
+once when an installed application opens in installed builds. Source launches permit manual checks only and refuse
 installer execution. Help contains Check for Program Updates, Check for Anti-Virus
 Updates and Preferences.
 Actual SDK initialization and signed-feed filtering pass focused tests; an
@@ -932,8 +934,8 @@ With no jobs, live import workers, tracked writes or export cleanup,
 `request_quit` calls `os._exit(0)` immediately.
 Otherwise a daemon waiter gives all jobs, worker tails, tracked writes
 and non-UI private-export cleanup one monotonic
-`QUIT_TIMEOUT_SECONDS` budget of five seconds, then calls `os._exit(0)` even if
-they remain blocked; it exits sooner when workers finish. It does not destroy
+`QUIT_TIMEOUT_SECONDS` budget of five seconds. It calls `os._exit(1)` if work remains blocked, or `os._exit(0)` when all tracked
+work finishes sooner. It does not destroy
 windows, wait for UI callbacks, run atexit handlers or enter Python finalization.
 The native event loop remains available during the grace period. Sparkle's
 deferred/installing phases retain ownership of termination and relaunch.
@@ -985,7 +987,7 @@ Explicit status/report requests still calculate complete archive statistics.
 `make test-quit` exercises actual process termination, multi-job stop, rollback,
 partial-append recovery, native-source and loopback-HTTP message boundaries, and
 duplicate-free restart. `make test-native-quit` tests the real Cocoa About window
-during periodic status polling. Its existing `MAILARCHIVER_NATIVE_GUI_E2E` opt-in
+during event-driven status refresh. Its existing `MAILARCHIVER_NATIVE_GUI_E2E` opt-in
 flag requires a macOS GUI session. These tests use only disposable archives.
 
 ## Archive status banner
@@ -1056,8 +1058,8 @@ are consumed without publishing or clearing newer pending IDs. `make test-gui`
 uses real SQLite locking, archive replacement and missing-index failures to verify
 these boundaries without replacing the preview reader.
 
-An eight-worker application executor retains named import futures. Status/notice
-polls consume completed results and errors. Import futures remain tracked through
+An eight-worker application executor retains named import futures. Completion
+notifications trigger collection of results and errors. Import futures remain tracked through
 worker tails; cancellation of a queued import closes its controller job and lease.
 Quit stops admission, cancels queued work and waits on futures under the existing
 deadline. The independent watchdog, export cleanup and quit waiter remain outside
@@ -1120,3 +1122,37 @@ spans, and decoded children reuse their parent's cached bytes. `walk_mime` check
 depth/counts before scheduling children and propagates resource exhaustion rather
 than silently skipping IDs. The GUI discards the incomplete traversal/caches and
 offers Raw Source; raw reads and the initial stdlib parse still occur in memory.
+
+## Timing and status ownership
+
+The search state proxy publishes assignments to its state-change event. Completed
+and invalidated drag exports replace their Map so observers are awakened even
+when an unselected row's export changes no visible DOM. The real reader/export
+driver exercises that path through actual temporary EML files and copy-only tokens.
+
+`coordination.js` shares one pending status Promise per About/Ingests/options
+page. Concurrent refresh callers join actual settlement; `fresh()` joins older
+work before reading post-command state. Windows Preferences similarly coalesces
+state reads and waits for a fresh post-Check snapshot. Existing generation/edit guards remain responsible for preserving
+user input. Suggestion focus handling uses the actual blur/mousedown events;
+message layout uses animation frames and existing resource-load callbacks.
+
+Connectivity, scanner, command supervisor, asset server, feed gateway and
+WinSparkle scheduler cleanup check actual liveness after their bounded joins.
+Scanner plaintext resources and native updater objects remain owned when their
+workers cannot stop. Application resource teardown attempts remaining independent
+cleanup and reports accumulated errors. These checks do not impose a hard deadline
+on arbitrary blocking filesystem calls or synchronous native SDK cleanup.
+
+Scanner close uses a dedicated teardown lock, separately from its short IPC/state
+locks. A concurrent failure cannot interpret detached ownership as completed
+termination or release runtime files while another closer is joining the process.
+
+`native_javascript.py` adapts the pinned Cocoa and initialized WebView2 evaluation
+methods. Per-window futures settle once, are released on Close and reject late
+publication after abandonment. Evaluations queue onto the native UI thread;
+callers wait off that thread with a final 15-second failure limit. WebView2
+continuation faults propagate rather than stranding the SDK semaphore. Cocoa
+retains the SDK's separately delivered Promise results and distinguishes WebKit's
+unsupported immediate result from execution errors. Actual Windows execution
+remains a separate VM acceptance requirement.

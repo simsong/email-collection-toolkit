@@ -17,11 +17,10 @@ from pathlib import Path
 import ssl
 import subprocess
 import sys
-from threading import Event
-from time import monotonic
 
 import pytest
 
+from mailarchiver.file_events import wait_for_path_state
 from mailarchiver.clamav_update import EICAR
 from mailarchiver.scanner import ClamScanner, scanner_availability
 
@@ -71,10 +70,7 @@ def test_windows_scanner_exits_after_abrupt_owner_death(tmp_path: Path) -> None:
     native.CloseHandle.argtypes = [w.HANDLE]
     worker_handle = None
     try:
-        deadline = monotonic() + 45
-        while not marker.exists() and monotonic() < deadline:
-            assert owner.poll() is None
-            Event().wait(0.05)
+        wait_for_path_state([marker], lambda: marker.exists() and bool(marker.read_text()), timeout=45)
         assert marker.exists(), "Scanner owner did not finish startup"
         worker_handle = native.OpenProcess(0x100000, False, int(marker.read_text()))
         assert worker_handle

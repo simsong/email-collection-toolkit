@@ -2,6 +2,7 @@
 
 """Issue #91: persistent tracks and installation exclude all application writers."""
 
+from importlib.metadata import version
 from pathlib import Path
 from threading import enumerate as running_threads
 
@@ -12,6 +13,21 @@ from mailarchiver.gui_app import PyWebViewApplication
 from mailarchiver.release_versions import release_metadata
 from mailarchiver.updates import UpdateService, UpdateStatus, allowed_channels, default_channel
 from mailarchiver.writer_lock import ArchiveBusyError, WriterLease
+
+
+def test_update_status_notifications_are_instance_owned() -> None:
+    """DESKTOP: unbound status is usable and a bound observer receives actual field changes."""
+    installed = version("mailarchiver")
+    status = UpdateStatus(version=installed, channel=default_channel(installed))
+    status.phase = "idle"
+    changes: list[str] = []
+    service = UpdateService(status, lambda: False, changed=lambda: changes.append(status.phase))
+    service.status.phase = "checking"
+    service.status.phase = "checking"
+    assert changes == ["checking"]
+    independent = UpdateStatus(version=installed, channel=default_channel(installed))
+    independent.phase = "idle"
+    assert changes == ["checking"]
 
 
 @pytest.mark.parametrize("installed,expected", [("1.0.0a10", "preview"), ("1.0.0b1", "preview"), ("1.0.0", "release")])

@@ -6,6 +6,10 @@ description = "Changes to the Email Collection Toolkit website, separate from ap
 
 ## 2026-11-07
 
+- Refresh synthetic search/import screenshots for alpha 59 after timing repairs.
+- Explain that warning banners stay expanded until manually collapsed or dismissed.
+
+
 - Explain window-specific import notices and dismissible extra-file warnings.
   Refresh the synthetic search and import screenshots for alpha 57.
 

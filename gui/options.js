@@ -7,6 +7,7 @@ let saving = false;
 let dirty = false;
 let initialized = false;
 let refreshGeneration = 0;
+const optionsRefresh = new RefreshTask(readOptions);
 
 function render(state, replace = false) {
   if (!dirty || replace) {
@@ -27,7 +28,9 @@ function controls() {
   }
 }
 
-async function refreshOptions() {
+function refreshOptions() { return optionsRefresh.run(); }
+
+async function readOptions() {
   if (saving) return;
   const generation = ++refreshGeneration;
   try {
@@ -73,4 +76,6 @@ function initialize() {
   refreshOptions();
 }
 window.addEventListener("pywebviewready", initialize);
-window.setInterval(() => { initialize(); if (initialized) refreshOptions(); }, 1000);
+window.addEventListener("mailarchiver-status-changed", () => { if (initialized) optionsRefresh.changed(); });
+window.addEventListener("focus", () => { if (initialized) optionsRefresh.changed(); });
+initialize();

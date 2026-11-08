@@ -85,7 +85,6 @@ jobs:
               break
             fi
             if [[ "$attempt" -eq 6 ]]; then exit 1; fi
-            sleep "$attempt"
           done
           platform_args="--platform macos"
           windows_asset="$(gh release view "$appcast_tag" --repo "$GITHUB_REPOSITORY" \
