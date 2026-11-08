@@ -356,6 +356,8 @@ The Ingests window provides **Import Directory…**, bound to its own archive ev
 when another archive is active. It opens the source picker directly, then
 uses the same owner-names setup, confirmation, and writer lease as File Import.
 The button is disabled during an import or while its dialogs are pending.
+Archive checkpoint progress reads **Verifying archived messages and saving
+checksums**, describing local preservation work without implying online publication.
 The same window offers **Suspend Import** for its own active archive and
 **Continue Import** for interrupted or failed work. Suspension is cooperative:
 show that current work is finishing until its checkpoints are saved and the

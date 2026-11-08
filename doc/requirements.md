@@ -25,6 +25,9 @@ platform acceptance and deferred work.
 
 ## Shared boundaries
 
+- Archive checkpoint progress describes local message verification and checksum
+  saving in plain language. See [desktop](requirements/DESKTOP.md).
+
 - Result-wait expiry remains an explicit typed GUI error; later actual completion
   can be retrieved on an explicit retry. Importer ownership begins before native
   notification setup, and PST work liveness is independent of diagnostic history.

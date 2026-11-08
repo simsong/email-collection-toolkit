@@ -6,6 +6,14 @@ Entries describe their recorded revisions. For current behavior use the
 [user manual](USER_MANUAL.md) and [CLI reference](CLI_REFERENCE.md). Retired
 Rust delivery plans and historical package checks are not current acceptance.
 
+## 1.0.0a62 — clarify alpha testing and archive verification
+
+- Label local archive checkpoint work **Verifying archived messages and saving
+  checksums** instead of “publishing archive integrity.”
+- Clarify in the README and website that alpha testing is welcome, source mail
+  remains unchanged, and the archive file format is stable. Usability and
+  performance work still prevent production readiness.
+
 ## 1.0.0a61 — enforce event-wait failure boundaries
 
 - Enforce filesystem predicate deadlines even while file notifications remain ready.

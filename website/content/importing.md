@@ -164,6 +164,13 @@ separates downloading/importing from processing and reports its own finished-tas
 count. Several processing tasks can belong to one email. IMAP source progress is
 reported as download partitions rather than files.
 
+**Verifying archived messages and saving checksums** means the application is
+checking saved message bytes and updating the archive's local integrity files,
+message inventory, and checksum manifests. This step reads the whole archive,
+so it can take time even after a small import while download workers are idle.
+It does not upload or share your email. The download percentage does not measure
+this final step.
+
 
 **Messages requiring processing** counts archived emails with unfinished work, once
 per email even when several body or attachment tasks remain. Pending, running,

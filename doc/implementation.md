@@ -48,6 +48,10 @@ platform acceptance and deferred work.
 
 ## Shared boundaries
 
+- Archive checkpoint events display **Verifying archived messages and saving
+  checksums** while refreshing local integrity records and manifests.
+  See [archive](implementation/ARCHIVE.md).
+
 - Filesystem predicate waits check the remaining deadline before each native wait;
   a ready notification cannot extend an expired budget. Browser acceptance callbacks
   publish `mailarchiver-state-changed` when changing private counters or captured

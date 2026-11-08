@@ -6,6 +6,10 @@ description = "Changes to the Email Collection Toolkit website, separate from ap
 
 ## 2026-11-08
 
+- Explain that the toolkit is safe for alpha testing, with unchanged source mail
+  and a stable archive file format; usability and performance still need work
+  before production use.
+- Explain local message verification and checksum saving during import finalization.
 - Refresh synthetic search/import screenshots for alpha 60 after review repairs.
 
 ## 2026-11-07

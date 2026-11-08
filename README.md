@@ -8,8 +8,13 @@ standard MBOX files inside a native BagIt 1.0 / Mailbag 1.0 package, records
 where each message came from, and uses SHA-256 hashes to check integrity.
 Its local search index can be discarded and rebuilt.
 
-**This program is under active development. Do not use it operationally until
-version 1.0 ships.**
+**Email Collection Toolkit is in alpha testing and is safe to test with your email.**
+Imports leave your source files and mail accounts unchanged. The archive file
+format is stable: original message data is preserved in standard MBOX files
+inside a BagIt / Mailbag package, with SHA-256 checksums to detect corruption.
+
+The application is not yet ready for production use because usability and
+performance are still being improved. Testing and feedback are welcome.
 
 Progress and window updates follow actual work and native change notifications.
 Warnings stay expanded until you collapse or dismiss them. When enabled, installed
@@ -205,8 +210,8 @@ Versions follow the semantic-versioning pattern **MAJOR.MINOR.PATCH**:
 
 During development, a numbered `a` or `b` suffix marks an alpha or beta, such as
 `1.0.0a1` or `1.0.0b1`. Higher numbers advance that preview series; beta follows
-alpha, and the unsuffixed `1.0.0` is the stable release. Previews are for testing
-and may change before the stable release.
+alpha, and the unsuffixed `1.0.0` is the production release. Preview application
+interfaces and performance may change; the archive file format is already stable.
 
 ### Program updates
 
