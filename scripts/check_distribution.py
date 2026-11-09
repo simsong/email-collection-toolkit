@@ -91,6 +91,27 @@ def install_and_smoke(uv: str, artifact: Path, root: Path) -> None:
                 f"{result.stdout}{result.stderr}"
             )
 
+    # CLI acceptance: an installed artifact must complete the user workflow outside a checkout.
+    source = environment / "synthetic.eml"
+    raw = (b"From: owner@example.org\nTo: other@example.org\nMessage-ID: <installed@example.org>\n"
+           b"Date: Fri, 01 May 2026 10:00:00 +0000\nSubject: Installed archive fixture\n\n"
+           b"From preserved installed bytes\n")
+    source.write_bytes(raw)
+    collection = environment / "collection.mailarchive"
+    commands = (
+        ("ect-create", str(collection), "--owner", "owner@example.org"),
+        ("ect-import", "--archive", str(collection), "--no-scan", "--workers", "1", str(source)),
+        ("ect", "import", "--archive", str(collection), "--no-scan", "--workers", "1", str(source)),
+        ("ect", "verify", str(collection)),
+    )
+    for command, *arguments in commands:
+        subprocess.run([str(environment / "bin" / command), *arguments], check=True,
+                       cwd=root, capture_output=True, text=True, timeout=60)
+    found = subprocess.run([str(environment / "bin/ect-search"), "--archive", str(collection), "installed"],
+                           check=True, cwd=root, capture_output=True, text=True, timeout=30)
+    assert found.stdout.count("Installed archive fixture") == 1, found.stdout
+    assert source.read_bytes() == raw
+
     # Exercise resource lookup from the installed artifact, outside the checkout.
     subprocess.run([str(python), "-I", "-c",
         "from importlib.util import find_spec; "
