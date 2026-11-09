@@ -600,6 +600,44 @@ def test_imap_connection_cap_preserves_processing_workers(imap_archive: Path, im
     assert not verify_archive(imap_archive)
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX signal injection; native Windows console acceptance remains separate")
+@pytest.mark.parametrize("command", ["imap", "import", "shortcut"])
+@pytest.mark.parametrize("skip", [0, 1], ids=["discovery", "download"])
+@pytest.mark.parametrize("imap_server", ["interruptible"], indirect=True)
+def test_connection_backoff_cli_reports_reason_and_ctrl_c_checkpoints(imap_archive: Path,
+        imap_inbox: DisposableImap, tmp_path: Path, command: str, skip: int) -> None:
+    """ACQUISITION: public CLIs report zero-download backoff once and promptly checkpoint Ctrl-C."""
+    assert isinstance(imap_inbox, InterruptibleImap) and imap_inbox.account is not None
+    imap_inbox.fault = ImapFault(command=b" AUTHENTICATE PLAIN", mode="reject", skip=skip,
+                               refusal=b"NO [ALERT] " + b"policy explanation " * 8 + b"Too many simultaneous connections.")
+    driver = "from mailarchiver import imap_source\nimap_source.IMAP_RETRY_INITIAL = 60.0\n" + CLI_DRIVER.replace(
+        "from mailarchiver.imap_cli import main", "from mailarchiver.cli import main")
+    if command == "shortcut":
+        driver = driver.replace("raise SystemExit(main())", "sys.argv[0] = 'ect-import'\nraise SystemExit(main())")
+    arguments = ([] if command == "shortcut" else [command]) + ["--archive", str(imap_archive), "--no-scan", "--workers", "1"]
+    if command != "imap":
+        arguments.append("--imap")
+    output = tmp_path / "backoff.log"
+    with output.open("wb") as log:
+        process = subprocess.Popen([sys.executable, "-c", driver, *arguments], stdout=log, stderr=log, start_new_session=True)
+        try:
+            marker = "IMAP server busy; retrying in 60s:"
+            wait_for_path_state([output], lambda: marker in output.read_text(), timeout=10)
+            assert totals(imap_archive).archived == 0
+            os.killpg(process.pid, signal.SIGINT)
+            assert process.wait(timeout=3) == 130, output.read_text()
+        finally:
+            if process.poll() is None:
+                process.kill()
+                process.wait(timeout=5)
+    diagnostic = output.read_text()
+    assert diagnostic.count(marker) == 1 and "Too many simultaneous connections" in diagnostic
+    assert "Traceback" not in diagnostic and "demopass" not in diagnostic
+    assert read_ingest_history(imap_archive).statuses[0].state == "interrupted"
+    assert resume_request(imap_archive, True, True).roots
+    assert password_for(imap_inbox.account) == "demopass"
+
+
 def test_ect_import_uses_saved_imap_sources(imap_archive: Path, imap_inbox: DisposableImap) -> None:
     """ACQUISITION: the unified CLI runs real TLS IMAP and resumes without duplicate messages."""
     from mailarchiver.cli import main as ect_main  # pylint: disable=import-outside-toplevel

@@ -60,12 +60,17 @@ server reason without exposing plaintext, escaped passwords or SASL payloads.
 Temporary server capacity/rate-limit refusals during session initialization shall
 keep imports running and retry after 1, 2, 4, 8 seconds, capping the delay at 60 seconds
 until accepted or cancelled. Show the sanitized reason and backoff as progress,
-close each refused connection before waiting, and wake immediately on Suspend/Quit.
+close each refused connection before waiting, and wake immediately on Suspend/Quit
+or console Ctrl-C, including main-thread discovery on Windows Python3.12.
+Both public IMAP CLI paths must show changed retry phases, including the sanitized
+reason and next delay, even while download totals remain unchanged.
 Classify the original response before redacting or truncating diagnostics; a
 password matching a response word must not change retry behavior. Do not blame or
 replace the password. Credential-only checks make one attempt and
 exit 75 for temporary refusal. Actual credential rejection remains a concise failure
-without a traceback. Provide a separate saved **Maximum IMAP connections per account**
+without a traceback. While replacement login validation is pending, account and
+password fields are locked, and Cancel/Escape cannot dismiss its dialog; after completion, normal cancellation resumes.
+Provide a separate saved **Maximum IMAP connections per account**
 preference: default 8, whole numbers 1–15. Apply it per account when starting or
 continuing an import, retaining all configured workers for message processing. Other mail clients can
 consume server slots; backoff handles those refusals without ending the import.

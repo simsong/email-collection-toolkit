@@ -36,7 +36,8 @@ from .archive_config import load_archive_config, save_archive_config
 from .imap_credentials import password_for, save_password
 from .imap_models import ImapAccount, ImapTotals
 from .imap_protocol import ImapAuthenticationError, ImapPaused, ImapSession
-from .imap_source import imap_locator
+from .imap_source import IMAP_BUSY_PHASE, imap_locator
+from .ingest_status import latest_ingest_status
 from .imap_state import totals
 from .owner_rules import OwnerRules
 from .sqlite_paths import sqlite_uri
@@ -76,18 +77,26 @@ class SyncReporter:
         self.finished = Event()
         self.observer: PathObserver | None = None
         self.last_running: ImapTotals | None = None
+        self.last_retry_phases: tuple[str, ...] = ()
         self.failure: Exception | None = None
 
     def display(self, status: str) -> None:
         current = totals(self.archive)
-        if status == "running" and current == self.last_running:
+        latest = latest_ingest_status(self.archive)
+        retries = tuple(sorted({phase for phase in (latest.phase, *(worker.phase for worker in latest.workers))
+                                if phase.startswith(IMAP_BUSY_PHASE)})) if latest and latest.state == "running" else ()
+        if status == "running" and current == self.last_running and retries == self.last_retry_phases:
             return
         self.last_running = current
+        changed = tuple(phase for phase in retries if phase not in self.last_retry_phases)
+        self.last_retry_phases = retries
         difference = ImapTotals(archived=current.archived - self.baseline.archived,
             duplicates=current.duplicates - self.baseline.duplicates,
             excluded=current.excluded - self.baseline.excluded, errors=current.errors - self.baseline.errors)
         print(f"{status}: newly archived={difference.archived} duplicate downloads={difference.duplicates} "
               f"excluded={difference.excluded} errors={difference.errors}", file=sys.stderr, flush=True)
+        for phase in changed:
+            print(phase, file=sys.stderr, flush=True)
 
     def _messages(self) -> None:
         if not self.show_messages:

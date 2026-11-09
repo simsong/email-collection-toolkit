@@ -49,10 +49,14 @@ async function initialize() {
       return option;
     }));
     byId("imap-password-status").textContent = "";
+    byId("cancel-imap-password").textContent = "Cancel";
     byId("imap-password-dialog").showModal();
     byId("imap-password").focus();
   });
   byId("cancel-imap-password").addEventListener("click", () => byId("imap-password-dialog").close());
+  byId("imap-password-dialog").addEventListener("cancel", event => {
+    if (byId("save-imap-password").disabled) event.preventDefault();
+  });
   byId("imap-password-dialog").addEventListener("close", () => { byId("imap-password").value = ""; });
   byId("imap-password-form").addEventListener("submit", updateImapPassword);
   byId("install-antivirus").addEventListener("click", () => window.pywebview.api.install_antivirus());
@@ -103,6 +107,9 @@ async function readHistory() {
 
 async function updateImapPassword(event) {
   event.preventDefault();
+  if (byId("save-imap-password").disabled) return;
+  byId("imap-account").disabled = true;
+  byId("imap-password").disabled = true;
   byId("save-imap-password").disabled = true;
   byId("cancel-imap-password").disabled = true;
   byId("imap-password-status").textContent = "Testing login…";
@@ -116,6 +123,8 @@ async function updateImapPassword(event) {
     byId("imap-password-status").textContent = String(error?.message || error);
   } finally {
     byId("imap-password").value = "";
+    byId("imap-account").disabled = false;
+    byId("imap-password").disabled = false;
     byId("save-imap-password").disabled = false;
     byId("cancel-imap-password").disabled = false;
   }

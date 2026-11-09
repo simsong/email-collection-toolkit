@@ -444,10 +444,17 @@ reducing the configured processing worker pool. `make test-imap-auth`
 covers real TLS replies, automatic retry, cancellation, credential-only
 immutability, replacement safety, connection counts and the shipped browser form.
 Both desktop Ingests entry points expose the same explicit bridge methods used by
-the browser recovery test. Initial discovery rejection saves the accepted source
+the browser recovery test. The password dialog locks account/password controls,
+rejects duplicate submission and blocks native cancel/Escape while its Test and Save call is pending and restores ordinary cancellation afterward. Initial discovery rejection saves the accepted source
 request before pipeline creation, allowing password repair and Continue Import
 after application restart without losing the chosen import policy. Early backoff
-cancellation also persists the request before pipeline initialization.
+cancellation also persists the request before pipeline initialization. Backoff
+uses `await_activity` with cancellation futures and the existing native console
+notification, including discovery on the CLI main thread. `SyncReporter` reads
+current status phases and emits changed retry reasons/delays independently of
+unchanged download totals. Retry phases retain up to600 printable characters in
+status, while the terminal dashboard keeps its normal short labels. Ingests history treats unreadable account configuration
+as an unavailable account list while retaining saved status records.
 
 Strict `ImapAccount` records live in `config.yaml.imap_sources`; nonempty lists
 select configuration version 3. Existing version-1/2 files remain readable. The

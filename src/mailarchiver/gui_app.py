@@ -659,9 +659,13 @@ class IngestWindowApi:
         resumable = bool(job is None and self._application is not None
                          and not (statuses and statuses[0].state == "running")
                          and unfinished_work(self.archive).incomplete)
+        try:
+            accounts = [account for account in load_archive_config(self.archive).imap_sources if account.enabled]
+        except (OSError, ValueError):
+            accounts = []  # Saved history remains readable when account configuration is unavailable.
         return GuiIngestHistory(statuses=statuses, errors=history.errors, starting=starting,
                                 active=job is not None, suspending=bool(job and job.stop.is_set()),
-                                imap_accounts=[account for account in load_archive_config(self.archive).imap_sources if account.enabled],
+                                imap_accounts=accounts,
                                 can_resume=job is None and resumable and self._application is not None).model_dump(mode="json")
 
     def update_imap_password(self, source_id: str, password: str) -> bool:

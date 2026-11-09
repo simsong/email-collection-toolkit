@@ -61,12 +61,34 @@ def test_password_replacement_form_checks_real_login_before_saving(imap_archive:
         assert password_for(account) == "old-password"
         expect(page.locator("#imap-password")).to_have_value("")
         page.get_by_label("New password or app password").fill("demopass")
+        # Hold only native-bridge delivery; the released call still validates real TLS
+        # and updates the disposable vault through the production password method.
+        page.evaluate("""() => {
+          const original = pywebview.api.update_imap_password;
+          pywebview.api.update_imap_password = (...args) => new Promise((resolve, reject) => {
+            window.releasePasswordValidation = () => original(...args).then(resolve, reject);
+          });
+        }""")
         page.get_by_role("button", name="Test and Save").click()
+        expect(page.locator("#imap-password-status")).to_have_text("Testing login…")
+        expect(page.locator("#imap-account")).to_be_disabled()
+        expect(page.locator("#imap-password")).to_be_disabled()
+        page.keyboard.press("Escape")
+        expect(page.locator("#imap-password-dialog")).to_be_visible()
+        expect(page.get_by_role("button", name="Cancel", exact=True)).to_be_disabled()
+        assert password_for(account) == "old-password"
+        page.evaluate("window.releasePasswordValidation()")
         expect(page.locator("#imap-password-status")).to_contain_text("Login succeeded. Password saved.")
         assert password_for(account) == "demopass"
+        expect(page.locator("#imap-account")).to_be_enabled()
+        expect(page.locator("#imap-password")).to_be_enabled()
         expect(page.locator("#imap-password")).to_have_value("")
         page.screenshot(path=str(tmp_path / "imap-password.png"))
         page.get_by_role("button", name="Close", exact=True).click()
+        expect(page.locator("#imap-password-dialog")).not_to_be_visible()
+        page.get_by_role("button", name="Update IMAP Password…").click()
+        expect(page.get_by_role("button", name="Cancel", exact=True)).to_be_enabled()
+        page.keyboard.press("Escape")
         expect(page.locator("#imap-password-dialog")).not_to_be_visible()
         page.get_by_role("button", name="Continue Import", exact=True).click()
         wait_for_import(api)

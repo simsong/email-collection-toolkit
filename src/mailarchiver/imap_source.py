@@ -16,6 +16,7 @@ Fundamental dependents:
 from __future__ import annotations
 
 from collections.abc import Callable, Generator, Iterator
+from concurrent.futures import Future
 from hashlib import sha256
 from contextlib import ExitStack, closing
 from math import ceil
@@ -27,7 +28,7 @@ from urllib.parse import parse_qs, quote, urlencode, urlparse
 from pydantic import BaseModel, Field
 
 from .archive_config import load_archive_config
-from .change_signal import ChangeEvent
+from .change_signal import ActivityCallback, ChangeEvent, await_activity
 from .imap_credentials import password_for
 from .imap_models import ImapAccount, ImapDownload, ImapMailbox, ImapMessageMetadata
 from .imap_preferences import DEFAULT_IMAP_CONNECTIONS
@@ -43,6 +44,21 @@ from .sqlite_paths import sqlite_uri
 UID_SEARCH_WINDOW = 65536
 IMAP_RETRY_INITIAL = 1.0
 IMAP_RETRY_MAXIMUM = 60.0
+IMAP_BUSY_PHASE = "IMAP server busy;"
+
+
+def _backoff_cancelled(cancellation: ChangeEvent, delay: float) -> bool:
+    """Wake for native console signals as well as worker/GUI cancellation, without polling."""
+    result: Future[bool] = Future()
+
+    def check() -> None:
+        if cancellation.is_set() and not result.done():
+            result.set_result(True)
+
+    try:
+        return await_activity(result, ActivityCallback(check, (cancellation.changed,)), delay)
+    except TimeoutError:
+        return False
 
 
 def normalize_download(raw: bytes, metadata: ImapMessageMetadata) -> tuple[bytes, ImapMessageMetadata]:
@@ -119,9 +135,9 @@ class ImapSourcePlugin(SourcePlugin):
             except ImapServerBusy as error:
                 detail = error.detail
             yield ProgressEvent(work_id=work_id,
-                                phase=f"IMAP server busy; retrying in {delay:g}s: {detail}")
+                                phase=f"{IMAP_BUSY_PHASE} retrying in {delay:g}s: {detail}")
             # This user-requested retry deadline also wakes immediately for Suspend/Quit.
-            if self.cancellation.wait(delay):
+            if _backoff_cancelled(self.cancellation, delay):
                 return None
             delay = min(delay * 2, IMAP_RETRY_MAXIMUM)
         return None

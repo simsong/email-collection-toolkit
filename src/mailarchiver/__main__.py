@@ -50,6 +50,7 @@ from tabulate import tabulate
 from .scan_evidence import ScanEvidence, ScanFailure
 from .future_coordinator import BoundedWorkers, FutureCoordinator, WORKER_NUMBER
 from .application import configured_imap_connections, configured_workers, validate_ingest_paths
+from .imap_source import IMAP_BUSY_PHASE
 from .imap_preferences import ImapConnectionLimit
 from .worker_preferences import half_cpus, worker_argument
 from .archive_integrity import ArchiveIntegrityWarning, MailbagArchiveIntegrityControls
@@ -471,10 +472,10 @@ def formatted_duration(seconds: float) -> str:
     return " ".join(fields)
 
 
-def safe_status_text(value: str) -> str:
+def safe_status_text(value: str, *, limit: int = 80) -> str:
     """Collapse untrusted plug-in status text to one bounded printable line."""
     printable = "".join(character if character.isprintable() else " " for character in value)
-    return " ".join(printable.split())[:80] or "working"
+    return " ".join(printable.split())[:limit] or "working"
 
 
 def overall_progress(state: ProgressState, now: float) -> OverallProgress:
@@ -636,7 +637,7 @@ class ProgressReporter:
 
     def record_plugin_event(self, event: ProgressEvent, path: Path | str, *, source_kind: str | None = None) -> None:
         """Render a typed plug-in event without letting plug-ins print directly."""
-        phase = safe_status_text(event.phase)
+        phase = safe_status_text(event.phase, limit=600 if event.phase.startswith(IMAP_BUSY_PHASE) else 80)
         if event.unit == "bytes" and event.completed is not None and event.total is not None:
             self._send(phase, path, event.completed, event.total, operation="downloading" if source_kind == "imap" else "importing")
             return
@@ -974,7 +975,7 @@ class ProgressReporter:
             top_line = self._fit(overall_line(self.state, now), self.terminal_columns).ljust(self.terminal_columns)
             lines = [
                 f"{TOP_LINE_STYLE}{top_line}{ANSI_RESET}",
-                f"mailarchiver ingest  [{display_label}]",
+                f"mailarchiver ingest  [{safe_status_text(display_label)}]",
                 (f"Processed: {state.processed:,} messages in {state.files_processed:,} files  "
                 f"Rate: {state.processed / elapsed:.2f} messages/s  Elapsed: {elapsed:.0f}s"),
                 f"Workers:   {active:,} active; peak {state.peak_active_files:,}; {len(state.workers):,} configured",
@@ -2175,7 +2176,7 @@ def _run_ingest(request: IngestRequest, writer_lease: WriterLease, outcome: Inge
                     if report_skipped:
                         progress.record_skipped_file(item.source.display_name, item.detail)
                 elif isinstance(item, ProgressEvent):
-                    progress.display(safe_status_text(item.phase))
+                    progress.display(safe_status_text(item.phase, limit=600 if item.phase.startswith(IMAP_BUSY_PHASE) else 80))
                 else:
                     raise TypeError(
                         f"source plug-in {plugin.manifest.kind} yielded unsupported {type(item).__name__}"

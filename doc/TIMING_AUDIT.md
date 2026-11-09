@@ -16,7 +16,9 @@ The November 8 IMAP follow-up explicitly authorizes one exception: temporary
 server-capacity refusals use cancellation-aware exponential backoff, starting at
 one second and capped at 60 seconds. This wait throttles rejected connections;
 it never establishes successful authentication or completion. Suspend/Quit wakes
-the framework cancellation Event immediately. Other timer restrictions remain.
+framework cancellation immediately; discovery also observes the existing native
+console notification through the shared future waiter, avoiding Windows3.12
+Event.wait signal delays. Other timer restrictions remain.
 
 ## Alpha 61 — reported CI and deadline repair
 

@@ -662,7 +662,7 @@ test-imap:
 
 # Authenticate to disposable TLS servers; check diagnostics, vault updates and the real password form.
 test-imap-auth:
-	uv run --locked pytest -q tests/test_imap.py -k 'login_rejections or server_echoed or credentials_only or gui_replacement or connection_cap or connection_backoff or connection_limit or shared_cli_login' $(PYTEST_ARGS)
+	uv run --locked pytest -q tests/test_imap.py tests/test_gui_processing.py::test_history_labels_preserve_saved_imap_locators -k 'login_rejections or server_echoed or credentials_only or gui_replacement or connection_cap or connection_backoff or connection_limit or shared_cli_login or history_labels_preserve_saved_imap_locators' $(PYTEST_ARGS)
 	uv run --locked pytest -q --browser chromium e2e_tests/test_imap_pause.py -k 'password or connection_backoff' $(PYTEST_ARGS)
 
 # Quiet legacy timeout presentation and real pause/Resume traffic-light rendering.
@@ -935,8 +935,8 @@ test-gui-processing: ruff
 	uv run --locked pylint $(IDENTITY_SEARCH_CHECK_FILES)
 	uv run --locked ty check $(IDENTITY_SEARCH_CHECK_FILES) --error-on-warning
 	uv run --locked pyright $(IDENTITY_SEARCH_CHECK_FILES) --warnings
-	uv run --locked pytest -q tests/test_gui_processing.py tests/test_search_completion.py tests/test_mailsearch.py
-	uv run --locked pytest -q --browser chromium e2e_tests/test_gui_processing.py
+	uv run --locked pytest -q tests/test_gui_processing.py tests/test_search_completion.py tests/test_mailsearch.py $(PYTEST_ARGS)
+	uv run --locked pytest -q --browser chromium e2e_tests/test_gui_processing.py $(PYTEST_ARGS)
 
 .PHONY: website-preview-screenshots
 website-preview-screenshots: website-build-check

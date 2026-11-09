@@ -6,6 +6,14 @@ Entries describe their recorded revisions. For current behavior use the
 [user manual](USER_MANUAL.md) and [CLI reference](CLI_REFERENCE.md). Retired
 Rust delivery plans and historical package checks are not current acceptance.
 
+## 1.0.0a70 — IMAP review and recovery fixes
+
+- Prevent Escape from dismissing password validation while a vault update is pending.
+- Print changed connection-backoff reasons and delays in public IMAP CLI paths.
+- Integrate native console notifications into discovery backoff, retaining worker
+  cancellation and checkpointed Ctrl-C handling. Native Windows acceptance remains separate.
+- Keep Ingests history readable when source account configuration is invalid.
+
 ## 1.0.0a69 — preserve CLI authentication reasons
 
 - Retain full sanitized server authentication reasons and replacement guidance in

@@ -733,6 +733,7 @@ def test_history_labels_preserve_saved_imap_locators(tmp_path: Path, configurati
     snapshots = {path: path.read_bytes() for path in (archive / "status").glob("ingest-*.json")}
     before = read_ingest_history(archive)
     history = GuiIngestHistory.model_validate(IngestWindowApi(archive).history())
+    assert len(history.imap_accounts) == (1 if configuration == "present" else 0)
     for status in history.statuses:
         original = next(item for item in before.statuses if item.status_id == status.status_id)
         assert status.source_roots == original.source_roots

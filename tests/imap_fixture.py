@@ -190,6 +190,7 @@ class DisposableImap:
 class ImapFault(BaseModel):
     command: bytes
     mode: Literal["timeout", "disconnect", "partial", "malformed", "reject"]
+    refusal: bytes = b"NO [ALERT] Too many simultaneous connections."
     skip: int = 0
     response: bytes = b"invalid IMAP response\r\n"
 
@@ -224,7 +225,7 @@ class InterruptibleImap(DisposableImap):
                         else:
                             if fault.mode == "reject":
                                 self.fault = None
-                                writer.write(line.split()[0] + b" NO [ALERT] Too many simultaneous connections.\r\n")
+                                writer.write(line.split()[0] + b" " + fault.refusal + b"\r\n")
                                 await writer.drain()
                                 return
                             if fault.mode == "partial":
