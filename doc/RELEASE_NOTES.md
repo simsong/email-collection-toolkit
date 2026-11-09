@@ -6,6 +6,15 @@ Entries describe their recorded revisions. For current behavior use the
 [user manual](USER_MANUAL.md) and [CLI reference](CLI_REFERENCE.md). Retired
 Rust delivery plans and historical package checks are not current acceptance.
 
+## 1.0.0a69 — preserve CLI authentication reasons
+
+- Retain full sanitized server authentication reasons and replacement guidance in
+  both public import entry points, including accounts with long usernames.
+- Recognize temporary refusals before redaction/truncation, including passwords
+  that match words or response codes in the server’s explanation.
+- Treat malformed NO/BAD greetings as protocol failures even when they mention
+  connection limits; valid server refusals continue to back off.
+
 ## 1.0.0a68 — separate IMAP connection preference
 
 - Default to 8 IMAP connections per account, with an independent 1–15 setting in

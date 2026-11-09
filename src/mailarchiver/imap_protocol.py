@@ -44,10 +44,15 @@ class ImapAuthenticationError(ValueError):
                          "Use Update IMAP Password in Ingests or --set-password to validate a replacement.")
 
 
+def _response_detail(error: imaplib.IMAP4.error) -> str:
+    """Read response text for classification; callers must redact it before presentation."""
+    value = error.args[0] if error.args else "Login rejected without a server explanation"
+    return value.decode("utf-8", errors="replace") if isinstance(value, bytes) else str(value)
+
+
 def authentication_detail(error: imaplib.IMAP4.error, username: str, password: str) -> str:
     """Retain the server's reason, redacting even an echoed SASL PLAIN credential."""
-    value = error.args[0] if error.args else "Login rejected without a server explanation"
-    detail = value.decode("utf-8", errors="replace") if isinstance(value, bytes) else str(value)
+    detail = _response_detail(error)
     plain = b"\x00" + username.encode("utf-8") + b"\x00" + password.encode("utf-8")
     # imaplib embeds BAD and malformed replies using repr(bytes), whose quote
     # choice depends on the complete reply rather than just the credential.
@@ -75,8 +80,10 @@ class ImapServerBusy(ImapPaused):
                          "The stored password has not been changed.")
 
 
-def temporary_refusal(detail: str) -> bool:
-    return any(reason in detail.casefold() for reason in (
+def temporary_refusal(error: imaplib.IMAP4.error) -> bool:
+    """Classify before redaction/truncation can erase a capacity word or response code."""
+    detail = _response_detail(error).casefold()
+    return any(reason in detail for reason in (
         "[unavailable]", "[limit]", "too many simultaneous", "too many connections",
         "connection limit", "rate limit", "temporarily unavailable"))
 
@@ -115,8 +122,14 @@ class _ServerBye(imaplib.IMAP4.abort):
     """Retain structured BYE evidence when construction fails before the session owns its client."""
 
 
-class _CommandCompletion(Protocol):
+class _ServerRefusal(imaplib.IMAP4.error):
+    """A completed setup command returned an actual tagged refusal."""
+
+
+class _ClientSetup(Protocol):
     """Type imaplib's inspected runtime hook, which its public stubs omit."""
+
+    def _connect(self) -> None: ...
 
     def _command_complete(self, name: str, tag: bytes) -> tuple[str, list[bytes]]: ...
 
@@ -124,15 +137,18 @@ class _CommandCompletion(Protocol):
 class _ImapClient(imaplib.IMAP4):
     """Retain setup refusals before constructor/STARTTLS wrappers discard their server data."""
 
-    def _command_complete(self, name: str, tag: bytes) -> tuple[str, list[bytes]]:
+    def _connect(self) -> None:
         try:
-            status, data = cast(_CommandCompletion, super())._command_complete(name, tag)
-        except imaplib.IMAP4.abort as error:
+            cast(_ClientSetup, super())._connect()
+        except imaplib.IMAP4.error as error:
             if self.response("BYE")[1] != [None]:
                 raise _ServerBye(*error.args) from None
             raise
+
+    def _command_complete(self, name: str, tag: bytes) -> tuple[str, list[bytes]]:
+        status, data = cast(_ClientSetup, super())._command_complete(name, tag)
         if status != "OK" and name in {"CAPABILITY", "STARTTLS"}:
-            raise self.error(data[-1] if data and data[-1] else f"{name} failed without a server explanation")
+            raise _ServerRefusal(data[-1] if data and data[-1] else f"{name} failed without a server explanation")
         return status, data
 
 
@@ -336,7 +352,7 @@ class ImapSession:
                 raise
             except imaplib.IMAP4.error as error:
                 detail = authentication_detail(error, self.account.username, self.password)
-                if temporary_refusal(detail):
+                if temporary_refusal(error):
                     raise ImapServerBusy(detail) from None
                 raise ImapAuthenticationError(self.account, detail) from None
             if self.authentication_only:
@@ -362,7 +378,7 @@ class ImapSession:
                 closed = isinstance(error, _ServerBye) or bool(
                     self.client is not None and self.client.response("BYE")[1] != [None])
                 failure: BaseException
-                if temporary_refusal(detail) and (not isinstance(error, imaplib.IMAP4.abort) or closed):
+                if (isinstance(error, _ServerRefusal) or closed) and temporary_refusal(error):
                     failure = ImapServerBusy(detail)
                 elif connection_interrupted(error) or closed:
                     reason = "timed out" if isinstance(connection_cause(error), TimeoutError) else "was interrupted"
@@ -408,9 +424,9 @@ class ImapSession:
     def _initial_ok(self, status: str, data: Sequence[bytes | None], command: str) -> None:
         """Retain setup refusals while the password is still available for redaction."""
         if status != "OK":
-            detail = authentication_detail(imaplib.IMAP4.error(next((part for part in reversed(data) if part), b"")),
-                                           self.account.username, self.password)
-            if temporary_refusal(detail):
+            error = imaplib.IMAP4.error(next((part for part in reversed(data) if part), b""))
+            detail = authentication_detail(error, self.account.username, self.password)
+            if temporary_refusal(error):
                 raise ImapServerBusy(detail)
             raise RuntimeError(f"IMAP {command} failed: {detail}")
 

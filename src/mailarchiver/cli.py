@@ -20,6 +20,7 @@ from pydantic import BaseModel
 
 from . import __main__ as engine
 from .archive_path import add_archive_argument, require_archive
+from .imap_protocol import ImapAuthenticationError
 
 
 class Command(BaseModel):
@@ -134,6 +135,9 @@ def main(argv: list[str] | None = None) -> int:
     except KeyboardInterrupt:
         print("Interrupted; completed archive work is retained.", file=sys.stderr)
         return 130
+    except ImapAuthenticationError as error:
+        print(f"{prog}: {error}", file=sys.stderr)
+        return 1
     except (OSError, ValueError, RuntimeError) as error:
         print(f"{prog}: {engine.safe_status_text(str(error))}", file=sys.stderr)
         return 1

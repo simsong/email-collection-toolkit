@@ -23,7 +23,8 @@ does not establish that every platform or release gate has passed.
   replacement passwords are tested before saving. Account acquisition uses
   a saved per-account limit (default 8, range 1–15) and cancellable capacity backoff while retaining the
   full processing worker pool. Protocol failures and private diagnostics
-  retain their distinct handling. See [acquisition](requirements/ACQUISITION.md).
+  retain their distinct handling, including malformed greetings and full CLI login
+  diagnostics. Retry classification precedes redaction. See [acquisition](requirements/ACQUISITION.md).
 
 - Source files and accounts are read-only. Preserve message bytes except the
   documented IMAP CRLF-to-LF acquisition policy, with original wire provenance.

@@ -422,11 +422,17 @@ message bytes. Credential-only checks retain one-attempt/exit-75 behavior.
 Initialization also replaces raw imaplib errors with sanitized exceptions of the
 same protocol category and suppresses private causes. Malformed parser aborts do
 not become capacity retries merely because their text includes capacity wording.
-The redactor covers raw, IMAP-escaped, Python bytes-repr and base64 credentials,
+Capacity classification uses original response text separately from bounded,
+redacted diagnostics, so a password matching a refusal word or code cannot erase
+retry evidence. The redactor covers raw, IMAP-escaped, Python bytes-repr and base64 credentials,
 including repr of the already IMAP-escaped wire value. The shared client command-
 completion boundary retains CAPABILITY/STARTTLS NO replies before imaplib can
 discard their reasons. A private protocol exception carries structured BYE
-evidence out of construction before the session can own the client. Both TLS
+evidence out of construction before the session can own the client. The constructor
+boundary retains actual BYE evidence; tagged setup refusals carry a separate marker.
+Invalid NO/BAD greetings therefore remain protocol errors, not capacity retries.
+The public ECT dispatcher prints complete sanitized authentication errors separately
+from its bounded generic status messages, preserving server reasons and repair guidance. Both TLS
 modes reuse stdlib handshakes; no duplicate commands or TLS bypass are introduced.
 Version-four application preferences store `imap_connections` separately from workers
 (default 8, strict whole-number range 1–15). CLI acquisition reads the current saved

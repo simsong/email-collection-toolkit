@@ -61,7 +61,9 @@ Temporary server capacity/rate-limit refusals during session initialization shal
 keep imports running and retry after 1, 2, 4, 8 seconds, capping the delay at 60 seconds
 until accepted or cancelled. Show the sanitized reason and backoff as progress,
 close each refused connection before waiting, and wake immediately on Suspend/Quit.
-Do not blame or replace the password. Credential-only checks make one attempt and
+Classify the original response before redacting or truncating diagnostics; a
+password matching a response word must not change retry behavior. Do not blame or
+replace the password. Credential-only checks make one attempt and
 exit 75 for temporary refusal. Actual credential rejection remains a concise failure
 without a traceback. Provide a separate saved **Maximum IMAP connections per account**
 preference: default 8, whole numbers 1–15. Apply it per account when starting or
@@ -71,7 +73,10 @@ This includes tagged temporary refusals during post-login CAPABILITY/ENABLE.
 STARTTLS refusals and valid BYE responses during constructor CAPABILITY also retain
 their server reasons and back off. Protocol classification must use structured
 BYE evidence even when construction has not returned a client object.
-Malformed replies remain protocol failures even if their text mentions capacity.
+Malformed replies, including invalid NO/BAD greetings, remain protocol failures
+even if their text mentions capacity. Every public IMAP import entry point must
+retain the sanitized server reason and password-replacement guidance without
+truncating it to a progress-status line.
 Diagnostics must also redact Python bytes-repr forms of credentials, including
 escaped quotes, backslashes and UTF-8 bytes, without exposing an unsanitized cause.
 
