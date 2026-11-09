@@ -48,8 +48,13 @@ def authentication_detail(error: imaplib.IMAP4.error, username: str, password: s
     value = error.args[0] if error.args else "Login rejected without a server explanation"
     detail = value.decode("utf-8", errors="replace") if isinstance(value, bytes) else str(value)
     plain = b"\x00" + username.encode("utf-8") + b"\x00" + password.encode("utf-8")
-    secrets = (password, password.replace("\\", "\\\\").replace('"', '\\"'),
-               base64.b64encode(plain).decode("ascii"), base64.b64encode(password.encode()).decode("ascii"))
+    # imaplib embeds BAD and malformed replies using repr(bytes), whose quote
+    # choice depends on the complete reply rather than just the credential.
+    secrets = [password, password.replace("\\", "\\\\").replace('"', '\\"')]
+    for value in tuple(secrets):
+        escaped = "".join(repr(bytes([byte]))[2:-1] for byte in value.encode("utf-8"))
+        secrets.extend((escaped, escaped.replace("'", "\\'"), escaped.replace('"', '\\"')))
+    secrets.extend((base64.b64encode(plain).decode("ascii"), base64.b64encode(password.encode()).decode("ascii")))
     for secret in sorted(set(secrets), key=len, reverse=True):
         if secret:
             detail = detail.replace(secret, "[redacted]")
@@ -103,6 +108,20 @@ class ImapToken(BaseModel):
 class ImapBody(BaseModel):
     metadata: bytes
     raw: bytes
+
+
+class _ImapClient(imaplib.IMAP4):
+    """Retain constructor CAPABILITY refusals before imaplib misreads them as capability names."""
+
+    def capability(self) -> tuple[str, list[bytes]]:
+        status, data = super().capability()
+        if status != "OK":
+            raise self.error(data[-1] if data else b"CAPABILITY failed without a server explanation")
+        return status, data
+
+
+class _ImapSSLClient(imaplib.IMAP4_SSL, _ImapClient):
+    """Use the same response checks for implicit TLS and STARTTLS without duplicating commands."""
 
 
 def decode_mailbox(value: bytes, *, utf8: bool = False) -> str:
@@ -282,10 +301,10 @@ class ImapSession:
             if any(character in self.password for character in "\r\n\x00"):
                 raise ValueError("IMAP passwords cannot contain CR, LF or NUL")
             if self.account.tls == "implicit":
-                client = imaplib.IMAP4_SSL(self.account.server, self.account.port,
+                client = _ImapSSLClient(self.account.server, self.account.port,
                                            ssl_context=self.context, timeout=IMAP_TIMEOUT)
             else:
-                client = imaplib.IMAP4(self.account.server, self.account.port, timeout=IMAP_TIMEOUT)
+                client = _ImapClient(self.account.server, self.account.port, timeout=IMAP_TIMEOUT)
             self.client = client
             if self.account.tls == "starttls":
                 client.starttls(ssl_context=self.context)
@@ -307,14 +326,14 @@ class ImapSession:
             if self.authentication_only:
                 return self
             status, capabilities = client.capability()
-            self._ok(status, "CAPABILITY")
+            self._initial_ok(status, capabilities, "CAPABILITY")
             advertised = b" ".join(item for item in capabilities if item).upper().split()
             self.gmail = b"X-GM-EXT-1" in advertised
             if {b"UTF8=ACCEPT", b"UTF8=ONLY"}.intersection(advertised):
                 # ENABLE checks imaplib's cached, potentially pre-login capabilities.
                 client.capabilities = tuple(item.decode("ascii") for item in advertised)
-                status, _data = client.enable("UTF8=ACCEPT")
-                self._ok(status, "ENABLE UTF8=ACCEPT")
+                status, data = client.enable("UTF8=ACCEPT")
+                self._initial_ok(status, data, "ENABLE UTF8=ACCEPT")
                 enabled = client.response("ENABLED")[1]
                 if b"UTF8=ACCEPT" not in b" ".join(item for item in enabled if item).upper().split():
                     raise RuntimeError("IMAP server did not enable UTF8=ACCEPT")
@@ -324,10 +343,19 @@ class ImapSession:
             # Servers may refuse a connection in their greeting or abort SASL with BYE.
             if isinstance(error, imaplib.IMAP4.error):
                 detail = authentication_detail(error, self.account.username, self.password)
-                if temporary_refusal(detail):
-                    busy = ImapServerBusy(detail)
-                    self.__exit__(type(busy), busy, None)
-                    raise busy from None
+                closed = bool(self.client is not None and self.client.response("BYE")[1] != [None])
+                failure: BaseException
+                if temporary_refusal(detail) and (not isinstance(error, imaplib.IMAP4.abort) or closed):
+                    failure = ImapServerBusy(detail)
+                elif connection_interrupted(error) or closed:
+                    reason = "timed out" if isinstance(connection_cause(error), TimeoutError) else "was interrupted"
+                    failure = ImapPaused(f"IMAP connection {reason}. Saved progress is retained; use Resume when connected.")
+                else:
+                    # Malformed replies remain protocol failures even when their
+                    # text mentions capacity. Never retain an unsanitized cause.
+                    failure = type(error)(detail)
+                self.__exit__(type(failure), failure, None)
+                raise failure from None
             self.__exit__(type(error), error, error.__traceback__)
             raise
         finally:
@@ -359,6 +387,15 @@ class ImapSession:
     def _ok(status: str, command: str) -> None:
         if status != "OK":
             raise RuntimeError(f"IMAP {command} failed")
+
+    def _initial_ok(self, status: str, data: Sequence[bytes | None], command: str) -> None:
+        """Retain setup refusals while the password is still available for redaction."""
+        if status != "OK":
+            detail = authentication_detail(imaplib.IMAP4.error(next((part for part in reversed(data) if part), b"")),
+                                           self.account.username, self.password)
+            if temporary_refusal(detail):
+                raise ImapServerBusy(detail)
+            raise RuntimeError(f"IMAP {command} failed: {detail}")
 
     def _client(self) -> imaplib.IMAP4:
         if self.client is None:

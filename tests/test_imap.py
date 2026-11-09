@@ -25,6 +25,7 @@ import signal
 import subprocess
 import sys
 import time
+import traceback
 from threading import Barrier, Event
 
 import pytest
@@ -40,13 +41,14 @@ from mailarchiver.imap_credentials import PASSWORD_KEY, password_for, _developme
 from keyring.errors import KeyringError
 from mailarchiver.imap_models import ImapAccount, ImapDownload, ImapMailbox, ImapMessageMetadata
 from mailarchiver.imap_cli import prompt_account
-from mailarchiver.imap_protocol import ImapAuthenticationError, ImapPaused, ImapServerBusy, ImapSession, body_literal, connection_interrupted, decode_mailbox, message_metadata, response_tokens, selected_mailboxes
+from mailarchiver.imap_protocol import ImapAuthenticationError, ImapPaused, ImapServerBusy, ImapSession, body_literal, connection_interrupted, decode_mailbox, message_metadata, quoted, response_tokens, selected_mailboxes
 from mailarchiver.imap_state import initialize_state, known_observation, record_download, refresh_observation, totals
 from mailarchiver.gui_processing import resume_request, unfinished_work
 from mailarchiver.gui_app import IngestWindowApi
 from mailarchiver.writer_lock import WriterLease
 from mailarchiver.gui_service import SearchPage, search_page
 from mailarchiver.ingest_status import read_ingest_history
+from mailarchiver.ingest_diagnostics import format_failure
 from mailarchiver.imap_source import ImapSourcePlugin, imap_locator
 from mailarchiver.standalone_verify import verify_archive
 from tests.test_gui_processing import open_headless, wait_for_import
@@ -81,20 +83,33 @@ def test_login_rejections_preserve_reason_and_distinguish_limits(tmp_path: Path,
         server.close()
 
 
-@pytest.mark.parametrize("plain", [False, True])
-def test_server_echoed_credentials_are_redacted(tmp_path: Path, plain: bool) -> None:
-    """ACQUISITION: server diagnostic replies cannot disclose the password or SASL payload."""
+@pytest.mark.parametrize("plain,password", [
+    (False, 'synthetic-"private\\secret'), (True, 'synthetic-"private\\secret'),
+    (True, "synthetic-λ'\\secret"),
+])
+@pytest.mark.parametrize("status", [b"NO", b"BAD", b"broken"])
+@pytest.mark.parametrize("wire", [False, True], ids=["raw-echo", "wire-echo"])
+def test_server_echoed_credentials_are_redacted(tmp_path: Path, plain: bool, password: str, status: bytes, wire: bool) -> None:
+    """ACQUISITION: ordinary, BAD and malformed replies cannot leak raw/repr credentials or SASL payloads."""
     import base64
-    password = 'synthetic-"private\\secret'
     payload = base64.b64encode(b"\0demouser\0" + password.encode())
-    reply = b"NO [AUTHENTICATIONFAILED] " + password.encode() + b" " + payload
+    echo = quoted(password.encode()) if wire else password.encode()
+    reply = status + b" [AUTHENTICATIONFAILED] " + echo + b" " + payload
+    if status == b"broken":
+        reply += b" too many connections"  # Malformed protocol data must never become retryable.
     server = Utf8Imap(tmp_path, credentials=("demouser", password) if plain else None, login_response=reply)
     try:
         account = server.start()
-        with pytest.raises(ImapAuthenticationError) as failure:
+        expected = imaplib.IMAP4.abort if status == b"broken" else ImapAuthenticationError
+        with pytest.raises(expected) as failure:
             with ImapSession(account, password, server.context, authentication_only=True):
                 pytest.fail("server rejection was ignored")
-        assert password not in str(failure.value) and payload.decode() not in str(failure.value)
+        diagnostic = "\n".join((str(failure.value), format_failure(failure.value),
+                                "".join(traceback.format_exception(failure.value))))
+        for value in (password, password.replace("\\", "\\\\").replace('"', '\\"')):
+            escaped = "".join(repr(bytes([byte]))[2:-1] for byte in value.encode())
+            for secret in (value, escaped, escaped.replace("'", "\\'"), escaped.replace('"', '\\"'), payload.decode()):
+                assert secret not in diagnostic
         assert "[AUTHENTICATIONFAILED]" in str(failure.value) and "[redacted]" in str(failure.value)
         assert failure.value.__cause__ is None and failure.value.__suppress_context__
     finally:
@@ -133,6 +148,48 @@ def test_connection_backoff_retries_discovery_until_server_accepts(tmp_path: Pat
             assert isinstance(next(discovered), MailContainer)
             assert time.monotonic() - started >= 3
         assert sum(b" AUTHENTICATE PLAIN" in command for command in server.commands) == 3
+        assert set(archive.iterdir()) == {archive / "config.yaml"}
+    finally:
+        server.close()
+
+
+@pytest.mark.parametrize("command,authenticated", [(b"CAPABILITY", False), (b"CAPABILITY", True), (b"ENABLE", True)])
+def test_connection_backoff_retries_session_setup_refusals(tmp_path: Path, command: bytes, authenticated: bool) -> None:
+    """ACQUISITION: tagged capacity refusals after login close the session and retry setup."""
+    server = Utf8Imap(tmp_path, credentials=("demouser", "demopass"), setup_command=command,
+                      setup_response=b"NO [UNAVAILABLE] Temporarily unavailable", setup_authenticated=authenticated)
+    try:
+        account = server.start()
+        archive = tmp_path / "config-only"
+        save_archive_config(archive, load_archive_config(archive).model_copy(update={"imap_sources": [account]}))
+        plugin = ImapSourcePlugin(credentials=lambda _account: "demopass", context=server.context)
+        with closing(plugin.discover(SourceSpec(locator=imap_locator(archive, account, 1)))) as discovered:
+            event = next(discovered)
+            assert isinstance(event, ProgressEvent) and "[UNAVAILABLE]" in event.phase
+            assert isinstance(next(discovered), MailContainer)
+        assert sum(b" AUTHENTICATE PLAIN" in line for line in server.commands) == (2 if authenticated else 1)
+        assert set(archive.iterdir()) == {archive / "config.yaml"}
+    finally:
+        server.close()
+
+
+def test_credentials_only_capacity_refusal_does_not_retry(tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
+    """ACQUISITION: pre-auth CAPABILITY capacity refusal returns temporary status without retry or mailbox access."""
+    server = Utf8Imap(tmp_path, setup_command=b"CAPABILITY", setup_authenticated=False,
+                      setup_response=b"NO [UNAVAILABLE] Temporarily unavailable")
+    vault = FixtureKeyring()
+    monkeypatch.setattr("mailarchiver.imap_credentials.native_keyring", lambda: vault)
+    try:
+        account = server.start()
+        monkeypatch.setenv("SSL_CERT_FILE", str(server.certificate))
+        archive = tmp_path / "config-only"
+        save_archive_config(archive, load_archive_config(archive).model_copy(update={"imap_sources": [account]}))
+        save_password(account, "demopass")
+        assert imap_main(["--archive", str(archive), "--check-credentials"]) == 75
+        assert "[UNAVAILABLE]" in capsys.readouterr().err
+        assert [line.split()[1] for line in server.commands] == [b"CAPABILITY"]
+        assert password_for(account) == "demopass"
         assert set(archive.iterdir()) == {archive / "config.yaml"}
     finally:
         server.close()

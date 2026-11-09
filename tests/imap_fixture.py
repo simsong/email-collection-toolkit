@@ -270,7 +270,9 @@ class Utf8Imap(DisposableImap):
     """
     def __init__(self, directory: Path, capability: str = "UTF8=ACCEPT", enable: str = "OK", *,
                  credentials: tuple[str, str] | None = None, login_response: bytes | None = None,
-                 login_failures: int | None = None, greeting: bytes = b"* OK Disposable UTF-8 IMAP\r\n") -> None:
+                 login_failures: int | None = None, greeting: bytes = b"* OK Disposable UTF-8 IMAP\r\n",
+                 setup_command: bytes | None = None, setup_response: bytes | None = None,
+                 setup_authenticated: bool = True) -> None:
         super().__init__(directory, "implicit")
         self.capability = capability.encode("ascii")
         self.enable = enable
@@ -278,6 +280,9 @@ class Utf8Imap(DisposableImap):
         self.login_response = login_response
         self.login_failures = login_failures
         self.greeting = greeting
+        self.setup_command = setup_command
+        self.setup_response = setup_response
+        self.setup_authenticated = setup_authenticated
         self.commands: list[bytes] = []
         self.names = ("旅行", "literal &AMk- &-", 'Quote " and \\ box')
 
@@ -305,7 +310,10 @@ class Utf8Imap(DisposableImap):
                 self.commands.append(line)
                 tag, command, *arguments = line.rstrip(b"\r\n").split(b" ", 2)
                 response = b"OK complete"
-                if command == b"CAPABILITY":
+                if (authenticated == self.setup_authenticated and command == self.setup_command
+                        and self.setup_response is not None):
+                    response, self.setup_response = self.setup_response, None
+                elif command == b"CAPABILITY":
                     capabilities = b"IMAP4rev1"
                     if not authenticated and self.credentials is not None:
                         capabilities += b" AUTH=PLAIN LOGINDISABLED"

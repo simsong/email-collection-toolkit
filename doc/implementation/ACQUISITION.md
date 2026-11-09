@@ -397,13 +397,20 @@ after LOGIN/SASL PLAIN, before post-login capability negotiation or mailbox acce
 the Ingests password form calls the same session mode and saves only after success.
 Login errors retain a control-free, bounded server reply after redacting password,
 escaped password and base64 credential forms. Temporary capacity/rate refusals in
-the greeting or login raise `ImapServerBusy`; the
+the greeting, login or initial CAPABILITY/ENABLE exchange raise `ImapServerBusy`; the
 source adapter closes the rejected session and retries with 1-to-60-second capped
 exponential backoff. Progress events show the reason and next delay; the plugin's
 framework cancellation Event wakes the wait for Suspend/Quit. The retry loop is
 limited to session initialization and cannot replay a downloaded body. Other
 refusals raise `ImapAuthenticationError`, recorded without traceback or unrelated
 message bytes. Credential-only checks retain one-attempt/exit-75 behavior.
+Initialization also replaces raw imaplib errors with sanitized exceptions of the
+same protocol category and suppresses private causes. Malformed parser aborts do
+not become capacity retries merely because their text includes capacity wording.
+The redactor covers raw, IMAP-escaped, Python bytes-repr and base64 credentials,
+including repr of the already IMAP-escaped wire value. A narrow client CAPABILITY
+override preserves pre-authentication NO replies before imaplib can mistake their
+text for advertised capabilities; it does not issue a second command.
 The existing concurrency-key scheduler caps download sessions at 15 per account;
 it does not reduce the configured processing worker pool. `make test-imap-auth`
 covers real TLS replies, automatic retry, cancellation, credential-only

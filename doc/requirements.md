@@ -26,8 +26,9 @@ platform acceptance and deferred work.
 ## Shared boundaries
 
 - IMAP credential checks authenticate without mailbox access or archive writes.
-  Server login reasons remain visible without exposing passwords; temporary
-  connection limits back off and retry rather than end the import. Ingests can test
+  Server login reasons remain visible without exposing passwords. Temporary setup
+  refusals back off and retry; malformed replies retain their protocol-failure category.
+  Ingests can test
   and save a replacement password. Limit each account to 15 download sessions,
   retaining the full processing worker pool.
   See [acquisition](requirements/ACQUISITION.md).

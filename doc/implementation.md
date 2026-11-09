@@ -50,8 +50,9 @@ platform acceptance and deferred work.
 
 - `imap_cli --check-credentials` reads saved configuration and native credentials,
   then uses authentication-only TLS sessions without opening archive databases.
-  Sanitized login replies distinguish temporary limits from rejection; Ingests
-  validates password replacements before saving them. The IMAP plugin caps
+  Diagnostics redact raw and escaped credentials, including imaplib's malformed
+  replies, while retaining the failure category. Ingests validates password
+  replacements before saving them. The IMAP plugin caps
   concurrent download sessions per account at 15, retains the processing worker
   count, and retries server capacity refusals with cancellable exponential backoff. See [acquisition](implementation/ACQUISITION.md).
 

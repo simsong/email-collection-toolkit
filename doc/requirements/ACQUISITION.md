@@ -57,6 +57,10 @@ exit 75 for temporary refusal. Actual credential rejection remains a concise fai
 without a traceback. Limit each account to 15 simultaneous download sessions while
 retaining all configured workers for message processing. Other mail clients can
 consume server slots; backoff handles those refusals without ending the import.
+This includes tagged temporary refusals during post-login CAPABILITY/ENABLE.
+Malformed replies remain protocol failures even if their text mentions capacity.
+Diagnostics must also redact Python bytes-repr forms of credentials, including
+escaped quotes, backslashes and UTF-8 bytes, without exposing an unsanitized cause.
 
 Each invocation synchronizes once and exits. Download workers use the shared
 preference (half CPUs by default, at least one); `--workers` overrides it with
