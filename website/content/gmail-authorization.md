@@ -1,5 +1,6 @@
 +++
 title = "Archive Gmail"
+aliases = ["oauth-client-registration"]
 description = "Use Google Takeout or read-only IMAP to preserve Gmail."
 +++
 <!-- Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved. -->

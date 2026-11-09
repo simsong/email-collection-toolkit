@@ -56,8 +56,12 @@ def test_manual_index_links_to_built_guides(tmp_path: Path) -> None:
         assert "Documentation" not in [link.get_text() for link in navigation]
         manual = next(link for link in navigation if link.get_text() == "User Manual")
         assert manual[HREF] == "https://simsong.github.io/email-collection-toolkit/manual"
-    redirect = (output / "use-cases/index.html").read_text(encoding="utf-8")
-    assert "https://simsong.github.io/email-collection-toolkit/features/" in redirect
+    # Existing bookmarked routes must redirect to maintained guides, rather than empty pages.
+    for alias, destination in (("use-cases", "features"), ("oauth-client-registration", "gmail-authorization")):
+        redirect = BeautifulSoup((output / alias / "index.html").read_text(encoding="utf-8"), "html.parser")
+        refresh = redirect.find("meta", attrs={"http-equiv": "refresh"})
+        assert refresh is not None
+        assert f"https://simsong.github.io/email-collection-toolkit/{destination}/" in str(refresh)
     # Requirement: pages consistently use current routes and reach real pages/anchors.
     base = "https://simsong.github.io/email-collection-toolkit/"
     for path in output.rglob("*.html"):

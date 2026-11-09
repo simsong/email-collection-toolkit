@@ -266,6 +266,7 @@ OCR_RUN_ARGS ?=
 
 .PHONY: check check-static check-tests lint ruff types ty pyright
 # Recursive recipes preserve stage ordering even with make -j.
+# TMPDIR can isolate disposable test files and their shared writer guard from a live app.
 check:
 	$(MAKE) check-static
 	$(MAKE) check-tests

@@ -194,6 +194,19 @@ make test-e2e
 make check
 ```
 
+If the desktop is importing mail while tests run, isolate the synthetic tests'
+temporary root so updater-lock tests do not compete with the live application's
+write guard. All test subprocesses must inherit the same temporary root:
+
+```sh
+mkdir -p .tmp/test-tmp
+TMPDIR="$PWD/.tmp/test-tmp" make check PYTEST_ARGS='--browser-channel chrome'
+```
+
+This keeps real cross-process locking within the test run and leaves the desktop
+import untouched. `TMPDIR` is an optional standard-library temporary-directory
+override, not an archive destination.
+
 Install the pinned headless Chromium once with `make install-test-browser`.
 To use an already installed Chrome instead, run
 `make check PYTEST_ARGS='--browser-channel chrome'`; Windows CI uses Edge.

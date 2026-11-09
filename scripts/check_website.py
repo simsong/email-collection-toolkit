@@ -25,6 +25,7 @@ REQUIRED_TEXT = (
     "/discussions/55",
     "/discussions/56",
     "gmail-authorization/",
+    "oauth-client-registration",
     "importing/",
     "searching/",
     "https://www.epaddproject.org/",
@@ -120,7 +121,6 @@ def main() -> int:
         root / "website/static/images/hands-typing.svg",
         root / "website/static/images/ATTRIBUTION.md",
         root / "website/content/advanced.md",
-        root / "website/content/oauth-client-registration.md",
         root / "website/static/icons/rainbow-post.svg", root / "gui/icons/rainbow-post.svg",
     ]
     auth_image_directory = root / "website/static/images/gmail-authorization"

@@ -178,6 +178,7 @@ reference; their workflows are in [For developers](doc/FOR_DEVELOPERS.md).
 | `CARGO_BUILD_JOBS` | Limit native Rust compilation parallelism |
 | `OPENSSL_DIR`, `OPENSSL_LIB_DIR`, `OPENSSL_INCLUDE_DIR` | Select the OpenSSL installation for Rust dependencies |
 | `OPENSSL_NO_VENDOR`, `PKG_CONFIG_PATH` | Control vendored OpenSSL and package metadata lookup |
+| `TMPDIR` | Optional disposable-test temporary root; all test subprocesses share it so lock tests stay separate from a running desktop import |
 | `UV_CACHE_DIR`, `UV_PYTHON_INSTALL_DIR`, `UV_PYTHON_BIN_DIR` | Locations for uv's cache, managed Python, and interpreter links |
 | `UV_PROJECT_ENVIRONMENT`, `PYTHONPATH` | Isolated packaging environment and repository-local test import path |
 | `FQDN` | Disposable IMAP tests use `localhost` to avoid reverse DNS |
