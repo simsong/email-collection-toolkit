@@ -1,81 +1,58 @@
 <!-- Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved. -->
 
-# Documentation guide
+# Documentation
 
-Start with the user manual for workflows and the CLI reference for commands.
-Current behavior follows source and current-revision validation; a requirement
-or historical test result is not evidence that a feature shipped.
+Choose the guide for the task you want to perform. User instructions describe
+shipped behavior; developer references explain implementation and validation.
+Plans and dated investigations are separate from instructions to run today.
 
-## Users and operators
+## Use the toolkit
 
-| Document | Owns |
-| --- | --- |
-| [USER_MANUAL.md](USER_MANUAL.md) | Desktop workflows, owner rules, search, viewing and archive care |
-| [CLI_REFERENCE.md](CLI_REFERENCE.md) | Command names, options, defaults and executable examples |
-| [Email Servers.md](Email%20Servers.md) | Acquisition paths and provider-adapter decision |
-| [GMAIL.md](GMAIL.md) / [M365.md](M365.md) | Provider-specific acquisition and authorization boundaries |
-| [APPLE_MAIL_CACHE.md](APPLE_MAIL_CACHE.md) | Cache safety, completeness and comparison interpretation |
-| [RELEASE_NOTES.md](RELEASE_NOTES.md) | Change history; older entries describe their own revisions |
+- [User manual](USER_MANUAL.md): install and use the desktop, import mail,
+  search, view messages and care for an archive.
+- [Command-line guide](CLI_REFERENCE.md): install the CLI, create an archive,
+  import a directory or IMAP account, search and verify.
+- [Gmail](GMAIL.md), [Microsoft 365](M365.md), and [Apple Mail caches](APPLE_MAIL_CACHE.md):
+  supported acquisition paths and their completeness limits.
+- [Customizable lists](CUSTOMIZABLE_DEFAULT_LISTS.md): owner rules and contact filters.
+- [Release notes](RELEASE_NOTES.md): version history.
 
-## Architecture and preservation
+## Develop and maintain the toolkit
 
-| Document | Owns |
-| --- | --- |
-| [requirements.md](requirements.md) | Current contracts by subsystem; future requirements are separate |
-| [implementation.md](implementation.md) | Source architecture, storage, recovery and evidence by subsystem |
-| [INTEGRITY_CONTROLS.md](INTEGRITY_CONTROLS.md) | Canonical transformations, hashes, manifests and verification |
-| [MBOX_READING.md](MBOX_READING.md) | MBOX dialect reading and ambiguity recovery |
-| [DATE_HANDLING.md](DATE_HANDLING.md) | Routing-date resolution and fallback order |
-| [PLUGINS.md](PLUGINS.md) | Typed provider/processor APIs, dispatch and persistence |
-| [MCT_IMPORTER_API.md](MCT_IMPORTER_API.md) | Importer stream and validation contract |
-| [PST_IMPORTER.md](PST_IMPORTER.md) | PST/OST helpers, reconstruction limits and importer examples |
-| [ON_DISK_MAIL_FORMATS.md](ON_DISK_MAIL_FORMATS.md) | Format/fixture inventory and backend research |
-| [EMBEDDED_CLAMAV.md](EMBEDDED_CLAMAV.md) | Scanner isolation, definitions and distribution constraints |
+- [For developers](FOR_DEVELOPERS.md): source setup, builds, tests and platform prerequisites.
+- [Developer commands](DEVELOPER_COMMANDS.md): Make targets, specialist tools,
+  signing and release recipes.
+- [Testing](END_TO_END_TESTING.md) and [regression policy](REGRESSION.md): fixture
+  safety, acceptance layers and corpus comparisons.
+- [DevOps](DEVOPS.md): CI, release and website workflow triggers and gates.
+- [macOS distribution](MACOS_DISTRIBUTION.md) and [certificates](CERTIFICATE_MANAGEMENT.md).
+- [Windows development](WINDOWS.md), [MSIX packaging](WINDOWS_MSIX_TEST.md),
+  [public signing](WINDOWS_PUBLIC_SIGNING.md), and [application updates](SPARKLE_UPDATES.md).
+- [Antivirus](EMBEDDED_CLAMAV.md), [plugins](PLUGINS.md), and [data-quality tools](DATA_QUALITY_AUDIT.md).
 
-## Development and delivery
+## Understand the archive and implementation
 
-| Document | Owns |
-| --- | --- |
-| [FOR_DEVELOPERS.md](FOR_DEVELOPERS.md) | Source installation, desktop builds, developer tools, and test entry points |
-| [END_TO_END_TESTING.md](END_TO_END_TESTING.md) | Test layers, fixture safety and native acceptance limits |
-| [REGRESSION.md](REGRESSION.md) | Corpus comparison, baseline retention and metrics |
-| [DEVOPS.md](DEVOPS.md) | Workflow triggers, publication policy and shared feed |
-| [MACOS_DISTRIBUTION.md](MACOS_DISTRIBUTION.md) | Python DMG construction and installed acceptance |
-| [CERTIFICATE_MANAGEMENT.md](CERTIFICATE_MANAGEMENT.md) | Developer ID/notarization credential lifecycle |
-| [WINDOWS.md](WINDOWS.md) | Native Windows development prerequisites and limitations |
-| [WINDOWS_MSIX_TEST.md](WINDOWS_MSIX_TEST.md) | Python MSIX structure, signing modes and installed acceptance |
-| [WINDOWS_PUBLIC_SIGNING.md](WINDOWS_PUBLIC_SIGNING.md) | Azure/OIDC/public publisher provisioning |
-| [SPARKLE_UPDATES.md](SPARKLE_UPDATES.md) | Python update lifecycle and remaining acceptance |
+- [Requirements](requirements.md) and [implementation](implementation.md):
+  subsystem indexes and shared invariants.
+- [Integrity format](INTEGRITY_CONTROLS.md): canonical message transformations,
+  hashes, manifests and independent verification.
+- [MBOX handling](MBOX_READING.md) and [date handling](DATE_HANDLING.md).
+- [PST/OST importers](PST_IMPORTER.md) and [importer API](MCT_IMPORTER_API.md).
+- [Threading](THREADING.md), [timing audit](TIMING_AUDIT.md), and [toolkit audit](TOOLKIT_AUDIT.md):
+  implementation reviews and their validation boundaries.
 
 ## Plans, research and history
 
-| Document | Status |
-| --- | --- |
-| [plans/README.md](plans/README.md) | Future acquisition, archive extensions, Contacts/geography and OCR requirements |
-| [project_direction.md](project_direction.md) | Current strategy and priorities; feature plans are indexed separately |
-| [Name Resolution Record Linkage.md](Name%20Resolution%20Record%20Linkage.md) | Name-resolution research design |
-| [research/name-matcher/README.md](research/name-matcher/README.md) | Notebook, experiments, literature and aggregate run log |
-| [RUST_GUI_EXPERIMENTS.md](RUST_GUI_EXPERIMENTS.md) | Experimental UI archive pointers |
-| [history/README.md](history/README.md) | Dated audits, reconciliation, ecosystem research and superseded release scope |
-| [DATA_QUALITY_AUDIT.md](DATA_QUALITY_AUDIT.md) | Current diagnostic tooling; investigation results are archived |
-| [PYTHON_WEBVIEW.md](PYTHON_WEBVIEW.md) | Pointer from the integrated comparison experiment to current guides |
-| [OAUTH_CLIENT_REGISTRATION.md](OAUTH_CLIENT_REGISTRATION.md) | Absence of a current Google registration/client |
+- [Plans](plans/README.md): unimplemented acquisition, archive, Contacts and OCR extensions.
+- [Name-linkage research](research/name-matcher/README.md) and
+  [research design](Name%20Resolution%20Record%20Linkage.md): methods and experiments.
+- [Format/backend research](ON_DISK_MAIL_FORMATS.md) and
+  [historical project direction](project_direction.md): research snapshots, not current feature inventories.
+- [History](history/README.md): dated audits, comparisons and superseded decisions.
+- [Retired Rust GUI](RUST_GUI_EXPERIMENTS.md): archive pointers only; maintained
+  Rust importer and verification tools remain supported.
 
-`end-to-end-tests.md` forwards to the maintained testing guide. Historical source
-snapshots remain recoverable through Git; obsolete runbooks are not alternative
-current instructions.
-
-## Maintaining the structure
-
-- Keep current contracts under `requirements/` and their source/evidence maps
-  under `implementation/`. Both overviews remain stable entry points.
-- Put unimplemented feature requirements in `plans/`. Keep an implemented
-  feature's missing native/release acceptance beside its current implementation.
-- Preserve dated audits and superseded decisions in `history/`, including the
-  revision and original validation limits. Update incoming links when moving files.
-- Keep command syntax in `CLI_REFERENCE.md`, except substantive test recipes and
-  specialist importer examples. Link to the owning contract instead of copying it.
-
-A behavior change updates the corresponding contract and implementation together.
-New acceptance evidence records the revision and platform; it does not silently
-replace an old audit's findings or become a second current feature inventory.
+Keep each command's syntax in the command-line guide and use links from workflow
+and specialist documents. Build/test recipes belong in developer documentation.
+Behavior changes update the owning requirement, implementation and validation
+records together. Historical evidence must retain its date and scope.

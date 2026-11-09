@@ -1,240 +1,55 @@
 <!-- Copyright (C) 2026 Simson L. Garfinkel. All Rights Reserved. -->
 
-# Mail archive normalizer requirements
+# Email Collection Toolkit requirements
 
-Requirements are organized by subsystem. These files describe current contracts and
-source behavior, including explicit limits; they do not assert that every native
-platform or release gate has passed. [Future work](plans/README.md) is separate.
+These are the current behavior contracts. The linked subsystem files own the
+details; this overview is an index, not a second feature changelog. A requirement
+does not establish that every platform or release gate has passed.
 
 | Subsystem | Scope |
 | --- | --- |
-| [Archive](requirements/ARCHIVE.md) | Canonical storage, hashes, deduplication and recovery |
-| [Acquisition](requirements/ACQUISITION.md) | Local sources, IMAP, PST/OST and diagnostic acquisition |
-| [Processing](requirements/PROCESSING.md) | Processors, identities, Contacts CLI and synthetic matcher |
-| [Search](requirements/SEARCH.md) | Search indexing, headers, dates and verified text display |
-| [Desktop](requirements/DESKTOP.md) | Documents, native UI, browser boundary and message viewing |
-| [Scanning](requirements/SCANNING.md) | Embedded scanner, evidence, definitions and timeouts |
-| [Delivery](requirements/DELIVERY.md) | Platform packaging, release identity, signing and publication |
-| [Validation](requirements/VALIDATION.md) | Fixtures, independent checks, CI and acceptance limits |
-
-The toolkit function audit covers preservation, MIME ancestry, failure isolation,
-portable process tests, validation inputs and release dependency checks. Current
-contracts and acceptance limits are recorded in each subsystem's **Function audit
-repairs** section; [audit scope](TOOLKIT_AUDIT.md) distinguishes reviewed code from
-platform acceptance and deferred work.
+| [Archive](requirements/ARCHIVE.md) | Canonical MBOX, hashes, deduplication, provenance and recovery |
+| [Acquisition](requirements/ACQUISITION.md) | Read-only local/IMAP import, source support and importer boundaries |
+| [Processing](requirements/PROCESSING.md) | Durable jobs, MIME extraction, identities and saved manual decisions |
+| [Search](requirements/SEARCH.md) | Indexes, query semantics, dates and verified message display |
+| [Desktop](requirements/DESKTOP.md) | Archive documents, windows, native UI and progress |
+| [Scanning](requirements/SCANNING.md) | Embedded ClamAV, definitions, failure evidence and isolation |
+| [Delivery](requirements/DELIVERY.md) | Installable commands, packaging, versions, signing and updates |
+| [Validation](requirements/VALIDATION.md) | Fixtures, test gates, platform acceptance and corpus checks |
 
 ## Shared boundaries
 
-- IMAP credential checks authenticate without mailbox access or archive writes.
-  Server login reasons remain visible without exposing passwords. Temporary setup
-  refusals back off and retry; malformed replies retain their protocol-failure category.
-  Ingests can test
-  and save a replacement password. Limit each account to 15 download sessions,
-  retaining the full processing worker pool.
-  See [acquisition](requirements/ACQUISITION.md).
+- IMAP credential checks authenticate without mailbox access or archive writes;
+  replacement passwords are tested before saving. Account acquisition uses
+  at most 15 sessions and cancellable capacity backoff while retaining the
+  full processing worker pool. Protocol failures and private diagnostics
+  retain their distinct handling. See [acquisition](requirements/ACQUISITION.md).
 
-- Archive checkpoint progress describes local message verification and checksum
-  saving in plain language. See [desktop](requirements/DESKTOP.md).
+- Source files and accounts are read-only. Preserve message bytes except the
+  documented IMAP CRLF-to-LF acquisition policy, with original wire provenance.
+- Standard MBOX and SHA-256 manifests are the canonical preservation record.
+  Search indexes are rebuildable; manual decisions, configuration and history
+  require backups of the whole archive.
+- Canonical writes use the writer lease and recoverable publication protocol.
+  Interrupted work retains completed checkpoints; errors do not silently drop mail.
+- ClamAV runs in owned workers. Detections and scanner failures retain messages
+  and evidence; no resident service or manual-review gate is introduced.
+- Jobs, windows and import progress follow actual work and change notifications.
+  Failure deadlines remain explicit; readiness must be observed.
+- User commands are `ect`, `ect-create`, `ect-import` and `ect-search`. They invoke
+  application code directly. Make is the developer build/test convenience layer.
+- Versions come from `pyproject.toml`; launch/build provenance discloses local
+  changes. Release publication and installed-platform acceptance have separate gates.
 
-- Result-wait expiry remains an explicit typed GUI error; later actual completion
-  can be retrieved on an explicit retry. Importer ownership begins before native
-  notification setup, and PST work liveness is independent of diagnostic history.
-  Actual stop notifications must wake silent importer waits and reap their children.
-  Status reads must not issue notices that trigger their own refresh loop.
+## Documentation and evidence
 
-- Completion and readiness require observable state, Events, futures or native
-  callbacks; a fixed delay never establishes success. Elapsed deadlines use
-  monotonic clocks and expiry reports failure even while notifications remain ready.
-  Non-DOM test state must explicitly notify its event-driven observers. No first-party non-timeout
-  scheduling timers are used except the explicitly requested, cancellable IMAP
-  capacity backoff. Status, sampling and other retries follow actual events. See [timing audit](TIMING_AUDIT.md).
+[The user manual](USER_MANUAL.md) explains workflows; [the command-line guide](CLI_REFERENCE.md)
+owns installed command syntax. [Developer commands](DEVELOPER_COMMANDS.md) covers
+builds, tests and release recipes. Unimplemented work belongs to [plans](plans/README.md);
+dated investigations belong to [history](history/README.md).
 
-
-- Extra non-mail files found during archive checks produce dismissible warnings
-  and do not fail imports. Missing or changed preserved email remains an error.
-  See [archive](requirements/ARCHIVE.md) and [desktop](requirements/DESKTOP.md).
-
-- Import notices belong only to the search window owning that operation, including
-  ownership transfer on Close; application-wide notices retain global scope.
-  Each newly issued notice remains eligible after dismissal, even with identical text.
-  See [desktop](requirements/DESKTOP.md).
-
-- Desktop timeout status uses a yellow circle with a horizontal dash and no
-  traceback; native macOS and Windows window bars show the launch version
-  at the top right.
-  See [desktop](requirements/DESKTOP.md).
-
-- Saved archive windows on macOS expose the native title-bar document-path menu;
-  untitled and utility windows have no represented path. Windows provides
-  **Show Archive in Explorer** for the saved active archive. See [desktop](requirements/DESKTOP.md).
-
-- Update dialogs render embedded release notes as rich text with wrapping and
-  working links; see [delivery](requirements/DELIVERY.md).
-
-- Platform menus distinguish program updates from anti-virus definition updates;
-  the latter also remains available in About. See [desktop](requirements/DESKTOP.md).
-
-- Both installer builders run staged ECT's explicit-directory definition downloader
-  before packaging and final signing; see [delivery](requirements/DELIVERY.md).
-
-- macOS CI and release packaging build the same pinned ClamAV/OpenSSL sources
-  and retain signature verification; see [delivery](requirements/DELIVERY.md).
-
-- Source and relocated native acceptance retain current phase and timeout diagnostics; bounded
-  deadlines must allow the component checks to run. JavaScript checks must collect
-  both scalar and Promise results and report JavaScript errors.
-  See [validation](requirements/VALIDATION.md).
-
-- Research process-memory reports must use byte units on macOS, Linux and Windows.
-
-- Preferences persist half-CPU, all-CPU or custom worker limits, defaulting to
-  half the logical CPUs and never exceeding twice that count. Explicit CLI
-  workers override and disable the desktop choice for that launch.
-  Preferences expose only their intended JavaScript methods, excluding native window state.
-  Both Preferences windows save valid edits automatically and on Close, with
-  standard platform window controls and no Done or Save button. See [desktop](requirements/DESKTOP.md).
-
-- Reprocessing is curator-invoked, with a long-duration confirmation; code and
-  settings changes never invalidate completed work. See [processing](requirements/PROCESSING.md)
-  and [desktop](requirements/DESKTOP.md).
-
-- Closing an import owner transfers its operation to another same-archive search;
-  the last-window veto must never block the native event loop. See [desktop](requirements/DESKTOP.md).
-
-- Processing progress labels distinct archived messages **Messages requiring processing**;
-  each leaves the count after its final task finishes. See [desktop](requirements/DESKTOP.md).
-
-- Progress separates downloads/imports from saved-mail processing, with independent
-  worker task totals in the table and no worker-count summary cards.
-  See [desktop](requirements/DESKTOP.md).
-
-- Scanner preflight retains live process status and wakes the owner on cancellation during blocking
-  definition checks and updates. See [scanning](requirements/SCANNING.md).
-
-- The macOS development launcher seals its bundle identity and preserves the
-  original interpreter's native credential access. See [delivery](requirements/DELIVERY.md).
-
-- About opens an offline processor DAG from the active registry, including
-  open-ended MIME extraction outputs. See [processing](requirements/PROCESSING.md#registered-processor-graph).
-
-- Fixes handed back for testing advance the version; About retains launch/build
-  Git provenance and discloses local changes. See [delivery](requirements/DELIVERY.md).
-
-- IMAP workers prioritize missing per-message checkpoints before refreshing saved
-  metadata; interrupted UID gaps remain eligible. Unicode folders retain their
-  negotiated UTF-8 or legacy modified UTF-7 wire names. See [acquisition](requirements/ACQUISITION.md).
-
-- Imports can suspend and resume without quitting; identity pickers display
-  loading and retry feedback. See [desktop](requirements/DESKTOP.md).
-
-- IMAP connection timeouts and disconnects pause downloads with saved progress and
-  a **Resume** button, including host-down socket errors where the platform exposes
-  them; see [acquisition](requirements/ACQUISITION.md).
-
-- About status remains available during import writer locks; plugin inventory
-  retries separately. See [desktop](requirements/DESKTOP.md).
-
-- Shared test acceptance retains reader preservation, scanner API/platform
-  boundaries and all legacy MBOX recovery cases; see [validation](requirements/VALIDATION.md#shared-acceptance-coverage).
-
-- Ordinary pytest includes disposable TLS IMAP acquisition through CLI and GUI
-  background services, with three-message search/read-only/rerun checks;
-  see [validation](requirements/VALIDATION.md#offline-imap-fixtures).
-
-- Manual review must never gate application processing. Python ingestion records
-  scan errors/incomplete scans and preserves originals while continuing;
-  see [scanning](requirements/SCANNING.md#malware-handling).
-
-- Recovery shows active processor/job work independently of source-import counts,
-  and queue lookup avoids rescanning completed history; see [processing](requirements/PROCESSING.md).
-
-- Deferred message/content recovery uses the configured worker pool with ordered
-  per-message checkpoints; see [processing](requirements/PROCESSING.md).
-  Continue Processing stays disabled during startup and active archive work.
-
-- End-of-import processor statistics use an aligned table labeled as cumulative
-  archive history; see [processing](requirements/PROCESSING.md).
-
-- Freeze all manifest-referenced acquisition adapters; validate local ingestion
-  with `make test-frozen-source-plugins` before packaging handoff.
-- Signature display-name recursion retains observed addresses and a diagnostic;
-  failed content jobs do not starve unrelated mail. See [processing](requirements/PROCESSING.md).
-- PST extraction publishes output-change progress and uses an inactivity deadline. Single
-  mailbox sources stream bounded parallel scans with ordered publication. Autocomplete
-  cancels stale requests and retains legacy subject-index performance. See
-  [acquisition](requirements/ACQUISITION.md) and [search](requirements/SEARCH.md).
-- Source workers retain thread-bound input handles and return publication requests
-  through futures; only their owner commits durable state. Single-worker processor
-  waits retain live process status without periodic heartbeats. See [acquisition](requirements/ACQUISITION.md).
-- The experimental Rust UI, helper and obsolete build/test paths are removed from
-  the active checkout. The signed `experimental-rust-ui` tag preserves the
-  October 10, 2026 retirement snapshot; see the [archive note](RUST_GUI_EXPERIMENTS.md).
-- Preview workers return tracked results; current-generation completion replies alone
-  update preview caches. See [desktop](requirements/DESKTOP.md).
-- Original IMAP folder labels decode percent escapes once while retaining stored
-  selection paths; see [desktop](requirements/DESKTOP.md).
-- Natural search preserves quoted symbols and works with existing indexes;
-  see [search behavior](requirements/SEARCH.md).
-
-- [Customizable Default Lists](CUSTOMIZABLE_DEFAULT_LISTS.md) provide typed bundled
-  templates, personal overrides, revisioned archive snapshots and a shared editor.
-  Provider-scoped reply-address rules retain attributed routing evidence without
-  accepting identity merges. Owner defaults start empty and prompt during setup.
-
-- Person views hide recognized non-person identities reversibly, retaining uncertain
-  names and original evidence. Research comparisons can weight exact full names
-  by frequency; see [processing research](requirements/PROCESSING.md#local-name-linkage-research).
-
-- Optional local name-linkage comparisons retain private evidence and distinguish
-  synthetic accuracy from unlabeled archive scores. Owner review distinguishes
-  non-person flags independently of identity-link judgments; HTML and JSON reports
-  require distinct destinations. Signature phone lists retain separate complete
-  numbers. See [processing research](requirements/PROCESSING.md#local-name-linkage-research).
-
-- Identity picker labels open name searches; count buttons open filtered evidence messages.
-  Navigation shows pending/error feedback and targets the clicked row independently of selection.
-  Count/name navigation and focus changes do not repeat the initial recovery prompt.
-  Native Close targets the focused window, including standalone list editors.
-  Navigation retains the displayed visibility and date filters; provider domains
-  are excluded from derived institution membership and search aliases.
-  Name rows display observed signature phones, with multiple numbers expandable.
-  See [desktop navigation](requirements/DESKTOP.md#identity-picker-navigation).
-
-- GUI imports use tracked futures; queued imports cancel safely on Quit,
-  retaining restartable work. See [desktop](requirements/DESKTOP.md).
-- Cocoa Open/About/Setup commands and startup export cleanup use tracked futures;
-  see [desktop](requirements/DESKTOP.md) and the [threading audit](THREADING.md).
-- Confirmed Quit offers **Suspend import and quit** and dims loaded windows with
-  a Shutting down notice; see [desktop shutdown](requirements/DESKTOP.md#shutdown-feedback).
-- Desktop recovery offers Continue Import for both phases, Leave import suspended,
-  or Stop import while retaining archived messages; collapsed
-  warnings remain readable; see [desktop recovery](requirements/DESKTOP.md#saved-import-recovery-and-notices).
-  Ingest history displays IMAP accounts and servers instead of internal locators.
-  Startup is visible before the first run snapshot; enlarged status circles use
-  symbols alongside color and text labels.
-
-- Scanner threads return tracked results to their process coordinator, which alone
-  writes responses; see [scanning](requirements/SCANNING.md).
-- Embedded scanners disable URL-phishing checks while retaining malware scanning;
-  see the [scanning policy](requirements/SCANNING.md#malware-handling).
-- Before Python scan sessions, refresh definitions over 24 hours old when online;
-  offline or failed refreshes retain existing definitions. See [scanning](requirements/SCANNING.md).
-- Retry saved scanner failures with the current engine and restore archived content
-  before pending ingest in normal unbounded runs; see [processing recovery](requirements/PROCESSING.md#working-object-lifetime).
-- Release cached raw mail after each MBOX publication and SQL commit, preserving
-  live derived inputs and retry checkpoints;
-  see [working-object lifetime](requirements/PROCESSING.md#working-object-lifetime).
-- Preserve source stores and original message bytes, with the documented IMAP
-  CRLF-to-LF acquisition exception; canonical MBOX/manifests
-  remain the portable preservation record.
-- Back up manual decisions, configuration and operational history; rebuilding
-  search does not recover that durable state.
-- Keep executable syntax in [CLI_REFERENCE.md](CLI_REFERENCE.md), with workflows
-  in [USER_MANUAL.md](USER_MANUAL.md).
-- Keep future features in [plans/](plans/README.md) and dated findings in
-  [history/](history/README.md). The retired GUI has one
-  [retrospective](RUST_GUI_EXPERIMENTS.md).
-
-When changing behavior, update the relevant subsystem contract and implementation
-together and record its substantive validation. This overview is the stable
-entry point; incoming section links have been updated to their owning files.
+Change the owning subsystem requirement and implementation together. Validate
+through the real authorized execution path and report the tested revision,
+platform and remaining limits. [The toolkit audit](TOOLKIT_AUDIT.md),
+[threading review](THREADING.md) and [timing audit](TIMING_AUDIT.md) retain their
+review scopes and evidence; they are not blanket acceptance claims.

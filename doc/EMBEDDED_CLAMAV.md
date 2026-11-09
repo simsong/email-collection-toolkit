@@ -88,7 +88,7 @@ and update it in place. On Apple Silicon Homebrew, the seed is normally
 network access and run the staged ECT downloader rather than this source command.
 
 About includes **Check for Anti-Virus Updates**, also available directly below
-**Check for Program Updates** in the native platform menu and through `make clamav-update`.
+**Check for Program Updates** in the native platform menu and through `ect update-definitions`.
 Updates use an explicit temporary configuration, never the host's installed
 freshclam.conf, and independent staging copies. The mounted-DMG updater check
 uses that same configuration writer and the mounted app's certificates. FreshClam

@@ -698,8 +698,8 @@ def aws_start(dataset: DatasetConfig, layout: DataLayout, stack: str) -> LaunchR
     return LaunchResponse.model_validate_json(response_path.read_text(encoding="utf-8"))
 
 
-def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description=__doc__)
+def build_parser(prog: str | None = None) -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(prog=prog, description=__doc__)
     parser.add_argument("--config-dir", type=Path, default=DEFAULT_CONFIG_DIR)
     parser.add_argument("--data-dir", type=Path, default=DEFAULT_DATA_DIR)
     parser.add_argument("--owner-names-file", type=Path, default=Path("owner-names.txt"))
@@ -717,9 +717,9 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def main() -> int:
-    parser = build_parser()
-    args = parser.parse_args()
+def main(argv: list[str] | None = None, *, prog: str | None = None) -> int:
+    parser = build_parser(prog)
+    args = parser.parse_args(argv)
     layout = DataLayout(root=args.data_dir.resolve())
     try:
         if args.command == "list":

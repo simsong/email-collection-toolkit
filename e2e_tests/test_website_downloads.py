@@ -93,10 +93,13 @@ def test_static_downloads(browser: Browser, download_site: tuple[str, list[Publi
             expect(button).to_have_attribute("href", asset or DOWNLOADS)
             if not asset:
                 expect(page.get_by_text(f"No published {platform} installer", exact=False)).to_be_visible()
-        if selected and selected.prerelease:
-            expect(page.get_by_text("Preview release:", exact=False)).to_be_visible()
+        testing_notice = page.get_by_text("Alpha testing — safe to test with your email.", exact=False)
+        if not any(not publication.prerelease for publication in publications):
+            expect(testing_notice).to_be_visible()
+            expect(page.get_by_text("The archive file format is stable", exact=False)).to_be_visible()
+            expect(page.get_by_text("not yet ready for production use", exact=False)).to_be_visible()
         else:
-            expect(page.get_by_text("Preview release:", exact=False)).to_have_count(0)
+            expect(testing_notice).to_have_count(0)
         # Signed Windows installers need no certificate-trust or installation guide.
         expect(page.get_by_role("link", name="Windows installation instructions", exact=True)).to_have_count(0)
         expect(page.get_by_text("test-signed", exact=False)).to_have_count(0)

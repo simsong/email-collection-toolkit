@@ -3510,8 +3510,8 @@ def macos_option_pressed() -> bool:
     return bool(appkit.NSEvent.modifierFlags() & appkit.NSEventModifierFlagOption)
 
 
-def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Read-only graphical search of a mailarchiver archive.")
+def build_parser(prog: str | None = None) -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(prog=prog, description="Open the Email Collection Toolkit desktop application.")
     launch = parser.add_mutually_exclusive_group()
     launch.add_argument("--archive", type=Path, help="directory containing archive.sqlite3 and search.sqlite3")
     launch.add_argument("--new", action="store_true", help="show the three-step setup without reopening the last archive")
@@ -3522,11 +3522,12 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def main() -> int:
-    if "--self-test" in sys.argv[1:] or "--self-test-gui" in sys.argv[1:]:
+def main(argv: list[str] | None = None, *, prog: str | None = None) -> int:
+    arguments = sys.argv[1:] if argv is None else argv
+    if "--self-test" in arguments or "--self-test-gui" in arguments:
         from .self_test import main as test_main  # pylint: disable=import-outside-toplevel
-        return test_main()
-    args = build_parser().parse_args()
+        return test_main(arguments, prog=prog)
+    args = build_parser(prog).parse_args(argv)
     if sys.platform == "win32":
         try:
             windows_webview()

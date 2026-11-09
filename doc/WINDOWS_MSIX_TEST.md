@@ -15,7 +15,7 @@ directories must be new.
 
 ## Build and signing
 
-[CLI_REFERENCE.md](CLI_REFERENCE.md#windows-packaging) owns the Makefile command
+[CLI_REFERENCE.md](DEVELOPER_COMMANDS.md#windows-packaging) owns the Makefile command
 syntax. The payload builder is `scripts/win/build_windows_msix.ps1`; bundling
 and signing are separate steps. The Python-reader reusable workflow supplies
 the payload to the MSIX workflow for assembly and installed acceptance.

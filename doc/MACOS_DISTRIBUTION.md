@@ -18,7 +18,7 @@ are retained.
 
 On a logged-in Mac with this checkout's development environment and `uv`:
 
-See [CLI_REFERENCE.md](CLI_REFERENCE.md#build-the-python-dmg) for this recipe.
+See [CLI_REFERENCE.md](DEVELOPER_COMMANDS.md#build-the-python-dmg) for this recipe.
 
 The target installs only project-local packaging dependencies, then uses
 PyInstaller to bundle the private Python runtime, Python extension libraries,
@@ -104,7 +104,7 @@ The shipped executable also accepts `--self-test`, `--self-test-gui`, and
 `--report /absolute/path/report.json`. Advanced users can access the bundled
 archive CLI with `--cli`, without a separately installed Python:
 
-See [CLI_REFERENCE.md](CLI_REFERENCE.md#check-the-installed-macos-executable) for this recipe.
+See [CLI_REFERENCE.md](DEVELOPER_COMMANDS.md#check-the-installed-macos-executable) for this recipe.
 
 ## Bundled antivirus
 
@@ -140,7 +140,7 @@ scanned by a later ordinary import; a rescan command remains future work.
 
 For local signing with a certificate and private key already in your Keychain:
 
-See [CLI_REFERENCE.md](CLI_REFERENCE.md#select-a-developer-id-identity) for this recipe.
+See [CLI_REFERENCE.md](DEVELOPER_COMMANDS.md#select-a-developer-id-identity) for this recipe.
 
 `dmg-signed` defaults to the first valid **Developer ID Application** identity
 listed by macOS. It fails before building if none is available. To select a
@@ -201,7 +201,7 @@ The mounted local tests do not establish downloaded-file Gatekeeper acceptance.
    Developer ID Installer is for `.pkg` installers, not this drag-install DMG.
 3. Build with the default Developer ID Application identity from your Keychain:
 
-   See [CLI_REFERENCE.md](CLI_REFERENCE.md#select-a-developer-id-identity) for this recipe.
+   See [CLI_REFERENCE.md](DEVELOPER_COMMANDS.md#select-a-developer-id-identity) for this recipe.
 
 4. For a tagged release, GitHub Actions submits the DMG with `notarytool`,
    staples the accepted ticket, validates it, and requires Gatekeeper
@@ -216,7 +216,7 @@ After the intended version change is merged into `main`, use a clean checkout
 and replace the example tag with `v` plus the exact `pyproject.toml` version.
 Do not move or reuse an already published tag.
 
-See [CLI_REFERENCE.md](CLI_REFERENCE.md#publish-a-matching-annotated-tag) for this recipe.
+See [CLI_REFERENCE.md](DEVELOPER_COMMANDS.md#publish-a-matching-annotated-tag) for this recipe.
 
 The tag push is the only trigger for [the release workflow](../.github/workflows/release.yml)
 for tags beginning with `v`. It checks that the tag is annotated, points to a

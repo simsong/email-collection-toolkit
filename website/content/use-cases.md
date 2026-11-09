@@ -49,12 +49,12 @@ Mailbag package directly.
 ## Available and planned source support
 
 Current releases read local MBOX, EML, Maildir, Emacs RMAIL Babyl, and complete
-Apple Mail `.emlx` messages. The macOS application also reads Outlook PST and
+Apple Mail `.emlx` messages. The macOS and Windows applications also read Outlook PST and
 OST files, with best-effort extraction documented in the user manual. A Gmail or
 Microsoft 365 export can be read if it uses one of these formats.
 
-Direct access to Gmail and Microsoft 365 accounts is planned but is not yet
-available. Mailbag import, automatic transfer to ePADD,
+Read-only IMAP supports Gmail accounts that permit app-password access. Direct
+Gmail API and Microsoft 365 OAuth access remain planned. Mailbag import, automatic transfer to ePADD,
 redaction, and more detailed finding-aid output are also planned.
 
 ## File and source handling
@@ -62,7 +62,8 @@ redaction, and more detailed finding-aid output are also planned.
 Email Collection Toolkit uses the same process for personal and institutional collections:
 
 - source mailboxes, accounts, stores, and exports are read-only;
-- the original RFC 5322 message data is stored in MBOX files;
+- message data is stored in MBOX files; IMAP normalizes CRLF to LF and records
+  the original wire hash and size;
 - every location containing a duplicate message is recorded;
 - search indexes can be created again from the archived messages; and
 - the archive uses MBOX, BagIt 1.0, Mailbag 1.0, and SHA-256.

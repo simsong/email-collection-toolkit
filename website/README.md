@@ -4,8 +4,8 @@
 
 This is a Zola site using the local `envelope-rainbow` theme. The checked-in
 site is built by `.github/workflows/pages.yml` and deployed with GitHub Pages
-Actions from `main`; there is no `gh-pages` branch. After the first merge,
-select **Settings → Pages → Build and deployment → Source: GitHub Actions**.
+Actions from `main`; there is no `gh-pages` branch. Repository Pages settings
+use **GitHub Actions** as the deployment source.
 
 The workflow resolves canonical stable, alpha and beta release assets into
 `data/releases.toml` during the build.
@@ -40,6 +40,6 @@ Control-C. Generated files stay in `.tmp/website-preview`; Zola reuses this
 disposable directory when restarting or rebuilding the preview. This does not publish
 the site.
 
-The homepage shows a preview warning when its primary downloads use a preview
-release. Platform downloads link directly to installers; signed Windows releases
+Before a stable release exists, the homepage explains that alpha testing is
+welcome, the archive format is stable, and usability/performance work remains. Platform downloads link directly to installers; signed Windows releases
 need no certificate-trust instructions or separate installation guide.

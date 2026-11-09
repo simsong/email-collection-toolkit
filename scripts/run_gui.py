@@ -71,7 +71,7 @@ def main() -> None:
         temporary = ROOT / ".tmp"
         temporary.mkdir(exist_ok=True)
         executable = development_bundle(Path(tempfile.mkdtemp(prefix="gui-launch-", dir=temporary)))
-    os.execve(executable, [str(executable), "-m", "mailarchiver.gui_app", *sys.argv[1:]],
+    os.execve(executable, [str(executable), "-m", "mailarchiver.cli", "gui", *sys.argv[1:]],
               development_environment() if sys.platform == "darwin" else os.environ)
 
 

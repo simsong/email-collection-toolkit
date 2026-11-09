@@ -296,7 +296,7 @@ Before creating NSApplication, `configure_macos_application` registers the
 process-local `NSTreatUnknownArgumentsAsOpen` default with string value `NO`.
 This prevents Cocoa from reopening the source launcher and option values as
 documents; argparse and the Finder delegate retain their existing roles.
-`make self-test-gui` launches the actual `mailsearch-gui` entry point using the
+`make self-test-gui` launches the actual `ect gui` entry point using the
 same isolated diagnostics as the packaged app and rejects unexpected startup
 errors. The native application probe also checks startup notices and opens its
 fixture through the document-open delegate.
@@ -452,7 +452,7 @@ use pywebview's native JavaScript bridge; there is currently no HTTP API.
 
 The `gui/` interface uses pywebview's Cocoa/WKWebView backend on macOS.  Its
 Python API delegates query parsing, SQLite reads, and direct MBOX retrieval to
-the same typed functions used by `mailsearch`. A nonempty query directly asks
+the same typed functions used by `ect-search`. A nonempty query directly asks
 the shared catalog/FTS predicate for up to 2,000 ordered headers. This avoids
 placing an exact or threshold count on the interactive path; SQLite FTS5 has no
 reliable approximate cardinality for arbitrary combined full-text/filter
@@ -883,7 +883,7 @@ macOS packaging retains its frozen Python builder.
 `reader_fixture.py` constructs only a newly reserved synthetic fixture, without
 enabling the POSIX archive publisher on Windows. Make targets exercise shared
 search/render/export, byte preservation, native promise bridging, and relocated
-MSIX execution. [PYTHON_WEBVIEW.md](../PYTHON_WEBVIEW.md) tracks actual validation
+MSIX execution. [WINDOWS.md](../WINDOWS.md) tracks actual validation
 and outstanding native/signing gates; earlier Rust packaging evidence is not
 evidence for this Python payload.
 

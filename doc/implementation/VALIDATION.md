@@ -255,7 +255,7 @@ JSON files are investigation artifacts, not repository fixtures.
 
 ## Public corpus validation pipeline
 
-`mailarchiver-validation` loads strict Pydantic models from
+`ect validation` loads strict Pydantic models from
 `validation/datasets/*.toml`. The nine definitions cover Enron, SF-LOVERS,
 SpamAssassin, bounded GNU emacs-devel, IETF-822, Apache httpd-dev, and GCC list
 samples, a pinned lore.kernel.org public-inbox repository, and the historical

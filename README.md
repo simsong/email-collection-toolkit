@@ -38,7 +38,7 @@ See [Versioning and updating](#versioning-and-updating) for update choices.
 
 ## Goals
 
-`mailarchiver` is preservation infrastructure for personal and research email
+Email Collection Toolkit is preservation infrastructure for personal and research email
 collections, not a mail client or a compliance appliance. Its goals are to:
 
 * harvest email from backup drives and active sources into one persistent,
@@ -101,22 +101,28 @@ requires the Microsoft Edge WebView2 Runtime.
 For source installation, build prerequisites, and testing, see
 [For developers](doc/FOR_DEVELOPERS.md).
 
-## Apache Tika
+## Command-line tools
 
-We plan to use Apache Tika for optional text extraction from PDF and Office
-attachments so their contents can be searched. Extracted text will be derived
-data; original messages and attachments will remain preserved.
+Install the CLI with [uv](https://docs.astral.sh/uv/getting-started/installation/):
 
-Tika is not connected to ingest or search yet. Today, `--index-attachments`
-indexes text attachments only. Ordinary importing and searching do not require
-Java. Developer preparation for Tika is described in
-[For developers](doc/FOR_DEVELOPERS.md#apache-tika-preparation).
+```sh
+uv tool install 'git+https://github.com/simsong/email-collection-toolkit.git'
+ect-create collection.mailarchive --owner sam@example.org
+ect-import --archive collection.mailarchive /path/to/exported-mail
+ect-search --archive collection.mailarchive budget
+ect verify collection.mailarchive
+```
 
-## CLI and archive workflows
+For an IMAP source, use `ect-import --archive collection.mailarchive --imap`.
+The generic `ect` command exposes all application operations: `ect create`,
+`ect import` and `ect search` are equivalent to the shortcuts above.
+From a source checkout, prefix commands with `uv run --locked`.
 
-The [CLI reference](doc/CLI_REFERENCE.md) covers local import, IMAP downloads,
-message listing/search, processing, verification, reports, and diagnostics.
-The [user manual](doc/USER_MANUAL.md) explains the workflows and desktop interface.
+The CLI uses Python 3.12+ and requires a native ClamAV runtime and definitions
+for scanning; desktop installers bundle these components. PST/OST imports also
+need their native helpers. The [command-line guide](doc/CLI_REFERENCE.md) covers
+installation, prerequisites, options and examples. For source builds and tests,
+see [For developers](doc/FOR_DEVELOPERS.md) and [Developer commands](doc/DEVELOPER_COMMANDS.md).
 
 ### Search matching
 
@@ -135,7 +141,7 @@ or Trash. See [IMAP downloads](doc/CLI_REFERENCE.md#imap-downloads) for account
 requirements and commands.
 
 Validate saved credentials without opening mailboxes or writing the archive with
-`make imap IMAP_ARGS='--archive /path/to/archive.mailarchive --check-credentials'`.
+`ect imap --archive /path/to/archive.mailarchive --check-credentials`.
 Ingests offers **Update IMAP Password…** to test a replacement before saving it.
 Temporary login limits back off and retry automatically; downloads use at most 15
 connections per account. All configured processing workers remain available.
@@ -178,6 +184,7 @@ reference; their workflows are in [For developers](doc/FOR_DEVELOPERS.md).
 | `CARGO_BUILD_JOBS` | Limit native Rust compilation parallelism |
 | `OPENSSL_DIR`, `OPENSSL_LIB_DIR`, `OPENSSL_INCLUDE_DIR` | Select the OpenSSL installation for Rust dependencies |
 | `OPENSSL_NO_VENDOR`, `PKG_CONFIG_PATH` | Control vendored OpenSSL and package metadata lookup |
+| `TMPDIR` | Optional disposable-test temporary root; all test subprocesses share it so lock tests stay separate from a running desktop import |
 | `UV_CACHE_DIR`, `UV_PYTHON_INSTALL_DIR`, `UV_PYTHON_BIN_DIR` | Locations for uv's cache, managed Python, and interpreter links |
 | `UV_PROJECT_ENVIRONMENT`, `PYTHONPATH` | Isolated packaging environment and repository-local test import path |
 | `FQDN` | Disposable IMAP tests use `localhost` to avoid reverse DNS |

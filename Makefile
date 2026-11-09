@@ -42,7 +42,7 @@ test-definition-state:
 .PHONY: download-definitions test-definition-download
 download-definitions:
 	@test -n "$(DEFINITIONS_DIRECTORY)" || { echo 'Specify DEFINITIONS_DIRECTORY=/new/output/path'; exit 2; }
-	uv run --locked python scripts/desktop_entry.py --update-virus-definitions --directory "$(DEFINITIONS_DIRECTORY)"
+	uv run --locked ect update-definitions --directory "$(DEFINITIONS_DIRECTORY)"
 
 test-definition-download:
 	uv run --locked pytest -q tests/test_clamav_definitions.py tests/test_python_desktop_package.py tests/test_packaging.py tests/test_website_scripts.py
@@ -238,7 +238,7 @@ name-matcher-observations:
 	uv run python -m scripts.name_matcher.build_observations --archive "$(ARCHIVE)" --output "$(OUTPUT)" $(ARGS)
 
 h3-ambiguous-review:
-	uv run mailarchiver-h3-review $(ARGS)
+	uv run ect h3-review $(ARGS)
 
 TIKA_DIR ?= $(CURDIR)/.tools/tika/$(TIKA_VERSION)
 TIKA_JAR := $(TIKA_DIR)/tika-app-$(TIKA_VERSION).jar
@@ -266,6 +266,7 @@ OCR_RUN_ARGS ?=
 
 .PHONY: check check-static check-tests lint ruff types ty pyright
 # Recursive recipes preserve stage ordering even with make -j.
+# TMPDIR can isolate disposable test files and their shared writer guard from a live app.
 check:
 	$(MAKE) check-static
 	$(MAKE) check-tests
@@ -410,7 +411,7 @@ self-test:
 	uv run python scripts/desktop_entry.py --self-test $(ARGS)
 
 self-test-gui:
-	uv run mailsearch-gui --self-test-gui $(ARGS)
+	uv run ect gui --self-test-gui $(ARGS)
 
 test-packaging:
 	uv run --group packaging pytest -q tests/test_packaging.py tests/test_macos_signing.py tests/test_self_test.py
@@ -448,7 +449,7 @@ test-updates: ruff
 	uv run --locked pytest -q tests/test_updates.py tests/test_writer_lock.py tests/test_application.py tests/test_clamav_definitions.py tests/test_website_scripts.py
 
 compare-apple-mail:
-	uv run mailarchiver-compare-apple-mail --apple-mail "$(HOME)/Library/Mail" --archive "$(HOME)/mail-archive" $(ARGS)
+	uv run ect compare-apple-mail --apple-mail "$(HOME)/Library/Mail" --archive "$(HOME)/mail-archive" $(ARGS)
 
 data-quality-audit:
 	@test -n "$(ARCHIVE)" || { echo 'usage: make data-quality-audit ARCHIVE=/path/to/mailbag EARLY_SOURCE=/path/to/source'; exit 2; }
@@ -477,24 +478,35 @@ fixture-e2e:
 	uv run python e2e_tests/generate_corpus.py e2e_tests/data/source
 
 extract-pdf-mail:
-	uv run extract-pdf-mail $(ARGS)
+	uv run ect extract-pdf-mail $(ARGS)
 
 pylint:
 	uv run --locked pylint src tests e2e_tests scripts conftest.py
 	uv run --locked --project converters/pff pylint --rcfile=pyproject.toml converters/pff/src converters/pff/tests converters/pff/entry.py
 
+.PHONY: create import test-cli
+# ARCHIVE is a new destination; ARGS supplies owner rules or import options.
+create:
+	uv run --locked ect-create "$(ARCHIVE)" $(ARGS)
+
+import:
+	uv run --locked ect-import --archive "$(ARCHIVE)" $(ARGS)
+
+test-cli:
+	uv run --locked pytest -q tests/test_cli.py
+
 run:
-	uv run mailarchiver $(ARGS)
+	uv run ect $(ARGS)
 
 search:
-	uv run mailsearch $(ARGS)
+	uv run ect-search $(ARGS)
 
 verify:
 	@test -n "$(ARCHIVE)" || { echo 'usage: make verify ARCHIVE=/path/to/mailbag'; exit 2; }
-	uv run verify-mail-archive "$(ARCHIVE)"
+	uv run ect verify "$(ARCHIVE)"
 
 summary-smoke:
-	@printf '%s\n' 'During verification, the archiver reads every canonical MBOX file without changing it. It checks BagIt payload and tag manifests, Mailbag metadata, and every declared complete-MBOX, raw-message, and semantic-message digest. Derived SQLite search data can be regenerated from canonical MBOX files. A failure is reported for investigation rather than repaired automatically.' | uv run summarize
+	@printf '%s\n' 'During verification, the archiver reads every canonical MBOX file without changing it. It checks BagIt payload and tag manifests, Mailbag metadata, and every declared complete-MBOX, raw-message, and semantic-message digest. Derived SQLite search data can be regenerated from canonical MBOX files. A failure is reported for investigation rather than repaired automatically.' | uv run ect summarize
 
 # __PYVENV_LAUNCHER__ is set internally for the signed macOS development bundle;
 # PYTHONEXECUTABLE is removed from that child environment to preserve the active venv.
@@ -640,7 +652,7 @@ test-mailsearch:
 # IMAP_ARGS supplies standalone CLI arguments; no password environment variable is supported.
 .PHONY: imap test-imap test-imap-auth
 imap:
-	uv run --locked mailarchiver-imap $(IMAP_ARGS)
+	uv run --locked ect imap $(IMAP_ARGS)
 
 # Pytest starts/stops loopback TLS IMAP, seeds three INBOX messages, and checks CLI/GUI search.
 # The fixture sets FQDN=localhost so server greetings never query host DNS.
@@ -736,26 +748,26 @@ test-plugins:
 
 validation-list:
 	@echo "Listing validation datasets configured in $(VALIDATION_CONFIG_DIR)"
-	uv run mailarchiver-validation --config-dir "$(VALIDATION_CONFIG_DIR)" --data-dir "$(VALIDATION_DATA_DIR)" list
+	uv run ect validation --config-dir "$(VALIDATION_CONFIG_DIR)" --data-dir "$(VALIDATION_DATA_DIR)" list
 
 validation-fetch:
 	@test -n "$(DATASET)" || { echo 'usage: make validation-fetch DATASET=dataset-id'; exit 2; }
 	@echo "Downloading and fixity-recording validation dataset $(DATASET) under $(VALIDATION_DATA_DIR)"
-	uv run mailarchiver-validation --config-dir "$(VALIDATION_CONFIG_DIR)" --data-dir "$(VALIDATION_DATA_DIR)" fetch "$(DATASET)"
+	uv run ect validation --config-dir "$(VALIDATION_CONFIG_DIR)" --data-dir "$(VALIDATION_DATA_DIR)" fetch "$(DATASET)"
 
 validation-prepare:
 	@test -n "$(DATASET)" || { echo 'usage: make validation-prepare DATASET=dataset-id'; exit 2; }
 	@echo "Safely extracting and preprocessing validation dataset $(DATASET) under $(VALIDATION_DATA_DIR)"
-	uv run mailarchiver-validation --config-dir "$(VALIDATION_CONFIG_DIR)" --data-dir "$(VALIDATION_DATA_DIR)" prepare "$(DATASET)"
+	uv run ect validation --config-dir "$(VALIDATION_CONFIG_DIR)" --data-dir "$(VALIDATION_DATA_DIR)" prepare "$(DATASET)"
 
 validation-run:
 	@test -n "$(DATASET)" || { echo 'usage: make validation-run DATASET=dataset-id'; exit 2; }
 	@echo "Acquiring, preprocessing, ingesting, independently verifying, and packaging $(DATASET)"
-	uv run mailarchiver-validation --config-dir "$(VALIDATION_CONFIG_DIR)" --data-dir "$(VALIDATION_DATA_DIR)" run "$(DATASET)"
+	uv run ect validation --config-dir "$(VALIDATION_CONFIG_DIR)" --data-dir "$(VALIDATION_DATA_DIR)" run "$(DATASET)"
 
 validation-run-all:
 	@echo "Running every enabled public validation dataset locally and sequentially"
-	uv run mailarchiver-validation --config-dir "$(VALIDATION_CONFIG_DIR)" --data-dir "$(VALIDATION_DATA_DIR)" run-all
+	uv run ect validation --config-dir "$(VALIDATION_CONFIG_DIR)" --data-dir "$(VALIDATION_DATA_DIR)" run-all
 
 validation-test:
 	uv run pytest -q tests/test_validation.py tests/test_validation_launcher.py
@@ -777,12 +789,12 @@ validation-aws-start:
 	@test -n "$(DATASET)" || { echo 'usage: make validation-aws-start DATASET=dataset-id STACK=stack-name'; exit 2; }
 	@test -n "$(STACK)" || { echo 'usage: make validation-aws-start DATASET=dataset-id STACK=stack-name'; exit 2; }
 	@echo "Launching one self-terminating EC2 worker for validation dataset $(DATASET)"
-	uv run mailarchiver-validation --config-dir "$(VALIDATION_CONFIG_DIR)" --data-dir "$(VALIDATION_DATA_DIR)" aws-start "$(DATASET)" --stack "$(STACK)"
+	uv run ect validation --config-dir "$(VALIDATION_CONFIG_DIR)" --data-dir "$(VALIDATION_DATA_DIR)" aws-start "$(DATASET)" --stack "$(STACK)"
 
 validation-aws-start-all:
 	@test -n "$(STACK)" || { echo 'usage: make validation-aws-start-all STACK=stack-name'; exit 2; }
 	@echo "Launching one independent self-terminating EC2 worker for every enabled validation dataset"
-	uv run mailarchiver-validation --config-dir "$(VALIDATION_CONFIG_DIR)" --data-dir "$(VALIDATION_DATA_DIR)" aws-start-all --stack "$(STACK)"
+	uv run ect validation --config-dir "$(VALIDATION_CONFIG_DIR)" --data-dir "$(VALIDATION_DATA_DIR)" aws-start-all --stack "$(STACK)"
 
 install-mac:
 	@test "$$(uname -s)" = Darwin || { echo "install-mac must run on macOS"; exit 1; }
@@ -870,7 +882,7 @@ test-owner-rules: ruff
 
 .PHONY: processor test-processors
 processor:
-	uv run --locked python -m mailarchiver.processing $(ARGS)
+	uv run --locked ect processor $(ARGS)
 
 test-processors: ruff
 	uv run --locked pylint src/mailarchiver/processing src/mailarchiver/plugin_configuration.py tests/test_processing.py tests/test_plugin_configuration.py
@@ -950,14 +962,14 @@ test-clamav:
 	uv run --locked pytest -q tests/test_scanner.py tests/test_clamav_definitions.py
 
 clamav-update:
-	uv run --locked python -m mailarchiver.clamav_update $(ARGS)
+	uv run --locked ect update-definitions $(ARGS)
 
 .PHONY: test-clamav-gui
 test-clamav-gui:
 	uv run --locked pytest -q --browser chromium e2e_tests/test_clamav_about.py
 
 freshclam:
-	uv run --locked python -m mailarchiver.clamav_update --development
+	uv run --locked ect update-definitions --development
 
 .PHONY: test-clamav-rust
 test-clamav-rust:
@@ -991,7 +1003,7 @@ prepare-windows-updater:
 .PHONY: clamav-seed
 clamav-seed:
 	@test -n "$(SEED_DIRECTORY)" || { echo 'Specify SEED_DIRECTORY containing existing ClamAV definitions'; exit 2; }
-	uv run --locked python -m mailarchiver.clamav_update --seed "$(SEED_DIRECTORY)"
+	uv run --locked ect update-definitions --seed "$(SEED_DIRECTORY)"
 
 # Disposable archives exercise object cleanup, recovery and canonical replay.
 .PHONY: test-processing-cleanup

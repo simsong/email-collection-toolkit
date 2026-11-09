@@ -633,7 +633,7 @@ def terminal_width() -> int:
     return max(40, shutil.get_terminal_size(fallback=(80, 24)).columns - 2)
 
 
-def search_epilog() -> str:
+def search_epilog(prog: str = "ect-search") -> str:
     width = terminal_width()
     selectors = (
         ("any:ADDRESS", "sender or To, Cc, or Bcc recipient address"),
@@ -648,9 +648,9 @@ def search_epilog() -> str:
     )
     selector_lines = [textwrap.fill(f"  {key:<21} {description}", width=width, subsequent_indent=" " * 23) for key, description in selectors]
     examples = (
-        "  mailsearch to:alice@example.com budget",
-        "  mailsearch --limit 0 after:2024-01-01",
-        "  mailsearch --archive OTHER_ARCHIVE 42",
+        f"  {prog} to:alice@example.com budget",
+        f"  {prog} --limit 0 after:2024-01-01",
+        f"  {prog} --archive OTHER_ARCHIVE 42",
     )
     return "\n\n".join(
         (
@@ -672,11 +672,11 @@ class TerminalHelpFormatter(argparse.HelpFormatter):
         return "\n".join(indent + line for line in text.splitlines())
 
 
-def build_parser() -> argparse.ArgumentParser:
+def build_parser(prog: str = "ect-search") -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        prog="mailsearch",
-        description="Read-only search of a mailarchiver archive.",
-        epilog=search_epilog(),
+        prog=prog,
+        description="Read-only search of an Email Collection Toolkit archive.",
+        epilog=search_epilog(prog),
         formatter_class=TerminalHelpFormatter,
     )
     add_archive_argument(parser, "directory containing archive.sqlite3 and search.sqlite3")
@@ -690,12 +690,12 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def main() -> int:
-    parser = build_parser()
-    args = parser.parse_args()
+def main(argv: list[str] | None = None, *, prog: str = "ect-search") -> int:
+    parser = build_parser(prog)
+    args = parser.parse_args(argv)
     args.archive = require_archive(parser, args.archive)
     if args.limit < 0:
-        raise SystemExit("mailsearch: --limit must be zero or positive")
+        raise SystemExit(f"{prog}: --limit must be zero or positive")
     try:
         if args.query is None and len(args.terms) == 1 and args.terms[0].isdigit():
             print_message(args.archive, int(args.terms[0]), args.headers, args.html, args.mime)
@@ -708,7 +708,7 @@ def main() -> int:
         for result in results:
             print(format_header(result, number_width, sys.stdout.isatty()))
     except ValueError as error:
-        raise SystemExit(f"mailsearch: {error}") from error
+        raise SystemExit(f"{prog}: {error}") from error
     return 0
 
 

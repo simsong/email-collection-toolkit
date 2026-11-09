@@ -14,70 +14,68 @@ message-ingest, and deferred content-processing boundaries.
 
 ## Command Line
 
-Run these commands from a source checkout. The desktop search language is
-also available in the terminal; quote the complete query to retain its syntax.
+Install the command-line tools with uv:
+
+```sh
+uv tool install 'git+https://github.com/simsong/email-collection-toolkit.git'
+```
+
+The [command-line guide](https://github.com/simsong/email-collection-toolkit/blob/main/doc/CLI_REFERENCE.md)
+covers prerequisites and all options. From a source checkout, prefix these
+commands with `uv run --locked` instead of installing them as tools.
+
+### Create and import
+
+```sh
+ect-create collection.mailarchive --owner sam@example.org
+ect-import --archive collection.mailarchive /path/to/exported-mail
+ect-import --archive collection.mailarchive --imap
+```
 
 ### Search
 
-```console
-make search ARGS="--archive '/path/to/collection' --query 'subject:\"annual report\" after:2024-01-01'"
+```sh
+ect-search --archive collection.mailarchive --query 'subject:"annual report" after:2024-01-01'
+ect-search --archive collection.mailarchive 42
 ```
 
 Use the same [words, phrases, and selectors](@/searching.md#words-phrases-and-selectors)
-as the search window. For a query containing spaces, pass `--query` with a
-single argument inside `ARGS`, as above.
+as the search window. Quote the query as one shell argument to preserve its syntax.
 
 ### Processing and identities
 
-Inspect the registered processors, check saved work, or resume deferred content
-processing without rereading source files:
-
-```console
-make run ARGS='--archive "/path/to/collection" processors'
-make run ARGS='--archive "/path/to/collection" processing-status'
-make run ARGS='--archive "/path/to/collection" process --phase content'
+```sh
+ect processors --archive collection.mailarchive
+ect processing-status --archive collection.mailarchive
+ect process --archive collection.mailarchive --phase content
+ect identities --archive collection.mailarchive addresses
+ect identities --archive collection.mailarchive organizations
 ```
 
-Inspect the address and organization data used by the desktop pickers:
-
-```console
-make run ARGS='--archive "/path/to/collection" identities addresses'
-make run ARGS='--archive "/path/to/collection" identities organizations'
-```
+Processing resumes saved work without rereading source files. Manual identity
+changes are durable archive data; include them in backups.
 
 ### Compare Apple Mail with an archive
 
-From the source checkout, run:
-
-```console
-make compare-apple-mail
+```sh
+ect compare-apple-mail --apple-mail /path/to/Mail --archive collection.mailarchive
 ```
 
-The command compares `~/Library/Mail` with `~/mail-archive` read-only. Alternate
-locations may be supplied through `ARGS`. It reports exact raw matches,
-semantic-only matches, cache-only and archive-only messages, ambiguous h3
-matches, excluded partial records, and aggregate header names that Apple added,
-removed, or changed. It never prints message content or header values and keeps
-its path/hash index in a disposable temporary database.
-
-On the September 6, 2026 comparison, 12,426 complete cache records were exact
-raw matches and 20,046 were h3 matches with different raw bytes. Of the latter,
-19,537 differed only in formatting. The aggregate report found 508 occurrences
-each of Apple-only `Received`, `Return-Path`, and `X-Mailer`, and 508 of
-archive-only `X-Universally-Unique-Identifier`; one Gmail pair lacked
-`X-GM-THRID` and `X-Gmail-Labels` in Apple Mail. These are point-in-time
-results from a live cache.
+Read-only comparison reports exact raw matches, semantic-only matches, cache-only
+and archive-only messages, and excluded partial records. A cache does not prove
+server completeness. See the [cache guide](https://github.com/simsong/email-collection-toolkit/blob/main/doc/APPLE_MAIL_CACHE.md)
+for interpretation; dated comparison results belong to the project history.
 
 ### Verify an archive
 
-After ingest or transfer, run the read-only archive verification:
+Stop archive writers, then run:
 
-```console
-make verify ARCHIVE=/path/to/archive
+```sh
+ect verify collection.mailarchive
 ```
 
-See the [full command reference](https://github.com/simsong/email-collection-toolkit/blob/main/doc/USER_MANUAL.md)
-for import, search-index refresh, and other command options.
+Verification is read-only and reports checksum or preservation errors without
+repairing messages. Back up the entire archive, including databases and configuration.
 
 ## Date handling
 
@@ -122,16 +120,14 @@ needed for the new search boundaries.
 
 ## Desktop application
 
-The supported desktop uses Python and pywebview on macOS and Windows. The
-earlier Rust GUI experiment is retired; independent Rust tools remain part of
-the archive system. See the
-[desktop retrospective](https://github.com/simsong/email-collection-toolkit/blob/main/rust/README.md)
-for the architecture history. Available installers and platform requirements
-are shown on the [homepage](@/_index.md).
+The desktop application runs locally on macOS and Windows. Available installers
+and platform requirements are shown on the [homepage](@/_index.md).
 
 ## Apple Mail as a temporary provider adapter
 
-Until direct Gmail, Microsoft 365, and IMAP adapters are implemented, Email Collection Toolkit can read complete Apple Mail `.emlx` records from `~/Library/Mail`.
+Email Collection Toolkit can read complete Apple Mail `.emlx` records from
+`~/Library/Mail`. This is an alternative local source; read-only password-based
+IMAP is already available.
 This works for any account Apple Mail has synchronized, including Gmail,
 Exchange Online, Outlook.com, and ordinary IMAP.
 

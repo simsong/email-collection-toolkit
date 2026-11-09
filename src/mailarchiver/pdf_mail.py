@@ -341,8 +341,8 @@ def positive_page(value: str) -> int:
     return page
 
 
-def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="extract printed email from a standalone PDF into derived MBOX")
+def main(argv: list[str] | None = None, *, prog: str | None = None) -> int:
+    parser = argparse.ArgumentParser(prog=prog, description="extract printed email from a standalone PDF into derived MBOX")
     parser.add_argument("pdf", type=Path)
     parser.add_argument("--output", type=Path, required=True, help="new .mboxrd output file")
     parser.add_argument(

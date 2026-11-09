@@ -272,8 +272,8 @@ class Utf8Imap(DisposableImap):
                  credentials: tuple[str, str] | None = None, login_response: bytes | None = None,
                  login_failures: int | None = None, greeting: bytes = b"* OK Disposable UTF-8 IMAP\r\n",
                  setup_command: bytes | None = None, setup_response: bytes | None = None,
-                 setup_authenticated: bool = True) -> None:
-        super().__init__(directory, "implicit")
+                 setup_authenticated: bool = True, tls: Literal["implicit", "starttls"] = "implicit") -> None:
+        super().__init__(directory, tls)
         self.capability = capability.encode("ascii")
         self.enable = enable
         self.credentials = credentials
@@ -283,6 +283,7 @@ class Utf8Imap(DisposableImap):
         self.setup_command = setup_command
         self.setup_response = setup_response
         self.setup_authenticated = setup_authenticated
+        self.server_context: ssl.SSLContext | None = None
         self.commands: list[bytes] = []
         self.names = ("旅行", "literal &AMk- &-", 'Quote " and \\ box')
 
@@ -296,13 +297,16 @@ class Utf8Imap(DisposableImap):
     async def _serve(self) -> None:
         context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
         context.load_cert_chain(self.certificate, self.key)
-        server = await asyncio.start_server(self._connection, "127.0.0.1", 0, ssl=context)
+        self.server_context = context
+        server = await asyncio.start_server(self._connection, "127.0.0.1", 0,
+                                            ssl=context if self.tls == "implicit" else None)
         async with server:
             self.port.set_result(server.sockets[0].getsockname()[1])
             await asyncio.to_thread(self.stop.wait)
 
     async def _connection(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
         authenticated = enabled = False
+        encrypted = self.tls == "implicit"
         writer.write(self.greeting)
         await writer.drain()
         try:
@@ -315,11 +319,20 @@ class Utf8Imap(DisposableImap):
                     response, self.setup_response = self.setup_response, None
                 elif command == b"CAPABILITY":
                     capabilities = b"IMAP4rev1"
-                    if not authenticated and self.credentials is not None:
+                    if not encrypted:
+                        capabilities += b" STARTTLS LOGINDISABLED"
+                    elif not authenticated and self.credentials is not None:
                         capabilities += b" AUTH=PLAIN LOGINDISABLED"
                     if authenticated:
                         capabilities += b" ENABLE " + self.capability
                     writer.write(b"* CAPABILITY " + capabilities + b"\r\n")
+                elif command == b"STARTTLS" and not encrypted:
+                    assert self.server_context is not None
+                    writer.write(tag + b" OK Begin TLS\r\n")
+                    await writer.drain()
+                    await writer.start_tls(self.server_context)
+                    encrypted = True
+                    continue
                 elif command == b"LOGIN":
                     refusal = self._login_refusal()
                     if refusal is not None:
@@ -359,6 +372,10 @@ class Utf8Imap(DisposableImap):
                     break
                 else:
                     response = b"BAD unexpected command"
+                if response.startswith(b"BYE "):
+                    writer.write(b"* " + response + b"\r\n")
+                    await writer.drain()
+                    return
                 writer.write(tag + b" " + response + b"\r\n")
                 await writer.drain()
         finally:

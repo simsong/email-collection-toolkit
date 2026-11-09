@@ -23,6 +23,7 @@ import ssl
 from collections.abc import Sequence
 from email.utils import parsedate_to_datetime
 from types import TracebackType
+from typing import Protocol, cast
 
 from pydantic import BaseModel, Field
 
@@ -110,13 +111,28 @@ class ImapBody(BaseModel):
     raw: bytes
 
 
-class _ImapClient(imaplib.IMAP4):
-    """Retain constructor CAPABILITY refusals before imaplib misreads them as capability names."""
+class _ServerBye(imaplib.IMAP4.abort):
+    """Retain structured BYE evidence when construction fails before the session owns its client."""
 
-    def capability(self) -> tuple[str, list[bytes]]:
-        status, data = super().capability()
-        if status != "OK":
-            raise self.error(data[-1] if data else b"CAPABILITY failed without a server explanation")
+
+class _CommandCompletion(Protocol):
+    """Type imaplib's inspected runtime hook, which its public stubs omit."""
+
+    def _command_complete(self, name: str, tag: bytes) -> tuple[str, list[bytes]]: ...
+
+
+class _ImapClient(imaplib.IMAP4):
+    """Retain setup refusals before constructor/STARTTLS wrappers discard their server data."""
+
+    def _command_complete(self, name: str, tag: bytes) -> tuple[str, list[bytes]]:
+        try:
+            status, data = cast(_CommandCompletion, super())._command_complete(name, tag)
+        except imaplib.IMAP4.abort as error:
+            if self.response("BYE")[1] != [None]:
+                raise _ServerBye(*error.args) from None
+            raise
+        if status != "OK" and name in {"CAPABILITY", "STARTTLS"}:
+            raise self.error(data[-1] if data and data[-1] else f"{name} failed without a server explanation")
         return status, data
 
 
@@ -343,7 +359,8 @@ class ImapSession:
             # Servers may refuse a connection in their greeting or abort SASL with BYE.
             if isinstance(error, imaplib.IMAP4.error):
                 detail = authentication_detail(error, self.account.username, self.password)
-                closed = bool(self.client is not None and self.client.response("BYE")[1] != [None])
+                closed = isinstance(error, _ServerBye) or bool(
+                    self.client is not None and self.client.response("BYE")[1] != [None])
                 failure: BaseException
                 if temporary_refusal(detail) and (not isinstance(error, imaplib.IMAP4.abort) or closed):
                     failure = ImapServerBusy(detail)
@@ -364,8 +381,8 @@ class ImapSession:
     def __exit__(self, _kind: type[BaseException] | None, _error: BaseException | None,
                  _traceback: TracebackType | None) -> None:
         client, self.client = self.client, None
-        server_closed = bool(client is not None and isinstance(_error, imaplib.IMAP4.abort)
-                             and client.response("BYE")[1] != [None])
+        server_closed = isinstance(_error, _ServerBye) or bool(
+            client is not None and isinstance(_error, imaplib.IMAP4.abort) and client.response("BYE")[1] != [None])
         if client is not None:
             try:
                 # A timed-out buffered socket cannot be reused, even for LOGOUT.

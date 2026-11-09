@@ -127,8 +127,8 @@ class SyncReporter:
         self.display(status)
 
 
-def parser() -> argparse.ArgumentParser:
-    result = argparse.ArgumentParser(description=__doc__)
+def parser(prog: str | None = None) -> argparse.ArgumentParser:
+    result = argparse.ArgumentParser(prog=prog, description=__doc__)
     target = result.add_mutually_exclusive_group(required=True)
     target.add_argument("--new", type=Path, metavar="ARCHIVE", help="create an empty new archive; never overwrite")
     target.add_argument("--archive", type=Path, help="synchronize an existing archive")
@@ -247,8 +247,8 @@ def synchronize(args: argparse.Namespace) -> int:
             lease.release()
 
 
-def main(argv: list[str] | None = None) -> int:
-    args = parser().parse_args(argv)
+def main(argv: list[str] | None = None, *, prog: str | None = None) -> int:
+    args = parser(prog).parse_args(argv)
     try:
         return synchronize(args)
     except KeyboardInterrupt:
