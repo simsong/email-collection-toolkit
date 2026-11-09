@@ -6,6 +6,13 @@ Entries describe their recorded revisions. For current behavior use the
 [user manual](USER_MANUAL.md) and [CLI reference](CLI_REFERENCE.md). Retired
 Rust delivery plans and historical package checks are not current acceptance.
 
+## 1.0.0a68 — separate IMAP connection preference
+
+- Default to 8 IMAP connections per account, with an independent 1–15 setting in
+  macOS and Windows Preferences. Processing workers retain their separate setting.
+- Apply saved connection changes when starting or continuing an import, including
+  CLI imports; temporary connection refusals continue to back off automatically.
+
 ## 1.0.0a67 — IMAP authentication diagnostics and connection backoff
 
 - Add credential-only validation and interactive test-before-save password replacement.

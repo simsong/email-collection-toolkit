@@ -78,7 +78,7 @@ def exercise_preferences(service: UpdateService) -> None:
     appkit = import_module("AppKit")
     saved: list[tuple[str, bool]] = []
     from mailarchiver.worker_preferences import WorkerPreferences, WorkerSettings
-    pane = MacOSPreferences(service, lambda channel, automatic, _workers: saved.append((channel, automatic)))
+    pane = MacOSPreferences(service, lambda channel, automatic, _workers, _imap: saved.append((channel, automatic)))
     pane.screen = min(appkit.NSScreen.screens(), key=lambda screen: screen.frame().origin.x)
     pane.show(WorkerSettings(preferences=WorkerPreferences()))
     run_native_until(pane.window.isVisible, "Preferences did not become visible")

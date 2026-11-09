@@ -920,12 +920,12 @@ test-pff: pst-importer mcti-scan pff-converter test-pff-converter
 .PHONY: test-gui-processing
 .PHONY: test-worker-preferences test-native-worker-preferences
 test-worker-preferences: ruff
-	uv run --locked pytest -q tests/test_worker_preferences.py tests/test_updates.py
-	uv run --locked pytest -q --browser chromium e2e_tests/test_worker_preferences.py
+	uv run --locked pytest -q tests/test_worker_preferences.py tests/test_updates.py $(PYTEST_ARGS)
+	uv run --locked pytest -q --browser chromium e2e_tests/test_worker_preferences.py $(PYTEST_ARGS)
 
 # MAILARCHIVER_NATIVE_APPLICATION_E2E enables disposable, visible macOS preference acceptance.
 test-native-worker-preferences: ruff
-	MAILARCHIVER_NATIVE_APPLICATION_E2E=1 uv run --locked pytest -q e2e_tests/test_worker_preferences.py -k native
+	MAILARCHIVER_NATIVE_APPLICATION_E2E=1 uv run --locked pytest -q e2e_tests/test_worker_preferences.py -k native $(PYTEST_ARGS)
 
 IDENTITY_SEARCH_CHECK_FILES = src/mailarchiver/name_entities.py src/mailarchiver/gui_processing.py src/mailarchiver/gui_app.py \
 	src/mailarchiver/gui_service.py src/mailarchiver/mailsearch.py src/mailarchiver/search_selectors.py \

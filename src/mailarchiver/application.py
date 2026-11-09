@@ -44,8 +44,9 @@ from .catalog import PROCESSING_DATABASE, create_catalog, create_search, validat
 from .writer_lock import ArchiveBusyError, WriterLease
 from .updates import UpdateChannel, default_channel
 from .worker_preferences import WorkerPreferences, validate_workers
+from .imap_preferences import DEFAULT_IMAP_CONNECTIONS, ImapConnectionLimit, validate_imap_connections
 
-APPLICATION_PREFERENCES_VERSION = 3
+APPLICATION_PREFERENCES_VERSION = 4
 RECENT_ARCHIVE_LIMIT = 10
 
 
@@ -56,12 +57,13 @@ class InvalidArchiveError(ValueError):
 class ApplicationPreferences(BaseModel):
     """Discardable, versioned state stored outside every archive."""
 
-    version: Literal[1, 2, 3] = APPLICATION_PREFERENCES_VERSION
+    version: Literal[1, 2, 3, 4] = APPLICATION_PREFERENCES_VERSION
     last_archive: Path | None = None
     recent_archives: list[Path] = Field(default_factory=list, max_length=RECENT_ARCHIVE_LIMIT)
     update_channel: UpdateChannel | None = None
     automatic_update_checks: bool = True
     workers: WorkerPreferences = Field(default_factory=WorkerPreferences)
+    imap_connections: ImapConnectionLimit = DEFAULT_IMAP_CONNECTIONS
 
 
 class ApplicationPreferencesStore:
@@ -105,6 +107,14 @@ def configured_workers(command_line: int | None = None, store: ApplicationPrefer
     except (OSError, ValueError):
         preferences = WorkerPreferences()
     return preferences.resolve()
+
+
+def configured_imap_connections(store: ApplicationPreferencesStore | None = None) -> int:
+    """Resolve the per-account acquisition budget without changing processing workers."""
+    try:
+        return (store or ApplicationPreferencesStore()).read().imap_connections
+    except (OSError, ValueError):
+        return DEFAULT_IMAP_CONNECTIONS
 
 
 def validate_source_destination(source: Path, destination: Path) -> None:
@@ -466,16 +476,21 @@ class ApplicationController:
         self.configure_preferences(channel, automatic_checks, strict=strict)
 
     def configure_preferences(self, channel: UpdateChannel | None, automatic_checks: bool,
-                              workers: WorkerPreferences | None = None, *, strict: bool = False) -> None:
+                              workers: WorkerPreferences | None = None, imap_connections: int | None = None,
+                              *, strict: bool = False) -> None:
         """Commit panel choices together; a CLI override supplies no replacement worker choice."""
         if workers is not None:
             workers.validate_limit()
+        if imap_connections is not None:
+            validate_imap_connections(imap_connections)
         with self._lock:
             previous = self._preferences.model_copy(deep=True)
             self._preferences.update_channel = channel
             self._preferences.automatic_update_checks = automatic_checks
             if workers is not None:
                 self._preferences.workers = workers.model_copy(deep=True)
+            if imap_connections is not None:
+                self._preferences.imap_connections = imap_connections
             self._preferences.version = APPLICATION_PREFERENCES_VERSION
             self._write_preferences()
             if strict and self.preference_error:

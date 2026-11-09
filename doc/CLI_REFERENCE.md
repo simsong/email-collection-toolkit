@@ -87,7 +87,9 @@ active. Rejected replacements retain the old password; saving never starts an
 import. Errors include a sanitized server reason; credential-only checks return 75 for
 temporary connection/rate limits. Imports stay running and retry after 1, 2, 4,
 8 seconds, up to 60 seconds between attempts, until accepted or cancelled. Downloads
-use at most 15 connections per account; the full processing worker pool is retained.
+use the saved IMAP connection preference (default 8, range 1–15) per account;
+the full processing worker pool is retained. Set it in **Preferences → Maximum
+IMAP connections per account**; `--workers` controls processing independently.
 
 ```sh
 ect-import --archive collection.mailarchive --imap

@@ -227,6 +227,11 @@ choice unchanged and disables all worker preference controls, with the note
 `# workers set to {number} on command line`. Generic ingest, process, refresh-index
 and standalone IMAP use the preference when their flag is omitted.
 
+Preferences also expose **Maximum IMAP connections per account**, default 8,
+accepting whole numbers 1–15. Persist it independently of processing workers.
+A `--workers` override must leave this control editable. Connection changes apply
+when starting or continuing an import; active imports keep their existing budget.
+
 The Preferences JavaScript API must expose only settings state, saving, update
 checking and completed-close methods. Native window state and close-event handlers
 must not enter pywebview discovery; opening and reopening must remain responsive.

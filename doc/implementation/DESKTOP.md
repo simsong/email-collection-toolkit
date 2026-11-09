@@ -183,12 +183,14 @@ are written explicitly as UTF-8 and atomically replaced in the platform
 application-data directory; their randomly generated temporary filename has no
 user-derived component. They are treated as optional, discardable state.
 
-Version-three application preferences store `WorkerPreferences` (half/all/custom
+Version-four application preferences store a separate `imap_connections` budget
+(default 8, range 1–15) alongside `WorkerPreferences` (half/all/custom
 mode and remembered custom count). `worker_preferences.py` shares CPU detection,
 positive-integer validation, the twice-CPU cap and typed UI snapshots. The Cocoa
 Preferences window uses a radio matrix and numeric text field; Windows' Preferences
 HTML uses equivalent controls. The document controller atomically persists worker
-and update choices together. CLI overrides disable only worker controls and omit
+and update choices together, including the independent IMAP numeric control.
+CLI overrides disable only worker controls and omit
 worker changes when saving. New/continued GUI requests and CLI adapters resolve the
 current setting; IMAP root partition counts follow the resolved worker limit.
 Active pools keep their current size. `make test-worker-preferences` exercises

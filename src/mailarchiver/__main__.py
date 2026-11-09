@@ -49,7 +49,8 @@ from tabulate import tabulate
 
 from .scan_evidence import ScanEvidence, ScanFailure
 from .future_coordinator import BoundedWorkers, FutureCoordinator, WORKER_NUMBER
-from .application import configured_workers, validate_ingest_paths
+from .application import configured_imap_connections, configured_workers, validate_ingest_paths
+from .imap_preferences import ImapConnectionLimit
 from .worker_preferences import half_cpus, worker_argument
 from .archive_integrity import ArchiveIntegrityWarning, MailbagArchiveIntegrityControls
 from .archive_path import add_archive_argument, require_archive
@@ -195,6 +196,7 @@ class IngestRequest(BaseModel):
     roots: list[str] = Field(default_factory=list)
     earliest_year: int = Field(default=1900, ge=1)
     workers: int = Field(default_factory=half_cpus, ge=1)
+    imap_connections: ImapConnectionLimit | None = Field(default=None, exclude=True)
     plugin_dir: list[Path] = Field(default_factory=list)
     index_attachments: bool = False
     scan_policy: Literal["clamav", "not-scanned"] = "clamav"
@@ -1380,7 +1382,9 @@ def _run_ingest(request: IngestRequest, writer_lease: WriterLease, outcome: Inge
         if stop_event.is_set():
             stop.set()
     plugins = load_plugins(request.plugin_dir, archive=request.archive, installation_config=request.installation_config,
-                           scan_policy=request.scan_policy, cancellation=stop)
+                           scan_policy=request.scan_policy, cancellation=stop,
+                           imap_connections=request.imap_connections if request.imap_connections is not None
+                           else configured_imap_connections())
     source_specs = [SourceSpec(locator=str(Path(root).resolve())
                               if "://" not in root and Path(root).exists() else root) for root in request.roots]
     selected_sources: list[tuple[SourceSpec, LoadedPlugin]] = []

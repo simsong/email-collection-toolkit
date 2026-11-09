@@ -21,7 +21,7 @@ does not establish that every platform or release gate has passed.
 
 - IMAP credential checks authenticate without mailbox access or archive writes;
   replacement passwords are tested before saving. Account acquisition uses
-  at most 15 sessions and cancellable capacity backoff while retaining the
+  a saved per-account limit (default 8, range 1–15) and cancellable capacity backoff while retaining the
   full processing worker pool. Protocol failures and private diagnostics
   retain their distinct handling. See [acquisition](requirements/ACQUISITION.md).
 

@@ -523,28 +523,31 @@ def assert_imap_searchable(archive: Path) -> None:
         assert database.execute("SELECT count(*) FROM invocations WHERE kind='text-index' AND status='completed'").fetchone()[0] > 0
 
 
-def test_imap_connection_cap_preserves_processing_workers(imap_archive: Path, imap_inbox: DisposableImap) -> None:
-    """ACQUISITION: allow fifteen real IMAP sessions while retaining sixteen processing workers."""
+@pytest.mark.parametrize("connections", [8, 3, 15])
+def test_imap_connection_cap_preserves_processing_workers(imap_archive: Path, imap_inbox: DisposableImap,
+        connections: int) -> None:
+    """ACQUISITION: separate connection budgets constrain real TLS sessions, retaining sixteen workers."""
     assert imap_inbox.account is not None
     with imap_inbox.connect() as client:
         for number in range(28):
             client.append("INBOX", None, None, f"Subject: limit {number}\r\n\r\nsynthetic {number}\r\n".encode())
     imap_inbox.peak_connections = 0
-    imap_inbox.connection_target = 15
+    imap_inbox.connection_target = connections
     imap_inbox.pause_after_bodies(1)
     request = IngestRequest(archive=imap_archive, roots=[imap_locator(imap_archive, imap_inbox.account, 16)],
-                            workers=16, scan_policy="not-scanned")
+                            workers=16, imap_connections=connections, scan_policy="not-scanned")
     with ThreadPoolExecutor(max_workers=1) as pool:
         future = pool.submit(run_ingest, request, terminal=False)
         try:
-            assert imap_inbox.connections_ready.wait(15), "Fifteen acquisition sessions were not admitted"
+            assert imap_inbox.connections_ready.wait(15), f"{connections} acquisition sessions were not admitted"
             assert not future.done()
         finally:
             imap_inbox.release_bodies()
         future.result(timeout=30)
-    assert imap_inbox.peak_connections == 15
+    assert imap_inbox.peak_connections == connections
     assert read_ingest_history(imap_archive).statuses[0].configured_workers == 16
     assert resume_request(imap_archive, False, True).workers == 16
+    assert resume_request(imap_archive, False, True).imap_connections is None  # Reload personal preferences on continuation.
     assert totals(imap_archive).archived == 31
     assert not verify_archive(imap_archive)
 

@@ -428,8 +428,13 @@ completion boundary retains CAPABILITY/STARTTLS NO replies before imaplib can
 discard their reasons. A private protocol exception carries structured BYE
 evidence out of construction before the session can own the client. Both TLS
 modes reuse stdlib handshakes; no duplicate commands or TLS bypass are introduced.
-The existing concurrency-key scheduler caps download sessions at 15 per account;
-it does not reduce the configured processing worker pool. `make test-imap-auth`
+Version-four application preferences store `imap_connections` separately from workers
+(default 8, strict whole-number range 1–15). CLI acquisition reads the current saved
+value; desktop starts and continuations supply their controller’s current value.
+The launch-only request value is excluded from saved archive requests so continuation
+reloads personal preferences. `PluginContext` carries the budget to the IMAP source’s
+instance capabilities; the concurrency-key scheduler applies it per account without
+reducing the configured processing worker pool. `make test-imap-auth`
 covers real TLS replies, automatic retry, cancellation, credential-only
 immutability, replacement safety, connection counts and the shipped browser form.
 Both desktop Ingests entry points expose the same explicit bridge methods used by

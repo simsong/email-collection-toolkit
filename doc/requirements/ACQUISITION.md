@@ -63,8 +63,9 @@ until accepted or cancelled. Show the sanitized reason and backoff as progress,
 close each refused connection before waiting, and wake immediately on Suspend/Quit.
 Do not blame or replace the password. Credential-only checks make one attempt and
 exit 75 for temporary refusal. Actual credential rejection remains a concise failure
-without a traceback. Limit each account to 15 simultaneous download sessions while
-retaining all configured workers for message processing. Other mail clients can
+without a traceback. Provide a separate saved **Maximum IMAP connections per account**
+preference: default 8, whole numbers 1–15. Apply it per account when starting or
+continuing an import, retaining all configured workers for message processing. Other mail clients can
 consume server slots; backoff handles those refusals without ending the import.
 This includes tagged temporary refusals during post-login CAPABILITY/ENABLE.
 STARTTLS refusals and valid BYE responses during constructor CAPABILITY also retain

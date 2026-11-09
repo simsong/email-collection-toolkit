@@ -1894,7 +1894,8 @@ class PyWebViewApplication:
                     return
                 window = show_windows_update_preferences(self.updates,
                     lambda channel, automatic: self.controller.configure_updates(channel, automatic, strict=True),
-                    self.worker_settings, self.save_preferences, lambda: self._quitting)
+                    self.worker_settings, self.save_preferences, lambda: self._quitting,
+                    lambda: self.controller.preferences.imap_connections)
                 self._windows_preferences_window = window
 
                 def closed(*_args: object) -> None:
@@ -1906,7 +1907,7 @@ class PyWebViewApplication:
             else:
                 if self._preferences_window is None:
                     self._preferences_window = MacOSPreferences(self.updates, self.save_preferences)
-                self._preferences_window.show(self.worker_settings())
+                self._preferences_window.show(self.worker_settings(), self.controller.preferences.imap_connections)
         except (OSError, ValueError) as error:
             self.add_notice("warning", f"Could not save preferences: {error}")
             return
@@ -1916,10 +1917,11 @@ class PyWebViewApplication:
     def worker_settings(self) -> WorkerSettings:
         return WorkerSettings(preferences=self.controller.preferences.workers, command_line=self._workers_override)
 
-    def save_preferences(self, channel: UpdateChannel, automatic: bool, workers: WorkerPreferences | None) -> None:
+    def save_preferences(self, channel: UpdateChannel, automatic: bool, workers: WorkerPreferences | None,
+                         imap_connections: int | None = None) -> None:
         if workers is not None and self._workers_override is not None:
             raise ValueError(self.worker_settings().override_note)
-        self.controller.configure_preferences(channel, automatic, workers, strict=True)
+        self.controller.configure_preferences(channel, automatic, workers, imap_connections, strict=True)
 
     def asset_url(
         self, asset: str, parameters: list[tuple[str, str]] | None = None
@@ -2443,7 +2445,8 @@ class PyWebViewApplication:
             archive=document.path, owner_names_file=owner_names, owner_rules=owner_rules,
             roots=[str(root) for root in roots], scan_policy=scan_policy,
         )
-        request = request.model_copy(update={"workers": self.worker_settings().effective_count})
+        request = request.model_copy(update={"workers": self.worker_settings().effective_count,
+                                            "imap_connections": self.controller.preferences.imap_connections})
         ingesting = bool(request.roots or (request.continue_ingest and unfinished_work(document.path).ingest))
         operation_id = uuid4().hex
         lease: WriterLease | None = None

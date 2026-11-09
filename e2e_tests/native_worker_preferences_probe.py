@@ -67,6 +67,16 @@ def main() -> None:
         assert window.standardWindowButton_(appkit.NSWindowMiniaturizeButton).isEnabled()
         controls = controls_for(window)
         choices, count, note = controls["worker-mode"], controls["worker-count"], controls["worker-note"]
+        connections = controls["imap-connections"]
+        assert connections.isEnabled() and str(connections.stringValue()) == "8"
+        connections.setStringValue_("3")
+        assert pane.commit()
+        assert store.read().imap_connections == 3
+        connections.setStringValue_("16")
+        assert not pane.commit()
+        assert store.read().imap_connections == 3
+        connections.setStringValue_("3")
+        assert pane.commit()
         assert choices.numberOfRows() == 3
         assert not controls["check-updates"].isEnabled()
         assert "source checkout" in str(controls["update-status"].stringValue())
@@ -103,6 +113,7 @@ def main() -> None:
         run_native_until(window.isVisible, "Preferences did not reopen")
         assert application._preferences_window is pane and window.isVisible()
         assert str(count.stringValue()) == "1"
+        assert str(connections.stringValue()) == "3"
         window.standardWindowButton_(appkit.NSWindowCloseButton).performClick_(None)
         assert not window.isVisible()
         assert not application.notices(), application.notices()

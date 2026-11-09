@@ -18,6 +18,7 @@ from typing import Any
 
 from .updates import PREVIEW_STREAM_LABEL, RELEASE_STREAM_LABEL, UPDATE_STREAM_HELP, UpdateChannel, UpdateService
 from .worker_preferences import WORKER_MODES, WorkerPreferences, WorkerSettings
+from .imap_preferences import DEFAULT_IMAP_CONNECTIONS, MAX_IMAP_CONNECTIONS, validate_imap_connections
 
 MODULE_KEY = "__module__"
 PROTOCOLS_KEY = "protocols"
@@ -61,17 +62,17 @@ def preferences_delegate() -> Any:
 class MacOSPreferences:
     """Own native controls, validation and a reusable preferences window."""
 
-    def __init__(self, service: UpdateService, save: Callable[[UpdateChannel, bool, WorkerPreferences | None], None]) -> None:
+    def __init__(self, service: UpdateService, save: Callable[[UpdateChannel, bool, WorkerPreferences | None, int], None]) -> None:
         self.service, self.save = service, save
         self.workers: WorkerSettings
-        self.saved: tuple[UpdateChannel, bool, WorkerPreferences | None] | None = None
+        self.saved: tuple[UpdateChannel, bool, WorkerPreferences | None, int] | None = None
         appkit = import_module("AppKit")
         parent = appkit.NSApplication.sharedApplication().keyWindow()
         self.screen = parent.screen() if parent is not None else appkit.NSScreen.mainScreen()
         self.delegate = preferences_delegate().alloc().init()
         self.delegate.pane = self
         self.window = appkit.NSWindow.alloc().initWithContentRect_styleMask_backing_defer_(
-            ((0, 0), (580, 620)), appkit.NSWindowStyleMaskTitled | appkit.NSWindowStyleMaskClosable |
+            ((0, 0), (580, 740)), appkit.NSWindowStyleMaskTitled | appkit.NSWindowStyleMaskClosable |
             appkit.NSWindowStyleMaskMiniaturizable, appkit.NSBackingStoreBuffered, False)
         self.window.setReleasedWhenClosed_(False)
         self.window.setTitle_("Preferences")
@@ -84,24 +85,31 @@ class MacOSPreferences:
             view.addSubview_(control)
             return control
 
-        self.version = label("", 568)
-        label("Maximum number of workers", 520)
+        self.version = label("", 688)
+        label("Maximum number of workers", 640)
         prototype = appkit.NSButtonCell.alloc().init()
         prototype.setButtonType_(appkit.NSRadioButton)
         self.choices = appkit.NSMatrix.alloc().initWithFrame_mode_prototype_numberOfRows_numberOfColumns_(
-            ((24, 408), (300, 96)), appkit.NSRadioModeMatrix, prototype, 3, 1)
+            ((24, 528), (300, 96)), appkit.NSRadioModeMatrix, prototype, 3, 1)
         self.choices.setCellSize_((300, 28))
         self.choices.setIntercellSpacing_((0, 4))
         self.choices.setAccessibilityIdentifier_("worker-mode")
         self.choices.setTarget_(self.delegate)
         self.choices.setAction_("changed:")
         view.addSubview_(self.choices)
-        self.count = appkit.NSTextField.alloc().initWithFrame_(((340, 408), (150, 28)))
+        self.count = appkit.NSTextField.alloc().initWithFrame_(((340, 528), (150, 28)))
         self.count.setAccessibilityIdentifier_("worker-count")
         self.count.setDelegate_(self.delegate)
         view.addSubview_(self.count)
-        self.note = label("", 340, 56)
+        self.note = label("", 460, 56)
         self.note.setAccessibilityIdentifier_("worker-note")
+        label("Maximum IMAP connections per account", 420)
+        self.imap_count = appkit.NSTextField.alloc().initWithFrame_(((340, 388), (150, 28)))
+        self.imap_count.setAccessibilityIdentifier_("imap-connections")
+        self.imap_count.setDelegate_(self.delegate)
+        view.addSubview_(self.imap_count)
+        label(f"1–{MAX_IMAP_CONNECTIONS}; default {DEFAULT_IMAP_CONNECTIONS}. Independent of processing workers.\n"
+              "Applies when starting or continuing an import.", 330, 48)
         label("Updates", 300)
         self.channel = appkit.NSPopUpButton.alloc().initWithFrame_pullsDown_(((24, 260), (532, 28)), False)
         self.channel.addItemsWithTitles_([RELEASE_STREAM_LABEL, PREVIEW_STREAM_LABEL])
@@ -120,7 +128,7 @@ class MacOSPreferences:
         self.check.setAccessibilityIdentifier_("check-updates")
         view.addSubview_(self.check)
 
-    def show(self, workers: WorkerSettings) -> None:
+    def show(self, workers: WorkerSettings, imap_connections: int = DEFAULT_IMAP_CONNECTIONS) -> None:
         """Reuse an open pane; refresh saved choices each time a closed pane reopens."""
         if self.window.isVisible():
             self.window.deminiaturize_(None)
@@ -135,9 +143,11 @@ class MacOSPreferences:
         self.choices.setEnabled_(workers.command_line is None)
         self.count.setStringValue_(str(min(workers.preferences.custom_count, workers.maximum)))
         self.count.setEnabled_(workers.command_line is None)
+        self.imap_count.setStringValue_(str(imap_connections))
         self.channel.selectItemAtIndex_(int(status.channel == "preview"))
         self.automatic.setState_(int(status.automatic_checks))
-        self.saved = (status.channel, status.automatic_checks, workers.preferences if workers.command_line is None else None)
+        self.saved = (status.channel, status.automatic_checks,
+                      workers.preferences if workers.command_line is None else None, imap_connections)
         self.note.setStringValue_(self.worker_note())
         self.refresh_status()
         appkit = import_module("AppKit")
@@ -161,7 +171,8 @@ class MacOSPreferences:
             selection = (WorkerPreferences.from_input(WORKER_MODES[self.choices.selectedRow()],
                          int(self.count.stringValue()), self.workers.cpus) if self.workers.command_line is None else None)
             channel: UpdateChannel = "preview" if self.channel.indexOfSelectedItem() == 1 else "release"
-            value = channel, bool(self.automatic.state()), selection
+            connections = validate_imap_connections(int(self.imap_count.stringValue()))
+            value = channel, bool(self.automatic.state()), selection, connections
             if value != self.saved:
                 self.save(*value)
                 if self.saved is None or value[:2] != self.saved[:2]:

@@ -143,8 +143,10 @@ requirements and commands.
 Validate saved credentials without opening mailboxes or writing the archive with
 `ect imap --archive /path/to/archive.mailarchive --check-credentials`.
 Ingests offers **Update IMAP Password…** to test a replacement before saving it.
-Temporary login limits back off and retry automatically; downloads use at most 15
-connections per account. All configured processing workers remain available.
+Temporary login limits back off and retry automatically; downloads default to 8
+connections per account. **Preferences → Maximum IMAP connections per account**
+accepts 1–15, independently of the processing worker count. All configured
+processing workers remain available.
 
 ### Archive care
 

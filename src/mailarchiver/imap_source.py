@@ -30,6 +30,7 @@ from .archive_config import load_archive_config
 from .change_signal import ChangeEvent
 from .imap_credentials import password_for
 from .imap_models import ImapAccount, ImapDownload, ImapMailbox, ImapMessageMetadata
+from .imap_preferences import DEFAULT_IMAP_CONNECTIONS
 from .imap_protocol import ImapServerBusy, ImapSession, UID_BATCH_SIZE
 from .imap_state import known_observation
 from .plugin_api import (
@@ -40,7 +41,6 @@ from .plugin_api import (
 from .sqlite_paths import sqlite_uri
 
 UID_SEARCH_WINDOW = 65536
-IMAP_CONNECTION_LIMIT = 15
 IMAP_RETRY_INITIAL = 1.0
 IMAP_RETRY_MAXIMUM = 60.0
 
@@ -98,13 +98,15 @@ class ImapSourcePlugin(SourcePlugin):
     kind = "imap"
     # Limit acquisition connections independently of the shared processing worker pool.
     capabilities = PluginCapabilities(resumable=False, stable_inventory=False, network_access=True,
-                                      max_concurrency=IMAP_CONNECTION_LIMIT)
+                                      max_concurrency=DEFAULT_IMAP_CONNECTIONS)
     integrity_controls = ImapIntegrityControls()
 
     def __init__(self, services: PluginContext | None = None, *, credentials: Callable[[ImapAccount], str] = password_for,
                  context: ssl.SSLContext | None = None) -> None:
         self.credentials = credentials
         self.context = context
+        if services is not None:
+            self.capabilities = self.capabilities.model_copy(update={"max_concurrency": services.imap_connections})
         self.cancellation = services.cancellation if services and services.cancellation is not None else ChangeEvent()
 
     def _connect(self, account: ImapAccount, connections: ExitStack, work_id: str

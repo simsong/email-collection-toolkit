@@ -61,6 +61,12 @@ On macOS, changes save automatically. Close Preferences using the red window
 control or **File → Close**; no Done button is needed. Invalid worker counts show
 an explanation and retain the previously saved setting.
 
+**Maximum IMAP connections per account** is a separate preference, default **8**,
+with a range of **1–15**. This leaves room under Gmail’s 15-connection account
+limit for other mail clients. It stays editable with a `--workers` override and
+applies when starting or continuing an import. Temporary server connection limits
+back off automatically; all processing workers remain available.
+
 **Check for Program Updates** requires the installed application. A source-checkout
 launch has no in-app updater, so this button is disabled with an explanation.
 **Check for Anti-Virus Updates**, directly below the program-update menu command,
