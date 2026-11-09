@@ -6,6 +6,14 @@ Entries describe their recorded revisions. For current behavior use the
 [user manual](USER_MANUAL.md) and [CLI reference](CLI_REFERENCE.md). Retired
 Rust delivery plans and historical package checks are not current acceptance.
 
+## 1.0.0a65 — IMAP authentication diagnostics and connection backoff
+
+- Add credential-only validation and interactive test-before-save password replacement.
+- Show sanitized server login reasons and retry temporary capacity/rate refusals
+  with cancellable exponential backoff, retaining import progress.
+- Cap account IMAP sessions at 15 while preserving the full processing worker pool.
+- Offer **Update IMAP Password…** in Ingests without starting an import.
+
 ## 1.0.0a62 — clarify alpha testing and archive verification
 
 - Label local archive checkpoint work **Verifying archived messages and saving

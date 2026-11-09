@@ -15,10 +15,12 @@ from playwright.sync_api import Page, expect
 
 from e2e_tests.browser_notifications import notify_status
 from mailarchiver.__main__ import IngestRequest
-from mailarchiver.gui_app import GUI_DIRECTORY, IngestWindowApi
+from mailarchiver.file_events import wait_for_path_state
+from mailarchiver.gui_app import GUI_DIRECTORY, INGEST_BRIDGE_METHODS, IngestWindowApi, WindowBridge
 from mailarchiver.gui_processing import unfinished_work
 from mailarchiver.imap_source import imap_locator
 from mailarchiver.imap_cli import parser, synchronize
+from mailarchiver.imap_credentials import password_for, save_password
 from mailarchiver.imap_state import totals
 from mailarchiver.ingest_status import read_ingest_history
 from mailarchiver.standalone_verify import verify_archive
@@ -29,6 +31,91 @@ from tests.test_gui_processing import open_headless, wait_for_import
 from tests.test_imap import assert_imap_searchable
 from tests.test_imap import imap_archive as imap_archive, imap_inbox as imap_inbox, imap_messages as imap_messages
 from tests.test_imap import imap_server as imap_server, imap_server_identity as imap_server_identity
+
+
+def test_password_replacement_form_checks_real_login_before_saving(imap_archive: Path,
+        imap_inbox: DisposableImap, page: Page, tmp_path: Path) -> None:
+    """ACQUISITION: the shipped password form reports rejection and saves only a validated replacement."""
+    account = imap_inbox.account
+    assert account is not None
+    save_password(account, "old-password")
+    app, api = open_headless(imap_archive, tmp_path / "preferences.json")
+    try:
+        request = IngestRequest(archive=imap_archive, roots=[imap_locator(imap_archive, account, 1)],
+                                workers=1, scan_policy="not-scanned", index_attachments=True)
+        assert app.start_import(api, [], processing_request=request)
+        wait_for_import(api)
+        status = read_ingest_history(imap_archive).statuses[0]
+        assert status.state == "failed" and status.failure_detail and "authentication failed" in status.failure_detail
+        assert "Traceback" not in status.failure_detail and "Message prefix" not in status.failure_detail
+        app.shutdown()
+        api.close()
+        app, api = open_headless(imap_archive, tmp_path / "preferences.json")
+        controls = IngestWindowApi(imap_archive, application=app, document=api.document)
+        bridge(page, WindowBridge(controls, INGEST_BRIDGE_METHODS), INGEST_BRIDGE_METHODS)
+        page.goto((GUI_DIRECTORY / "ingests.html").as_uri())
+        page.get_by_role("button", name="Update IMAP Password…").click()
+        page.get_by_label("New password or app password").fill("incorrect")
+        page.get_by_role("button", name="Test and Save").click()
+        expect(page.locator("#imap-password-status")).to_contain_text("authentication failed")
+        assert password_for(account) == "old-password"
+        expect(page.locator("#imap-password")).to_have_value("")
+        page.get_by_label("New password or app password").fill("demopass")
+        page.get_by_role("button", name="Test and Save").click()
+        expect(page.locator("#imap-password-status")).to_contain_text("Login succeeded. Password saved.")
+        assert password_for(account) == "demopass"
+        expect(page.locator("#imap-password")).to_have_value("")
+        page.screenshot(path=str(tmp_path / "imap-password.png"))
+        page.get_by_role("button", name="Close", exact=True).click()
+        expect(page.locator("#imap-password-dialog")).not_to_be_visible()
+        page.get_by_role("button", name="Continue Import", exact=True).click()
+        wait_for_import(api)
+        notify_status(page)
+        expect(page.locator(".state-badge")).to_have_text("completed")
+        assert totals(imap_archive).archived == 3
+        assert_imap_searchable(imap_archive)
+        assert not unfinished_work(imap_archive).incomplete
+    finally:
+        app.shutdown()
+        api.close()
+
+
+@pytest.mark.parametrize("imap_server", ["interruptible"], indirect=True)
+def test_connection_backoff_stays_running_and_suspend_cancels_wait(imap_archive: Path,
+        imap_inbox: DisposableImap, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, page: Page) -> None:
+    """ACQUISITION: quota backoff is live progress; Suspend wakes it and Continue Import retains settings."""
+    server = imap_inbox
+    assert isinstance(server, InterruptibleImap) and server.account is not None
+    monkeypatch.setattr("mailarchiver.imap_source.IMAP_RETRY_INITIAL", 60.0)
+    server.fault = ImapFault(command=b" AUTHENTICATE PLAIN", mode="reject")
+    app, api = open_headless(imap_archive, tmp_path / "preferences.json", workers_override=1)
+    try:
+        controls = IngestWindowApi(imap_archive, application=app, document=api.document)
+        bridge(page, WindowBridge(controls, INGEST_BRIDGE_METHODS), INGEST_BRIDGE_METHODS)
+        page.goto((GUI_DIRECTORY / "ingests.html").as_uri())
+        request = IngestRequest(archive=imap_archive, roots=[imap_locator(imap_archive, server.account, 1)],
+                                workers=1, scan_policy="not-scanned", index_attachments=True)
+        assert app.start_import(api, [], processing_request=request)
+        wait_for_path_state([imap_archive / "status"], lambda: any(
+            "retrying in 60s" in status.phase for status in read_ingest_history(imap_archive).statuses))
+        notify_status(page)
+        expect(page.locator("#ingest-detail")).to_contain_text("retrying in 60s")
+        status = read_ingest_history(imap_archive).statuses[0]
+        assert status.state == "running" and status.failure_detail is None
+        page.get_by_role("button", name="Suspend Import", exact=True).click()
+        wait_for_import(api)  # Must complete without waiting for the 60-second retry deadline.
+        notify_status(page)
+        assert read_ingest_history(imap_archive).statuses[0].state == "interrupted"
+        page.get_by_role("button", name="Continue Import", exact=True).click()
+        wait_for_import(api)
+        notify_status(page)
+        expect(page.locator(".state-badge")).to_have_text("completed")
+        assert totals(imap_archive).archived == 3
+        assert_imap_searchable(imap_archive)
+    finally:
+        server.fault = None
+        app.shutdown()
+        api.close()
 
 
 @pytest.mark.parametrize("imap_server", ["interruptible"], indirect=True)

@@ -8,6 +8,7 @@ let selectedStatusId = new URLSearchParams(window.location.search).get("status")
 let initialized = false;
 let importing = false;
 let starting = false;
+let imapAccounts = [];
 const historyRefresh = new RefreshTask(readHistory);
 const byId = id => document.getElementById(id);
 const integer = value => Number(value || 0).toLocaleString();
@@ -40,6 +41,20 @@ async function initialize() {
   byId("import-directory").addEventListener("click", importDirectory);
   byId("suspend-import").addEventListener("click", () => controlImport("suspend_import"));
   byId("resume-import").addEventListener("click", () => controlImport("resume_import"));
+  byId("update-imap-password").addEventListener("click", () => {
+    byId("imap-account").replaceChildren(...imapAccounts.map(account => {
+      const option = document.createElement("option");
+      option.value = account.id;
+      option.textContent = `${account.username} on ${account.server}:${account.port}`;
+      return option;
+    }));
+    byId("imap-password-status").textContent = "";
+    byId("imap-password-dialog").showModal();
+    byId("imap-password").focus();
+  });
+  byId("cancel-imap-password").addEventListener("click", () => byId("imap-password-dialog").close());
+  byId("imap-password-dialog").addEventListener("close", () => { byId("imap-password").value = ""; });
+  byId("imap-password-form").addEventListener("submit", updateImapPassword);
   byId("install-antivirus").addEventListener("click", () => window.pywebview.api.install_antivirus());
   await refreshHistory();
 
@@ -67,6 +82,9 @@ async function readHistory() {
       selectedStatusId = statuses[0]?.status_id || null;
     }
     starting = Boolean(history.starting);
+    imapAccounts = history.imap_accounts || [];
+    byId("update-imap-password").hidden = imapAccounts.length === 0;
+    byId("update-imap-password").disabled = Boolean(history.active) || importing;
     byId("suspend-import").disabled = importing || !history.active || history.suspending;
     byId("resume-import").disabled = importing || !history.can_resume;
     byId("resume-import").textContent = statuses[0]?.state === "paused" ? "Resume" : "Continue Import";
@@ -80,6 +98,26 @@ async function readHistory() {
     byId("import-directory").disabled = importing || !canImport;
   } catch (error) {
     showError(`Could not read ingest history: ${error}`);
+  }
+}
+
+async function updateImapPassword(event) {
+  event.preventDefault();
+  byId("save-imap-password").disabled = true;
+  byId("cancel-imap-password").disabled = true;
+  byId("imap-password-status").textContent = "Testing login…";
+  try {
+    if (!await window.pywebview.api.update_imap_password(byId("imap-account").value, byId("imap-password").value)) {
+      throw new Error("The password could not be saved.");
+    }
+    byId("imap-password-status").textContent = "Login succeeded. Password saved. Choose Continue Import to resume.";
+    byId("cancel-imap-password").textContent = "Close";
+  } catch (error) {
+    byId("imap-password-status").textContent = String(error?.message || error);
+  } finally {
+    byId("imap-password").value = "";
+    byId("save-imap-password").disabled = false;
+    byId("cancel-imap-password").disabled = false;
   }
 }
 

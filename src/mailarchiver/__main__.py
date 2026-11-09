@@ -56,7 +56,7 @@ from .archive_path import add_archive_argument, require_archive
 from .contacts import contacts, load_owner_addresses, print_contacts
 from .document_options import DocumentOptions, read_owner_names
 from .ingest_diagnostics import add_message_context, format_failure, format_source_identity
-from .imap_protocol import ImapPaused
+from .imap_protocol import ImapAuthenticationError, ImapPaused
 from .owner_rules import OwnerRules
 from .catalog import (
     PROCESSING_DATABASE,
@@ -2303,12 +2303,25 @@ def _run_ingest(request: IngestRequest, writer_lease: WriterLease, outcome: Inge
         progress.announce_interrupt()
         interrupted = True
         failure_detail = type(error).__name__
+        if pipeline is None:
+            with closing(processing_connection(archive, create=not (archive / PROCESSING_DATABASE).exists(),
+                                               production=True)) as database, database:
+                save_processing_request(database, saved_request)
         catalog.commit()
         search.commit()
         raise
     except DiskFullError as error:
         disk_full = True
         failure_detail = format_failure(error)
+        catalog.rollback()
+        search.rollback()
+        raise
+    except ImapAuthenticationError as error:
+        failure_detail = str(error)
+        if pipeline is None:
+            with closing(processing_connection(archive, create=not (archive / PROCESSING_DATABASE).exists(),
+                                               production=True)) as database, database:
+                save_processing_request(database, saved_request)
         catalog.rollback()
         search.rollback()
         raise
@@ -2737,6 +2750,9 @@ def main() -> int:
     except ImapPaused as error:
         print(f"paused: {error}", file=sys.stderr, flush=True)
         return 75
+    except ImapAuthenticationError as error:
+        print(str(error), file=sys.stderr, flush=True)
+        return 1
     except KeyboardInterrupt:
         print("interrupted: archive state committed through the last completed message", file=sys.stderr, flush=True)
         print_report(Path(args.archive), None, DEFAULT_REPORT_TOP)

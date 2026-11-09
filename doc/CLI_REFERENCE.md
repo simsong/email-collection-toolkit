@@ -112,11 +112,31 @@ Policy configuration is documented in [USER_MANUAL.md](USER_MANUAL.md#contact-fi
 
 ## IMAP downloads
 
+Check the saved password without opening mailboxes, downloading mail or writing
+the archive. Optionally select a saved source ID:
+
+```sh
+mailarchiver-imap --archive collection.mailarchive --check-credentials
+mailarchiver-imap --archive collection.mailarchive --source SOURCE_ID --check-credentials
+# Test a hidden replacement, saving only after successful login; no import.
+mailarchiver-imap --archive collection.mailarchive --source SOURCE_ID --set-password
+```
+
+Checks need only the archive's existing `config.yaml` and may run while an import
+holds the writer lease. `--set-password` needs an interactive terminal and exactly
+one selected account. Ingests offers **Update IMAP Password…** while no import is
+active. Rejected replacements retain the old password; saving never starts an
+import. Errors include a sanitized server reason; credential-only checks return 75 for
+temporary connection/rate limits. Imports stay running and retry after 1, 2, 4,
+8 seconds, up to 60 seconds between attempts, until accepted or cancelled. Downloads
+use at most 15 connections per account; the full processing worker pool is retained.
+
 Wrapper: `make imap IMAP_ARGS='OPTIONS'`; entry point: `mailarchiver-imap`.
 
 ```text
 usage: imap_cli.py [-h] (--new ARCHIVE | --archive ARCHIVE) [--source SOURCE]
-                   [--configure | --add-source] [--workers WORKERS]
+                   [--check-credentials | --set-password | --configure | --add-source]
+                   [--workers WORKERS]
                    [--show-messages] [--no-scan]
 
 Configure and synchronize read-only IMAP sources from a terminal.
@@ -126,6 +146,8 @@ options:
   --new ARCHIVE      create an empty new archive; never overwrite
   --archive ARCHIVE  synchronize an existing archive
   --source SOURCE    synchronize only this saved source ID
+  --check-credentials validate stored credentials only; no import or archive writes
+  --set-password     validate and save a replacement password only; no import
   --configure        prompt for settings and update saved credentials
   --add-source       prompt for another account
   --workers WORKERS  override worker preferences (default: half CPUs; maximum: twice CPUs)

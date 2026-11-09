@@ -51,7 +51,9 @@ from .desktop_platform import copy_windows_text, drag_windows_file, open_export,
 from .identity import APPLICATION_NAME
 from .build_info import BUILD_INFO, BuildInfo
 from .worker_preferences import WorkerPreferences, WorkerSettings, worker_argument
-from .imap_protocol import ImapPaused
+from .imap_protocol import ImapAuthenticationError, ImapPaused, ImapSession
+from .imap_credentials import save_password
+from .imap_models import ImapAccount
 from .search_completion import SearchSuggestions
 from .processor_graph import ProcessorGraphStatus, processor_graph
 from .updates import UpdateChannel, UpdateService, UpdateStatus, default_channel
@@ -74,6 +76,7 @@ from .gui_default_lists import DefaultListsApi
 from .document_options import DocumentOptions, OwnerRulesState
 from .owner_rules import OwnerRules
 from .archive_config import (
+    load_archive_config,
     import_directory as configured_import_directory,
     remember_import_directory,
 )
@@ -227,6 +230,7 @@ class GuiIngestHistory(BaseModel):
     active: bool = False
     suspending: bool = False
     can_resume: bool = False
+    imap_accounts: list[ImapAccount] = Field(default_factory=list)
 
 
 class DragExport(BaseModel):
@@ -657,7 +661,24 @@ class IngestWindowApi:
                          and unfinished_work(self.archive).incomplete)
         return GuiIngestHistory(statuses=statuses, errors=history.errors, starting=starting,
                                 active=job is not None, suspending=bool(job and job.stop.is_set()),
+                                imap_accounts=[account for account in load_archive_config(self.archive).imap_sources if account.enabled],
                                 can_resume=job is None and resumable and self._application is not None).model_dump(mode="json")
+
+    def update_imap_password(self, source_id: str, password: str) -> bool:
+        """Validate a user-entered replacement before updating only its native-vault item."""
+        if self.archive is None or (self._document is not None and self._document.ingest_job is not None):
+            raise ValueError("Suspend the import before updating its password")
+        accounts = [account for account in load_archive_config(self.archive).imap_sources
+                    if account.enabled and account.id == source_id]
+        if len(accounts) != 1:
+            raise ValueError("The selected IMAP account is unavailable")
+        try:
+            with ImapSession(accounts[0], password, authentication_only=True):
+                pass
+            save_password(accounts[0], password)
+        finally:
+            password = ""
+        return True
 
     def suspend_import(self) -> bool:
         if self._application is None or self._document is None:
@@ -842,6 +863,11 @@ SEARCH_BRIDGE_METHODS = (
     "save_message", "save_attachment", "prepare_drag", "start_drag",
 )
 
+INGEST_BRIDGE_METHODS = (
+    "history", "can_import_directory", "import_directory", "antivirus", "install_antivirus",
+    "suspend_import", "resume_import", "update_imap_password",
+)
+
 
 class GuiApi:
     """Narrow API exposed to one webview window."""
@@ -1000,7 +1026,7 @@ class GuiApi:
             window = webview.create_window(
                 "Email Collection Toolkit — Ingests",
                 str(GUI_DIRECTORY / f"ingests.html{selected}"),
-                js_api=WindowBridge(api, ("history", "can_import_directory", "import_directory", "antivirus", "install_antivirus")),
+                js_api=WindowBridge(api, INGEST_BRIDGE_METHODS),
                 width=1050,
                 height=700,
                 min_size=(720, 440),
@@ -2572,7 +2598,7 @@ class PyWebViewApplication:
         except BaseException as caught:  # pylint: disable=broad-exception-caught
             logging.getLogger(__name__).debug("Best-effort operation failed", exc_info=True)
             error = caught
-            if isinstance(caught, (IngestInterrupted, ImapPaused)):
+            if isinstance(caught, (IngestInterrupted, ImapPaused, ImapAuthenticationError)):
                 try:
                     if outcome.accepted_request is None:
                         raise ValueError("Import stopped before its settings were accepted.")
@@ -2601,6 +2627,8 @@ class PyWebViewApplication:
             notice("information", f"Import suspended for {document.display_path}; use Continue Import in Ingests to resume.")
         elif error is None:
             notice("information", f"Import completed for {document.display_path}")
+        elif isinstance(error, ImapAuthenticationError):
+            notice("error", str(error))
         else:
             notice(
                 "error",
@@ -2841,8 +2869,7 @@ class PyWebViewApplication:
                         "ingests.html",
                         [("status", status_id)] if status_id is not None else None,
                     ),
-                    js_api=WindowBridge(api, ("history", "can_import_directory", "import_directory", "antivirus", "install_antivirus",
-                                              "suspend_import", "resume_import")),
+                    js_api=WindowBridge(api, INGEST_BRIDGE_METHODS),
                     width=1050,
                     height=700,
                     min_size=(720, 440),

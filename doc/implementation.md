@@ -48,6 +48,13 @@ platform acceptance and deferred work.
 
 ## Shared boundaries
 
+- `imap_cli --check-credentials` reads saved configuration and native credentials,
+  then uses authentication-only TLS sessions without opening archive databases.
+  Sanitized login replies distinguish temporary limits from rejection; Ingests
+  validates password replacements before saving them. The IMAP plugin caps
+  concurrent download sessions per account at 15, retains the processing worker
+  count, and retries server capacity refusals with cancellable exponential backoff. See [acquisition](implementation/ACQUISITION.md).
+
 - Archive checkpoint events display **Verifying archived messages and saving
   checksums** while refreshing local integrity records and manifests.
   See [archive](implementation/ARCHIVE.md).

@@ -32,8 +32,47 @@ IMAP_TIMEOUT = 30
 UID_BATCH_SIZE = 256
 
 
+class ImapAuthenticationError(ValueError):
+    """A server rejected login; its sanitized reply explains why without blaming the vault."""
+
+    def __init__(self, account: ImapAccount, detail: str) -> None:
+        self.source_id = account.id
+        self.detail = detail
+        super().__init__(f"IMAP authentication failed for {account.username} on {account.server}:{account.port}: "
+                         f"{detail}. The stored password has not been changed. "
+                         "Use Update IMAP Password in Ingests or --set-password to validate a replacement.")
+
+
+def authentication_detail(error: imaplib.IMAP4.error, username: str, password: str) -> str:
+    """Retain the server's reason, redacting even an echoed SASL PLAIN credential."""
+    value = error.args[0] if error.args else "Login rejected without a server explanation"
+    detail = value.decode("utf-8", errors="replace") if isinstance(value, bytes) else str(value)
+    plain = b"\x00" + username.encode("utf-8") + b"\x00" + password.encode("utf-8")
+    secrets = (password, password.replace("\\", "\\\\").replace('"', '\\"'),
+               base64.b64encode(plain).decode("ascii"), base64.b64encode(password.encode()).decode("ascii"))
+    for secret in sorted(set(secrets), key=len, reverse=True):
+        if secret:
+            detail = detail.replace(secret, "[redacted]")
+    return " ".join("".join(character if character.isprintable() else " " for character in detail).split())[:512]
+
+
 class ImapPaused(ConnectionError):
     """A lost IMAP connection requires a fresh session and an explicit resume."""
+
+
+class ImapServerBusy(ImapPaused):
+    """A temporary server refusal permits another connection attempt after backoff."""
+
+    def __init__(self, detail: str) -> None:
+        self.detail = detail
+        super().__init__(f"IMAP server temporarily refused the connection: {detail}. "
+                         "The stored password has not been changed.")
+
+
+def temporary_refusal(detail: str) -> bool:
+    return any(reason in detail.casefold() for reason in (
+        "[unavailable]", "[limit]", "too many simultaneous", "too many connections",
+        "connection limit", "rate limit", "temporarily unavailable"))
 
 
 def connection_cause(error: BaseException) -> BaseException:
@@ -227,13 +266,14 @@ def body_literal(data: Sequence[bytes | tuple[bytes, bytes] | None], uid: int) -
 
 class ImapSession:
     def __init__(self, account: ImapAccount, password: str,
-                 context: ssl.SSLContext | None = None) -> None:
+                 context: ssl.SSLContext | None = None, *, authentication_only: bool = False) -> None:
         self.account = account
         self.password = password
         self.context = context or ssl.create_default_context()
         self.client: imaplib.IMAP4 | None = None
         self.gmail = False
         self.utf8 = False
+        self.authentication_only = authentication_only
 
     def __enter__(self) -> ImapSession:
         if not self.context.check_hostname or self.context.verify_mode != ssl.CERT_REQUIRED:
@@ -259,8 +299,13 @@ class ImapSession:
                     client.login(quoted(self.account.username.encode("ascii")).decode("ascii"), self.password)
             except imaplib.IMAP4.abort:
                 raise
-            except imaplib.IMAP4.error:
-                raise ValueError("IMAP authentication failed; check the password or app password") from None
+            except imaplib.IMAP4.error as error:
+                detail = authentication_detail(error, self.account.username, self.password)
+                if temporary_refusal(detail):
+                    raise ImapServerBusy(detail) from None
+                raise ImapAuthenticationError(self.account, detail) from None
+            if self.authentication_only:
+                return self
             status, capabilities = client.capability()
             self._ok(status, "CAPABILITY")
             advertised = b" ".join(item for item in capabilities if item).upper().split()
@@ -276,6 +321,13 @@ class ImapSession:
                 self.utf8 = True
             return self
         except BaseException as error:
+            # Servers may refuse a connection in their greeting or abort SASL with BYE.
+            if isinstance(error, imaplib.IMAP4.error):
+                detail = authentication_detail(error, self.account.username, self.password)
+                if temporary_refusal(detail):
+                    busy = ImapServerBusy(detail)
+                    self.__exit__(type(busy), busy, None)
+                    raise busy from None
             self.__exit__(type(error), error, error.__traceback__)
             raise
         finally:
@@ -299,7 +351,7 @@ class ImapSession:
                         client.shutdown()
                 except OSError:
                     logging.getLogger(__name__).debug("IMAP socket cleanup did not complete", exc_info=True)
-        if _error is not None and (connection_interrupted(_error) or server_closed):
+        if _error is not None and not isinstance(_error, ImapPaused) and (connection_interrupted(_error) or server_closed):
             reason = "timed out" if isinstance(connection_cause(_error), TimeoutError) else "was interrupted"
             raise ImapPaused(f"IMAP connection {reason}. Saved progress is retained; use Resume when connected.") from _error
 

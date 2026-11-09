@@ -134,6 +134,12 @@ unchanged. Gmail downloads use All Mail, excluding messages found only in Spam
 or Trash. See [IMAP downloads](doc/CLI_REFERENCE.md#imap-downloads) for account
 requirements and commands.
 
+Validate saved credentials without opening mailboxes or writing the archive with
+`make imap IMAP_ARGS='--archive /path/to/archive.mailarchive --check-credentials'`.
+Ingests offers **Update IMAP Password…** to test a replacement before saving it.
+Temporary login limits back off and retry automatically; downloads use at most 15
+connections per account. All configured processing workers remain available.
+
 ### Archive care
 
 Use **File → Customizable Default Lists…** for owner/sender defaults,

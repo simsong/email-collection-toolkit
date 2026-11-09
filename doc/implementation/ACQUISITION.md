@@ -389,6 +389,31 @@ cancellation and retains the lease until
 the ingest engine has stopped and checkpointed. No desktop window or OS scheduler
 is started. Setup is interactive; subsequent invocations can be unattended.
 
+Credential-only mode branches before archive opening, worker preferences and lease
+acquisition. It requires an existing `config.yaml`, reads native-vault credentials,
+and uses sequential `ImapSession(authentication_only=True)` sessions. These stop
+after LOGIN/SASL PLAIN, before post-login capability negotiation or mailbox access.
+`--set-password` requires an interactive terminal and exactly one selected account;
+the Ingests password form calls the same session mode and saves only after success.
+Login errors retain a control-free, bounded server reply after redacting password,
+escaped password and base64 credential forms. Temporary capacity/rate refusals in
+the greeting or login raise `ImapServerBusy`; the
+source adapter closes the rejected session and retries with 1-to-60-second capped
+exponential backoff. Progress events show the reason and next delay; the plugin's
+framework cancellation Event wakes the wait for Suspend/Quit. The retry loop is
+limited to session initialization and cannot replay a downloaded body. Other
+refusals raise `ImapAuthenticationError`, recorded without traceback or unrelated
+message bytes. Credential-only checks retain one-attempt/exit-75 behavior.
+The existing concurrency-key scheduler caps download sessions at 15 per account;
+it does not reduce the configured processing worker pool. `make test-imap-auth`
+covers real TLS replies, automatic retry, cancellation, credential-only
+immutability, replacement safety, connection counts and the shipped browser form.
+Both desktop Ingests entry points expose the same explicit bridge methods used by
+the browser recovery test. Initial discovery rejection saves the accepted source
+request before pipeline creation, allowing password repair and Continue Import
+after application restart without losing the chosen import policy. Early backoff
+cancellation also persists the request before pipeline initialization.
+
 Strict `ImapAccount` records live in `config.yaml.imap_sources`; nonempty lists
 select configuration version 3. Existing version-1/2 files remain readable. The
 opaque source ID and endpoint fingerprint derive

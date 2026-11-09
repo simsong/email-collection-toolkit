@@ -38,6 +38,26 @@ Development-app credential reads retain the existing interpreter's Keychain trus
 without changing vault access rules. Report native failure status without exposing
 passwords or raw private backend exception text.
 
+`--check-credentials --archive ARCHIVE [--source ID]` shall read the stored password
+and validate one TLS login at a time, without mailbox selection, fetching, scanning,
+archive initialization, a writer lease, database access, or any local writes.
+It must work while the archive writer is busy and must never prompt to replace a
+credential. `--set-password` is a separate interactive operation: validate a hidden
+replacement before saving only that account's native-vault item, without importing.
+Ingests offers the same test-before-save replacement through **Update IMAP Password**
+when no import is active. Failed validation retains the old stored password.
+Login rejection shall identify account/server and retain a bounded, sanitized
+server reason without exposing plaintext, escaped passwords or SASL payloads.
+Temporary server capacity/rate-limit refusals during session initialization shall
+keep imports running and retry after 1, 2, 4, 8 seconds, capping the delay at 60 seconds
+until accepted or cancelled. Show the sanitized reason and backoff as progress,
+close each refused connection before waiting, and wake immediately on Suspend/Quit.
+Do not blame or replace the password. Credential-only checks make one attempt and
+exit 75 for temporary refusal. Actual credential rejection remains a concise failure
+without a traceback. Limit each account to 15 simultaneous download sessions while
+retaining all configured workers for message processing. Other mail clients can
+consume server slots; backoff handles those refusals without ending the import.
+
 Each invocation synchronizes once and exits. Download workers use the shared
 preference (half CPUs by default, at least one); `--workers` overrides it with
 a positive count no greater than twice the detected CPU count. Generic IMAP includes every selectable mailbox

@@ -638,7 +638,7 @@ test-mailsearch:
 	uv run pytest -q tests/test_mailsearch.py
 
 # IMAP_ARGS supplies standalone CLI arguments; no password environment variable is supported.
-.PHONY: imap test-imap
+.PHONY: imap test-imap test-imap-auth
 imap:
 	uv run --locked mailarchiver-imap $(IMAP_ARGS)
 
@@ -647,6 +647,11 @@ imap:
 test-imap:
 	uv run --locked pytest -q tests/test_imap.py $(PYTEST_ARGS)
 	uv run --locked pytest -q --browser chromium e2e_tests/test_imap_pause.py $(PYTEST_ARGS)
+
+# Authenticate to disposable TLS servers; check diagnostics, vault updates and the real password form.
+test-imap-auth:
+	uv run --locked pytest -q tests/test_imap.py -k 'login_rejections or server_echoed or credentials_only or gui_replacement or connection_cap or connection_backoff or connection_limit or shared_cli_login' $(PYTEST_ARGS)
+	uv run --locked pytest -q --browser chromium e2e_tests/test_imap_pause.py -k 'password or connection_backoff' $(PYTEST_ARGS)
 
 # Quiet legacy timeout presentation and real pause/Resume traffic-light rendering.
 .PHONY: test-timeout-presentation

@@ -25,6 +25,13 @@ platform acceptance and deferred work.
 
 ## Shared boundaries
 
+- IMAP credential checks authenticate without mailbox access or archive writes.
+  Server login reasons remain visible without exposing passwords; temporary
+  connection limits back off and retry rather than end the import. Ingests can test
+  and save a replacement password. Limit each account to 15 download sessions,
+  retaining the full processing worker pool.
+  See [acquisition](requirements/ACQUISITION.md).
+
 - Archive checkpoint progress describes local message verification and checksum
   saving in plain language. See [desktop](requirements/DESKTOP.md).
 
@@ -38,7 +45,8 @@ platform acceptance and deferred work.
   callbacks; a fixed delay never establishes success. Elapsed deadlines use
   monotonic clocks and expiry reports failure even while notifications remain ready.
   Non-DOM test state must explicitly notify its event-driven observers. No first-party non-timeout
-  scheduling timers are used: status, sampling and retries follow actual events. See [timing audit](TIMING_AUDIT.md).
+  scheduling timers are used except the explicitly requested, cancellable IMAP
+  capacity backoff. Status, sampling and other retries follow actual events. See [timing audit](TIMING_AUDIT.md).
 
 
 - Extra non-mail files found during archive checks produce dismissible warnings
