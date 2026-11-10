@@ -894,3 +894,8 @@ a completed metadata-only refresh is explicitly not a successful download test.
 The import worker returns a receipt containing only a newly created status for
 its own process. The evaluator uses that receipt, never the archive's latest
 status, so failed/suppressed writes cannot borrow a prior run's positive coverage.
+
+The source-pool driver also advances cooperative saved-content dispatch, combining
+source, publication and invocation futures in one event-driven wait. This permits
+TLS reads while processor invocations run, without sharing writer connections across
+threads or introducing an unbounded staging buffer. Existing IMAP limits still apply.

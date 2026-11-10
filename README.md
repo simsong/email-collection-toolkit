@@ -190,6 +190,7 @@ reference; their workflows are in [For developers](doc/FOR_DEVELOPERS.md).
 
 | Variable / Make parameter | Purpose |
 | --- | --- |
+| `CONCURRENT_IMAP_TESTS` | Optional Python test selection for `make test-concurrent-imap`; browser checks still run |
 | `CARGO`, `RUST_TARGET_DIR`, `CARGO_TARGET_DIR` | Cargo executable and build output; Make uses `RUST_TARGET_DIR`, direct Cargo uses `CARGO_TARGET_DIR` |
 | `RUSTUP_TOOLCHAIN` | Override the compiler selected by `rust-toolchain.toml` |
 | `CARGO_BUILD_JOBS` | Limit native Rust compilation parallelism |

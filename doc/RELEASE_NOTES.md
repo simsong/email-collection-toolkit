@@ -6,6 +6,12 @@ Entries describe their recorded revisions. For current behavior use the
 [user manual](USER_MANUAL.md) and [CLI reference](CLI_REFERENCE.md). Retired
 Rust delivery plans and historical package checks are not current acceptance.
 
+## 1.0.0a81 — overlap downloads and saved-message processing
+
+- Download new mail while processing saved messages through separate worker groups.
+  Canonical writes still have one owner, and suspension retains resumable checkpoints.
+  Unpublished ingest recovery and explicit deferred/limited processing keep their safeguards.
+
 ## 1.0.0a80 — deliver GUI replies without redundant native waits
 
 - Deliver API replies asynchronously to Cocoa/WebView2 instead of waiting for a

@@ -144,6 +144,8 @@ class IngestStatus(BaseModel):
     activity_kind: Literal["source", "processing"] | None = None
     saved_messages_remaining: int | None = Field(default=None, ge=0)
     download_coverage: ImapDownloadCoverage | None = None
+    saved_workers: list[IngestWorkerStatus] = Field(default_factory=list)
+    concurrent_processing: bool = False
 
     @field_validator("started_at", "updated_at", "completed_at")
     @classmethod

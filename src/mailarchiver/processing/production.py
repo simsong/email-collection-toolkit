@@ -16,6 +16,8 @@ Fundamental dependents:
 from __future__ import annotations
 
 import json
+from collections.abc import Generator
+from concurrent.futures import Future
 import sqlite3
 import tempfile
 from collections.abc import Callable
@@ -46,7 +48,7 @@ from .api import (
 from .contracts import AddressEvidence, ContentMetadata, Filing, HeaderMetadata, MailboxReference, MimeInventory, ProcessingPolicy, ScanEvidence, SourceMetadata
 from .objects import collect_objects
 from .registry import fingerprint, load_processors
-from .runtime import RANK_FAILURE, ProcessingProgress, dispatch, prepare_run, run
+from .runtime import RANK_FAILURE, ProcessingProgress, dispatch, dispatch_steps, prepare_run, run
 from .store import DATABASE, USER_CANCELLED, connect, enqueue, report, snapshot
 
 Publisher = Callable[[MailObject, ParsedMessage, MailboxReference, int], int]
@@ -201,13 +203,15 @@ class ProductionPipeline:
             raise RuntimeError("ingest processor tree ended without a filing decision")
         return IngestedMessage(parsed=ParsedMessage.model_validate_json(row[0]), message_pk=row[1], duplicate=existing is not None, excluded=bool(row[2]))
 
-    def resume_ingest(self, *, progress: ProcessingProgress | None = None) -> None:
+    def resume_ingest(self, *, progress: ProcessingProgress | None = None, unpublished_only: bool = False) -> None:
         """Replay durable ingest work with cooperative stops between messages."""
         while row := self.database.execute("SELECT json_extract(item_json,'$.message_id') FROM jobs "
                 "WHERE status IN ('pending','running') AND json_extract(item_json,'$.pipeline') "
-                "IN ('ingest','message') AND (parent_job_id IS NULL OR EXISTS "
+                "IN ('ingest','message') AND (?=0 OR NOT EXISTS (SELECT 1 FROM message_state state "
+                "WHERE state.message_id=json_extract(jobs.item_json,'$.message_id') AND state.parsed_json IS NOT NULL)) "
+                "AND (parent_job_id IS NULL OR EXISTS "
                 "(SELECT 1 FROM jobs parent WHERE parent.job_id=jobs.parent_job_id "
-                "AND parent.status='completed')) ORDER BY job_id LIMIT 1").fetchone():
+                "AND parent.status='completed')) ORDER BY job_id LIMIT 1", (int(unpublished_only),)).fetchone():
             if self.cancelled is not None:
                 self.cancelled()
             # Archived metadata failures cannot starve fresh sources, even when
@@ -243,6 +247,17 @@ class ProductionPipeline:
         if fail_on_error:
             self._raise_failures(pipelines, failures, message_id=message_id)
         return result
+
+    def resume_steps(self, *, progress: ProcessingProgress, workers: int) -> Generator[tuple[Future[object], ...], None, None]:
+        """Yield between independent invocations; the archive owner also services acquisition."""
+        # Construction recovered interrupted jobs once. Reopening an idle dispatcher
+        # must not reset active/failed jobs while new sources are being published.
+        completed = yield from dispatch_steps(self.database, self.plugins, pipelines=("message", "content"),
+            installation_config=self.installation_config, services=self, cancelled=self.cancelled,
+            continue_after_failure=True, progress=progress, workers=workers,
+            heartbeat=self.heartbeat, signals=self.signals, cooperative=True)
+        if not completed:
+            self._raise_failures(("message", "content"), [], message_id=None)
 
     def _raise_failures(self, pipelines: tuple[Pipeline, ...], failures: list[Exception], *, message_id: str | None = None) -> None:
         placeholders = ",".join("?" for _ in pipelines)

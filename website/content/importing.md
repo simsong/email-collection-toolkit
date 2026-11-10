@@ -55,6 +55,10 @@ and short waits. Saved progress is retained. If recovery keeps failing, the
 import pauses with a yellow circle and horizontal dash. Reconnect to the network,
 then click **Resume** in Ingests. Messages already saved are not downloaded again.
 
+Downloads and saved-message processing can run at the same time after unfinished
+ingest recovery. Ingests shows their worker groups separately, so a saved-mail backlog
+does not have to finish before new downloads begin.
+
 The download details show the number of messages downloaded in this run, their
 earliest and latest server-reported dates in UTC, and counts by year. Emails
 extracted from attachments are counted separately from downloads. If the amount

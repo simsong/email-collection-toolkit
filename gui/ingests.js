@@ -13,7 +13,7 @@ const historyRefresh = new RefreshTask(readHistory);
 const byId = id => document.getElementById(id);
 const integer = value => Number(value || 0).toLocaleString();
 const stateLabel = status => status.timed_out ? "Timeout" : status.state;
-const processingMode = status => !(status.state !== "running" && (status.processed_messages || status.files_processed))
+const processingMode = status => !status.concurrent_processing && !(status.state !== "running" && (status.processed_messages || status.files_processed))
   && (status.activity_kind === "processing" || status.processing_active
     || ["recovering archived content", "recovering pending imports", "processing content"].includes(status.phase));
 const processingActive = status => processingMode(status) && status.state === "running";
@@ -275,6 +275,9 @@ function renderDetail(status) {
     ? `${Number(status.percent).toFixed(1)}% saved` : `${Number(status.percent).toFixed(1)}% · ETA ${!status.bytes_total && status.files_processed < status.files_total ? "unavailable" : status.eta}`));
 
   detail.append(heading, track, caption, statistics(status));
+  if (status.concurrent_processing) {
+    detail.append(textBlock("New mail downloads while saved messages and attachments are processed.", "processing-explanation"));
+  }
   if (processingMode(status)) {
     const explanation = document.createElement("p");
     explanation.className = "processing-explanation";
@@ -289,6 +292,7 @@ function renderDetail(status) {
   }
   if (status.failure_detail) detail.append(section("Failure", textBlock(status.failure_detail, "failure")));
   detail.append(section("Workers", workerTable(status.workers)));
+  if (status.saved_workers?.length) detail.append(section("Saved-mail processing workers", workerTable(status.saved_workers)));
   if (status.source_roots.length) {
     const sources = document.createElement("ul");
     sources.className = "source-list";

@@ -498,3 +498,8 @@ a completed metadata-only refresh is explicitly not a successful download test.
 The import worker returns a receipt containing only a newly created status for
 its own process. The evaluator uses that receipt, never the archive's latest
 status, so failed/suppressed writes cannot borrow a prior run's positive coverage.
+
+After mandatory ingest recovery, active source reads shall overlap saved content
+processing rather than waiting for the archived-content queue to drain. Per-account
+IMAP connection limits remain independent of the processing worker pool. Only the
+archive owner may publish canonical bytes, observations and processing results.

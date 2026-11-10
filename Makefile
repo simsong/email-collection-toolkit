@@ -742,6 +742,15 @@ test-source-coordination: ruff
 	uv run --locked pyright $(SOURCE_COORDINATION_CHECK_FILES) --warnings
 	uv run --locked pytest -q $(SOURCE_COORDINATION_TESTS)
 
+.PHONY: test-concurrent-imap
+# CONCURRENT_IMAP_TESTS optionally narrows Python regressions after a fixture repair.
+CONCURRENT_IMAP_TESTS ?= tests/test_imap.py tests/test_progress.py tests/test_ingest_recovery.py tests/test_processing.py tests/test_processing_objects.py tests/test_future_coordinator.py tests/test_quit_import.py
+test-concurrent-imap: ruff
+	$(MAKE) pylint
+	$(MAKE) types
+	uv run --locked pytest -q $(CONCURRENT_IMAP_TESTS) $(PYTEST_ARGS)
+	uv run --locked pytest -q --browser chromium e2e_tests/test_ingest_diagnostics.py $(PYTEST_ARGS)
+
 test-headers:
 	uv run pytest -q tests/test_message.py tests/test_search.py
 

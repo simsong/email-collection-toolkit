@@ -4,6 +4,18 @@
 
 ## Working-object lifetime
 
+With unlimited content processing enabled during acquisition, saved message/content
+jobs shall not form a barrier before source downloads. Independent invocations and
+source reads run concurrently under their own configured bounds. One archive owner
+alone claims jobs and commits results, MBOX and indexes; processor workers never use
+its SQLite connections. Recovery of unpublished ingest roots remains mandatory;
+if such roots exist, retain the prior healthy archived-content recovery pass before
+retrying those roots. Explicit deferred/limited-content modes retain their budgets.
+Suspension stops new acquisition/claims, joins invocations, and retains resumable
+work. A real TLS regression must hold saved processing open while fresh bodies are
+downloaded and canonically published, then verify bytes, exactly-once delivery and
+cancel/resume integrity (`make test-concurrent-imap`).
+
 Deferred message/content processing shall use the configured worker count to
 execute independent messages concurrently. Workers drain one shared durable
 queue, claim each job once, and preserve per-message rank/parent ordering and

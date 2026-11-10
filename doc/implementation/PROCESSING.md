@@ -9,6 +9,24 @@ of `processing-status` remains unchanged.
 
 ## Working-object lifetime
 
+`runtime.dispatch_steps` yields only between invocation submissions/results, outside
+SQLite transactions. `dispatch` drives it synchronously for existing callers.
+`ProductionPipeline.resume_steps` does not reset retry state: construction recovers
+interrupted invocations once. `run_file_workers` advances this cooperative dispatcher
+alongside source futures and publication requests, waiting on all completion/change
+futures. Source admission retains its synchronous mandatory ingest/message ranks;
+content invocation results are committed by the same owner between admissions.
+Pending jobs are claimed once and running inputs remain pinned. The background
+dispatcher closes before pool/writer teardown, including cancellation and exceptions.
+Only unlimited combined acquisition/content runs enable this path; unpublished ingest
+roots retain the prior recovery-before-retry pass and limited/deferred modes are unchanged.
+Source and saved-processing lanes have separate status arrays; global job/source counts
+remain independent and mixed activity does not substitute a processing ETA for acquisition.
+Job advancement restores its logical worker context for attachment publication;
+source-triggered cancellation cannot replace the source's original exception.
+Only unpublished mandatory ingest decisions run in the serial recovery pass;
+archived metadata jobs remain in the configured parallel saved-work pool.
+
 `runtime.run` prepares interrupted checkpoints once. The dispatcher advances one
 generator per active message and submits its next invocation to a bounded
 `ThreadPoolExecutor`. Workers return typed results from isolated temporary

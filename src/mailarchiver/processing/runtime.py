@@ -36,6 +36,7 @@ from types import CodeType
 from pydantic import BaseModel, ConfigDict, InstanceOf
 
 from ..change_signal import ActivityCallback, ChangeSignal
+from ..future_coordinator import PROCESSING_WORKER, WORKER_NUMBER
 from ..console_events import console_signal
 from ..plugin_configuration import PluginConfiguration, NamespaceWrites, apply_config_batch, read_plugin_configuration, recover_config_transaction
 
@@ -321,6 +322,21 @@ def dispatch(database: sqlite3.Connection, plugins: tuple[PluginSpec, ...], *,
         failures: list[Exception] | None = None, message_id: str | None = None,
         continue_after_failure: bool = False, progress: ProcessingProgress | None = None, workers: int = 1,
         heartbeat: Callable[[], None] | None = None, signals: tuple[ChangeSignal, ...] = ()) -> None:
+    """Drive the cooperative dispatcher to completion for standalone callers."""
+    for pending in dispatch_steps(database, plugins, max_jobs=max_jobs, installation_config=installation_config,
+            pipelines=pipelines, services=services, cancelled=cancelled, failures=failures, message_id=message_id,
+            continue_after_failure=continue_after_failure, progress=progress, workers=workers,
+            heartbeat=heartbeat, signals=signals):
+        wait(pending, return_when=FIRST_COMPLETED)
+
+
+def dispatch_steps(database: sqlite3.Connection, plugins: tuple[PluginSpec, ...], *,
+        max_jobs: int | None = None, installation_config: Path | None = None,
+        pipelines: tuple[Pipeline, ...] = ("ingest", "message", "content"),
+        services: ProcessorServices | None = None, cancelled: Callable[[], None] | None = None,
+        failures: list[Exception] | None = None, message_id: str | None = None,
+        continue_after_failure: bool = False, progress: ProcessingProgress | None = None, workers: int = 1,
+        heartbeat: Callable[[], None] | None = None, signals: tuple[ChangeSignal, ...] = (), cooperative: bool = False) -> Generator[tuple[Future[object], ...], None, bool]:
     """Workers return results; this coordinator alone advances jobs and commits SQL."""
     if workers < 1:
         raise ValueError("processing workers must be positive")
@@ -347,10 +363,12 @@ def dispatch(database: sqlite3.Connection, plugins: tuple[PluginSpec, ...], *,
     failure: BaseException | None = None
     with tempfile.TemporaryDirectory(prefix="processing-") as directory:
         try:
-            with ThreadPoolExecutor(max_workers=workers) if workers > 1 or heartbeat is not None else nullcontext() as pool:
+            with ThreadPoolExecutor(max_workers=workers) if workers > 1 or heartbeat is not None or cooperative else nullcontext() as pool:
                 def advance(job: ActiveJob, response: InvocationResponse | None = None,
                             error: BaseException | None = None) -> None:
                     nonlocal stopped, failure
+                    token = WORKER_NUMBER.set(job.worker)
+                    pool_token = PROCESSING_WORKER.set(cooperative)
                     try:
                         if error is not None:
                             request = job.steps.throw(error)
@@ -366,6 +384,8 @@ def dispatch(database: sqlite3.Connection, plugins: tuple[PluginSpec, ...], *,
                         active.remove(job)
                         return
                     finally:
+                        WORKER_NUMBER.reset(token)
+                        PROCESSING_WORKER.reset(pool_token)
                         if job.workspace is not None:
                             shutil.rmtree(job.workspace)
                             job.workspace = None
@@ -409,12 +429,11 @@ def dispatch(database: sqlite3.Connection, plugins: tuple[PluginSpec, ...], *,
                     changed = tuple(signal.ready for signal in signals)
                     if heartbeat is not None:
                         heartbeat()
-                    completed, _pending = wait(cast(list[Future[object]], [*(job.future for job in active if job.future is not None), *changed]),
-                                               return_when=FIRST_COMPLETED)
+                    yield cast(tuple[Future[object], ...], tuple(job.future for job in active if job.future is not None) + changed)
                     if heartbeat is not None:
                         heartbeat()
                     for job in tuple(active):
-                        if job.future is None or job.future not in completed:
+                        if job.future is None or not job.future.done():
                             continue
                         try:
                             response = job.future.result()
@@ -427,6 +446,7 @@ def dispatch(database: sqlite3.Connection, plugins: tuple[PluginSpec, ...], *,
                 job.steps.close()
         if failure is not None:
             raise failure
+        return not stopped
 
 
 def _job(database: sqlite3.Connection, plugins: tuple[PluginSpec, ...], job_id: int, payload: str, *,

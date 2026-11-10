@@ -1484,3 +1484,79 @@ def test_scratch_cycle_never_reuses_old_success_if_status_writes_fail(imap_archi
     assert import_cycle(settings) is None
     assert read_ingest_history(scratch).statuses[0].status_id == first.status_id
     assert not verify_archive(scratch)
+
+
+@pytest.mark.parametrize("cancel", [False, True])
+@pytest.mark.parametrize("duplicate", [False, True])
+def test_concurrent_saved_processing_does_not_block_imap_downloads(imap_archive: Path,
+        imap_inbox: DisposableImap, imap_messages: tuple[bytes, ...], tmp_path: Path, cancel: bool, duplicate: bool) -> None:
+    """ACQUISITION/PROCESSING: publish fresh TLS bodies while a saved content invocation is held open."""
+    from mailarchiver.__main__ import IngestInterrupted
+    from mailarchiver.change_signal import ChangeEvent
+    from mailarchiver.processing_progress import saved_messages_remaining
+    from mailarchiver.processing.store import connect
+    from tests.test_processing import plugin
+    saved = tmp_path / "2024/saved.eml"
+    saved.parent.mkdir()
+    raw = (b"From: other@example.org\r\nMessage-ID: <saved@example.test>\r\nSubject: saved body\r\n"
+           b"Date: Tue, 5 Nov 2024 12:00:00 +0000\r\n\r\nsavedoverlaptoken\r\n")
+    if duplicate:
+        raw = imap_messages[0].replace(b"\r\n", b"\n")
+    saved.write_bytes(raw)
+    run_ingest(IngestRequest(archive=imap_archive, roots=[str(saved)], workers=1,
+        scan_policy="not-scanned", continue_content=False), terminal=False)
+    custom = tmp_path / "custom"
+    plugin(custom, "saved-gate", 'if (item.archive.path / "hold-saved").exists():\n'
+        '    (item.archive.path / "saved-entered").touch()\n'
+        '    item.wait_for_files((item.archive.path,), lambda: (item.archive.path / "release-saved").exists())\n'
+        'return ProcessingResult()', timeout=15)
+    manifest = custom / "processors/saved-gate/plugin.toml"
+    manifest.write_text(manifest.read_text().replace('pipeline="ingest"', 'pipeline="content"'))
+    (imap_archive / "hold-saved").touch()
+    imap_inbox.pause_after_bodies(1)
+    account = load_archive_config(imap_archive).imap_sources[0]
+    request = IngestRequest(archive=imap_archive, roots=[imap_locator(imap_archive, account, 1)],
+        workers=1, imap_connections=1, scan_policy="not-scanned", plugin_dir=[custom])
+    stop = ChangeEvent()
+
+    expected = 3 if duplicate else 4
+    def fully_archived() -> bool:
+        with sqlite3.connect(imap_archive / "archive.sqlite3") as database:
+            return database.execute("SELECT count(*) FROM messages").fetchone() == (expected,)
+
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        future = pool.submit(run_ingest, request, terminal=False, stop_event=stop)
+        try:
+            wait_for_path_state([imap_archive], lambda: (imap_archive / "saved-entered").exists(), timeout=10)
+            assert imap_inbox.fetch_paused.wait(10), "Saved content blocked network acquisition"
+            imap_inbox.release_bodies()
+            wait_for_path_state([imap_archive / "status"], fully_archived, timeout=10)
+            status = read_ingest_history(imap_archive).statuses[0]
+            assert status.concurrent_processing and status.download_coverage is not None
+            assert status.download_coverage.messages == 3
+            assert any(worker.phase.startswith("processing ") for worker in status.saved_workers)
+            assert not (imap_archive / "release-saved").exists()
+            if cancel:
+                stop.set()
+                with pytest.raises(IngestInterrupted):
+                    future.result(timeout=20)
+            else:
+                (imap_archive / "release-saved").touch()
+                future.result(timeout=20)
+        finally:
+            imap_inbox.release_bodies()
+            (imap_archive / "release-saved").touch()
+    if cancel:
+        run_ingest(request, terminal=False)
+    assert totals(imap_archive).archived == (2 if duplicate else 3)
+    assert totals(imap_archive).duplicates == int(duplicate)
+    assert sum(b"BODY.PEEK[]" in command for command in imap_inbox.commands) == 3
+    with connect(imap_archive) as database:
+        assert saved_messages_remaining(database) == 0
+        assert database.execute("SELECT count(*) FROM jobs WHERE status='running'").fetchone() == (0,)
+    from mailarchiver.mailsearch import read_message_bytes
+    if not duplicate:
+        assert len(search_page(imap_archive, "savedoverlaptoken").results) == 1
+    assert {read_message_bytes(imap_archive, number) for number in range(1, expected + 1)} == {raw} | {
+        message.replace(b"\r\n", b"\n") for message in imap_messages}
+    assert saved.read_bytes() == raw and not verify_archive(imap_archive)

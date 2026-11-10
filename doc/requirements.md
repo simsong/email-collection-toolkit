@@ -39,6 +39,8 @@ does not establish that every platform or release gate has passed.
 - ClamAV runs in owned workers. Detections and scanner failures retain messages
   and evidence; no resident service or manual-review gate is introduced.
 - Jobs, windows and import progress follow actual work and change notifications.
+  Source acquisition and saved-message processing run concurrently after mandatory
+  ingest recovery, sharing one owner for database and canonical publication.
   Failure deadlines remain explicit; readiness must be observed.
   Native API replies use one-way delivery; lost Ingests replies display an unknown
   outcome without retrying a command or marking the import failed.

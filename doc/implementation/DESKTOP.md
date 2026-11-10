@@ -1206,6 +1206,10 @@ redundant synchronous acknowledgement, plus a browser-level lost control reply.
 
 ## IMAP run coverage
 
+Additive `saved_workers` and `concurrent_processing` snapshot fields keep saved-content
+lane updates apart from source/scanner updates. Ingests renders both groups and source
+statistics during overlap; historical files retain their previous presentation.
+
 Unknown-byte source inventory reports ETA unavailable while partitions remain;
 finishing known byte input may still report finalizing before its checkpoint.
 Ingests shows run-specific message count, earliest/latest IMAP INTERNALDATE values

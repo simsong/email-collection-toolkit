@@ -19,6 +19,7 @@ from mailarchiver.__main__ import IngestRequest, ProgressReporter, ProgressUpdat
 from mailarchiver.gui_app import GUI_DIRECTORY, IngestWindowApi
 from mailarchiver.ingest_status import IngestStatusFile, read_ingest_history
 from mailarchiver.identity import APPLICATION_VERSION
+from mailarchiver.sources import SourceInventory
 from scripts.website_screenshots import bridge
 
 APPLICATION_VERSION_FIELD = "application_version"
@@ -68,6 +69,7 @@ def test_lost_history_reply_releases_refresh_for_a_fresh_read(tmp_path: Path, pa
     page.clock.install()
     page.goto((GUI_DIRECTORY / "ingests.html").as_uri())
     expect(page.locator(".state-badge")).to_have_text("completed")
+
     page.evaluate("""() => {
       window.savedHistory = window.pywebview.api.history;
       window.pywebview.api.history = () => { window.statusReadStarted = true; return new Promise(() => {}); };
@@ -82,6 +84,33 @@ def test_lost_history_reply_releases_refresh_for_a_fresh_read(tmp_path: Path, pa
       await refreshHistory();
     }""")
     expect(page.locator(".state-badge")).to_have_text("completed")
+
+
+def test_concurrent_download_and_processing_have_separate_rows(tmp_path: Path, page: Page) -> None:
+    """DESKTOP: mixed activity retains source ETA/counts and distinct processor lanes."""
+    saved = IngestStatusFile(tmp_path, "ingest-concurrent-fixture")
+    progress = ProgressReporter(1, status_file=saved, archive=tmp_path, run_pk=1,
+        source_roots=["imap://synthetic-account?archive=fixture"], terminal=False)
+    progress.finish_inventory(SourceInventory(file_count=1, byte_count=0))
+    progress.begin_concurrent_processing()
+    progress._queue_update(ProgressUpdate(worker=1, phase="downloading", path="Synthetic IMAP mailbox",
+        operation="downloading", download_date=datetime(2024, 1, 2, tzinfo=UTC)))
+    progress._queue_update(ProgressUpdate(worker=1, saved_pool=True, phase="processing mime", path="content job 7",
+        processing_active=True, processing_job_id=7, processing_processor="mime", activity_unit="jobs"))
+    progress.refresh()
+    snapshot = read_ingest_history(tmp_path).statuses[0]
+    assert snapshot.workers[0].operation == "downloading"
+    assert snapshot.saved_workers[0].operation == "processing"
+    assert snapshot.eta == "unavailable"
+    bridge(page, IngestWindowApi(tmp_path), ("history", "antivirus", "can_import_directory"))
+    page.goto((GUI_DIRECTORY / "ingests.html").as_uri())
+    expect(page.locator(".processing-explanation")).to_have_text("New mail downloads while saved messages and attachments are processed.")
+    tables = page.locator(".worker-table")
+    expect(tables).to_have_count(2)
+    expect(tables.nth(0)).to_contain_text("Downloading")
+    expect(tables.nth(1)).to_contain_text("Processing saved mail")
+    expect(page.locator(".progress-caption")).to_contain_text("ETA unavailable")
+    page.screenshot(path=str(tmp_path / "concurrent-imap-processing.png"), full_page=True)
 
 
 @pytest.mark.parametrize("recorded_version", ["0.0.0+synthetic-history", None])

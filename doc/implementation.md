@@ -39,6 +39,8 @@ than a second change log. Platform acceptance is stated alongside its evidence.
 - ClamAV runs in owned workers. Detections and scanner failures retain messages
   and evidence; no resident service or manual-review gate is introduced.
 - Jobs, windows and import progress follow actual work and change notifications.
+  Source workers and cooperative saved-processing dispatch share an event-driven
+  owner loop; invocations run in a separate bounded pool and commits stay serialized.
   Failure deadlines remain explicit; readiness must be observed.
   The pinned SDK's API replies are posted to the native view without a second
   synchronous acknowledgement; Ingests bounds its own reply waits.

@@ -901,6 +901,10 @@ later actual completion.
 
 ## IMAP run coverage
 
+Concurrent acquisition and saved-content work shall show separate worker groups,
+their actual operations and an explicit overlap explanation. Saved-work events must
+not erase source activity or change unknown-size acquisition ETA into finalizing.
+
 Unknown-byte source inventory reports ETA unavailable while partitions remain;
 finishing known byte input may still report finalizing before its checkpoint.
 Ingests shows run-specific message count, earliest/latest IMAP INTERNALDATE values
