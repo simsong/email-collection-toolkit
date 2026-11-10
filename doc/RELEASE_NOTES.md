@@ -6,6 +6,12 @@ Entries describe their recorded revisions. For current behavior use the
 [user manual](USER_MANUAL.md) and [CLI reference](CLI_REFERENCE.md). Retired
 Rust delivery plans and historical package checks are not current acceptance.
 
+## 1.0.0a86 — count completed IMAP transfers before scanning
+
+- Include received IMAP bodies in the run's download coverage even when scanning
+  or archiving is still pending. Show the source count as unavailable for older
+  IMAP runs without recorded download coverage.
+
 ## 1.0.0a85 — separate source counts from saved attachment processing
 
 - Count promoted attached emails as archival work. Source message totals and

@@ -91,7 +91,7 @@ def test_concurrent_download_and_processing_have_separate_rows(tmp_path: Path, p
     saved = IngestStatusFile(tmp_path, "ingest-concurrent-fixture")
     progress = ProgressReporter(1, status_file=saved, archive=tmp_path, run_pk=1,
         source_roots=["imap://synthetic-account?archive=fixture"], terminal=False)
-    progress.finish_inventory(SourceInventory(file_count=1, byte_count=0))
+    progress.finish_inventory(SourceInventory(file_count=1, unknown_size_count=1))
     progress.begin_concurrent_processing()
     progress._queue_update(ProgressUpdate(worker=1, phase="downloading", path="Synthetic IMAP mailbox",
         operation="downloading", download_date=datetime(2024, 1, 2, tzinfo=UTC)))
@@ -252,6 +252,7 @@ def test_imap_coverage_and_unknown_eta(tmp_path: Path, page: Page, legacy: bool)
     coverage = page.locator(".message-coverage")
     if legacy:
         expect(coverage).to_contain_text("Download coverage unavailable for this older run.")
+        expect(page.locator(".history-summary")).to_contain_text("Source message count unavailable")
     else:
         expect(page.locator(".history-summary")).to_contain_text("3 source messages")
         expect(coverage).to_contain_text("This run: 3 messages")

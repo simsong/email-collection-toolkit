@@ -1625,9 +1625,10 @@ def test_concurrent_saved_processing_does_not_block_imap_downloads(imap_archive:
     assert saved.read_bytes() == raw and not verify_archive(imap_archive)
 
 
+@pytest.mark.parametrize("scan_policy", ["not-scanned", "clamav"])
 def test_concurrent_saved_fail_import_stops_imap_while_peer_finishes(imap_archive: Path,
-        imap_inbox: DisposableImap, tmp_path: Path) -> None:
-    """ACQUISITION: accepted fail-import closes admission before a held peer result returns."""
+        imap_inbox: DisposableImap, tmp_path: Path, scan_policy: Literal["not-scanned", "clamav"]) -> None:
+    """ACQUISITION: stop admission but count an already received body before scanning."""
     from mailarchiver.processing.runtime import ProcessorStop
     from tests.test_processing import plugin
     source = tmp_path / "saved"
@@ -1651,7 +1652,7 @@ def test_concurrent_saved_fail_import_stops_imap_while_peer_finishes(imap_archiv
     imap_inbox.pause_after_bodies(1)
     account = load_archive_config(imap_archive).imap_sources[0]
     request = IngestRequest(archive=imap_archive, roots=[imap_locator(imap_archive, account, 2)],
-        workers=2, imap_connections=1, scan_policy="not-scanned", plugin_dir=[custom])
+        workers=2, imap_connections=1, scan_policy=scan_policy, plugin_dir=[custom])
     with ThreadPoolExecutor(max_workers=1) as pool:
         future = pool.submit(run_ingest, request, terminal=False)
         try:
@@ -1672,6 +1673,9 @@ def test_concurrent_saved_fail_import_stops_imap_while_peer_finishes(imap_archiv
             (imap_archive / "accept-stop").touch()
             (imap_archive / "release-peer").touch()
     assert totals(imap_archive).archived == 1
+    coverage = read_ingest_history(imap_archive).statuses[0].download_coverage
+    assert coverage is not None and coverage.messages == 2
+    assert coverage.earliest_date == coverage.latest_date == datetime(2026, 10, 1, 10, tzinfo=UTC)
     with sqlite3.connect(imap_archive / "processing.sqlite3") as database:
         assert database.execute("SELECT status FROM invocations WHERE kind='stop-gate' ORDER BY invocation_id").fetchall() == [
             ("completed",), ("completed",)]

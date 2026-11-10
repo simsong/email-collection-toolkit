@@ -49,7 +49,8 @@ does not establish that every platform or release gate has passed.
   Unfinished unknown-size acquisition reports ETA unavailable, including mixed
   local and remote runs. Source counts and dates exclude promoted attachments.
   IMAP run details show
-  message counts, IMAP INTERNALDATE UTC bounds and per-year coverage.
+  complete source downloads, IMAP INTERNALDATE UTC bounds and per-year coverage.
+  Older IMAP history without download counts shows them as unavailable.
   Run history preserves the producing application's launch version, including failures;
   older snapshots without that evidence display the version as unavailable.
   Worker activity updates keep four table columns fixed; task/source expands

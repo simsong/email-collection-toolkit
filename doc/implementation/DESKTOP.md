@@ -1213,7 +1213,8 @@ saved-only and source-only phases have their own labels. Both terminal formats
 also show saved lanes. Historical files retain their previous presentation.
 The active overlap explanation is restricted to running snapshots. During combined
 work, real progress changes sample the saved-backlog query at most once per second;
-idle refreshes reuse the sample and shutdown takes an exact count. No polling timer
+the last source checkpoint refreshes immediately. Idle refreshes reuse the sample
+and shutdown takes an exact count. No polling timer
 is introduced.
 
 Unknown-byte source inventory reports ETA unavailable while partitions remain;
@@ -1221,5 +1222,7 @@ finishing known byte input may still report finalizing before its checkpoint.
 Ingests shows run-specific message count, earliest/latest IMAP INTERNALDATE values
 in UTC and year counts before the workers table. The range uses source IMAP INTERNALDATE, not header dates or download times.
 Separate acquisition counters exclude attached-message extraction and saved processing.
-Historical missing dates show unavailable; no dated messages shows an explicit
+Acquisition records complete bodies before sending them to the scan pool.
+Historical IMAP runs without recorded download coverage show unavailable in both
+the history row and details; no dated messages shows an explicit
 empty state. `make test-imap-progress` validates the estimator and actual browser.

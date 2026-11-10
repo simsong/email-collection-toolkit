@@ -617,9 +617,11 @@ class ProgressReporter:
     def record(self, parsed: ParsedMessage, source: MailObject) -> None:
         self._record_source_progress(source, datetime.fromisoformat(parsed.date_utc))
 
-    def record_source(self, source: MailObject) -> None:
+    def record_download(self, source: MailObject) -> None:
         if source.source.plugin_kind == "imap" and "#mime=" not in source.cursor and source.source_date_utc is not None:
             self._queue_update(ProgressUpdate(worker=self._worker_number(), download_date=source.source_date_utc))
+
+    def record_source(self, source: MailObject) -> None:
         self._record_source_progress(source)
 
     def _record_source_progress(self, source: MailObject, message_date: datetime | None = None) -> None:
@@ -2142,6 +2144,15 @@ def _run_ingest(request: IngestRequest, writer_lease: WriterLease, outcome: Inge
             check_interrupted()
             return not stop.is_set()
 
+        def track_downloads(source_items: Iterator[MailObject | SourceObservation | ProgressEvent]
+                            ) -> Iterator[MailObject | SourceObservation | ProgressEvent]:
+            for item in source_items:
+                if isinstance(item, MailObject):
+                    if item.work_id != work.container.work_id or item.source != work.container.source:
+                        raise RuntimeError(f"source plug-in {work.plugin.manifest.kind} yielded a mail object for the wrong container")
+                    progress.record_download(item)
+                yield item
+
         try:
             check_interrupted()
             if stop.is_set():
@@ -2177,7 +2188,7 @@ def _run_ingest(request: IngestRequest, writer_lease: WriterLease, outcome: Inge
                     prior_date = datetime.fromisoformat(row[0])
 
             items = iter(source_plugin.messages(work.container, decision.resume_cursor))
-            scanned = message_workers.map(scan_source, items, before_read=before_read,
+            scanned = message_workers.map(scan_source, track_downloads(items), before_read=before_read,
                 max_pending=1 if source_plugin.capabilities.network_access else None)
             while True:
                 # Both native and API sources stop before requesting another
@@ -2204,10 +2215,6 @@ def _run_ingest(request: IngestRequest, writer_lease: WriterLease, outcome: Inge
                     coordinator.call(partial(publish_observation, item))
                     continue
                 source = item
-                if source.work_id != work.container.work_id or source.source != work.container.source:
-                    raise RuntimeError(
-                        f"source plug-in {work.plugin.manifest.kind} yielded a mail object for the wrong container"
-                    )
                 raw = source.raw
                 progress.record_source(source)
                 if source.exclusion_reason is not None:

@@ -216,9 +216,9 @@ function historyRow(status) {
   const summary = document.createElement("span");
   summary.className = "history-summary";
   const imapOnly = status.source_roots.length && status.source_roots.every(root => root.startsWith("imap://"));
-  const messages = imapOnly && status.download_coverage ? status.download_coverage.messages : status.processed_messages;
+  const messages = imapOnly ? status.download_coverage?.messages : status.processed_messages;
   summary.textContent = `${processingMode(status) ? `${integer(status.processing_jobs_completed)} processing tasks finished`
-    : `${integer(messages)} source messages`} · ${formatDuration(status.elapsed_seconds)}`;
+    : messages == null ? "Source message count unavailable" : `${integer(messages)} source messages`} · ${formatDuration(status.elapsed_seconds)}`;
   main.append(title, time, version, summary);
   row.append(dot, main);
   row.addEventListener("click", () => { selectedStatusId = status.status_id; render(); });

@@ -50,7 +50,8 @@ than a second change log. Platform acceptance is stated alongside its evidence.
   The estimator tracks unfinished unknown-size containers separately from known
   source bytes. Promoted attachments increment archival counts without affecting
   source totals or dates. IMAP run details show
-  message counts, IMAP INTERNALDATE UTC bounds and per-year coverage.
+  complete source downloads, IMAP INTERNALDATE UTC bounds and per-year coverage.
+  The acquisition worker records complete bodies before scanning and publication.
   Ingest snapshots record the shared immutable launch version. Ingests displays that
   saved value in history and run details, with an unavailable fallback for older files.
   The worker table uses fixed column widths, with task/source taking the remaining
