@@ -192,6 +192,8 @@ class ImapFault(BaseModel):
     mode: Literal["timeout", "disconnect", "partial", "malformed", "reject"]
     refusal: bytes = b"NO [ALERT] Too many simultaneous connections."
     skip: int = 0
+    once: bool = False
+    next_uid_validity: int | None = None
     response: bytes = b"invalid IMAP response\r\n"
 
 
@@ -201,6 +203,7 @@ class InterruptibleImap(DisposableImap):
         super().__init__(directory, "implicit")
         self.fault: ImapFault | None = None
         self.commands: list[bytes] = []
+        self.replacement_uid_validity: int | None = None
 
     async def _serve(self) -> None:
         args = argparse.Namespace(host="127.0.0.1", port=0, debug=False, cert=str(self.certificate),
@@ -218,11 +221,21 @@ class InterruptibleImap(DisposableImap):
             async def requests() -> None:
                 while line := await reader.readline():
                     self.commands.append(line)
+                    if self.replacement_uid_validity is not None and b" EXAMINE " in line:
+                        writer.write(b"* 3 EXISTS\r\n* OK [UIDVALIDITY " + str(self.replacement_uid_validity).encode()
+                            + b"] epoch\r\n* OK [UIDNEXT 4] next\r\n" + line.split()[0] + b" OK [READ-ONLY] selected\r\n")
+                        await writer.drain()
+                        await reader.read()
+                        return
                     fault = self.fault
                     if fault is not None and fault.command in line:
                         if fault.skip:
                             fault.skip -= 1
                         else:
+                            if fault.once:
+                                self.fault = None
+                            if fault.next_uid_validity is not None:
+                                self.replacement_uid_validity = fault.next_uid_validity
                             if fault.mode == "reject":
                                 self.fault = None
                                 writer.write(line.split()[0] + b" " + fault.refusal + b"\r\n")
@@ -273,7 +286,7 @@ class Utf8Imap(DisposableImap):
                  credentials: tuple[str, str] | None = None, login_response: bytes | None = None,
                  login_failures: int | None = None, greeting: bytes = b"* OK Disposable UTF-8 IMAP\r\n",
                  setup_command: bytes | None = None, setup_response: bytes | None = None,
-                 setup_authenticated: bool = True, tls: Literal["implicit", "starttls"] = "implicit") -> None:
+                 setup_authenticated: bool = True, setup_failures: int | None = 1, tls: Literal["implicit", "starttls"] = "implicit") -> None:
         super().__init__(directory, tls)
         self.capability = capability.encode("ascii")
         self.enable = enable
@@ -284,6 +297,7 @@ class Utf8Imap(DisposableImap):
         self.setup_command = setup_command
         self.setup_response = setup_response
         self.setup_authenticated = setup_authenticated
+        self.setup_failures = setup_failures
         self.server_context: ssl.SSLContext | None = None
         self.commands: list[bytes] = []
         self.names = ("旅行", "literal &AMk- &-", 'Quote " and \\ box')
@@ -316,8 +330,10 @@ class Utf8Imap(DisposableImap):
                 tag, command, *arguments = line.rstrip(b"\r\n").split(b" ", 2)
                 response = b"OK complete"
                 if (authenticated == self.setup_authenticated and command == self.setup_command
-                        and self.setup_response is not None):
-                    response, self.setup_response = self.setup_response, None
+                        and self.setup_response is not None and self.setup_failures != 0):
+                    response = self.setup_response
+                    if self.setup_failures is not None:
+                        self.setup_failures -= 1
                 elif command == b"CAPABILITY":
                     capabilities = b"IMAP4rev1"
                     if not encrypted:

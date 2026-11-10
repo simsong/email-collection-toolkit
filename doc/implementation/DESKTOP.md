@@ -1196,8 +1196,8 @@ remains a separate VM acceptance requirement.
 
 Unknown-byte source inventory reports ETA unavailable while partitions remain;
 finishing known byte input may still report finalizing before its checkpoint.
-Ingests shows run-specific message count, earliest/latest resolved message dates
-in UTC and year counts before the workers table. The range uses the existing
-message-date resolution, including source-date fallback, not download timestamps.
+Ingests shows run-specific message count, earliest/latest IMAP INTERNALDATE values
+in UTC and year counts before the workers table. The range uses source IMAP INTERNALDATE, not header dates or download times.
+Separate acquisition counters exclude attached-message extraction and saved processing.
 Historical missing dates show unavailable; no dated messages shows an explicit
 empty state. `make test-imap-progress` validates the estimator and actual browser.

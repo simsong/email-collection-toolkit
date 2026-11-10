@@ -201,8 +201,10 @@ function historyRow(status) {
   version.textContent = runVersion(status);
   const summary = document.createElement("span");
   summary.className = "history-summary";
+  const imapOnly = status.source_roots.length && status.source_roots.every(root => root.startsWith("imap://"));
+  const messages = imapOnly && status.download_coverage ? status.download_coverage.messages : status.processed_messages;
   summary.textContent = `${processingMode(status) ? `${integer(status.processing_jobs_completed)} processing tasks finished`
-    : `${integer(status.processed_messages)} source messages`} · ${formatDuration(status.elapsed_seconds)}`;
+    : `${integer(messages)} source messages`} · ${formatDuration(status.elapsed_seconds)}`;
   main.append(title, time, version, summary);
   row.append(dot, main);
   row.addEventListener("click", () => { selectedStatusId = status.status_id; render(); });
@@ -294,10 +296,10 @@ function statistics(status) {
     ["Average processing rate", `${(Number(status.processing_jobs_completed) / Math.max(Number(status.elapsed_seconds), 1)).toFixed(2)} tasks/s`],
     ["Elapsed", formatDuration(status.elapsed_seconds)],
   ] : [
-    [imap ? "Source messages downloaded" : "Source messages imported", integer(status.processed_messages)],
+    [imap ? "Source messages downloaded" : "Source messages imported", imap ? status.download_coverage ? integer(status.download_coverage.messages) : "Unavailable" : integer(status.processed_messages)],
     [imap ? "Download partitions finished" : "Source files finished", `${integer(status.files_processed)} / ${integer(status.files_total)}`],
     ["Elapsed", formatDuration(status.elapsed_seconds)],
-    [imap ? "Average download rate" : "Average import rate", `${Number(status.message_rate).toFixed(2)} messages/s`],
+    [imap ? "Average download rate" : "Average import rate", imap && !status.download_coverage ? "Unavailable" : `${Number(imap && status.download_coverage ? status.download_coverage.messages / Math.max(status.elapsed_seconds, 1) : status.message_rate).toFixed(2)} messages/s`],
     ["Archived", integer(status.counts.archived)],
     ["Previously seen", integer(status.counts.duplicates)],
     ["Autosaved", integer(status.counts.autosaves)],
@@ -323,9 +325,11 @@ function statistics(status) {
 function messageCoverage(status) {
   const coverage = document.createElement("div");
   coverage.className = "message-coverage";
+  const measured = status.download_coverage;
+  if (!measured) { coverage.append(textBlock("Download coverage unavailable for this older run.")); return coverage; }
   const date = value => value ? new Date(value).toISOString().slice(0, 10) : "Unavailable";
-  coverage.append(textBlock(`This run: ${integer(status.processed_messages)} messages · Earliest: ${date(status.earliest_date)} · Latest: ${date(status.latest_date)}`));
-  coverage.append(textBlock("Resolved message dates in UTC, using source dates as fallback. Counts describe this run, not the entire archive."));
+  coverage.append(textBlock(`This run: ${integer(measured.messages)} messages · Earliest: ${date(measured.earliest_date)} · Latest: ${date(measured.latest_date)}`));
+  coverage.append(textBlock("Dates reported by the mail server (UTC). Counts cover downloads in this run; attached emails and later processing are excluded."));
   const table = document.createElement("table");
   table.className = "coverage-table";
   const head = document.createElement("thead");
@@ -338,7 +342,7 @@ function messageCoverage(status) {
   }
   head.append(headings);
   const body = document.createElement("tbody");
-  for (const entry of [...status.years].sort((a, b) => a.year - b.year)) {
+  for (const entry of [...measured.years].sort((a, b) => a.year - b.year)) {
     const row = document.createElement("tr");
     for (const value of [String(entry.year), integer(entry.messages)]) {
       const cell = document.createElement("td");
@@ -349,7 +353,7 @@ function messageCoverage(status) {
   }
   table.append(head, body);
   coverage.append(table);
-  if (!status.years.length) coverage.append(textBlock("No dated messages downloaded in this run yet."));
+  if (!measured.years.length) coverage.append(textBlock("No dated messages downloaded in this run yet."));
   return coverage;
 }
 

@@ -10,17 +10,18 @@ from __future__ import annotations
 
 import argparse
 from hashlib import sha256
-import multiprocessing
+import sys
 from pathlib import Path
 from threading import Timer
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, TypeAdapter
 
 from mailarchiver.__main__ import IngestInterrupted, IngestRequest, run_ingest
 from mailarchiver.application import create_empty_archive
 from mailarchiver.archive_config import ArchiveConfig, load_archive_config, save_archive_config
 from mailarchiver.change_signal import ChangeEvent
 from mailarchiver.imap_source import imap_locator
+from mailarchiver.owned_command import run_owned_command
 from mailarchiver.ingest_status import IngestStatus, latest_ingest_status
 from mailarchiver.standalone_verify import verify_archive
 
@@ -30,8 +31,9 @@ MARKER = ".ect-imap-acceptance"
 class AcceptanceSettings(BaseModel):
     source_archive: Path
     scratch_archive: Path
-    seconds: float = Field(default=600, gt=0)
-    grace_seconds: float = Field(default=120, gt=0)
+    seconds: float = Field(default=600, gt=0, allow_inf_nan=False)
+    grace_seconds: float = Field(default=120, gt=0, allow_inf_nan=False)
+    verification_seconds: float = Field(default=120, gt=0, allow_inf_nan=False)
     workers: int = Field(default=4, ge=1)
     no_scan: bool = False
 
@@ -41,6 +43,8 @@ class AcceptanceResult(BaseModel):
     forced_stop: bool
     integrity_errors: list[str]
     status: IngestStatus | None
+    evaluation_error: str | None = None
+    progress_observed: bool
 
 
 def prepare(settings: AcceptanceSettings) -> None:
@@ -60,6 +64,7 @@ def prepare(settings: AcceptanceSettings) -> None:
         if load_archive_config(scratch).imap_sources != accounts:
             raise ValueError("scratch account configuration changed")
         return
+    scratch.mkdir(mode=0o700, parents=True, exist_ok=True)
     create_empty_archive(scratch, owner_rules=config.owner)
     scratch.chmod(0o700)
     save_archive_config(scratch, ArchiveConfig(owner=config.owner, imap_sources=accounts))
@@ -87,27 +92,38 @@ def import_cycle(settings: AcceptanceSettings) -> None:
         deadline.cancel()
 
 
+def worker_command(settings: AcceptanceSettings, operation: str) -> list[str]:
+    command = [sys.executable, "-m", "scripts.imap_acceptance", "--worker", operation,
+        "--source-archive", str(settings.source_archive.resolve()),
+        "--scratch-archive", str(settings.scratch_archive.resolve()),
+        "--seconds", str(settings.seconds), "--workers", str(settings.workers)]
+    if settings.no_scan:
+        command.append("--no-scan")
+    return command
+
+
 def evaluate(settings: AcceptanceSettings) -> AcceptanceResult:
     prepare(settings)
-    child = multiprocessing.get_context("spawn").Process(target=import_cycle, args=(settings,))
-    child.start()
+    forced, error, code = False, None, None
     try:
-        child.join(settings.seconds + settings.grace_seconds)
-    except KeyboardInterrupt:
-        pass  # The finally boundary also owns cleanup after console cancellation.
-    finally:
-        forced = child.is_alive()
-        if forced:
-            child.terminate()
-            child.join(10)
-            if child.is_alive():
-                child.kill()
-                child.join()
-    result = AcceptanceResult(child_exitcode=child.exitcode, forced_stop=forced,
-        integrity_errors=verify_archive(settings.scratch_archive, quiet=True),
-        status=latest_ingest_status(settings.scratch_archive))
-    child.close()
-    return result
+        imported = run_owned_command(worker_command(settings, "import"),
+                                     timeout=settings.seconds + settings.grace_seconds)
+        code = imported.returncode
+        if code:
+            error = imported.stderr[-2000:] or imported.stdout[-2000:]
+    except RuntimeError as failure:
+        forced, error = True, str(failure)
+    try:
+        verified = run_owned_command(worker_command(settings, "verify"), timeout=settings.verification_seconds)
+        errors = TypeAdapter(list[str]).validate_json(verified.stdout)
+        if verified.returncode and not errors:
+            errors = ["Integrity verifier exited without a valid result"]
+    except (RuntimeError, ValueError) as failure:
+        errors = [f"Integrity verification did not finish: {failure}"]
+    status = latest_ingest_status(settings.scratch_archive)
+    return AcceptanceResult(child_exitcode=code, forced_stop=forced, evaluation_error=error,
+        integrity_errors=errors, status=status,
+        progress_observed=bool(status and status.download_coverage and status.download_coverage.messages))
 
 
 def main() -> int:
@@ -118,11 +134,30 @@ def main() -> int:
     parser.add_argument("--grace-seconds", type=float, default=120)
     parser.add_argument("--workers", type=int, default=4)
     parser.add_argument("--no-scan", action="store_true")
-    settings = AcceptanceSettings(**vars(parser.parse_args()))
-    result = evaluate(settings)
+    parser.add_argument("--verification-seconds", type=float, default=120)
+    parser.add_argument("--worker", choices=("import", "verify"), help=argparse.SUPPRESS)
+    args = parser.parse_args()
+    settings = AcceptanceSettings(source_archive=args.source_archive, scratch_archive=args.scratch_archive,
+        seconds=args.seconds, grace_seconds=args.grace_seconds, verification_seconds=args.verification_seconds,
+        workers=args.workers, no_scan=args.no_scan)
+    if args.worker:
+        if not (settings.scratch_archive / MARKER).is_file():
+            raise ValueError("worker requires an initialized acceptance scratch archive")
+        prepare(settings)
+        if args.worker == "import":
+            import_cycle(settings)
+            return 0
+        errors = verify_archive(settings.scratch_archive, quiet=True)
+        print(TypeAdapter(list[str]).dump_json(errors).decode())
+        return int(bool(errors))
+    try:
+        result = evaluate(settings)
+    except KeyboardInterrupt:
+        return 130
     print(result.model_dump_json(indent=2))
     return int(result.forced_stop or result.child_exitcode != 0 or bool(result.integrity_errors)
-               or result.status is None or result.status.state not in {"completed", "interrupted"})
+               or result.status is None or result.status.state not in {"completed", "interrupted"}
+               or result.status.state != "completed" and not result.progress_observed)
 
 
 if __name__ == "__main__":

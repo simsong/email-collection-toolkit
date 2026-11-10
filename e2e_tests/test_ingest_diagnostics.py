@@ -22,6 +22,10 @@ from mailarchiver.identity import APPLICATION_VERSION
 from scripts.website_screenshots import bridge
 
 APPLICATION_VERSION_FIELD = "application_version"
+DOWNLOAD_COVERAGE_FIELD = "download_coverage"
+ETA_FIELD = "eta"
+WIDTH = "width"
+HEIGHT = "height"
 
 
 @pytest.mark.parametrize("recorded_version", ["0.0.0+synthetic-history", None])
@@ -104,7 +108,7 @@ def test_long_failure_detail_wraps_without_hiding_source_or_traceback(tmp_path: 
             archive=archive, roots=[str(source)], owner_names_file=owners, scan_policy="not-scanned",
         ), terminal=False)
     assert read_ingest_history(archive).statuses[0].application_version == APPLICATION_VERSION
-    page.set_viewport_size({"width": 1000, "height": 900})
+    page.set_viewport_size({WIDTH: 1000, HEIGHT: 900})
     bridge(page, IngestWindowApi(archive), ("history", "antivirus", "can_import_directory"))
     page.goto((GUI_DIRECTORY / "ingests.html").as_uri())
     failure = page.locator("div.failure")
@@ -119,7 +123,8 @@ def test_long_failure_detail_wraps_without_hiding_source_or_traceback(tmp_path: 
     page.screenshot(path=str(tmp_path / "import-failure.png"))
 
 
-def test_imap_coverage_and_unknown_eta(tmp_path: Path, page: Page) -> None:
+@pytest.mark.parametrize("legacy", [False, True])
+def test_imap_coverage_and_unknown_eta(tmp_path: Path, page: Page, legacy: bool) -> None:
     """DESKTOP: unknown-size IMAP work has honest ETA and visible run-specific date/year counts."""
     archive = tmp_path / "synthetic.mailarchive"
     saved = IngestStatusFile(archive, "ingest-coverage-fixture")
@@ -129,14 +134,26 @@ def test_imap_coverage_and_unknown_eta(tmp_path: Path, page: Page) -> None:
     progress.state.files_processed = 6
     progress.state.inventory_complete = True
     for year in (2020, 2020, 2024):
-        progress.updates.put(ProgressUpdate(worker=1, phase="ingesting", message_date=datetime(year, 6, 15, tzinfo=UTC)))
+        progress.updates.put(ProgressUpdate(worker=1, phase="ingesting", download_date=datetime(year, 6, 15, tzinfo=UTC)))
+    progress.updates.put(ProgressUpdate(worker=1, message_date=datetime(1990, 1, 1, tzinfo=UTC)))
     progress.refresh()
+    if legacy:
+        payload = json.loads(saved.path.read_text())
+        del payload[DOWNLOAD_COVERAGE_FIELD]
+        payload[ETA_FIELD] = "finalizing"
+        saved.path.write_text(json.dumps(payload))
+    page.set_viewport_size({WIDTH: 1200, HEIGHT: 1000})
     bridge(page, IngestWindowApi(archive), ("history", "antivirus", "can_import_directory"))
     page.goto((GUI_DIRECTORY / "ingests.html").as_uri())
     expect(page.locator(".progress-caption")).to_contain_text("ETA unavailable")
     coverage = page.locator(".message-coverage")
-    expect(coverage).to_contain_text("This run: 3 messages")
-    expect(coverage).to_contain_text("Earliest: 2020-06-15")
-    expect(coverage).to_contain_text("Latest: 2024-06-15")
-    expect(coverage.locator("tbody tr")).to_have_text(["20202", "20241"])
+    if legacy:
+        expect(coverage).to_contain_text("Download coverage unavailable for this older run.")
+    else:
+        expect(page.locator(".history-summary")).to_contain_text("3 source messages")
+        expect(coverage).to_contain_text("This run: 3 messages")
+        expect(coverage).to_contain_text("Earliest: 2020-06-15")
+        expect(coverage).to_contain_text("Latest: 2024-06-15")
+        expect(coverage.locator("tbody tr")).to_have_text(["20202", "20241"])
+    page.screenshot(path=str(tmp_path / "imap-message-coverage.png"), full_page=True)
     expect(page.locator("body")).not_to_contain_text("ETA finalizing")

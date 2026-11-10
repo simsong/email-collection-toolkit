@@ -6,6 +6,14 @@ Entries describe their recorded revisions. For current behavior use the
 [user manual](USER_MANUAL.md) and [CLI reference](CLI_REFERENCE.md). Retired
 Rust delivery plans and historical package checks are not current acceptance.
 
+## 1.0.0a77 — safe transport recovery
+
+- Reconnect interrupted IMAP sessions with bounded, cancellable backoff and
+  epoch validation. Retain delivered UID state and pause safely if recovery fails.
+- Count actual downloaded source messages separately from extracted attachments
+  and saved processing, using IMAP INTERNALDATE for date/year coverage.
+- Contain scratch workers on owner death and bound integrity verification.
+
 ## 1.0.0a76 — IMAP run coverage
 
 - Show run-specific message dates and yearly counts. Unknown-size downloads

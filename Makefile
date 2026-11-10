@@ -1101,3 +1101,11 @@ test-imap-progress: ruff
 .PHONY: imap-acceptance
 imap-acceptance:
 	uv run --locked python -m scripts.imap_acceptance $(IMAP_ACCEPTANCE_ARGS)
+
+# Real TLS transient faults, persistent pause fallback and source-byte validation.
+.PHONY: test-imap-recovery
+test-imap-recovery: ruff
+	uv run --locked pylint src/mailarchiver/imap_source.py src/mailarchiver/imap_cli.py src/mailarchiver/ingest_status.py scripts/imap_acceptance.py
+	uv run --locked ty check src/mailarchiver/imap_source.py src/mailarchiver/imap_cli.py src/mailarchiver/ingest_status.py scripts/imap_acceptance.py --error-on-warning
+	uv run --locked pyright src/mailarchiver/imap_source.py src/mailarchiver/imap_cli.py src/mailarchiver/ingest_status.py scripts/imap_acceptance.py --warnings
+	uv run --locked pytest -q tests/test_imap.py -k 'transient_reads or reconnect_epoch or standalone_cli_reports_network_pause or invalid_imap_response or scratch_' $(PYTEST_ARGS)

@@ -37,7 +37,7 @@ from .configuration_diagnostics import ConfigurationError
 from .imap_credentials import password_for, save_password
 from .imap_models import ImapAccount, ImapTotals
 from .imap_protocol import ImapAuthenticationError, ImapPaused, ImapSession
-from .imap_source import IMAP_BUSY_PHASE, imap_locator
+from .imap_source import IMAP_BUSY_PHASE, IMAP_RECOVERY_PHASE, imap_locator
 from .ingest_status import latest_ingest_status
 from .imap_state import totals
 from .owner_rules import OwnerRules
@@ -85,7 +85,7 @@ class SyncReporter:
         current = totals(self.archive)
         latest = latest_ingest_status(self.archive)
         retries = tuple(sorted({phase for phase in (latest.phase, *(worker.phase for worker in latest.workers))
-                                if phase.startswith(IMAP_BUSY_PHASE)})) if latest and latest.state == "running" else ()
+                                if phase.startswith((IMAP_BUSY_PHASE, IMAP_RECOVERY_PHASE))})) if latest and latest.state == "running" else ()
         if status == "running" and current == self.last_running and retries == self.last_retry_phases:
             return
         self.last_running = current

@@ -73,6 +73,7 @@ from .change_signal import ActivityCallback, ChangeEvent, ChangeSignal
 from .console_events import console_signal
 from .ingest_status import (
     IngestCounts,
+    ImapDownloadCoverage,
     IngestState,
     IngestStatus,
     IngestStatusFile,
@@ -290,6 +291,7 @@ class ProgressUpdate(BaseModel):
     activity_total: int | None = None
     activity_unit: str | None = None
     message_date: datetime | None = None
+    download_date: datetime | None = None
     disposition: str | None = None
     file_complete: bool = False
     notice_kind: Literal["skipped input", "skipped unchanged"] | None = None
@@ -322,6 +324,7 @@ class ProgressState(BaseModel):
     workers: list[WorkerProgress] = Field(default_factory=list)
     counts: IngestCounts = Field(default_factory=IngestCounts)
     years: list[YearProgress] = Field(default_factory=list)
+    download_coverage: ImapDownloadCoverage = Field(default_factory=ImapDownloadCoverage)
     processing_active: bool = False
     processing_jobs_completed: int = 0
     processing_job_id: int | None = None
@@ -600,6 +603,8 @@ class ProgressReporter:
         self._record_source_progress(source, datetime.fromisoformat(parsed.date_utc))
 
     def record_source(self, source: MailObject) -> None:
+        if source.source.plugin_kind == "imap" and "#mime=" not in source.cursor and source.source_date_utc is not None:
+            self._queue_update(ProgressUpdate(worker=self._worker_number(), download_date=source.source_date_utc))
         self._record_source_progress(source)
 
     def _record_source_progress(self, source: MailObject, message_date: datetime | None = None) -> None:
@@ -861,6 +866,8 @@ class ProgressReporter:
                     worker.activity_unit = update.activity_unit
                 if update.processing_active:
                     worker.activity_done = worker.processing_jobs_completed
+            if update.download_date is not None:
+                self.state.download_coverage.record(update.download_date)
             if update.message_date is not None:
                 self._record_message(update.message_date)
                 worker.messages_processed += 1
@@ -1072,6 +1079,7 @@ class ProgressReporter:
             workers=[WorkerProgress.model_validate(worker) for worker in state.workers],
             counts=state.counts,
             years=state.years,
+            download_coverage=state.download_coverage,
             failure_detail=failure_detail,
             scan_policy=self.scan_policy,
             processing_active=state.processing_active,

@@ -22,7 +22,8 @@ than a second change log. Platform acceptance is stated alongside its evidence.
 - IMAP credential checks authenticate without mailbox access or archive writes;
   replacement passwords are tested before saving. Account acquisition uses
   a saved per-account limit (default 8, range 1–15) and cancellable capacity backoff while retaining the
-  full processing worker pool. Protocol failures and private diagnostics
+  full processing worker pool. Interrupted sessions retry with fresh TLS and
+  epoch checks, retaining delivered UID state; exhausted recovery pauses safely. Protocol failures and private diagnostics
   retain their distinct handling, including malformed greetings and full CLI login
   diagnostics. Expected configuration problems use actionable warnings without
   validator dumps or tracebacks. Retry classification precedes redaction; CLI backoff remains visible,
@@ -40,7 +41,7 @@ than a second change log. Platform acceptance is stated alongside its evidence.
 - Jobs, windows and import progress follow actual work and change notifications.
   Failure deadlines remain explicit; readiness must be observed.
   Unknown-size acquisition reports ETA unavailable. IMAP run details show
-  message counts, resolved UTC date bounds and per-year coverage.
+  message counts, IMAP INTERNALDATE UTC bounds and per-year coverage.
   Ingest snapshots record the shared immutable launch version. Ingests displays that
   saved value in history and run details, with an unavailable fallback for older files.
   The worker table uses fixed column widths, with task/source taking the remaining

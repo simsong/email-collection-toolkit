@@ -7,6 +7,7 @@ Purpose: Adapt generic IMAP and Gmail All Mail to the shared source contract.
 How it works:
 Freeze UID ranges, prioritize missing checkpoints and emit LF-normalized message bytes with
 wire hashes, then refresh saved-message metadata without another body transfer.
+Replace interrupted sessions with bounded backoff while retaining frozen UID plans.
 
 Fundamental dependents:
 
@@ -32,7 +33,7 @@ from .change_signal import ActivityCallback, ChangeEvent, await_activity
 from .imap_credentials import password_for
 from .imap_models import ImapAccount, ImapDownload, ImapMailbox, ImapMessageMetadata
 from .imap_preferences import DEFAULT_IMAP_CONNECTIONS
-from .imap_protocol import ImapServerBusy, ImapSession, UID_BATCH_SIZE
+from .imap_protocol import ImapPaused, ImapServerBusy, ImapSession, UID_BATCH_SIZE
 from .imap_state import known_observation
 from .plugin_api import (
     IntegrityDecision, IntegrityEvidence, MailContainer, MailObject, PluginCapabilities,
@@ -42,6 +43,8 @@ from .plugin_api import (
 from .sqlite_paths import sqlite_uri
 
 UID_SEARCH_WINDOW = 65536
+IMAP_RECOVERY_ATTEMPTS = 3
+IMAP_RECOVERY_PHASE = "IMAP connection interrupted;"
 IMAP_RETRY_INITIAL = 1.0
 IMAP_RETRY_MAXIMUM = 60.0
 IMAP_BUSY_PHASE = "IMAP server busy;"
@@ -73,6 +76,7 @@ class ImapWork(BaseModel):
     account: ImapAccount
     mailbox: ImapMailbox
     gmail: bool
+    utf8: bool | None = None
     first_uid: int = Field(ge=1)
     last_uid: int = Field(ge=0)
 
@@ -87,7 +91,8 @@ def _uid_batches(database: sqlite3.Connection, session: ImapSession, work: ImapW
     for start in range(work.first_uid, work.last_uid + 1, UID_SEARCH_WINDOW):
         end = min(start + UID_SEARCH_WINDOW - 1, work.last_uid)
         prior = {row[0] for row in database.execute("SELECT uid FROM prior_imap_uids WHERE uid BETWEEN ? AND ?", (start, end))}
-        uids = [uid for uid in session.uids(start, end) if (uid in prior) == refresh]
+        delivered = {row[0] for row in database.execute("SELECT uid FROM delivered_imap_uids WHERE uid BETWEEN ? AND ?", (start, end))}
+        uids = [uid for uid in session.uids(start, end) if (uid in prior) == refresh and uid not in delivered]
         for offset in range(0, len(uids), UID_BATCH_SIZE):
             yield uids[offset:offset + UID_BATCH_SIZE]
 
@@ -142,6 +147,14 @@ class ImapSourcePlugin(SourcePlugin):
             delay = min(delay * 2, IMAP_RETRY_MAXIMUM)
         return None
 
+    def _recover(self, work_id: str, attempt: int, error: ImapPaused) -> Generator[ProgressEvent, None, bool]:
+        if attempt > IMAP_RECOVERY_ATTEMPTS:
+            raise error
+        delay = min(IMAP_RETRY_INITIAL * 2 ** (attempt - 1), IMAP_RETRY_MAXIMUM)
+        yield ProgressEvent(work_id=work_id,
+            phase=f"{IMAP_RECOVERY_PHASE} reconnecting in {delay:g}s ({attempt}/{IMAP_RECOVERY_ATTEMPTS})")
+        return not _backoff_cancelled(self.cancellation, delay)
+
     def recognizes(self, source: SourceSpec) -> bool:
         return source.kind == "imap" or source.locator.startswith("imap://")
 
@@ -162,63 +175,107 @@ class ImapSourcePlugin(SourcePlugin):
         account = matches[0]
         if not account.enabled:
             return
-        with ExitStack() as connections:
-            session = yield from self._connect(account, connections, account.id)
-            if session is None:
+        frozen: list[ImapMailbox] = []
+        emitted: set[str] = set()
+        mode: tuple[bool, bool] | None = None
+        failures = 0
+        while not self.cancellation.is_set():
+            try:
+                with ExitStack() as connections:
+                    session = yield from self._connect(account, connections, account.id)
+                    if session is None:
+                        return
+                    if mode is not None and mode != (session.gmail, session.utf8):
+                        raise RuntimeError("IMAP capabilities changed during discovery; restart synchronization")
+                    mode = (session.gmail, session.utf8)
+                    for listed in session.mailboxes():
+                        mailbox = session.select(listed)
+                        previous = next((item for item in frozen if item.name == mailbox.name), None)
+                        if previous is not None:
+                            if mailbox.uid_validity != previous.uid_validity:
+                                raise RuntimeError("IMAP UIDVALIDITY changed during discovery; restart synchronization")
+                            mailbox = previous
+                        else:
+                            frozen.append(mailbox)
+                        # Escaped display components satisfy the provider-neutral hierarchy contract.
+                        hierarchy = tuple(quote(part, safe="").replace(".", "%2E")
+                                          for part in mailbox.name.split(mailbox.delimiter or "\x00") if part)
+                        source_ref = SourceReference(plugin_kind="imap", source_id=account.id,
+                            native_id=mailbox.name, display_name=f"{account.username}: {mailbox.name}",
+                            hierarchy=hierarchy, provenance_json=account.model_dump_json())
+                        length = max(1, ceil(max(mailbox.uid_next - 1, 1) / workers))
+                        for partition, first in enumerate(range(1, max(mailbox.uid_next, 2), length)):
+                            last = min(first + length - 1, mailbox.uid_next - 1)
+                            work = ImapWork(archive=archive, account=account, mailbox=mailbox, gmail=session.gmail, utf8=session.utf8,
+                                            first_uid=first, last_uid=last)
+                            native_id = f"{quote(mailbox.name, safe='')}?partition={partition}"
+                            container = MailContainer(work_id=f"{account.id}:{native_id}",
+                                source=source_ref.model_copy(update={"native_id": native_id}),
+                                concurrency_key=account.id, plugin_data_json=work.model_dump_json())
+                            if container.work_id not in emitted:
+                                emitted.add(container.work_id)
+                                yield container
                 return
-            for listed in session.mailboxes():
-                mailbox = session.select(listed)
-                # Escaped display components satisfy the provider-neutral hierarchy contract.
-                hierarchy = tuple(quote(part, safe="").replace(".", "%2E")
-                                  for part in mailbox.name.split(mailbox.delimiter or "\x00") if part)
-                source_ref = SourceReference(plugin_kind="imap", source_id=account.id,
-                    native_id=mailbox.name, display_name=f"{account.username}: {mailbox.name}",
-                    hierarchy=hierarchy, provenance_json=account.model_dump_json())
-                length = max(1, ceil(max(mailbox.uid_next - 1, 1) / workers))
-                for partition, first in enumerate(range(1, max(mailbox.uid_next, 2), length)):
-                    last = min(first + length - 1, mailbox.uid_next - 1)
-                    work = ImapWork(archive=archive, account=account, mailbox=mailbox, gmail=session.gmail,
-                                    first_uid=first, last_uid=last)
-                    native_id = f"{quote(mailbox.name, safe='')}?partition={partition}"
-                    yield MailContainer(work_id=f"{account.id}:{native_id}",
-                        source=source_ref.model_copy(update={"native_id": native_id}),
-                        concurrency_key=account.id, plugin_data_json=work.model_dump_json())
+            except ImapPaused as error:
+                if self.cancellation.is_set():
+                    return
+                failures += 1
+                if not (yield from self._recover(account.id, failures, error)):
+                    return
 
     def messages(self, container: MailContainer, resume_cursor: str | None
                  ) -> Generator[MailObject | SourceObservation | ProgressEvent, None, None]:
         del resume_cursor
         work = ImapWork.model_validate_json(container.plugin_data_json)
-        with ExitStack() as connections:
-            session = yield from self._connect(work.account, connections, container.work_id)
-            if session is None:
-                return
-            selected = session.select(work.mailbox)
-            if selected.uid_validity != work.mailbox.uid_validity or session.gmail != work.gmail:
-                raise RuntimeError("IMAP mailbox epoch or capabilities changed; retry synchronization")
-            with closing(sqlite3.connect(sqlite_uri(work.archive / "archive.sqlite3"), uri=True)) as database:
-                # Snapshot only UID membership in temporary SQL storage. New commits must
-                # not enter the refresh pass, and this read must not hold the writer lock.
-                database.execute("CREATE TEMP TABLE prior_imap_uids(uid INTEGER PRIMARY KEY)")
-                prior_count = database.execute("INSERT INTO prior_imap_uids SELECT uid FROM imap_seen "
-                    "WHERE source_id=? AND mailbox=? AND uid_validity=? AND uid BETWEEN ? AND ?",
-                    (work.account.id, selected.name, selected.uid_validity, work.first_uid, work.last_uid)).rowcount
-                database.commit()
-                for refresh in ((False, True) if prior_count else (False,)):
-                    phase = "refreshing saved IMAP metadata" if refresh else "finding unarchived IMAP messages"
-                    yield ProgressEvent(work_id=container.work_id, phase=phase)
-                    completed = 0
-                    for batch in _uid_batches(database, session, work, refresh):
-                        for metadata in session.metadata(selected, batch):
-                            cursor = f"{metadata.uid_validity}:{metadata.uid}"
-                            payload = metadata.model_dump_json()
-                            if known_observation(database, container.source, metadata) is not None:
-                                yield SourceObservation(work_id=container.work_id, source=container.source,
-                                    cursor=cursor, provider_metadata_json=payload)
-                            else:
-                                normalized, metadata = normalize_download(session.body(metadata), metadata)
-                                yield MailObject(work_id=container.work_id, source=container.source, cursor=cursor,
-                                    raw=normalized, provider_metadata_json=metadata.model_dump_json(),
-                                    source_date_utc=metadata.internal_date)
-                        if refresh:
-                            completed += len(batch)
-                            yield ProgressEvent(work_id=container.work_id, phase=phase, completed=completed, unit="messages")
+        with closing(sqlite3.connect(sqlite_uri(work.archive / "archive.sqlite3"), uri=True)) as database:
+            # Freeze prior membership once. Track delivered objects separately so a
+            # fresh transport never replays bodies already handed to publication.
+            database.execute("CREATE TEMP TABLE prior_imap_uids(uid INTEGER PRIMARY KEY)")
+            database.execute("CREATE TEMP TABLE delivered_imap_uids(uid INTEGER PRIMARY KEY)")
+            prior_count = database.execute("INSERT INTO prior_imap_uids SELECT uid FROM imap_seen "
+                "WHERE source_id=? AND mailbox=? AND uid_validity=? AND uid BETWEEN ? AND ?",
+                (work.account.id, work.mailbox.name, work.mailbox.uid_validity, work.first_uid, work.last_uid)).rowcount
+            database.commit()
+            failures = 0
+            while not self.cancellation.is_set():
+                try:
+                    with ExitStack() as connections:
+                        session = yield from self._connect(work.account, connections, container.work_id)
+                        if session is None:
+                            return
+                        selected = session.select(work.mailbox)
+                        if (selected.uid_validity != work.mailbox.uid_validity or session.gmail != work.gmail
+                                or work.utf8 is not None and session.utf8 != work.utf8):
+                            raise RuntimeError("IMAP mailbox epoch or capabilities changed; retry synchronization")
+                        for refresh in ((False, True) if prior_count else (False,)):
+                            phase = "refreshing saved IMAP metadata" if refresh else "finding unarchived IMAP messages"
+                            yield ProgressEvent(work_id=container.work_id, phase=phase)
+                            completed = 0
+                            for batch in _uid_batches(database, session, work, refresh):
+                                for metadata in session.metadata(selected, batch):
+                                    cursor = f"{metadata.uid_validity}:{metadata.uid}"
+                                    payload = metadata.model_dump_json()
+                                    item: MailObject | SourceObservation
+                                    if known_observation(database, container.source, metadata) is not None:
+                                        item = SourceObservation(work_id=container.work_id, source=container.source,
+                                            cursor=cursor, provider_metadata_json=payload)
+                                    else:
+                                        normalized, metadata = normalize_download(session.body(metadata), metadata)
+                                        item = MailObject(work_id=container.work_id, source=container.source, cursor=cursor,
+                                            raw=normalized, provider_metadata_json=metadata.model_dump_json(),
+                                            source_date_utc=metadata.internal_date)
+                                    database.execute("INSERT INTO delivered_imap_uids VALUES(?)", (metadata.uid,))
+                                    database.commit()
+                                    yield item
+                                    failures = 0
+                                if refresh:
+                                    completed += len(batch)
+                                    yield ProgressEvent(work_id=container.work_id, phase=phase,
+                                                        completed=completed, unit="messages")
+                    return
+                except ImapPaused as error:
+                    if self.cancellation.is_set():
+                        return
+                    failures += 1
+                    if not (yield from self._recover(container.work_id, failures, error)):
+                        return

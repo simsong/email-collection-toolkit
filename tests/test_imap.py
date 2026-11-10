@@ -26,6 +26,7 @@ import subprocess
 import sys
 import time
 import traceback
+from typing import Literal
 from threading import Barrier, Event
 
 import pytest
@@ -911,7 +912,8 @@ def test_shared_cli_login_reason_survives_long_account_names(tmp_path: Path, sho
     server = Utf8Imap(tmp_path, credentials=(username, "demopass"),
                       login_response=None if paused else b"NO " + reason + b" demopass",
                       setup_command=b"CAPABILITY" if paused else None, setup_authenticated=False,
-                      setup_response=b"BYE Server shutting down" if paused else None)
+                      setup_response=b"BYE Server shutting down" if paused else None,
+                      setup_failures=None if paused else 1)
     try:
         account = server.start().model_copy(update={"username": username})
         archive = tmp_path / "archive"
@@ -1374,3 +1376,78 @@ def test_scratch_cycle_imports_and_resumes_real_tls(imap_archive: Path, tmp_path
     import_cycle(settings)
     assert totals(scratch).archived == 3 and totals(scratch).duplicates == 0
     assert totals(imap_archive).archived == 0
+
+
+@pytest.mark.parametrize("imap_server", ["interruptible"], indirect=True)
+@pytest.mark.parametrize("command,mode", [(b" LIST ", "disconnect"), (b" EXAMINE ", "disconnect"),
+    (b"BODY.PEEK[]", "disconnect"), (b"BODY.PEEK[]", "partial"), (b"BODY.PEEK[]", "timeout")])
+def test_transient_reads_recover_without_replaying_delivered_bodies(imap_archive: Path,
+        imap_inbox: DisposableImap, monkeypatch: pytest.MonkeyPatch, command: bytes, mode: Literal["disconnect", "partial", "timeout"]) -> None:
+    """ACQUISITION: discard broken TLS streams, reconnect and retain exact committed/delivered UID progress."""
+    assert isinstance(imap_inbox, InterruptibleImap)
+    monkeypatch.setattr("mailarchiver.imap_protocol.IMAP_TIMEOUT", 1)
+    imap_inbox.fault = ImapFault(command=command, mode=mode, once=True)
+    args = parser().parse_args(["--archive", str(imap_archive), "--no-scan", "--workers", "1"])
+    assert synchronize(args) == 0
+    assert totals(imap_archive).archived == 3 and totals(imap_archive).duplicates == 0
+    status = read_ingest_history(imap_archive).statuses[0]
+    assert status.state == "completed"
+    assert status.download_coverage is not None and status.download_coverage.messages == 3
+    assert not verify_archive(imap_archive)
+    assert_imap_searchable(imap_archive)
+
+
+@pytest.mark.parametrize("imap_server", ["interruptible"], indirect=True)
+def test_reconnect_epoch_change_never_reuses_old_uids(imap_archive: Path,
+        imap_inbox: DisposableImap) -> None:
+    """ACQUISITION: a new epoch on a replacement connection must stop before replaying old UIDs."""
+    assert isinstance(imap_inbox, InterruptibleImap)
+    imap_inbox.fault = ImapFault(command=b"BODY.PEEK[]", mode="disconnect", skip=1,
+                               once=True, next_uid_validity=999999999)
+    args = parser().parse_args(["--archive", str(imap_archive), "--no-scan", "--workers", "1"])
+    with pytest.raises(RuntimeError, match="epoch or capabilities changed"):
+        synchronize(args)
+    assert totals(imap_archive).archived == 1
+    assert sum(b"BODY.PEEK[]" in line for line in imap_inbox.commands) == 2
+    assert not verify_archive(imap_archive)
+
+
+def test_scratch_verification_worker_is_owned_and_bounded(imap_archive: Path, tmp_path: Path) -> None:
+    """ACQUISITION: actual CLI verification is independent of credentials and cannot exceed its budget."""
+    from mailarchiver.owned_command import run_owned_command
+    from scripts.imap_acceptance import AcceptanceSettings, import_cycle, prepare, worker_command
+    settings = AcceptanceSettings(source_archive=imap_archive, scratch_archive=tmp_path / "scratch.mailarchive", no_scan=True)
+    prepare(settings)
+    import_cycle(settings)
+    command = worker_command(settings, "verify")
+    result = run_owned_command(command, timeout=10)
+    assert result.returncode == 0 and json.loads(result.stdout) == []
+    with pytest.raises(RuntimeError, match="timed out"):
+        run_owned_command(command, timeout=0.001)
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX owner-death containment; Windows uses the existing job boundary")
+def test_scratch_owner_death_reaps_utility(tmp_path: Path) -> None:
+    """ACQUISITION: the same owned-command boundary used by evaluation reaps an abruptly orphaned child."""
+    from mailarchiver.file_events import process_alive
+    marker = tmp_path / "utility.pid"
+    utility = "from pathlib import Path; import os; from threading import Event; " + \
+        f"Path({str(marker)!r}).write_text(str(os.getpid())); Event().wait()"
+    owner = f"from mailarchiver.owned_command import run_owned_command; run_owned_command({[sys.executable, '-c', utility]!r}, timeout=300)"
+    parent = subprocess.Popen([sys.executable, "-c", owner])
+    child_pid = None
+    try:
+        wait_for_path_state([marker], lambda: marker.exists() and marker.stat().st_size > 0, timeout=10)
+        child_pid = int(marker.read_text())
+        parent.terminate()
+        parent.wait(timeout=10)
+        deadline = time.monotonic() + 10
+        while process_alive(child_pid) and time.monotonic() < deadline:
+            time.sleep(0.05)
+        assert not process_alive(child_pid)
+    finally:
+        if parent.poll() is None:
+            parent.kill()
+            parent.wait(timeout=5)
+        if child_pid is not None and process_alive(child_pid):
+            os.kill(child_pid, signal.SIGKILL)

@@ -864,8 +864,26 @@ disjoint scratch archive. It copies one enabled account reference and owner
 settings from the source archive without reading mail or modifying credentials
 there. Only marked, matching scratch archives can be resumed. An owned child
 uses the production importer with one connection and an acquisition deadline,
-followed by bounded cleanup grace. Forced termination, child failure, invalid
+followed by bounded cleanup grace. The existing owned-command supervisor
+contains descendants on timeout or owner death on POSIX and Windows. Canonical
+verification has its own configurable deadline (default 120 seconds). Forced termination, child failure, invalid
 final status or canonical verification errors fail the evaluation. The JSON
 summary retains the status, date/year counts and integrity result. Disposable TLS
 fixtures exercise destination rejection and exact resume through
 `make test-imap-progress`; live Gmail evaluation is separate evidence.
+
+## Automatic transport recovery
+
+Discovery and acquisition discard interrupted sessions before cancellable
+1, 2 and 4 second reconnect waits. After three unsuccessful recovery attempts,
+retain the existing paused/Resume behavior. Successful message delivery resets
+the acquisition retry budget. Authentication, TLS trust, malformed protocol and
+local storage failures are not retried as transport failures. Every replacement
+session EXAMINEs and checks UIDVALIDITY/capabilities before using old UID plans.
+Discovery freezes mailbox bounds and avoids emitting duplicate containers.
+Each worker retains temporary SQL sets of prior and already-delivered UIDs, so
+reconnecting cannot replay an object already handed to publication. Partial
+literals never reach publication. Initial capacity-refusal backoff retains its
+existing policy. CLI progress exposes reconnect deadlines while counts are still.
+`make test-imap-recovery` exercises transient and persistent faults, epoch change,
+source integrity and owned scratch-process lifecycle.

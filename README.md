@@ -282,7 +282,7 @@ separately licensed components are identified in
 Developer scratch IMAP acceptance uses `make imap-acceptance` with
 `IMAP_ACCEPTANCE_ARGS="--source-archive SOURCE --scratch-archive SCRATCH --seconds 600"`.
 This Make argument selects disjoint archives and a cancellation deadline (default
-ten minutes, plus two minutes for cleanup); it contains no password. The tool
+ten minutes, plus two minutes for cleanup and a separate two-minute verification budget); it contains no password. The tool
 reuses one configured account through its existing vault reference and one extra
 connection, retains the scratch archive for subsequent runs, and prints status
 and canonical-integrity results. A forced stop is a failed evaluation.
