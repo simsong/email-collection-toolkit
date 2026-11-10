@@ -6,6 +6,24 @@ Entries describe their recorded revisions. For current behavior use the
 [user manual](USER_MANUAL.md) and [CLI reference](CLI_REFERENCE.md). Retired
 Rust delivery plans and historical package checks are not current acceptance.
 
+## 1.0.0a76 — IMAP run coverage
+
+- Show run-specific message dates and yearly counts. Unknown-size downloads
+  report ETA unavailable instead of claiming finalization. Keep narrow worker
+  tables scrollable within their section.
+
+## 1.0.0a75 — accurate search progress
+
+- Leave the cleared results pane blank while the status line says **Searching…**.
+  Remove the premature **No messages.** placeholder; completed empty searches
+  still report **0 messages** in the status line.
+
+## 1.0.0a74 — stable worker columns
+
+- Keep Thread, Operation, Download / import progress and Processing tasks finished
+  at fixed widths while worker activity changes. Current task / source uses the
+  remaining width and expands with the window; long source names wrap.
+
 ## 1.0.0a73 — record the version behind each import result
 
 - Save the producer's launch application version with every ingest snapshot and

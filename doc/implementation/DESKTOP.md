@@ -94,6 +94,12 @@ mixed downloading/processing rows. Run these checks with `make test-ingest-progr
 Completed source runs retain their source totals alongside processing totals.
 The shared statistics renderer omits aggregate Workers and Peak workers cards;
 individual worker rows retain their activity and finished-task totals.
+`ingests.css` uses fixed table layout with 60/152/160/160-pixel widths for Thread,
+Operation, source progress and finished tasks. The task/source column receives
+the remaining width without a maximum; text wraps and a 680-pixel table minimum
+keeps narrow windows readable through the detail pane's horizontal scrolling.
+`make test-worker-columns` measures column positions across idle, downloading and
+processing history updates and verifies that only task/source grows on resize.
 `ingests.js` renders running processing activity with a striped indeterminate bar,
 finished-job count, processor name and the worker's job activity. Source-file and
 imported-message counters keep their original meaning; terminal/stale snapshots
@@ -1185,3 +1191,13 @@ continuation faults propagate rather than stranding the SDK semaphore. Cocoa
 retains the SDK's separately delivered Promise results and distinguishes WebKit's
 unsupported immediate result from execution errors. Actual Windows execution
 remains a separate VM acceptance requirement.
+
+## IMAP run coverage
+
+Unknown-byte source inventory reports ETA unavailable while partitions remain;
+finishing known byte input may still report finalizing before its checkpoint.
+Ingests shows run-specific message count, earliest/latest resolved message dates
+in UTC and year counts before the workers table. The range uses the existing
+message-date resolution, including source-date fallback, not download timestamps.
+Historical missing dates show unavailable; no dated messages shows an explicit
+empty state. `make test-imap-progress` validates the estimator and actual browser.

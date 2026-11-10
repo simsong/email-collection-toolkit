@@ -460,3 +460,16 @@ own provenance, long subjects may use folded encoded words, and DEL/C1 controls
 are rejected. Validate with `make test-imap`, `make test-pst` and `make test-pff`.
 PDF-derived MBOX publication must atomically refuse a racing destination without
 requiring hardlink-capable storage; existing output remains untouched.
+
+## Timed scratch IMAP evaluation
+
+`make imap-acceptance` runs `scripts.imap_acceptance` against an explicit,
+disjoint scratch archive. It copies one enabled account reference and owner
+settings from the source archive without reading mail or modifying credentials
+there. Only marked, matching scratch archives can be resumed. An owned child
+uses the production importer with one connection and an acquisition deadline,
+followed by bounded cleanup grace. Forced termination, child failure, invalid
+final status or canonical verification errors fail the evaluation. The JSON
+summary retains the status, date/year counts and integrity result. Disposable TLS
+fixtures exercise destination rejection and exact resume through
+`make test-imap-progress`; live Gmail evaluation is separate evidence.

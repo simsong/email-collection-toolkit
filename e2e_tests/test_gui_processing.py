@@ -48,6 +48,41 @@ def expose(page: Page, api: object, names: tuple[str, ...]) -> None:
         window.addEventListener('DOMContentLoaded', () => window.dispatchEvent(new Event('pywebviewready')));""")
 
 
+def test_searching_does_not_claim_there_are_no_messages(tmp_path: Path, page: Page) -> None:
+    """SEARCH: an empty table during a pending real query is not a completed zero-result search."""
+    api = GuiApi(build_deferred_archive(tmp_path))
+    try:
+        expose(page, api, SEARCH_BRIDGE_METHODS)
+        page.goto((GUI_DIRECTORY / "index.html").as_uri() + "?query=subject:Parent")
+        expect(page.locator("#result-list .result")).to_have_count(1)
+        # Delay delivery of real search results without replacing the service or its data.
+        page.evaluate("""() => {
+            const search = window.pywebview.api.search;
+            window.searchReplies = [];
+            window.pywebview.api.search = async (...args) => {
+                const result = await search(...args);
+                await new Promise(resolve => window.searchReplies.push(resolve));
+                return result;
+            };
+        }""")
+        for query, count in (("subject:absent-search-token", 0), ("subject:Parent", 1)):
+            page.locator("#search").fill(query)
+            page.locator("#search").press("Enter")
+            page.wait_for_function("window.searchReplies.length === 1")
+            expect(page.locator("#result-status")).to_have_text("Searching…")
+            expect(page.locator("#result-list")).to_be_visible()
+            expect(page.locator("#result-list")).not_to_contain_text("No messages.")
+            expect(page.locator("#result-list .result")).to_have_count(0)
+            previews = GUI_DIRECTORY.parent / ".tmp/gui-previews"
+            previews.mkdir(parents=True, exist_ok=True)
+            page.screenshot(path=str(previews / "searching.png"))
+            page.evaluate("window.searchReplies.shift()()")
+            expect(page.locator("#result-status")).to_have_text(f"{count} message{'s' if count != 1 else ''}")
+            expect(page.locator("#result-list .result")).to_have_count(count)
+    finally:
+        api.close()
+
+
 def test_result_append_exceeds_javascript_argument_limit_without_losing_rows(tmp_path: Path, page: Page) -> None:
     """SEARCH: append a constructed volume batch to the real widget without replacing the backend."""
     api = GuiApi(build_deferred_archive(tmp_path))
@@ -566,6 +601,49 @@ def test_processing_history_shows_jobs_instead_of_zero_source_progress(tmp_path:
     page.reload()
     expect(page.locator(".state-badge")).to_have_text("failed")
     expect(page.locator(".progress-fill.indeterminate")).to_have_count(0)
+
+
+def test_worker_columns_stay_fixed_during_status_changes(tmp_path: Path, page: Page) -> None:
+    """DESKTOP: activity updates keep four columns stable; only task/source grows with the window."""
+    archive = build_interrupted_archive(tmp_path)
+    status = read_ingest_history(archive).statuses[0]
+    worker = status.workers[0].model_copy(update={"phase": "idle", "processing_jobs_completed": 0})
+    status = status.model_copy(update={"status_id": "ingest-column-fixture", "workers": [worker]})
+    status_file = IngestStatusFile(archive, status.status_id)
+    status_file.write(status)
+    expose(page, IngestWindowApi(archive), ("history", "antivirus", "can_import_directory"))
+    page.goto((GUI_DIRECTORY / "ingests.html").as_uri() + f"?status={status.status_id}")
+    headings = page.locator(".worker-table th")
+    operation = page.locator(".worker-table tbody td").nth(1)
+    geometry = "cells => cells.map(cell => { const r = cell.getBoundingClientRect(); return [r.x, r.width]; })"
+    fixed_widths: list[float] = []
+    task_width = 0.0
+    for width in (1000, 1440, 1800):
+        page.set_viewport_size({"width": width, "height": 1000})
+        status_file.write(status.model_copy(update={"workers": [worker], "updated_at": datetime.now(UTC)}))
+        page.evaluate("window.refreshHistory()")
+        expect(operation).to_have_text("Idle")
+        baseline: list[list[float]] = headings.evaluate_all(geometry)
+        current_widths = [baseline[index][1] for index in (0, 1, 3, 4)]
+        if fixed_widths:
+            assert current_widths == pytest.approx(fixed_widths)
+            assert baseline[2][1] > task_width
+        fixed_widths, task_width = current_widths, baseline[2][1]
+        for phase, kind, label, unit in (
+            ("fetching messages", "downloading", "Downloading", "messages"),
+            ("scanning", "processing", "Processing imported mail", "messages"),
+            ("processing mime", "processing", "Processing saved mail", "jobs"),
+        ):
+            active = worker.model_copy(update={"worker": 128, "phase": phase, "operation": kind,
+                "path": "Inbox/" + "long-source-name" * 30, "activity_done": 123456789,
+                "activity_total": 999999999, "activity_unit": unit, "processing_jobs_completed": 123456789})
+            status_file.write(status.model_copy(update={"workers": [active], "updated_at": datetime.now(UTC)}))
+            page.evaluate("window.refreshHistory()")
+            expect(operation).to_have_text(label)
+            for actual, expected in zip(headings.evaluate_all(geometry), baseline, strict=True):
+                assert actual == pytest.approx(expected)
+            # Long task/source text wraps within its expanding cell instead of overlapping progress.
+            assert page.locator(".worker-path").evaluate("cell => cell.scrollWidth <= cell.clientWidth")
 
 
 def test_history_startup_and_status_symbols(tmp_path: Path, page: Page) -> None:

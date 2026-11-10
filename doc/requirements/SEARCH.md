@@ -91,7 +91,9 @@ When more rows exist, the GUI immediately displays that ordered prefix,
 automatically retrieves the complementary remainder in the background, and
 then displays the complete result set and exact count. During that continuation,
 the result status is red and says **Searching in background** with the displayed
-count. A newer
+count. While a query is pending, the cleared result table must not claim
+**No messages.**; the status line shows **Searching…** and the table stays blank
+until results arrive. A completed empty search reports **0 messages**. A newer
 query supersedes the continuation; a failure retains the first 2,000 results
 and reports that the background search failed. The GUI has no **Find older
 ones**, **Load more**, or **Load all** interaction. Limiting an unordered FTS

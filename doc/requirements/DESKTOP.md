@@ -69,7 +69,11 @@ Label saved work **Processing saved mail**. During processing stages, including
 intervals between jobs, show finished tasks and average tasks/second instead of
 zero source-message/file/rate cards. History summaries use processing counts too.
 The worker table separates operation, current task/source, download/import
-progress and that worker's finished processing tasks. Preserve each worker's
+progress and that worker's finished processing tasks. Keep Thread, Operation,
+download/import progress and finished-task columns at constant widths across
+activity updates and window resizing. Current task/source takes the remaining
+width and wraps long paths. Narrow windows may scroll the table horizontally.
+Preserve each worker's
 count across tasks and idle periods; never copy the global total into its row.
 Old snapshots without worker totals display unavailable rather than invented
 counts. Describe IMAP source containers as download partitions, not files.
@@ -889,3 +893,13 @@ Large search batches must append without depending on JavaScript's function
 argument limit. Suggestion/preview wait expiry returns a typed error with current
 pending state; it is not a successful polling tick, and explicit retries may read
 later actual completion.
+
+## IMAP run coverage
+
+Unknown-byte source inventory reports ETA unavailable while partitions remain;
+finishing known byte input may still report finalizing before its checkpoint.
+Ingests shows run-specific message count, earliest/latest resolved message dates
+in UTC and year counts before the workers table. The range uses the existing
+message-date resolution, including source-date fallback, not download timestamps.
+Historical missing dates show unavailable; no dated messages shows an explicit
+empty state. `make test-imap-progress` validates the estimator and actual browser.

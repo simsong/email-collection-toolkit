@@ -39,8 +39,14 @@ does not establish that every platform or release gate has passed.
   and evidence; no resident service or manual-review gate is introduced.
 - Jobs, windows and import progress follow actual work and change notifications.
   Failure deadlines remain explicit; readiness must be observed.
+  Unknown-size acquisition reports ETA unavailable. IMAP run details show
+  message counts, resolved UTC date bounds and per-year coverage.
   Run history preserves the producing application's launch version, including failures;
   older snapshots without that evidence display the version as unavailable.
+  Worker activity updates keep four table columns fixed; task/source expands
+  into the remaining width. See [desktop](requirements/DESKTOP.md).
+- Pending GUI searches show progress without claiming no matches before
+  completion. See [search](requirements/SEARCH.md).
 - User commands are `ect`, `ect-create`, `ect-import` and `ect-search`. They invoke
   application code directly. Make is the developer build/test convenience layer.
 - Versions come from `pyproject.toml`; launch/build provenance discloses local

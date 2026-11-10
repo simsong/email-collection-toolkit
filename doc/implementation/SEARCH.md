@@ -187,6 +187,14 @@ substring searches have a separate linear-work budget because an ordinary
 B-tree cannot seek a leading-wildcard pattern. Tests check plan properties rather
 than snapshotting SQLite's entire version-dependent explanation.
 
+## Search progress display
+
+`gui/app.js` leaves Tabulator's empty-table placeholder disabled. The existing
+search status line reports **Searching…** while the bridge reply is pending,
+then the completed count, including **0 messages**. `make test-search-placeholder`
+delays delivery of real search replies and verifies pending, empty and matching
+results without replacing the search service.
+
 ## Natural search matching
 
 Natural search shares `search_text.search_fold`: Unicode case folding expands

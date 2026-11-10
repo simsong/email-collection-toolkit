@@ -1346,3 +1346,31 @@ finally:
     result = subprocess.run([sys.executable, "-c", code, str(tmp_path)], cwd=ROOT,
                             capture_output=True, text=True, check=False, timeout=30)
     assert result.returncode == 0, result.stdout + result.stderr
+
+
+def test_scratch_acceptance_refuses_canonical_and_unmarked_archives(imap_archive: Path, tmp_path: Path) -> None:
+    """ACQUISITION: acceptance must never reuse its source or an unrelated archive as scratch."""
+    from scripts.imap_acceptance import AcceptanceSettings, prepare
+    original = (imap_archive / "config.yaml").read_bytes()
+    for scratch in (imap_archive, imap_archive / "nested", tmp_path / "unmarked"):
+        if scratch.name == "unmarked":
+            scratch.mkdir()
+            (scratch / "preserve.txt").write_text("keep")
+        with pytest.raises(ValueError):
+            prepare(AcceptanceSettings(source_archive=imap_archive, scratch_archive=scratch))
+    assert (imap_archive / "config.yaml").read_bytes() == original
+    assert (tmp_path / "unmarked/preserve.txt").read_text() == "keep"
+
+
+def test_scratch_cycle_imports_and_resumes_real_tls(imap_archive: Path, tmp_path: Path) -> None:
+    """ACQUISITION: scratch uses the production importer, preserves source settings and resumes exact UIDs."""
+    from scripts.imap_acceptance import AcceptanceSettings, import_cycle, prepare
+    scratch = tmp_path / "scratch.mailarchive"
+    settings = AcceptanceSettings(source_archive=imap_archive, scratch_archive=scratch, seconds=10, no_scan=True)
+    prepare(settings)
+    import_cycle(settings)
+    assert totals(scratch).archived == 3 and not verify_archive(scratch)
+    prepare(settings)
+    import_cycle(settings)
+    assert totals(scratch).archived == 3 and totals(scratch).duplicates == 0
+    assert totals(imap_archive).archived == 0

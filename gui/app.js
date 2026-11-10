@@ -1140,7 +1140,6 @@ function initializeResultTable() {
     renderVertical: "virtual",
     selectableRows: true,
     selectableRowsRangeMode: "click",
-    placeholder: "No messages.",
     columns: [{
       field: "subject",
       formatter: resultCardFormatter,

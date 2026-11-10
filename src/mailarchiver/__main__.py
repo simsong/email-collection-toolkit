@@ -499,7 +499,7 @@ def overall_progress(state: ProgressState, now: float) -> OverallProgress:
     if not state.inventory_complete:
         eta = "calculating"
     elif total == 0:
-        eta = "0s" if state.files_processed >= state.source_files_total else "finalizing"
+        eta = "0s" if state.files_processed >= state.source_files_total else "unavailable"
     elif done == 0 or state.byte_progress_started_monotonic is None:
         eta = "calculating"
     elif done >= total:

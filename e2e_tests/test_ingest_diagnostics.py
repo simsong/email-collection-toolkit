@@ -8,13 +8,14 @@
 
 """Requirement: local failure evidence is readable in the real Ingests interface."""
 
+from datetime import UTC, datetime
 from pathlib import Path
 import json
 
 import pytest
 from playwright.sync_api import Page, expect
 
-from mailarchiver.__main__ import IngestRequest, ProgressReporter, run_ingest
+from mailarchiver.__main__ import IngestRequest, ProgressReporter, ProgressUpdate, run_ingest
 from mailarchiver.gui_app import GUI_DIRECTORY, IngestWindowApi
 from mailarchiver.ingest_status import IngestStatusFile, read_ingest_history
 from mailarchiver.identity import APPLICATION_VERSION
@@ -116,3 +117,26 @@ def test_long_failure_detail_wraps_without_hiding_source_or_traceback(tmp_path: 
     assert page.locator(".ingest-detail").evaluate("el => el.scrollWidth <= el.clientWidth + 1")
     failure.scroll_into_view_if_needed()
     page.screenshot(path=str(tmp_path / "import-failure.png"))
+
+
+def test_imap_coverage_and_unknown_eta(tmp_path: Path, page: Page) -> None:
+    """DESKTOP: unknown-size IMAP work has honest ETA and visible run-specific date/year counts."""
+    archive = tmp_path / "synthetic.mailarchive"
+    saved = IngestStatusFile(archive, "ingest-coverage-fixture")
+    progress = ProgressReporter(1, status_file=saved, archive=archive, run_pk=1,
+        source_roots=["imap://synthetic-account?archive=fixture"], terminal=False)
+    progress.state.source_files_total = 16
+    progress.state.files_processed = 6
+    progress.state.inventory_complete = True
+    for year in (2020, 2020, 2024):
+        progress.updates.put(ProgressUpdate(worker=1, phase="ingesting", message_date=datetime(year, 6, 15, tzinfo=UTC)))
+    progress.refresh()
+    bridge(page, IngestWindowApi(archive), ("history", "antivirus", "can_import_directory"))
+    page.goto((GUI_DIRECTORY / "ingests.html").as_uri())
+    expect(page.locator(".progress-caption")).to_contain_text("ETA unavailable")
+    coverage = page.locator(".message-coverage")
+    expect(coverage).to_contain_text("This run: 3 messages")
+    expect(coverage).to_contain_text("Earliest: 2020-06-15")
+    expect(coverage).to_contain_text("Latest: 2024-06-15")
+    expect(coverage.locator("tbody tr")).to_have_text(["20202", "20241"])
+    expect(page.locator("body")).not_to_contain_text("ETA finalizing")

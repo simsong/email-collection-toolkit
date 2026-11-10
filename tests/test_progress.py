@@ -157,7 +157,9 @@ def test_unknown_byte_inventory_uses_completed_containers_for_percentage() -> No
         inventory_complete=True,
     )
 
-    assert overall_progress(state, now=20).percent == 25
+    result = overall_progress(state, now=20)
+    assert result.percent == 25
+    assert result.eta == "unavailable"
 
 
 def test_worker_file_progress_does_not_regress_during_post_ingest_hashing() -> None:

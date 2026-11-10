@@ -256,7 +256,7 @@ function renderDetail(status) {
   track.setAttribute("aria-valuetext", processingNow ? processing : `${Number(status.percent).toFixed(1)}%`);
   if (!processingNow) track.setAttribute("aria-valuenow", Number(status.percent));
   caption.append(textSpan(phaseLabel(status)), textSpan(processingNow ? processing : status.state === "paused"
-    ? `${Number(status.percent).toFixed(1)}% saved` : `${Number(status.percent).toFixed(1)}% · ETA ${status.eta}`));
+    ? `${Number(status.percent).toFixed(1)}% saved` : `${Number(status.percent).toFixed(1)}% · ETA ${!status.bytes_total && status.files_processed < status.files_total ? "unavailable" : status.eta}`));
 
   detail.append(heading, track, caption, statistics(status));
   if (processingMode(status)) {
@@ -267,6 +267,9 @@ function renderDetail(status) {
       explanation.textContent += " Source downloading/importing resumes after this saved work finishes.";
     }
     detail.append(explanation);
+  }
+  if (status.source_roots.some(root => root.startsWith("imap://"))) {
+    detail.append(section("Downloaded message coverage", messageCoverage(status)));
   }
   if (status.failure_detail) detail.append(section("Failure", textBlock(status.failure_detail, "failure")));
   detail.append(section("Workers", workerTable(status.workers)));
@@ -317,6 +320,39 @@ function statistics(status) {
   return grid;
 }
 
+function messageCoverage(status) {
+  const coverage = document.createElement("div");
+  coverage.className = "message-coverage";
+  const date = value => value ? new Date(value).toISOString().slice(0, 10) : "Unavailable";
+  coverage.append(textBlock(`This run: ${integer(status.processed_messages)} messages · Earliest: ${date(status.earliest_date)} · Latest: ${date(status.latest_date)}`));
+  coverage.append(textBlock("Resolved message dates in UTC, using source dates as fallback. Counts describe this run, not the entire archive."));
+  const table = document.createElement("table");
+  table.className = "coverage-table";
+  const head = document.createElement("thead");
+  const headings = document.createElement("tr");
+  for (const label of ["Year", "Messages"]) {
+    const cell = document.createElement("th");
+    cell.scope = "col";
+    cell.textContent = label;
+    headings.append(cell);
+  }
+  head.append(headings);
+  const body = document.createElement("tbody");
+  for (const entry of [...status.years].sort((a, b) => a.year - b.year)) {
+    const row = document.createElement("tr");
+    for (const value of [String(entry.year), integer(entry.messages)]) {
+      const cell = document.createElement("td");
+      cell.textContent = value;
+      row.append(cell);
+    }
+    body.append(row);
+  }
+  table.append(head, body);
+  coverage.append(table);
+  if (!status.years.length) coverage.append(textBlock("No dated messages downloaded in this run yet."));
+  return coverage;
+}
+
 function workerTable(workers) {
   const table = document.createElement("table");
   table.className = "worker-table";
@@ -351,7 +387,10 @@ function workerTable(workers) {
     body.append(row);
   }
   table.append(head, body);
-  return table;
+  const scroll = document.createElement("div");
+  scroll.className = "worker-table-scroll";
+  scroll.append(table);
+  return scroll;
 }
 
 function section(title, content) {
