@@ -76,6 +76,8 @@ Ingest history Sources shows IMAP username, hostname and port instead of interna
 account IDs and locator query options. Local paths remain readable. Missing or
 invalid account configuration shows an unavailable-account label; viewing history
 never connects to IMAP or changes saved source locators.
+Invalid or unreadable settings also show an actionable warning without a validator
+dump or traceback. Log the warning once per changed condition, rather than on every refresh.
 
 Opening an archive with unfinished work asks before reconnecting or processing.
 Show source identity (IMAP username, server and port), first start and latest

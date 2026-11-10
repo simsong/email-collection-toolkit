@@ -20,10 +20,9 @@ import re
 from datetime import UTC, datetime
 from email.utils import getaddresses
 
-from pydantic import BaseModel, ConfigDict, Field
-
 from striprtf.striprtf import rtf_to_text
 
+from ..builtin_configuration import AttachedMessageLimits, DEFAULT_MAX_TEXT_BYTES, MAX_TEXT_BYTES, SIGNATURE_LINES
 from ..encoding import decode_text
 from ..reply_addresses import RoutingCandidate
 from ..message import MetadataDefect, ParsedMessage, decoded_header, decoded_message_header, header_addresses, parse_message
@@ -34,11 +33,8 @@ from ..scan_evidence import DETECTION_HEADER, ENGINE_HEADER, DEFINITIONS_HEADER
 from .phones import signature_phone_numbers
 from .mime import ExtractionLimitError, MimeLimits, extract_parts, read_headers
 
-SIGNATURE_LINES = "signature_lines"
 EMAIL = re.compile(r"[A-Za-z0-9.!#$%&'*+/=?^_`{|}~-]+@[A-Za-z0-9](?:[A-Za-z0-9.-]*[A-Za-z0-9])?")
 QUARANTINE_UNKNOWN_DATE = "quarantine-unknown"
-MAX_TEXT_BYTES = "max_text_bytes"
-DEFAULT_MAX_TEXT_BYTES = 8 * 1024 * 1024
 
 
 def text_limit(item: ProcessingObject) -> int:
@@ -250,11 +246,6 @@ class IdentityProcessor:
                               if candidate.lower() == address and name), "")
                 evidence.append(AddressEvidence(address=address, name=named, kind="signature"))
         return ProcessingResult(evidence=tuple(evidence), phone_numbers=signature_phone_numbers(text, count), diagnostics=tuple(diagnostics))
-
-
-class AttachedMessageLimits(BaseModel):
-    model_config = ConfigDict(extra="forbid", frozen=True)
-    max_depth: int | None = Field(default=None, gt=0, strict=True)
 
 
 class AttachedMessageProcessor:

@@ -455,6 +455,18 @@ current status phases and emits changed retry reasons/delays independently of
 unchanged download totals. Retry phases retain up to600 printable characters in
 status, while the terminal dashboard keeps its normal short labels. Ingests history treats unreadable account configuration
 as an unavailable account list while retaining saved status records.
+The shared `configuration_diagnostics.ConfigurationError` summarizes archive and
+installation schema, YAML and access problems without
+raw values or chained validator exceptions, with printable single-line messages
+and repair guidance naming the affected file. CLI entry points print the complete
+repair message and stop cleanly; expected configuration diagnostics omit traceback
+frames. Ingests exposes the warning visibly and logs it once per changed condition.
+`read_plugin_configuration` checks built-in setting schemas after merging layers and
+identifies the layer supplying an invalid value. Production startup checks all selected
+processor namespaces before processing, after any explicit replay invalidation so stale
+search results remain cleared on failed replay. Custom plugin/runtime defects retain diagnostics.
+`make test-config-diagnostics` exercises real malformed fixtures, public/module CLI
+paths, saved-history preservation and the shipped warning banner.
 
 Strict `ImapAccount` records live in `config.yaml.imap_sources`; nonempty lists
 select configuration version 3. Existing version-1/2 files remain readable. The

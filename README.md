@@ -149,6 +149,10 @@ connections per account. **Preferences → Maximum IMAP connections per account*
 accepts 1–15, independently of the processing worker count. All configured
 processing workers remain available.
 
+Invalid archive settings produce an actionable warning with the configuration
+filename and repair guidance. Saved Ingests history remains available; invalid
+settings must be repaired before importing.
+
 ### Archive care
 
 Use **File → Customizable Default Lists…** for owner/sender defaults,

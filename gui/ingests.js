@@ -87,6 +87,8 @@ async function readHistory() {
     }
     starting = Boolean(history.starting);
     imapAccounts = history.imap_accounts || [];
+    byId("configuration-warning").textContent = (history.warnings || []).join("\n");
+    byId("configuration-warning").hidden = !history.warnings?.length;
     byId("update-imap-password").hidden = imapAccounts.length === 0;
     byId("update-imap-password").disabled = Boolean(history.active) || importing;
     byId("suspend-import").disabled = importing || !history.active || history.suspending;

@@ -50,6 +50,7 @@ from tabulate import tabulate
 from .scan_evidence import ScanEvidence, ScanFailure
 from .future_coordinator import BoundedWorkers, FutureCoordinator, WORKER_NUMBER
 from .application import configured_imap_connections, configured_workers, validate_ingest_paths
+from .configuration_diagnostics import ConfigurationError
 from .imap_source import IMAP_BUSY_PHASE
 from .imap_preferences import ImapConnectionLimit
 from .worker_preferences import half_cpus, worker_argument
@@ -2250,6 +2251,7 @@ def _run_ingest(request: IngestRequest, writer_lease: WriterLease, outcome: Inge
                                       (pipeline.policy.model_dump_json(exclude={"scanner_configuration"}),))
         if request.reprocess:
             pipeline.reprocess()
+        pipeline.validate_configuration()
         def process_content(_unused: int, *, fail_on_error: bool = True) -> None:
             assert pipeline is not None
             try:
@@ -2774,6 +2776,9 @@ def execute(args: argparse.Namespace, parser: argparse.ArgumentParser) -> int:
         print(f"paused: {error}", file=sys.stderr, flush=True)
         return 75
     except ImapAuthenticationError as error:
+        print(str(error), file=sys.stderr, flush=True)
+        return 1
+    except ConfigurationError as error:
         print(str(error), file=sys.stderr, flush=True)
         return 1
     except KeyboardInterrupt:

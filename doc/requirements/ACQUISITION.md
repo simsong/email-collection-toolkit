@@ -40,7 +40,12 @@ Antivirus is enabled by default; `--no-scan` explicitly records unscanned mail.
 Initial IMAP setup prompts for server,
 port, verified TLS mode, username and hidden password/app password, saves and runs.
 Configuration uses `config.yaml` version 3's typed `imap_sources`, with unique source
-IDs; passwords remain exclusively in the native OS keyring. Existing local-only
+IDs; passwords remain exclusively in the native OS keyring. Expected settings
+problems in archive or installation files must be caught at UI/CLI boundaries and identify the file, affected setting
+and repair action without a traceback, validator internals or raw configuration
+values. This includes the supported built-in plugin settings after installation/archive
+overrides are merged. Invalid import settings stop before processing; saved history remains
+readable with an explanatory warning. Repeated refreshes must not flood logs. Existing local-only
 version-1/2 configurations remain readable. Missing credentials require interactive
 `--configure`; unattended runs fail clearly without a plaintext or environment fallback.
 Development-app credential reads retain the existing interpreter's Keychain trust

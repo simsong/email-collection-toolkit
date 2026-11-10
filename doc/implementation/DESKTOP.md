@@ -111,6 +111,9 @@ processing jobs and the current processor instead of a source percentage/ETA.
 IMAP accounts from local configuration without keyring or network access; missing
 or invalid configuration falls back to an unavailable-account label. Raw
 `source_roots` and saved history files retain their resumable locators.
+Expected configuration problems also populate typed history warnings and the
+Ingests warning banner. A per-window warning cache logs each changed condition
+once, without validator frames or configuration values; history remains read-only.
 
 `gui_processing.unfinished_work` groups typed unfinished run snapshots by source,
 stopping at a completion or explicit abort. Rootless processing does not hide

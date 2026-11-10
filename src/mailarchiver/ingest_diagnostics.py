@@ -21,6 +21,7 @@ from pydantic import BaseModel, ValidationError
 
 from .plugin_api import SourceReference
 from .mbox_framing import MboxNormalization
+from .configuration_diagnostics import ConfigurationError
 
 MESSAGE_PREVIEW_BYTES = 4096
 ENVELOPE_PREVIEW_BYTES = 512
@@ -93,7 +94,9 @@ def _exception_summary(error: BaseException) -> str:
 
 
 def format_failure(error: BaseException) -> str:
-    """Retain exception chains and validator frames without Pydantic's input_value dump."""
+    """Explain expected settings problems plainly; retain chains/frames for unexpected failures."""
+    if isinstance(error, ConfigurationError):
+        return str(error)
     detail = _exception_summary(error) + "\n\n"
     pending = [("", error)]
     seen: set[int] = set()

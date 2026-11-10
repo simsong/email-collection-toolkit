@@ -24,7 +24,8 @@ than a second change log. Platform acceptance is stated alongside its evidence.
   a saved per-account limit (default 8, range 1–15) and cancellable capacity backoff while retaining the
   full processing worker pool. Protocol failures and private diagnostics
   retain their distinct handling, including malformed greetings and full CLI login
-  diagnostics. Retry classification precedes redaction; CLI backoff remains visible,
+  diagnostics. Expected configuration problems use actionable warnings without
+  validator dumps or tracebacks. Retry classification precedes redaction; CLI backoff remains visible,
   console cancellation wakes discovery, and pending password validation blocks Escape. See [acquisition](implementation/ACQUISITION.md).
 
 - Source files and accounts are read-only. Preserve message bytes except the

@@ -33,6 +33,7 @@ from .__main__ import IngestRequest, run_ingest, safe_status_text
 from .application import ArchiveDocument, configured_workers, create_empty_archive
 from .worker_preferences import worker_argument
 from .archive_config import load_archive_config, save_archive_config
+from .configuration_diagnostics import ConfigurationError
 from .imap_credentials import password_for, save_password
 from .imap_models import ImapAccount, ImapTotals
 from .imap_protocol import ImapAuthenticationError, ImapPaused, ImapSession
@@ -266,7 +267,7 @@ def main(argv: list[str] | None = None, *, prog: str | None = None) -> int:
     except ImapPaused as error:
         print(str(error), file=sys.stderr)
         return 75
-    except ImapAuthenticationError as error:
+    except (ImapAuthenticationError, ConfigurationError) as error:
         print(str(error), file=sys.stderr)
         return 1
     except Exception as error:

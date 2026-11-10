@@ -31,6 +31,7 @@ from .standalone_verify import open_shared_text
 from .owner_rules import OwnerRules
 from .imap_models import ImapAccount
 from .mbox import DEFAULT_MBOX_MAX_BYTES
+from .configuration_diagnostics import ConfigurationError
 
 ARCHIVE_CONFIG_FILENAME = "config.yaml"
 
@@ -62,11 +63,11 @@ def load_archive_config(archive: Path) -> ArchiveConfig:
     try:
         with open_shared_text(path) as source:
             value = safe_load(source)
-        return ArchiveConfig.model_validate(value or {})
+        return ArchiveConfig.model_validate({} if value is None else value)
     except FileNotFoundError:
         return ArchiveConfig()
     except (OSError, ValueError, TypeError, YAMLError) as error:
-        raise ValueError(f"invalid archive configuration {path}: {error}") from error
+        raise ConfigurationError.from_error(path, error, "archive") from None
 
 
 def save_archive_config(archive: Path, config: ArchiveConfig) -> None:

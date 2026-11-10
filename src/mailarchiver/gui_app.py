@@ -75,6 +75,7 @@ from .configuration import GuiConfiguration, application_configuration
 from .gui_default_lists import DefaultListsApi
 from .document_options import DocumentOptions, OwnerRulesState
 from .owner_rules import OwnerRules
+from .configuration_diagnostics import ConfigurationError
 from .archive_config import (
     load_archive_config,
     import_directory as configured_import_directory,
@@ -226,6 +227,7 @@ class GuiIngestStatus(IngestStatus):
 class GuiIngestHistory(BaseModel):
     statuses: list[GuiIngestStatus]
     errors: list[IngestStatusReadError]
+    warnings: list[str] = Field(default_factory=list)
     starting: bool = False
     active: bool = False
     suspending: bool = False
@@ -643,6 +645,8 @@ class IngestWindowApi:
         self.window: Any = None
         self._application = application
         self._document = document
+        self._configuration_warning: str | None = None
+        self._warning_lock = Lock()
 
     def set_window(self, window: Any) -> None:
         self.window = window
@@ -659,11 +663,19 @@ class IngestWindowApi:
         resumable = bool(job is None and self._application is not None
                          and not (statuses and statuses[0].state == "running")
                          and unfinished_work(self.archive).incomplete)
+        warning = None
         try:
             accounts = [account for account in load_archive_config(self.archive).imap_sources if account.enabled]
-        except (OSError, ValueError):
+        except ConfigurationError as error:
             accounts = []  # Saved history remains readable when account configuration is unavailable.
+            warning = f"Account settings are unavailable. {error} Saved import history remains available."
+        with self._warning_lock:
+            changed = warning != self._configuration_warning
+            self._configuration_warning = warning
+        if warning and changed:
+            logging.getLogger(__name__).warning("%s", warning)
         return GuiIngestHistory(statuses=statuses, errors=history.errors, starting=starting,
+                                warnings=[warning] if warning else [],
                                 active=job is not None, suspending=bool(job and job.stop.is_set()),
                                 imap_accounts=accounts,
                                 can_resume=job is None and resumable and self._application is not None).model_dump(mode="json")
@@ -2603,7 +2615,10 @@ class PyWebViewApplication:
             except (OSError, ValueError) as config_error:
                 notice("warning", f"Import completed but the source directory could not be saved: {config_error}")
         except BaseException as caught:  # pylint: disable=broad-exception-caught
-            logging.getLogger(__name__).debug("Best-effort operation failed", exc_info=True)
+            if isinstance(caught, ConfigurationError):
+                logging.getLogger(__name__).warning("%s", caught)
+            else:
+                logging.getLogger(__name__).debug("Best-effort operation failed", exc_info=True)
             error = caught
             if isinstance(caught, (IngestInterrupted, ImapPaused, ImapAuthenticationError)):
                 try:
@@ -2636,6 +2651,8 @@ class PyWebViewApplication:
             notice("information", f"Import completed for {document.display_path}")
         elif isinstance(error, ImapAuthenticationError):
             notice("error", str(error))
+        elif isinstance(error, ConfigurationError):
+            notice("warning", str(error))
         else:
             notice(
                 "error",

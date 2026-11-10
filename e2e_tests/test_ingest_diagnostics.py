@@ -13,6 +13,28 @@ from mailarchiver.ingest_status import IngestStatusFile
 from scripts.website_screenshots import bridge
 
 
+def test_invalid_configuration_shows_warning_and_saved_history(tmp_path: Path, page: Page) -> None:
+    """DESKTOP: malformed account settings show actionable warning text while history stays usable."""
+    archive = tmp_path / "synthetic.mailarchive"
+    saved = IngestStatusFile(archive, "ingest-config-fixture")
+    progress = ProgressReporter(1, status_file=saved, archive=archive, run_pk=1,
+                                source_roots=["imap://synthetic-account?archive=fixture"], terminal=False)
+    progress.finish("completed")
+    (archive / "config.yaml").write_text("imap_sources: PRIVATE_CONFIGURATION_VALUE\n")
+    original = saved.path.read_bytes()
+    bridge(page, IngestWindowApi(archive), ("history", "antivirus", "can_import_directory"))
+    page.goto((GUI_DIRECTORY / "ingests.html").as_uri())
+    warning = page.locator("#configuration-warning")
+    expect(warning).to_be_visible()
+    expect(warning).to_contain_text("imap_sources: expected a list")
+    expect(warning).to_contain_text("Repair config.yaml")
+    expect(page.locator(".state-badge")).to_have_text("completed")
+    expect(page.locator("#error")).not_to_be_visible()
+    assert "PRIVATE_CONFIGURATION_VALUE" not in page.locator("body").inner_text()
+    assert saved.path.read_bytes() == original
+    page.screenshot(path=str(tmp_path / "configuration-warning.png"), full_page=True)
+
+
 def test_saved_timeout_shows_yellow_dash_without_traceback(tmp_path: Path, page: Page) -> None:
     """Desktop: older recorded IMAP timeouts use the same quiet display without rewriting history."""
     archive = tmp_path / "synthetic.mailarchive"

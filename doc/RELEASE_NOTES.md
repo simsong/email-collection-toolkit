@@ -6,6 +6,16 @@ Entries describe their recorded revisions. For current behavior use the
 [user manual](USER_MANUAL.md) and [CLI reference](CLI_REFERENCE.md). Retired
 Rust delivery plans and historical package checks are not current acceptance.
 
+## 1.0.0a71 — actionable configuration warnings
+
+- Catch expected configuration problems and show the affected setting and repair
+  action without validator dumps, raw configuration values or tracebacks.
+- Keep Ingests history readable with a visible warning, logged once per condition.
+- Preserve a clean stop for imports with invalid settings; missing/empty supported
+  configuration still uses defaults.
+- Validate effective built-in plugin settings before processing and identify the
+  installation or archive file supplying an invalid value.
+
 ## 1.0.0a70 — IMAP review and recovery fixes
 
 - Prevent Escape from dismissing password validation while a vault update is pending.
