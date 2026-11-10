@@ -106,8 +106,8 @@ class DisposableImap:
 
     def pause_after_bodies(self, count: int) -> None:
         """Keep downloads incomplete until the parent acknowledges the stop notice."""
-        if count < 1:
-            raise ValueError("At least one body must be allowed before pausing")
+        if count < 0:
+            raise ValueError("Body pause count cannot be negative")
         with self._gate_lock:
             self._body_limit, self._bodies = count, 0
             self.fetch_paused.clear()

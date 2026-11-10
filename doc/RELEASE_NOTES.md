@@ -6,6 +6,12 @@ Entries describe their recorded revisions. For current behavior use the
 [user manual](USER_MANUAL.md) and [CLI reference](CLI_REFERENCE.md). Retired
 Rust delivery plans and historical package checks are not current acceptance.
 
+## 1.0.0a83 — reuse active inputs and coalesce saved-work status queries
+
+- Verify and reuse a duplicate's existing input file while another worker reads it.
+- Coalesce backlog counts during combined work, retain the exact final count, and
+  suppress live overlap messages for stale runs.
+
 ## 1.0.0a82 — preserve recovery and stop boundaries during overlap
 
 - Complete previously filed ingest roots, keep duplicate metadata jobs in the

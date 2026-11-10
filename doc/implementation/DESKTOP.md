@@ -1211,6 +1211,10 @@ lane updates apart from source/scanner updates. Ingests renders both groups and 
 statistics during overlap. The overlap flag requires active work in both groups;
 saved-only and source-only phases have their own labels. Both terminal formats
 also show saved lanes. Historical files retain their previous presentation.
+The active overlap explanation is restricted to running snapshots. During combined
+work, real progress changes sample the saved-backlog query at most once per second;
+idle refreshes reuse the sample and shutdown takes an exact count. No polling timer
+is introduced.
 
 Unknown-byte source inventory reports ETA unavailable while partitions remain;
 finishing known byte input may still report finalizing before its checkpoint.

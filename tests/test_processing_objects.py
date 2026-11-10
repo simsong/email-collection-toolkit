@@ -23,7 +23,7 @@ from mailarchiver.mailsearch import read_message_bytes
 from mailarchiver.processing.objects import collect_objects
 from mailarchiver.processing.registry import fingerprint, load_processors
 from mailarchiver.processing.runtime import run
-from mailarchiver.processing.store import connect, submit
+from mailarchiver.processing.store import connect, snapshot, submit
 from mailarchiver.standalone_verify import verify_archive
 from tests.test_cli_processing import HEADER, cli, ingest
 from tests.test_processing import MESSAGE, plugin
@@ -31,6 +31,19 @@ from tests.test_processing import MESSAGE, plugin
 
 def objects(archive: Path) -> set[str]:
     return {path.name for path in (archive / "objects").iterdir()}
+
+
+def test_snapshot_does_not_replace_invalid_cached_object(tmp_path: Path) -> None:
+    """PROCESSING: an invalid shared input is reported and preserved for diagnosis."""
+    source = tmp_path / "source.eml"
+    source.write_bytes(b"original bytes")
+    reference = snapshot(tmp_path, source)
+    reference.path.write_bytes(b"damaged working bytes")
+    with pytest.raises(ValueError, match="existing processor object failed SHA-256 verification"):
+        snapshot(tmp_path, source)
+    assert reference.path.read_bytes() == b"damaged working bytes"
+    assert source.read_bytes() == b"original bytes"
+    assert objects(tmp_path) == {reference.sha256}
 
 
 def test_completed_local_ingest_reprocesses_from_canonical_bytes(tmp_path: Path) -> None:

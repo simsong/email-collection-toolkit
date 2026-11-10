@@ -41,6 +41,7 @@ does not establish that every platform or release gate has passed.
 - Jobs, windows and import progress follow actual work and change notifications.
   Source acquisition and saved-message processing run concurrently after mandatory
   ingest recovery, sharing one owner for database and canonical publication.
+  Verified working inputs stay in place while processors read them.
   Failure deadlines remain explicit; readiness must be observed.
   Native API replies use one-way delivery; lost Ingests replies display an unknown
   outcome without retrying a command or marking the import failed.

@@ -85,6 +85,8 @@ def content_reference(path: Path) -> ContentReference:
 def snapshot(archive: Path, path: Path) -> ContentReference:
     """Copy once into content-addressed storage before committing a DB reference."""
     destination = archive / "objects"
+    if destination.is_symlink():
+        raise ValueError("processor objects directory must not be a symlink")
     destination.mkdir(exist_ok=True)
     with tempfile.NamedTemporaryFile(dir=destination, prefix=".object-", delete=False) as target:
         temporary = Path(target.name)
@@ -97,11 +99,22 @@ def snapshot(archive: Path, path: Path) -> ContentReference:
             target.close()
             temporary.unlink(missing_ok=True)
             raise
-    reference = content_reference(temporary)
-    final = destination / reference.sha256
-    replace_file(temporary, final)
-    sync_directory(destination)
-    return ContentReference(path=final.resolve(), sha256=reference.sha256)
+    try:
+        reference = content_reference(temporary)
+        final = destination / reference.sha256
+        if final.is_symlink():
+            raise ValueError("processor object must not be a symlink")
+        if final.exists():
+            if not final.is_file() or content_reference(final).sha256 != reference.sha256:
+                raise ValueError("existing processor object failed SHA-256 verification")
+            # A saved processor can hold this immutable input open. Replacing
+            # identical bytes is unnecessary and fails with Windows delete sharing.
+        else:
+            replace_file(temporary, final)
+            sync_directory(destination)
+        return ContentReference(path=final.resolve(), sha256=reference.sha256)
+    finally:
+        temporary.unlink(missing_ok=True)
 
 
 USER_CANCELLED = "Cancelled by user"

@@ -42,6 +42,9 @@ Failure/cancellation stops new claims while active work is checkpointed.
 An explicit `fail-import` ends its rank immediately; the coordinator submits no
 further invocations, including same-rank subscribers, after accepting that stop.
 Running inputs remain pinned against collection, including shared raw digests.
+`store.snapshot` verifies and reuses an existing immutable object instead of
+replacing a file an active processor may hold open. A mismatched or unsafe path
+fails without overwriting the existing bytes or retaining the temporary copy.
 Production passes `request.workers` to both archived-content and final-content
 passes; CLI `process --workers` overrides the shared worker preference, while
 other saved processing/source policy is retained. Source admission retains its existing

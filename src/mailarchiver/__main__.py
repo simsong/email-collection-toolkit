@@ -579,6 +579,7 @@ class ProgressReporter:
         self.interrupt_announced = False
         self.activity_kind: Literal["source", "processing"] = "source"
         self.saved_message_counter: Callable[[], int] | None = None
+        self.saved_count_sample: tuple[float, tuple[int, int]] | None = None
 
     def _queue_update(self, update: ProgressUpdate) -> None:
         if self.state.concurrent_processing and PROCESSING_WORKER.get():
@@ -738,6 +739,7 @@ class ProgressReporter:
     def begin_concurrent_processing(self) -> None:
         self._assert_driver_thread()
         self.state.concurrent_processing = True
+        self.saved_count_sample = None
         self.state.saved_workers = [WorkerProgress(worker=worker.worker, processing_jobs_completed=0)
                                     for worker in self.state.workers]
 
@@ -752,6 +754,20 @@ class ProgressReporter:
         """Bind a read-only queue counter owned by this status driver."""
         self._assert_driver_thread()
         self.saved_message_counter = counter
+        self.saved_count_sample = None
+
+    def _sample_saved_count(self, now: float, *, force: bool = False) -> None:
+        if self.saved_message_counter is None:
+            return
+        revision = (self.state.processed, self.state.processing_jobs_completed)
+        if not force and self.state.concurrent_processing and self.saved_count_sample is not None:
+            sampled_at, previous_revision = self.saved_count_sample
+            # Sample on real status changes, not a timer. Rapid admissions and
+            # invocation heartbeats share a bounded read of the saved backlog.
+            if revision == previous_revision or now - sampled_at < 1:
+                return
+        self.state.saved_messages_remaining = self.saved_message_counter()
+        self.saved_count_sample = (now, revision)
 
     def _send(
         self,
@@ -990,8 +1006,8 @@ class ProgressReporter:
     ) -> None:
         self._drain_updates()
         now = time.monotonic()
-        if (self.activity_kind == "processing" or self.state.concurrent_processing) and self.saved_message_counter is not None:
-            self.state.saved_messages_remaining = self.saved_message_counter()
+        if self.activity_kind == "processing" or self.state.concurrent_processing:
+            self._sample_saved_count(now, force=ingest_state != "running")
         display_label = label or self._worker_phase()
         if display_label != self.phase:
             self.phase = display_label

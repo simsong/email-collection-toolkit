@@ -24,8 +24,9 @@ abort semantics. A content-job limit applies to the whole pool. Cancellation
 and explicit import failure stop new claims and leave unfinished work resumable.
 An explicit `fail-import` also stops remaining subscribers in the current rank.
 Keep inputs of running jobs resident; publication and object collection must not
-race active processors. Progress shall show each active worker and remain active
-until all workers finish. Validate with `make test-processors`,
+race active processors. Reuse SHA-256 verified existing objects rather than replacing
+an active input; report and preserve an invalid existing object. Progress shall show
+each active worker and remain active until all workers finish. Validate with `make test-processors`,
 `make test-ingest-recovery`, `make test-progress` and `make test-processing-cleanup`.
 
 Recovery shall expose the current processor/job and finished-job count while

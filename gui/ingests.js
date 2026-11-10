@@ -275,7 +275,7 @@ function renderDetail(status) {
     ? `${Number(status.percent).toFixed(1)}% saved` : `${Number(status.percent).toFixed(1)}% · ETA ${!status.bytes_total && status.files_processed < status.files_total ? "unavailable" : status.eta}`));
 
   detail.append(heading, track, caption, statistics(status));
-  if (status.concurrent_processing) {
+  if (status.state === "running" && status.concurrent_processing) {
     detail.append(textBlock("Source work and saved message processing are running together.", "processing-explanation"));
   }
   if (processingMode(status)) {

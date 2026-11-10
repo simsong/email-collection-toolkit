@@ -8,7 +8,7 @@
 
 """Requirement: local failure evidence is readable in the real Ingests interface."""
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 import json
 
@@ -125,6 +125,10 @@ def test_concurrent_download_and_processing_have_separate_rows(tmp_path: Path, p
     page.evaluate("window.refreshHistory()")
     expect(page.locator(".progress-caption")).to_contain_text("Processing saved mail")
     expect(page.locator(".processing-explanation")).not_to_contain_text("resumes after")
+    saved.write(snapshot.model_copy(update={"process_id": 0, "updated_at": datetime.now(UTC) - timedelta(seconds=30)}))
+    page.evaluate("window.refreshHistory()")
+    expect(page.locator(".state-badge")).to_have_text("stale")
+    expect(page.locator(".processing-explanation")).to_have_count(0)
 
 
 @pytest.mark.parametrize("recorded_version", ["0.0.0+synthetic-history", None])

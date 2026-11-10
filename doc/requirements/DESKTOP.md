@@ -904,6 +904,8 @@ later actual completion.
 Concurrent acquisition and saved-content work shall show separate worker groups,
 their actual operations and an explicit overlap explanation. Saved-work events must
 not erase source activity or change unknown-size acquisition ETA into finalizing.
+Do not show live overlap for a stale run. Coalesce saved-backlog queries during
+source activity while sampling the exact remaining count at shutdown.
 
 Unknown-byte source inventory reports ETA unavailable while partitions remain;
 finishing known byte input may still report finalizing before its checkpoint.

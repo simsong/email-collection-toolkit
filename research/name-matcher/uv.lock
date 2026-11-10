@@ -505,7 +505,7 @@ wheels = [
 
 [[package]]
 name = "mailarchiver"
-version = "1.0.0a82"
+version = "1.0.0a83"
 source = { editable = "../../" }
 dependencies = [
     { name = "beautifulsoup4" },

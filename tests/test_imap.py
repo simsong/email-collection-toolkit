@@ -1508,8 +1508,10 @@ def test_concurrent_saved_processing_does_not_block_imap_downloads(imap_archive:
         scan_policy="not-scanned", continue_content=False), terminal=False)
     custom = tmp_path / "custom"
     plugin(custom, "saved-gate", 'if (item.archive.path / "hold-saved").exists():\n'
-        '    (item.archive.path / "saved-entered").touch()\n'
-        '    item.wait_for_files((item.archive.path,), lambda: (item.archive.path / "release-saved").exists())\n'
+        '    with item.content_ref.open() as original:\n'
+        '        (item.archive.path / "saved-entered").touch()\n'
+        '        item.wait_for_files((item.archive.path,), lambda: (item.archive.path / "release-saved").exists())\n'
+        '        assert original.read(1)\n'
         'return ProcessingResult()', timeout=15)
     manifest = custom / "processors/saved-gate/plugin.toml"
     manifest.write_text(manifest.read_text().replace('pipeline="ingest"', 'pipeline="content"'))
@@ -1523,7 +1525,7 @@ def test_concurrent_saved_processing_does_not_block_imap_downloads(imap_archive:
             enqueue(database, ProcessingObject.model_validate_json(payload).model_copy(update={"pipeline": "message"}), registry, parent)
             metadata_job = database.execute("SELECT max(job_id) FROM jobs").fetchone()[0]
     (imap_archive / "hold-saved").touch()
-    imap_inbox.pause_after_bodies(1)
+    imap_inbox.pause_after_bodies(0 if duplicate else 1)
     account = load_archive_config(imap_archive).imap_sources[0]
     request = IngestRequest(archive=imap_archive, roots=[imap_locator(imap_archive, account, 1)],
         workers=1, imap_connections=1, scan_policy="not-scanned", plugin_dir=[custom])
@@ -1539,6 +1541,8 @@ def test_concurrent_saved_processing_does_not_block_imap_downloads(imap_archive:
         try:
             wait_for_path_state([imap_archive], lambda: (imap_archive / "saved-entered").exists(), timeout=10)
             assert imap_inbox.fetch_paused.wait(10), "Saved content blocked network acquisition"
+            held_object = imap_archive / "objects" / hashlib.sha256(raw).hexdigest()
+            held_inode = held_object.stat().st_ino
             imap_inbox.release_bodies()
             wait_for_path_state([imap_archive / "status"], fully_archived, timeout=10)
             status = read_ingest_history(imap_archive).statuses[0]
@@ -1546,6 +1550,7 @@ def test_concurrent_saved_processing_does_not_block_imap_downloads(imap_archive:
             assert status.download_coverage.messages == 3
             assert any(worker.phase.startswith("processing ") for worker in status.saved_workers)
             assert not (imap_archive / "release-saved").exists()
+            assert held_object.stat().st_ino == held_inode
             if metadata_job is not None:
                 with sqlite3.connect(f"{(imap_archive / 'processing.sqlite3').as_uri()}?mode=ro", uri=True) as database:
                     assert database.execute("SELECT status FROM jobs WHERE job_id=?", (metadata_job,)).fetchone() == ("pending",)
