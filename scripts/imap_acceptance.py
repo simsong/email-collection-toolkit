@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import argparse
 from hashlib import sha256
+import os
 import sys
 from pathlib import Path
 from threading import Timer
@@ -22,10 +23,11 @@ from mailarchiver.archive_config import ArchiveConfig, load_archive_config, save
 from mailarchiver.change_signal import ChangeEvent
 from mailarchiver.imap_source import imap_locator
 from mailarchiver.owned_command import run_owned_command
-from mailarchiver.ingest_status import IngestStatus, latest_ingest_status
+from mailarchiver.ingest_status import IngestStatus, STATUS_PREFIX, read_ingest_history, status_directory
 from mailarchiver.standalone_verify import verify_archive
 
 MARKER = ".ect-imap-acceptance"
+RECEIPT_PREFIX = "ECT_ACCEPTANCE_RECEIPT "
 
 
 class AcceptanceSettings(BaseModel):
@@ -36,6 +38,10 @@ class AcceptanceSettings(BaseModel):
     verification_seconds: float = Field(default=120, gt=0, allow_inf_nan=False)
     workers: int = Field(default=4, ge=1)
     no_scan: bool = False
+
+
+class ImportReceipt(BaseModel):
+    status: IngestStatus | None
 
 
 class AcceptanceResult(BaseModel):
@@ -78,10 +84,11 @@ def prepare(settings: AcceptanceSettings) -> None:
     marker.write_text(identity)
 
 
-def import_cycle(settings: AcceptanceSettings) -> None:
+def import_cycle(settings: AcceptanceSettings) -> IngestStatus | None:
     """Use one extra network slot while preserving a distinct local processing pool."""
     scratch = settings.scratch_archive.resolve()
     account = load_archive_config(scratch).imap_sources[0]
+    previous = {path.stem for path in status_directory(scratch).glob(f"{STATUS_PREFIX}*.json")}
     stop = ChangeEvent()
     deadline = Timer(settings.seconds, stop.set)
     deadline.start()
@@ -97,6 +104,8 @@ def import_cycle(settings: AcceptanceSettings) -> None:
         raise SystemExit(1) from None
     finally:
         deadline.cancel()
+    return next((status for status in read_ingest_history(scratch).statuses
+                 if status.process_id == os.getpid() and status.status_id not in previous), None)
 
 
 def worker_command(settings: AcceptanceSettings, operation: str) -> list[str]:
@@ -112,13 +121,21 @@ def worker_command(settings: AcceptanceSettings, operation: str) -> list[str]:
 def evaluate(settings: AcceptanceSettings) -> AcceptanceResult:
     prepare(settings)
     forced, error, code = False, None, None
+    status: IngestStatus | None = None
     try:
         imported = run_owned_command(worker_command(settings, "import"),
                                      timeout=settings.seconds + settings.grace_seconds)
         code = imported.returncode
         if code:
             error = imported.stderr[-2000:] or imported.stdout[-2000:]
-    except RuntimeError as failure:
+        else:
+            receipts = [line[len(RECEIPT_PREFIX):] for line in imported.stdout.splitlines()
+                        if line.startswith(RECEIPT_PREFIX)]
+            if len(receipts) == 1:
+                status = ImportReceipt.model_validate_json(receipts[0]).status
+            if status is None:
+                error = "Import worker did not return fresh status evidence for this invocation"
+    except (RuntimeError, ValueError) as failure:
         forced, error = True, str(failure)
     try:
         verified = run_owned_command(worker_command(settings, "verify"), timeout=settings.verification_seconds)
@@ -127,7 +144,6 @@ def evaluate(settings: AcceptanceSettings) -> AcceptanceResult:
             errors = ["Integrity verifier exited without a valid result"]
     except (RuntimeError, ValueError) as failure:
         errors = [f"Integrity verification did not finish: {failure}"]
-    status = latest_ingest_status(settings.scratch_archive)
     return AcceptanceResult(child_exitcode=code, forced_stop=forced, evaluation_error=error,
         integrity_errors=errors, status=status,
         progress_observed=bool(status and status.download_coverage and status.download_coverage.messages))
@@ -152,8 +168,9 @@ def main() -> int:
             raise ValueError("worker requires an initialized acceptance scratch archive")
         prepare(settings)
         if args.worker == "import":
-            import_cycle(settings)
-            return 0
+            current = import_cycle(settings)
+            print(RECEIPT_PREFIX + ImportReceipt(status=current).model_dump_json())
+            return int(current is None)
         errors = verify_archive(settings.scratch_archive, quiet=True)
         print(TypeAdapter(list[str]).dump_json(errors).decode())
         return int(bool(errors))

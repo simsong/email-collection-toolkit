@@ -494,3 +494,7 @@ source integrity and owned scratch-process lifecycle.
 
 A scratch evaluation succeeds only after downloading at least one source message;
 a completed metadata-only refresh is explicitly not a successful download test.
+
+The import worker returns a receipt containing only a newly created status for
+its own process. The evaluator uses that receipt, never the archive's latest
+status, so failed/suppressed writes cannot borrow a prior run's positive coverage.

@@ -1466,3 +1466,21 @@ def test_scratch_owner_death_reaps_utility(tmp_path: Path) -> None:
             parent.wait(timeout=5)
         if child_pid is not None and process_alive(child_pid):
             os.kill(child_pid, signal.SIGKILL)
+
+
+def test_scratch_cycle_never_reuses_old_success_if_status_writes_fail(imap_archive: Path, tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch) -> None:
+    """ACQUISITION: inject only the status-write fault; real directory denial blocks owner setup first."""
+    from scripts.imap_acceptance import AcceptanceSettings, import_cycle, prepare
+    from mailarchiver.ingest_status import IngestStatus, IngestStatusFile
+    scratch = tmp_path / "scratch.mailarchive"
+    settings = AcceptanceSettings(source_archive=imap_archive, scratch_archive=scratch, no_scan=True, seconds=10)
+    prepare(settings)
+    first = import_cycle(settings)
+    assert first is not None and first.download_coverage is not None and first.download_coverage.messages == 3
+    def deny_status_write(_self: IngestStatusFile, _status: IngestStatus) -> None:
+        raise PermissionError("simulated status-only permission failure")
+    monkeypatch.setattr(IngestStatusFile, "write", deny_status_write)
+    assert import_cycle(settings) is None
+    assert read_ingest_history(scratch).statuses[0].status_id == first.status_id
+    assert not verify_archive(scratch)
