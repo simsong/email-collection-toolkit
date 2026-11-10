@@ -5,6 +5,16 @@
 Current implementation and validation boundaries. Deferred feature designs
 live in [plans](../plans/README.md); historical evidence does not validate this revision.
 
+## Dependency security
+
+`make security-lock` targets Pylint, setuptools, both Brotli implementations and
+the Rust ZIP reader in the application, converter and research locks. Python
+constraints require setuptools >=84.1.0, Brotli >=1.2.1 and BrotliCFFI >=1.2.1.0
+where relevant; development Pylint requires >=4.0.9. The downloader requires ZIP
+>=9.0.5 on the 9.x line. The real loopback acquisition test in `pst/tests.rs`
+checks rejection of contradictory ZIP filenames and absence of published PSTs.
+Dependabot reports on `main`; publishing a PR branch does not clear those alerts.
+
 ## Build identity
 
 `build_info` captures typed commit/dirty metadata from the owning Git checkout

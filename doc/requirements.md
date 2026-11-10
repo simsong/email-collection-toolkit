@@ -43,6 +43,8 @@ does not establish that every platform or release gate has passed.
   application code directly. Make is the developer build/test convenience layer.
 - Versions come from `pyproject.toml`; launch/build provenance discloses local
   changes. Release publication and installed-platform acceptance have separate gates.
+- Dependency security fixes cover the application, converter, optional research
+  and Rust locks; ZIP acquisition must reject contradictory member headers.
 
 ## Documentation and evidence
 

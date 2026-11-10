@@ -43,6 +43,8 @@ than a second change log. Platform acceptance is stated alongside its evidence.
   application code directly. Make is the developer build/test convenience layer.
 - Versions come from `pyproject.toml`; launch/build provenance discloses local
   changes. Release publication and installed-platform acceptance have separate gates.
+- `make security-lock` refreshes alerted dependencies across the application,
+  converter, research and Rust locks; downloader fixtures check ZIP header rejection.
 
 ## Documentation and evidence
 

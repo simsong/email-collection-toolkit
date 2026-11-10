@@ -227,6 +227,14 @@ rust-smoke: rust-programs
 sync-dependencies:
 	uv sync
 
+# Refresh only the alerted packages and their required dependencies in every environment.
+.PHONY: security-lock
+security-lock:
+	uv lock --upgrade-package pylint --upgrade-package setuptools
+	uv lock --project converters/pff --upgrade-package pylint --upgrade-package setuptools
+	uv lock --project research/name-matcher --upgrade-package brotli --upgrade-package brotlicffi --upgrade-package setuptools
+	$(CARGO_RUN) update -p zip
+
 test-reconciliation:
 	uv run pytest -q tests/test_contacts.py tests/test_contact_filtering.py tests/test_name_matcher_research.py tests/test_apple_mail_compare.py tests/test_scanner.py
 

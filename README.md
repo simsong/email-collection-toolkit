@@ -124,6 +124,10 @@ need their native helpers. The [command-line guide](doc/CLI_REFERENCE.md) covers
 installation, prerequisites, options and examples. For source builds and tests,
 see [For developers](doc/FOR_DEVELOPERS.md) and [Developer commands](doc/DEVELOPER_COMMANDS.md).
 
+`make security-lock` refreshes the affected dependency packages across the application,
+converter, optional name-matcher research environment and Rust workspace. Patched minimum
+versions are recorded in their manifests; commit the refreshed lockfiles together.
+
 ### Search matching
 
 Search ignores case and accents and treats `ß`/`ẞ` as `ss`, without stemming.

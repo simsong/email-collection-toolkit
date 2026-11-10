@@ -23,5 +23,8 @@ dependencies = [
     "splink>=5.0.0",
 ]
 
+[tool.uv]
+constraint-dependencies = ["setuptools>=84.1.0", "brotli>=1.2.1", "brotlicffi>=1.2.1.0"]
+
 [tool.uv.sources]
 mailarchiver = { path = "../../", editable = true }

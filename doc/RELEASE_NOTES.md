@@ -6,6 +6,15 @@ Entries describe their recorded revisions. For current behavior use the
 [user manual](USER_MANUAL.md) and [CLI reference](CLI_REFERENCE.md). Retired
 Rust delivery plans and historical package checks are not current acceptance.
 
+## 1.0.0a72 — dependency security updates
+
+- Update the PST downloader's ZIP reader to the patched 9.x line and reject
+  contradictory ZIP headers before publishing extracted PSTs.
+- Raise security floors for Pylint and setuptools; refresh the application,
+  converter and research locks, including both Brotli implementations.
+- `make security-lock` refreshes the affected packages across all environments.
+  Default-branch Dependabot alerts require the fixes to reach `main` before clearing.
+
 ## 1.0.0a71 — actionable configuration warnings
 
 - Catch expected configuration problems and show the affected setting and repair
